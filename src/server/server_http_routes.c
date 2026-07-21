@@ -876,16 +876,6 @@ typedef struct
    long created;
 } op_run_job_t;
 
-/* LLM orchestration coordinators must not consume generic compute workers while
- * waiting on provider calls. Their panel turns are admitted independently by
- * the enabled agents' live max_parallel limits. Keep only a generous process
- * safety backstop here; it is not an agent-capacity policy. */
-#define OP_RUN_ONDEMAND_CEILING 512
-#define OP_RUN_ONDEMAND_STACK   ((size_t)2 * 1024 * 1024)
-static pthread_mutex_t g_op_run_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_op_run_cond = PTHREAD_COND_INITIALIZER;
-static int g_op_run_inflight = 0;
-
 /* Build the run snapshot object stored for GET /v1/runs/{id}. `result` is an
  * already-serialized JSON value (object/array/string) or NULL while queued. */
 static char *op_run_snapshot(const char *run_id, const char *op, const char *status, long created,
@@ -971,69 +961,7 @@ static void op_run_worker_run(void *arg)
 static void *op_run_worker_thread(void *arg)
 {
    op_run_worker_run(arg);
-   pthread_mutex_lock(&g_op_run_mutex);
-   if (g_op_run_inflight > 0)
-      g_op_run_inflight--;
-   pthread_cond_broadcast(&g_op_run_cond);
-   pthread_mutex_unlock(&g_op_run_mutex);
    return NULL;
-}
-
-static int op_run_spawn_ondemand(op_run_job_t *j)
-{
-   pthread_mutex_lock(&g_op_run_mutex);
-   if (g_op_run_inflight >= OP_RUN_ONDEMAND_CEILING)
-   {
-      pthread_mutex_unlock(&g_op_run_mutex);
-      return -1;
-   }
-   g_op_run_inflight++;
-   pthread_mutex_unlock(&g_op_run_mutex);
-
-   pthread_attr_t attr;
-   pthread_attr_t *attr_p = NULL;
-   if (pthread_attr_init(&attr) == 0)
-   {
-      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-      pthread_attr_setstacksize(&attr, OP_RUN_ONDEMAND_STACK);
-      attr_p = &attr;
-   }
-   pthread_t th;
-   int rc = pthread_create(&th, attr_p, op_run_worker_thread, j);
-   if (attr_p)
-      pthread_attr_destroy(attr_p);
-   if (rc == 0)
-      return 0;
-
-   pthread_mutex_lock(&g_op_run_mutex);
-   g_op_run_inflight--;
-   pthread_cond_broadcast(&g_op_run_cond);
-   pthread_mutex_unlock(&g_op_run_mutex);
-   return -1;
-}
-
-void server_http_op_runs_drain(int timeout_ms)
-{
-   struct timespec deadline;
-   clock_gettime(CLOCK_REALTIME, &deadline);
-   deadline.tv_sec += timeout_ms / 1000;
-   deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
-   if (deadline.tv_nsec >= 1000000000L)
-   {
-      deadline.tv_sec++;
-      deadline.tv_nsec -= 1000000000L;
-   }
-   pthread_mutex_lock(&g_op_run_mutex);
-   while (g_op_run_inflight > 0)
-   {
-      if (pthread_cond_timedwait(&g_op_run_cond, &g_op_run_mutex, &deadline) == ETIMEDOUT)
-         break;
-   }
-   int remaining = g_op_run_inflight;
-   pthread_mutex_unlock(&g_op_run_mutex);
-   if (remaining > 0)
-      aimee_log(LOG_WARN, "server.op_run", "%d orchestration run(s) still active at shutdown",
-                remaining);
 }
 
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
@@ -1109,18 +1037,18 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    server_ctx_t *ctx = server_active_ctx();
    int llm_orchestrator = strcmp(op_method, "delegate.roundtable") == 0 ||
                           strcmp(op_method, "delegate.aggregate") == 0;
-   if (llm_orchestrator || !ctx)
+   if (llm_orchestrator && ctx)
    {
-      if (op_run_spawn_ondemand(j) != 0)
+      if (compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j) != 0)
       {
          char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"orchestration ceiling reached\"}");
+                                        "{\"error\":\"orchestration queue full\"}");
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
          free(j);
          free(queued);
-         return err_json(resp, cap, 503, "orchestration ceiling reached");
+         return err_json(resp, cap, 503, "orchestration queue full");
       }
    }
    else if (ctx)
@@ -1136,6 +1064,22 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
          free(queued);
          return err_json(resp, cap, 503, "compute queue full");
       }
+   }
+   else
+   {
+      pthread_t th;
+      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
+      {
+         char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                        "{\"error\":\"could not start run\"}");
+         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+         free(failed);
+         free(j->line);
+         free(j);
+         free(queued);
+         return err_json(resp, cap, 500, "could not start run");
+      }
+      pthread_detach(th);
    }
    int n = snprintf(resp, (size_t)cap, "%s", queued);
    free(queued);

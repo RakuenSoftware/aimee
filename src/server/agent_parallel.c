@@ -18,6 +18,8 @@
 #include <string.h>
 #include <time.h>
 
+#define AGENT_PARALLEL_SAFETY_MAX 64
+
 /* Completion barrier for the deadline path: workers flip their `done` flag and
  * bump `done_count` under `mtx`, signalling `cv`, so the caller can
  * cond-timedwait and abandon stragglers at the deadline. */
@@ -126,9 +128,9 @@ static int parallel_worker_ceiling(int task_count)
    {
       int v = atoi(env);
       if (v >= 1)
-         return v;
+         return v < AGENT_PARALLEL_SAFETY_MAX ? v : AGENT_PARALLEL_SAFETY_MAX;
    }
-   return task_count;
+   return task_count < AGENT_PARALLEL_SAFETY_MAX ? task_count : AGENT_PARALLEL_SAFETY_MAX;
 }
 
 /* Deadline-bounded fan-out: spawn all workers, wait on a completion barrier until

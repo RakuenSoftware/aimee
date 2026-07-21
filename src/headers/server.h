@@ -193,6 +193,8 @@ typedef struct
    compute_pool_t pool;
    compute_pool_t request_pool;
    int request_pool_initialized;
+   compute_pool_t orchestration_pool;
+   int orchestration_pool_initialized;
    pthread_mutex_t session_pools_mutex;
    int session_pools_initialized;
    int session_threads;
@@ -215,8 +217,6 @@ int server_run(server_ctx_t *ctx);
 /* True if an aimee-server instance is already running for `socket_path` (pid-file
  * + liveness check). Used by the offline --rotate-master-key guard (D13 F2). */
 int server_is_running(const char *socket_path);
-/* Drain detached LLM orchestration coordinators before DB1 shutdown. */
-void server_http_op_runs_drain(int timeout_ms);
 /* Boot-time delegate-vault provisioning: seal operator-supplied delegate API
  * keys ($AIMEE_DELEGATE_SECRETS_FILE / AIMEE_DELEGATE_KEY_<AGENT>) into the
  * server-principal vault so a fresh server's delegates work with no manual

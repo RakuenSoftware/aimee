@@ -88,6 +88,7 @@ typedef struct
    server_method_handler_t handler;
 } server_method_dispatch_t;
 #define SERVER_REQUEST_POOL_MAX_THREADS 4
+#define SERVER_ORCHESTRATION_POOL_THREADS 16
 static const server_method_dispatch_t server_dispatch_table[];
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -111,6 +112,15 @@ static void server_request_pool_shutdown(server_ctx_t *ctx)
    compute_pool_unregister_secondary(&ctx->request_pool);
    compute_pool_shutdown(&ctx->request_pool);
    ctx->request_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_shutdown(server_ctx_t *ctx)
+{
+   if (!ctx || !ctx->orchestration_pool_initialized)
+      return;
+   compute_pool_unregister_secondary(&ctx->orchestration_pool);
+   compute_pool_shutdown(&ctx->orchestration_pool);
+   ctx->orchestration_pool_initialized = 0;
 }
 
 int server_compute_budget_acquire(server_ctx_t *ctx)
@@ -2220,9 +2230,27 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    }
    ctx->request_pool_initialized = 1;
    compute_pool_register_secondary(&ctx->request_pool, "requests");
+   /* Provider-backed orchestration is mostly blocked on remote I/O. Give it a
+    * dedicated bounded lane so generic background work cannot consume its
+    * coordinators; per-agent admission still owns actual provider concurrency. */
+   if (compute_pool_init(&ctx->orchestration_pool, SERVER_ORCHESTRATION_POOL_THREADS) != 0)
+   {
+      LOG_ERROR("server", "failed to initialize orchestration pool");
+      server_request_pool_shutdown(ctx);
+      server_session_pools_shutdown(ctx);
+      compute_pool_shutdown(&ctx->pool);
+      pthread_mutex_destroy(&ctx->conns_mutex);
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      unlink(socket_path);
+      return -1;
+   }
+   ctx->orchestration_pool_initialized = 1;
+   compute_pool_register_secondary(&ctx->orchestration_pool, "orchestration");
    if (pthread_mutex_init(&ctx->compute_budget_mutex, NULL) != 0)
    {
       LOG_ERROR("server", "failed to initialize compute budget mutex");
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2236,6 +2264,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    {
       LOG_ERROR("server", "failed to initialize compute budget condition");
       pthread_mutex_destroy(&ctx->compute_budget_mutex);
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2406,6 +2435,9 @@ void server_shutdown(server_ctx_t *ctx)
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
+   /* This closes orchestration admission and authoritatively drains every
+    * queued/running roundtable or aggregate before shared stores are torn down. */
+   server_orchestration_pool_shutdown(ctx);
    /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
     * connections (server-owned turn lifecycle), so a long detached turn would
     * otherwise block the drain indefinitely. The atomic cancel flags are
@@ -2421,9 +2453,6 @@ void server_shutdown(server_ctx_t *ctx)
     * They bypass the compute budget and own no socket, so any straggler past the
     * window only touches DB1 + its own ctx — safe to proceed. */
    delegate_ondemand_drain(5000);
-   /* Roundtable/aggregate coordinators are I/O-bound and deliberately bypass
-    * the generic compute pool; drain them before the run store/DB closes. */
-   server_http_op_runs_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
    pthread_cond_destroy(&ctx->compute_budget_cond);
