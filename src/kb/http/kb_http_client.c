@@ -3,6 +3,7 @@
 #endif
 
 #include "kb_http_client.h"
+#include "kb_http_resolver_protocol.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -17,12 +18,13 @@
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
-#include <stdatomic.h>
+#include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -61,6 +63,7 @@ struct kb_http_response_parser
 
 static int64_t now_ns(void);
 static kb_http_result_t parser_fail(kb_http_response_parser_t *p, kb_http_result_t result);
+static kb_http_result_t wait_fd(int fd, short events, int64_t deadline);
 
 static kb_http_result_t parser_deadline(kb_http_response_parser_t *p)
 {
@@ -449,43 +452,15 @@ static int deadline_expired(int64_t deadline)
    return now < 0 || now >= deadline;
 }
 
-typedef struct dns_query
-{
-   pthread_mutex_t mutex;
-   pthread_cond_t cond;
-   atomic_int refs;
-   int done, abandoned;
-   int gai_result;
-   struct addrinfo *result;
-   struct addrinfo hints;
-   char host[256];
-   char service[16];
-   struct dns_query *next;
-} dns_query_t;
-
-/* A fixed process-lifetime worker pool bounds both resolver concurrency and
- * timed-out jobs.  Workers, rather than per-request SIGEV_THREAD callbacks,
- * always reclaim abandoned jobs and their addrinfo results. */
-#define DNS_WORKER_COUNT      4U
+/* Resolver helpers are capped process-wide. A slot is held until the exact
+ * child is reaped, including after deadline-driven SIGKILL. */
 #define DNS_QUERY_PROCESS_CAP 16U
 static pthread_mutex_t dns_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t dns_work_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t dns_slots_cond;
 static pthread_once_t dns_pool_once = PTHREAD_ONCE_INIT;
-static dns_query_t *dns_queue_head, *dns_queue_tail;
 static size_t dns_slots_used;
 static size_t dns_slots_high_water;
 static int dns_pool_ready;
-
-static void dns_query_release(dns_query_t *q)
-{
-   if (atomic_fetch_sub(&q->refs, 1) == 1)
-   {
-      pthread_cond_destroy(&q->cond);
-      pthread_mutex_destroy(&q->mutex);
-      free(q);
-   }
-}
 
 static void dns_slot_release(void)
 {
@@ -494,40 +469,6 @@ static void dns_slot_release(void)
       dns_slots_used--;
    pthread_cond_broadcast(&dns_slots_cond);
    pthread_mutex_unlock(&dns_pool_mutex);
-}
-
-static void *dns_worker(void *unused)
-{
-   (void)unused;
-   for (;;)
-   {
-      pthread_mutex_lock(&dns_pool_mutex);
-      while (!dns_queue_head)
-         pthread_cond_wait(&dns_work_cond, &dns_pool_mutex);
-      dns_query_t *q = dns_queue_head;
-      dns_queue_head = q->next;
-      if (!dns_queue_head)
-         dns_queue_tail = NULL;
-      pthread_mutex_unlock(&dns_pool_mutex);
-
-      struct addrinfo *resolved = NULL;
-      int gai = getaddrinfo(q->host, q->service, &q->hints, &resolved);
-      pthread_mutex_lock(&q->mutex);
-      q->gai_result = gai;
-      if (!q->abandoned && gai == 0)
-      {
-         q->result = resolved;
-         resolved = NULL;
-      }
-      q->done = 1;
-      pthread_cond_signal(&q->cond);
-      pthread_mutex_unlock(&q->mutex);
-      if (resolved)
-         freeaddrinfo(resolved);
-      dns_slot_release();
-      dns_query_release(q);
-   }
-   return NULL;
 }
 
 static void dns_pool_init(void)
@@ -542,27 +483,7 @@ static void dns_pool_init(void)
       return;
    }
    pthread_condattr_destroy(&cond_attr);
-
-   pthread_attr_t thread_attr;
-   if (pthread_attr_init(&thread_attr) != 0)
-      return;
-   if (pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED) != 0)
-   {
-      pthread_attr_destroy(&thread_attr);
-      return;
-   }
-   size_t started = 0;
-   for (size_t i = 0; i < DNS_WORKER_COUNT; i++)
-   {
-      pthread_t worker;
-      if (pthread_create(&worker, &thread_attr, dns_worker, NULL) == 0)
-         started++;
-   }
-   pthread_attr_destroy(&thread_attr);
-   /* At least one permanent worker guarantees every accepted job has an owner.
-    * Detached workers and static synchronization state intentionally live until
-    * process exit; no shutdown ordering can race an in-flight resolver call. */
-   dns_pool_ready = started != 0;
+   dns_pool_ready = 1;
 }
 
 static kb_http_result_t dns_slot_acquire(int64_t deadline)
@@ -591,105 +512,354 @@ static kb_http_result_t dns_slot_acquire(int64_t deadline)
    return result;
 }
 
-static void dns_enqueue(dns_query_t *q)
+static void resolved_addresses_free(struct addrinfo *addresses)
 {
-   pthread_mutex_lock(&dns_pool_mutex);
-   if (dns_queue_tail)
-      dns_queue_tail->next = q;
-   else
-      dns_queue_head = q;
-   dns_queue_tail = q;
-   pthread_cond_signal(&dns_work_cond);
-   pthread_mutex_unlock(&dns_pool_mutex);
+   while (addresses)
+   {
+      struct addrinfo *next = addresses->ai_next;
+      free(addresses->ai_addr);
+      free(addresses);
+      addresses = next;
+   }
+}
+
+static int resolver_helper_path(char path[PATH_MAX], const char *override)
+{
+   if (override)
+   {
+      size_t length = strnlen(override, PATH_MAX);
+      if (!length || length == PATH_MAX || override[0] != '/')
+         return -1;
+      memcpy(path, override, length + 1U);
+      return 0;
+   }
+   ssize_t length = readlink("/proc/self/exe", path, PATH_MAX - 1U);
+   if (length <= 0 || length >= PATH_MAX)
+      return -1;
+   path[length] = 0;
+   char *slash = strrchr(path, '/');
+   static const char helper[] = "aimee-kb-resolver";
+   if (!slash || (size_t)(slash - path) + sizeof(helper) >= PATH_MAX)
+      return -1;
+   memcpy(slash + 1, helper, sizeof(helper));
+   return 0;
+}
+
+static int fd_nonblocking(int fd)
+{
+   int flags = fcntl(fd, F_GETFL, 0);
+   return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 ? 0 : -1;
+}
+
+static int pipe_cloexec(int fds[2])
+{
+   int raw[2];
+   if (pipe2(raw, O_CLOEXEC) != 0)
+      return -1;
+   for (size_t i = 0; i < 2; i++)
+   {
+      if (raw[i] > STDERR_FILENO)
+         fds[i] = raw[i];
+      else
+      {
+         fds[i] = fcntl(raw[i], F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+         close(raw[i]);
+         if (fds[i] < 0)
+         {
+            if (i)
+               close(fds[0]);
+            return -1;
+         }
+      }
+   }
+   return 0;
+}
+
+static kb_http_result_t pipe_write_deadline(int fd, const unsigned char *bytes, size_t length,
+                                            int64_t deadline)
+{
+   size_t at = 0;
+   while (at < length)
+   {
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
+      ssize_t n = write(fd, bytes + at, length - at);
+      if (n > 0)
+         at += (size_t)n;
+      else if (n < 0 && errno == EINTR)
+         continue;
+      else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      {
+         kb_http_result_t wait = wait_fd(fd, POLLOUT, deadline);
+         if (wait != KB_HTTP_OK)
+            return wait;
+      }
+      else
+         return KB_HTTP_IO_ERROR;
+   }
+   return deadline_expired(deadline) ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
+}
+
+static kb_http_result_t pipe_read_deadline(int fd, unsigned char *bytes, size_t capacity,
+                                           size_t *length, int64_t deadline)
+{
+   *length = 0;
+   for (;;)
+   {
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
+      unsigned char surplus;
+      unsigned char *target = *length < capacity ? bytes + *length : &surplus;
+      size_t available = *length < capacity ? capacity - *length : 1U;
+      ssize_t n = read(fd, target, available);
+      if (n > 0)
+      {
+         if (*length == capacity)
+            return KB_HTTP_RESOLVE_ERROR;
+         *length += (size_t)n;
+      }
+      else if (n == 0)
+         return deadline_expired(deadline) ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
+      else if (errno == EINTR)
+         continue;
+      else if (errno == EAGAIN || errno == EWOULDBLOCK)
+      {
+         int timeout = deadline_poll_ms(deadline);
+         if (!timeout)
+            return KB_HTTP_TIMEOUT;
+         struct pollfd pfd = {.fd = fd, .events = POLLIN};
+         int rc = poll(&pfd, 1, timeout);
+         if (rc == 0)
+            return KB_HTTP_TIMEOUT;
+         if (rc < 0)
+         {
+            if (errno == EINTR)
+               continue;
+            return KB_HTTP_IO_ERROR;
+         }
+         if (pfd.revents & (POLLERR | POLLNVAL))
+            return KB_HTTP_IO_ERROR;
+         if (!(pfd.revents & (POLLIN | POLLHUP)))
+            continue;
+      }
+      else
+         return KB_HTTP_IO_ERROR;
+   }
+}
+
+static kb_http_result_t child_reap_deadline(pid_t pid, int64_t deadline, int *status)
+{
+   for (;;)
+   {
+      pid_t rc = waitpid(pid, status, WNOHANG);
+      if (rc == pid)
+         return deadline_expired(deadline) ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
+      if (rc < 0 && errno != EINTR)
+         return KB_HTTP_INTERNAL_ERROR;
+      if (deadline_expired(deadline))
+         return KB_HTTP_TIMEOUT;
+      (void)poll(NULL, 0, 1);
+   }
+}
+
+static void child_kill_reap(pid_t pid)
+{
+   if (pid <= 0)
+      return;
+   (void)kill(pid, SIGKILL);
+   while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+      ;
+}
+
+static kb_http_result_t parse_resolver_response(const unsigned char *wire, size_t length,
+                                                struct addrinfo **result)
+{
+   *result = NULL;
+   if (length < 8 || kb_resolver_get_u32(wire) != KB_RESOLVER_RESPONSE_MAGIC ||
+       wire[4] != KB_RESOLVER_VERSION || wire[7] != 0 || wire[6] > KB_RESOLVER_RECORD_MAX)
+      return KB_HTTP_RESOLVE_ERROR;
+   if (wire[5] != KB_RESOLVER_STATUS_OK)
+      return length == 8 && wire[6] == 0 ? KB_HTTP_RESOLVE_ERROR : KB_HTTP_RESOLVE_ERROR;
+   if (!wire[6])
+      return KB_HTTP_RESOLVE_ERROR;
+   size_t at = 8;
+   struct addrinfo **tail = result;
+   for (size_t i = 0; i < wire[6]; i++)
+   {
+      if (at + 5U > length || wire[at + 4] != 0)
+         goto malformed;
+      unsigned family = wire[at], address_len = wire[at + 1];
+      uint16_t port = kb_resolver_get_u16(wire + at + 2);
+      at += 5;
+      if (!port || ((family != 4 || address_len != 4) && (family != 6 || address_len != 16)) ||
+          at + address_len > length)
+         goto malformed;
+      struct addrinfo *a = calloc(1, sizeof(*a));
+      struct sockaddr *sa =
+          calloc(1, family == 4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6));
+      if (!a || !sa)
+      {
+         free(a);
+         free(sa);
+         resolved_addresses_free(*result);
+         *result = NULL;
+         return KB_HTTP_INTERNAL_ERROR;
+      }
+      a->ai_family = family == 4 ? AF_INET : AF_INET6;
+      a->ai_socktype = SOCK_STREAM;
+      a->ai_protocol = IPPROTO_TCP;
+      a->ai_addr = sa;
+      if (family == 4)
+      {
+         struct sockaddr_in *in = (struct sockaddr_in *)sa;
+         in->sin_family = AF_INET;
+         in->sin_port = htons(port);
+         memcpy(&in->sin_addr, wire + at, address_len);
+         a->ai_addrlen = sizeof(*in);
+      }
+      else
+      {
+         struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
+         in6->sin6_family = AF_INET6;
+         in6->sin6_port = htons(port);
+         memcpy(&in6->sin6_addr, wire + at, address_len);
+         a->ai_addrlen = sizeof(*in6);
+      }
+      at += address_len;
+      *tail = a;
+      tail = &a->ai_next;
+   }
+   if (at != length)
+      goto malformed;
+   return KB_HTTP_OK;
+
+malformed:
+   resolved_addresses_free(*result);
+   *result = NULL;
+   return KB_HTTP_RESOLVE_ERROR;
+}
+
+static kb_http_result_t resolve_deadline_with(const char *host, const char *service, unsigned flags,
+                                              const char *helper_override, int64_t deadline,
+                                              struct addrinfo **result)
+{
+   *result = NULL;
+   size_t host_len = strnlen(host, KB_RESOLVER_HOST_MAX + 1U);
+   size_t service_len = strnlen(service, KB_RESOLVER_SERVICE_MAX + 1U);
+   if (!host_len || host_len > KB_RESOLVER_HOST_MAX || !service_len ||
+       service_len > KB_RESOLVER_SERVICE_MAX || (flags & ~KB_RESOLVER_FLAG_HANG_TEST))
+      return KB_HTTP_INVALID_ARGUMENT;
+   kb_http_result_t outcome = dns_slot_acquire(deadline);
+   if (outcome != KB_HTTP_OK)
+      return outcome;
+
+   int request_pipe[2] = {-1, -1}, response_pipe[2] = {-1, -1};
+   pid_t pid = -1;
+   char helper_path[PATH_MAX];
+   unsigned char request[8U + KB_RESOLVER_HOST_MAX + KB_RESOLVER_SERVICE_MAX] = {0};
+   unsigned char response[KB_RESOLVER_WIRE_MAX];
+   size_t response_len = 0;
+   if (resolver_helper_path(helper_path, helper_override) != 0 || pipe_cloexec(request_pipe) != 0 ||
+       pipe_cloexec(response_pipe) != 0)
+   {
+      outcome = KB_HTTP_RESOLVE_ERROR;
+      goto done;
+   }
+   posix_spawn_file_actions_t actions;
+   if (posix_spawn_file_actions_init(&actions) != 0)
+   {
+      outcome = KB_HTTP_INTERNAL_ERROR;
+      goto done;
+   }
+   int action_error = posix_spawn_file_actions_adddup2(&actions, request_pipe[0], STDIN_FILENO);
+   if (!action_error)
+      action_error = posix_spawn_file_actions_adddup2(&actions, response_pipe[1], STDOUT_FILENO);
+   if (!action_error)
+      action_error =
+          posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+   if (!action_error)
+      action_error = posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
+   char *const argv[] = {helper_path, NULL};
+   char *const envp[] = {"LANG=C", "LC_ALL=C", NULL};
+   int spawn_error =
+       action_error ? action_error : posix_spawn(&pid, helper_path, &actions, NULL, argv, envp);
+   posix_spawn_file_actions_destroy(&actions);
+   if (spawn_error != 0)
+   {
+      outcome = KB_HTTP_RESOLVE_ERROR;
+      goto done;
+   }
+   close(request_pipe[0]);
+   request_pipe[0] = -1;
+   close(response_pipe[1]);
+   response_pipe[1] = -1;
+   if (fd_nonblocking(request_pipe[1]) != 0 || fd_nonblocking(response_pipe[0]) != 0)
+   {
+      outcome = KB_HTTP_INTERNAL_ERROR;
+      goto done;
+   }
+   kb_resolver_put_u32(request, KB_RESOLVER_REQUEST_MAGIC);
+   request[4] = KB_RESOLVER_VERSION;
+   request[5] = (unsigned char)flags;
+   request[6] = (unsigned char)host_len;
+   request[7] = (unsigned char)service_len;
+   memcpy(request + 8, host, host_len);
+   memcpy(request + 8 + host_len, service, service_len);
+   outcome = pipe_write_deadline(request_pipe[1], request, 8U + host_len + service_len, deadline);
+   close(request_pipe[1]);
+   request_pipe[1] = -1;
+   if (outcome != KB_HTTP_OK)
+      goto done;
+   outcome =
+       pipe_read_deadline(response_pipe[0], response, sizeof(response), &response_len, deadline);
+   if (outcome != KB_HTTP_OK)
+      goto done;
+   int child_status = 0;
+   outcome = child_reap_deadline(pid, deadline, &child_status);
+   if (outcome != KB_HTTP_OK)
+      goto done;
+   pid = -1;
+   if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
+   {
+      outcome = KB_HTTP_RESOLVE_ERROR;
+      goto done;
+   }
+   outcome = deadline_expired(deadline) ? KB_HTTP_TIMEOUT
+                                        : parse_resolver_response(response, response_len, result);
+
+done:
+   if (pid > 0)
+      child_kill_reap(pid);
+   for (size_t i = 0; i < 2; i++)
+   {
+      if (request_pipe[i] >= 0)
+         close(request_pipe[i]);
+      if (response_pipe[i] >= 0)
+         close(response_pipe[i]);
+   }
+   dns_slot_release();
+   return outcome;
 }
 
 static kb_http_result_t resolve_deadline(const char *host, const char *service, int64_t deadline,
                                          struct addrinfo **result)
 {
-   *result = NULL;
-   kb_http_result_t slot_result = dns_slot_acquire(deadline);
-   if (slot_result != KB_HTTP_OK)
-      return slot_result;
-   dns_query_t *q = calloc(1, sizeof(*q));
-   if (!q)
-   {
-      dns_slot_release();
-      return KB_HTTP_INTERNAL_ERROR;
-   }
-   if (strnlen(host, sizeof(q->host)) == sizeof(q->host) ||
-       strnlen(service, sizeof(q->service)) == sizeof(q->service) ||
-       pthread_mutex_init(&q->mutex, NULL) != 0)
-   {
-      free(q);
-      dns_slot_release();
-      return KB_HTTP_INTERNAL_ERROR;
-   }
-   pthread_condattr_t attr;
-   if (pthread_condattr_init(&attr) != 0)
-   {
-      pthread_mutex_destroy(&q->mutex);
-      free(q);
-      dns_slot_release();
-      return KB_HTTP_INTERNAL_ERROR;
-   }
-   if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) != 0 ||
-       pthread_cond_init(&q->cond, &attr) != 0)
-   {
-      pthread_condattr_destroy(&attr);
-      pthread_mutex_destroy(&q->mutex);
-      free(q);
-      dns_slot_release();
-      return KB_HTTP_INTERNAL_ERROR;
-   }
-   pthread_condattr_destroy(&attr);
-   atomic_init(&q->refs, 1); /* caller; the worker reference is added only on enqueue */
-   snprintf(q->host, sizeof(q->host), "%s", host);
-   snprintf(q->service, sizeof(q->service), "%s", service);
-   q->hints.ai_family = AF_UNSPEC;
-   q->hints.ai_socktype = SOCK_STREAM;
-   q->hints.ai_protocol = IPPROTO_TCP;
-   if (deadline_expired(deadline))
-   {
-      dns_query_release(q);
-      dns_slot_release();
-      return KB_HTTP_TIMEOUT;
-   }
-   atomic_fetch_add(&q->refs, 1);
-   dns_enqueue(q);
-   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
-   pthread_mutex_lock(&q->mutex);
-   int wait_result = 0;
-   while (!q->done && wait_result == 0)
-      wait_result = pthread_cond_timedwait(&q->cond, &q->mutex, &until);
-   if (!q->done || deadline_expired(deadline))
-   {
-      q->abandoned = 1;
-      struct addrinfo *late_result = q->result;
-      q->result = NULL;
-      pthread_mutex_unlock(&q->mutex);
-      if (late_result)
-         freeaddrinfo(late_result);
-      dns_query_release(q);
-      return KB_HTTP_TIMEOUT;
-   }
-   int gai = q->gai_result;
-   *result = q->result;
-   q->result = NULL;
-   pthread_mutex_unlock(&q->mutex);
-   dns_query_release(q);
-   return gai == 0 && *result ? KB_HTTP_OK : KB_HTTP_RESOLVE_ERROR;
+   return resolve_deadline_with(host, service, 0, NULL, deadline, result);
 }
 
 __attribute__((visibility("hidden"))) kb_http_result_t
-kb_http_client_test__resolve(const char *host, int timeout_ms)
+kb_http_client_test__resolve(const char *host, int timeout_ms, int hang)
 {
    int64_t now = now_ns();
-   if (!host || timeout_ms <= 0 || now < 0 || now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
+   char helper_path[PATH_MAX];
+   if (!host || timeout_ms <= 0 || now < 0 || !realpath("../aimee-kb-resolver", helper_path) ||
+       now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
       return KB_HTTP_INVALID_ARGUMENT;
    struct addrinfo *result = NULL;
    kb_http_result_t status =
-       resolve_deadline(host, "443", now + (int64_t)timeout_ms * 1000000LL, &result);
-   freeaddrinfo(result);
+       resolve_deadline_with(host, "443", hang ? KB_RESOLVER_FLAG_HANG_TEST : 0, helper_path,
+                             now + (int64_t)timeout_ms * 1000000LL, &result);
+   resolved_addresses_free(result);
    return status;
 }
 
@@ -1164,7 +1334,7 @@ done:
       OPENSSL_cleanse(request_bytes, request_bytes_len);
       free(request_bytes);
    }
-   freeaddrinfo(addresses);
+   resolved_addresses_free(addresses);
    if (ssl)
    {
       if (deadline_poll_ms(deadline))

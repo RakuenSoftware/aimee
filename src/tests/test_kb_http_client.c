@@ -5,7 +5,6 @@
 #include <errno.h>
 #include <openssl/ssl.h>
 #include <poll.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -269,37 +268,18 @@ static void poll_readiness_precedes_hangup(void)
    assert(close(sockets[0]) == 0);
 }
 
-typedef struct
-{
-   kb_http_result_t result;
-} resolver_stress_t;
-
-static void *resolver_stress_thread(void *context)
-{
-   resolver_stress_t *run = context;
-   run->result = kb_http_client_test__resolve("localhost", 2);
-   return NULL;
-}
-
-static void resolver_pool_is_bounded_and_reclaims(void)
+static void resolver_hang_releases_capacity(void)
 {
    enum
    {
-      STRESS_THREADS = 64
+      HANG_RUNS = 20
    };
-   pthread_t threads[STRESS_THREADS];
-   resolver_stress_t runs[STRESS_THREADS] = {0};
-   for (size_t i = 0; i < STRESS_THREADS; i++)
-      assert(pthread_create(&threads[i], NULL, resolver_stress_thread, &runs[i]) == 0);
-   for (size_t i = 0; i < STRESS_THREADS; i++)
-   {
-      assert(pthread_join(threads[i], NULL) == 0);
-      assert(runs[i].result == KB_HTTP_OK || runs[i].result == KB_HTTP_TIMEOUT ||
-             runs[i].result == KB_HTTP_RESOLVE_ERROR);
-   }
+   for (size_t i = 0; i < HANG_RUNS; i++)
+      assert(kb_http_client_test__resolve("localhost", 10, 1) == KB_HTTP_TIMEOUT);
    size_t high_water = 0;
-   assert(kb_http_client_test__dns_wait_idle(5000, &high_water) == KB_HTTP_OK);
+   assert(kb_http_client_test__dns_wait_idle(1000, &high_water) == KB_HTTP_OK);
    assert(high_water > 0 && high_water <= 16);
+   assert(kb_http_client_test__resolve("localhost", 2000, 0) == KB_HTTP_OK);
 }
 
 static void sigpipe_mask_failure_policy(void)
@@ -307,6 +287,20 @@ static void sigpipe_mask_failure_policy(void)
    assert(kb_http_client_test__sigpipe_mask_policy(0) == KB_HTTP_OK);
    assert(kb_http_client_test__sigpipe_mask_policy(EINVAL) == KB_HTTP_INTERNAL_ERROR);
    assert(kb_http_client_test__sigpipe_mask_policy(ENOMEM) == KB_HTTP_INTERNAL_ERROR);
+}
+
+static void callbacks_complete_synchronously(void)
+{
+   static const unsigned char wire[] = "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nx";
+   capture_t capture = {.gate = KB_HTTP_GATE_DELIVER};
+   kb_http_response_parser_t *parser = NULL;
+   assert(kb_http_response_parser_init(&parser, 8, capture_headers, capture_body, &capture) ==
+          KB_HTTP_OK);
+   assert(kb_http_response_parser_feed(parser, wire, sizeof(wire) - 1) == KB_HTTP_MORE);
+   /* Both callbacks have returned before feed returns; no borrowed input escapes. */
+   assert(capture.headers_called == 1 && capture.body_called == 1 && capture.body_len == 1);
+   assert(kb_http_response_parser_finish_eof(parser) == KB_HTTP_OK);
+   kb_http_response_parser_free(&parser);
 }
 
 int main(void)
@@ -321,7 +315,8 @@ int main(void)
    authenticated_tls_eof_policy();
    poll_readiness_precedes_hangup();
    sigpipe_mask_failure_policy();
-   resolver_pool_is_bounded_and_reclaims();
+   callbacks_complete_synchronously();
+   resolver_hang_releases_capacity();
    puts("kb http client: strict parser and request validation passed");
    return 0;
 }

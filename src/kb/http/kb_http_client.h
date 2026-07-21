@@ -55,6 +55,8 @@ typedef struct
    char content_type[128];
 } kb_http_response_t;
 
+/* Callbacks execute synchronously on the exchange thread. They must not block,
+ * retain borrowed pointers, or re-enter the exchange; return promptly. */
 typedef kb_http_gate_t (*kb_http_headers_fn)(const kb_http_response_t *response, void *context);
 typedef enum
 {
@@ -104,7 +106,7 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
 int kb_http_client_test__tls_eof_is_authenticated(int ssl_error);
 kb_http_result_t kb_http_client_test__wait_fd(int fd, short events, int timeout_ms);
 kb_http_result_t kb_http_client_test__sigpipe_mask_policy(int mask_result);
-kb_http_result_t kb_http_client_test__resolve(const char *host, int timeout_ms);
+kb_http_result_t kb_http_client_test__resolve(const char *host, int timeout_ms, int hang);
 kb_http_result_t kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water);
 #endif
 
