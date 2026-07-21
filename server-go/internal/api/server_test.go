@@ -283,6 +283,22 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	}
 }
 
+func TestAutoProposalCandidate(t *testing.T) {
+	for candidate, want := range map[string]bool{
+		"docs/proposals/pending/feature.md":         true,
+		"docs/proposals/pending/FEATURE.MD":         true,
+		"docs/proposals/pending/.gitkeep":           false,
+		"docs/proposals/pending/notes.txt":          false,
+		"docs/proposals/pending/.drafts/feature.md": false,
+		"docs/.private/pending/feature.md":          false,
+		"":                                          false,
+	} {
+		if got := autoProposalCandidate(candidate); got != want {
+			t.Errorf("autoProposalCandidate(%q)=%v want=%v", candidate, got, want)
+		}
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", dir}, args...)...)

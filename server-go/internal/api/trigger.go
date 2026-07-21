@@ -116,8 +116,7 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 		return err
 	}
 	for _, candidate := range strings.Split(string(listing), "\n") {
-		if candidate == "" || strings.HasPrefix(filepath.Base(candidate), ".") ||
-			!strings.EqualFold(filepath.Ext(candidate), ".md") {
+		if !autoProposalCandidate(candidate) {
 			continue
 		}
 		request.Proposal = candidate
@@ -139,6 +138,18 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 		return fileErr
 	}
 	return nil
+}
+
+func autoProposalCandidate(candidate string) bool {
+	if candidate == "" || !strings.EqualFold(path.Ext(candidate), ".md") {
+		return false
+	}
+	for _, component := range strings.Split(candidate, "/") {
+		if strings.HasPrefix(component, ".") {
+			return false
+		}
+	}
+	return true
 }
 
 func refreshScanRef(ctx context.Context, workspace, configured string) (string, error) {
