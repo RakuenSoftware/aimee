@@ -268,6 +268,24 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_rate_policy_set(TEXT,TEXT,INT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_rate_policy_show(TEXT,TEXT) TO aimee_kb_runtime;
 
+  -- P2b-a egress authority. Runtime has no direct access to the private binding or
+  -- durable dispatch ledger; every state change is owner-scoped and fenced by a
+  -- SECURITY DEFINER function. The admin-gated binding setter is intentionally
+  -- executable by runtime because it enforces kb_principal_is_admin internally.
+  REVOKE ALL ON org_egress_binding, org_egress_dispatch FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_egress_binding_set(BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_egress_binding_set(BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_recover(INT) TO aimee_kb_runtime;
+
   -- P9a telemetry export + content-free ingest. org_telemetry + org_telemetry_allowlist
   -- are WRITTEN ONLY by the SECURITY DEFINER ingest/allow functions (owned by
   -- aimee_kb_owner, which bypasses ENABLE-not-FORCE RLS). Runtime gets SELECT on

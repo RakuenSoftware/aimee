@@ -18,6 +18,7 @@ typedef struct
    char last_seen_at[32];
    char expires_at[32];
    char revoked_at[32];
+   char authority_id[33]; /* renewal-stable random 128-bit lowercase hex */
    int legacy;
 } db2_enrollment_row_t;
 
@@ -42,6 +43,11 @@ int db2_enrollment_is_revoked(const char *fingerprint);
  * stops authorizing on the next request even over a keep-alive connection.
  * Returns 1 revoked, 0 active/unknown. */
 int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm);
+
+/* Resolve the stable egress authority for one exact active certificate instance.
+ * Returns 0 and writes 32 hex chars, 1 when not active/enrolled, or -1 on error. */
+int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
+                                     const char *cert_serial_norm, char out_authority[33]);
 
 /* Eager one-time backfill of cert_issuer/cert_serial_norm on legacy enrollments
  * (P1 I5), so revocation-by-key has no key-less window. Returns rows updated or -1. */
