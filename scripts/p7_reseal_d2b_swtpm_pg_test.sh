@@ -8,8 +8,12 @@ root=$(cd "$here/.." && pwd)
 src="$root/src"
 db_url=${1:-${AIMEE_TEST_PG_URL:-}}
 test -n "$db_url" || { echo 'usage: p7_reseal_d2b_swtpm_pg_test.sh postgres-url' >&2; exit 2; }
+case "$db_url" in *[?#]*) echo 'refusing database URL with query or fragment' >&2; exit 2;; esac
 db=${db_url##*/}
-case "$db" in aimee_p7_d2b_*) ;; *) echo "refusing non-scratch database: $db" >&2; exit 2;; esac
+if ! [[ "$db" =~ ^aimee_p7_d2b_[A-Za-z0-9_]+$ ]]; then
+  echo "refusing non-scratch database identifier: $db" >&2
+  exit 2
+fi
 admin_url=${db_url%/*}/postgres
 harness=${P7_D2B_HARNESS:-$src/build/obj/tests/p7-reseal-d2b-live}
 port=${P7_D2B_SWTPM_PORT:-2361}
@@ -50,7 +54,7 @@ cleanup(){
     say "preserving failed artifacts in $work"
     return "$rc"
   fi
-  psql -v ON_ERROR_STOP=1 "$admin_url" -c "DROP DATABASE IF EXISTS $db" >/dev/null 2>&1 || true
+  dropdb --maintenance-db="$admin_url" --if-exists "$db" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT INT TERM
@@ -67,8 +71,8 @@ export AIMEE_VAULT_TPM2_BLOB_PATH="$blob"
 export AIMEE_VAULT_TPM2_NV_INDEX=0x01500020
 
 reset_db(){
-  psql -v ON_ERROR_STOP=1 "$admin_url" -c "DROP DATABASE IF EXISTS $db" >/dev/null
-  psql -v ON_ERROR_STOP=1 "$admin_url" -c "CREATE DATABASE $db" >/dev/null
+  dropdb --maintenance-db="$admin_url" --if-exists "$db" >/dev/null
+  createdb --maintenance-db="$admin_url" "$db"
 }
 
 reset_tpm(){

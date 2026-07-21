@@ -8,8 +8,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 typedef struct
 {
@@ -35,6 +37,7 @@ typedef struct
 
 static int arena_new(size_t need, protected_arena_t *a)
 {
+#if defined(__linux__) && defined(MADV_DONTDUMP) && defined(MADV_WIPEONFORK)
    long ps = sysconf(_SC_PAGESIZE);
    if (!a || ps <= 0 || need > SIZE_MAX - (size_t)ps)
       return -1;
@@ -46,11 +49,8 @@ static int arena_new(size_t need, protected_arena_t *a)
       a->n = 0;
       return -1;
    }
-   if (mlock(a->p, a->n) != 0 || madvise(a->p, a->n, MADV_DONTDUMP) != 0
-#ifdef MADV_WIPEONFORK
-       || madvise(a->p, a->n, MADV_WIPEONFORK) != 0
-#endif
-   )
+   if (mlock(a->p, a->n) != 0 || madvise(a->p, a->n, MADV_DONTDUMP) != 0 ||
+       madvise(a->p, a->n, MADV_WIPEONFORK) != 0)
    {
       OPENSSL_cleanse(a->p, a->n);
       (void)munlock(a->p, a->n);
@@ -60,6 +60,12 @@ static int arena_new(size_t need, protected_arena_t *a)
       return -1;
    }
    return 0;
+#else
+   (void)need;
+   if (a)
+      memset(a, 0, sizeof(*a));
+   return -1;
+#endif
 }
 
 static void arena_free(protected_arena_t *a)
@@ -67,8 +73,10 @@ static void arena_free(protected_arena_t *a)
    if (!a || !a->p)
       return;
    OPENSSL_cleanse(a->p, a->n);
+#if defined(__linux__) && defined(MADV_DONTDUMP) && defined(MADV_WIPEONFORK)
    (void)munlock(a->p, a->n);
    (void)munmap(a->p, a->n);
+#endif
    a->p = NULL;
    a->n = 0;
 }
@@ -197,6 +205,17 @@ static int receipt_from_snapshot(const db2_vault_rewrap_snapshot_t *s,
    return s->has_receipt && vault_reseal_receipt_decode(s->receipt, sizeof(s->receipt), r) == 0;
 }
 
+static int cursor_advances(const db2_vault_rewrap_cursor_t *before,
+                           const db2_vault_rewrap_cursor_t *after)
+{
+   if (!before || !after || before->len > sizeof(before->bytes) ||
+       after->len > sizeof(after->bytes))
+      return 0;
+   size_t common = before->len < after->len ? before->len : after->len;
+   int cmp = common ? memcmp(after->bytes, before->bytes, common) : 0;
+   return cmp > 0 || (cmp == 0 && after->len > before->len);
+}
+
 static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
 {
    crypto_context_t *c = opaque;
@@ -224,6 +243,11 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
                                  DB2_VAULT_REWRAP_PAGE_MAX, secrets, DB2_VAULT_REWRAP_PAGE_MAX, &n);
       if (r != DB2_VAULT_REWRAP_OK)
          goto rollback;
+      if (n > DB2_VAULT_REWRAP_PAGE_MAX)
+      {
+         r = DB2_VAULT_REWRAP_INTEGRITY;
+         goto rollback;
+      }
       if (!n)
          break;
       for (size_t i = 0; i < n; i++)
@@ -254,8 +278,18 @@ static int stage_callback(const uint8_t old_kek[VAULT_KEK_LEN], void *opaque)
                                 &next);
       if (r != DB2_VAULT_REWRAP_OK)
          goto rollback;
+      if (n > DB2_VAULT_REWRAP_PAGE_MAX)
+      {
+         r = DB2_VAULT_REWRAP_INTEGRITY;
+         goto rollback;
+      }
       if (!n)
          break;
+      if (!cursor_advances(&cursor, &next))
+      {
+         r = DB2_VAULT_REWRAP_INTEGRITY;
+         goto rollback;
+      }
       for (size_t i = 0; i < n; i++)
       {
          size_t wn = 0;
@@ -339,7 +373,7 @@ static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
                                  DB2_VAULT_REWRAP_PAGE_MAX, &n);
       if (r != DB2_VAULT_REWRAP_OK)
          goto rollback;
-      if (!n || n > (size_t)remaining)
+      if (!n || n > (size_t)limit || n > (size_t)remaining)
       {
          r = DB2_VAULT_REWRAP_INTEGRITY;
          goto rollback;
@@ -379,7 +413,7 @@ static int verify_callback(const uint8_t new_kek[VAULT_KEK_LEN], void *opaque)
                                 DB2_VAULT_REWRAP_PAGE_MAX, &n, &next);
       if (r != DB2_VAULT_REWRAP_OK)
          goto rollback;
-      if (!n || n > (size_t)remaining)
+      if (!n || n > (size_t)limit || n > (size_t)remaining || !cursor_advances(&cursor, &next))
       {
          r = DB2_VAULT_REWRAP_INTEGRITY;
          goto rollback;
@@ -553,10 +587,19 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
          db2_vault_rewrap_snapshot_clear(&s);
          break;
       }
-      if (s.state != DB2_VAULT_REWRAP_COMPLETED && s.state != DB2_VAULT_REWRAP_ABORTED &&
-          d->custody->guard_sync_epoch(guard, (uint64_t)s.seal_epoch) != VAULT_MAINTENANCE_OK)
+      int sync_result = VAULT_MAINTENANCE_OK;
+      if (s.state != DB2_VAULT_REWRAP_COMPLETED && s.state != DB2_VAULT_REWRAP_ABORTED)
+         sync_result = d->custody->guard_sync_epoch(guard, (uint64_t)s.seal_epoch);
+      if (sync_result != VAULT_MAINTENANCE_OK)
       {
-         result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
+         if (sync_result == VAULT_MAINTENANCE_BUSY)
+            result = VAULT_RESEAL_ORCHESTRATOR_BUSY;
+         else if (sync_result == VAULT_MAINTENANCE_EPOCH ||
+                  sync_result == VAULT_MAINTENANCE_INVALID ||
+                  sync_result == VAULT_MAINTENANCE_WRONG_OWNER)
+            result = VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
+         else
+            result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
          db2_vault_rewrap_snapshot_clear(&s);
          break;
       }

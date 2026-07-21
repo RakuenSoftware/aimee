@@ -26,6 +26,7 @@ static int g_prepare_result = VAULT_TPM2_RESEAL_OK, g_prepare_lost_response;
 static vault_tpm2_reseal_status_t g_prepare_after_status = VAULT_TPM2_RESEAL_PREPARED;
 static int g_nv_result = VAULT_TPM2_RESEAL_OK;
 static uint64_t g_nv_generation = 7;
+static int g_secret_page_oversize, g_check_page_oversize, g_check_cursor_stale;
 static int g_sequence, g_first_order[40], g_last_order[40];
 static int64_t g_secret_count, g_check_count;
 static vault_tpm2_reseal_receipt_t g_receipt;
@@ -214,6 +215,11 @@ static db2_vault_rewrap_result_t secret_page(db2_vault_rewrap_tx_t *t, const uin
    (void)o;
    (void)f;
    called(C_SECRET_PAGE);
+   if (g_secret_page_oversize)
+   {
+      *n = DB2_VAULT_REWRAP_PAGE_MAX + 1u;
+      return DB2_VAULT_REWRAP_OK;
+   }
    int64_t total = g_forward ? g_secret_count : 0;
    size_t take = a < total ? (size_t)(total - a) : 0;
    if (take > (size_t)l)
@@ -237,9 +243,20 @@ static db2_vault_rewrap_result_t check_page(db2_vault_rewrap_tx_t *t, const uint
    (void)o;
    (void)f;
    called(C_CHECK_PAGE);
+   if (g_check_page_oversize)
+   {
+      *n = DB2_VAULT_REWRAP_PAGE_MAX + 1u;
+      return DB2_VAULT_REWRAP_OK;
+   }
    int64_t pos = 0;
-   if (a->len == sizeof(pos))
-      memcpy(&pos, a->bytes, sizeof(pos));
+   if (a->len)
+   {
+      char text[32];
+      assert(a->len < sizeof(text));
+      memcpy(text, a->bytes, a->len);
+      text[a->len] = 0;
+      pos = strtoll(text, NULL, 10);
+   }
    int64_t total = g_forward ? g_check_count : 0;
    size_t take = pos < total ? (size_t)(total - pos) : 0;
    if (take > (size_t)l)
@@ -258,8 +275,11 @@ static db2_vault_rewrap_result_t check_page(db2_vault_rewrap_tx_t *t, const uint
    if (take)
    {
       memset(next, 0, sizeof(*next));
-      memcpy(next->bytes, &pos, sizeof(pos));
-      next->len = sizeof(pos);
+      int written = snprintf((char *)next->bytes, sizeof(next->bytes), "%020lld", (long long)pos);
+      assert(written == 20);
+      next->len = (size_t)written;
+      if (g_check_cursor_stale)
+         *next = *a;
    }
    *n = take;
    return DB2_VAULT_REWRAP_OK;
@@ -580,6 +600,7 @@ static void reset_fakes(void)
    g_prepare_after_status = VAULT_TPM2_RESEAL_PREPARED;
    g_nv_result = VAULT_TPM2_RESEAL_OK;
    g_nv_generation = 7;
+   g_secret_page_oversize = g_check_page_oversize = g_check_cursor_stale = 0;
    g_secret_count = g_check_count = 0;
 }
 
@@ -690,10 +711,51 @@ static void replay_callback_and_terminal_guards(void)
    g_snapshot_result = DB2_VAULT_REWRAP_OK;
 
    memset(g_calls, 0, sizeof(g_calls));
-   g_guard_sync_result = VAULT_MAINTENANCE_ERROR;
+   g_guard_sync_result = VAULT_MAINTENANCE_EPOCH;
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY);
    assert(g_calls[C_GUARD_SYNC] == 1 && g_calls[C_DISCOVER] == 0);
+   g_guard_sync_result = VAULT_MAINTENANCE_BUSY;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_BUSY);
+   g_guard_sync_result = VAULT_MAINTENANCE_ERROR;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY);
    g_guard_sync_result = VAULT_MAINTENANCE_OK;
+}
+
+static void pagination_defenses(void)
+{
+   uint8_t secret[3] = {1, 2, 3};
+   vault_reseal_orchestrator_request_t r = request(VAULT_RESEAL_ORCHESTRATOR_RESUME, secret);
+   vault_reseal_orchestrator_output_t out;
+
+   reset_fakes();
+   g_forward = 1;
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_secret_count = g_check_count = 1;
+   g_secret_page_oversize = 1;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) ==
+          VAULT_RESEAL_ORCHESTRATOR_RECOVERY_REQUIRED);
+   assert(g_calls[C_STAGE_DEK] == 0 && g_calls[C_QUARANTINE] == 1);
+
+   reset_fakes();
+   g_forward = 1;
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_secret_count = g_check_count = 1;
+   g_check_page_oversize = 1;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) ==
+          VAULT_RESEAL_ORCHESTRATOR_RECOVERY_REQUIRED);
+   assert(g_calls[C_STAGE_DEK] == 1 && g_calls[C_STAGE_CHECK] == 0 && g_calls[C_QUARANTINE] == 1);
+
+   reset_fakes();
+   g_forward = 1;
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_secret_count = g_check_count = 1;
+   g_check_cursor_stale = 1;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) ==
+          VAULT_RESEAL_ORCHESTRATOR_RECOVERY_REQUIRED);
+   assert(g_calls[C_STAGE_CHECK] == 0 && g_calls[C_QUARANTINE] == 1);
 }
 
 static void assert_critical_cell_calls(db2_vault_rewrap_state_t state,
@@ -939,6 +1001,7 @@ int main(void)
    exhaustive_matrix();
    full_forward_path();
    replay_callback_and_terminal_guards();
+   pagination_defenses();
    uncertainty_and_abort_ordering();
    teardown_failures();
    puts("vault_reseal_orchestrator: exhaustive DB x custody tests passed");
