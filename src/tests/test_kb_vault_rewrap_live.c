@@ -115,12 +115,6 @@ static void make_check_plain(size_t principal_index, uint8_t plain[VAULT_DEK_LEN
       plain[i] = (uint8_t)(0x80u + principal_index * 7u + i);
 }
 
-static void sha256_bytes(const void *data, size_t len, uint8_t out[32])
-{
-   unsigned int out_len = 0;
-   assert(EVP_Digest(data, len, out, &out_len, EVP_sha256(), NULL) == 1 && out_len == 32);
-}
-
 static void seed_salts(const uint8_t old_kek[VAULT_KEK_LEN])
 {
    static const size_t empty[] = {1, 5};
@@ -261,8 +255,21 @@ static int64_t begin_operation(void)
 
 static void record_prepared(int64_t fence, uint8_t receipt_digest[32])
 {
-   static const uint8_t receipt[] = "p7-reseal-c-mock-receipt-v1";
-   sha256_bytes(receipt, sizeof(receipt) - 1, receipt_digest);
+   vault_tpm2_reseal_receipt_t decoded = {0};
+   uint8_t receipt[VAULT_RESEAL_RECEIPT_V1_LEN] = {0};
+   assert(vault_reseal_operation_id_from_hex(OP, decoded.operation_id) == 0);
+   decoded.old_generation = 41;
+   decoded.new_generation = 42;
+   for (size_t i = 0; i < 32; i++)
+   {
+      decoded.predecessor_digest[i] = (uint8_t)(0x10 + i);
+      decoded.capsule_digest[i] = (uint8_t)(0x30 + i);
+      decoded.future_digest[i] = (uint8_t)(0x50 + i);
+      decoded.new_kek_digest[i] = (uint8_t)(0x70 + i);
+      decoded.manifest_digest[i] = (uint8_t)(0x90 + i);
+   }
+   assert(vault_reseal_receipt_encode(&decoded, receipt) == 0);
+   assert(vault_reseal_receipt_digest(receipt, receipt_digest) == 0);
    char err[ERR_CAP] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        db2_conn(), "SELECT org_vault_rewrap_record_prepared(?1,?2,?3,?4)", err, sizeof(err));
@@ -270,13 +277,15 @@ static void record_prepared(int64_t fence, uint8_t receipt_digest[32])
       die_pg("prepare record_prepared", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
    assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
-   assert(aimee_pg_bind_blob(st, "?3", receipt, sizeof(receipt) - 1) == 0);
+   assert(aimee_pg_bind_blob(st, "?3", receipt, sizeof(receipt)) == 0);
    assert(aimee_pg_bind_blob(st, "?4", receipt_digest, 32) == 0);
    if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
       die_pg("record prepared", err);
    const char *state = aimee_pg_column_text(st, 0);
    assert(state && strcmp(state, "custody_prepared") == 0);
    aimee_pg_finalize(st);
+   OPENSSL_cleanse(&decoded, sizeof(decoded));
+   OPENSSL_cleanse(receipt, sizeof(receipt));
 }
 
 static void stage_secret(const secret_row_t *row, int64_t fence,
