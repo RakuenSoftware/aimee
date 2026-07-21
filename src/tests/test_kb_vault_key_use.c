@@ -14,6 +14,7 @@ static int g_candidate_fail;
 static int g_admit_result = 1;
 static int64_t g_admit_epoch = 1;
 static int g_begin_fail;
+static uint64_t g_seen_admitted_epoch;
 static int g_sealed;
 static int g_callback_fail;
 static int g_callback_calls;
@@ -113,9 +114,10 @@ uint64_t vault_use_epoch_snapshot(void)
    return 9;
 }
 
-int vault_use_begin(uint64_t epoch, uint8_t kek[VAULT_KEK_LEN])
+int vault_use_begin(uint64_t epoch, uint64_t admitted_epoch, uint8_t kek[VAULT_KEK_LEN])
 {
-   if (g_begin_fail || epoch != 9)
+   g_seen_admitted_epoch = admitted_epoch;
+   if (g_begin_fail || epoch != 9 || admitted_epoch != (uint64_t)g_admit_epoch)
       return -1;
    memset(kek, 0x55, VAULT_KEK_LEN);
    return 0;
@@ -198,6 +200,7 @@ static void reset(void)
 {
    g_hwm_fail = g_verify_fail = g_candidate_fail = g_begin_fail = g_sealed = 0;
    g_callback_fail = g_callback_calls = g_scope_open = 0;
+   g_seen_admitted_epoch = 0;
    g_admit_result = 1;
    g_admit_epoch = 1;
    g_live = 1;
@@ -206,7 +209,8 @@ static void reset(void)
 int main(void)
 {
    reset();
-   assert(run() == KB_VAULT_KEY_USE_OK && g_callback_calls == 1);
+   g_admit_epoch = 17;
+   assert(run() == KB_VAULT_KEY_USE_OK && g_callback_calls == 1 && g_seen_admitted_epoch == 17);
    reset();
    g_admit_result = 0;
    assert(run() == KB_VAULT_KEY_USE_REPLAY && g_callback_calls == 0);

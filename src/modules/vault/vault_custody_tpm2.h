@@ -97,6 +97,12 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
                                       uint64_t expected_old_generation,
                                       const uint8_t new_kek[VAULT_KEK_LEN], const char *secret,
                                       vault_tpm2_reseal_receipt_t *out);
+int vault_custody_tpm2_reseal_discover(const uint8_t operation_id[16],
+                                       uint64_t expected_old_generation, const char *secret,
+                                       vault_tpm2_reseal_receipt_t *receipt,
+                                       vault_tpm2_reseal_status_t *status);
+int vault_custody_tpm2_reseal_recover_kek(const vault_tpm2_reseal_receipt_t *receipt,
+                                          const char *secret, uint8_t new_kek[VAULT_KEK_LEN]);
 int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
                                      vault_tpm2_reseal_status_t *out);
 int vault_custody_tpm2_reseal_commit(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,

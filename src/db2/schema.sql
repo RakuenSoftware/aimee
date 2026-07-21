@@ -3431,14 +3431,13 @@ REVOKE ALL ON TABLE org_vault_key_use_intent FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
 
--- P7-reseal-c: owner-only whole-vault re-wrap staging.  No runtime grant or
--- production caller exists until the end-to-end reconciliation slice.
+-- P7-reseal-d1: owner-only whole-vault re-wrap staging, completion, and
+-- fail-closed quarantine. No production caller exists in this slice.
 CREATE TABLE IF NOT EXISTS kb_vault_rewrap_operation (
   operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{32}$'),
   request_id TEXT NOT NULL UNIQUE CHECK (octet_length(request_id) BETWEEN 1 AND 200),
   actor TEXT NOT NULL CHECK (octet_length(actor) BETWEEN 1 AND 575),
-  state TEXT NOT NULL CHECK (state IN ('preparing','custody_prepared','wraps_staged',
-    'reseal_committing','resealed','promoted','aborted','recovery_required')),
+  state TEXT NOT NULL,
   seal_epoch BIGINT NOT NULL CHECK (seal_epoch > 0),
   fencing_token BIGINT NOT NULL CHECK (fencing_token > 0),
   old_generation BIGINT NOT NULL CHECK (old_generation >= 0),
@@ -3453,30 +3452,54 @@ CREATE TABLE IF NOT EXISTS kb_vault_rewrap_operation (
   -- is copied into the immutable content-free WORM checkpoint.
   failure_class TEXT NOT NULL DEFAULT '' CHECK (
     failure_class='' OR failure_class ~ '^[a-z][a-z0-9_]{0,63}$'),
+  failure_from_state TEXT,
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
   updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
   CHECK ((receipt IS NULL AND receipt_digest IS NULL) OR
-         (octet_length(receipt) BETWEEN 1 AND 4096 AND receipt_digest IS NOT NULL)),
-  CONSTRAINT kb_vault_rewrap_state_fields_check CHECK (
+         (octet_length(receipt) BETWEEN 1 AND 4096 AND receipt_digest IS NOT NULL))
+);
+ALTER TABLE kb_vault_rewrap_operation
+  ADD COLUMN IF NOT EXISTS failure_from_state TEXT;
+ALTER TABLE kb_vault_rewrap_operation
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_operation_state_check;
+ALTER TABLE kb_vault_rewrap_operation
+  ADD CONSTRAINT kb_vault_rewrap_operation_state_check CHECK (state IN
+    ('preparing','custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
+     'completed','aborted','recovery_required'));
+ALTER TABLE kb_vault_rewrap_operation
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_state_fields_check;
+ALTER TABLE kb_vault_rewrap_operation
+  ADD CONSTRAINT kb_vault_rewrap_state_fields_check CHECK (
     (state='preparing' AND receipt IS NULL AND inventory_digest IS NULL AND
-      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='') OR
+      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='' AND
+      failure_from_state IS NULL) OR
     (state='custody_prepared' AND receipt IS NOT NULL AND inventory_digest IS NULL AND
-      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='') OR
+      stage_digest IS NULL AND secret_count=0 AND check_count=0 AND failure_class='' AND
+      failure_from_state IS NULL) OR
     (state IN ('wraps_staged','reseal_committing','resealed','promoted') AND
       receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL AND
-      failure_class='') OR
+      failure_class='' AND failure_from_state IS NULL) OR
+    (state='completed' AND receipt IS NOT NULL AND inventory_digest IS NOT NULL AND
+      stage_digest IS NOT NULL AND failure_class='' AND failure_from_state IS NULL) OR
     (state='aborted' AND failure_class<>'' AND
+      failure_from_state IS NULL AND
       ((receipt IS NULL AND inventory_digest IS NULL AND stage_digest IS NULL AND
          secret_count=0 AND check_count=0) OR
        (receipt IS NOT NULL AND inventory_digest IS NULL AND stage_digest IS NULL AND
          secret_count=0 AND check_count=0) OR
        (receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL))) OR
-    (state='recovery_required' AND receipt IS NOT NULL AND inventory_digest IS NOT NULL AND
-      stage_digest IS NOT NULL AND failure_class<>''))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_vault_rewrap_one_active
+    (state='recovery_required' AND failure_class<>'' AND
+      ((failure_from_state='preparing' AND receipt IS NULL AND inventory_digest IS NULL AND
+         stage_digest IS NULL AND secret_count=0 AND check_count=0) OR
+       (failure_from_state='custody_prepared' AND receipt IS NOT NULL AND
+         inventory_digest IS NULL AND stage_digest IS NULL AND secret_count=0 AND check_count=0) OR
+       (failure_from_state IN ('wraps_staged','reseal_committing','resealed','promoted') AND
+         receipt IS NOT NULL AND inventory_digest IS NOT NULL AND stage_digest IS NOT NULL)))
+  );
+DROP INDEX IF EXISTS idx_kb_vault_rewrap_one_active;
+CREATE UNIQUE INDEX idx_kb_vault_rewrap_one_active
   ON kb_vault_rewrap_operation((true))
-  WHERE state NOT IN ('aborted','recovery_required');
+  WHERE state NOT IN ('aborted','recovery_required','completed');
 
 CREATE TABLE IF NOT EXISTS kb_vault_rewrap_dek_stage (
   operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,
@@ -3499,7 +3522,7 @@ CREATE TABLE IF NOT EXISTS kb_vault_rewrap_check_stage (
 );
 CREATE TABLE IF NOT EXISTS kb_vault_rewrap_worm (
   operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id),
-  event_kind TEXT NOT NULL CHECK (event_kind IN ('intent','resealed','abort','recovery_required')),
+  event_kind TEXT NOT NULL,
   event_id TEXT NOT NULL UNIQUE CHECK (event_id ~ '^[0-9a-f]{64}$'),
   state TEXT NOT NULL,
   seal_epoch BIGINT NOT NULL,
@@ -3510,12 +3533,24 @@ CREATE TABLE IF NOT EXISTS kb_vault_rewrap_worm (
   actor TEXT NOT NULL CHECK (octet_length(actor) BETWEEN 1 AND 575),
   detail TEXT NOT NULL DEFAULT '' CHECK (octet_length(detail) <= 1000),
   created_at TEXT NOT NULL DEFAULT (pg_now_text()),
-  PRIMARY KEY(operation_id,event_kind),
-  CHECK ((event_kind='intent' AND state='preparing') OR
-         (event_kind='resealed' AND state='resealed') OR
-         (event_kind='abort' AND state='aborted') OR
-         (event_kind='recovery_required' AND state='recovery_required'))
+  PRIMARY KEY(operation_id,event_kind)
 );
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_event_kind_check;
+ALTER TABLE kb_vault_rewrap_worm
+  ADD CONSTRAINT kb_vault_rewrap_worm_event_kind_check CHECK
+    (event_kind IN ('intent','resealed','completed','abort','recovery_required'));
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_check;
+ALTER TABLE kb_vault_rewrap_worm
+  DROP CONSTRAINT IF EXISTS kb_vault_rewrap_worm_event_state_check;
+ALTER TABLE kb_vault_rewrap_worm
+  ADD CONSTRAINT kb_vault_rewrap_worm_event_state_check CHECK
+    ((event_kind='intent' AND state='preparing') OR
+     (event_kind='resealed' AND state='resealed') OR
+     (event_kind='completed' AND state='completed') OR
+     (event_kind='abort' AND state='aborted') OR
+     (event_kind='recovery_required' AND state='recovery_required'));
 CREATE OR REPLACE FUNCTION org_vault_rewrap_worm_block() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog,public,pg_temp AS $$
 BEGIN RAISE EXCEPTION 'WORM: kb_vault_rewrap_worm is append-only'; END; $$;
@@ -3558,6 +3593,7 @@ BEGIN
   IF p_state<>o.state OR octet_length(COALESCE(p_detail,''))>1000 OR
      NOT ((p_kind='intent' AND p_state='preparing') OR
           (p_kind='resealed' AND p_state='resealed') OR
+          (p_kind='completed' AND p_state='completed') OR
           (p_kind='abort' AND p_state='aborted') OR
           (p_kind='recovery_required' AND p_state='recovery_required')) THEN
     RAISE EXCEPTION 'org_vault_rewrap_worm_append: invalid event' USING ERRCODE='22023';
@@ -3610,7 +3646,7 @@ BEGIN
   END IF;
   IF EXISTS(SELECT 1 FROM public.org_vault_rotation r WHERE r.state<>'retired') OR
      EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation x
-       WHERE x.state NOT IN ('aborted','recovery_required')) THEN
+       WHERE x.state NOT IN ('aborted','recovery_required','completed')) THEN
     RAISE EXCEPTION 'org_vault_rewrap_begin: busy' USING ERRCODE='55000';
   END IF;
   UPDATE public.kb_vault_control AS ctl SET sealed=true,seal_epoch=ctl.seal_epoch+1,
@@ -3641,7 +3677,10 @@ BEGIN
   IF o.state<>'preparing' THEN
     IF o.fencing_token=p_fence AND o.receipt=p_receipt AND o.receipt_digest=p_digest AND
        o.state IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
-                   'aborted','recovery_required') THEN RETURN o.state; END IF;
+                   'completed','aborted','recovery_required') AND
+       (o.state<>'recovery_required' OR o.failure_from_state<>'preparing') THEN
+      RETURN o.state;
+    END IF;
     RAISE EXCEPTION 'org_vault_rewrap_record_prepared: state conflict' USING ERRCODE='40001';
   END IF;
   IF o.fencing_token<>p_fence OR NOT EXISTS(SELECT 1 FROM public.kb_vault_control
@@ -3664,18 +3703,21 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM public.kb_vault_control WHERE singleton=1 AND sealed AND
       maintenance_kind='tpm2-reseal' AND maintenance_id=p_op AND fencing_token=p_fence) OR
      NOT EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op AND
-      fencing_token=p_fence AND state NOT IN ('aborted','recovery_required')) THEN
+      fencing_token=p_fence AND state NOT IN ('aborted','recovery_required','completed')) THEN
     RAISE EXCEPTION 'org_vault_rewrap: stale fence' USING ERRCODE='40001';
   END IF;
 END; $$;
 
-CREATE OR REPLACE FUNCTION org_vault_rewrap_status(p_op TEXT)
+DROP FUNCTION IF EXISTS org_vault_rewrap_status(TEXT);
+CREATE FUNCTION org_vault_rewrap_status(p_op TEXT)
 RETURNS TABLE(operation_id TEXT,state TEXT,seal_epoch BIGINT,fencing_token BIGINT,
   old_generation BIGINT,new_generation BIGINT,receipt_digest BYTEA,secret_count BIGINT,
-  check_count BIGINT,inventory_digest BYTEA,stage_digest BYTEA,failure_class TEXT)
+  check_count BIGINT,inventory_digest BYTEA,stage_digest BYTEA,failure_class TEXT,
+  failure_from_state TEXT)
 LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
   SELECT o.operation_id,o.state,o.seal_epoch,o.fencing_token,o.old_generation,o.new_generation,
-    o.receipt_digest,o.secret_count,o.check_count,o.inventory_digest,o.stage_digest,o.failure_class
+    o.receipt_digest,o.secret_count,o.check_count,o.inventory_digest,o.stage_digest,o.failure_class,
+    o.failure_from_state
   FROM public.kb_vault_rewrap_operation o WHERE o.operation_id=p_op;
 $$;
 
@@ -3751,7 +3793,7 @@ BEGIN
       RAISE EXCEPTION 'org_vault_rewrap_stage_dek: replay mismatch' USING ERRCODE='23505';
     END IF;
     IF o.state NOT IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
-                       'recovery_required') THEN
+                       'completed','recovery_required') THEN
       RAISE EXCEPTION 'org_vault_rewrap_stage_dek: state conflict' USING ERRCODE='40001';
     END IF;
     RETURN;
@@ -3792,7 +3834,7 @@ BEGIN
       RAISE EXCEPTION 'org_vault_rewrap_stage_check: replay mismatch' USING ERRCODE='23505';
     END IF;
     IF o.state NOT IN ('custody_prepared','wraps_staged','reseal_committing','resealed','promoted',
-                       'recovery_required') THEN
+                       'completed','recovery_required') THEN
       RAISE EXCEPTION 'org_vault_rewrap_stage_check: state conflict' USING ERRCODE='40001';
     END IF;
     RETURN;
@@ -3883,7 +3925,7 @@ BEGIN
   IF o.state<>'custody_prepared' THEN
     IF o.fencing_token=p_fence AND
        o.state IN ('wraps_staged','reseal_committing','resealed','promoted','aborted',
-                   'recovery_required') AND
+                   'completed','recovery_required') AND
        o.inventory_digest IS NOT NULL AND o.stage_digest IS NOT NULL THEN RETURN o.state; END IF;
     RAISE EXCEPTION 'org_vault_rewrap_stage_finish: state conflict' USING ERRCODE='40001';
   END IF;
@@ -3929,10 +3971,21 @@ BEGIN
   PERFORM public.org_vault_control_lock_exclusive();
   SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
   IF o.state<>'wraps_staged' THEN
-    IF o.fencing_token=p_fence AND o.state IN
-       ('reseal_committing','resealed','promoted','recovery_required') AND
-       o.receipt_digest IS NOT NULL AND o.inventory_digest IS NOT NULL AND
-       o.stage_digest IS NOT NULL THEN RETURN o.state; END IF;
+    IF o.fencing_token=p_fence AND o.receipt_digest IS NOT NULL AND
+       o.inventory_digest IS NOT NULL AND o.stage_digest IS NOT NULL AND
+       (o.state IN ('reseal_committing','resealed','promoted') OR
+        (o.state='completed' AND EXISTS(SELECT 1 FROM public.kb_vault_rewrap_worm w
+          WHERE w.operation_id=p_op AND w.event_kind='completed' AND w.state='completed' AND
+            w.fencing_token=p_fence AND w.receipt_digest=o.receipt_digest AND
+            w.inventory_digest=o.inventory_digest AND w.stage_digest=o.stage_digest)) OR
+        (o.state='recovery_required' AND
+          o.failure_from_state IN ('reseal_committing','resealed','promoted') AND
+          (o.failure_from_state='reseal_committing' OR EXISTS(SELECT 1
+             FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+               w.event_kind='resealed' AND w.state='resealed' AND
+               w.fencing_token=p_fence AND w.receipt_digest=o.receipt_digest)))) THEN
+      RETURN o.state;
+    END IF;
     RAISE EXCEPTION 'org_vault_rewrap_mark_committing: state conflict' USING ERRCODE='40001';
   END IF;
   IF o.fencing_token<>p_fence THEN
@@ -3958,9 +4011,16 @@ BEGIN
   IF o.state<>'reseal_committing' THEN
     IF o.fencing_token=p_fence AND o.receipt_digest=p_receipt_digest AND
        (o.state IN ('resealed','promoted') OR
-        (o.state='recovery_required' AND EXISTS(SELECT 1
+        (o.state='completed' AND EXISTS(SELECT 1
           FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
-            w.event_kind='resealed' AND w.receipt_digest=p_receipt_digest))) THEN
+            w.event_kind='completed' AND w.state='completed' AND w.fencing_token=p_fence AND
+            w.receipt_digest=p_receipt_digest AND w.inventory_digest=o.inventory_digest AND
+            w.stage_digest=o.stage_digest)) OR
+        (o.state='recovery_required' AND
+         o.failure_from_state IN ('resealed','promoted') AND EXISTS(SELECT 1
+          FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+            w.event_kind='resealed' AND w.state='resealed' AND w.fencing_token=p_fence AND
+            w.receipt_digest=p_receipt_digest))) THEN
       RETURN o.state;
     END IF;
     RAISE EXCEPTION 'org_vault_rewrap_mark_resealed: state conflict' USING ERRCODE='40001';
@@ -3989,11 +4049,19 @@ BEGIN
   IF current_setting('transaction_isolation')<>'serializable' THEN
     RAISE EXCEPTION 'org_vault_rewrap_promote: serializable required' USING ERRCODE='25001';
   END IF;
-  IF o.state='recovery_required' AND o.fencing_token=p_fence AND EXISTS(SELECT 1
+  IF o.state='recovery_required' AND o.fencing_token=p_fence AND
+      o.failure_from_state='promoted' AND EXISTS(SELECT 1
       FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
         w.event_kind='recovery_required' AND
         w.detail=('from_state=promoted;class='||o.failure_class)) THEN
     RETURN 'recovery_required';
+  END IF;
+  IF o.state='completed' AND o.fencing_token=p_fence AND EXISTS(SELECT 1
+      FROM public.kb_vault_rewrap_worm w WHERE w.operation_id=p_op AND
+        w.event_kind='completed' AND w.state='completed' AND w.fencing_token=p_fence AND
+        w.receipt_digest=o.receipt_digest AND w.inventory_digest=o.inventory_digest AND
+        w.stage_digest=o.stage_digest) THEN
+    RETURN 'completed';
   END IF;
   IF o.state='promoted' THEN
     IF o.fencing_token=p_fence THEN RETURN 'promoted'; END IF;
@@ -4056,6 +4124,47 @@ BEGIN
   RETURN 'promoted';
 END; $$;
 
+CREATE OR REPLACE FUNCTION org_vault_rewrap_complete(p_op TEXT,p_fence BIGINT,
+  p_receipt_digest BYTEA,p_inventory_digest BYTEA,p_stage_digest BYTEA) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; c public.kb_vault_control%ROWTYPE;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_receipt_digest IS NULL OR octet_length(p_receipt_digest)<>32 OR
+     p_inventory_digest IS NULL OR octet_length(p_inventory_digest)<>32 OR
+     p_stage_digest IS NULL OR octet_length(p_stage_digest)<>32 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.state='completed' THEN
+    IF o.fencing_token=p_fence AND o.receipt_digest=p_receipt_digest AND
+       o.inventory_digest=p_inventory_digest AND o.stage_digest=p_stage_digest THEN
+      PERFORM public.org_vault_rewrap_worm_append(p_op,'completed','completed','');
+      RETURN 'completed';
+    END IF;
+    RAISE EXCEPTION 'org_vault_rewrap_complete: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  IF o.state<>'promoted' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: state conflict' USING ERRCODE='40001';
+  END IF;
+  IF o.fencing_token<>p_fence OR o.receipt_digest<>p_receipt_digest OR
+     o.inventory_digest<>p_inventory_digest OR o.stage_digest<>p_stage_digest THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: fence/digest mismatch' USING ERRCODE='40001';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,false);
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1;
+  IF c.fencing_token=9223372036854775807 THEN
+    RAISE EXCEPTION 'org_vault_rewrap_complete: fence exhausted' USING ERRCODE='22003';
+  END IF;
+  UPDATE public.kb_vault_rewrap_operation SET state='completed',updated_at=public.pg_now_text()
+    WHERE operation_id=p_op;
+  PERFORM public.org_vault_rewrap_worm_append(p_op,'completed','completed','');
+  UPDATE public.kb_vault_control SET maintenance_kind='',maintenance_id='',
+    fencing_token=fencing_token+1,updated_at=public.pg_now_text() WHERE singleton=1;
+  RETURN 'completed';
+END; $$;
+
 CREATE OR REPLACE FUNCTION org_vault_rewrap_abort(p_op TEXT,p_fence BIGINT,p_failure TEXT)
 RETURNS TEXT LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public,pg_temp AS $$
@@ -4104,10 +4213,17 @@ BEGIN
   PERFORM public.org_vault_control_lock_exclusive();
   SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
   IF o.state='recovery_required' THEN
-    IF o.fencing_token=p_fence AND o.failure_class=p_failure THEN RETURN 'recovery_required'; END IF;
+    IF o.fencing_token=p_fence AND o.failure_class=p_failure AND
+       o.failure_from_state IN ('preparing','custody_prepared','wraps_staged',
+         'reseal_committing','resealed','promoted') THEN
+      PERFORM public.org_vault_rewrap_worm_append(p_op,'recovery_required','recovery_required',
+        'from_state='||o.failure_from_state||';class='||p_failure);
+      RETURN 'recovery_required';
+    END IF;
     RAISE EXCEPTION 'org_vault_rewrap_recovery_required: replay mismatch' USING ERRCODE='23505';
   END IF;
-  IF o.state NOT IN ('reseal_committing','resealed','promoted') THEN
+  IF o.state NOT IN ('preparing','custody_prepared','wraps_staged','reseal_committing',
+                     'resealed','promoted') THEN
     RAISE EXCEPTION 'org_vault_rewrap_recovery_required: state conflict' USING ERRCODE='40001';
   END IF;
   IF o.fencing_token<>p_fence THEN
@@ -4119,7 +4235,7 @@ BEGIN
     RAISE EXCEPTION 'org_vault_rewrap_recovery_required: fence exhausted' USING ERRCODE='22003';
   END IF;
   UPDATE public.kb_vault_rewrap_operation SET state='recovery_required',failure_class=p_failure,
-    updated_at=public.pg_now_text() WHERE operation_id=p_op;
+    failure_from_state=o.state,updated_at=public.pg_now_text() WHERE operation_id=p_op;
   PERFORM public.org_vault_rewrap_worm_append(p_op,'recovery_required','recovery_required',
     'from_state='||o.state||';class='||p_failure);
   UPDATE public.kb_vault_control SET fencing_token=fencing_token+1,
@@ -4148,6 +4264,7 @@ REVOKE ALL ON FUNCTION org_vault_rewrap_stage_finish(TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_mark_committing(TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_promote(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_abort(TEXT,BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT) FROM PUBLIC;
 DO $$
@@ -4171,6 +4288,7 @@ BEGIN
       public.org_vault_rewrap_mark_committing(TEXT,BIGINT),
       public.org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
       public.org_vault_rewrap_promote(TEXT,BIGINT),
+      public.org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA),
       public.org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
       public.org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
       FROM aimee_kb_runtime;

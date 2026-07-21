@@ -72,6 +72,16 @@ static void test_stub_prepared_reseal_refused(void)
    const uint8_t zero[sizeof(receipt)] = {0};
    assert(memcmp(&receipt, zero, sizeof(receipt)) == 0);
    vault_tpm2_reseal_status_t status = VAULT_TPM2_RESEAL_CORRUPT;
+   memset(&receipt, 0x5a, sizeof(receipt));
+   assert(vault_custody_tpm2_reseal_discover(op, 1, "secret", &receipt, &status) ==
+          VAULT_TPM2_RESEAL_NOT_BUILT);
+   assert(memcmp(&receipt, zero, sizeof(receipt)) == 0);
+   assert(status == VAULT_TPM2_RESEAL_ABSENT);
+   memset(kek, 0x5a, sizeof(kek));
+   assert(vault_custody_tpm2_reseal_recover_kek(&receipt, "secret", kek) ==
+          VAULT_TPM2_RESEAL_NOT_BUILT);
+   const uint8_t zero_kek[sizeof(kek)] = {0};
+   assert(memcmp(kek, zero_kek, sizeof(kek)) == 0);
    assert(vault_custody_tpm2_reseal_status(&receipt, "secret", &status) ==
           VAULT_TPM2_RESEAL_NOT_BUILT);
    assert(status == VAULT_TPM2_RESEAL_ABSENT);

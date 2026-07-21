@@ -164,6 +164,7 @@ if [ "$state" = resealed ]; then
     echo 'P7 rewrap concurrency FAIL: disconnected promotion partially committed' >&2
     exit 1
   fi
+  sql -c "BEGIN ISOLATION LEVEL SERIALIZABLE; SELECT org_vault_rewrap_promote('$promote_op',$promote_fence); COMMIT" >/dev/null
 elif [ "$state" = promoted ]; then
   if [ "$matched_secrets" -ne "$total_secrets" ] || [ "$matched_checks" -ne "$total_checks" ]; then
     echo 'P7 rewrap concurrency FAIL: promoted outcome is incomplete' >&2
@@ -176,8 +177,47 @@ else
   exit 1
 fi
 
-# Test-only teardown: terminalize the operation and restore a clean singleton for
-# the following independent state-machine gate.  Production has no clear API here.
-sql -c "SELECT org_vault_rewrap_recovery_required('$promote_op',$promote_fence,'disconnect_test'); UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',updated_at=pg_now_text() WHERE singleton=1" >/dev/null
+# Completion and quarantine contend on the same exclusive gate and consumed
+# operation fence.  Exactly one terminal checkpoint and one fence advance commit.
+race_fence_before=$(sql -c 'SELECT fencing_token FROM kb_vault_control WHERE singleton=1')
+PGAPPNAME=p7_complete_racer psql -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -Atq "$db" >"$tmp/complete-racer.out" 2>&1 \
+  -c "SELECT org_vault_rewrap_complete('$promote_op',$promote_fence,(SELECT receipt_digest FROM kb_vault_rewrap_operation WHERE operation_id='$promote_op'),(SELECT inventory_digest FROM kb_vault_rewrap_operation WHERE operation_id='$promote_op'),(SELECT stage_digest FROM kb_vault_rewrap_operation WHERE operation_id='$promote_op'))" &
+complete_pid=$!
+PGAPPNAME=p7_recovery_racer psql -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -Atq "$db" >"$tmp/recovery-racer.out" 2>&1 \
+  -c "SELECT org_vault_rewrap_recovery_required('$promote_op',$promote_fence,'race_quarantine')" &
+recovery_pid=$!
+set +e
+wait "$complete_pid"; complete_rc=$?
+wait "$recovery_pid"; recovery_rc=$?
+set -e
+terminal_state=$(sql -c "SELECT state FROM kb_vault_rewrap_operation WHERE operation_id='$promote_op'")
+terminal_events=$(sql -c "SELECT count(*) FROM kb_vault_rewrap_worm WHERE operation_id='$promote_op' AND event_kind IN ('completed','recovery_required')")
+race_fence_after=$(sql -c 'SELECT fencing_token FROM kb_vault_control WHERE singleton=1')
+if [ $(( (complete_rc == 0) + (recovery_rc == 0) )) -ne 1 ] ||
+   [ "$terminal_events" -ne 1 ] || [ "$race_fence_after" -ne $((race_fence_before + 1)) ]; then
+  echo "P7 rewrap concurrency FAIL: terminal race mismatch (complete=$complete_rc recovery=$recovery_rc state=$terminal_state events=$terminal_events)" >&2
+  exit 1
+fi
+if [ "$terminal_state" = completed ]; then
+  if [ "$complete_rc" -ne 0 ] ||
+     [ "$(sql -c "SELECT count(*) FROM kb_vault_control WHERE singleton=1 AND sealed AND maintenance_kind='' AND maintenance_id=''")" -ne 1 ] ||
+     ! grep -q '40001' "$tmp/recovery-racer.out"; then
+    echo 'P7 rewrap concurrency FAIL: completed winner/barrier/loser mismatch' >&2
+    exit 1
+  fi
+elif [ "$terminal_state" = recovery_required ]; then
+  if [ "$recovery_rc" -ne 0 ] ||
+     [ "$(sql -c "SELECT count(*) FROM kb_vault_control WHERE singleton=1 AND sealed AND maintenance_kind='tpm2-reseal' AND maintenance_id='$promote_op'")" -ne 1 ] ||
+     ! grep -q '40001' "$tmp/complete-racer.out"; then
+    echo 'P7 rewrap concurrency FAIL: quarantine winner/barrier/loser mismatch' >&2
+    exit 1
+  fi
+else
+  echo "P7 rewrap concurrency FAIL: invalid terminal race state=$terminal_state" >&2
+  exit 1
+fi
 
-echo '== P7-reseal-c concurrency/failure gate: PASSED =='
+# Test-only owner reset. Production exposes no terminal-clear operation in D1.
+sql -c "UPDATE kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',updated_at=pg_now_text() WHERE singleton=1" >/dev/null
+
+echo '== P7-reseal-d1 concurrency/failure gate: PASSED =='

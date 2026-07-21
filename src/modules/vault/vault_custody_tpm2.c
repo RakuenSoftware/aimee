@@ -788,29 +788,58 @@ static int blob_read(const char *path, int *out_version, uint64_t *out_gen, TPM2
    return 0;
 }
 
-static int blob_bytes_validate(tpm2_ctx_t *ctx, const uint8_t *buf, size_t len,
-                               uint64_t expected_generation)
+/* Unmarshal one in-memory v2 blob. Prepared recovery uses this directly on the
+ * capsule embedded in the canonical bundle: it must never publish the capsule
+ * at the active-blob path merely to reuse blob_read(). */
+static int blob_bytes_unmarshal_v2(const uint8_t *buf, size_t len, uint64_t *out_gen,
+                                   TPM2B_PUBLIC *pub, TPM2B_PRIVATE *priv)
 {
-   if (!ctx || !buf || len < TPM2_BLOB_HDR_LEN_V2 || len > TPM2_BLOB_MAX ||
-       memcmp(buf, TPM2_BLOB_MAGIC_V2, 8) != 0 || get_be64(buf + 8) != expected_generation)
+   if (out_gen)
+      *out_gen = 0;
+   if (pub)
+      memset(pub, 0, sizeof(*pub));
+   if (priv)
+      memset(priv, 0, sizeof(*priv));
+   if (!buf || !out_gen || !pub || !priv || len < TPM2_BLOB_HDR_LEN_V2 || len > TPM2_BLOB_MAX ||
+       memcmp(buf, TPM2_BLOB_MAGIC_V2, 8) != 0)
       return -1;
    uint32_t pub_len = get_be32(buf + 16), priv_len = get_be32(buf + 20);
    if ((uint64_t)TPM2_BLOB_HDR_LEN_V2 + pub_len + priv_len != len)
       return -1;
-   TPM2B_PUBLIC pub;
-   TPM2B_PRIVATE priv;
    size_t off = 0;
-   memset(&pub, 0, sizeof(pub));
-   memset(&priv, 0, sizeof(priv));
-   if (Tss2_MU_TPM2B_PUBLIC_Unmarshal(buf + TPM2_BLOB_HDR_LEN_V2, pub_len, &off, &pub) !=
+   if (Tss2_MU_TPM2B_PUBLIC_Unmarshal(buf + TPM2_BLOB_HDR_LEN_V2, pub_len, &off, pub) !=
            TSS2_RC_SUCCESS ||
        off != pub_len)
-      return -1;
+      goto fail;
    off = 0;
    if (Tss2_MU_TPM2B_PRIVATE_Unmarshal(buf + TPM2_BLOB_HDR_LEN_V2 + pub_len, priv_len, &off,
-                                       &priv) != TSS2_RC_SUCCESS ||
+                                       priv) != TSS2_RC_SUCCESS ||
        off != priv_len)
+      goto fail;
+   *out_gen = get_be64(buf + 8);
+   return 0;
+fail:
+   OPENSSL_cleanse(pub, sizeof(*pub));
+   OPENSSL_cleanse(priv, sizeof(*priv));
+   return -1;
+}
+
+static int blob_bytes_validate(tpm2_ctx_t *ctx, const uint8_t *buf, size_t len,
+                               uint64_t expected_generation)
+{
+   if (!ctx)
       return -1;
+   TPM2B_PUBLIC pub;
+   TPM2B_PRIVATE priv;
+   uint64_t generation = 0;
+   if (blob_bytes_unmarshal_v2(buf, len, &generation, &pub, &priv) != 0)
+      return -1;
+   if (generation != expected_generation)
+   {
+      OPENSSL_cleanse(&priv, sizeof(priv));
+      OPENSSL_cleanse(&pub, sizeof(pub));
+      return -1;
+   }
    TPM2B_DIGEST policy;
    memset(&policy, 0, sizeof(policy));
    int rc = compute_seal_policy(ctx, expected_generation, &policy);
@@ -824,6 +853,7 @@ static int blob_bytes_validate(tpm2_ctx_t *ctx, const uint8_t *buf, size_t len,
        pub.publicArea.parameters.keyedHashDetail.scheme.scheme != TPM2_ALG_NULL)
       rc = -1;
    OPENSSL_cleanse(&priv, sizeof(priv));
+   OPENSSL_cleanse(&pub, sizeof(pub));
    OPENSSL_cleanse(&policy, sizeof(policy));
    return rc;
 }
@@ -894,58 +924,31 @@ static int tpm2_is_sealed(void *vctx)
    return s;
 }
 
-/* Unseal (P7-tpm2b, TPM-ENFORCED anti-rollback). Load the v2 blob under the verified
- * primary, then unseal it over a POLICY session whose policyDigest must match the
- * object's authPolicy = PolicyNV(NV == the blob's bound generation) THEN
- * PolicyAuthValue(the operator secret). A stale blob (bound to an old generation after
- * a reseal bumped the NV counter) fails at the PolicyNV step INSIDE THE TPM — the TPM
- * itself refuses to unseal, not our software. The session is salted (to the primary)
- * + response-ENCRYPTED so the recovered KEK is transport-encrypted TPM->caller. A v1
- * (tpm2a, generation-less) blob is REFUSED (no PolicyNV binding). A post-unseal
- * software gen==NV check is cheap defence-in-depth. Any failure -> stays sealed, -1.
- * Flushes the sealed object + session on EVERY path (incl. error). */
-static int tpm2_unseal(void *vctx, const void *params, size_t len)
+/* Unseal one already-parsed PolicyNV-bound object while ctx->mu is held. The
+ * plaintext is published only after the TPM policy and the embedded/live
+ * generation checks all pass. This primitive deliberately does not touch the
+ * provider cache or sealed flag, so prepared-capsule recovery can remain sealed. */
+static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVATE *priv,
+                                uint64_t bound_gen, const void *params, size_t len,
+                                uint8_t out_kek[VAULT_KEK_LEN])
 {
-   tpm2_ctx_t *ctx = vctx;
-   if (!ctx || (!params && len))
+   if (out_kek)
+      OPENSSL_cleanse(out_kek, VAULT_KEK_LEN);
+   if (!ctx || !pub || !priv || !out_kek || (!params && len))
       return -1;
-
-   pthread_mutex_lock(&ctx->mu);
-   /* Atomic + fail-closed: drop any previously-materialized KEK and mark sealed
-    * UP-FRONT, so this unseal either fully succeeds (sets the new KEK below) or
-    * leaves the provider SEALED — a failed (stale-gen / wrong-secret) unseal can
-    * never leave a stale KEK reachable via get_kek. */
-   OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek));
-   ctx->kek_ready = 0;
-   ctx->sealed = 1;
    int rc = -1;
-   int version = 0;
-   uint64_t bound_gen = 0;
    ESYS_TR sealed = ESYS_TR_NONE;
    ESYS_TR session = ESYS_TR_NONE;
    TPM2B_SENSITIVE_DATA *out_data = NULL;
-   TPM2B_PUBLIC pub;
-   TPM2B_PRIVATE priv;
    TPM2B_AUTH auth;
    memset(&auth, 0, sizeof(auth));
-   memset(&pub, 0, sizeof(pub));
-   memset(&priv, 0, sizeof(priv));
-
-   if (ensure_ready(ctx) != 0)
-      goto out;
-   if (ensure_primary(ctx, 0) != 0) /* NO create on the unseal path */
-      goto out;
-   if (blob_read(ctx->blob_path, &version, &bound_gen, &pub, &priv) != 0)
-      goto out;
-   if (version != 2) /* v1 (tpm2a) -> tpm2b requires a re-provision to v2 (PolicyNV) */
-      goto out;
    /* Resolve the NV counter (must already exist) + set its secret-derived auth so the
     * policy-session PolicyNV can read it. NO create on the unseal path. */
    if (nv_ensure(ctx, params, len, 0) != 0)
       goto out;
 
    TSS2_RC trc = Esys_Load(ctx->esys, ctx->primary, ESYS_TR_PASSWORD, ESYS_TR_NONE, ESYS_TR_NONE,
-                           &priv, &pub, &sealed);
+                           priv, pub, &sealed);
    if (trc != TSS2_RC_SUCCESS)
       goto out;
 
@@ -1006,9 +1009,7 @@ static int tpm2_unseal(void *vctx, const void *params, size_t len)
          goto out;
    }
 
-   memcpy(ctx->kek, out_data->buffer, VAULT_KEK_LEN);
-   ctx->kek_ready = 1;
-   ctx->sealed = 0;
+   memcpy(out_kek, out_data->buffer, VAULT_KEK_LEN);
    rc = 0;
 
 out:
@@ -1018,11 +1019,56 @@ out:
       Esys_Free(out_data);
    }
    OPENSSL_cleanse(&auth, sizeof(auth));
-   OPENSSL_cleanse(&priv, sizeof(priv));
    if (session != ESYS_TR_NONE)
       Esys_FlushContext(ctx->esys, session);
    if (sealed != ESYS_TR_NONE)
       Esys_FlushContext(ctx->esys, sealed);
+   if (rc != 0)
+      OPENSSL_cleanse(out_kek, VAULT_KEK_LEN);
+   return rc;
+}
+
+/* Unseal (P7-tpm2b, TPM-ENFORCED anti-rollback). Load the v2 blob under the verified
+ * primary, then unseal it over a POLICY session whose policyDigest must match the
+ * object's authPolicy = PolicyNV(NV == the blob's bound generation) THEN
+ * PolicyAuthValue(the operator secret). A stale blob (bound to an old generation after
+ * a reseal bumped the NV counter) fails at the PolicyNV step INSIDE THE TPM — the TPM
+ * itself refuses to unseal, not our software. The session is salted (to the primary)
+ * + response-ENCRYPTED so the recovered KEK is transport-encrypted TPM->caller. A v1
+ * (tpm2a, generation-less) blob is REFUSED (no PolicyNV binding). A post-unseal
+ * software gen==NV check is cheap defence-in-depth. Any failure -> stays sealed, -1. */
+static int tpm2_unseal(void *vctx, const void *params, size_t len)
+{
+   tpm2_ctx_t *ctx = vctx;
+   if (!ctx || (!params && len))
+      return -1;
+
+   pthread_mutex_lock(&ctx->mu);
+   OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek));
+   ctx->kek_ready = 0;
+   ctx->sealed = 1;
+   int rc = -1;
+   int version = 0;
+   uint64_t bound_gen = 0;
+   TPM2B_PUBLIC pub;
+   TPM2B_PRIVATE priv;
+   uint8_t recovered[VAULT_KEK_LEN];
+   memset(&pub, 0, sizeof(pub));
+   memset(&priv, 0, sizeof(priv));
+   memset(recovered, 0, sizeof(recovered));
+
+   if (ensure_ready(ctx) != 0 || ensure_primary(ctx, 0) != 0 ||
+       blob_read(ctx->blob_path, &version, &bound_gen, &pub, &priv) != 0 || version != 2 ||
+       unseal_loaded_locked(ctx, &pub, &priv, bound_gen, params, len, recovered) != 0)
+      goto out;
+   memcpy(ctx->kek, recovered, sizeof(ctx->kek));
+   ctx->kek_ready = 1;
+   ctx->sealed = 0;
+   rc = 0;
+out:
+   OPENSSL_cleanse(recovered, sizeof(recovered));
+   OPENSSL_cleanse(&priv, sizeof(priv));
+   OPENSSL_cleanse(&pub, sizeof(pub));
    pthread_mutex_unlock(&ctx->mu);
    return rc;
 }
@@ -1502,6 +1548,123 @@ out:
    return rc;
 }
 
+int vault_custody_tpm2_reseal_discover(const uint8_t operation_id[16],
+                                       uint64_t expected_old_generation, const char *secret,
+                                       vault_tpm2_reseal_receipt_t *receipt,
+                                       vault_tpm2_reseal_status_t *status)
+{
+   if (receipt)
+      OPENSSL_cleanse(receipt, sizeof(*receipt));
+   if (status)
+      *status = VAULT_TPM2_RESEAL_CORRUPT;
+   if (!operation_id || !secret || !receipt || !status || expected_old_generation == UINT64_MAX)
+      return VAULT_TPM2_RESEAL_ERR;
+
+   pthread_mutex_lock(&g_ctx.mu);
+   int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
+   reseal_bundle_t b;
+   memset(&b, 0, sizeof(b));
+   reseal_mark_sealed();
+   if (ensure_ready(&g_ctx) != 0 || ensure_primary(&g_ctx, 0) != 0)
+      goto out;
+   if ((lockfd = reseal_lock()) < 0)
+   {
+      rc = VAULT_TPM2_RESEAL_BUSY;
+      goto out;
+   }
+   rc = reseal_status_locked(NULL, secret, status, &b);
+   if (rc != VAULT_TPM2_RESEAL_OK)
+      goto out;
+   if (*status == VAULT_TPM2_RESEAL_ABSENT)
+      goto out;
+   if ((*status != VAULT_TPM2_RESEAL_PREPARED && *status != VAULT_TPM2_RESEAL_NV_ADVANCED &&
+        *status != VAULT_TPM2_RESEAL_INSTALLED) ||
+       b.receipt.old_generation != expected_old_generation ||
+       b.receipt.new_generation != expected_old_generation + 1 ||
+       CRYPTO_memcmp(b.receipt.operation_id, operation_id, sizeof(b.receipt.operation_id)) != 0)
+   {
+      *status = VAULT_TPM2_RESEAL_CONFLICT;
+      rc = VAULT_TPM2_RESEAL_INTEGRITY;
+      goto out;
+   }
+   *receipt = b.receipt;
+out:
+   if (rc != VAULT_TPM2_RESEAL_OK || *status == VAULT_TPM2_RESEAL_ABSENT)
+      OPENSSL_cleanse(receipt, sizeof(*receipt));
+   OPENSSL_cleanse(&b, sizeof(b));
+   reseal_mark_sealed();
+   reseal_unlock(lockfd);
+   pthread_mutex_unlock(&g_ctx.mu);
+   return rc;
+}
+
+int vault_custody_tpm2_reseal_recover_kek(const vault_tpm2_reseal_receipt_t *receipt,
+                                          const char *secret, uint8_t new_kek[VAULT_KEK_LEN])
+{
+   if (new_kek)
+      OPENSSL_cleanse(new_kek, VAULT_KEK_LEN);
+   if (!receipt || !secret || !new_kek)
+      return VAULT_TPM2_RESEAL_ERR;
+
+   pthread_mutex_lock(&g_ctx.mu);
+   int rc = VAULT_TPM2_RESEAL_ERR, lockfd = -1;
+   reseal_bundle_t b;
+   vault_tpm2_reseal_status_t status = VAULT_TPM2_RESEAL_CORRUPT;
+   TPM2B_PUBLIC pub;
+   TPM2B_PRIVATE priv;
+   uint64_t capsule_generation = 0;
+   uint8_t recovered[VAULT_KEK_LEN], digest[32];
+   memset(&b, 0, sizeof(b));
+   memset(&pub, 0, sizeof(pub));
+   memset(&priv, 0, sizeof(priv));
+   memset(recovered, 0, sizeof(recovered));
+   memset(digest, 0, sizeof(digest));
+   reseal_mark_sealed();
+   if (ensure_ready(&g_ctx) != 0 || ensure_primary(&g_ctx, 0) != 0)
+      goto out;
+   if ((lockfd = reseal_lock()) < 0)
+   {
+      rc = VAULT_TPM2_RESEAL_BUSY;
+      goto out;
+   }
+   rc = reseal_status_locked(receipt, secret, &status, &b);
+   if (rc != VAULT_TPM2_RESEAL_OK)
+      goto out;
+   if (status != VAULT_TPM2_RESEAL_PREPARED)
+   {
+      rc = VAULT_TPM2_RESEAL_INTEGRITY;
+      goto out;
+   }
+   if (blob_bytes_unmarshal_v2(b.capsule, b.capsule_len, &capsule_generation, &pub, &priv) != 0 ||
+       capsule_generation != receipt->old_generation ||
+       unseal_loaded_locked(&g_ctx, &pub, &priv, capsule_generation, secret, strlen(secret),
+                            recovered) != 0)
+   {
+      rc = VAULT_TPM2_RESEAL_INTEGRITY;
+      goto out;
+   }
+   SHA256(recovered, sizeof(recovered), digest);
+   if (CRYPTO_memcmp(digest, receipt->new_kek_digest, sizeof(digest)) != 0)
+   {
+      rc = VAULT_TPM2_RESEAL_INTEGRITY;
+      goto out;
+   }
+   memcpy(new_kek, recovered, VAULT_KEK_LEN);
+   rc = VAULT_TPM2_RESEAL_OK;
+out:
+   if (rc != VAULT_TPM2_RESEAL_OK)
+      OPENSSL_cleanse(new_kek, VAULT_KEK_LEN);
+   OPENSSL_cleanse(digest, sizeof(digest));
+   OPENSSL_cleanse(recovered, sizeof(recovered));
+   OPENSSL_cleanse(&priv, sizeof(priv));
+   OPENSSL_cleanse(&pub, sizeof(pub));
+   OPENSSL_cleanse(&b, sizeof(b));
+   reseal_mark_sealed();
+   reseal_unlock(lockfd);
+   pthread_mutex_unlock(&g_ctx.mu);
+   return rc;
+}
+
 int vault_custody_tpm2_reseal_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
                                      vault_tpm2_reseal_status_t *out)
 {
@@ -1842,6 +2005,31 @@ int vault_custody_tpm2_reseal_prepare(const uint8_t operation_id[16],
    (void)secret;
    if (out)
       memset(out, 0, sizeof(*out));
+   return VAULT_TPM2_RESEAL_NOT_BUILT;
+}
+
+int vault_custody_tpm2_reseal_discover(const uint8_t operation_id[16],
+                                       uint64_t expected_old_generation, const char *secret,
+                                       vault_tpm2_reseal_receipt_t *receipt,
+                                       vault_tpm2_reseal_status_t *status)
+{
+   (void)operation_id;
+   (void)expected_old_generation;
+   (void)secret;
+   if (receipt)
+      memset(receipt, 0, sizeof(*receipt));
+   if (status)
+      *status = VAULT_TPM2_RESEAL_ABSENT;
+   return VAULT_TPM2_RESEAL_NOT_BUILT;
+}
+
+int vault_custody_tpm2_reseal_recover_kek(const vault_tpm2_reseal_receipt_t *receipt,
+                                          const char *secret, uint8_t new_kek[VAULT_KEK_LEN])
+{
+   (void)receipt;
+   (void)secret;
+   if (new_kek)
+      memset(new_kek, 0, VAULT_KEK_LEN);
    return VAULT_TPM2_RESEAL_NOT_BUILT;
 }
 

@@ -19,6 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 #include <unistd.h>
 
 /* Fixed, non-secret HKDF salt for the server KEK. Distinct from the random
@@ -181,7 +184,7 @@ static int file_get_kek(void *ctx, uint8_t kek[VAULT_KEK_LEN])
    return rc;
 }
 
-void vault_server_key_reset_for_test(void)
+static void file_kek_clear(void)
 {
    pthread_mutex_lock(&g_kek_mu);
    OPENSSL_cleanse(g_kek, sizeof(g_kek));
@@ -453,17 +456,166 @@ static const vault_custody_provider_t *g_custody = &file_custody;
 static pthread_mutex_t g_hwm_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_rwlock_t g_use_lock = PTHREAD_RWLOCK_INITIALIZER;
 static uint64_t g_use_epoch = 1;
+static uint64_t g_primary_seal_epoch;
+static int g_primary_epoch_initialized;
+
+typedef struct
+{
+   vault_maintenance_guard_t *token;
+   pthread_t owner;
+   int prior_cancel_state;
+   uint8_t *arena;
+   size_t arena_len;
+} maintenance_registry_t;
+
+static pthread_mutex_t g_maintenance_mu = PTHREAD_MUTEX_INITIALIZER;
+static maintenance_registry_t g_maintenance;
+static uintptr_t g_next_guard_token = 1;
+static _Thread_local vault_maintenance_guard_t *g_owned_guard;
+static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
+static int g_atfork_status = -1;
+
+static int custody_is_sealed_unlocked(void)
+{
+   return g_custody->is_sealed ? g_custody->is_sealed(g_custody->ctx) : 0;
+}
+
+static int custody_get_kek_unlocked(uint8_t kek[VAULT_KEK_LEN])
+{
+   return g_custody->get_kek ? g_custody->get_kek(g_custody->ctx, kek) : -1;
+}
+
+static int custody_unseal_unlocked(const void *params, size_t len)
+{
+   return g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
+}
+
+/* Always clear local key material and epoch synchronization, even when the
+ * provider reports a seal failure. Caller holds g_use_lock exclusively. */
+static int custody_seal_failclosed_unlocked(void)
+{
+   int epoch_ok = g_use_epoch != UINT64_MAX;
+   if (epoch_ok)
+      g_use_epoch++;
+   g_primary_seal_epoch = 0;
+   g_primary_epoch_initialized = 0;
+   vault_kek_cache_clear();
+   file_kek_clear();
+   int rc = g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
+   return rc == 0 && epoch_ok ? 0 : -1;
+}
+
+static void maintenance_child_atfork(void)
+{
+   if (g_maintenance.arena && g_maintenance.arena_len)
+   {
+      OPENSSL_cleanse(g_maintenance.arena, g_maintenance.arena_len);
+#if defined(__linux__)
+      (void)munmap(g_maintenance.arena, g_maintenance.arena_len);
+#endif
+   }
+   memset(&g_maintenance, 0, sizeof(g_maintenance));
+   g_owned_guard = NULL;
+   g_primary_seal_epoch = 0;
+   g_primary_epoch_initialized = 0;
+   if (g_use_epoch != UINT64_MAX)
+      g_use_epoch++;
+   OPENSSL_cleanse(g_kek, sizeof(g_kek));
+   g_kek_ready = 0;
+   g_custody = &file_custody;
+   g_use_lock = (pthread_rwlock_t)PTHREAD_RWLOCK_INITIALIZER;
+   g_maintenance_mu = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+   g_hwm_mu = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+   g_kek_mu = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+}
+
+static void register_atfork_once(void)
+{
+   g_atfork_status = pthread_atfork(NULL, NULL, maintenance_child_atfork);
+}
+
+static int ensure_atfork(void)
+{
+   return pthread_once(&g_atfork_once, register_atfork_once) == 0 && g_atfork_status == 0 ? 0 : -1;
+}
+
+static int maintenance_arena_new(uint8_t **arena, size_t *mapped)
+{
+#if defined(__linux__) && defined(MADV_DONTDUMP)
+   long page = sysconf(_SC_PAGESIZE);
+   if (page <= 0)
+      return -1;
+   size_t n = ((size_t)VAULT_KEK_LEN + (size_t)page - 1) & ~((size_t)page - 1);
+   void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+   if (p == MAP_FAILED)
+      return -1;
+   if (mlock(p, n) != 0 || madvise(p, n, MADV_DONTDUMP) != 0)
+   {
+      OPENSSL_cleanse(p, n);
+      (void)munlock(p, n);
+      (void)munmap(p, n);
+      return -1;
+   }
+   *arena = p;
+   *mapped = n;
+   return 0;
+#else
+   (void)arena;
+   (void)mapped;
+   return -1;
+#endif
+}
+
+static void maintenance_arena_free(uint8_t *arena, size_t mapped)
+{
+   if (!arena)
+      return;
+   OPENSSL_cleanse(arena, mapped);
+#if defined(__linux__)
+   (void)munlock(arena, mapped);
+   (void)munmap(arena, mapped);
+#else
+   (void)mapped;
+#endif
+}
+
+/* Validate identity before dereferencing any caller-controlled handle. */
+static int maintenance_validate(vault_maintenance_guard_t *guard)
+{
+   int rc = VAULT_MAINTENANCE_INVALID;
+   pthread_mutex_lock(&g_maintenance_mu);
+   if (guard && guard == g_maintenance.token)
+      rc = pthread_equal(pthread_self(), g_maintenance.owner) ? VAULT_MAINTENANCE_OK
+                                                              : VAULT_MAINTENANCE_WRONG_OWNER;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   return rc;
+}
 
 /* Rebind the active custody provider (P7 profile composition / tests). NULL
  * restores the built-in file provider. See vault_internal.h. */
 void vault_custody_set_provider(const vault_custody_provider_t *provider)
 {
+   (void)ensure_atfork();
    pthread_rwlock_wrlock(&g_use_lock);
    pthread_mutex_lock(&g_hwm_mu);
    g_custody = provider ? provider : &file_custody;
    pthread_mutex_unlock(&g_hwm_mu);
    if (g_use_epoch != UINT64_MAX)
       g_use_epoch++;
+   g_primary_seal_epoch = 0;
+   g_primary_epoch_initialized = 0;
+   pthread_rwlock_unlock(&g_use_lock);
+}
+
+void vault_server_key_reset_for_test(void)
+{
+   (void)ensure_atfork();
+   pthread_rwlock_wrlock(&g_use_lock);
+   file_kek_clear();
+   if (g_use_epoch != UINT64_MAX)
+      g_use_epoch++;
+   g_primary_seal_epoch = 0;
+   g_primary_epoch_initialized = 0;
    pthread_rwlock_unlock(&g_use_lock);
 }
 
@@ -485,44 +637,54 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
  * (file custody) never seals and vault_is_sealed() is always 0 for it. */
 int vault_is_sealed(void)
 {
-   return g_custody->is_sealed ? g_custody->is_sealed(g_custody->ctx) : 0;
+   return custody_is_sealed_unlocked();
 }
 
 int vault_unseal(const void *params, size_t len)
 {
+   if (ensure_atfork() != 0)
+      return -1;
    pthread_rwlock_wrlock(&g_use_lock);
-   int rc = g_custody->unseal ? g_custody->unseal(g_custody->ctx, params, len) : 0;
+   int rc = custody_unseal_unlocked(params, len);
    pthread_rwlock_unlock(&g_use_lock);
    return rc;
 }
 
 int vault_seal(void)
 {
+   if (ensure_atfork() != 0)
+      return -1;
    pthread_rwlock_wrlock(&g_use_lock);
-   if (g_use_epoch != UINT64_MAX)
-      g_use_epoch++;
-   /* Flush the process-wide KEK cache FIRST so no cached KEK can survive the seal,
-    * even if the provider has no seal slot (P7 §3 "sealing flushes the KEK cache"). */
-   vault_kek_cache_clear();
-   int rc = g_custody->seal ? g_custody->seal(g_custody->ctx) : 0;
+   int rc = custody_seal_failclosed_unlocked();
    pthread_rwlock_unlock(&g_use_lock);
    return rc;
 }
 
 uint64_t vault_use_epoch_snapshot(void)
 {
+   if (ensure_atfork() != 0)
+      return 0;
    pthread_rwlock_rdlock(&g_use_lock);
    uint64_t epoch = g_use_epoch;
    pthread_rwlock_unlock(&g_use_lock);
    return epoch;
 }
 
-int vault_use_begin(uint64_t expected_epoch, uint8_t kek[VAULT_KEK_LEN])
+int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
+                    uint8_t kek[VAULT_KEK_LEN])
 {
-   if (!expected_epoch || expected_epoch == UINT64_MAX || !kek ||
+   if (!kek)
+      return -1;
+   /* Every rejection path leaves caller-owned key storage clean, including
+    * malformed epochs rejected before custody is consulted. */
+   OPENSSL_cleanse(kek, VAULT_KEK_LEN);
+   if (ensure_atfork() != 0 || !expected_epoch || expected_epoch == UINT64_MAX ||
+       !admitted_primary_epoch || admitted_primary_epoch > INT64_MAX ||
        pthread_rwlock_rdlock(&g_use_lock) != 0)
       return -1;
-   if (g_use_epoch != expected_epoch || vault_is_sealed() || vault_server_kek(kek) != 0)
+   if (g_use_epoch != expected_epoch || !g_primary_epoch_initialized ||
+       g_primary_seal_epoch != admitted_primary_epoch || custody_is_sealed_unlocked() ||
+       custody_get_kek_unlocked(kek) != 0)
    {
       OPENSSL_cleanse(kek, VAULT_KEK_LEN);
       pthread_rwlock_unlock(&g_use_lock);
@@ -534,6 +696,161 @@ int vault_use_begin(uint64_t expected_epoch, uint8_t kek[VAULT_KEK_LEN])
 void vault_use_end(void)
 {
    pthread_rwlock_unlock(&g_use_lock);
+}
+
+int vault_primary_epoch_initialize(uint64_t primary_epoch)
+{
+   if (g_owned_guard)
+      return VAULT_MAINTENANCE_BUSY;
+   if (ensure_atfork() != 0 || !primary_epoch || primary_epoch > INT64_MAX ||
+       pthread_rwlock_wrlock(&g_use_lock) != 0)
+      return VAULT_MAINTENANCE_INVALID;
+   int rc = VAULT_MAINTENANCE_ERROR;
+   pthread_mutex_lock(&g_maintenance_mu);
+   int guard_active = g_maintenance.token != NULL;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   if (!guard_active && custody_is_sealed_unlocked())
+   {
+      if (!g_primary_epoch_initialized)
+      {
+         g_primary_seal_epoch = primary_epoch;
+         g_primary_epoch_initialized = 1;
+         rc = VAULT_MAINTENANCE_OK;
+      }
+      else if (g_primary_seal_epoch == primary_epoch)
+         rc = VAULT_MAINTENANCE_OK;
+      else
+         rc = VAULT_MAINTENANCE_EPOCH;
+   }
+   else if (!custody_is_sealed_unlocked())
+      rc = VAULT_MAINTENANCE_SEALED;
+   pthread_rwlock_unlock(&g_use_lock);
+   return rc;
+}
+
+int vault_maintenance_guard_begin(vault_maintenance_guard_t **guard)
+{
+   if (!guard || *guard || ensure_atfork() != 0)
+      return VAULT_MAINTENANCE_INVALID;
+   if (g_owned_guard)
+      return VAULT_MAINTENANCE_BUSY;
+
+   int prior = PTHREAD_CANCEL_ENABLE;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &prior) != 0)
+      return VAULT_MAINTENANCE_ERROR;
+   uint8_t *arena = NULL;
+   size_t mapped = 0;
+   if (maintenance_arena_new(&arena, &mapped) != 0 || pthread_rwlock_wrlock(&g_use_lock) != 0)
+   {
+      maintenance_arena_free(arena, mapped);
+      (void)pthread_setcancelstate(prior, NULL);
+      return VAULT_MAINTENANCE_ERROR;
+   }
+
+   pthread_mutex_lock(&g_maintenance_mu);
+   if (g_next_guard_token > (UINTPTR_MAX - 1) / 2)
+   {
+      pthread_mutex_unlock(&g_maintenance_mu);
+      pthread_rwlock_unlock(&g_use_lock);
+      maintenance_arena_free(arena, mapped);
+      (void)pthread_setcancelstate(prior, NULL);
+      return VAULT_MAINTENANCE_ERROR;
+   }
+   uintptr_t token_value = (g_next_guard_token++ << 1) | 1;
+   vault_maintenance_guard_t *token = (vault_maintenance_guard_t *)token_value;
+   g_maintenance.token = token;
+   g_maintenance.owner = pthread_self();
+   g_maintenance.prior_cancel_state = prior;
+   g_maintenance.arena = arena;
+   g_maintenance.arena_len = mapped;
+   g_owned_guard = token;
+   *guard = token;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   return VAULT_MAINTENANCE_OK;
+}
+
+int vault_maintenance_guard_sync_primary_epoch(vault_maintenance_guard_t *guard,
+                                               uint64_t primary_epoch)
+{
+   int valid = maintenance_validate(guard);
+   if (valid != VAULT_MAINTENANCE_OK)
+      return valid;
+   if (!primary_epoch || primary_epoch > INT64_MAX)
+      return VAULT_MAINTENANCE_EPOCH;
+   if (g_primary_epoch_initialized && primary_epoch < g_primary_seal_epoch)
+      return VAULT_MAINTENANCE_EPOCH;
+   if (g_primary_epoch_initialized && primary_epoch == g_primary_seal_epoch)
+      return VAULT_MAINTENANCE_OK;
+   if (g_use_epoch == UINT64_MAX)
+      return VAULT_MAINTENANCE_EPOCH;
+   g_primary_seal_epoch = primary_epoch;
+   g_primary_epoch_initialized = 1;
+   g_use_epoch++;
+   return VAULT_MAINTENANCE_OK;
+}
+
+int vault_maintenance_guard_with_active_kek(vault_maintenance_guard_t *guard,
+                                            vault_maintenance_kek_fn callback, void *ctx)
+{
+   int valid = maintenance_validate(guard);
+   if (valid != VAULT_MAINTENANCE_OK || !callback)
+      return valid == VAULT_MAINTENANCE_OK ? VAULT_MAINTENANCE_INVALID : valid;
+   if (custody_is_sealed_unlocked())
+      return VAULT_MAINTENANCE_SEALED;
+
+   uint8_t *arena;
+   size_t mapped;
+   pthread_mutex_lock(&g_maintenance_mu);
+   arena = g_maintenance.arena;
+   mapped = g_maintenance.arena_len;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   OPENSSL_cleanse(arena, mapped);
+   if (custody_get_kek_unlocked(arena) != 0)
+   {
+      OPENSSL_cleanse(arena, mapped);
+      return VAULT_MAINTENANCE_ERROR;
+   }
+   int rc = callback(arena, ctx);
+   OPENSSL_cleanse(arena, mapped);
+   return rc;
+}
+
+int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void *params, size_t len)
+{
+   int valid = maintenance_validate(guard);
+   return valid == VAULT_MAINTENANCE_OK ? custody_unseal_unlocked(params, len) : valid;
+}
+
+int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard)
+{
+   int valid = maintenance_validate(guard);
+   return valid == VAULT_MAINTENANCE_OK ? custody_seal_failclosed_unlocked() : valid;
+}
+
+int vault_maintenance_guard_end(vault_maintenance_guard_t **guard)
+{
+   if (!guard)
+      return VAULT_MAINTENANCE_INVALID;
+   int valid = maintenance_validate(*guard);
+   if (valid != VAULT_MAINTENANCE_OK)
+      return valid;
+
+   int seal_rc = custody_seal_failclosed_unlocked();
+   uint8_t *arena;
+   size_t mapped;
+   int prior;
+   pthread_mutex_lock(&g_maintenance_mu);
+   arena = g_maintenance.arena;
+   mapped = g_maintenance.arena_len;
+   prior = g_maintenance.prior_cancel_state;
+   memset(&g_maintenance, 0, sizeof(g_maintenance));
+   g_owned_guard = NULL;
+   *guard = NULL;
+   pthread_mutex_unlock(&g_maintenance_mu);
+   maintenance_arena_free(arena, mapped);
+   pthread_rwlock_unlock(&g_use_lock);
+   (void)pthread_setcancelstate(prior, NULL);
+   return seal_rc == 0 ? VAULT_MAINTENANCE_OK : VAULT_MAINTENANCE_ERROR;
 }
 
 int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,

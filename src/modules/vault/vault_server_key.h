@@ -42,7 +42,8 @@ int vault_server_kek(uint8_t kek[VAULT_KEK_LEN]);
 
 /* Test seam: drop the cached server KEK so a test that re-points
  * config_default_dir at a fresh temp dir re-derives from that dir's master key.
- * Not for production callers. */
+ * Not for production callers. This is also a local seal transition: it advances
+ * the use generation and invalidates durable-epoch synchronization. */
 void vault_server_key_reset_for_test(void);
 
 /* Rotate the `.server-master.key` (D13). Mint a fresh master key, derive the new
@@ -106,7 +107,41 @@ int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, s
  * shared guard until vault_use_end; seal takes the exclusive side and advances the
  * generation, so an admission cannot cross a seal/unseal cycle. */
 uint64_t vault_use_epoch_snapshot(void);
-int vault_use_begin(uint64_t expected_epoch, uint8_t kek[VAULT_KEK_LEN]);
+int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
+                    uint8_t kek[VAULT_KEK_LEN]);
 void vault_use_end(void);
+
+/* Exclusive maintenance guard used by crash recovery and DEK re-wrap. The
+ * handle is opaque and is validated against an internal registry before any
+ * state is accessed. A successful begin disables cancellation for the owning
+ * thread and drains all operational readers. */
+typedef struct vault_maintenance_guard vault_maintenance_guard_t;
+typedef int (*vault_maintenance_kek_fn)(const uint8_t kek[VAULT_KEK_LEN], void *ctx);
+
+enum
+{
+   VAULT_MAINTENANCE_OK = 0,
+   VAULT_MAINTENANCE_ERROR = -1,
+   VAULT_MAINTENANCE_INVALID = -2,
+   VAULT_MAINTENANCE_BUSY = -3,
+   VAULT_MAINTENANCE_WRONG_OWNER = -4,
+   VAULT_MAINTENANCE_EPOCH = -5,
+   VAULT_MAINTENANCE_SEALED = -6,
+};
+
+int vault_maintenance_guard_begin(vault_maintenance_guard_t **guard);
+int vault_maintenance_guard_sync_primary_epoch(vault_maintenance_guard_t *guard,
+                                               uint64_t primary_epoch);
+int vault_maintenance_guard_with_active_kek(vault_maintenance_guard_t *guard,
+                                            vault_maintenance_kek_fn callback, void *ctx);
+int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void *params,
+                                   size_t len);
+int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard);
+int vault_maintenance_guard_end(vault_maintenance_guard_t **guard);
+
+/* Startup-only synchronization with the durable kb_control.seal_epoch. The
+ * provider must still be sealed and no maintenance guard or key use may be
+ * active. Exact replay is idempotent; a differing second initialization fails. */
+int vault_primary_epoch_initialize(uint64_t primary_epoch);
 
 #endif /* DEC_VAULT_SERVER_KEY_H */
