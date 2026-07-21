@@ -53,6 +53,22 @@ static int add_member(const char *identity, int64_t team)
    return step == AIMEE_PG_DONE ? 0 : -1;
 }
 
+static int revoke_enrollment(const char *fingerprint)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "UPDATE kb_enrollments SET state='revoked',revoked_at=pg_now_text() "
+       "WHERE fingerprint=?1",
+       err, sizeof(err));
+   if (!st) return -1;
+   aimee_pg_bind_text(st, "?1", fingerprint);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int changed = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_DONE && changed == 1 ? 0 : -1;
+}
+
 static kb_principal_t owner(void)
 {
    kb_principal_t p = {.kind = KB_PRIN_OWNER, .authenticated = 1};
@@ -254,6 +270,22 @@ int main(void)
    assert(status == 409);
 
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=982260") == 3);
+
+   assert(db2_tenant_scope_begin(&admin, team) == 0);
+   assert(scalar("SELECT org_egress_binding_set(982260,'p2b-live-model',"
+                 "'p2b-live-billable',1,'p2b-live-key','team:982260:bedrock',"
+                 "'bedrock','iam',1000,100,false)::int") == 1);
+   assert(db2_tenant_scope_commit() == 0);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "77777777-7777-4777-8777-777777777777", team,
+                           response, sizeof(response));
+   assert(status == 403);
+
+   assert(revoke_enrollment(cert_fp) == 0);
+   status = egress_request(mtls_port, ca, cert, client_key,
+                           "88888888-8888-4888-8888-888888888888", team,
+                           response, sizeof(response));
+   assert(status == 401);
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(dek, sizeof(dek));

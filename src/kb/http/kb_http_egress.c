@@ -286,19 +286,28 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    { cJSON_Delete(root); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"unsupported payload\"}"); return 400; }
    cJSON_Delete(root);
    char authority[33],origin[576];
-   if (db2_enrollment_authority_resolve(fingerprint,transport->issuer,transport->subject,authority)!=0 ||
-       kb_identity_key(transport,origin,sizeof(origin))!=0)
+   int enrollment_rc=db2_enrollment_authority_resolve(
+       fingerprint,transport->issuer,transport->subject,authority);
+   if (enrollment_rc==1)
+   { aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"not authorized\"}"); return 401; }
+   if (enrollment_rc!=0)
+   { aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission unavailable\"}"); return 503; }
+   if (kb_identity_key(transport,origin,sizeof(origin))!=0)
    { aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"not authorized\"}"); return 403; }
    char *canonical=NULL; size_t canonical_len=0; char digest[65];
    if (kb_bedrock_canonical_body(&ir,&canonical,&canonical_len)!=KB_BEDROCK_OK ||
        request_digest(authority,request_id,team,has_project,project,model_id,canonical,canonical_len,digest))
    { aimee_request_free(&ir); free(canonical); snprintf(out,(size_t)out_cap,"{\"error\":\"invalid payload\"}"); return 400; }
    kb_bedrock_authorized_target_t *target=NULL; db2_org_egress_admission_t admission; int ar=-1;
-   if (db2_tenant_scope_begin(transport,team)!=0 ||
-       kb_bedrock_authorized_target_resolve(team,model_id,&target)!=KB_BEDROCK_OK ||
-       (ar=db2_org_egress_admit(authority,fingerprint,transport->issuer,transport->subject,origin,
+   int scope_rc=db2_tenant_scope_begin(transport,team);
+   if (scope_rc!=0)
+   { kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"%s\"}",scope_rc==DB2_ERR_TENANT_DENIED?"not authorized":"admission unavailable"); return scope_rc==DB2_ERR_TENANT_DENIED?403:503; }
+   kb_bedrock_result_t target_rc=kb_bedrock_authorized_target_resolve(team,model_id,&target);
+   if (target_rc!=KB_BEDROCK_OK)
+   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"%s\"}",target_rc==KB_BEDROCK_INVALID_TARGET?"not authorized":"admission unavailable"); return target_rc==KB_BEDROCK_INVALID_TARGET?403:503; }
+   if ((ar=db2_org_egress_admit(authority,fingerprint,transport->issuer,transport->subject,origin,
           request_id,team,has_project,project,model_id,digest,P2B_LEASE_SECONDS,&admission))!=0)
-   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"not authorized\"}"); return ar==DB2_EGRESS_ERR_CONFLICT?409:403; }
+   { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"%s\"}",ar==DB2_EGRESS_ERR_DENIED?"not authorized":"admission unavailable"); return ar==DB2_EGRESS_ERR_CONFLICT?409:ar==DB2_EGRESS_ERR_DENIED?403:503; }
    if (admission.outcome==DB2_EGRESS_RATE_REFUSED || admission.outcome==DB2_EGRESS_BUDGET_REFUSED)
    { db2_tenant_scope_rollback(); kb_bedrock_authorized_target_clear(&target); free(canonical); aimee_request_free(&ir); snprintf(out,(size_t)out_cap,"{\"error\":\"admission refused\"}"); return 429; }
    if (admission.outcome==DB2_EGRESS_REPLAY)
@@ -342,11 +351,17 @@ int kb_http_egress_route(const char *method, const char *path, const char *body,
    else
    {
       int guarded=0;
-      if (db2_tenant_scope_begin(transport,team)!=0 ||
-          db2_org_egress_owner_guard(dispatch_id,owner,generation,&guarded)!=0 || !guarded)
+      int guard_scope_rc=db2_tenant_scope_begin(transport,team);
+      if (guard_scope_rc!=0)
+      {
+         snprintf(out,(size_t)out_cap,"{\"error\":\"dispatch ownership lost\"}");
+         status=504;
+      }
+      else if (db2_org_egress_owner_guard(dispatch_id,owner,generation,&guarded)!=0 || !guarded)
       {
          db2_tenant_scope_rollback();
          snprintf(out,(size_t)out_cap,"{\"error\":\"dispatch ownership lost\"}");
+         status=504;
       }
       else
       {
