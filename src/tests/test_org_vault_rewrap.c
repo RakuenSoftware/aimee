@@ -11,6 +11,14 @@
 struct aimee_pg_stmt
 {
    int step;
+   int query;
+};
+
+enum
+{
+   QUERY_STATE,
+   QUERY_BEGIN,
+   QUERY_SNAPSHOT
 };
 
 static int g_conn, g_returns, g_discards;
@@ -19,6 +27,8 @@ static const char *g_fail_state;
 static int g_step_fail_at;
 static const char *g_stmt_state = "XX000";
 static aimee_pg_prepare_error_t g_prepare_failure = AIMEE_PG_PREPARE_OK;
+static int g_empty_rows;
+static const char *g_returned_op = "01000000000000000000000000000000";
 
 int db2_pool_active(void)
 {
@@ -60,7 +70,6 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_er
                                      char *e, size_t n)
 {
    (void)c;
-   (void)s;
    (void)e;
    (void)n;
    if (g_prepare_failure != AIMEE_PG_PREPARE_OK)
@@ -70,6 +79,9 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_er
       return NULL;
    }
    g_stmt.step = 0;
+   g_stmt.query = strstr(s, "org_vault_rewrap_begin")
+                      ? QUERY_BEGIN
+                      : (strstr(s, "org_vault_rewrap_snapshot") ? QUERY_SNAPSHOT : QUERY_STATE);
    if (kind)
       *kind = AIMEE_PG_PREPARE_OK;
    return &g_stmt;
@@ -91,6 +103,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *e, size_t n)
       s->step++;
       return AIMEE_PG_ERR;
    }
+   if (g_empty_rows && s->step++ == 0)
+      return AIMEE_PG_DONE;
    return s->step++ == 0 ? AIMEE_PG_ROW : AIMEE_PG_DONE;
 }
 const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *s)
@@ -129,8 +143,8 @@ int aimee_pg_bind_blob(aimee_pg_stmt_t *s, const char *n, const void *v, int z)
 }
 int aimee_pg_column_is_null(aimee_pg_stmt_t *s, int c)
 {
-   (void)s;
-   (void)c;
+   if (s->query == QUERY_SNAPSHOT)
+      return !(c == 2 || c == 3 || c == 4 || c == 5 || c == 8 || c == 9);
    return 1;
 }
 int aimee_pg_column_bytes(aimee_pg_stmt_t *s, int c)
@@ -147,15 +161,26 @@ const void *aimee_pg_column_blob(aimee_pg_stmt_t *s, int c)
 }
 const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
 {
-   (void)s;
-   (void)c;
+   if (s->query == QUERY_BEGIN)
+      return c == 0 ? g_returned_op : "preparing";
+   if (s->query == QUERY_SNAPSHOT)
+      return c == 0 ? g_returned_op : "preparing";
    return "promoted";
 }
 int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c)
 {
-   (void)s;
-   (void)c;
+   if (s->query == QUERY_SNAPSHOT)
+      return c == 5 ? 1 : (c == 2 || c == 3 ? 1 : 0);
    return 1;
+}
+
+static int all_zero(const void *ptr, size_t len)
+{
+   const unsigned char *p = ptr;
+   unsigned char any = 0;
+   for (size_t i = 0; i < len; i++)
+      any |= p[i];
+   return any == 0;
 }
 
 static void test_sqlstate_mapping(void)
@@ -307,6 +332,90 @@ static void test_page_cap_rejection(void)
    free(rows);
 }
 
+static void test_operation_id_binding_and_failure_clear(void)
+{
+   uint8_t op[16] = {1};
+   db2_vault_rewrap_tx_t *tx = NULL;
+   int64_t epoch = 99, fence = 99;
+   db2_vault_rewrap_state_t state = DB2_VAULT_REWRAP_COMPLETED;
+
+   g_returned_op = "02000000000000000000000000000000";
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_begin(tx, "actor", "request", op, 0, 1, &epoch, &fence, &state) ==
+          DB2_VAULT_REWRAP_INTEGRITY);
+   assert(epoch == 0 && fence == 0 && state == 0);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   epoch = fence = 99;
+   state = DB2_VAULT_REWRAP_COMPLETED;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_begin(tx, "", "request", op, 0, 1, &epoch, &fence, &state) ==
+          DB2_VAULT_REWRAP_INVALID);
+   assert(epoch == 0 && fence == 0 && state == 0);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   db2_vault_rewrap_snapshot_t snapshot;
+   memset(&snapshot, 0xa5, sizeof(snapshot));
+   assert(db2_vault_rewrap_snapshot(op, &snapshot) == DB2_VAULT_REWRAP_INTEGRITY);
+   assert(all_zero(&snapshot, sizeof(snapshot)));
+   g_returned_op = "01000000000000000000000000000000";
+
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_begin(tx, "actor", "request", op, 0, 1, &epoch, &fence, &state) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(epoch == 1 && fence == 1 && state == DB2_VAULT_REWRAP_PREPARING);
+   assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
+
+   assert(db2_vault_rewrap_snapshot(op, &snapshot) == DB2_VAULT_REWRAP_OK);
+   assert(memcmp(snapshot.operation_id, op, sizeof(op)) == 0);
+   db2_vault_rewrap_snapshot_clear(&snapshot);
+}
+
+static void test_page_clearing_and_exhaustion(void)
+{
+   uint8_t op[16] = {1};
+   db2_vault_rewrap_secret_t secret;
+   size_t count = 99;
+   memset(&secret, 0xa5, sizeof(secret));
+   db2_vault_rewrap_tx_t *tx = NULL;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, -1, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_INVALID);
+   assert(count == 0 && all_zero(&secret, sizeof(secret)));
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   g_empty_rows = 1;
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 0);
+   assert(db2_vault_rewrap_source_secret_page(tx, op, 1, 0, 1, &secret, 1, &count) ==
+          DB2_VAULT_REWRAP_INTEGRITY);
+   db2_vault_rewrap_tx_rollback(&tx);
+
+   db2_vault_rewrap_check_t check;
+   db2_vault_rewrap_cursor_t cursor = {{0}, 0};
+   memset(&check, 0xa5, sizeof(check));
+   assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_source_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &cursor) ==
+          DB2_VAULT_REWRAP_OK);
+   assert(count == 0 && cursor.len == 0 && all_zero(&check, sizeof(check)));
+   assert(db2_vault_rewrap_source_check_page(tx, op, 1, &cursor, 1, &check, 1, &count, &cursor) ==
+          DB2_VAULT_REWRAP_INTEGRITY);
+   db2_vault_rewrap_tx_rollback(&tx);
+   g_empty_rows = 0;
+}
+
+static void test_ops_vtable_complete(void)
+{
+   const db2_vault_rewrap_ops_t *o = &db2_vault_rewrap_default_ops;
+   assert(o->tx_begin && o->tx_commit && o->tx_rollback && o->snapshot && o->begin &&
+          o->record_prepared && o->source_secret_page && o->source_check_page && o->stage_dek &&
+          o->stage_check && o->stage_finish && o->mark_committing && o->mark_resealed &&
+          o->promote && o->abort && o->recovery_required && o->verify_summary &&
+          o->verify_secret_page && o->verify_check_page && o->verify_crypto_ack && o->complete);
+}
+
 static void test_output_clear_helpers(void)
 {
    db2_vault_rewrap_secret_t secrets[2];
@@ -339,6 +448,9 @@ int main(void)
    test_prepare_and_followup_failures();
    test_receipt_identity_binding();
    test_page_cap_rejection();
+   test_operation_id_binding_and_failure_clear();
+   test_page_clearing_and_exhaustion();
+   test_ops_vtable_complete();
    test_output_clear_helpers();
    puts("org_vault_rewrap: public phase/SQLSTATE tests passed");
    return 0;

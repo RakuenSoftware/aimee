@@ -162,6 +162,35 @@ typedef struct
    db2_vault_rewrap_result_t (*tx_commit)(db2_vault_rewrap_tx_t **);
    void (*tx_rollback)(db2_vault_rewrap_tx_t **);
    db2_vault_rewrap_result_t (*snapshot)(const uint8_t[16], db2_vault_rewrap_snapshot_t *);
+   db2_vault_rewrap_result_t (*begin)(db2_vault_rewrap_tx_t *, const char *, const char *,
+                                      const uint8_t[16], int64_t, int64_t, int64_t *, int64_t *,
+                                      db2_vault_rewrap_state_t *);
+   db2_vault_rewrap_result_t (*record_prepared)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                                int64_t, int64_t,
+                                                const uint8_t[VAULT_RESEAL_RECEIPT_V1_LEN]);
+   db2_vault_rewrap_result_t (*source_secret_page)(db2_vault_rewrap_tx_t *, const uint8_t[16],
+                                                   int64_t, int64_t, int,
+                                                   db2_vault_rewrap_secret_t *, size_t, size_t *);
+   db2_vault_rewrap_result_t (*source_check_page)(db2_vault_rewrap_tx_t *, const uint8_t[16],
+                                                  int64_t, const db2_vault_rewrap_cursor_t *, int,
+                                                  db2_vault_rewrap_check_t *, size_t, size_t *,
+                                                  db2_vault_rewrap_cursor_t *);
+   db2_vault_rewrap_result_t (*stage_dek)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                          const db2_vault_rewrap_secret_t *,
+                                          const uint8_t[VAULT_WRAPPED_DEK_LEN]);
+   db2_vault_rewrap_result_t (*stage_check)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                            const db2_vault_rewrap_check_t *, const uint8_t *,
+                                            size_t);
+   db2_vault_rewrap_result_t (*stage_finish)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t);
+   db2_vault_rewrap_result_t (*mark_committing)(db2_vault_rewrap_tx_t *, const uint8_t[16],
+                                                int64_t);
+   db2_vault_rewrap_result_t (*mark_resealed)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                              const uint8_t[32]);
+   db2_vault_rewrap_result_t (*promote)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t);
+   db2_vault_rewrap_result_t (*abort)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                      const char *);
+   db2_vault_rewrap_result_t (*recovery_required)(db2_vault_rewrap_tx_t *, const uint8_t[16],
+                                                  int64_t, const char *);
    db2_vault_rewrap_result_t (*verify_summary)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
                                                db2_vault_rewrap_verify_summary_t *);
    db2_vault_rewrap_result_t (*verify_secret_page)(db2_vault_rewrap_tx_t *, const uint8_t[16],

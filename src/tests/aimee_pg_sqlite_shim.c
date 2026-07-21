@@ -671,7 +671,7 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_pr
    if (kind)
       *kind = AIMEE_PG_PREPARE_INVALID;
    sqlite3 *db = (sqlite3 *)pg_conn;
-   if (!db)
+   if (!db || !sql)
       return NULL;
    char *sql_t = translate_sql(sql);
    if (!sql_t)
@@ -684,6 +684,8 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_pr
    int rc = sqlite3_prepare_v2(db, sql_t, -1, &st, NULL);
    if (rc != SQLITE_OK)
    {
+      if (kind && rc == SQLITE_NOMEM)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "prepare: %s (sql=%s)", sqlite3_errmsg(db), sql_t);
       free(sql_t);
