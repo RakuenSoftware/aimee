@@ -1298,8 +1298,8 @@ native_provider_http:
              * it the same bounded degenerate-response correction used for
              * reasoning-only content. The final-tool retry below is mutually
              * exclusive because it requires total_calls > 0. */
-            if (total_calls == 0 && agent_session_retry_degenerate_response(
-                                        messages, &turn, &degenerate_retry_count))
+            if (total_calls == 0 &&
+                agent_session_retry_degenerate_response(messages, &turn, &degenerate_retry_count))
             {
                agent_free_parsed_response(&parsed);
                continue;
