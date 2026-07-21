@@ -348,14 +348,32 @@ static int wfe_item_id_valid(const char *s)
 {
    if (!s || strncmp(s, "wi_", 3) != 0 || strlen(s) > 80)
       return 0;
-   for (const unsigned char *p = (const unsigned char *)s + 3; *p; p++)
-   {
-      if (!isalnum(*p) && *p != '_' && *p != '.')
+   const unsigned char *p = (const unsigned char *)s + 3;
+   const unsigned char *root = p;
+   while (isalnum(*p) || *p == '_')
+      p++;
+   if (p == root)
+      return 0;
+   if (!*p)
+      return 1;
+   if (p[0] != '.' || p[1] != 's')
+      return 0;
+   p += 2;
+   for (int i = 0; i < 10; i++, p++)
+      if (!isdigit(*p) && (*p < 'a' || *p > 'f'))
          return 0;
-      if (*p == '.' && (p == (const unsigned char *)s + 3 || !p[1] || p[1] == '.'))
-         return 0;
-   }
-   return s[3] != '\0';
+   if (p[0] != '.' || p[1] != 'g')
+      return 0;
+   p += 2;
+   if (!isdigit(*p))
+      return 0;
+   while (isdigit(*p))
+      p++;
+   if (*p++ != '.' || !isdigit(*p))
+      return 0;
+   while (isdigit(*p))
+      p++;
+   return *p == '\0';
 }
 
 static char *const wfe_git_env[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1",
@@ -421,7 +439,8 @@ static int wfe_managed_repo(const char *workdir_in, const char *head, char *work
       char feature[300], slice[300];
       snprintf(feature, sizeof(feature), "aimee/feat/%s", item_id);
       snprintf(slice, sizeof(slice), "aimee/wi/%s", item_id);
-      if (strcmp(head, feature) != 0 && strcmp(head, slice) != 0)
+      int slice_item = strstr(item_id, ".s") != NULL;
+      if ((slice_item && strcmp(head, slice) != 0) || (!slice_item && strcmp(head, feature) != 0))
       {
          snprintf(err, errlen, "managed branch does not match work-item id");
          return -1;
@@ -544,6 +563,8 @@ static int wfe_slice_ref_matches_workdir(const char *workdir, const char *prefix
 {
    const char *item_id = strrchr(workdir, '/');
    item_id = item_id ? item_id + 1 : workdir;
+   if (!wfe_item_id_valid(item_id))
+      return 0;
    const char *slice_suffix = strstr(item_id, ".s");
    if (!slice_suffix)
       return 0;
@@ -617,7 +638,9 @@ int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
    }
    int feature_head = head && strncmp(head, "aimee/feat/wi_", 14) == 0;
    int slice_head = head && strncmp(head, "aimee/wi/wi_", 12) == 0;
-   if (strcmp(op, "push") == 0 && head && (feature_head || slice_head))
+   int allowed_push_head =
+       feature_head || (slice_head && wfe_slice_ref_matches_workdir(workdir, "aimee/wi/", 0, head));
+   if (strcmp(op, "push") == 0 && head && allowed_push_head)
    {
       rc = git_ops_push_dir(principal, workdir, remote, head, &detail, err, sizeof(err));
    }
