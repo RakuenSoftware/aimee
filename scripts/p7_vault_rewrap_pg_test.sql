@@ -33,15 +33,18 @@ LANGUAGE plpgsql AS $$
 DECLARE r RECORD; next_wrap BYTEA; next_check BYTEA;
 BEGIN
   FOR r IN SELECT * FROM org_vault_rewrap_secret_page(p_op,p_fence,0,128) LOOP
-    next_wrap:=sha256(int8send(r.source_id)||decode('a1','hex'))||
-      substring(sha256(int8send(r.source_id)||decode('a2','hex')) FROM 1 FOR 8);
+    -- Include the source digest so consecutive promoted test rotations never
+    -- attempt to stage a byte-identical wrap for the same stable source ID.
+    next_wrap:=sha256(r.source_digest||decode('a1','hex'))||
+      substring(sha256(r.source_digest||decode('a2','hex')) FROM 1 FOR 8);
     PERFORM org_vault_rewrap_stage_dek(p_op,p_fence,r.source_id,r.principal,r.agent,r.cred,
       r.version,r.source_digest,next_wrap);
   END LOOP;
   FOR r IN SELECT * FROM org_vault_rewrap_check_page(p_op,p_fence,'',128) LOOP
     next_check:=CASE WHEN octet_length(r.kek_check)=0 THEN ''::bytea ELSE
-      sha256(convert_to(r.principal,'UTF8')||decode('b1','hex'))||
-      substring(sha256(convert_to(r.principal,'UTF8')||decode('b2','hex')) FROM 1 FOR 8) END;
+      sha256(r.source_digest||convert_to(r.principal,'UTF8')||decode('b1','hex'))||
+      substring(sha256(r.source_digest||convert_to(r.principal,'UTF8')||decode('b2','hex'))
+        FROM 1 FOR 8) END;
     PERFORM org_vault_rewrap_stage_check(p_op,p_fence,r.principal,r.source_digest,next_check);
   END LOOP;
 END; $$;
