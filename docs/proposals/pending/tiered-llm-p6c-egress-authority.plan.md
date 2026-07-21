@@ -22,20 +22,28 @@ region. Signing or dispatch cannot safely build on that ambiguity.
    model_id)`. It derives the actor from `current_setting('aimee.principal', true)` and
    proves membership in that exact team, entitlement of that exact team, enabled state,
    provider/wire `bedrock`, `bedrock_api='converse'`, and a complete supported tuple.
-   The caller cannot nominate an actor and the runtime retains no direct catalog `SELECT`.
+   It also requires `current_setting('aimee.team', true)` to equal the supplied team, so a
+   multi-team actor cannot resolve team B while handling a team-A-scoped request. The caller
+   cannot nominate an actor and the runtime retains no direct catalog `SELECT`.
 3. Bedrock catalog endpoints must be empty in production catalog state. Later CT mock
    dispatch uses a test-compiled loopback-only transport override, never a stored endpoint.
 4. Arrays are one-dimensional, nonempty where required, contain no NULL elements, and are
    capped at 64 entries at both write and resolve boundaries. Every scalar/element has a
-   fixed owned C bound; truncation is an error, never success.
+   fixed owned C bound; truncation is an error, never success. For non-profile targets the
+   destination set is exactly the singleton invocation region. For profiles, every
+   underlying foundation-model ARN region must be in `aws_region_set` and every listed
+   destination region must appear in at least one underlying ARN; duplicates may not widen
+   the set.
 5. The resolver returns arrays as JSON text from PostgreSQL. The C adapter parses them with
    cJSON into owned fixed arrays and rejects malformed JSON, wrong types, over-cap counts,
-   embedded NUL/control data, and any scalar that does not fit. PostgreSQL text-array syntax
-   is not hand-parsed.
+   raw JSON `\u0000` escapes before parsing, decoded control data, and any scalar that does
+   not fit. PostgreSQL text-array syntax is not hand-parsed. (PostgreSQL TEXT itself cannot
+   contain NUL; the raw-escape check closes the injectable/fake adapter boundary.)
 6. `bedrock_target_t` gains `invoke_region`. Foundation/provisioned/custom resource ARNs and
    application/cross-region profile ARNs use that region exactly once. Profile destination
    foundation-model ARNs remain the authoritative `underlying_fm_arns`; no profile ARN is
-   synthesized for every destination region.
+   synthesized for every destination region. The policy resource set capacity becomes 65
+   (one profile plus up to 64 underlying ARNs), while each catalog array stays capped at 64.
 7. Existing Bedrock rows are not silently backfilled from array order. The idempotent schema
    migration leaves their new field NULL; the resolver fails closed until an admin re-upserts
    them through the new signature. The obsolete upsert overload is explicitly revoked and
@@ -50,14 +58,18 @@ region. Signing or dispatch cannot safely build on that ambiguity.
     WORM-audits only content-free tuple metadata;
   - add `org_catalog_bedrock_target(team_id, model_id)` as the sole runtime authority
     resolver, returning the complete bounded tuple and JSON arrays;
-  - revoke/drop the obsolete overload and revoke the new resolver from PUBLIC.
+  - define the new definer with `search_path=pg_catalog,public,pg_temp`, schema-qualify its
+    objects/helper calls, and let schema ownership remain with the provisioned DB owner;
+  - revoke/drop the obsolete overload; revoke every new signature from PUBLIC before grants.
 - `src/db2/schema_grants.sql`
   - grant only the new upsert and resolver signatures to `aimee_kb_runtime`; retain no direct
     catalog read.
 - `src/db2/org_model_catalog.[ch]`
   - add an owned `db2_bedrock_target_t` with 64-entry arrays and explicit caps;
-  - add `db2_model_bedrock_target_resolve(team_id, model_id, out)` returning typed
-    OK/not-found/denied-invalid/error results without leaking SQL text;
+  - add `db2_model_bedrock_target_resolve(team_id, model_id, out)` with a public enum:
+    `OK`, `UNAVAILABLE` (one indistinguishable result for missing, wrong-team, unentitled,
+    disabled, wrong-provider/api, or incomplete), `INVALID` (malformed adapter row), and
+    `ERROR` (connection/statement failure). No catalog-existence or SQL-text oracle;
   - convert the resolver row strictly and clear `out` on every non-success.
 - `src/modules/aws/bedrock_policy.[ch]`
   - add `invoke_region`, validate it, and correct per-target ARN construction;
@@ -69,8 +81,9 @@ region. Signing or dispatch cannot safely build on that ambiguity.
     no direct runtime SELECT, and resolver tuple equality;
   - extend `src/tests/test_aws_auth.c` to prove invocation region is independent of
     destination ordering and profile ARN appears exactly once in the invocation region;
-  - add a focused C resolver test if the existing live catalog harness cannot exercise all
-    owned-buffer and malformed-result cases through the normal DB adapter.
+  - add a mandatory focused injected-row C resolver test for wrong JSON types, `\u0000`,
+    decoded controls, NULLs, oversized arrays/scalars, partial output clearing, and exact
+    typed-result mapping; valid PostgreSQL rows alone cannot exercise this hostile boundary.
 
 ## Gates
 
