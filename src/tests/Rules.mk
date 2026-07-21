@@ -309,6 +309,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-check \
                $(TESTPREFIX)/unit-test-vault-reseal-receipt \
+               $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
                $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-vault-store \
@@ -3301,6 +3302,12 @@ $(TESTPREFIX)/unit-test-vault-reseal-receipt: $(OBJDIR)/tests/test_vault_reseal_
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-vault-reseal-orchestrator: \
+                              $(OBJDIR)/tests/test_vault_reseal_orchestrator.o \
+                              $(OBJDIR)/modules/vault/vault_reseal_orchestrator.o \
+                              $(OBJDIR)/modules/vault/vault_reseal_receipt.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 $(TESTPREFIX)/unit-test-org-vault-rewrap: $(OBJDIR)/tests/test_org_vault_rewrap.o \
                               $(OBJDIR)/db2/org_vault_rewrap.o \
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
@@ -3575,6 +3582,18 @@ $(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_TPM2_LDLIBS)
+
+# P7-reseal-d2b real PostgreSQL + swtpm integration harness.  On demand only:
+# the default unit suite must remain independent of libtss2 and a scratch PG DB.
+# The full KB closure intentionally supplies the KB-prefixed WITH_TPM2 provider,
+# D2a Postgres adapter, and D2b default orchestrator adapter.
+$(TESTPREFIX)/p7-reseal-d2b-live: \
+                              $(OBJDIR)/tests/test_vault_reseal_orchestrator_live.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
 
 $(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.o \
                               $(OBJDIR)/cli_agent_keys.o \
