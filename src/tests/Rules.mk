@@ -3325,6 +3325,7 @@ $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
 
 $(TESTPREFIX)/unit-test-vault-seam: $(OBJDIR)/tests/test_vault_seam.o \
                               $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3573,7 +3574,9 @@ $(TESTPREFIX)/unit-test-pki: $(OBJDIR)/tests/test_pki.o $(OBJDIR)/server/pki.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/tests/test_vault_server_key.o \
-                              $(OBJDIR)/modules/vault/vault_server_key.o $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3971,6 +3974,7 @@ $(TESTPREFIX)/unit-test-kb-enroll: $(OBJDIR)/tests/test_kb_enroll.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/modules/vault/vault_server_key.o \
                      $(OBJDIR)/modules/vault/vault_crypto.o \
+                     $(OBJDIR)/modules/vault/vault_kek_cache.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/platform_random.o \
                      $(TEST_CORE_OBJS)
