@@ -149,7 +149,10 @@ guard_callback_result(int guard_result, vault_reseal_orchestrator_result_t callb
 {
    if (guard_result == VAULT_MAINTENANCE_OK)
       return callback_result;
-   if (callback_result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
+   /* The maintenance callback reports every non-success as a generic guard
+    * error. Preserve its typed DB/crypto outcome when it actually ran. */
+   if (callback_result != VAULT_RESEAL_ORCHESTRATOR_COMPLETED &&
+       callback_result != VAULT_RESEAL_ORCHESTRATOR_ERROR)
       return callback_result;
    return guard_result == VAULT_MAINTENANCE_BUSY ? VAULT_RESEAL_ORCHESTRATOR_BUSY
                                                  : VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;

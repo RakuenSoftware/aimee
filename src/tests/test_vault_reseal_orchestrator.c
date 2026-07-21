@@ -18,6 +18,7 @@ static int g_supported = 1, g_calls[40];
 static int g_forward, g_missing, g_guard_with_result = VAULT_MAINTENANCE_OK;
 static db2_vault_rewrap_result_t g_snapshot_result = DB2_VAULT_REWRAP_OK;
 static db2_vault_rewrap_result_t g_tx_commit_result = DB2_VAULT_REWRAP_OK;
+static db2_vault_rewrap_result_t g_stage_finish_result = DB2_VAULT_REWRAP_OK;
 static int g_tx_commit_retain;
 static int g_guard_sync_result = VAULT_MAINTENANCE_OK;
 static int g_guard_seal_result = VAULT_MAINTENANCE_OK;
@@ -315,6 +316,8 @@ static db2_vault_rewrap_result_t stage_finish(db2_vault_rewrap_tx_t *t, const ui
    (void)o;
    (void)f;
    g_calls[C_STAGE_FINISH]++;
+   if (g_stage_finish_result != DB2_VAULT_REWRAP_OK)
+      return g_stage_finish_result;
    if (g_forward)
    {
       g_state = DB2_VAULT_REWRAP_WRAPS_STAGED;
@@ -594,6 +597,7 @@ static void reset_fakes(void)
    g_guard_end_result = VAULT_MAINTENANCE_OK;
    g_snapshot_result = DB2_VAULT_REWRAP_OK;
    g_tx_commit_result = DB2_VAULT_REWRAP_OK;
+   g_stage_finish_result = DB2_VAULT_REWRAP_OK;
    g_tx_commit_retain = 0;
    g_prepare_result = VAULT_TPM2_RESEAL_OK;
    g_prepare_lost_response = 0;
@@ -756,6 +760,27 @@ static void pagination_defenses(void)
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) ==
           VAULT_RESEAL_ORCHESTRATOR_RECOVERY_REQUIRED);
    assert(g_calls[C_STAGE_CHECK] == 0 && g_calls[C_QUARANTINE] == 1);
+}
+
+static void callback_result_typing(void)
+{
+   uint8_t secret[3] = {1, 2, 3};
+   vault_reseal_orchestrator_request_t r = request(VAULT_RESEAL_ORCHESTRATOR_RESUME, secret);
+   vault_reseal_orchestrator_output_t out;
+
+   reset_fakes();
+   g_forward = 1;
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_stage_finish_result = DB2_VAULT_REWRAP_BUSY;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_BUSY);
+
+   reset_fakes();
+   g_forward = 1;
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_stage_finish_result = DB2_VAULT_REWRAP_INVALID;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INVALID);
 }
 
 static void assert_critical_cell_calls(db2_vault_rewrap_state_t state,
@@ -1002,6 +1027,7 @@ int main(void)
    full_forward_path();
    replay_callback_and_terminal_guards();
    pagination_defenses();
+   callback_result_typing();
    uncertainty_and_abort_ordering();
    teardown_failures();
    puts("vault_reseal_orchestrator: exhaustive DB x custody tests passed");
