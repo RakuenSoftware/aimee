@@ -54,6 +54,40 @@ def _regular_file(path: Path, *, max_bytes: int) -> bytes:
         fail("input", f"cannot read {path}: {exc}")
 
 
+def _repository_file(repo: Path, relative: Path | PurePosixPath, *, max_bytes: int) -> bytes:
+    pure = PurePosixPath(relative.as_posix())
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        fail("repository-path", "repository path is not canonical")
+    current = repo
+    for index, part in enumerate(pure.parts):
+        current = current / part
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            fail("repository-path", f"cannot inspect {current}: {exc}")
+        if stat.S_ISLNK(info.st_mode):
+            fail("repository-path", f"symlink component is forbidden: {current}")
+        if index + 1 < len(pure.parts) and not stat.S_ISDIR(info.st_mode):
+            fail("repository-path", f"non-directory path component: {current}")
+    return _regular_file(current, max_bytes=max_bytes)
+
+
+def _repository_directory(repo: Path, relative: Path | PurePosixPath) -> Path:
+    pure = PurePosixPath(relative.as_posix())
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
+        fail("repository-path", "repository directory is not canonical")
+    current = repo
+    for part in pure.parts:
+        current = current / part
+        try:
+            info = current.lstat()
+        except OSError as exc:
+            fail("repository-path", f"cannot inspect {current}: {exc}")
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            fail("repository-path", f"directory or symlink invariant failed: {current}")
+    return current
+
+
 def _public_key(path: Path) -> str:
     raw = _regular_file(path, max_bytes=4096)
     try:
@@ -67,7 +101,7 @@ def _public_key(path: Path) -> str:
 
 def _inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = contract.strict_json_bytes(
-        _regular_file(repo / INVENTORY_PATH, max_bytes=contract.MAX_DESCRIPTOR_BYTES)
+        _repository_file(repo, INVENTORY_PATH, max_bytes=contract.MAX_DESCRIPTOR_BYTES)
     )
     if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
         fail("inventory", "canonical inventory has unexpected shape")
@@ -103,8 +137,9 @@ def _resolve_worktree_reference(repo: Path, module_ids: set[str], reference: str
     pure = PurePosixPath(relative)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         fail("evidence", "path is not canonical")
-    path = repo.joinpath(*pure.parts)
-    raw = _regular_file(path, max_bytes=contract.MAX_GOVERNED_BLOB_BYTES)
+    raw = _repository_file(
+        repo, pure, max_bytes=contract.MAX_GOVERNED_BLOB_BYTES
+    )
     if match.group("line") is not None and int(match.group("line")) > len(raw.splitlines()):
         fail("evidence", f"line exceeds {relative}")
 
@@ -253,6 +288,7 @@ def build_attestations(args: argparse.Namespace) -> None:
     )
     toolchain = contract.load_locked_toolchain(lock, args.ssh_keygen.resolve())
     target = repo / ATTESTATION_PATH
+    target_parent = _repository_directory(repo, ATTESTATION_PATH.parent)
     _existing_attestations_are_well_formed(
         target,
         module_ids,
@@ -262,22 +298,25 @@ def build_attestations(args: argparse.Namespace) -> None:
         reviewer_key=reviewer_key,
         toolchain=toolchain,
     )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".attestations-", dir=target.parent))
+    staging = Path(tempfile.mkdtemp(prefix=".attestations-", dir=target_parent))
     os.chmod(staging, 0o700)
     installed = False
     try:
         index: list[dict[str, str]] = []
         for module_id in sorted(module_ids):
-            descriptor_path = repo / "src/modules" / module_id / "module.yaml"
-            descriptor_raw = _regular_file(descriptor_path, max_bytes=contract.MAX_DESCRIPTOR_BYTES)
+            descriptor_relative = Path("src/modules") / module_id / "module.yaml"
+            descriptor_raw = _repository_file(
+                repo, descriptor_relative, max_bytes=contract.MAX_DESCRIPTOR_BYTES
+            )
             descriptor = contract.validate_v2_metadata(
                 contract.strict_json_bytes(descriptor_raw),
                 optional=module_id in optional,
                 known_ids=module_ids,
             )
-            document_path = repo / descriptor["docs"]
-            document_raw = _regular_file(document_path, max_bytes=contract.MAX_DOCUMENT_BYTES)
+            document_path = Path(descriptor["docs"])
+            document_raw = _repository_file(
+                repo, document_path, max_bytes=contract.MAX_DOCUMENT_BYTES
+            )
             contract.parse_module_document(
                 document_raw,
                 module_id,

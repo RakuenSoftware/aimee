@@ -76,6 +76,18 @@ class SignModuleDocsTests(unittest.TestCase):
             ))
             self.assertEqual((target / "index.json").read_bytes(), marker)
 
+    def test_repository_files_reject_symlink_ancestors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            outside = Path(tmp) / "outside"
+            repo.mkdir()
+            outside.mkdir()
+            (outside / "secret").write_text("secret", encoding="ascii")
+            (repo / "linked").symlink_to(outside, target_is_directory=True)
+            self.assert_rule("repository-path", lambda: signer._repository_file(
+                repo, Path("linked/secret"), max_bytes=1024
+            ))
+
     def test_directory_exchange_is_atomic_when_supported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
