@@ -297,19 +297,40 @@ func TestRefreshScanRefUsesNewRemoteBranchTip(t *testing.T) {
 	}
 }
 
-func TestAutoProposalCandidate(t *testing.T) {
-	for candidate, want := range map[string]bool{
-		"docs/proposals/pending/feature.md":         true,
-		"docs/proposals/pending/FEATURE.MD":         true,
-		"docs/proposals/pending/.gitkeep":           false,
-		"docs/proposals/pending/notes.txt":          false,
-		"docs/proposals/pending/.drafts/feature.md": false,
-		"docs/.private/pending/feature.md":          false,
-		"":                                          false,
-	} {
-		if got := autoProposalCandidate(candidate); got != want {
-			t.Errorf("autoProposalCandidate(%q)=%v want=%v", candidate, got, want)
-		}
+func TestVisibleMarkdownProposal(t *testing.T) {
+	const root = "docs/proposals/pending"
+	cases := map[string]struct {
+		candidate string
+		want      bool
+	}{
+		"visible":           {root + "/feature.md", true},
+		"case insensitive":  {root + "/FEATURE.MD", true},
+		"version directory": {root + "/v1.0/notes.md", true},
+		"hidden filename":   {root + "/.gitkeep.md", false},
+		"hidden directory":  {root + "/.drafts/feature.md", false},
+		"hidden well known": {root + "/.well-known/foo.md", false},
+		"wrong extension":   {root + "/notes.txt", false},
+		"wrong root":        {"docs/other/feature.md", false},
+		"parent escape":     {root + "/../feature.md", false},
+		"absolute":          {"/" + root + "/feature.md", false},
+		"control character": {root + "/bad\nname.md", false},
+		"empty":             {"", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := isVisibleMarkdownProposal(root, tc.candidate); got != tc.want {
+				t.Errorf("isVisibleMarkdownProposal(%q)=%v want=%v", tc.candidate, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegularTreePathRejectsSymlinks(t *testing.T) {
+	if got, ok := regularTreePath("100644 blob deadbeef\tdocs/proposals/pending/ok.md"); !ok || got != "docs/proposals/pending/ok.md" {
+		t.Fatalf("regular path=%q ok=%v", got, ok)
+	}
+	if _, ok := regularTreePath("120000 blob deadbeef\tdocs/proposals/pending/link.md"); ok {
+		t.Fatal("symlink was accepted as a proposal")
 	}
 }
 

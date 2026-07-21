@@ -107,16 +107,17 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 		return err
 	}
 	request.Ref = ref
-	directory := request.Event
-	if directory == "" {
-		directory = "docs/proposals/pending"
-	}
-	listing, err := gitOutput(ctx, request.Workspace, "ls-tree", "-r", "--name-only", request.Ref, "--", directory)
+	directory, err := confinedProposalDirectory(request.Event)
 	if err != nil {
 		return err
 	}
-	for _, candidate := range strings.Split(string(listing), "\n") {
-		if !autoProposalCandidate(candidate) {
+	listing, err := gitOutput(ctx, request.Workspace, "ls-tree", "-r", "-z", request.Ref, "--", directory)
+	if err != nil {
+		return err
+	}
+	for _, record := range strings.Split(string(listing), "\x00") {
+		candidate, regular := regularTreePath(record)
+		if !regular || !isVisibleMarkdownProposal(directory, candidate) {
 			continue
 		}
 		request.Proposal = candidate
@@ -140,11 +141,42 @@ func (s *Server) scanTrigger(ctx context.Context, request triggerFireRequest) er
 	return nil
 }
 
-func autoProposalCandidate(candidate string) bool {
-	if candidate == "" || !strings.EqualFold(path.Ext(candidate), ".md") {
+func confinedProposalDirectory(directory string) (string, error) {
+	if directory == "" {
+		directory = "docs/proposals/pending"
+	}
+	clean := path.Clean(directory)
+	if clean == "." || path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", errors.New("proposal directory must be a confined repository-relative path")
+	}
+	return clean, nil
+}
+
+func regularTreePath(record string) (string, bool) {
+	tab := strings.IndexByte(record, '\t')
+	if tab < 0 {
+		return "", false
+	}
+	fields := strings.Fields(record[:tab])
+	if len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" {
+		return "", false
+	}
+	return record[tab+1:], true
+}
+
+// isVisibleMarkdownProposal validates POSIX paths emitted by git ls-tree. A
+// candidate must remain below the configured root, have no hidden relative
+// component, contain no control character, and end in .md case-insensitively.
+func isVisibleMarkdownProposal(directory, candidate string) bool {
+	clean := path.Clean(candidate)
+	root := path.Clean(directory)
+	if candidate == "" || clean != candidate || path.IsAbs(clean) ||
+		!strings.HasPrefix(clean, root+"/") || !strings.EqualFold(path.Ext(clean), ".md") ||
+		strings.IndexFunc(clean, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 		return false
 	}
-	for _, component := range strings.Split(candidate, "/") {
+	relative := strings.TrimPrefix(clean, root+"/")
+	for _, component := range strings.Split(relative, "/") {
 		if strings.HasPrefix(component, ".") {
 			return false
 		}
@@ -300,20 +332,16 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if len(commit) != 40 && len(commit) != 64 {
 		return "", "", errors.New("git returned an invalid commit id")
 	}
-	directory := request.Event
-	if directory == "" {
-		directory = "docs/proposals/pending"
+	cleanDirectory, err := confinedProposalDirectory(request.Event)
+	if err != nil {
+		return "", "", err
 	}
-	cleanDirectory := path.Clean(directory)
-	if cleanDirectory == "." || strings.HasPrefix(cleanDirectory, "../") || path.IsAbs(cleanDirectory) {
-		return "", "", errors.New("proposal directory must be a confined repository-relative path")
-	}
-	listing, err := gitOutput(ctx, workspace, "ls-tree", "-r", "--name-only", commit, "--", cleanDirectory)
+	listing, err := gitOutput(ctx, workspace, "ls-tree", "-r", "-z", "--name-only", commit, "--", cleanDirectory)
 	if err != nil {
 		return "", "", fmt.Errorf("list pending proposals: %w", err)
 	}
 	proposalPath := ""
-	for _, candidate := range strings.Split(string(listing), "\n") {
+	for _, candidate := range strings.Split(string(listing), "\x00") {
 		if proposalMatches(candidate, request.Proposal) {
 			if proposalPath != "" && proposalPath != candidate {
 				return "", "", fmt.Errorf("proposal selector %q is ambiguous", request.Proposal)
