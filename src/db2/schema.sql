@@ -6502,8 +6502,11 @@ BEGIN
      p_digest IS NULL OR p_digest!~'^[0-9a-f]{64}$' OR p_lease IS NULL OR p_lease<1 THEN
     RAISE EXCEPTION 'org_egress_admit: invalid input' USING ERRCODE='22023';
   END IF;
-  IF p_origin IS DISTINCT FROM ('cert:'||p_issuer||':'||p_serial) OR
-     NOT EXISTS(SELECT 1 FROM kb_enrollments e WHERE e.authority_id=p_authority AND
+  -- p_origin is the canonical, percent-encoded kb_identity_key.  Do not rebuild
+  -- it from raw issuer bytes here: real X.509 DNs contain '/' and '='.  The
+  -- caller transaction already set v_actor from that verified principal, while
+  -- the exact raw issuer/serial are independently bound to the enrollment row.
+  IF NOT EXISTS(SELECT 1 FROM kb_enrollments e WHERE e.authority_id=p_authority AND
       e.fingerprint=p_fingerprint AND e.cert_issuer=p_issuer AND
       e.cert_serial_norm=p_serial AND e.state='active' AND e.revoked_at='') OR
      v_actor IS DISTINCT FROM p_origin OR
