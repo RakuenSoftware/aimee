@@ -4185,7 +4185,7 @@ DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; w public.kb_vault_rewrap_wor
   ct BYTEA:=pg_catalog.sha256(pg_catalog.convert_to('aimee-vault-rewrap-check-stage-v1','UTF8'));
   computed BYTEA;
 BEGIN
-  IF pg_catalog.coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
      p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 THEN
     RAISE EXCEPTION 'org_vault_rewrap_verify_summary: invalid input' USING ERRCODE='22023';
   END IF;
@@ -4299,7 +4299,7 @@ CREATE OR REPLACE FUNCTION org_vault_rewrap_verify_secret_page(p_op TEXT,p_fence
 RETURNS TABLE(source_id BIGINT,principal TEXT,agent TEXT,cred TEXT,version BIGINT,wrapped_dek BYTEA)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
-  IF pg_catalog.coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
      p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 OR
      p_after IS NULL OR p_after OPERATOR(pg_catalog.<) 0 OR p_limit IS NULL OR
      p_limit OPERATOR(pg_catalog.<) 1 OR p_limit OPERATOR(pg_catalog.>) 128 THEN
@@ -4333,7 +4333,7 @@ CREATE OR REPLACE FUNCTION org_vault_rewrap_verify_check_page(p_op TEXT,p_fence 
 RETURNS TABLE(principal TEXT,kek_check BYTEA,principal_cursor BYTEA)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
-  IF pg_catalog.coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
+  IF coalesce(p_op,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
      p_fence IS NULL OR p_fence OPERATOR(pg_catalog.<) 1 OR p_after IS NULL OR
      pg_catalog.octet_length(p_after) OPERATOR(pg_catalog.>) 640 OR p_limit IS NULL OR
      p_limit OPERATOR(pg_catalog.<) 1 OR p_limit OPERATOR(pg_catalog.>) 128 THEN

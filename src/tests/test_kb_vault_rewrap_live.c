@@ -615,7 +615,8 @@ static void verify_promoted_bounded(int64_t fence)
    assert(st);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);
    assert(aimee_pg_bind_int64(st, "?2", fence) == 0);
-   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW);
+   if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
+      die_pg("org_vault_rewrap_verify_summary", err);
    assert(aimee_pg_column_int64(st, 0) == SECRET_ROWS);
    assert(aimee_pg_column_int64(st, 1) == CHECK_ROWS);
    assert(aimee_pg_column_bytes(st, 2) == 32);
