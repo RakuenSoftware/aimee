@@ -10,11 +10,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef struct
+{
+   size_t callbacks;
+   size_t terminal;
+   int abort_nonterminal;
+} stream_probe_t;
+
 static int consume_delta(const aimee_delta_t *delta, void *context)
 {
-   (void)delta;
-   size_t *count = context;
-   (*count)++;
+   stream_probe_t *probe = context;
+   probe->callbacks++;
+   if (delta->type == AIMEE_DELTA_TURN_STOP)
+      probe->terminal++;
+   else if (probe->abort_nonterminal)
+      return 1;
    return 0;
 }
 
@@ -29,10 +39,11 @@ int main(int argc, char **argv)
    }
    if (argc < 2 || argc > 3)
    {
-      fprintf(stderr, "usage: %s model [buffered|stream]\n", argv[0]);
+      fprintf(stderr, "usage: %s model [buffered|stream|stream-abort]\n", argv[0]);
       return 2;
    }
-   int streaming = argc == 3 && strcmp(argv[2], "stream") == 0;
+   int stream_abort = argc == 3 && strcmp(argv[2], "stream-abort") == 0;
+   int streaming = argc == 3 && (strcmp(argv[2], "stream") == 0 || stream_abort);
    if (argc == 3 && !streaming && strcmp(argv[2], "buffered") != 0)
       return 2;
    int64_t team = team_text && *team_text ? strtoll(team_text, NULL, 10) : 960001;
@@ -74,10 +85,26 @@ int main(int argc, char **argv)
    kb_bedrock_result_t result;
    if (streaming)
    {
-      size_t deltas = 0;
-      result = kb_bedrock_dispatch_stream(&target, &request, &credentials, consume_delta, &deltas,
+      stream_probe_t probe = {.abort_nonterminal = stream_abort};
+      result = kb_bedrock_dispatch_stream(&target, &request, &credentials, consume_delta, &probe,
                                           &status);
-      if (result == KB_BEDROCK_OK && !deltas)
+      if (stream_abort)
+      {
+         if (result != KB_BEDROCK_CALLBACK_ABORT || status != 0 || probe.callbacks != 1 ||
+             probe.terminal != 0)
+         {
+            fprintf(stderr,
+                    "kb_bedrock_live: callback abort mismatch rc=%d status=%d callbacks=%zu "
+                    "terminal=%zu\n",
+                    result, status, probe.callbacks, probe.terminal);
+            db2_shutdown();
+            return 1;
+         }
+         db2_shutdown();
+         puts("kb_bedrock_live: ok (callback abort)");
+         return 0;
+      }
+      if (result == KB_BEDROCK_OK && !probe.callbacks)
          result = KB_BEDROCK_INCOMPLETE_STREAM;
    }
    else
