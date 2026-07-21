@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import struct
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -430,6 +432,79 @@ class ModuleDocContractTests(unittest.TestCase):
             "git-byte-budget", lambda: budget.cache_blob(("repo", "a" * 40, "x"), b"x")
         )
 
+    def test_snapshot_close_drains_leases_and_serializes_accounting(self) -> None:
+        budget = contract.GitDecisionBudget()
+        started = threading.Event()
+        release = threading.Event()
+        closed = threading.Event()
+
+        def operation() -> None:
+            with budget.operation():
+                started.set()
+                release.wait(timeout=2)
+
+        worker = threading.Thread(target=operation)
+        worker.start()
+        self.assertTrue(started.wait(timeout=1))
+
+        def close_budget() -> None:
+            budget.close()
+            closed.set()
+
+        closer = threading.Thread(target=close_budget)
+        closer.start()
+        self.assertFalse(closed.wait(timeout=0.05))
+        deadline = time.monotonic() + 1
+        while True:
+            try:
+                with budget.operation():
+                    pass
+            except contract.ContractError as exc:
+                self.assertIn("rule=git-snapshot-lifetime", str(exc))
+                break
+            self.assertLess(time.monotonic(), deadline)
+        release.set()
+        worker.join(timeout=1)
+        closer.join(timeout=1)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertTrue(closed.is_set())
+
+        concurrent = contract.GitDecisionBudget()
+        concurrent.git_operations = contract.MAX_DECISION_GIT_OPERATIONS - 5
+        outcomes: list[str] = []
+        outcome_lock = threading.Lock()
+
+        def consume() -> None:
+            try:
+                concurrent.consume_git_operation()
+                result = "accepted"
+            except contract.ContractError:
+                result = "rejected"
+            with outcome_lock:
+                outcomes.append(result)
+
+        threads = [threading.Thread(target=consume) for _ in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=1)
+        self.assertEqual(outcomes.count("accepted"), 5)
+        self.assertEqual(outcomes.count("rejected"), 5)
+
+        cached = contract.GitDecisionBudget()
+        cache_threads = [
+            threading.Thread(
+                target=lambda: cached.cache_blob(("repo", "a" * 40, "x"), b"shared")
+            )
+            for _ in range(10)
+        ]
+        for thread in cache_threads:
+            thread.start()
+        for thread in cache_threads:
+            thread.join(timeout=1)
+        self.assertEqual(cached.distinct_blob_bytes, len(b"shared"))
+
     def test_decision_deadline_kills_git_and_prevents_late_spawn(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -573,6 +648,8 @@ class ModuleDocContractTests(unittest.TestCase):
             profile = oidc_profile()
             token_claims = claims(profile)
             events: list[str] = []
+            retained_readers = []
+            retained_validations = []
 
             def verify(token: str, selected: dict[str, object]) -> dict[str, object]:
                 self.assertEqual(token, "signed.jwt.value")
@@ -580,9 +657,7 @@ class ModuleDocContractTests(unittest.TestCase):
                 events.append("crypto")
                 return token_claims
 
-            def resolve(workload: dict[str, object], pull_request: int) -> dict[str, object]:
-                self.assertEqual(events, ["crypto"])
-                events.append("resolve")
+            def target_for(workload: dict[str, object], pull_request: int):
                 return {
                     "schema": "aimee.candidate-target.v1",
                     "repository_identity": workload["repository_identity"],
@@ -598,10 +673,33 @@ class ModuleDocContractTests(unittest.TestCase):
                     "trigger_check_identity": workload["trigger_check_identity"],
                 }
 
-            def validate(reader, workload, target) -> str:
-                self.assertEqual(events, ["crypto", "resolve"])
+            @contextmanager
+            def owned_candidate(target):
+                events.append("enter")
+                try:
+                    yield contract.ResolvedCandidate(target, repo)
+                finally:
+                    events.append("exit")
+
+            def resolve(workload: dict[str, object], pull_request: int):
+                self.assertEqual(events, ["crypto"])
+                events.append("resolve")
+                return owned_candidate(target_for(workload, pull_request))
+
+            def validate(validation, workload, target) -> str:
+                self.assertEqual(events, ["crypto", "resolve", "enter"])
                 events.append("candidate")
-                self.assertEqual(reader.read_blob("evidence.txt"), b"governed\n")
+                candidate = validation.candidate
+                base = validation.base
+                self.assertFalse(hasattr(validation, "reader"))
+                for hidden in ("repository", "budget", "blobs"):
+                    self.assertFalse(hasattr(candidate, hidden))
+                self.assertEqual(candidate.read_blob("evidence.txt"), b"governed\n")
+                self.assertEqual(base.read_blob("evidence.txt"), b"governed\n")
+                retained_readers.append(candidate)
+                retained_validations.append(validation)
+                workload["repository_identity"] = "callback-mutation"
+                target["candidate_revision"] = "c" * 40
                 return "All governed artifacts passed."
 
             request = json.dumps({
@@ -609,33 +707,224 @@ class ModuleDocContractTests(unittest.TestCase):
                 "pull_request": 1708,
                 "oidc_token": "signed.jwt.value",
             }, separators=(",", ":")).encode("ascii")
-            decision = contract.evaluate_trigger(
-                request,
-                (json.dumps(profile, separators=(",", ":")) + "\n").encode("ascii"),
-                wall_time=1_800_000_000,
-                verify_jwt=verify,
-                resolve_target=resolve,
-                validate_candidate=validate,
-                repository=repo,
+            profile_raw = (
+                json.dumps(profile, separators=(",", ":")) + "\n"
+            ).encode("ascii")
+
+            def decide(*, resolver=resolve, validator=validate):
+                return contract.evaluate_trigger(
+                    request,
+                    profile_raw,
+                    wall_time=1_800_000_000,
+                    verify_jwt=verify,
+                    resolve_target=resolver,
+                    validate_candidate=validator,
+                )
+
+            decision = decide()
+            self.assertEqual(
+                events, ["crypto", "resolve", "enter", "candidate", "exit"]
             )
-            self.assertEqual(events, ["crypto", "resolve", "candidate"])
+
+            events.clear()
+            read_started = threading.Event()
+            release_read = threading.Event()
+            reader_threads = []
+            reader_errors = []
+            original_read_blob = contract.GitBlobReader.read_blob
+
+            def blocking_read_blob(reader, path, *, max_bytes=contract.MAX_GOVERNED_BLOB_BYTES):
+                read_started.set()
+                release_read.wait(timeout=2)
+                try:
+                    return original_read_blob(reader, path, max_bytes=max_bytes)
+                finally:
+                    events.append("read-finished")
+
+            def concurrent_validate(validation, workload, target):
+                events.append("candidate")
+
+                def read() -> None:
+                    try:
+                        validation.candidate.read_blob("evidence.txt")
+                    except BaseException as exc:
+                        reader_errors.append(exc)
+
+                thread = threading.Thread(target=read)
+                reader_threads.append(thread)
+                thread.start()
+                self.assertTrue(read_started.wait(timeout=1))
+                threading.Timer(0.05, release_read.set).start()
+                return "Concurrent read drained before cleanup."
+
+            with mock.patch.object(
+                contract.GitBlobReader, "read_blob", new=blocking_read_blob
+            ):
+                decide(validator=concurrent_validate)
+            for thread in reader_threads:
+                thread.join(timeout=1)
+            self.assertEqual(reader_errors, [])
+            self.assertEqual(
+                events,
+                [
+                    "crypto", "resolve", "enter", "candidate", "read-finished", "exit"
+                ],
+            )
+
+            events.clear()
+
+            def mismatched_resolve(workload: dict[str, object], pull_request: int):
+                target = target_for(workload, pull_request)
+                target["repository_identity"] = "different-repository"
+                return owned_candidate(target)
+
+            with self.assertRaisesRegex(
+                contract.ContractError, "rule=target-repository-binding"
+            ):
+                decide(resolver=mismatched_resolve)
+            self.assertEqual(events, ["crypto", "enter", "exit"])
+
+            events.clear()
+
+            def malformed_resolve(workload: dict[str, object], pull_request: int):
+                target = target_for(workload, pull_request)
+                target["candidate_revision"] = "abbreviated"
+                return owned_candidate(target)
+
+            with self.assertRaisesRegex(
+                contract.ContractError, "rule=candidate-target-revision"
+            ):
+                decide(resolver=malformed_resolve)
+            self.assertEqual(events, ["crypto", "enter", "exit"])
+
+            events.clear()
+
+            def explode(validation, workload, target) -> str:
+                events.append("candidate")
+                raise RuntimeError("unexpected validator failure")
+
+            class AdversarialContext:
+                def __init__(self, target, *, cleanup_error=False):
+                    self.target = target
+                    self.cleanup_error = cleanup_error
+
+                def __enter__(self):
+                    events.append("enter")
+                    return contract.ResolvedCandidate(self.target, repo)
+
+                def __exit__(self, exc_type, exc, traceback):
+                    events.append("exit")
+                    if self.cleanup_error:
+                        raise RuntimeError("cleanup replacement")
+                    return True
+
+            def adversarial_resolve(workload, pull_request):
+                return AdversarialContext(target_for(workload, pull_request))
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected validator failure"):
+                decide(resolver=adversarial_resolve, validator=explode)
+            self.assertEqual(events, ["crypto", "enter", "candidate", "exit"])
+
+            events.clear()
+
+            def replacing_resolve(workload, pull_request):
+                return AdversarialContext(
+                    target_for(workload, pull_request), cleanup_error=True
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected validator failure"):
+                decide(resolver=replacing_resolve, validator=explode)
+            self.assertEqual(events, ["crypto", "enter", "candidate", "exit"])
+
+            events.clear()
+
+            def accept(validation, workload, target):
+                events.append("candidate")
+                return "Accepted before cleanup."
+
+            self.assert_rule(
+                "resolver-cleanup",
+                lambda: decide(resolver=replacing_resolve, validator=accept),
+            )
+            self.assertEqual(events, ["crypto", "enter", "candidate", "exit"])
+
+            events.clear()
+            partial = repo / "partial-acquisition"
+
+            def failed_acquisition(workload, pull_request):
+                @contextmanager
+                def acquisition():
+                    partial.mkdir()
+                    try:
+                        raise RuntimeError("acquisition failed")
+                        yield
+                    finally:
+                        partial.rmdir()
+
+                return acquisition()
+
+            with self.assertRaisesRegex(RuntimeError, "acquisition failed"):
+                decide(resolver=failed_acquisition)
+            self.assertFalse(partial.exists())
+            self.assert_rule(
+                "git-snapshot-lifetime",
+                lambda: retained_readers[0].read_blob("evidence.txt"),
+            )
+            self.assert_rule(
+                "git-snapshot-lifetime",
+                lambda: retained_validations[0].base.read_blob("evidence.txt"),
+            )
+            self.assertFalse(hasattr(retained_validations[0], "reader"))
+            for name, callback in (
+                ("commit", lambda: retained_readers[0].commit),
+                ("list", lambda: retained_readers[0].list_directory(".")),
+                (
+                    "reference",
+                    lambda: retained_readers[0].resolve_reference(
+                        "path:evidence.txt#L1"
+                    ),
+                ),
+                (
+                    "source-pattern",
+                    lambda: retained_readers[0].expand_source_pattern(
+                        "src/modules/memory/*.c", "memory"
+                    ),
+                ),
+            ):
+                with self.subTest(revoked_operation=name):
+                    self.assert_rule("git-snapshot-lifetime", callback)
             self.assertEqual(decision.publisher_result["candidate_revision"], commit)
+            self.assertEqual(
+                decision.workload["repository_identity"], "repository-17"
+            )
             self.assertRegex(decision.token_replay_key, r"^[0-9a-f]{64}$")
             self.assertRegex(decision.decision_replay_key, r"^[0-9a-f]{64}$")
             events.clear()
-            def reject(reader, workload, target) -> str:
+
+            def reject(validation, workload, target) -> str:
+                events.append("candidate")
                 contract.fail("candidate-rejected", "fixture rejection")
-            rejected = contract.evaluate_trigger(
-                request,
-                (json.dumps(profile, separators=(",", ":")) + "\n").encode("ascii"),
-                wall_time=1_800_000_000,
-                verify_jwt=verify,
-                resolve_target=resolve,
-                validate_candidate=reject,
-                repository=repo,
+
+            rejected = decide(validator=reject)
+            self.assertEqual(
+                events, ["crypto", "resolve", "enter", "candidate", "exit"]
             )
             self.assertEqual(rejected.publisher_result["conclusion"], "failure")
             self.assertIn("rule=candidate-rejected", rejected.publisher_result["summary"])
+
+            events.clear()
+            rejected = decide(resolver=replacing_resolve, validator=reject)
+            self.assertEqual(events, ["crypto", "enter", "candidate", "exit"])
+            self.assertEqual(rejected.publisher_result["conclusion"], "failure")
+            self.assertIn("rule=candidate-rejected", rejected.publisher_result["summary"])
+
+            events.clear()
+
+            with self.assertRaisesRegex(RuntimeError, "unexpected validator failure"):
+                decide(validator=explode)
+            self.assertEqual(
+                events, ["crypto", "resolve", "enter", "candidate", "exit"]
+            )
 
     def test_atomic_candidate_validator_with_two_real_signers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

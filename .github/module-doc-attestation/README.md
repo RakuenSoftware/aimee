@@ -11,8 +11,25 @@ that produces the same normalized workload and candidate-target records.
 descriptor-v2 validation, document validation, SSHSIG validation, workload-to-candidate binding,
 replay keys, and publisher-result validation. Its decision engine invokes the deployment's
 cryptographic JWT verifier before normalizing claims. It then invokes the read-only repository
-resolver before opening the resolved candidate commit. Function names alone do not establish those
-properties, so deployment integration tests must exercise invalid signatures, stale keys,
+resolver, which yields the candidate target and keeps the read-only object database live for every
+Git read against it. The resolver context cleans up that database on success and on every failure
+after entry. It must also clean partial resources if acquisition fails before entry. Resolver cleanup
+cannot suppress an active contract or validation failure, and a cleanup error replaces no active
+failure; a cleanup error on a normal exit propagates fail closed. The invocation-scoped validation
+capability exposes only pre-bound candidate and protected-base readers over that one database and one
+decision budget; it cannot open arbitrary revisions.
+Those readers expose no repository path, budget, or cache, and reject every Git operation after
+validation returns. Candidate-policy failures remain active through cleanup and become failure
+results only afterward. Only detached normalized metadata survives cleanup for replay-key and
+publisher-result construction.
+
+Validation-reader operations hold synchronized leases for their full duration. Closing the
+capability rejects new leases and waits for all in-flight operations before repository cleanup
+begins. The same synchronization protects Git-operation and evidence counts, the distinct-blob
+cache, and byte-ceiling accounting from concurrent updates.
+
+Function names alone do not establish those properties, so deployment integration tests must
+exercise invalid signatures, stale keys,
 redirects, repository mismatches, replay, and publisher permissions.
 
 Each decision has explicit ceilings for evidence records, distinct blob bytes, Git operations, and
