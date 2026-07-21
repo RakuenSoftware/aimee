@@ -422,9 +422,14 @@ type panelFinding struct {
 	Summary        string `json:"summary"`
 	Recommendation string `json:"recommendation"`
 }
+type panelAlignment struct {
+	Status  string `json:"status"`
+	Summary string `json:"summary"`
+}
 type panelResponse struct {
-	Verdict  string         `json:"verdict"`
-	Findings []panelFinding `json:"findings"`
+	OriginalRequestAlignment panelAlignment `json:"original_request_alignment"`
+	Verdict                  string         `json:"verdict"`
+	Findings                 []panelFinding `json:"findings"`
 }
 type panelSeat struct {
 	persona, delegate string
@@ -450,7 +455,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	}
 	req.WorkItem.Worktree = workdir
 	focus := paramString(req.Node, "focus", "correctness, completeness, security, and test quality")
-	basePrompt := "Review the complete artifact against the complete proposal. FOCUS: " + focus + ". Return only JSON shaped {\"verdict\":\"approve\" or \"changes\",\"findings\":[{\"id\":\"...\",\"severity\":\"blocking\",\"location\":\"...\",\"summary\":\"...\",\"recommendation\":\"...\"}]}. A changes verdict requires at least one actionable finding.\n\nPROPOSAL:\n" + req.Proposal + "\n\nARTIFACT (" + reviewed.Type + "):\n" + string(reviewed.Content)
+	basePrompt := "Review the complete artifact against the complete original request. First decide whether the direction actually follows that request: useful refinement is aligned; substituting a different goal or deliverable is drifted; missing context is unclear. Return only JSON shaped {\"original_request_alignment\":{\"status\":\"aligned\" or \"drifted\" or \"unclear\",\"summary\":\"comparison to the original request\"},\"verdict\":\"approve\" or \"changes\",\"findings\":[{\"id\":\"...\",\"severity\":\"blocking\",\"location\":\"...\",\"summary\":\"...\",\"recommendation\":\"...\"}]}. Drifted, unclear, or omitted alignment must use a changes verdict. A changes verdict requires at least one actionable finding. FOCUS: " + focus + ".\n\nORIGINAL REQUEST:\n" + req.Proposal + "\n\nARTIFACT (" + reviewed.Type + "):\n" + string(reviewed.Content)
 	maxRounds := paramInt(req.Node, "max_rounds", 1)
 	if maxRounds < 1 {
 		maxRounds = 1
@@ -522,8 +527,30 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 			}
 			continue
 		}
+		alignment := strings.ToLower(strings.TrimSpace(o.result.OriginalRequestAlignment.Status))
+		alignmentOK := alignment == "aligned"
+		if !alignmentOK {
+			if alignment != "drifted" && alignment != "unclear" {
+				alignment = "unclear"
+			}
+			summary := strings.TrimSpace(o.result.OriginalRequestAlignment.Summary)
+			if summary == "" {
+				summary = "reviewer did not establish that the direction follows the original request"
+			}
+			feedback.Findings = append(feedback.Findings, wfe.Finding{
+				ID:             o.seat.persona + "-original-request-alignment",
+				Persona:        o.seat.persona,
+				Severity:       "blocking",
+				Summary:        "original-request alignment is " + alignment + ": " + summary,
+				Recommendation: "revise the direction so it directly serves the original request, then rerun the panel",
+			})
+		}
 		if o.result.Verdict == "approve" && len(o.result.Findings) == 0 {
-			approvals++
+			// The feedback finding already prevents advancement; also exclude this
+			// vote from quorum so the fail-closed invariant is local and explicit.
+			if alignmentOK {
+				approvals++
+			}
 			continue
 		}
 		if o.result.Verdict != "changes" || len(o.result.Findings) == 0 {

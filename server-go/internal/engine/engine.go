@@ -22,8 +22,10 @@ const (
 )
 
 type StepRequest struct {
-	WorkItem db1.WorkItem            `json:"work_item"`
-	Node     wfe.Node                `json:"node"`
+	WorkItem db1.WorkItem `json:"work_item"`
+	Node     wfe.Node     `json:"node"`
+	// Proposal is the immutable originating request. The historical field name
+	// is retained on the wire, but review prompts expose it as ORIGINAL REQUEST.
 	Proposal string                  `json:"proposal"`
 	Inputs   map[string]wfe.Artifact `json:"inputs,omitempty"`
 	Feedback *wfe.ReviewFeedback     `json:"feedback,omitempty"`
