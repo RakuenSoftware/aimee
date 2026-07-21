@@ -24,6 +24,9 @@ SELECT org_pricing_add_version('bedrock','p2b-billable',1.0,2.0,0.5,0.75);
 SELECT org_vault_put('team:982001:bedrock',982001,'bedrock','iam',1,
   '\x01'::bytea,'\x0102030405060708090a0b0c'::bytea,'\x02'::bytea,
   '\x0102030405060708090a0b0c0d0e0f10'::bytea);
+SELECT org_vault_put('team:982001:bedrock',982001,'bedrock','iam',2,
+  '\x03'::bytea,'\x1112131415161718191a1b1c'::bytea,'\x04'::bytea,
+  '\x1112131415161718191a1b1c1d1e1f20'::bytea);
 INSERT INTO org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
   VALUES ('p2b-key','team:982001:bedrock',982001,'bedrock','iam',1,2,'activated');
 SELECT org_budget_set(982001,NULL,'day',1000.0,NULL);

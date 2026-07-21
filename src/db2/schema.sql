@@ -4684,14 +4684,16 @@ DECLARE
 BEGIN
   IF p_old_fp !~ '^[0-9a-f]{64}$' OR p_new_fp !~ '^[0-9a-f]{64}$'
      OR p_old_issuer = '' OR p_new_issuer = ''
-     OR p_old_serial !~ '^[0-9A-F]+$' OR p_new_serial !~ '^[0-9A-F]+$'
+     OR p_old_serial !~ '^[0-9a-f]+$' OR p_new_serial !~ '^[0-9a-f]+$'
      OR p_scope = '' OR p_new_issuer <> p_old_issuer OR p_new_fp = p_old_fp
      OR p_new_serial = p_old_serial THEN
     RAISE EXCEPTION 'invalid enrollment renewal metadata' USING ERRCODE = '22023';
   END IF;
 
-  v_old_identity := 'cert:' || p_old_issuer || ':' || p_old_serial;
-  v_new_identity := 'cert:' || p_new_issuer || ':' || p_new_serial;
+  v_old_identity := 'cert:' || replace(replace(p_old_issuer,'%','%25'),':','%3A') || ':' ||
+                    replace(replace(p_old_serial,'%','%25'),':','%3A');
+  v_new_identity := 'cert:' || replace(replace(p_new_issuer,'%','%25'),':','%3A') || ':' ||
+                    replace(replace(p_new_serial,'%','%25'),':','%3A');
   IF current_setting('aimee.principal',true) IS DISTINCT FROM v_old_identity THEN
     RAISE EXCEPTION 'renewal actor does not own old certificate' USING ERRCODE = '42501';
   END IF;
@@ -6452,13 +6454,16 @@ BEGIN
   END IF;
   IF NOT EXISTS(SELECT 1 FROM org_model_catalog c WHERE c.model_id=p_model AND c.enabled AND
       c.provider='bedrock' AND c.wire='bedrock' AND c.bedrock_api='converse') OR
-     NOT EXISTS(SELECT 1 FROM org_model_pricing p WHERE p.billable_model=p_billable AND
-      p.version=p_pricing) OR
+     NOT EXISTS(SELECT 1 FROM org_model_pricing_current pc
+      JOIN org_model_pricing p ON p.billable_model=pc.billable_model AND p.version=pc.version
+      WHERE pc.billable_model=p_billable AND pc.version=p_pricing) OR
      NOT EXISTS(SELECT 1 FROM org_vault_current c JOIN org_vault_secret s ON
       s.principal=c.principal AND s.agent=c.agent AND s.cred=c.cred AND s.version=c.version
       WHERE c.principal=p_principal AND c.agent=COALESCE(p_agent,'') AND
       c.cred=COALESCE(p_cred,'') AND s.team_id=p_team) OR
-     NOT EXISTS(SELECT 1 FROM org_vault_rotation r WHERE r.key_id=p_key_id AND
+     NOT EXISTS(SELECT 1 FROM org_vault_rotation r JOIN org_vault_current vc
+      ON vc.principal=r.principal AND vc.agent=r.agent AND vc.cred=r.cred AND
+         vc.version=r.to_version WHERE r.key_id=p_key_id AND
       r.principal=p_principal AND r.agent=COALESCE(p_agent,'') AND
       r.cred=COALESCE(p_cred,'') AND r.team_id=p_team AND r.state='activated') THEN
     RAISE EXCEPTION 'org_egress_binding_set: unavailable authority tuple' USING ERRCODE='42501';
@@ -6540,7 +6545,7 @@ BEGIN
     WHERE x.team_id=p_team AND x.model_id=p_model AND x.enabled AND NOT x.overage_fenced AND
       EXISTS(SELECT 1 FROM org_vault_rotation vr WHERE vr.key_id=x.key_id AND
         vr.principal=x.vault_principal AND vr.agent=x.vault_agent AND vr.cred=x.vault_cred AND
-        vr.team_id=x.team_id AND vr.state='activated') AND
+        vr.team_id=x.team_id AND vr.to_version=vc.version AND vr.state='activated') AND
       c.enabled AND c.provider='bedrock' AND c.wire='bedrock' AND c.bedrock_api='converse';
   IF NOT FOUND THEN
     RAISE EXCEPTION 'org_egress_admit: not authorized' USING ERRCODE='42501';
@@ -6553,30 +6558,42 @@ BEGIN
   IF v_res IS NULL OR v_res<0 OR v_res>=10000000000::numeric THEN
     RAISE EXCEPTION 'org_egress_admit: invalid reservation' USING ERRCODE='22003';
   END IF;
-  SELECT * INTO v_rate FROM org_rate_check(p_team,p_project,p_model,b.vault_cred);
-  IF NOT v_rate.admitted THEN
-    RETURN QUERY SELECT 'rate_refused',NULL::bigint,''::text,v_res::text,b.billable_model,
-      b.pricing_version,b.key_id,b.vault_principal,b.vault_agent,b.vault_cred,
-      b.max_input_tokens,b.max_output_tokens;
-    RETURN;
-  END IF;
-  v_budget:=org_budget_reserve(p_authority,p_request,p_team,p_project,b.pricing_version,v_res,p_lease);
-  IF v_budget<>'granted' THEN
-    RETURN QUERY SELECT 'budget_refused',NULL::bigint,''::text,v_res::text,b.billable_model,
-      b.pricing_version,b.key_id,b.vault_principal,b.vault_agent,b.vault_cred,
-      b.max_input_tokens,b.max_output_tokens;
-    RETURN;
-  END IF;
-  PERFORM org_token_audit_start(p_request,p_authority,'','',p_team,p_project,
-    b.billable_model,b.pricing_version,'','');
-  INSERT INTO org_egress_dispatch(authority_id,request_id,origin_identity,origin_fingerprint,
-      request_digest,team_id,project_id,model_id,billable_model,pricing_version,
-      reserved_max_usd,key_id,vault_principal,vault_agent,vault_cred,max_input_tokens,
-      max_output_tokens,state,lease_expires_at)
-    VALUES(p_authority,p_request,p_origin,p_fingerprint,p_digest,p_team,p_project,p_model,
-      b.billable_model,b.pricing_version,v_res,b.key_id,b.vault_principal,b.vault_agent,
-      b.vault_cred,b.max_input_tokens,b.max_output_tokens,'admitted',now()+p_lease*interval '1 sec')
-    RETURNING * INTO d;
+  -- Refusals are normal API outcomes, but rate_check and budget_reserve mutate
+  -- rows.  A caught inner-subtransaction exception rolls those mutations back
+  -- before returning the refusal tuple.
+  BEGIN
+    SELECT * INTO v_rate FROM org_rate_check(p_team,p_project,p_model,b.vault_cred);
+    IF NOT v_rate.admitted THEN
+      RAISE EXCEPTION 'rate refused' USING ERRCODE='P2R01';
+    END IF;
+    v_budget:=org_budget_reserve(p_authority,p_request,p_team,p_project,b.pricing_version,
+                                 v_res,p_lease);
+    IF v_budget<>'granted' THEN
+      RAISE EXCEPTION 'budget refused' USING ERRCODE='P2B01';
+    END IF;
+    PERFORM org_token_audit_start(p_request,p_authority,'','',p_team,p_project,
+      b.billable_model,b.pricing_version,'','');
+    INSERT INTO org_egress_dispatch(authority_id,request_id,origin_identity,origin_fingerprint,
+        request_digest,team_id,project_id,model_id,billable_model,pricing_version,
+        reserved_max_usd,key_id,vault_principal,vault_agent,vault_cred,max_input_tokens,
+        max_output_tokens,state,lease_expires_at)
+      VALUES(p_authority,p_request,p_origin,p_fingerprint,p_digest,p_team,p_project,p_model,
+        b.billable_model,b.pricing_version,v_res,b.key_id,b.vault_principal,b.vault_agent,
+        b.vault_cred,b.max_input_tokens,b.max_output_tokens,'admitted',
+        now()+p_lease*interval '1 sec')
+      RETURNING * INTO d;
+  EXCEPTION
+    WHEN SQLSTATE 'P2R01' THEN
+      RETURN QUERY SELECT 'rate_refused',NULL::bigint,''::text,v_res::text,b.billable_model,
+        b.pricing_version,b.key_id,b.vault_principal,b.vault_agent,b.vault_cred,
+        b.max_input_tokens,b.max_output_tokens;
+      RETURN;
+    WHEN SQLSTATE 'P2B01' THEN
+      RETURN QUERY SELECT 'budget_refused',NULL::bigint,''::text,v_res::text,b.billable_model,
+        b.pricing_version,b.key_id,b.vault_principal,b.vault_agent,b.vault_cred,
+        b.max_input_tokens,b.max_output_tokens;
+      RETURN;
+  END;
   RETURN QUERY SELECT 'admitted',d.id,d.state,d.reserved_max_usd::text,d.billable_model,
     d.pricing_version,d.key_id,d.vault_principal,d.vault_agent,d.vault_cred,
     d.max_input_tokens,d.max_output_tokens;
@@ -6710,15 +6727,22 @@ BEGIN
   v_overage:=CASE WHEN v_over THEN GREATEST(v_cost-d.reserved_max_usd,0) ELSE 0 END;
   v_budget:=CASE WHEN v_over THEN v_cost ELSE LEAST(v_cost,d.reserved_max_usd) END;
   IF v_over THEN
-    PERFORM org_egress_budget_settle_overage(d.authority_id,d.request_id,v_budget);
+    SELECT org_egress_budget_settle_overage(d.authority_id,d.request_id,v_budget)
+      INTO v_settled;
   ELSE
-    PERFORM org_budget_settle(d.authority_id,d.request_id,v_budget);
+    SELECT org_budget_settle(d.authority_id,d.request_id,v_budget) INTO v_settled;
   END IF;
-  PERFORM org_token_audit_settle(d.authority_id,d.request_id,
+  IF NOT v_settled THEN
+    RAISE EXCEPTION 'org_egress_dispatch_settle: budget row not settled';
+  END IF;
+  SELECT org_token_audit_settle(d.authority_id,d.request_id,
     CASE p_state WHEN 'succeeded' THEN 'settled_success'
       WHEN 'uncertain' THEN 'indeterminate' ELSE 'settled_failed' END,
     d.model_id,p_prompt,p_completion,p_cache_read,p_cache_write,v_cost,
-    to_char(CURRENT_DATE,'YYYY-MM-DD'));
+    to_char(CURRENT_DATE,'YYYY-MM-DD')) INTO v_settled;
+  IF NOT v_settled THEN
+    RAISE EXCEPTION 'org_egress_dispatch_settle: token audit not settled';
+  END IF;
   IF v_over THEN
     UPDATE org_egress_binding SET overage_fenced=true,updated_at=pg_now_text()
       WHERE team_id=d.team_id AND model_id=d.model_id;
@@ -6742,16 +6766,18 @@ EXCEPTION WHEN numeric_value_out_of_range THEN
     raw_cache_write_tokens=COALESCE(p_cache_write,0)::text,
     outcome_class='liability_overflow',owner_token='',owner_instance='',lease_expires_at=NULL,
     updated_at=pg_now_text() WHERE id=d.id;
-  PERFORM org_budget_settle(d.authority_id,d.request_id,d.reserved_max_usd);
-  PERFORM org_token_audit_settle(d.authority_id,d.request_id,'indeterminate',d.model_id,
+  SELECT org_budget_settle(d.authority_id,d.request_id,d.reserved_max_usd) INTO v_settled;
+  IF NOT v_settled THEN RAISE EXCEPTION 'liability overflow budget settlement failed'; END IF;
+  SELECT org_token_audit_settle(d.authority_id,d.request_id,'indeterminate',d.model_id,
     p_prompt,p_completion,p_cache_read,p_cache_write,d.reserved_max_usd,
-    to_char(CURRENT_DATE,'YYYY-MM-DD'));
+    to_char(CURRENT_DATE,'YYYY-MM-DD')) INTO v_settled;
+  IF NOT v_settled THEN RAISE EXCEPTION 'liability overflow audit settlement failed'; END IF;
   RETURN true;
 END; $$;
 
 CREATE OR REPLACE FUNCTION org_egress_recover(p_limit INT DEFAULT 100) RETURNS BIGINT
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
-DECLARE d org_egress_dispatch%ROWTYPE; n BIGINT:=0;
+DECLARE d org_egress_dispatch%ROWTYPE; n BIGINT:=0; v_settled BOOLEAN;
 BEGIN
   IF p_limit<1 OR p_limit>100 THEN
     RAISE EXCEPTION 'org_egress_recover: invalid limit' USING ERRCODE='22023';
@@ -6760,16 +6786,20 @@ BEGIN
   FOR d IN SELECT * FROM org_egress_dispatch WHERE state IN ('admitted','dispatching') AND
       lease_expires_at<now() ORDER BY lease_expires_at,id FOR UPDATE SKIP LOCKED LIMIT p_limit LOOP
     IF d.state='admitted' THEN
-      PERFORM org_budget_settle(d.authority_id,d.request_id,0);
-      PERFORM org_token_audit_settle(d.authority_id,d.request_id,'settled_failed',d.model_id,
-        0,0,0,0,0,to_char(CURRENT_DATE,'YYYY-MM-DD'));
+      SELECT org_budget_settle(d.authority_id,d.request_id,0) INTO v_settled;
+      IF NOT v_settled THEN RAISE EXCEPTION 'stale admitted budget settlement failed'; END IF;
+      SELECT org_token_audit_settle(d.authority_id,d.request_id,'settled_failed',d.model_id,
+        0,0,0,0,0,to_char(CURRENT_DATE,'YYYY-MM-DD')) INTO v_settled;
+      IF NOT v_settled THEN RAISE EXCEPTION 'stale admitted audit settlement failed'; END IF;
       UPDATE org_egress_dispatch SET state='failed',outcome_class='stale_admitted',
         owner_generation=owner_generation+1,owner_token='',owner_instance='',lease_expires_at=NULL,
         updated_at=pg_now_text() WHERE id=d.id;
     ELSE
-      PERFORM org_budget_settle(d.authority_id,d.request_id,d.reserved_max_usd);
-      PERFORM org_token_audit_settle(d.authority_id,d.request_id,'indeterminate',d.model_id,
-        0,0,0,0,d.reserved_max_usd,to_char(CURRENT_DATE,'YYYY-MM-DD'));
+      SELECT org_budget_settle(d.authority_id,d.request_id,d.reserved_max_usd) INTO v_settled;
+      IF NOT v_settled THEN RAISE EXCEPTION 'stale dispatch budget settlement failed'; END IF;
+      SELECT org_token_audit_settle(d.authority_id,d.request_id,'indeterminate',d.model_id,
+        0,0,0,0,d.reserved_max_usd,to_char(CURRENT_DATE,'YYYY-MM-DD')) INTO v_settled;
+      IF NOT v_settled THEN RAISE EXCEPTION 'stale dispatch audit settlement failed'; END IF;
       UPDATE org_egress_dispatch SET state='uncertain',outcome_class='stale_dispatching',
         owner_generation=owner_generation+1,owner_token='',owner_instance='',lease_expires_at=NULL,
         updated_at=pg_now_text() WHERE id=d.id;
