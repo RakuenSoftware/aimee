@@ -194,7 +194,8 @@ static int converse_usage(const cJSON *usage, const char *name, long *out)
 {
    const cJSON *it = usage ? cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name) : NULL;
    if (!cJSON_IsNumber(it) || !isfinite(it->valuedouble) || it->valuedouble < 0 ||
-       it->valuedouble > LONG_MAX || floor(it->valuedouble) != it->valuedouble)
+       it->valuedouble > 9007199254740991.0 || it->valuedouble > LONG_MAX ||
+       floor(it->valuedouble) != it->valuedouble)
       return -1;
    *out = (long)it->valuedouble;
    return 0;
