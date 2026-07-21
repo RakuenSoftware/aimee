@@ -1925,9 +1925,9 @@ static int server_agent_route_is_down(const char *agent_name)
  * Only unchecked. Now the flag alone decides: a claude-oauth subscription is
  * pre-flagged primary-only at add time (driving a personal Claude plan as an
  * automated delegate may breach Anthropic's terms), and unchecking it is an
- * explicit operator opt-in to self-delegation. Roundtable panels keep their own
- * primary exclusion (delegate_ensemble.c) so a second opinion is never the
- * primary itself.
+ * explicit operator opt-in to self-delegation. Roundtable panels use this same
+ * explicit agent policy plus review-role membership; they do not invent a
+ * second hidden exclusion based on the configured primary provider.
  * The gate is config-independent (it reads the agent record), so it holds even
  * when config_load would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
