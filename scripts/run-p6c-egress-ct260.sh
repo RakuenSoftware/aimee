@@ -16,7 +16,7 @@ die() {
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die 'must run as root inside CT260'
 [[ -n ${AIMEE_TEST_PG_URL:-} ]] || die 'AIMEE_TEST_PG_URL is required (CT103 PostgreSQL)'
 
-for command_name in flock make openssl psql python3 stat update-ca-certificates; do
+for command_name in flock make openssl psql python3 sha256sum stat update-ca-certificates; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing required command: $command_name"
 done
 [[ -x scripts/p6c_bedrock_mock.py ]] || die 'scripts/p6c_bedrock_mock.py is missing or not executable'
@@ -171,8 +171,100 @@ exit_for_deferred_signal() {
   esac
 }
 
+recover_stale_system_cas() {
+  # CT260 is a throwaway integration container.  This deliberately narrow
+  # recovery is not a general-purpose host trust-store repair mechanism.  The
+  # exclusive gate flock is already held, so no compliant active run can own a
+  # matching file while this scan executes.
+  local cert_path metadata subject issuer basic_constraints key_usage cert_inode cert_hash
+  local index
+  local -a candidates=()
+  local -a verified_paths=()
+  local -a verified_inodes=()
+  local -a verified_hashes=()
+
+  shopt -s nullglob
+  candidates=(/usr/local/share/ca-certificates/aimee-p6c-egress-ct260-pid-*.crt)
+  shopt -u nullglob
+
+  for cert_path in "${candidates[@]}"; do
+    [[ $cert_path =~ ^/usr/local/share/ca-certificates/aimee-p6c-egress-ct260-pid-[0-9]+\.crt$ ]] ||
+      die 'unverified stale system CA filename; refusing trust-store mutation'
+    [[ -f $cert_path && ! -L $cert_path ]] ||
+      die 'unverified stale system CA file type; refusing trust-store mutation'
+    metadata=$(stat -c '%u:%a' -- "$cert_path") ||
+      die 'cannot inspect stale system CA ownership'
+    [[ $metadata == '0:600' ]] ||
+      die 'unverified stale system CA owner or mode; refusing deletion'
+    awk '
+      BEGIN { inside = 0; begins = 0; ends = 0 }
+      $0 == "-----BEGIN CERTIFICATE-----" {
+        if (inside || begins) exit 1
+        inside = 1; begins++; next
+      }
+      $0 == "-----END CERTIFICATE-----" {
+        if (!inside || ends) exit 1
+        inside = 0; ends++; next
+      }
+      inside && $0 !~ /^[A-Za-z0-9+\/=]+$/ { exit 1 }
+      !inside && $0 !~ /^[[:space:]]*$/ { exit 1 }
+      END { if (inside || begins != 1 || ends != 1) exit 1 }
+    ' "$cert_path" || die 'unverified stale system CA PEM shape; refusing deletion'
+    subject=$(LC_ALL=C openssl x509 -in "$cert_path" -noout -subject -nameopt RFC2253) ||
+      die 'cannot parse stale system CA subject'
+    issuer=$(LC_ALL=C openssl x509 -in "$cert_path" -noout -issuer -nameopt RFC2253) ||
+      die 'cannot parse stale system CA issuer'
+    [[ $subject == 'subject=CN=aimee-p6c-ct260-test-ca' &&
+      $issuer == 'issuer=CN=aimee-p6c-ct260-test-ca' ]] ||
+      die 'unverified stale system CA identity; refusing deletion'
+    basic_constraints=$(
+      LC_ALL=C openssl x509 -in "$cert_path" -noout -ext basicConstraints |
+        tr -d '[:space:]'
+    ) || die 'cannot parse stale system CA basic constraints'
+    key_usage=$(
+      LC_ALL=C openssl x509 -in "$cert_path" -noout -ext keyUsage |
+        tr -d '[:space:]'
+    ) || die 'cannot parse stale system CA key usage'
+    [[ $basic_constraints == 'X509v3BasicConstraints:criticalCA:TRUE' ]] ||
+      die 'unverified stale system CA constraints; refusing deletion'
+    [[ $key_usage == 'X509v3KeyUsage:criticalCertificateSign,CRLSign' ]] ||
+      die 'unverified stale system CA key usage; refusing deletion'
+    LC_ALL=C openssl verify -no_check_time -CAfile "$cert_path" "$cert_path" >/dev/null 2>&1 ||
+      die 'unverified stale system CA signature; refusing deletion'
+    cert_inode=$(stat -Lc '%d:%i' -- "$cert_path") ||
+      die 'cannot record stale system CA inode'
+    cert_hash=$(sha256sum -- "$cert_path") ||
+      die 'cannot fingerprint stale system CA'
+    cert_hash=${cert_hash%% *}
+    [[ $cert_hash =~ ^[0-9a-f]{64}$ ]] ||
+      die 'invalid stale system CA fingerprint'
+    verified_paths+=("$cert_path")
+    verified_inodes+=("$cert_inode")
+    verified_hashes+=("$cert_hash")
+  done
+
+  for index in "${!verified_paths[@]}"; do
+    cert_path=${verified_paths[$index]}
+    cert_inode=$(stat -Lc '%d:%i' -- "$cert_path" 2>/dev/null)
+    metadata=$(stat -c '%u:%a' -- "$cert_path" 2>/dev/null)
+    cert_hash=$(sha256sum -- "$cert_path" 2>/dev/null)
+    cert_hash=${cert_hash%% *}
+    [[ ! -L $cert_path && $metadata == '0:600' &&
+      $cert_inode == "${verified_inodes[$index]}" &&
+      $cert_hash == "${verified_hashes[$index]}" ]] ||
+      die 'stale system CA changed after validation; refusing deletion'
+  done
+  for cert_path in "${verified_paths[@]}"; do
+    rm -f -- "$cert_path"
+  done
+  if (( ${#verified_paths[@]} > 0 )); then
+    update-ca-certificates >/dev/null
+  fi
+}
+
 trap cleanup EXIT
 restore_termination_traps
+recover_stale_system_cas
 
 if awk -v wanted="$bedrock_host" '
   /^[[:space:]]*#/ { next }
