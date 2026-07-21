@@ -64,9 +64,11 @@ int vault_reseal_receipt_encode(const vault_tpm2_reseal_receipt_t *r,
 {
    if (!out)
       return -1;
-   /* An overlapping output cannot be cleared without first corrupting the input. */
    if (r && overlaps(r, sizeof(*r), out, VAULT_RESEAL_RECEIPT_V1_LEN))
+   {
+      OPENSSL_cleanse(out, VAULT_RESEAL_RECEIPT_V1_LEN);
       return -1;
+   }
    OPENSSL_cleanse(out, VAULT_RESEAL_RECEIPT_V1_LEN);
    if (!r || !generations_valid(r->old_generation, r->new_generation))
       return -1;
@@ -92,7 +94,10 @@ int vault_reseal_receipt_decode(const uint8_t *wire, size_t wire_len,
    if (!r)
       return -1;
    if (wire && overlaps(wire, wire_len, r, sizeof(*r)))
+   {
+      OPENSSL_cleanse(r, sizeof(*r));
       return -1;
+   }
    OPENSSL_cleanse(r, sizeof(*r));
    if (!wire || wire_len != VAULT_RESEAL_RECEIPT_V1_LEN ||
        CRYPTO_memcmp(wire, receipt_magic, sizeof(receipt_magic)) != 0 || get_u16(wire + 8) != 1 ||
@@ -124,7 +129,10 @@ int vault_reseal_receipt_digest(const uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN],
    if (!digest)
       return -1;
    if (wire && overlaps(wire, VAULT_RESEAL_RECEIPT_V1_LEN, digest, 32))
+   {
+      OPENSSL_cleanse(digest, 32);
       return -1;
+   }
    OPENSSL_cleanse(digest, 32);
    if (!wire)
       return -1;
@@ -161,7 +169,10 @@ int vault_reseal_operation_id_to_hex(const uint8_t operation_id[VAULT_RESEAL_OPE
       return -1;
    if (operation_id && overlaps(operation_id, VAULT_RESEAL_OPERATION_ID_LEN, out,
                                 VAULT_RESEAL_OPERATION_HEX_LEN + 1))
+   {
+      OPENSSL_cleanse(out, VAULT_RESEAL_OPERATION_HEX_LEN + 1);
       return -1;
+   }
    memset(out, 0, VAULT_RESEAL_OPERATION_HEX_LEN + 1);
    if (!operation_id)
       return -1;
@@ -180,7 +191,10 @@ int vault_reseal_operation_id_from_hex(const char *hex,
       return -1;
    if (hex && overlaps(hex, VAULT_RESEAL_OPERATION_HEX_LEN + 1, operation_id,
                        VAULT_RESEAL_OPERATION_ID_LEN))
+   {
+      OPENSSL_cleanse(operation_id, VAULT_RESEAL_OPERATION_ID_LEN);
       return -1;
+   }
    OPENSSL_cleanse(operation_id, VAULT_RESEAL_OPERATION_ID_LEN);
    if (!hex || strlen(hex) != VAULT_RESEAL_OPERATION_HEX_LEN)
       return -1;

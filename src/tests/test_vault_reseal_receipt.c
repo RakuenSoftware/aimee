@@ -111,35 +111,56 @@ static void test_strict_decode_and_zeroing(void)
       uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN];
    } overlap;
    overlap.receipt = original;
-   uint8_t before[VAULT_RESEAL_RECEIPT_V1_LEN];
-   memcpy(before, overlap.wire, sizeof(before));
    assert(vault_reseal_receipt_encode(&overlap.receipt, overlap.wire) == -1);
-   assert(CRYPTO_memcmp(overlap.wire, before, sizeof(before)) == 0);
+   assert(all_zero(overlap.wire, sizeof(overlap.wire)));
    memcpy(overlap.wire, wire, VAULT_RESEAL_RECEIPT_V1_LEN);
-   memcpy(before, overlap.wire, sizeof(before));
    assert(vault_reseal_receipt_decode(overlap.wire, sizeof(overlap.wire), &overlap.receipt) == -1);
-   assert(CRYPTO_memcmp(overlap.wire, before, sizeof(before)) == 0);
+   assert(all_zero(&overlap.receipt, sizeof(overlap.receipt)));
 
-   memcpy(wire, before, VAULT_RESEAL_RECEIPT_V1_LEN);
-   memcpy(before, wire, sizeof(before));
+   assert(vault_reseal_receipt_encode(&original, wire) == 0);
    assert(vault_reseal_receipt_digest(wire, wire + 64) == -1);
-   assert(CRYPTO_memcmp(wire, before, sizeof(before)) == 0);
+   assert(all_zero(wire + 64, 32));
+
+   union
+   {
+      vault_tpm2_reseal_receipt_t alignment;
+      uint8_t bytes[VAULT_RESEAL_RECEIPT_V1_LEN + 8];
+   } partial;
+   vault_tpm2_reseal_receipt_t *partial_receipt =
+       (vault_tpm2_reseal_receipt_t *)(partial.bytes + 8);
+   *partial_receipt = original;
+   assert(vault_reseal_receipt_encode(partial_receipt, partial.bytes) == -1);
+   assert(all_zero(partial.bytes, VAULT_RESEAL_RECEIPT_V1_LEN));
+
+   assert(vault_reseal_receipt_encode(&original, partial.bytes) == 0);
+   assert(vault_reseal_receipt_decode(partial.bytes, VAULT_RESEAL_RECEIPT_V1_LEN,
+                                      partial_receipt) == -1);
+   assert(all_zero(partial_receipt, sizeof(*partial_receipt)));
 }
 
 static void test_operation_id_overlap_and_failure_zeroing(void)
 {
-   uint8_t alias[VAULT_RESEAL_OPERATION_HEX_LEN + 1], before[sizeof(alias)];
+   uint8_t alias[VAULT_RESEAL_OPERATION_HEX_LEN + 1];
    memset(alias, 0x5a, sizeof(alias));
    for (size_t i = 0; i < VAULT_RESEAL_OPERATION_ID_LEN; i++)
       alias[i] = (uint8_t)i;
-   memcpy(before, alias, sizeof(alias));
    assert(vault_reseal_operation_id_to_hex(alias, (char *)alias) == -1);
-   assert(CRYPTO_memcmp(alias, before, sizeof(alias)) == 0);
+   assert(all_zero(alias, sizeof(alias)));
 
    memcpy(alias, "000102030405060708090a0b0c0d0e0f", sizeof(alias));
-   memcpy(before, alias, sizeof(alias));
    assert(vault_reseal_operation_id_from_hex((const char *)alias, alias) == -1);
-   assert(CRYPTO_memcmp(alias, before, sizeof(alias)) == 0);
+   assert(all_zero(alias, VAULT_RESEAL_OPERATION_ID_LEN));
+
+   uint8_t partial[VAULT_RESEAL_OPERATION_HEX_LEN + 2];
+   memset(partial, 0x5a, sizeof(partial));
+   for (size_t i = 0; i < VAULT_RESEAL_OPERATION_ID_LEN; i++)
+      partial[i + 1] = (uint8_t)i;
+   assert(vault_reseal_operation_id_to_hex(partial + 1, (char *)partial) == -1);
+   assert(all_zero(partial, VAULT_RESEAL_OPERATION_HEX_LEN + 1));
+
+   memcpy(partial, "000102030405060708090a0b0c0d0e0f", VAULT_RESEAL_OPERATION_HEX_LEN + 1);
+   assert(vault_reseal_operation_id_from_hex((const char *)partial, partial + 8) == -1);
+   assert(all_zero(partial + 8, VAULT_RESEAL_OPERATION_ID_LEN));
 
    char hex[VAULT_RESEAL_OPERATION_HEX_LEN + 1];
    memset(hex, 0xa5, sizeof(hex));

@@ -40,7 +40,7 @@ BEGIN
     org_vault_rewrap_status(TEXT),
     org_vault_rewrap_snapshot(TEXT),
     org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
-    org_vault_rewrap_check_page(TEXT,BIGINT,TEXT,INTEGER),
+    org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER),
     org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
     org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
     org_vault_rewrap_digests(TEXT), org_vault_rewrap_stage_finish(TEXT,BIGINT),

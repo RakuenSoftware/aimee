@@ -662,12 +662,24 @@ int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, siz
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
+   return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
+}
+
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
+                                     char *errbuf, size_t errlen)
+{
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_INVALID;
    sqlite3 *db = (sqlite3 *)pg_conn;
    if (!db)
       return NULL;
    char *sql_t = translate_sql(sql);
    if (!sql_t)
+   {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       return NULL;
+   }
    sqlite3_stmt *st = NULL;
    int rc = sqlite3_prepare_v2(db, sql_t, -1, &st, NULL);
    if (rc != SQLITE_OK)
@@ -681,11 +693,15 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    aimee_pg_stmt_t *out = calloc(1, sizeof(*out));
    if (!out)
    {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       sqlite3_finalize(st);
       return NULL;
    }
    out->st = st;
    out->db = db;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_OK;
    return out;
 }
 

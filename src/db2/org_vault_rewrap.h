@@ -70,7 +70,17 @@ typedef struct
    size_t len;
 } db2_vault_rewrap_cursor_t;
 
+typedef struct
+{
+   int64_t secret_count, check_count;
+   uint8_t receipt_digest[32], inventory_digest[32], stage_digest[32];
+} db2_vault_rewrap_verify_summary_t;
+
 void db2_vault_rewrap_snapshot_clear(db2_vault_rewrap_snapshot_t *snapshot);
+void db2_vault_rewrap_secret_clear(db2_vault_rewrap_secret_t *rows, size_t count);
+void db2_vault_rewrap_check_clear(db2_vault_rewrap_check_t *rows, size_t count);
+void db2_vault_rewrap_cursor_clear(db2_vault_rewrap_cursor_t *cursor);
+void db2_vault_rewrap_verify_summary_clear(db2_vault_rewrap_verify_summary_t *summary);
 db2_vault_rewrap_result_t db2_vault_rewrap_snapshot(const uint8_t operation_id[16],
                                                     db2_vault_rewrap_snapshot_t *out);
 
@@ -86,14 +96,16 @@ db2_vault_rewrap_result_t db2_vault_rewrap_begin(db2_vault_rewrap_tx_t *tx, cons
                                                  db2_vault_rewrap_state_t *state);
 db2_vault_rewrap_result_t
 db2_vault_rewrap_record_prepared(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
-                                 int64_t fence, const uint8_t receipt[VAULT_RESEAL_RECEIPT_V1_LEN]);
+                                 int64_t fence, int64_t old_generation, int64_t new_generation,
+                                 const uint8_t receipt[VAULT_RESEAL_RECEIPT_V1_LEN]);
 db2_vault_rewrap_result_t db2_vault_rewrap_source_secret_page(
     db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16], int64_t fence, int64_t after,
     int limit, db2_vault_rewrap_secret_t *rows, size_t capacity, size_t *count);
 db2_vault_rewrap_result_t
 db2_vault_rewrap_source_check_page(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
-                                   int64_t fence, const char *after, int limit,
-                                   db2_vault_rewrap_check_t *rows, size_t capacity, size_t *count);
+                                   int64_t fence, const db2_vault_rewrap_cursor_t *after, int limit,
+                                   db2_vault_rewrap_check_t *rows, size_t capacity, size_t *count,
+                                   db2_vault_rewrap_cursor_t *next);
 db2_vault_rewrap_result_t
 db2_vault_rewrap_stage_dek(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16], int64_t fence,
                            const db2_vault_rewrap_secret_t *source,
@@ -130,7 +142,7 @@ db2_vault_rewrap_result_t db2_vault_rewrap_recovery_required(db2_vault_rewrap_tx
 db2_vault_rewrap_result_t db2_vault_rewrap_verify_summary(db2_vault_rewrap_tx_t *tx,
                                                           const uint8_t operation_id[16],
                                                           int64_t fence,
-                                                          db2_vault_rewrap_snapshot_t *out);
+                                                          db2_vault_rewrap_verify_summary_t *out);
 db2_vault_rewrap_result_t db2_vault_rewrap_verify_secret_page(
     db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16], int64_t fence, int64_t after,
     int limit, db2_vault_rewrap_secret_t *rows, size_t capacity, size_t *count);
@@ -151,7 +163,7 @@ typedef struct
    void (*tx_rollback)(db2_vault_rewrap_tx_t **);
    db2_vault_rewrap_result_t (*snapshot)(const uint8_t[16], db2_vault_rewrap_snapshot_t *);
    db2_vault_rewrap_result_t (*verify_summary)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
-                                               db2_vault_rewrap_snapshot_t *);
+                                               db2_vault_rewrap_verify_summary_t *);
    db2_vault_rewrap_result_t (*verify_secret_page)(db2_vault_rewrap_tx_t *, const uint8_t[16],
                                                    int64_t, int64_t, int,
                                                    db2_vault_rewrap_secret_t *, size_t, size_t *);

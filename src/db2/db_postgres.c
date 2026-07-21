@@ -884,8 +884,15 @@ int aimee_pg_ping(void *c, char *e, size_t n)
 }
 aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
 {
+   return aimee_pg_prepare_ex(c, s, NULL, e, n);
+}
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_error_t *kind,
+                                     char *e, size_t n)
+{
    (void)c;
    (void)s;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_RESOURCE;
    if (e && n)
       snprintf(e, n, "libpq not linked");
    return NULL;
@@ -1176,6 +1183,14 @@ static void pg_clear_blob_cache(aimee_pg_stmt_t *s)
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
+   return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
+}
+
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
+                                     char *errbuf, size_t errlen)
+{
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_INVALID;
    if (!pg_conn || !sql)
       return NULL;
 
@@ -1188,6 +1203,8 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    aimee_pg_stmt_t *s = calloc(1, sizeof(*s));
    if (!s)
    {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       free(rewritten);
       aimee_pg_free_names(names, nparams);
       return NULL;
@@ -1197,9 +1214,20 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    s->names = names;
    s->nparams = nparams;
    s->values = nparams > 0 ? calloc((size_t)nparams, sizeof(char *)) : NULL;
+   if (nparams > 0 && !s->values)
+   {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
+      aimee_pg_free_names(s->names, s->nparams);
+      free(s->sql);
+      free(s);
+      return NULL;
+   }
    s->row_index = -1;
    s->blob_cache_col = -1;
    s->blob_cache_row = -1;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_OK;
    return s;
 }
 

@@ -40,6 +40,13 @@ void aimee_pg_free_names(char **names, int count);
 
 typedef struct aimee_pg_stmt aimee_pg_stmt_t;
 
+typedef enum
+{
+   AIMEE_PG_PREPARE_OK = 0,
+   AIMEE_PG_PREPARE_INVALID,
+   AIMEE_PG_PREPARE_RESOURCE
+} aimee_pg_prepare_error_t;
+
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen);
 void aimee_pg_close(void *pg_conn);
 
@@ -61,6 +68,9 @@ int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt);
 int aimee_pg_ping(void *pg_conn, char *errbuf, size_t errlen);
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen);
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql,
+                                     aimee_pg_prepare_error_t *error_kind, char *errbuf,
+                                     size_t errlen);
 void aimee_pg_finalize(aimee_pg_stmt_t *stmt);
 aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen);
 int aimee_pg_reset(aimee_pg_stmt_t *stmt);

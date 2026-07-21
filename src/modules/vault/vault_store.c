@@ -770,10 +770,12 @@ static int kek_check_matches(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
 {
    cJSON *jc = cJSON_GetObjectItemCaseSensitive(root, "kek_check");
    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
-   if (!cJSON_IsString(jc) ||
-       b64url_decode(jc->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN)
-      return 0;
-   return vault_kek_check_verify(kek, wrapped) == 0;
+   int matches = cJSON_IsString(jc) &&
+                 b64url_decode(jc->valuestring, wrapped, sizeof(wrapped)) ==
+                     VAULT_WRAPPED_DEK_LEN &&
+                 vault_kek_check_verify(kek, wrapped) == 0;
+   OPENSSL_cleanse(wrapped, sizeof(wrapped));
+   return matches;
 }
 
 /* Wrap the sentinel under `kek` into the root's kek_check field. 0 on success. */
