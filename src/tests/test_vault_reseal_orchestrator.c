@@ -21,6 +21,7 @@ static db2_vault_rewrap_result_t g_tx_commit_result = DB2_VAULT_REWRAP_OK;
 static db2_vault_rewrap_result_t g_stage_finish_result = DB2_VAULT_REWRAP_OK;
 static int g_tx_commit_retain;
 static int g_guard_sync_result = VAULT_MAINTENANCE_OK;
+static int g_guard_unseal_result = VAULT_MAINTENANCE_OK;
 static int g_guard_seal_result = VAULT_MAINTENANCE_OK;
 static int g_guard_end_result = VAULT_MAINTENANCE_OK;
 static int g_prepare_result = VAULT_TPM2_RESEAL_OK, g_prepare_lost_response;
@@ -518,7 +519,7 @@ static int guard_unseal(void *g, const void *p, size_t n)
    (void)g;
    (void)p;
    (void)n;
-   return VAULT_MAINTENANCE_OK;
+   return g_guard_unseal_result;
 }
 static int guard_seal(void *g)
 {
@@ -593,6 +594,7 @@ static void reset_fakes(void)
    g_missing = 0;
    g_guard_with_result = VAULT_MAINTENANCE_OK;
    g_guard_sync_result = VAULT_MAINTENANCE_OK;
+   g_guard_unseal_result = VAULT_MAINTENANCE_OK;
    g_guard_seal_result = VAULT_MAINTENANCE_OK;
    g_guard_end_result = VAULT_MAINTENANCE_OK;
    g_snapshot_result = DB2_VAULT_REWRAP_OK;
@@ -781,6 +783,20 @@ static void callback_result_typing(void)
    g_status = VAULT_TPM2_RESEAL_PREPARED;
    g_stage_finish_result = DB2_VAULT_REWRAP_INVALID;
    assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INVALID);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_guard_unseal_result = VAULT_MAINTENANCE_BUSY;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_BUSY);
+   assert(g_calls[C_GUARD_WITH] == 0);
+
+   reset_fakes();
+   g_state = DB2_VAULT_REWRAP_CUSTODY_PREPARED;
+   g_status = VAULT_TPM2_RESEAL_PREPARED;
+   g_guard_unseal_result = VAULT_MAINTENANCE_INVALID;
+   assert(vault_reseal_orchestrator_run(&r, &deps, &out) == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY);
+   assert(g_calls[C_GUARD_WITH] == 0);
 }
 
 static void assert_critical_cell_calls(db2_vault_rewrap_state_t state,

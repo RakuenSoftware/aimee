@@ -158,6 +158,16 @@ guard_callback_result(int guard_result, vault_reseal_orchestrator_result_t callb
                                                  : VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
 }
 
+static vault_reseal_orchestrator_result_t guard_operation_result(int guard_result)
+{
+   if (guard_result == VAULT_MAINTENANCE_BUSY)
+      return VAULT_RESEAL_ORCHESTRATOR_BUSY;
+   if (guard_result == VAULT_MAINTENANCE_EPOCH || guard_result == VAULT_MAINTENANCE_INVALID ||
+       guard_result == VAULT_MAINTENANCE_WRONG_OWNER)
+      return VAULT_RESEAL_ORCHESTRATOR_INTEGRITY;
+   return VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
+}
+
 static vault_reseal_orchestrator_result_t tx_finish(const db2_vault_rewrap_ops_t *db,
                                                     db2_vault_rewrap_tx_t **tx,
                                                     db2_vault_rewrap_result_t edge)
@@ -736,16 +746,20 @@ vault_reseal_orchestrator_run(const vault_reseal_orchestrator_request_t *req,
             if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
                result = terminal_edge(d, &s, "custody_integrity", 0);
          }
-         else if (d->custody->guard_unseal(guard, secret, req->provider_secret_len) !=
-                  VAULT_MAINTENANCE_OK)
-            result = VAULT_RESEAL_ORCHESTRATOR_SAFE_RETRY;
          else
          {
-            crypto_context_t ctx = {d, &s, workspace, VAULT_RESEAL_ORCHESTRATOR_ERROR};
-            int cb = d->custody->guard_with_active_kek(guard, stage_callback, &ctx);
-            result = guard_callback_result(cb, ctx.result);
-            if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
-               result = terminal_edge(d, &s, "source_integrity", 0);
+            int unseal_result =
+                d->custody->guard_unseal(guard, secret, req->provider_secret_len);
+            if (unseal_result != VAULT_MAINTENANCE_OK)
+               result = guard_operation_result(unseal_result);
+            else
+            {
+               crypto_context_t ctx = {d, &s, workspace, VAULT_RESEAL_ORCHESTRATOR_ERROR};
+               int cb = d->custody->guard_with_active_kek(guard, stage_callback, &ctx);
+               result = guard_callback_result(cb, ctx.result);
+               if (result == VAULT_RESEAL_ORCHESTRATOR_INTEGRITY)
+                  result = terminal_edge(d, &s, "source_integrity", 0);
+            }
          }
       }
       else if ((s.state == DB2_VAULT_REWRAP_CUSTODY_PREPARED ||
