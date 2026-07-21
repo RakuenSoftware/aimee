@@ -9,6 +9,16 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
+# The server image entrypoint must honor Docker's explicit command override.
+# Run it outside the image: dispatch must happen before any image-only bootstrap.
+entrypoint_output=$(sh ../deploy/container/server-entrypoint.sh \
+    printf '%s\n' entrypoint-command-override 2>/dev/null)
+if [ "$entrypoint_output" = "entrypoint-command-override" ]; then
+    pass "server entrypoint honors explicit command override"
+else
+    fail "server entrypoint ignored explicit command override"
+fi
+
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;
