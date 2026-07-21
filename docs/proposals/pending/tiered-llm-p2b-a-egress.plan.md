@@ -1,6 +1,6 @@
 # P2b-a — buffered kb Bedrock egress authority
 
-- **State:** plan review v2; first-round blockers incorporated, requires convergence before code.
+- **State:** roundtable-converged plan v3; verified minority findings incorporated.
 - **Depends on:** P1 identity/RLS, P2a catalog, P3a pricing/audit, P4a budget,
   P4b rate, P6a/P6b/P6c Bedrock cores, and P7 signed-HWM use-in-place.
 - **Scope boundary:** one real, certificate-authenticated, non-streaming Bedrock Converse
@@ -27,7 +27,7 @@ The only public shape is:
 
 ```json
 {
-  "request_id": "caller-stable-id",
+  "request_id": "018f6f4e-7d3a-7b1c-9f0a-123456789abc",
   "team_id": 42,
   "project_id": 7,
   "model_id": "org/bedrock-model",
@@ -45,6 +45,12 @@ the existing OpenAI Chat frontend into `aimee_request_t`; both model fields must
 both stream fields must be false, and `max_tokens` must be an explicitly present,
 positive integer. Provider, wire, region, endpoint, headers, credential identity,
 pricing version, token ceilings, and retry controls do not exist in the request shape.
+`request_id` is a canonical lowercase UUIDv4/v7 with 122+ bits of caller-generated
+entropy; other shapes are rejected so a team peer cannot cheaply squat predictable IDs.
+P2b-a accepts text-only system/user/assistant messages plus ordinary sampling/stop
+parameters. Reject images, documents, tool definitions/calls/results, cache controls,
+thinking, metadata, service tiers, unknown blocks, and raw sidecar-only extensions;
+those features need a later pricing/billing review before admission.
 
 The response is `openai_frontend_render(aimee_response_t)`, augmented only with the
 stable `request_id` and the resolved numeric `team_id`. Errors are content-free JSON
@@ -66,7 +72,10 @@ credential is logged or persisted.
    the exact fingerprint and matching normalized issuer/serial, and recheck
    `state/revoked_at` on the primary in the same transaction as every other authority
    decision. Unknown, mismatched, retired, revoked, or DB-unavailable certificates
-   fail closed.
+   fail closed. Fix mTLS renewal in this slice: the new leaf is inserted with its new
+   fingerprint and normalized issuer/serial under the same enrollment scope before it
+   is returned, while the old leaf remains independently revocable. A renewal DB
+   failure returns no usable certificate.
 2. Harden the mTLS HTTP reader before exposing egress: reject any Transfer-Encoding
    and malformed or duplicate `Content-Length` globally; permit absent length only
    for a method/route that accepts no body and reject any body octets in that case.
@@ -74,7 +83,10 @@ credential is logged or persisted.
    other body-bearing route. Reject signs, junk, overlong header lines, and lengths
    above a dedicated bounded egress cap; distinguish incomplete header/body from a
    complete request; never pass bytes beyond the declared body. Apply socket/SSL read
-   and write deadlines. Preserve bodyless GET behavior for enrollment/metrics routes.
+   and write deadlines. Reject bare LF, obsolete folded headers, whitespace before a
+   colon, invalid header-name/value bytes, multiple request lines, absolute-form
+   egress targets, and bytes after the declared request. Preserve bodyless GET behavior
+   for enrollment/metrics routes.
 3. Replace the listener's single blocking connection loop with a fixed-size bounded
    worker pool and bounded accepted-fd queue. Saturation closes/refuses without
    allocating request-sized buffers. Each worker owns one connection, always clears
@@ -113,21 +125,27 @@ mutation.
 
 ## Canonical request and maximum reservation
 
-After strict parsing, discard authority-bearing raw sidecars and validate the typed IR
-against explicit P6 bounds. Canonicalize a domain-separated, length-prefixed digest
-over: protocol version, canonical transport identity, request ID, resolved team,
-optional project, catalog model, normalized typed IR, and generation parameters. Do
-not hash raw JSON bytes. Equivalent accepted JSON encodings must produce one digest;
-semantically different requests must not collide. This 64-lowercase-hex digest is the
-P7 key-use digest.
+After strict parsing, discard authority-bearing raw sidecars and validate the text-only
+typed IR against explicit P6 bounds. Before admission, use a new pure P6 serializer to
+produce the exact canonical unsigned Bedrock request body that will later be signed.
+Hash a domain-separated length-prefixed transcript with literal domain
+`aimee.p2b.egress.v1` and fields in this fixed order: canonical transport identity,
+request UUID, resolved team, project-presence+value, catalog model, and the exact
+canonical Bedrock body bytes. The body includes every accepted message, sampling,
+stop, model, and generation field; no second ad-hoc IR field list can drift. Do not
+hash raw client JSON bytes. Equivalent accepted JSON encodings produce one digest;
+semantically different requests do not. This 64-lowercase-hex digest is the P7 key-use
+digest and the same body object is retained for the later signed-request builder.
 
 For this conservative first slice, reserve the binding's entire provider-documented
 `max_input_tokens` plus its entire `max_output_tokens`, not merely the requested
 completion limit. The request's explicit `max_tokens` must not exceed that output
 limit. Accepted IR features and the serialized P6 body remain bounded, and binding
 ceilings are operator-validated against the provider model limits. A new
-definer/wrapper computes a NUMERIC maximum using only the pinned
-immutable price row and returns the price version plus decimal amount; unpriced,
+definer/wrapper computes a NUMERIC maximum using only the pinned immutable price row,
+charging the full input ceiling at the greatest applicable input/cache-read/cache-write
+rate and the full output ceiling at its output rate, and returns the price version plus
+decimal amount; unpriced,
 overflowing, negative, or out-of-range results fail closed. Settlement uses actual
 non-negative IR usage counts and the same pinned version.
 
@@ -146,7 +164,7 @@ Add private `org_egress_dispatch`, unique on `(team_id,request_id)`, with
 immutable request digest, team/project/model/binding/price/reserved-maximum fields and
 states:
 
-`admitted -> dispatching -> succeeded | denied | failed | uncertain`
+`admitted -> dispatching | failed`; `dispatching -> succeeded | denied | failed | uncertain`
 
 Terminal rows are immutable except that a separate future operator reconciliation may
 move `uncertain` to a proven terminal state; P2b-a exposes no redispatch transition.
@@ -159,9 +177,10 @@ One short PostgreSQL transaction performs:
 
 1. exact active-enrollment/revocation recheck, certificate-only identity resolution,
    and exact team/project validation;
-2. private binding/catalog/pricing resolution;
-3. the dispatch row as the first idempotency claim after team resolution, using
-   `INSERT ... ON CONFLICT` plus a row lock on `(team,request_id)`;
+2. lookup/claim the dispatch row before consulting current binding/entitlement/pricing,
+   so an authorized exact replay returns its durable state after configuration changes;
+   use `INSERT ... ON CONFLICT` plus a row lock on `(team,request_id)`;
+3. for a genuinely new claim only, private binding/catalog/pricing resolution;
 4. `org_rate_check`;
 5. budget reservation at the conservative maximum;
 6. `org_token_audit_start`, then commit the already-inserted `admitted` claim.
@@ -169,8 +188,8 @@ One short PostgreSQL transaction performs:
 Any denial/error rolls the whole transaction back, including the rate-window bump.
 An exact existing request returns its durable state and never re-admits, reuses a key,
 or dispatches; a digest/origin/binding mismatch is an integrity conflict. The team-
-scoped idempotency namespace deliberately survives certificate renewal and membership
-migration, so retrying an old request after renewal cannot acquire a new dispatch
+scoped idempotency namespace deliberately survives certificate renewal while the
+billing team is unchanged, so retrying an old request after renewal cannot acquire a new dispatch
 right. The immutable row still records the exact certificate instance/origin for
 audit. Concurrent twins serialize on the row: the loser waits, ends its aborted/no-op
 transaction, rereads state in a fresh transaction, and never executes rate/budget/
@@ -178,18 +197,22 @@ audit admission. The route changes `admitted -> dispatching` durably before call
 vault. From that point no automatic code path may retry credential use or vendor
 dispatch.
 
-If key admission/signing is definitively refused before an intent can have committed,
-settle `failed` at zero. If key-use returns replay, integrity, or any result that can
-mean the intent committed without producing an owned request, mark `uncertain` and
-retain/charge the full reservation. This avoids inventing a safe retry across the P7
-commit/callback crash gap. Crash recovery does not compose around the existing global
+Failures proved before invoking `kb_vault_key_use` may transition `admitted -> failed`
+and settle zero. After the call is invoked, every non-OK status is conservatively
+`uncertain` and retains/charges the full reservation because the existing enum does not
+expose whether the durable intent committed. This avoids inventing a safe retry across
+the P7 commit/callback crash gap. Crash recovery does not compose around the existing global
 `db2_org_budget_settle_expired` sweep. Add one request-correlated SECURITY DEFINER
-recovery operation that locks a bounded batch of stale dispatch rows and, for each
-exact `(team,request_id,origin)`, atomically changes dispatch to `uncertain`, settles
-that exact reservation at its maximum, and changes the exact token audit to
-`indeterminate`. Include a production startup plus periodic recovery runner in this
-slice, coordinated by a singleton advisory lock and bounded batches. It never touches
-a key or network. Process death followed by restart must converge without operator DML.
+recovery operation that scans an indexed lease/state key with `FOR UPDATE SKIP LOCKED`
+in fixed batches of at most 100. For each exact `(team,request_id,origin)`, it atomically
+changes stale `admitted` (which proves no vault invocation) to `failed` and settles
+zero, or stale `dispatching` to `uncertain` and settles that exact reservation at its
+maximum; it changes the matching token audit to the corresponding terminal or
+`indeterminate` state in the same locked transaction. Normal settlement takes the same
+dispatch-row lock and state predicate, so recovery cannot double-settle a live owner.
+Include a production startup plus periodic runner, coordinated by a singleton advisory
+lock and bounded batches. It never touches a key or network. Process death followed by
+restart must converge without operator DML.
 
 For an authenticated complete vendor response, settle dispatch, budget, and token
 audit in one transaction. Success records actual usage/cost. A proven provider denial
@@ -203,8 +226,9 @@ the maximum and records integrity failure.
 Do not call `kb_bedrock_dispatch_buffered` from the plaintext callback. Split the P6
 surface into two ownership-safe operations:
 
-- an internal builder accepts the opaque authorized target, typed IR, and borrowed
-  AWS credential view; it creates one initialized, owned `kb_bedrock_wire_request_t`
+- an internal builder accepts the opaque authorized target, pre-serialized canonical
+  body, and borrowed length-bearing AWS credential views (no `strlen` contract); it
+  creates one initialized, owned `kb_bedrock_wire_request_t`
   containing the body, target-derived host/path, payload hash, access-key identifier,
   session token if any, and signature—but never the secret access key;
 - a dispatcher accepts only the opaque target plus that owned signed request and does
@@ -221,6 +245,11 @@ cJSON is forbidden for credential plaintext. The existing P7 cleanup completes b
 TLS, or write. Clear the signed request on every exit, including authorization and
 transport failures. Deprecate the combined raw-credential dispatch entry point from
 production kb callers; pure P6 tests may retain an internal test wrapper.
+
+Delete and replace the unused `kb_egress_admit_dispatch` scaffold rather than calling
+it: its caller-supplied `cred_slot`/`reserve_max`, rate-before-later-failure behavior,
+raw dispatch callback, and settle-at-reserve semantics are not an authority boundary.
+The new route can reach only the combined DB admission and split signed-wire APIs.
 
 Extend the transport result with a conservative `vendor_bytes_possible`/authenticated
 completion classification. A complete success can settle actual usage. Once vendor
@@ -283,8 +312,8 @@ roundtable-reviewed after the live gate and every valid finding is fixed before 
   idempotency; primary admission rejects unknown/revoked/mismatched fingerprint and
   issuer/serial even when the listener cache says active; same CN/different serial is
   distinct; same serial/different issuer is distinct; transport/actor confusion and
-  worker-thread residue deny. An uncertain request retried after cert renewal and
-  membership migration produces no second P7 intent or vendor send.
+  worker-thread residue deny. An uncertain request retried after cert renewal within
+  the same billing team produces no second P7 intent or vendor send.
 - Atomic admission: rate increment rolls back on budget/audit/dispatch failure; budget
   rolls back on later failure; exact replay never increments, reserves, audits, signs,
   or sends; conflicting replay denies; concurrent twins produce one owner.
