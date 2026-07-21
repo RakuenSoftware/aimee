@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -145,6 +146,8 @@ def read_live_text(repo: Path, relative: str) -> str:
     if candidate.is_symlink():
         fail("input-symlink", f"{relative} must not be a symlink")
     try:
+        if not stat.S_ISREG(candidate.stat(follow_symlinks=False).st_mode):
+            fail("input-not-regular", f"{relative} must be a regular file")
         return resolved.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         fail("input", f"cannot read {relative}: {exc}")
@@ -280,7 +283,11 @@ def validate_discovery(
 
 
 def source_or_exact_signal(path: str, exact_paths: set[str]) -> bool:
-    return path.startswith("src/modules/git/") or path in exact_paths
+    return (
+        path == "src/modules/git"
+        or path.startswith("src/modules/git/")
+        or path in exact_paths
+    )
 
 
 def parse_name_status(raw: bytes) -> list[tuple[str, tuple[str, ...]]]:
@@ -329,16 +336,42 @@ def blob(repo: Path, revision: str, path: str) -> bytes | None:
     return result.stdout
 
 
-def added_claim_signal(before: bytes, after: bytes, claim: str, suffix: str) -> bool:
+def yaml_scalar_lines(lines: list[str]) -> set[int]:
+    """Return line indexes that are content of a YAML block scalar."""
+    scalar_lines: set[int] = set()
+    scalar_indent: int | None = None
+    opening = re.compile(r"^[ \t]*[^#][^:]*:[ \t]*[|>][+-]?[1-9]?[ \t]*(?:#.*)?$")
+    for index, line in enumerate(lines):
+        expanded = line.expandtabs(8)
+        indent = len(expanded) - len(expanded.lstrip(" "))
+        if scalar_indent is not None:
+            if not line.strip() or indent > scalar_indent:
+                scalar_lines.add(index)
+                continue
+            scalar_indent = None
+        if opening.fullmatch(line):
+            scalar_indent = indent
+    return scalar_lines
+
+
+def claim_signal_in_diff(before: bytes, after: bytes, claim: str, suffix: str) -> bool:
+    """Detect new or changed-to-true claims in a structured UTF-8 blob."""
     try:
         old_lines = before.decode("utf-8").splitlines()
         new_lines = after.decode("utf-8").splitlines()
     except UnicodeDecodeError:
         return False
     patterns = claim_patterns(claim, suffix)
-    for line in difflib.ndiff(old_lines, new_lines):
-        if line.startswith("+ ") and any(pattern.fullmatch(line[2:]) for pattern in patterns):
-            return True
+    scalar_lines = yaml_scalar_lines(new_lines) if suffix in {".yaml", ".yml"} else set()
+    matcher = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+    for tag, _old_start, _old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        for index in range(new_start, new_end):
+            if index not in scalar_lines and any(
+                pattern.fullmatch(new_lines[index]) for pattern in patterns
+            ):
+                return True
     return False
 
 
@@ -382,8 +415,10 @@ def commit_signals(
                 continue
             source = paths[0]
             source_in_root = under_root(source, root)
-            before = blob(repo, parent, source) if source_in_root else None
-            if added_claim_signal(before or b"", after, claim, suffix):
+            before = None
+            if not status.startswith("C") and source_in_root:
+                before = blob(repo, parent, source)
+            if claim_signal_in_diff(before or b"", after, claim, suffix):
                 signals.append(("status-claim", f"{root}:{claim}:{destination}"))
     return signals
 
@@ -442,7 +477,7 @@ def enforce_signal_precedence(
     repo: Path, anchor: str, signals: list[tuple[str, str, list[tuple[str, str]]]]
 ) -> None:
     for commit, parent, evidence in signals:
-        if not on_first_parent_chain(repo, anchor, parent):
+        if parent == anchor or not on_first_parent_chain(repo, anchor, parent):
             rendered = ", ".join(f"{kind}:{value}" for kind, value in evidence)
             fail(
                 "git-contract-ordering",
@@ -483,6 +518,18 @@ def validate_event(head: str) -> None:
     fail("event-ref", f"unsupported GitHub event/ref pair {event!r}/{ref!r}")
 
 
+def require_clean_metadata(repo: Path) -> None:
+    for args in (
+        ("diff", "--quiet", "--", CONTRACT_PATH, HANDOFF_PATH),
+        ("diff", "--cached", "--quiet", "--", CONTRACT_PATH, HANDOFF_PATH),
+    ):
+        result = git_run(repo, *args)
+        if result.returncode == 1:
+            fail("live-contract-dirty", "contract or handoff has uncommitted changes")
+        if result.returncode != 0:
+            fail("git-command", f"git {' '.join(args)} failed ({result.returncode})")
+
+
 def validate_ordering(repo: Path) -> int:
     require_repository(repo)
     head = git_text(repo, "rev-parse", "HEAD")
@@ -491,6 +538,7 @@ def validate_ordering(repo: Path) -> int:
     if not is_ancestor(repo, SLICE2_ANCHOR, head):
         fail("slice2-anchor", "approved Slice 2 anchor is not an ancestor of HEAD")
 
+    require_clean_metadata(repo)
     validate_trusted_contract(repo)
     pinned, pinned_handoff = canonical_metadata(repo)
     live, live_handoff = live_metadata(repo)

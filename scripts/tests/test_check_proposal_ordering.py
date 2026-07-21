@@ -72,6 +72,7 @@ class ProposalOrderingTests(unittest.TestCase):
 
     def test_source_and_exact_path_detection(self) -> None:
         exact = {"src/modules/git/module.yaml", "src/generated/modules.mk"}
+        self.assertTrue(ordering.source_or_exact_signal("src/modules/git", exact))
         self.assertTrue(ordering.source_or_exact_signal("src/modules/git/a.c", exact))
         self.assertTrue(ordering.source_or_exact_signal("src/generated/modules.mk", exact))
         self.assertFalse(ordering.source_or_exact_signal("src/modules/memory/a.c", exact))
@@ -111,18 +112,36 @@ class ProposalOrderingTests(unittest.TestCase):
 
     def test_added_claim_ignores_deletion_context_and_binary(self) -> None:
         self.assertTrue(
-            ordering.added_claim_signal(
+            ordering.claim_signal_in_diff(
                 b"not ready\n", b"git-runtime-ready: true\n", "git-runtime-ready", ".yaml"
             )
         )
         self.assertFalse(
-            ordering.added_claim_signal(
+            ordering.claim_signal_in_diff(
                 b"git-runtime-ready: true\n", b"not ready\n", "git-runtime-ready", ".yaml"
             )
         )
         self.assertFalse(
-            ordering.added_claim_signal(b"", b"\xff\x00", "git-runtime-ready", ".yaml")
+            ordering.claim_signal_in_diff(b"", b"\xff\x00", "git-runtime-ready", ".yaml")
         )
+
+    def test_claim_toggle_and_yaml_block_scalars(self) -> None:
+        self.assertTrue(
+            ordering.claim_signal_in_diff(
+                b"git-runtime-ready: false\n",
+                b"git-runtime-ready: true\n",
+                "git-runtime-ready",
+                ".yaml",
+            )
+        )
+        for marker in ("|", ">-"):
+            after = f"description: {marker}\n  git-runtime-ready: true\nnext: value\n"
+            with self.subTest(marker=marker):
+                self.assertFalse(
+                    ordering.claim_signal_in_diff(
+                        b"", after.encode(), "git-runtime-ready", ".yaml"
+                    )
+                )
 
     def test_history_records_source_signal_even_after_revert(self) -> None:
         tmp, repo, cutoff = self.make_repo()
@@ -232,6 +251,9 @@ class ProposalOrderingTests(unittest.TestCase):
             anchor_file = repo / "contract.md"
             anchor_file.write_text("approved\n", encoding="utf-8")
             anchor = self.commit(repo, "anchor")
+            spacer = repo / "spacer"
+            spacer.write_text("separate approval from signal\n", encoding="utf-8")
+            self.commit(repo, "post-anchor boundary")
             source = repo / "src/modules/git/example.c"
             source.parent.mkdir(parents=True)
             source.write_text("signal\n", encoding="utf-8")
@@ -244,6 +266,9 @@ class ProposalOrderingTests(unittest.TestCase):
                 root_claims=[],
             )
             ordering.enforce_signal_precedence(repo, anchor, signals)
+            direct = [(head, anchor, [("path", "M:src/modules/git/example.c")])]
+            with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
+                ordering.enforce_signal_precedence(repo, anchor, direct)
             with self.assertRaisesRegex(ordering.OrderingError, "git-contract-ordering"):
                 ordering.enforce_signal_precedence(repo, head, signals)
         finally:
@@ -271,6 +296,35 @@ class ProposalOrderingTests(unittest.TestCase):
             self.assertTrue(
                 any("src/modules/git/example.c" in item[1] for item in signals[0][2])
             )
+        finally:
+            tmp.cleanup()
+
+    def test_exact_git_tree_root_gitlink_is_signal(self) -> None:
+        tmp, repo, cutoff = self.make_repo()
+        try:
+            self.git(
+                repo,
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                f"160000,{cutoff},src/modules/git",
+            )
+            self.git(
+                repo,
+                "-c",
+                "user.name=Aimee Test",
+                "-c",
+                "user.email=aimee@example.invalid",
+                "commit",
+                "-m",
+                "git root gitlink",
+            )
+            head = self.git(repo, "rev-parse", "HEAD")
+            signals = ordering.scan_history(
+                repo, cutoff, head, exact_paths=set(), root_claims=[]
+            )
+            self.assertEqual(len(signals), 1)
+            self.assertIn("src/modules/git", signals[0][2][0][1])
         finally:
             tmp.cleanup()
 
@@ -336,12 +390,36 @@ class ProposalOrderingTests(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_copy_of_in_root_claim_uses_empty_destination_baseline(self) -> None:
+        tmp, repo, _ = self.make_repo()
+        try:
+            source = repo / "docs/modules/source.yaml"
+            source.parent.mkdir(parents=True)
+            source.write_text("git-runtime-ready: true\n", encoding="utf-8")
+            parent = self.commit(repo, "source claim")
+            destination = repo / "docs/modules/copy.yaml"
+            destination.write_bytes(source.read_bytes())
+            commit = self.commit(repo, "copy claim")
+            signals = ordering.commit_signals(
+                repo,
+                parent,
+                commit,
+                exact_paths=set(),
+                root_claims=[("docs/modules", "git-runtime-ready")],
+            )
+            self.assertTrue(any(kind == "status-claim" for kind, _ in signals))
+        finally:
+            tmp.cleanup()
+
     def test_complete_dag_scan_keeps_side_branch_signal_and_revert(self) -> None:
         tmp, repo, cutoff = self.make_repo()
         try:
             anchor_file = repo / "contract.md"
             anchor_file.write_text("approved\n", encoding="utf-8")
             anchor = self.commit(repo, "anchor")
+            spacer = repo / "spacer"
+            spacer.write_text("post-anchor boundary\n", encoding="utf-8")
+            self.commit(repo, "post-anchor boundary")
             self.git(repo, "switch", "-q", "-c", "side")
             source = repo / "src/modules/git/example.c"
             source.parent.mkdir(parents=True)
@@ -455,11 +533,13 @@ class ProposalOrderingTests(unittest.TestCase):
             ):
                 ordering.validate_event(head)
 
-        partials = (
-            {"GITHUB_SHA": head},
-            {"GITHUB_REF": "refs/heads/feature/core-modularization"},
-            {"GITHUB_BASE_REF": "feature/core-modularization"},
-        )
+        partials = tuple({key: value} for key, value in {
+            "GITHUB_EVENT_NAME": "push",
+            "GITHUB_REF": "refs/heads/feature/core-modularization",
+            "GITHUB_SHA": head,
+            "GITHUB_BASE_REF": "feature/core-modularization",
+            "GITHUB_HEAD_REF": "slice/example",
+        }.items())
         for env in partials:
             with (
                 self.subTest(env=env),
@@ -523,6 +603,22 @@ class ProposalOrderingTests(unittest.TestCase):
     def test_non_repository_config_root_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(ordering.main(["--config-root", tmp]), 1)
+
+    def test_dirty_contract_or_handoff_fails_closed(self) -> None:
+        tmp, repo, _ = self.make_repo()
+        try:
+            contract = repo / ordering.CONTRACT_PATH
+            handoff = repo / ordering.HANDOFF_PATH
+            contract.parent.mkdir(parents=True)
+            handoff.parent.mkdir(parents=True, exist_ok=True)
+            contract.write_text("contract\n", encoding="utf-8")
+            handoff.write_text("handoff\n", encoding="utf-8")
+            self.commit(repo, "metadata")
+            contract.write_text("dirty\n", encoding="utf-8")
+            with self.assertRaisesRegex(ordering.OrderingError, "live-contract-dirty"):
+                ordering.require_clean_metadata(repo)
+        finally:
+            tmp.cleanup()
 
 
 if __name__ == "__main__":
