@@ -24,7 +24,7 @@
 #define CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS 50
 
 /* Server execution pool defaults */
-#define CONFIG_DEFAULT_BACKGROUND_THREADS 2
+#define CONFIG_DEFAULT_BACKGROUND_THREADS 14
 #define CONFIG_DEFAULT_SESSION_THREADS    4
 /* The well-known /v1 bearer baked into the aimee-server image — a ONE-TIME
  * bootstrap, never a standing credential. While the live listener bearer still
@@ -1020,7 +1020,8 @@ typedef struct config
 
    /* Global background-thread budget for non-session local parallel work.
     * Config accepts the preferred background_threads key and legacy
-    * compute_threads / worker_threads keys. 0 = default to 2. */
+    * compute_threads / worker_threads keys. 0 = default to 14, matching the
+    * standard 10 Codex + 4 MiniMax roundtable capacity. */
    int compute_threads;
 
    /* Per-session threadpool size for chat/tool/delegate work tied to an
