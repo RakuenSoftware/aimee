@@ -183,6 +183,26 @@ nodes:
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
 		t.Fatalf("duplicate status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	if err := os.WriteFile(filepath.Join(repo, "unrelated.txt"), []byte("advance watched ref\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "unrelated.txt")
+	runGit(t, repo, "commit", "-m", "advance branch without changing proposal")
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already filed") {
+		t.Fatalf("moving-ref duplicate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(proposalDir, "large.md"), []byte(proposal+"\nchanged blob\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "docs/proposals/pending/large.md")
+	runGit(t, repo, "commit", "-m", "change proposal blob")
+	rec = httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/trigger/fire", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("changed blob status=%d body=%s", rec.Code, rec.Body.String())
+	}
 	linkedBody := []byte(`{"source":"proposals","proposal":"linked","workspace":` +
 		strconv.Quote(repo) + `,"ref":"HEAD","pipeline":"build","mode":"autonomous"}`)
 	rec = httptest.NewRecorder()

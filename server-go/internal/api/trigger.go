@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -378,8 +379,13 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if err != nil {
 		return "", "", err
 	}
-	identity := fmt.Sprintf("git:%s:%s:%s:%s:%s", commit, proposalPath, wfe.Hash(content),
-		request.Pipeline, request.Mode)
+	proposalHash := wfe.Hash(content)
+	identity := db1.GitProposalIdentity(proposalHash, request.Pipeline, request.Mode)
+	if existing, findErr := s.db.WorkItemByGitProposal(ctx, workspace, proposalHash, request.Pipeline, request.Mode); findErr == nil {
+		return "", "", fmt.Errorf("proposal already filed as %s", existing.ID)
+	} else if !errors.Is(findErr, sql.ErrNoRows) {
+		return "", "", findErr
+	}
 	workItemID, err := mintWorkItemID()
 	if err != nil {
 		return "", "", err

@@ -288,6 +288,29 @@ SELECT work_item_id FROM lifecycle_work_item WHERE repo = ? AND proposal_path = 
 	return s.WorkItem(ctx, id)
 }
 
+func GitProposalIdentity(proposalHash, workflow, mode string) string {
+	return fmt.Sprintf("git:%s:%s:%s", proposalHash, workflow, mode)
+}
+
+// WorkItemByGitProposal finds both the current blob-based trigger identity and
+// the older commit-qualified identity. A proposal that has not changed must not
+// be filed again merely because its watched branch advanced.
+func (s *Store) WorkItemByGitProposal(ctx context.Context, repo, proposalHash, workflow, mode string) (WorkItem, error) {
+	identity := GitProposalIdentity(proposalHash, workflow, mode)
+	legacySuffix := fmt.Sprintf(":%s:%s:%s", proposalHash, workflow, mode)
+	var id string
+	if err := s.db.QueryRowContext(ctx, `
+SELECT work_item_id FROM lifecycle_work_item
+WHERE repo = ? AND parent_id = '' AND
+      (proposal_path = ? OR
+       (substr(proposal_path, 1, 4) = 'git:' AND
+        substr(proposal_path, -length(?)) = ?))
+ORDER BY id LIMIT 1`, repo, identity, legacySuffix, legacySuffix).Scan(&id); err != nil {
+		return WorkItem{}, fmt.Errorf("find work item by git proposal: %w", err)
+	}
+	return s.WorkItem(ctx, id)
+}
+
 func (s *Store) WorkItems(ctx context.Context) ([]WorkItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage,
