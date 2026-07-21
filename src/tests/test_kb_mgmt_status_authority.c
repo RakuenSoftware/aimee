@@ -41,13 +41,13 @@ int main(void)
    n = 32;
    assert(EVP_PKEY_get_raw_public_key(key, pk, &n) == 1);
    kb_mgmt_status_t out;
-   assert(kb_mgmt_status_authority_issue(&r, "/CN=ca", "01", caller_fp, "key-1", 100,
-                                         lookup, NULL, sign_status, sk, &out) == 0);
+   assert(kb_mgmt_status_authority_issue(&r, "/CN=ca", "01", caller_fp, "key-1", 100, lookup, NULL,
+                                         sign_status, sk, &out) == 0);
    assert(out.revocation_generation == 9 && out.expires_at == 110);
    assert(kb_mgmt_status_verify_signature(&out, pk) == 0);
    r.target_mgmt_fingerprint[0] = 'f';
-   assert(kb_mgmt_status_authority_issue(&r, "/CN=ca", "01", caller_fp, "key-1", 100,
-                                         lookup, NULL, sign_status, sk, &out) == -1);
+   assert(kb_mgmt_status_authority_issue(&r, "/CN=ca", "01", caller_fp, "key-1", 100, lookup, NULL,
+                                         sign_status, sk, &out) == -1);
    EVP_PKEY_free(key);
    EVP_PKEY_CTX_free(kctx);
    puts("kb_mgmt_status_authority: ok");

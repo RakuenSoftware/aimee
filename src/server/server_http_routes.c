@@ -31,7 +31,7 @@
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_mgmt_status.h"
-#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -68,12 +68,12 @@
 #include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
 #include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
 #include <openssl/evp.h>
-#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
-#include <time.h>            /* unique proposal artifact filename */
+#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
+#include <time.h>          /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -165,7 +165,7 @@ static int rh_management_challenge(const route_req_t *rq, char *resp, int cap)
    if (rc != SERVER_MGMT_NONCE_OK)
       return err_json(resp, cap, rc == SERVER_MGMT_NONCE_SATURATED ? 429 : 503,
                       rc == SERVER_MGMT_NONCE_SATURATED ? "management challenge capacity reached"
-                                                       : "management challenge unavailable");
+                                                        : "management challenge unavailable");
    char enc[48];
    if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
       return err_json(resp, cap, 503, "management challenge unavailable");
@@ -204,25 +204,22 @@ static int rh_management_health(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 401, "invalid management status staple");
    }
    uint64_t hwm = 0, now = (uint64_t)time(NULL);
-   int shape = server_mgmt_status_hwm(&hwm) == 0 &&
-               kb_mgmt_status_validate(&st, now, hwm) == 0 &&
-               kb_mgmt_status_verify_signature(&st, pub) == 0 && strcmp(st.key_id, key_id) == 0 &&
-               memcmp(st.caller_issuer, peer->issuer, sizeof(st.caller_issuer)) == 0 &&
-               memcmp(st.caller_serial_norm, peer->serial_norm,
-                      sizeof(st.caller_serial_norm)) == 0 &&
-               memcmp(st.caller_fingerprint, peer->fingerprint,
-                      sizeof(st.caller_fingerprint)) == 0 &&
-               strcmp(st.target_server_id, target) == 0 &&
-               strcmp(st.target_mgmt_fingerprint, local_fp) == 0 &&
-               strcmp(st.purpose, "management.health.v1") == 0;
-   server_mgmt_nonce_result_t rc =
-       server_mgmt_nonce_consume(&st, peer, target, now, shape);
+   int shape =
+       server_mgmt_status_hwm(&hwm) == 0 && kb_mgmt_status_validate(&st, now, hwm) == 0 &&
+       kb_mgmt_status_verify_signature(&st, pub) == 0 && strcmp(st.key_id, key_id) == 0 &&
+       memcmp(st.caller_issuer, peer->issuer, sizeof(st.caller_issuer)) == 0 &&
+       memcmp(st.caller_serial_norm, peer->serial_norm, sizeof(st.caller_serial_norm)) == 0 &&
+       memcmp(st.caller_fingerprint, peer->fingerprint, sizeof(st.caller_fingerprint)) == 0 &&
+       strcmp(st.target_server_id, target) == 0 &&
+       strcmp(st.target_mgmt_fingerprint, local_fp) == 0 &&
+       strcmp(st.purpose, "management.health.v1") == 0;
+   server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume(&st, peer, target, now, shape);
    if (rc != SERVER_MGMT_NONCE_OK)
    {
-      int status = rc == SERVER_MGMT_NONCE_STORAGE ? 503
+      int status = rc == SERVER_MGMT_NONCE_STORAGE    ? 503
                    : rc == SERVER_MGMT_NONCE_MISMATCH ? 403
                    : rc == SERVER_MGMT_NONCE_NOT_FOUND || rc == SERVER_MGMT_NONCE_EXPIRED ||
-                             rc == SERVER_MGMT_NONCE_ROLLBACK
+                           rc == SERVER_MGMT_NONCE_ROLLBACK
                        ? 409
                        : 401;
       return err_json(resp, cap, status, "management status denied");
@@ -1475,8 +1472,7 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 static const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
-    {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0,
-     rh_management_challenge},
+    {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
     {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},

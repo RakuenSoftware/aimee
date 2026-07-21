@@ -108,8 +108,8 @@ extern "C"
 
    /* Dedicated reverse-management caller profile: fixed CN, clientAuth only,
     * and the Aimee management-profile certificate extension. */
-   int kb_pki_sign_kb_management_csr(const kb_pki_ca_t *ca, const char *csr_pem,
-                                     long valid_secs, char *cert_pem_out, size_t cert_cap);
+   int kb_pki_sign_kb_management_csr(const kb_pki_ca_t *ca, const char *csr_pem, long valid_secs,
+                                     char *cert_pem_out, size_t cert_cap);
 
    /* Atomically validate and issue the two P5 server roles. The CSRs must prove
     * possession of different public keys. On any failure both outputs are

@@ -5,9 +5,8 @@
 #include <string.h>
 
 int kb_mgmt_status_authority_issue(const kb_mgmt_status_request_t *r, const char *issuer,
-                                   const char *serial, const char *fingerprint,
-                                   const char *key_id, uint64_t now,
-                                   kb_mgmt_status_lookup_fn lookup, void *lookup_ctx,
+                                   const char *serial, const char *fingerprint, const char *key_id,
+                                   uint64_t now, kb_mgmt_status_lookup_fn lookup, void *lookup_ctx,
                                    kb_mgmt_status_sign_fn sign, void *sign_ctx,
                                    kb_mgmt_status_t *out)
 {

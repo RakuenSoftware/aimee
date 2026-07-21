@@ -40,20 +40,15 @@ int main(void)
    server_tls_peer_cert_t p = peer('a'), other = peer('c');
 
    kb_mgmt_status_t s = issue(&p, 100);
-   assert(server_mgmt_nonce_consume(&s, &other, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_MISMATCH);
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_NOT_FOUND);
+   assert(server_mgmt_nonce_consume(&s, &other, "server-1", 101, 1) == SERVER_MGMT_NONCE_MISMATCH);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_NOT_FOUND);
 
    s = issue(&p, 100);
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 0) ==
-          SERVER_MGMT_NONCE_INVALID);
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_NOT_FOUND);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 0) == SERVER_MGMT_NONCE_INVALID);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_NOT_FOUND);
 
    s = issue(&p, 100);
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 116, 1) ==
-          SERVER_MGMT_NONCE_EXPIRED);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 116, 1) == SERVER_MGMT_NONCE_EXPIRED);
 
    s = issue(&p, 100);
    assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_OK);
@@ -61,15 +56,13 @@ int main(void)
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 4);
    s = issue(&p, 100);
    s.revocation_generation = 3;
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_ROLLBACK);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_ROLLBACK);
 
    s = issue(&p, 100);
    db1_shutdown();
    assert(db1_init(path) == 0 && server_mgmt_status_init() == 0);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 4);
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_NOT_FOUND);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_NOT_FOUND);
    db1_shutdown();
    unlink(path);
    puts("server_mgmt_status: ok");

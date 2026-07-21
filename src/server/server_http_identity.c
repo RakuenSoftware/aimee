@@ -12,7 +12,7 @@
 #include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
 #include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
 #include "kb_mgmt_status.h"
-#include "aimee_home.h"     /* aimee_home */
+#include "aimee_home.h" /* aimee_home */
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <pthread.h>
@@ -144,8 +144,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
       if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
           strncasecmp(authz, "Bearer ", 7) == 0)
          snprintf(tl_bearer, sizeof(tl_bearer), "%s", authz + 7);
-      http_header(buf, "X-Aimee-Management-Status", tl_status_staple,
-                  sizeof(tl_status_staple));
+      http_header(buf, "X-Aimee-Management-Status", tl_status_staple, sizeof(tl_status_staple));
    }
 }
 

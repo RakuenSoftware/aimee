@@ -404,8 +404,7 @@ static void test_role_csr_profiles(const kb_pki_ca_t *ca)
    assert_cert_cn(server_cert, "p5-server.example");
 
    char mgmt_cert[KB_PKI_CERT_PEM_MAX];
-   assert(kb_pki_sign_kb_management_csr(ca, client_csr, 3600, mgmt_cert,
-                                        sizeof(mgmt_cert)) == 0);
+   assert(kb_pki_sign_kb_management_csr(ca, client_csr, 3600, mgmt_cert, sizeof(mgmt_cert)) == 0);
    assert_exact_eku(mgmt_cert, NID_client_auth);
    assert_cert_cn(mgmt_cert, "p5-kb-management");
    BIO *mb = BIO_new_mem_buf(mgmt_cert, -1);
@@ -416,9 +415,8 @@ static void test_role_csr_profiles(const kb_pki_ca_t *ca)
    X509_EXTENSION *mext = mpos >= 0 ? X509_get_ext(mc, mpos) : NULL;
    ASN1_OCTET_STRING *mvalue = mext ? X509_EXTENSION_get_data(mext) : NULL;
    static const unsigned char marker[] = "aimee-p5-kb-management-v1";
-   assert(mext && !X509_EXTENSION_get_critical(mext) &&
-          X509_get_ext_by_OBJ(mc, moid, mpos) < 0 && mvalue &&
-          ASN1_STRING_length(mvalue) == (int)sizeof(marker) - 1 &&
+   assert(mext && !X509_EXTENSION_get_critical(mext) && X509_get_ext_by_OBJ(mc, moid, mpos) < 0 &&
+          mvalue && ASN1_STRING_length(mvalue) == (int)sizeof(marker) - 1 &&
           memcmp(ASN1_STRING_get0_data(mvalue), marker, sizeof(marker) - 1) == 0);
    ASN1_OBJECT_free(moid);
    X509_free(mc);

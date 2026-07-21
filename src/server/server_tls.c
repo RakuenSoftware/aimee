@@ -355,13 +355,12 @@ int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
    BIGNUM *bn = asn_serial ? ASN1_INTEGER_to_BN(asn_serial, NULL) : NULL;
    issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
    serial = bn ? BN_bn2hex(bn) : NULL;
-   if (!subject || X509_NAME_get_text_by_NID(subject, NID_commonName, out->cn,
-                                              (int)sizeof(out->cn)) <= 0 ||
+   if (!subject ||
+       X509_NAME_get_text_by_NID(subject, NID_commonName, out->cn, (int)sizeof(out->cn)) <= 0 ||
        !issuer || strlen(issuer) >= sizeof(out->issuer) || !serial || !serial[0] ||
        strlen(serial) >= sizeof(out->serial_norm) ||
        X509_digest(cert, EVP_sha256(), digest, &digest_len) != 1 || digest_len != 32 ||
-       SSL_export_keying_material(ssl, binding, sizeof(binding),
-                                  "aimee-management-channel-v1",
+       SSL_export_keying_material(ssl, binding, sizeof(binding), "aimee-management-channel-v1",
                                   sizeof("aimee-management-channel-v1") - 1, NULL, 0, 0) != 1)
       goto done;
    snprintf(out->issuer, sizeof(out->issuer), "%s", issuer);

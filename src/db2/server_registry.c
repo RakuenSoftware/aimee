@@ -217,22 +217,22 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
    return rc;
 }
 
-int db2_management_status_lookup(const char *issuer, const char *serial,
-                                 const char *fingerprint, const char *target,
-                                 const char *purpose, int64_t *generation,
+int db2_management_status_lookup(const char *issuer, const char *serial, const char *fingerprint,
+                                 const char *target, const char *purpose, int64_t *generation,
                                  char *target_fingerprint, size_t target_fingerprint_len)
 {
-   if (db2_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target ||
-       !purpose || !generation || !target_fingerprint || target_fingerprint_len < 65)
+   if (db2_tenant_require_pg() != 0 || !issuer || !serial || !fingerprint || !target || !purpose ||
+       !generation || !target_fingerprint || target_fingerprint_len < 65)
       return -1;
    void *c = db2_conn();
    if (!c)
       return -1;
    char e[256];
-   aimee_pg_stmt_t *s = aimee_pg_prepare(
-       c, "SELECT revocation_generation,target_mgmt_fingerprint FROM "
-          "kb_management_status_lookup(?1,?2,?3,?4,?5)",
-       e, sizeof(e));
+   aimee_pg_stmt_t *s =
+       aimee_pg_prepare(c,
+                        "SELECT revocation_generation,target_mgmt_fingerprint FROM "
+                        "kb_management_status_lookup(?1,?2,?3,?4,?5)",
+                        e, sizeof(e));
    if (!s)
       return -1;
    aimee_pg_bind_text(s, "?1", issuer);

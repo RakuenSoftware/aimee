@@ -42,8 +42,8 @@ static int ascii_token(const char *s, size_t min, size_t max)
    if (!bounded(s, min, max))
       return 0;
    for (const unsigned char *p = (const unsigned char *)s; *p; p++)
-      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
-            (*p >= '0' && *p <= '9') || *p == '.' || *p == '_' || *p == '-'))
+      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+            *p == '.' || *p == '_' || *p == '-'))
          return 0;
    return 1;
 }
@@ -52,8 +52,7 @@ static int status_shape(const kb_mgmt_status_t *s)
 {
    return s && s->version == 1 && ascii_token(s->key_id, 1, 64) &&
           printable(s->caller_issuer, 1, 600) && hex_lower(s->caller_serial_norm, 1, 128) &&
-          hex_lower(s->caller_fingerprint, 64, 64) &&
-          ascii_token(s->target_server_id, 1, 127) &&
+          hex_lower(s->caller_fingerprint, 64, 64) && ascii_token(s->target_server_id, 1, 127) &&
           hex_lower(s->target_mgmt_fingerprint, 64, 64) &&
           strcmp(s->purpose, "management.health.v1") == 0 && s->issued_at > 0 &&
           s->expires_at > s->issued_at && s->expires_at - s->issued_at <= 10 &&
@@ -96,15 +95,13 @@ int kb_mgmt_status_transcript(const kb_mgmt_status_t *s, unsigned char *out, siz
       return -1;
    size_t o = 0;
    if (put_bytes(out, cap, &o, STATUS_DOMAIN, sizeof(STATUS_DOMAIN) - 1) ||
-       put_u32(out, cap, &o, s->version) ||
-       put_bytes(out, cap, &o, s->key_id, strlen(s->key_id)) ||
+       put_u32(out, cap, &o, s->version) || put_bytes(out, cap, &o, s->key_id, strlen(s->key_id)) ||
        put_bytes(out, cap, &o, s->nonce, sizeof(s->nonce)) ||
        put_bytes(out, cap, &o, s->caller_issuer, strlen(s->caller_issuer)) ||
        put_bytes(out, cap, &o, s->caller_serial_norm, strlen(s->caller_serial_norm)) ||
        put_bytes(out, cap, &o, s->caller_fingerprint, strlen(s->caller_fingerprint)) ||
        put_bytes(out, cap, &o, s->target_server_id, strlen(s->target_server_id)) ||
-       put_bytes(out, cap, &o, s->target_mgmt_fingerprint,
-                 strlen(s->target_mgmt_fingerprint)) ||
+       put_bytes(out, cap, &o, s->target_mgmt_fingerprint, strlen(s->target_mgmt_fingerprint)) ||
        put_bytes(out, cap, &o, s->purpose, strlen(s->purpose)) ||
        put_u64(out, cap, &o, s->issued_at) || put_u64(out, cap, &o, s->expires_at) ||
        put_u64(out, cap, &o, s->revocation_generation))
@@ -113,15 +110,14 @@ int kb_mgmt_status_transcript(const kb_mgmt_status_t *s, unsigned char *out, siz
    return 0;
 }
 
-int kb_mgmt_status_sign(kb_mgmt_status_t *s,
-                        const unsigned char key[KB_MGMT_STATUS_KEY_LEN])
+int kb_mgmt_status_sign(kb_mgmt_status_t *s, const unsigned char key[KB_MGMT_STATUS_KEY_LEN])
 {
    unsigned char msg[1536];
    size_t msg_len = 0, sig_len = sizeof(s->signature);
    if (!s || !key || kb_mgmt_status_transcript(s, msg, sizeof(msg), &msg_len) != 0)
       return -1;
-   EVP_PKEY *pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, key,
-                                                  KB_MGMT_STATUS_KEY_LEN);
+   EVP_PKEY *pkey =
+       EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, key, KB_MGMT_STATUS_KEY_LEN);
    EVP_MD_CTX *ctx = pkey ? EVP_MD_CTX_new() : NULL;
    int ok = ctx && EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) == 1 &&
             EVP_DigestSign(ctx, s->signature, &sig_len, msg, msg_len) == 1 &&
@@ -222,8 +218,7 @@ static int b64_decode_exact(const char *in, unsigned char *out, size_t expected)
    if (o != expected || (bits && acc != 0))
       return -1;
    char canonical[128];
-   return b64_encode(out, expected, canonical, sizeof(canonical)) == 0 &&
-                  strcmp(canonical, in) == 0
+   return b64_encode(out, expected, canonical, sizeof(canonical)) == 0 && strcmp(canonical, in) == 0
               ? 0
               : -1;
 }
@@ -245,10 +240,9 @@ static int u64_decimal(const char *s, uint64_t *out)
 
 static int object_exact(const cJSON *j)
 {
-   static const char *names[] = {"version",      "key_id",       "nonce",
-                                 "caller_issuer", "caller_serial", "caller_fp",
-                                 "target",       "target_mgmt_fp", "purpose",
-                                 "issued_at",    "expires_at",    "generation",
+   static const char *names[] = {"version",       "key_id",    "nonce",      "caller_issuer",
+                                 "caller_serial", "caller_fp", "target",     "target_mgmt_fp",
+                                 "purpose",       "issued_at", "expires_at", "generation",
                                  "signature"};
    int seen[13] = {0}, count = 0;
    for (const cJSON *p = j ? j->child : NULL; p; p = p->next)
@@ -281,14 +275,12 @@ static int copy_string(char *dst, size_t cap, const char *src)
    return 0;
 }
 
-int kb_mgmt_status_nonce_from_json(const char *raw,
-                                   unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN])
+int kb_mgmt_status_nonce_from_json(const char *raw, unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN])
 {
    if (!raw || !nonce)
       return -1;
    size_t raw_len = strnlen(raw, KB_MGMT_STATUS_JSON_MAX + 1);
-   if (raw_len < 2 || raw_len > KB_MGMT_STATUS_JSON_MAX || raw[0] != '{' ||
-       raw[raw_len - 1] != '}')
+   if (raw_len < 2 || raw_len > KB_MGMT_STATUS_JSON_MAX || raw[0] != '{' || raw[raw_len - 1] != '}')
       return -1;
    const char *end = NULL, *encoded = NULL;
    cJSON *j = cJSON_ParseWithOpts(raw, &end, 1);
@@ -300,8 +292,7 @@ int kb_mgmt_status_nonce_from_json(const char *raw,
             count++;
             encoded = cJSON_IsString(p) ? cJSON_GetStringValue(p) : NULL;
          }
-   int rc = count == 1 && encoded && b64_decode_exact(encoded, nonce,
-                                                       KB_MGMT_STATUS_NONCE_LEN) == 0
+   int rc = count == 1 && encoded && b64_decode_exact(encoded, nonce, KB_MGMT_STATUS_NONCE_LEN) == 0
                 ? 0
                 : -1;
    cJSON_Delete(j);
@@ -321,8 +312,7 @@ int kb_mgmt_status_to_json(const kb_mgmt_status_t *s, char *out, size_t cap)
    snprintf(version, sizeof(version), "%u", s->version);
    snprintf(issued, sizeof(issued), "%llu", (unsigned long long)s->issued_at);
    snprintf(expires, sizeof(expires), "%llu", (unsigned long long)s->expires_at);
-   snprintf(generation, sizeof(generation), "%llu",
-            (unsigned long long)s->revocation_generation);
+   snprintf(generation, sizeof(generation), "%llu", (unsigned long long)s->revocation_generation);
    cJSON *j = cJSON_CreateObject();
    if (!j)
       return -1;
@@ -351,8 +341,7 @@ int kb_mgmt_status_from_json(const char *raw, kb_mgmt_status_t *s)
    if (!raw || !s)
       return -1;
    size_t raw_len = strnlen(raw, KB_MGMT_STATUS_JSON_MAX + 1);
-   if (raw_len < 2 || raw_len > KB_MGMT_STATUS_JSON_MAX || raw[0] != '{' ||
-       raw[raw_len - 1] != '}')
+   if (raw_len < 2 || raw_len > KB_MGMT_STATUS_JSON_MAX || raw[0] != '{' || raw[raw_len - 1] != '}')
       return -1;
    const char *end = NULL;
    cJSON *j = cJSON_ParseWithOpts(raw, &end, 1);
@@ -364,16 +353,15 @@ int kb_mgmt_status_from_json(const char *raw, kb_mgmt_status_t *s)
    const char *version = json_string(j, "version"), *key_id = json_string(j, "key_id"),
               *nonce = json_string(j, "nonce"), *issuer = json_string(j, "caller_issuer"),
               *serial = json_string(j, "caller_serial"), *fp = json_string(j, "caller_fp"),
-              *target = json_string(j, "target"),
-              *target_fp = json_string(j, "target_mgmt_fp"),
-              *purpose = json_string(j, "purpose"),
-              *issued = json_string(j, "issued_at"), *expires = json_string(j, "expires_at"),
-              *generation = json_string(j, "generation"), *sig = json_string(j, "signature");
+              *target = json_string(j, "target"), *target_fp = json_string(j, "target_mgmt_fp"),
+              *purpose = json_string(j, "purpose"), *issued = json_string(j, "issued_at"),
+              *expires = json_string(j, "expires_at"), *generation = json_string(j, "generation"),
+              *sig = json_string(j, "signature");
    uint64_t ver = 0;
    memset(s, 0, sizeof(*s));
-   int ok = version && key_id && nonce && issuer && serial && fp && target && target_fp && purpose &&
-            issued && expires && generation && sig && u64_decimal(version, &ver) == 0 && ver == 1 &&
-            copy_string(s->key_id, sizeof(s->key_id), key_id) == 0 &&
+   int ok = version && key_id && nonce && issuer && serial && fp && target && target_fp &&
+            purpose && issued && expires && generation && sig && u64_decimal(version, &ver) == 0 &&
+            ver == 1 && copy_string(s->key_id, sizeof(s->key_id), key_id) == 0 &&
             b64_decode_exact(nonce, s->nonce, sizeof(s->nonce)) == 0 &&
             copy_string(s->caller_issuer, sizeof(s->caller_issuer), issuer) == 0 &&
             copy_string(s->caller_serial_norm, sizeof(s->caller_serial_norm), serial) == 0 &&
@@ -398,8 +386,7 @@ int kb_mgmt_status_from_json(const char *raw, kb_mgmt_status_t *s)
 int kb_mgmt_status_validate(const kb_mgmt_status_t *s, uint64_t now, uint64_t high_water)
 {
    if (!status_shape(s) || (s->issued_at > now && s->issued_at - now > 2) ||
-       (now > s->expires_at && now - s->expires_at > 2) ||
-       s->revocation_generation < high_water)
+       (now > s->expires_at && now - s->expires_at > 2) || s->revocation_generation < high_water)
       return -1;
    return 0;
 }

@@ -42,8 +42,8 @@ int kb_mgmt_endpoint_parse(const char *e, kb_mgmt_endpoint_t *out)
    if (*p == '[')
    {
       const char *end = strchr(p + 1, ']');
-      if (!end || end == p + 1 || strchr(p + 1, '%') ||
-          (end[1] && end[1] != ':') || strlen(p + 1) >= sizeof(out->host))
+      if (!end || end == p + 1 || strchr(p + 1, '%') || (end[1] && end[1] != ':') ||
+          strlen(p + 1) >= sizeof(out->host))
          return -1;
       size_t hn = (size_t)(end - p - 1);
       if (hn >= sizeof(out->host))
@@ -56,12 +56,11 @@ int kb_mgmt_endpoint_parse(const char *e, kb_mgmt_endpoint_t *out)
       if (end[1] == ':')
       {
          char tail = 0;
-         if (sscanf(end + 2, "%d%c", &out->port, &tail) != 1 || out->port < 1 ||
-             out->port > 65535)
+         if (sscanf(end + 2, "%d%c", &out->port, &tail) != 1 || out->port < 1 || out->port > 65535)
             return -1;
       }
-      snprintf(out->host_header, sizeof(out->host_header),
-               out->port == 443 ? "[%s]" : "[%s]:%d", out->host, out->port);
+      snprintf(out->host_header, sizeof(out->host_header), out->port == 443 ? "[%s]" : "[%s]:%d",
+               out->host, out->port);
       return 0;
    }
    const char *colon = strrchr(p, ':');
@@ -73,8 +72,7 @@ int kb_mgmt_endpoint_parse(const char *e, kb_mgmt_endpoint_t *out)
    if (colon)
    {
       char tail = 0;
-      if (sscanf(colon + 1, "%d%c", &out->port, &tail) != 1 || out->port < 1 ||
-          out->port > 65535)
+      if (sscanf(colon + 1, "%d%c", &out->port, &tail) != 1 || out->port < 1 || out->port > 65535)
          return -1;
    }
    struct in_addr v4;
@@ -95,8 +93,7 @@ static int v4_permitted(uint32_t n)
 {
    uint32_t a = ntohl(n);
    unsigned o1 = a >> 24, o2 = (a >> 16) & 255;
-   return !(o1 == 0 || o1 == 10 || o1 == 127 || o1 >= 224 ||
-            (o1 == 100 && o2 >= 64 && o2 <= 127) ||
+   return !(o1 == 0 || o1 == 10 || o1 == 127 || o1 >= 224 || (o1 == 100 && o2 >= 64 && o2 <= 127) ||
             (o1 == 169 && o2 == 254) || (o1 == 172 && o2 >= 16 && o2 <= 31) ||
             (o1 == 192 && o2 == 168) || (o1 == 198 && (o2 == 18 || o2 == 19)));
 }
@@ -120,9 +117,9 @@ int kb_mgmt_sockaddr_permitted(const struct sockaddr *addr, socklen_t len)
    int all_zero = 1;
    for (int i = 0; i < 16; i++)
       all_zero &= b[i] == 0;
-   return !all_zero && !(b[0] == 0xff || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) ||
-                         (b[0] & 0xfe) == 0xfc ||
-                         (memcmp(b, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1", 16) == 0));
+   return !all_zero &&
+          !(b[0] == 0xff || (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) || (b[0] & 0xfe) == 0xfc ||
+            (memcmp(b, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1", 16) == 0));
 }
 
 int kb_mgmt_endpoint_connect(const kb_mgmt_endpoint_t *ep)

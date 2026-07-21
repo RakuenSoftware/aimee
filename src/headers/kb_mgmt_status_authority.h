@@ -25,9 +25,8 @@ typedef int (*kb_mgmt_status_sign_fn)(kb_mgmt_status_t *status, void *ctx);
  * P7 custodial key-use boundary in the dedicated authority process. */
 int kb_mgmt_status_authority_issue(const kb_mgmt_status_request_t *, const char *peer_issuer,
                                    const char *peer_serial_norm, const char *peer_fingerprint,
-                                   const char *key_id, uint64_t now,
-                                   kb_mgmt_status_lookup_fn, void *lookup_ctx,
-                                   kb_mgmt_status_sign_fn, void *sign_ctx,
+                                   const char *key_id, uint64_t now, kb_mgmt_status_lookup_fn,
+                                   void *lookup_ctx, kb_mgmt_status_sign_fn, void *sign_ctx,
                                    kb_mgmt_status_t *out);
 
 #endif

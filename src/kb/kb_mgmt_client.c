@@ -11,8 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
-static int response_content_length(const char *raw, const char *end, size_t cap,
-                                   size_t *length)
+static int response_content_length(const char *raw, const char *end, size_t cap, size_t *length)
 {
    const char *line = strstr(raw, "\r\n");
    int seen = 0;
@@ -61,9 +60,9 @@ static int response_content_length(const char *raw, const char *end, size_t cap,
 static int response_status(const char *raw, const char *end)
 {
    const char *line_end = strstr(raw, "\r\n");
-   if (!line_end || line_end >= end || line_end - raw < 13 ||
-       memcmp(raw, "HTTP/1.1 ", 9) != 0 || raw[9] < '1' || raw[9] > '5' ||
-       raw[10] < '0' || raw[10] > '9' || raw[11] < '0' || raw[11] > '9' || raw[12] != ' ')
+   if (!line_end || line_end >= end || line_end - raw < 13 || memcmp(raw, "HTTP/1.1 ", 9) != 0 ||
+       raw[9] < '1' || raw[9] > '5' || raw[10] < '0' || raw[10] > '9' || raw[11] < '0' ||
+       raw[11] > '9' || raw[12] != ' ')
       return -1;
    return (raw[9] - '0') * 100 + (raw[10] - '0') * 10 + raw[11] - '0';
 }
@@ -73,8 +72,7 @@ static int request_headers_valid(const char *headers)
    if (!headers || !headers[0])
       return 1;
    size_t total = strlen(headers);
-   if (total < 2 || memcmp(headers + total - 2, "\r\n", 2) != 0 ||
-       strstr(headers, "\r\n\r\n"))
+   if (total < 2 || memcmp(headers + total - 2, "\r\n", 2) != 0 || strstr(headers, "\r\n\r\n"))
       return 0;
    const char *line = headers;
    while (*line)
@@ -110,10 +108,9 @@ void kb_mgmt_client_session_close(kb_mgmt_client_session_t *s)
    s->fd = -1;
 }
 
-int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoint,
-                                const char *ca, const char *cc, const char *ck,
-                                const char *expected_issuer, const char *expected_serial,
-                                const char *expected_fp)
+int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoint, const char *ca,
+                                const char *cc, const char *ck, const char *expected_issuer,
+                                const char *expected_serial, const char *expected_fp)
 {
    if (!s || !ca || ((cc != NULL) != (ck != NULL)))
       return -1;
@@ -149,9 +146,8 @@ fail:
 }
 
 int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *method,
-                                   const char *path, const char *body,
-                                   const char *extra_headers, char *resp, size_t cap,
-                                   int *status_out)
+                                   const char *path, const char *body, const char *extra_headers,
+                                   char *resp, size_t cap, int *status_out)
 {
    if (!s || !s->ssl || !method ||
        (strcmp(method, "GET") && strcmp(method, "HEAD") && strcmp(method, "POST")) || !path ||

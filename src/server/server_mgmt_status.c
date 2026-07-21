@@ -34,15 +34,16 @@ int server_mgmt_nonce_issue(const server_tls_peer_cert_t *p, const char *target,
       return SERVER_MGMT_NONCE_STORAGE;
    int result = SERVER_MGMT_NONCE_STORAGE;
    sqlite3_stmt *q = NULL;
-   if (sqlite3_prepare_v2(db, "DELETE FROM server_mgmt_nonce WHERE expires_at<?1", -1, &q,
-                          NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(db, "DELETE FROM server_mgmt_nonce WHERE expires_at<?1", -1, &q, NULL) !=
+       SQLITE_OK)
       goto done;
    sqlite3_bind_int64(q, 1, (sqlite3_int64)now);
    if (sqlite3_step(q) != SQLITE_DONE)
       goto done;
    sqlite3_finalize(q);
    q = NULL;
-   if (sqlite3_prepare_v2(db, "SELECT count(*) FROM server_mgmt_nonce", -1, &q, NULL) != SQLITE_OK ||
+   if (sqlite3_prepare_v2(db, "SELECT count(*) FROM server_mgmt_nonce", -1, &q, NULL) !=
+           SQLITE_OK ||
        sqlite3_step(q) != SQLITE_ROW)
       goto done;
    int count = sqlite3_column_int(q, 0);
@@ -80,13 +81,11 @@ done:
 }
 
 server_mgmt_nonce_result_t server_mgmt_nonce_consume(const kb_mgmt_status_t *st,
-                                                      const server_tls_peer_cert_t *p,
-                                                      const char *target, uint64_t now,
-                                                      int valid)
+                                                     const server_tls_peer_cert_t *p,
+                                                     const char *target, uint64_t now, int valid)
 {
    sqlite3 *db = db1_conn();
-   if (!db || !st || !p || !target || now > INT64_MAX ||
-       st->revocation_generation > INT64_MAX)
+   if (!db || !st || !p || !target || now > INT64_MAX || st->revocation_generation > INT64_MAX)
       return SERVER_MGMT_NONCE_INVALID;
    if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return SERVER_MGMT_NONCE_STORAGE;
@@ -126,17 +125,18 @@ server_mgmt_nonce_result_t server_mgmt_nonce_consume(const kb_mgmt_status_t *st,
    else
    {
       if (sqlite3_prepare_v2(db, "SELECT generation FROM server_mgmt_status_hwm WHERE singleton=1",
-                             -1, &q, NULL) != SQLITE_OK || sqlite3_step(q) != SQLITE_ROW)
+                             -1, &q, NULL) != SQLITE_OK ||
+          sqlite3_step(q) != SQLITE_ROW)
          goto rollback;
       uint64_t hwm = (uint64_t)sqlite3_column_int64(q, 0);
       sqlite3_finalize(q);
       q = NULL;
       if (st->revocation_generation < hwm)
          result = SERVER_MGMT_NONCE_ROLLBACK;
-      else if (sqlite3_prepare_v2(
-                   db, "UPDATE server_mgmt_status_hwm SET generation=max(generation,?1) "
-                       "WHERE singleton=1",
-                   -1, &q, NULL) != SQLITE_OK)
+      else if (sqlite3_prepare_v2(db,
+                                  "UPDATE server_mgmt_status_hwm SET generation=max(generation,?1) "
+                                  "WHERE singleton=1",
+                                  -1, &q, NULL) != SQLITE_OK)
          goto rollback;
       else
       {
@@ -159,9 +159,9 @@ int server_mgmt_status_hwm(uint64_t *generation)
 {
    sqlite3 *db = db1_conn();
    sqlite3_stmt *q = NULL;
-   if (!db || !generation || sqlite3_prepare_v2(
-                                 db, "SELECT generation FROM server_mgmt_status_hwm WHERE singleton=1",
-                                 -1, &q, NULL) != SQLITE_OK)
+   if (!db || !generation ||
+       sqlite3_prepare_v2(db, "SELECT generation FROM server_mgmt_status_hwm WHERE singleton=1", -1,
+                          &q, NULL) != SQLITE_OK)
       return -1;
    int rc = sqlite3_step(q) == SQLITE_ROW ? 0 : -1;
    if (rc == 0)
