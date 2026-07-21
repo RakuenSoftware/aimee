@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "vault_custody_kms.h"
 #include "vault_crypto.h"
 #include "vault_hwm.h"
@@ -10,6 +13,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
 
 /* The helper is the cloud-KMS adapter: it receives the operation name and key
  * id via argv/env and must emit exactly one 32-byte decrypted root to stdout.
@@ -20,6 +26,29 @@ typedef struct
 } kms_ctx;
 static uint64_t g_hwm_version;
 static int g_hwm_ready;
+
+/* A provider helper receives only stdout. In particular it must not inherit
+ * live libpq/TLS/listener descriptors from an online custody process. Compute
+ * the portable fallback bound before fork; the child uses close_range when the
+ * kernel provides it and otherwise only invokes async-signal-safe close(2). */
+static long helper_fd_limit(void)
+{
+   long limit = sysconf(_SC_OPEN_MAX);
+   return limit > 3 ? limit : 1024;
+}
+
+static void helper_close_fds(long limit)
+{
+   close(STDIN_FILENO);
+   close(STDERR_FILENO);
+#if defined(__linux__) && defined(SYS_close_range)
+   if (syscall(SYS_close_range, 3u, ~0u, 0u) == 0)
+      return;
+#endif
+   for (long fd = 3; fd < limit; ++fd)
+      close((int)fd);
+}
+
 static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t next,
                     uint64_t *ver, uint8_t *att, size_t *alen)
 {
@@ -33,6 +62,7 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
    int p[2];
    if (pipe(p) != 0)
       return -1;
+   long fd_limit = helper_fd_limit();
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -48,6 +78,7 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
       dup2(p[1], 1);
       close(p[0]);
       close(p[1]);
+      helper_close_fds(fd_limit);
       execl(helper, helper, op, key, e, n, (char *)NULL);
       _exit(127);
    }
@@ -121,6 +152,7 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
    int p[2];
    if (pipe(p) != 0)
       return -1;
+   long fd_limit = helper_fd_limit();
    pid_t pid = fork();
    if (pid < 0)
    {
@@ -133,6 +165,7 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
       dup2(p[1], STDOUT_FILENO);
       close(p[0]);
       close(p[1]);
+      helper_close_fds(fd_limit);
       execl(helper, helper, "decrypt", key_id, (char *)NULL);
       _exit(127);
    }

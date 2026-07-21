@@ -23,6 +23,18 @@ int db2_management_status_key_ctx_open(db2_management_status_key_ctx_t *ctx, con
    return 0;
 }
 
+int db2_management_status_key_ctx_borrow_hardened(
+    db2_management_status_key_ctx_t *ctx, const db2_management_status_runtime_t *runtime)
+{
+   if (!ctx || !runtime || !runtime->connection || runtime->transaction_active ||
+       aimee_pg_in_transaction(runtime->connection))
+      return DB2_VAULT_KEY_USE_ERROR;
+   memset(ctx, 0, sizeof(*ctx));
+   ctx->connection = runtime->connection;
+   ctx->owns_connection = 0;
+   return 0;
+}
+
 void db2_management_status_key_ctx_close(db2_management_status_key_ctx_t *ctx)
 {
    if (!ctx)
@@ -87,7 +99,8 @@ int db2_management_status_key_candidate(db2_management_status_key_ctx_t *ctx, co
    memset(out, 0, sizeof(*out));
    char e[256] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(
-       ctx->connection, "SELECT * FROM kb_management_status_key_candidate(?1,?2,?3)", e, sizeof(e));
+       ctx->connection, "SELECT * FROM public.kb_management_status_key_candidate(?1,?2,?3)", e,
+       sizeof(e));
    if (!s)
       return DB2_VAULT_KEY_USE_ERROR;
    aimee_pg_bind_text(s, "?1", key_id);
@@ -115,8 +128,8 @@ int db2_management_status_key_admit(db2_management_status_key_ctx_t *ctx,
    char e[256] = "";
    aimee_pg_stmt_t *s = aimee_pg_prepare(
        ctx->connection,
-       "SELECT * FROM kb_management_status_key_admit(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", e,
-       sizeof(e));
+       "SELECT * FROM public.kb_management_status_key_admit(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+       e, sizeof(e));
    if (!s)
       return DB2_VAULT_KEY_USE_ERROR;
    aimee_pg_bind_text(s, "?1", p->use_id);
@@ -182,7 +195,7 @@ int db2_management_status_key_guard_begin(db2_management_status_key_ctx_t *ctx, 
 {
    if (epoch < 1)
       return DB2_VAULT_KEY_USE_INTEGRITY;
-   return begin_one(ctx, "SELECT kb_management_status_key_use_guard(?1)", epoch, 1);
+   return begin_one(ctx, "SELECT public.kb_management_status_key_use_guard(?1)", epoch, 1);
 }
 
 int db2_management_status_key_guard_end(db2_management_status_key_ctx_t *ctx, int commit)
@@ -207,13 +220,14 @@ int db2_management_status_key_startup_begin(db2_management_status_key_ctx_t *ctx
       return DB2_VAULT_KEY_USE_ERROR;
    *epoch = 0;
    *sealed = 0;
-   int rc = begin_one(ctx, "SELECT * FROM kb_management_status_key_startup_status()", 0, 0);
+   int rc = begin_one(ctx, "SELECT * FROM public.kb_management_status_key_startup_status()", 0, 0);
    if (rc)
       return rc;
    char e[256] = "";
    /* begin_one consumed the row; issue inside the still-open transaction to copy it. */
    aimee_pg_stmt_t *s = aimee_pg_prepare(
-       ctx->connection, "SELECT * FROM kb_management_status_key_startup_status()", e, sizeof(e));
+       ctx->connection, "SELECT * FROM public.kb_management_status_key_startup_status()", e,
+       sizeof(e));
    if (!s || aimee_pg_step(s, e, sizeof(e)) != AIMEE_PG_ROW || aimee_pg_column_is_null(s, 0) ||
        aimee_pg_column_int64(s, 0) < 1)
    {

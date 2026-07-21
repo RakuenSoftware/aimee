@@ -76,12 +76,12 @@ static int sign_only(const unsigned char *secret, size_t len, void *ctx)
    return len == KB_MGMT_STATUS_KEY_LEN ? kb_mgmt_status_sign((kb_mgmt_status_t *)ctx, secret) : -1;
 }
 
-int kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
+kb_mgmt_status_custody_result_t kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
 {
    kb_mgmt_status_custody_t *cfg = opaque;
    if (!status || !cfg || !cfg->database || !cfg->custody_key_id || !cfg->custody_key_id[0] ||
        strlen(cfg->custody_key_id) > 600 || !kb_vault_management_status_keys_allowed())
-      return -1;
+      return KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
 
    unsigned char transcript[2048], request_hash[32] = {0}, use_hash[32] = {0};
    char request_digest[65], use_id[65];
@@ -92,7 +92,8 @@ int kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
    db2_vault_key_use_envelope_t candidate, admitted;
    memset(&candidate, 0, sizeof(candidate));
    memset(&admitted, 0, sizeof(admitted));
-   int rc = -1, old_cancel_state = PTHREAD_CANCEL_ENABLE;
+   kb_mgmt_status_custody_result_t rc = KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+   int old_cancel_state = PTHREAD_CANCEL_ENABLE;
    custody_cleanup_t cleanup = {
        .status = status,
        .database = cfg->database,
@@ -111,7 +112,7 @@ int kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
    {
       OPENSSL_cleanse(status->signature, sizeof(status->signature));
       (void)pthread_setcancelstate(old_cancel_state, NULL);
-      return -1;
+      return KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
    }
    cleanup.mutex_locked = 1;
    pthread_cleanup_push(custody_cleanup, &cleanup);
@@ -151,11 +152,25 @@ int kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
        .hwm_attestation_len = candidate.hwm_attestation_len,
    };
    int admitted_rc = db2_management_status_key_admit(cfg->database, &p, &admitted);
+   if (admitted_rc == 0)
+   {
+      rc = KB_MGMT_STATUS_CUSTODY_CONFLICT;
+      goto done;
+   }
+   if (admitted_rc < 0)
+   {
+      rc = admitted_rc == DB2_VAULT_KEY_USE_INTEGRITY ? KB_MGMT_STATUS_CUSTODY_INTEGRITY
+                                                       : KB_MGMT_STATUS_CUSTODY_UNAVAILABLE;
+      goto done;
+   }
    if (admitted_rc != 1 || admitted.version != (int64_t)version ||
        admitted.hwm_attestation_len != candidate.hwm_attestation_len ||
        CRYPTO_memcmp(admitted.hwm_attestation, candidate.hwm_attestation,
                      candidate.hwm_attestation_len))
+   {
+      rc = KB_MGMT_STATUS_CUSTODY_INTEGRITY;
       goto done;
+   }
    if (db2_management_status_key_guard_begin(cfg->database, admitted.seal_epoch))
       goto done;
    cleanup.guard_open = 1;
@@ -168,14 +183,14 @@ int kb_mgmt_status_custody_sign(kb_mgmt_status_t *status, void *opaque)
       goto done;
    }
    cleanup.guard_open = 0;
-   rc = 0;
+   rc = KB_MGMT_STATUS_CUSTODY_OK;
 done:
    /* Keep the cleanup handler installed while cancellation is restored: a
     * pending cancellation must roll back the guard and erase the signature. */
    (void)pthread_setcancelstate(old_cancel_state, NULL);
    if (old_cancel_state == PTHREAD_CANCEL_ENABLE)
       pthread_testcancel();
-   cleanup.keep_signature = rc == 0;
+   cleanup.keep_signature = rc == KB_MGMT_STATUS_CUSTODY_OK;
    pthread_cleanup_pop(1);
    return rc;
 }

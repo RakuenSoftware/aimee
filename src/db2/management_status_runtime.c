@@ -221,7 +221,10 @@ int db2_management_status_runtime_lookup(db2_management_status_runtime_t *runtim
    }
    aimee_pg_step_t first = aimee_pg_step(stmt, error, sizeof(error));
    int rc = DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
-   if (first == AIMEE_PG_DONE)
+   const char *sqlstate = first == AIMEE_PG_ERR ? aimee_pg_sqlstate(stmt) : NULL;
+   if (first == AIMEE_PG_ERR && sqlstate && strcmp(sqlstate, "28000") == 0)
+      rc = DB2_MANAGEMENT_STATUS_RUNTIME_DENIED;
+   else if (first == AIMEE_PG_DONE)
       rc = DB2_MANAGEMENT_STATUS_RUNTIME_DENIED;
    else if (first == AIMEE_PG_ROW)
    {
@@ -303,16 +306,12 @@ int db2_management_status_runtime_startup_begin(db2_management_status_runtime_t 
    int sealed = 0, enabled = 0;
    int64_t epoch = aimee_pg_column_int64(stmt, 0);
    int64_t version = aimee_pg_column_int64(stmt, 6);
-   int attestation_size = aimee_pg_column_bytes(stmt, 7);
-   const void *attestation = aimee_pg_column_blob(stmt, 7);
    db2_management_status_runtime_startup_t candidate;
    memset(&candidate, 0, sizeof(candidate));
    int valid = epoch >= 1 && version >= 1 && bounded(custody, 1, 600) && token(wire, 1, 64) &&
                bool_text(aimee_pg_column_text(stmt, 1), &sealed) == 0 &&
                bool_text(aimee_pg_column_text(stmt, 5), &enabled) == 0 &&
-               copy_blob(stmt, 4, candidate.public_key, sizeof(candidate.public_key)) == 0 &&
-               attestation && attestation_size > 0 &&
-               (size_t)attestation_size <= sizeof(candidate.hwm_attestation);
+               copy_blob(stmt, 4, candidate.public_key, sizeof(candidate.public_key)) == 0;
    if (valid)
    {
       candidate.seal_epoch = epoch;
@@ -321,8 +320,22 @@ int db2_management_status_runtime_startup_begin(db2_management_status_runtime_t 
       snprintf(candidate.wire_key_id, sizeof(candidate.wire_key_id), "%s", wire);
       candidate.enabled = enabled;
       candidate.version = version;
-      memcpy(candidate.hwm_attestation, attestation, (size_t)attestation_size);
-      candidate.hwm_attestation_len = (size_t)attestation_size;
+      /* aimee_pg_column_blob owns one per-statement decode cache. Copy each
+       * bytea before asking for a different column, or the later decode frees
+       * and replaces the earlier pointer. */
+      int attestation_size = aimee_pg_column_bytes(stmt, 7);
+      const void *attestation = aimee_pg_column_blob(stmt, 7);
+      if (!attestation || attestation_size <= 0 ||
+          (size_t)attestation_size > sizeof(candidate.hwm_attestation))
+         valid = 0;
+      else
+      {
+         memcpy(candidate.hwm_attestation, attestation, (size_t)attestation_size);
+         candidate.hwm_attestation_len = (size_t)attestation_size;
+      }
+   }
+   if (valid)
+   {
       valid = aimee_pg_step(stmt, error, sizeof(error)) == AIMEE_PG_DONE;
    }
    aimee_pg_finalize(stmt);

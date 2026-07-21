@@ -53,6 +53,8 @@ int aimee_pg_exec(void *c, const char *sql, char *e, size_t n)
    (void)e;
    (void)n;
    assert(c == &g_stmt);
+   if (strstr(sql, "kb_management_status_"))
+      assert(strstr(sql, "public.kb_management_status_") != NULL);
    if (!strcmp(sql, "BEGIN"))
    {
       if (g_in_tx)

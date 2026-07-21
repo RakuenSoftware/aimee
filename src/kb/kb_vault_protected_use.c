@@ -21,7 +21,7 @@ typedef struct
 
 static protected_arena_t *arena_new(size_t *mapped)
 {
-#if defined(__linux__) && defined(MADV_DONTDUMP)
+#if defined(__linux__) && defined(MADV_DONTDUMP) && defined(MADV_WIPEONFORK)
    long page = sysconf(_SC_PAGESIZE);
    if (page <= 0)
       return NULL;
@@ -29,7 +29,7 @@ static protected_arena_t *arena_new(size_t *mapped)
    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
    if (p == MAP_FAILED)
       return NULL;
-   if (mlock(p, n) || madvise(p, n, MADV_DONTDUMP))
+   if (mlock(p, n) || madvise(p, n, MADV_DONTDUMP) || madvise(p, n, MADV_WIPEONFORK))
    {
       OPENSSL_cleanse(p, n);
       (void)munlock(p, n);
