@@ -32,6 +32,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status') THEN
     CREATE ROLE aimee_kb_status NOLOGIN NOINHERIT;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status_login') THEN
+    CREATE ROLE aimee_kb_status_login NOLOGIN NOINHERIT;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status_definer') THEN
     CREATE ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS;
   END IF;
@@ -43,6 +46,7 @@ $$;
 -- over-grant is caught at boot, not silently tolerated.
 ALTER ROLE aimee_kb_runtime NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER;
 ALTER ROLE aimee_kb_status NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+ALTER ROLE aimee_kb_status_login NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_migrate NOBYPASSRLS NOSUPERUSER;
 ALTER ROLE aimee_kb_owner NOLOGIN NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 -- This non-login role owns only the four fixed status-authority functions. Its
@@ -52,12 +56,15 @@ ALTER ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREA
 
 -- migrate acts as owner for DDL; runtime never does.
 GRANT aimee_kb_owner TO aimee_kb_migrate;
+GRANT aimee_kb_status TO aimee_kb_status_login;
 
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status;
+GRANT USAGE ON SCHEMA public TO aimee_kb_status_login;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_login;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status_definer;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_definer;
 

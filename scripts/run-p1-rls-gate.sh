@@ -57,6 +57,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b_status_pg17_test.sql"
 echo "== P5-B1 fixed status-key authority assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b1-status-key-pg17-test.sql"
 
+echo "== P5-B1b owner-only status-key bootstrap assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b1b-status-bootstrap-pg17-test.sql"
+
 echo "== P5-B1 status-key revoke/rotation/disable/seal concurrency =="
 "$ROOT/scripts/p5b1-status-key-concurrency.sh" "$DB_URL"
 
