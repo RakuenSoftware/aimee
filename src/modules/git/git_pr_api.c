@@ -22,23 +22,40 @@ static void wipe(void *p, size_t n)
       *v++ = 0;
 }
 
-/* Run `git -C <repo_dir> <args>` and capture the trimmed first line of stdout.
- * Returns 0 + out on success (non-empty, rc==0). repo_dir is a server-resolved
- * workspace path; a stray single quote is rejected (no shell injection). */
+/* Run one fixed local git query and capture the trimmed first line of stdout.
+ * A minimal environment prevents inherited GIT_DIR/WORK_TREE/config overrides
+ * from changing the trusted repository context. No shell is involved. */
 static int git_cap(const char *repo_dir, const char *args, char *out, size_t cap)
 {
    if (out && cap)
       out[0] = '\0';
-   if (!repo_dir || strchr(repo_dir, '\''))
+   if (!repo_dir)
       return -1;
-   char cmd[1024];
-   if ((size_t)snprintf(cmd, sizeof(cmd), "git -C '%s' %s 2>/dev/null", repo_dir, args) >=
-       sizeof(cmd))
+   const char *const *argv = NULL;
+   const char *origin[] = {"git", "-C", repo_dir, "config", "--get", "remote.origin.url", NULL};
+   const char *branch[] = {"git", "-C", repo_dir, "rev-parse", "--abbrev-ref", "HEAD", NULL};
+   const char *origin_head[] = {"git",          "-C",          repo_dir, "rev-parse",
+                                "--abbrev-ref", "origin/HEAD", NULL};
+   const char *subject[] = {"git", "-C", repo_dir, "log", "-1", "--format=%s", NULL};
+   if (strcmp(args, "config --get remote.origin.url") == 0)
+      argv = origin;
+   else if (strcmp(args, "rev-parse --abbrev-ref HEAD") == 0)
+      argv = branch;
+   else if (strcmp(args, "rev-parse --abbrev-ref origin/HEAD") == 0)
+      argv = origin_head;
+   else if (strcmp(args, "log -1 --format=%s") == 0)
+      argv = subject;
+   else
       return -1;
-   int rc = 0;
-   char *r = run_cmd(cmd, &rc);
-   if (!r)
+   char *const envp[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1",
+                         "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null", NULL};
+   char *r = NULL;
+   int rc = safe_exec_capture_cwd_env_timeout(argv, repo_dir, envp, &r, 4096, 5000);
+   if (rc != 0 || !r)
+   {
+      free(r);
       return -1;
+   }
    char *nl = strchr(r, '\n');
    if (nl)
       *nl = '\0';
@@ -47,7 +64,7 @@ static int git_cap(const char *repo_dir, const char *args, char *out, size_t cap
       r[--n] = '\0';
    snprintf(out, cap, "%s", r);
    free(r);
-   return (rc == 0 && out[0]) ? 0 : -1;
+   return out[0] ? 0 : -1;
 }
 
 /* The host (case-insensitive, between [s, e)) is exactly github.com / www.github.com. */
@@ -481,6 +498,7 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
    const cJSON *headj = cJSON_GetObjectItem(j, "head");
    const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
+   const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
    const cJSON *basej = cJSON_GetObjectItem(j, "base");
    const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
    out->open =
@@ -490,6 +508,8 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
    if (cJSON_IsString(sha) && sha->valuestring)
       snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
+   if (cJSON_IsString(headref) && headref->valuestring)
+      snprintf(out->head, sizeof(out->head), "%s", headref->valuestring);
    if (cJSON_IsString(baseref) && baseref->valuestring)
       snprintf(out->base, sizeof(out->base), "%s", baseref->valuestring);
    cJSON_Delete(j);

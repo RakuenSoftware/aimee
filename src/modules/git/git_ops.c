@@ -95,25 +95,27 @@ static int env_key_is(const char *entry, const char *key)
  * protocol, destination, and refspec. */
 static char **harden_push_env(char **source)
 {
-   size_t count = 0;
-   while (source && source[count])
-      count++;
-   char **out = calloc(count + 4, sizeof(char *));
+   /* Deliberately allowlist only the fd-fed askpass seam. Do not inherit HOME,
+    * GIT_DIR/WORK_TREE/object/index selectors, proxy/TLS/header overrides, or
+    * any other repository/transport control from the daemon environment. */
+   char **out = calloc(8, sizeof(char *));
    if (!out)
       return NULL;
    size_t n = 0;
-   for (size_t i = 0; i < count; i++)
+   for (size_t i = 0; source && source[i]; i++)
    {
-      if (strncmp(source[i], "GIT_CONFIG_", 11) == 0 || env_key_is(source[i], "GIT_CONFIG"))
+      if (!env_key_is(source[i], "GIT_ASKPASS") && !env_key_is(source[i], "GIT_TERMINAL_PROMPT") &&
+          !env_key_is(source[i], "AIMEE_GIT_TOKEN_FD"))
          continue;
       out[n] = strdup(source[i]);
       if (!out[n++])
          goto fail;
    }
+   out[n++] = strdup("PATH=/usr/local/bin:/usr/bin:/bin");
    out[n++] = strdup("GIT_CONFIG_NOSYSTEM=1");
    out[n++] = strdup("GIT_CONFIG_SYSTEM=/dev/null");
    out[n++] = strdup("GIT_CONFIG_GLOBAL=/dev/null");
-   if (!out[n - 1] || !out[n - 2] || !out[n - 3])
+   if (!out[n - 1] || !out[n - 2] || !out[n - 3] || !out[n - 4])
       goto fail;
    return out;
 fail:
@@ -157,9 +159,48 @@ int git_ops_push_dir(const char *principal, const char *repo_dir, const char *re
    char **envp =
        git_cred_inject_build_env_for_repo(principal, remote_url, NULL, NULL, environ, &token_fd);
    char **hardened = harden_push_env(envp ? envp : environ);
-   int rc = safe_exec_capture_cwd_env_fd_timeout(
-       argv, repo_dir, hardened ? hardened : (envp ? envp : environ), out, GO_OUT_MAX,
-       GO_TIMEOUT_MS, token_fd, token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (!hardened)
+   {
+      if (token_fd >= 0)
+         close(token_fd);
+      if (envp)
+         git_cred_inject_free_env(envp);
+      snprintf(err, errlen, "cannot construct hardened git environment");
+      return -1;
+   }
+
+   /* Repository-local config is data controlled by the checkout. Reject every
+    * setting capable of rewriting the explicit URL, injecting auth/headers,
+    * changing TLS/proxy behavior, or selecting an external transport. rc=1 is
+    * git-config's clean 'no matches'; every other nonzero result fails closed. */
+   const char *config_argv[] = {
+       "git",
+       "-C",
+       repo_dir,
+       "config",
+       "--local",
+       "--name-only",
+       "--get-regexp",
+       "^(url\\..*\\.insteadof|http\\.|credential\\.|core\\.sshcommand|remote\\..*\\.(proxy|vcs))",
+       NULL};
+   char *unsafe_config = NULL;
+   int config_rc = safe_exec_capture_cwd_env_fd_timeout(config_argv, repo_dir, hardened,
+                                                        &unsafe_config, 65536, 5000, -1, -1);
+   if (config_rc != 1 || (unsafe_config && unsafe_config[0]))
+   {
+      free(unsafe_config);
+      if (token_fd >= 0)
+         close(token_fd);
+      if (envp)
+         git_cred_inject_free_env(envp);
+      git_cred_inject_free_env(hardened);
+      snprintf(err, errlen, "unsafe or unreadable repository-local git configuration");
+      return -1;
+   }
+   free(unsafe_config);
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, repo_dir, hardened, out, GO_OUT_MAX,
+                                                 GO_TIMEOUT_MS, token_fd,
+                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
    if (token_fd >= 0)
       close(token_fd);
    if (envp)

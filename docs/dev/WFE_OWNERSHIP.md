@@ -24,7 +24,8 @@ client.
 The local-only `/v1/internal/forge/execute` resource route is the credential
 boundary between those planes. It accepts only a small typed set of mechanical
 forge operations from a kernel-attested Unix-socket peer. C confines the path to
-the managed WFE worktree root, verifies repository identity and branch shape,
+the managed WFE worktree root, derives repository identity from the worktree's
+Git common directory, verifies branch shape,
 and applies the shared vault resolution ladder without returning credential
 material. It does not read DB1, choose an operation, interpret a workflow, or
 advance a transition. Go owns those decisions and every resulting lifecycle

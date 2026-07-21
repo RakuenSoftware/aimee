@@ -30,6 +30,7 @@ const (
 )
 
 type Forge interface {
+	Push(context.Context, string, string, string) error
 	Open(context.Context, string, string, string, string, string) (PullRequest, error)
 	CI(context.Context, string, string) (CIState, error)
 	Merge(context.Context, string, string, string) error
@@ -37,8 +38,27 @@ type Forge interface {
 
 type unavailableForge struct{}
 
+func (unavailableForge) Push(context.Context, string, string, string) error {
+	return errors.New("forge resource plane is unavailable")
+}
 func (unavailableForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
 	return PullRequest{}, errors.New("forge resource plane is unavailable")
+}
+
+func (f *HTTPForge) Push(ctx context.Context, repo, workdir, head string) error {
+	if !managedBranch(head) {
+		return fmt.Errorf("refuse push of unmanaged branch %q", head)
+	}
+	repoOrigin, err := gitText(ctx, repo, "remote", "get-url", "origin")
+	if err != nil {
+		return err
+	}
+	workOrigin, err := gitText(ctx, workdir, "remote", "get-url", "origin")
+	if err != nil || repoOrigin != workOrigin {
+		return errors.New("worktree origin does not match admitted repository")
+	}
+	var ignored map[string]any
+	return f.execute(ctx, map[string]any{"op": "push", "workdir": workdir, "head": head}, &ignored)
 }
 func (unavailableForge) CI(context.Context, string, string) (CIState, error) {
 	return CIPending, errors.New("forge resource plane is unavailable")
@@ -100,7 +120,7 @@ func (f *HTTPForge) Open(ctx context.Context, repo, workdir, head, base, title s
 	var result struct {
 		URL string `json:"url"`
 	}
-	if err := f.execute(ctx, map[string]any{"op": "open", "repo": repo, "workdir": workdir,
+	if err := f.execute(ctx, map[string]any{"op": "open", "workdir": workdir,
 		"head": head, "base": base, "title": title}, &result); err != nil {
 		return PullRequest{}, err
 	}
@@ -118,7 +138,7 @@ func (f *HTTPForge) Mergeable(ctx context.Context, workdir, ref string) (bool, e
 	var result struct {
 		Mergeable int `json:"mergeable"`
 	}
-	if err := f.execute(ctx, map[string]any{"op": "info", "repo": workdir,
+	if err := f.execute(ctx, map[string]any{"op": "info",
 		"workdir": workdir, "number": number}, &result); err != nil {
 		return false, err
 	}
@@ -133,7 +153,7 @@ func (f *HTTPForge) CI(ctx context.Context, workdir, ref string) (CIState, error
 	var result struct {
 		State CIState `json:"state"`
 	}
-	if err := f.execute(ctx, map[string]any{"op": "ci", "repo": workdir,
+	if err := f.execute(ctx, map[string]any{"op": "ci",
 		"workdir": workdir, "number": number}, &result); err != nil {
 		return CIPending, err
 	}
@@ -154,7 +174,7 @@ func (f *HTTPForge) Merge(ctx context.Context, workdir, ref, requiredBase string
 		return err
 	}
 	var ignored map[string]any
-	return f.execute(ctx, map[string]any{"op": "merge", "repo": workdir,
+	return f.execute(ctx, map[string]any{"op": "merge",
 		"workdir": workdir, "number": number, "base": requiredBase}, &ignored)
 }
 

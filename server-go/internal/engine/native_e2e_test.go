@@ -62,6 +62,11 @@ func (passVerifier) Verify(context.Context, string) error { return nil }
 
 type e2eForge struct{}
 
+func (e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
+	_, err := gitText(ctx, workdir, "push", "-u", "origin", branch)
+	return err
+}
+
 func (e2eForge) Open(_ context.Context, _ string, _ string, head, base, _ string) (PullRequest, error) {
 	return PullRequest{Ref: "pr:" + head, URL: "pr:" + head, Head: head, Base: base}, nil
 }
@@ -253,7 +258,10 @@ nodes:
 	go func() { scheduler.Run(ctx); close(done) }()
 	shutdown := func() { cancel(); <-done }
 	defer shutdown()
-	deadline := time.Now().Add(10 * time.Second)
+	// The production scheduler intentionally gives transient fan-in recovery a
+	// five-second backoff. This end-to-end path needs two such recovery passes
+	// (child completion, then parent continuation), so leave deterministic headroom.
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		item, err := store.WorkItem(context.Background(), rootID)
 		if err != nil {
@@ -275,5 +283,6 @@ nodes:
 	}
 	item, _ := store.WorkItem(context.Background(), rootID)
 	children, _ := store.Children(context.Background(), rootID)
-	t.Fatalf("workflow timed out: parent=%+v children=%+v", item, children)
+	events, _ := store.Events(context.Background(), rootID, 0, 1000)
+	t.Fatalf("workflow timed out: parent=%+v children=%+v events=%+v", item, children, events)
 }

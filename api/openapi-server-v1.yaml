@@ -4653,10 +4653,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [op, repo, workdir]
+              required: [op, workdir]
               properties:
-                op: { type: string, enum: [open, info, ci, merge] }
-                repo: { type: string }
+                op: { type: string, enum: [push, open, info, ci, merge] }
                 workdir: { type: string }
                 head: { type: string }
                 base: { type: string }

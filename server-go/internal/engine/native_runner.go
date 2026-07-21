@@ -243,7 +243,7 @@ func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepRes
 	if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 		return StepResult{}, err
 	}
-	if _, err := gitText(ctx, workdir, "push", "-u", "origin", branch); err != nil {
+	if err := r.forge.Push(ctx, req.WorkItem.Repo, workdir, branch); err != nil {
 		return StepResult{}, err
 	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: wfe.Hash([]byte(branch))}, nil
