@@ -1266,21 +1266,19 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
  * burn a slot on a "failed to build request URL" participant; server-hosting is
  * capability, primary_only is authorization, so both must pass. So a
  * primary-only or disabled claude is never seated, even after a server-side
- * OAuth setup. Other enabled agents are eligible.
+ * OAuth setup. Other enabled agents with the review role are eligible.
  *
- * The PRIMARY agent is also never seated: a roundtable exists for an INDEPENDENT
- * second opinion, so the model the operator runs as primary (config.provider)
- * must not sit on — or aggregate — its own review panel and quietly grade its own
- * work. Any agent that resolves to the primary provider (by agent name — the
- * primary passthrough is named after the provider — or by its provider tag) is
- * excluded, structurally, regardless of what ensemble.reference_models lists. */
+ * Role membership is the operator's inclusion policy.  There is deliberately no
+ * implicit "primary provider" exclusion: if an enabled agent has the review role
+ * and is not marked primary_only, it is a valid unpinned panelist.  Operators
+ * exclude it by removing the role, disabling it, or setting primary_only. */
 int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
 {
+   (void)cfg;
    if (!ag || !ag->enabled || !ag->name[0])
       return 0;
-   if (cfg->provider[0] && (strcasecmp(ag->name, cfg->provider) == 0 ||
-                            (ag->provider[0] && strcasecmp(ag->provider, cfg->provider) == 0)))
-      return 0; /* the primary must never sit on its own panel */
+   if (!agent_has_role(ag, "review") && !agent_is_exec_role(ag, "review"))
+      return 0;
    if (ag->primary_only)
       return 0;
    if (agent_is_claude_cli(ag) && !ag->is_server_hosted)
@@ -1382,13 +1380,14 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
     * ensemble.reference_models list: drop any entry that names a configured agent
     * which is not panel-eligible (an unauthorized / disabled / client-only
     * claude). An entry that is not a configured agent (an ad-hoc model id) is
-    * left as-is. Keeps reference_models and the aggregator consistent. */
+    * dropped: a positive pin must name a configured, eligible agent. Keeps
+    * reference_models and the aggregator consistent. */
    int n = 0;
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
       const char *name = cfg->ensemble_reference_models[i];
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
-      if (ag && !ensemble_panelist_eligible(cfg, ag))
+      if (!ag || !ensemble_panelist_eligible(cfg, ag))
       {
          aimee_log(LOG_WARN, "delegate.panel",
                    "dropping unauthorized panelist '%s' from the roundtable panel", name);
@@ -1404,7 +1403,7 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
    if (cfg->ensemble_aggregator[0])
    {
       const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
-      if (agg && !ensemble_panelist_eligible(cfg, agg))
+      if (!agg || !ensemble_panelist_eligible(cfg, agg))
          cfg->ensemble_aggregator[0] = '\0';
    }
    if (!cfg->ensemble_aggregator[0] && n > 0)
@@ -1420,14 +1419,15 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
     * breaker marked DOWN. Otherwise it burns a panel seat on a guaranteed-to-fail
     * participant and silently degrades the round (the bug that left a roundtable
     * "2/3 participants failed" with unkeyed models in the list). An ad-hoc model
-    * id that is not a configured agent is left as-is (we cannot check it). Same
-    * predicate single-delegate routing uses: agent_is_available_for_routing. */
+    * id that is not a configured agent is dropped: pins never create shadow
+    * agents outside agents.json. Same predicate single-delegate routing uses:
+    * agent_is_available_for_routing. */
    int n = 0;
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
       const char *name = cfg->ensemble_reference_models[i];
       const agent_t *ag = agent_find((agent_config_t *)acfg, name);
-      if (ag && !agent_is_available_for_routing(ag))
+      if (!ag || !agent_is_available_for_routing(ag))
       {
          aimee_log(LOG_WARN, "delegate.panel",
                    "dropping unavailable panelist '%s' (no key / unhealthy / command missing)",
@@ -1443,7 +1443,7 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
    if (cfg->ensemble_aggregator[0])
    {
       const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
-      if (agg && !agent_is_available_for_routing(agg))
+      if (!agg || !agent_is_available_for_routing(agg))
          cfg->ensemble_aggregator[0] = '\0';
    }
    if (!cfg->ensemble_aggregator[0] && n > 0)

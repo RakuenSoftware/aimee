@@ -1587,18 +1587,20 @@ agent_t *agent_default_primary(agent_config_t *cfg)
    return NULL;
 }
 
-/* Pick randomly from an array of candidates using monotonic-clock nanoseconds.
- * Thread-safe: no shared mutable state. */
-static agent_t *agent_pick_random(agent_t **candidates, int count)
+/* Pick fairly from an array of equally eligible candidates.  `default_agent` is
+ * the primary-session default, not a hidden delegate pin: letting it win every
+ * unpinned delegation starves every peer at the same tier.  A process-wide
+ * atomic cursor gives those peers round-robin opportunities while explicit
+ * --via pins continue to be handled before this function is reached. */
+static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
+   static unsigned cursor;
    if (count <= 0)
       return NULL;
    if (count == 1)
       return candidates[0];
-   struct timespec _ts;
-   clock_gettime(CLOCK_MONOTONIC, &_ts);
-   unsigned int seed = (unsigned int)_ts.tv_nsec ^ (unsigned int)_ts.tv_sec;
-   return candidates[seed % (unsigned int)count];
+   unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
+   return candidates[pick % (unsigned int)count];
 }
 
 int agent_is_claude_cli(const agent_t *agent)
@@ -1692,9 +1694,9 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
 
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
+   agent_t *primary_default = NULL;
+   if (agent_routing_primary_turn() && cfg->default_agent[0])
+      primary_default = agent_find(cfg, cfg->default_agent);
 
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
@@ -1728,21 +1730,17 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
          continue;
       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
-      if (ag == def)
+      if (ag == primary_default)
          return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
-/* Route to a randomly selected enabled agent at exactly the given cost_tier. */
+/* Route fairly among enabled agents at exactly the given cost_tier. */
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
 {
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
-
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -1752,12 +1750,10 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
          continue;
       if (role && !agent_supports_role(ag, role))
          continue;
-      if (ag == def)
-         return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
 static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_caps, int min_context)
@@ -1839,9 +1835,9 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    if (min_tier < 0)
       return NULL;
 
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
+   agent_t *primary_default = NULL;
+   if (agent_routing_primary_turn() && cfg->default_agent[0])
+      primary_default = agent_find(cfg, cfg->default_agent);
 
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
@@ -1861,12 +1857,12 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
             continue;
       }
 
-      if (ag == def)
+      if (ag == primary_default)
          return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
