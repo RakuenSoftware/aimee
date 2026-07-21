@@ -140,6 +140,21 @@ static int add_ext(X509 *issuer, X509 *subject, int nid, const char *value)
    return rc == 1;
 }
 
+static int add_management_profile_ext(X509 *cert)
+{
+   ASN1_OBJECT *oid = OBJ_txt2obj("1.3.6.1.4.1.55555.5.1", 1);
+   ASN1_OCTET_STRING *value = ASN1_OCTET_STRING_new();
+   static const unsigned char marker[] = "aimee-p5-kb-management-v1";
+   X509_EXTENSION *ext = NULL;
+   int ok = oid && value && ASN1_OCTET_STRING_set(value, marker, sizeof(marker) - 1) == 1 &&
+            (ext = X509_EXTENSION_create_by_OBJ(NULL, oid, 0, value)) != NULL &&
+            X509_add_ext(cert, ext, -1) == 1;
+   X509_EXTENSION_free(ext);
+   ASN1_OCTET_STRING_free(value);
+   ASN1_OBJECT_free(oid);
+   return ok;
+}
+
 /* Set a random 64-bit positive serial number on `cert`. Returns 1/0. */
 static int set_random_serial(X509 *cert)
 {
@@ -447,7 +462,8 @@ int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const ch
                             size_t cert_cap)
 {
    if (!ca || !subject_cn || !subject_cn[0] || !cert_pem_out || valid_secs <= 0 ||
-       (profile != KB_PKI_CSR_CLIENT_AUTH && profile != KB_PKI_CSR_SERVER_AUTH))
+       (profile != KB_PKI_CSR_CLIENT_AUTH && profile != KB_PKI_CSR_SERVER_AUTH &&
+        profile != KB_PKI_CSR_KB_MANAGEMENT_CLIENT))
       return -1;
 
    int rc = -1;
@@ -494,6 +510,8 @@ int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const ch
       if (n < 0 || (size_t)n >= sizeof(san) || !add_ext(ca_cert, cert, NID_subject_alt_name, san))
          goto done;
    }
+   else if (profile == KB_PKI_CSR_KB_MANAGEMENT_CLIENT && !add_management_profile_ext(cert))
+      goto done;
 
    const char *key_usage = profile == KB_PKI_CSR_SERVER_AUTH
                                ? "critical,digitalSignature,keyEncipherment"
@@ -567,6 +585,13 @@ int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subj
 {
    return kb_pki_sign_csr_profile(ca, csr_pem, subject_cn, valid_secs, KB_PKI_CSR_CLIENT_AUTH,
                                   cert_pem_out, cert_cap);
+}
+
+int kb_pki_sign_kb_management_csr(const kb_pki_ca_t *ca, const char *csr_pem, long valid_secs,
+                                  char *cert_pem_out, size_t cert_cap)
+{
+   return kb_pki_sign_csr_profile(ca, csr_pem, "p5-kb-management", valid_secs,
+                                  KB_PKI_CSR_KB_MANAGEMENT_CLIENT, cert_pem_out, cert_cap);
 }
 
 /* --- chain verification --- */

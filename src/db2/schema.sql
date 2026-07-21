@@ -6227,6 +6227,44 @@ REVOKE ALL ON FUNCTION org_metrics_snapshot() FROM PUBLIC;
 -- P5 server registry: kb-authoritative fleet inventory.  Management transport
 -- and enrollment code consume this tenant-scoped table; endpoint/cert values are
 -- enrollment-owned and never accepted from an operator action.
+CREATE TABLE IF NOT EXISTS kb_cert_revocation_generation (
+  singleton SMALLINT PRIMARY KEY CHECK (singleton=1),
+  generation BIGINT NOT NULL CHECK (generation>=1),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO kb_cert_revocation_generation(singleton,generation)
+  VALUES(1,1) ON CONFLICT(singleton) DO NOTHING;
+
+-- Revocation is monotonic.  Centralizing the generation bump in a trigger makes
+-- every writer participate in the same transaction, including legacy/admin paths,
+-- while idempotent updates do not manufacture generations.  A revoked instance
+-- can never be resurrected in place; renewal creates a new certificate row.
+CREATE OR REPLACE FUNCTION kb_enrollment_revocation_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public AS $$
+BEGIN
+  IF OLD.state='revoked' OR OLD.revoked_at<>'' THEN
+    IF NEW.state<>'revoked' OR NEW.revoked_at='' THEN
+      RAISE EXCEPTION 'revoked enrollment is immutable' USING ERRCODE='55000';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.state='revoked' OR NEW.revoked_at<>'' THEN
+    IF NEW.state<>'revoked' OR NEW.revoked_at='' THEN
+      RAISE EXCEPTION 'inconsistent enrollment revocation' USING ERRCODE='22023';
+    END IF;
+    UPDATE kb_cert_revocation_generation
+      SET generation=generation+1,updated_at=now() WHERE singleton=1;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'revocation generation unavailable' USING ERRCODE='55000';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS trg_kb_enrollment_revocation_guard ON kb_enrollments;
+CREATE TRIGGER trg_kb_enrollment_revocation_guard
+  BEFORE UPDATE OF state,revoked_at ON kb_enrollments
+  FOR EACH ROW EXECUTE FUNCTION kb_enrollment_revocation_guard();
+
 CREATE TABLE IF NOT EXISTS kb_server_registry (
   server_id TEXT PRIMARY KEY,
   cert_cn TEXT NOT NULL UNIQUE,
@@ -6424,9 +6462,10 @@ BEGIN
   RETURN QUERY SELECT * FROM kb_server_registry r WHERE r.team_id=p_team ORDER BY r.server_id;
 END $$;
 
-CREATE OR REPLACE FUNCTION kb_server_registry_snapshot(p_team BIGINT,p_server_id TEXT)
+DROP FUNCTION IF EXISTS kb_server_registry_snapshot(BIGINT,TEXT);
+CREATE FUNCTION kb_server_registry_snapshot(p_team BIGINT,p_server_id TEXT)
 RETURNS TABLE(server_id TEXT,endpoint TEXT,status TEXT,mgmt_issuer TEXT,mgmt_serial_norm TEXT,
-  mgmt_fingerprint TEXT,enrollment_state TEXT,revoked_at TEXT)
+  mgmt_fingerprint TEXT,enrollment_state TEXT,revoked_at TEXT,revocation_generation BIGINT)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
   IF NOT (kb_principal_is_admin() OR is_team_lead(p_team)
@@ -6435,11 +6474,50 @@ BEGIN
     RAISE EXCEPTION 'registry snapshot not authorized' USING ERRCODE='42501';
   END IF;
   RETURN QUERY SELECT r.server_id,r.endpoint,r.status,r.mgmt_issuer,r.mgmt_serial_norm,
-    r.mgmt_fingerprint,e.state,e.revoked_at FROM kb_server_registry r
+    r.mgmt_fingerprint,e.state,e.revoked_at,g.generation FROM kb_server_registry r
     LEFT JOIN kb_enrollments e ON e.scope='p5-server-management'
       AND e.cert_issuer=r.mgmt_issuer AND e.cert_serial_norm=r.mgmt_serial_norm
       AND e.fingerprint=r.mgmt_fingerprint
+    CROSS JOIN kb_cert_revocation_generation g
     WHERE r.team_id=p_team AND r.server_id=p_server_id;
+END $$;
+
+-- Narrow primary-backed admission used only by the online status authority.
+-- The mTLS serving seam supplies the verified caller identity; no CN or request
+-- identity participates in the decision.
+DROP FUNCTION IF EXISTS kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT);
+CREATE FUNCTION kb_management_status_lookup(
+  p_issuer TEXT,p_serial TEXT,p_fingerprint TEXT,p_target_server TEXT,p_purpose TEXT
+) RETURNS TABLE(revocation_generation BIGINT,target_mgmt_fingerprint TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+BEGIN
+  IF char_length(p_issuer) NOT BETWEEN 1 AND 600
+     OR p_serial !~ '^[0-9a-f]{1,128}$'
+     OR p_fingerprint !~ '^[0-9a-f]{64}$'
+     OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
+     OR p_purpose<>'management.health.v1' THEN
+    RAISE EXCEPTION 'invalid management status input' USING ERRCODE='22023';
+  END IF;
+  RETURN QUERY SELECT g.generation,r.mgmt_fingerprint
+    FROM kb_cert_revocation_generation g
+    JOIN kb_server_registry r ON r.server_id=p_target_server AND r.status='active'
+    JOIN kb_enrollments caller_e ON caller_e.scope='p5-kb-management'
+      AND caller_e.cert_issuer=p_issuer AND caller_e.cert_serial_norm=p_serial
+      AND caller_e.fingerprint=p_fingerprint AND caller_e.state='active'
+      AND caller_e.revoked_at='' AND NULLIF(caller_e.expires_at,'')::timestamptz>now()
+    JOIN kb_team_membership caller_m ON caller_m.team=r.team_id
+      AND caller_m.identity_key=
+        'cert:'||replace(replace(p_issuer,'%','%25'),':','%3A')||':'||
+        replace(replace(p_serial,'%','%25'),':','%3A')
+    JOIN kb_enrollments target_e ON target_e.scope='p5-server-management'
+      AND target_e.cert_issuer=r.mgmt_issuer
+      AND target_e.cert_serial_norm=r.mgmt_serial_norm
+      AND target_e.fingerprint=r.mgmt_fingerprint
+      AND target_e.state='active' AND target_e.revoked_at=''
+   WHERE g.singleton=1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management status denied' USING ERRCODE='28000';
+  END IF;
 END $$;
 
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
@@ -6447,6 +6525,7 @@ REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT
 REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_list(BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 
 -- P2b-a buffered Bedrock egress authority. Certificate instances remain the
 -- revocation/audit origin; authority_id is the renewal-stable idempotency owner.

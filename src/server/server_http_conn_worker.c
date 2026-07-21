@@ -54,7 +54,12 @@ static void *conn_worker(void *arg)
     * (SSE-offload is refused over TLS, so it never crosses threads). */
    SSL *ssl = j->is_tls ? server_tls_begin(j->fd) : NULL;
    if (!(j->is_tls && !ssl)) /* skip handle_conn only when the TLS handshake failed */
-      handle_conn(j->fd, j->is_tcp);
+   {
+      do
+      {
+         handle_conn(j->fd, j->is_tcp);
+      } while (j->is_tls && server_http_keepalive_take());
+   }
    server_tls_end(j->fd, ssl);
    close(j->fd);
    atomic_fetch_sub(&g_conn_live, 1);

@@ -21,6 +21,7 @@
 #include "turn_registry.h"
 #include "server_http.h"
 #include "server_tls.h"    /* server_http_api_status_report */
+#include "server_mgmt_status.h"
 #include "config.h"        /* config_t / config_load for api.status, api.enable */
 #include "aimee_backend.h" /* aimee_backend_anthropic_set_cache_enabled (economizer tier) */
 #include "delegate_backend_docker.h"
@@ -2173,7 +2174,11 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
                cfg.db1_path);
    else
+   {
       db1_apply_server_pragmas();
+      if (server_mgmt_status_init() != 0)
+         LOG_WARN("server", "management status nonce initialization failed");
+   }
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);

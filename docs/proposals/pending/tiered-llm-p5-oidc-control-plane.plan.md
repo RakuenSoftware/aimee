@@ -1,6 +1,7 @@
 # P5 implementation plan — security-closed control-plane slices
 
-- **State:** IN PROGRESS. P5-A is complete; P5-B is the next implementation slice.
+- **State:** IN PROGRESS. P5-A and the fail-disabled P5-B status foundation are
+  complete; P5-B composition is the next implementation slice.
 - **Proposal:** `tiered-llm-p5-oidc-control-plane.md`.
 - **Existing substrate:** P1 composite identity/OIDC/JWKS verification, P7 custody and
   PostgreSQL WORM append, the P8a per-request enrollment revocation seam, and the
@@ -127,15 +128,153 @@ an application header.
 - A heartbeat failure never changes registry authority fields. A zero-row update is
   a denial, not success.
 
-## Requirements pinned for later P5 slices
+## P5-B — pinned reverse mTLS and nonce-bound status
 
-P5-B must resolve every address at connect time, reject public-name→private-address
-rebinding including IPv4-mapped IPv6, pin the socket to a validated address, preserve
-SNI/Host for the enrolled name, reject redirects, and pin the enrolled server leaf.
-Its dedicated online status authority signs a fresh server nonce plus caller
-issuer/serial, target server, purpose, expiry, and monotonic revocation generation;
-unreachable authority, stale/invalid staple, rollback, or revocation fails closed on
-the next request even on a pooled connection.
+**Delivery:** foundation complete. The primary status authority, strict signed
+status protocol, endpoint/TLS pinning substrate, server nonce/high-water verifier,
+and management-client certificate profile are implemented and validated. The next
+composition slice connects them through a dedicated custodial authority and kb
+orchestrator on CT260↔CT262; until then only read-only server routes exist and no
+management action is enabled.
+
+### Security boundary and delivery shape
+
+P5-B exposes exactly one new operation: a read-only management health probe. It does
+not proxy a general path, accept a bearer fallback, mint an operator JWT, consume a
+management `jti`, or make `/v1/management/action` reachable. The implementation may
+be built internally as transport/status sub-packets, but this slice is not complete
+and the health probe is not enabled until both compose end to end.
+
+The online status authority is a separately runnable, narrow service identity. Only
+that service can use the `p5-management-status` signing key through the P7 custody
+and key-use admission boundary; an ordinary unsealed kb process receives only a
+signed staple and cannot read the private key or call an in-process signing helper.
+The status key is distinct from the enrollment CA and management-JWT keys. Servers
+pin its public key and a bounded key id through deployment/enrollment configuration.
+
+P5-B also closes the remaining caller-credential gap from P5-A: each kb instance
+auto-enrolls a distinct `p5-kb-management` `clientAuth` leaf using its already
+verified platform workload identity, persists it only in that instance's custody
+domain, and renews it with the same identity binding. A third strict CA signing
+profile, `kb-to-server-management-client`, permits only that scope and clientAuth
+EKU; renewal requires the same platform workload identity, permits only a bounded
+overlap, and a revoked leaf cannot renew. The management listener and status
+authority accept only that profile. A manually shared fleet credential or a generic
+enrollment leaf cannot enable the health path.
+
+### Primary state and revocation transitions
+
+- Add one singleton, primary-backed `kb_cert_revocation_generation` row initialized
+  to one. Every authoritative transition that makes an enrollment newly revoked
+  increments it in the same transaction as the revocation; retries that change no
+  state do not increment it. It is deliberately unrelated to vault seal/key epochs.
+- Add a SECURITY DEFINER status lookup that takes the caller certificate's exact
+  issuer, normalized serial, and fingerprint plus a bounded target server id and
+  purpose. In one primary query it returns the current generation and the target's
+  authoritative management fingerprint only when
+  the caller is an active, unexpired `p5-kb-management` enrollment and the target is
+  an active registry row. Runtime roles receive EXECUTE only, never table access.
+- Extend the existing management snapshot to return the same revocation generation.
+  kb performs this primary query before each request, including requests on a reused
+  TLS connection. Inactive/revoked server enrollment or a lower generation aborts
+  before bytes for the protected request are written.
+- SQLite mirrors only the table shape. Production wrappers require PostgreSQL and
+  fail closed on primary outage, zero rows, invalid state, or generation rollback.
+
+### Canonical status protocol
+
+The management listener provides two fixed routes on required mTLS:
+
+1. `POST /v1/management/challenge` creates 32 random bytes with the OS CSPRNG and
+   returns base64url nonce plus an absolute expiry no more than 15 seconds ahead.
+   Server state binds the nonce to the verified caller leaf fingerprint, issuer and
+   normalized serial, the configured server id, and purpose
+   `management.health.v1`. At most 128 outstanding nonces are allowed; expired rows
+   are removed before admission and saturation denies the challenge without
+   eviction. They are single-use and all outstanding nonces are deleted on restart,
+   while the generation high-water survives restart.
+2. The kb instance sends the nonce, target server id, purpose, and the target
+   management fingerprint from its fresh registry snapshot to the dedicated
+   status authority while presenting the same management `clientAuth` leaf. The
+   authority derives issuer/serial/fingerprint from that verified mTLS peer, queries
+   PostgreSQL primary, requires the requested target fingerprint to equal that same
+   query's registry result, and returns a signed staple. Caller-supplied certificate
+   identity is never authoritative.
+3. `GET /v1/management/health` carries the staple on the same TLS connection. The
+   server binds it to the actual peer leaf, atomically consumes the matching nonce,
+   verifies the signature/key id, exact target and purpose, issued/expiry window,
+   target management fingerprint, and generation `>=` its durable high-water mark
+   before returning bounded health JSON. Nonce consumption, verification outcome,
+   and high-water comparison/advance use one server-local transaction and one lock
+   order. Every verification failure consumes the nonce. Successful higher
+   generations are durably advanced before the response; a persistence failure
+   denies the request.
+
+The signed bytes are a versioned, unambiguous length-prefixed binary transcript over
+`version, key_id, nonce, caller_issuer, caller_serial_norm, caller_fingerprint,
+target_server_id, target_mgmt_fingerprint, purpose, issued_at, expires_at,
+revocation_generation`; integers are unsigned network byte order. Version is one;
+key id is 1..64 token bytes; nonce is exactly 32 bytes; issuer is 1..600 printable
+bytes; serial is 1..128 lowercase hex; each fingerprint is exactly 64 lowercase hex;
+server id is 1..127 token bytes; purpose is exactly `management.health.v1`; times and
+generation are u64, the signature is 64 bytes, and all variable fields carry u32
+network-order lengths. The outer wire object is strict JSON containing those exact
+fields and base64url-no-pad signature; numeric values are canonical decimal strings;
+duplicates, unknown fields, non-canonical encodings, overflow, and trailing data are
+rejected. Ed25519 is the initial algorithm and algorithm choice is not accepted from
+the request. Clock skew is bounded to two seconds and staple lifetime to ten seconds.
+
+### Reverse transport and endpoint policy
+
+- Parse `https://host[:port]` once, rejecting userinfo, paths, queries, fragments,
+  ambiguous IPv6 syntax, zone ids, NUL/control bytes, and invalid ports. The enrolled
+  DNS name remains the TLS SNI, hostname-verification name, and HTTP `Host` value.
+- Resolve afresh with one `getaddrinfo(AF_UNSPEC)` call at every connection attempt.
+  Normalize IPv4-mapped IPv6 to IPv4 and
+  reject every candidate in IPv4 loopback, RFC1918, link-local/metadata, multicast,
+  unspecified, or IPv6 loopback, `fe80::/10`, `fc00::/7`, multicast, and unspecified
+  ranges. Denied candidates are filtered independently (including mixed A+AAAA
+  answers); a name is usable only if at least one candidate is permitted. The exact
+  returned permitted sockaddr is passed directly to `connect(2)`, never through a
+  second hostname lookup.
+- After normal CA/hostname/EKU validation, hash the DER peer leaf and constant-time
+  compare it with the registry snapshot fingerprint; issuer and normalized serial
+  must also match. No TOFU, proxy environment variables, plaintext downgrade, or
+  redirects are supported. Any 3xx is a terminal failure.
+- Challenge and protected health request share one TLS connection. Before the second
+  write, kb re-reads the primary snapshot and refuses changed endpoint/cert identity,
+  inactive/revoked state, or generation rollback. Connection pooling may be added,
+  but every protected request must obtain a new server nonce and staple and repeat
+  the primary server check.
+
+### P5-B validation and failure semantics
+
+- Unit/fuzz/ASAN coverage exercises endpoint parsing and every IPv4/IPv6 boundary,
+  mapped-address bypasses, mixed DNS answers, leaf mismatch, strict staple parsing,
+  transcript ambiguity, nonce expiry/replay/cross-peer/cross-server reuse, signature
+  failure, stale/rollback generations, high-water persistence failure, and 3xx.
+- Real PostgreSQL 17 runtime-role tests prove atomic generation increments, no-op
+  revoke stability, status denial after revoke, cross-team/target denial, primary
+  failure, no direct table access, and management-snapshot consistency.
+- CT260 runs PostgreSQL and the separately credentialed status authority; CT262 runs
+  the server management listener. The two-node test uses an isolated non-denied test
+  address, validates the full challenge→authority→health exchange, then revokes
+  the kb management leaf between challenge and status issuance. Issuance is denied,
+  and the next complete challenge cycle also fails on the existing TLS connection.
+  A revocation committed after a staple has already been issued defines the boundary
+  between that in-flight logical request and the next request; P5-B never claims an
+  offline signature can observe a later database commit. It also proves DNS
+  rebinding/private candidates, wrong EKU/CA/leaf, authority outage, replay,
+  rollback, and redirects fail closed.
+- Status-authority/primary/network errors map to `503`; unauthenticated or invalid
+  peer/staple to `401`; authenticated binding/purpose/target mismatch to `403`;
+  replay/expired/conflicting challenge to `409`. No failure reaches a server write,
+  and `/v1/management/action` remains unconditional `503`.
+
+Run the hardened server/kb/status-authority builds, focused tests, schema/grant gates,
+lint and route coverage, then an adversarial branch roundtable over the full diff.
+
+## Requirements pinned for later P5 slices
 
 P5-C must verify structured JWT claims without a second permissive parser; bind the
 token to the actual mTLS peer and target audience; publish signed, non-rollbackable
