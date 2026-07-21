@@ -12,9 +12,9 @@ Example:
     --expected-path /model/model/converse-stream \
     --counter-file /run/p6c-mock.accepted --ready-file /run/p6c-mock.ready
 
-The certificate SAN must contain the signed Bedrock Runtime host.  The client
-connects to this loopback listener through its test-only socket override while
-retaining that AWS hostname for Host, SNI, and certificate verification.
+The certificate SAN must contain the signed Bedrock Runtime host.  The CT gate
+maps that hostname to this loopback listener while retaining it for Host, SNI,
+and certificate verification.
 
 Run the dependency-free internal checks with:
   python3 scripts/p6c_bedrock_mock.py --self-test
@@ -375,6 +375,15 @@ class MockHandler(BaseHTTPRequestHandler):
             pass
         self.close_connection = True
 
+    def _send_close_notify(self) -> None:
+        """Send TLS close_notify without waiting for the client's reciprocal alert."""
+        try:
+            self.wfile.flush()
+            self.connection.setblocking(False)
+            self.connection.unwrap()
+        except (ssl.SSLWantReadError, ssl.SSLWantWriteError, OSError):
+            pass
+
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         args = self.server.args
         if (
@@ -477,6 +486,7 @@ class MockHandler(BaseHTTPRequestHandler):
             flush=True,
         )
         self._respond(args.case)
+        self._send_close_notify()
         self.close_connection = True
 
     def _respond(self, case: str) -> None:
