@@ -74,6 +74,15 @@ BEGIN
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
 
+  -- P5-A authoritative registry: runtime reaches state only through audited,
+  -- bounded definer APIs; direct reads and writes are unavailable.
+  REVOKE ALL ON kb_server_registry FROM aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_list(BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) TO aimee_kb_runtime;
+
   -- P3a cost attribution. The ledger, rollup, and price tables are WRITTEN ONLY by
   -- the SECURITY DEFINER metering functions (owned by aimee_kb_owner, which bypasses
   -- ENABLE-not-FORCE RLS). Runtime therefore gets SELECT (RLS-filtered: admin OR

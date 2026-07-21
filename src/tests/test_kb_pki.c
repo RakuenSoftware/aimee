@@ -395,10 +395,9 @@ static void test_role_csr_profiles(const kb_pki_ca_t *ca)
    char *server_csr = make_csr(server_key, "ignored-server");
    char client_cert[KB_PKI_CERT_PEM_MAX], server_cert[KB_PKI_CERT_PEM_MAX];
 
-   assert(kb_pki_sign_csr_profile(ca, client_csr, "server:p5-a", 3600, KB_PKI_CSR_CLIENT_AUTH,
-                                  client_cert, sizeof(client_cert)) == 0);
-   assert(kb_pki_sign_csr_profile(ca, server_csr, "p5-server.example", 3600, KB_PKI_CSR_SERVER_AUTH,
-                                  server_cert, sizeof(server_cert)) == 0);
+   assert(kb_pki_sign_server_role_csrs(ca, client_csr, "server:p5-a", server_csr,
+                                       "p5-server.example", 3600, client_cert, sizeof(client_cert),
+                                       server_cert, sizeof(server_cert)) == 0);
    assert_exact_eku(client_cert, NID_client_auth);
    assert_exact_eku(server_cert, NID_server_auth);
    assert_cert_cn(client_cert, "server:p5-a");
@@ -412,6 +411,10 @@ static void test_role_csr_profiles(const kb_pki_ca_t *ca)
 
    assert(kb_pki_sign_csr_profile(ca, client_csr, "server:p5-a", 3600, (kb_pki_csr_profile_t)99,
                                   client_cert, sizeof(client_cert)) == -1);
+   assert(kb_pki_sign_server_role_csrs(ca, client_csr, "server:p5-a", client_csr,
+                                       "p5-server.example", 3600, client_cert, sizeof(client_cert),
+                                       server_cert, sizeof(server_cert)) == -1);
+   assert(client_cert[0] == '\0' && server_cert[0] == '\0');
    free(client_csr);
    free(server_csr);
    EVP_PKEY_free(client_key);

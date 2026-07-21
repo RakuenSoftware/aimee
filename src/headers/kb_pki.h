@@ -105,6 +105,15 @@ extern "C"
                                long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
                                size_t cert_cap);
 
+   /* Atomically validate and issue the two P5 server roles. The CSRs must prove
+    * possession of different public keys. On any failure both outputs are
+    * cleared, so a caller cannot accidentally return a partial enrollment. */
+   int kb_pki_sign_server_role_csrs(const kb_pki_ca_t *ca, const char *client_csr_pem,
+                                    const char *client_subject, const char *server_csr_pem,
+                                    const char *server_subject, long valid_secs,
+                                    char *client_cert_out, size_t client_cert_cap,
+                                    char *server_cert_out, size_t server_cert_cap);
+
    /* Validate a PEM PKCS#10 CSR WITHOUT issuing anything: it must parse, its
     * self-signature must verify (proof of private-key possession), and its key
     * must be acceptable (RSA >= 2048). Returns 0 if the CSR is acceptable, -1

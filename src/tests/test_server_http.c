@@ -124,6 +124,18 @@ int main(void)
       assert(strstr(resp, "\"service\":\"aimee-server\""));
    }
 
+   /* P5-A: legacy management environment cannot enable a write route. */
+   {
+      platform_setenv("AIMEE_MGMT_JWKS", "{\"keys\":[]}");
+      platform_setenv("AIMEE_MGMT_ISSUER", "legacy-issuer");
+      platform_setenv("AIMEE_MGMT_AUDIENCE", "legacy-audience");
+      platform_setenv("AIMEE_MGMT_PEER_CN", "legacy-peer");
+      int st = server_http_route("POST", "/v1/management/action",
+                                 "{\"token\":\"legacy\",\"target\":\"x\"}", 31, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "management control plane is not enabled"));
+   }
+
    /* --- GET /v1/version reports the build version --- */
    {
       int st = server_http_route("GET", "/v1/version", NULL, 0, resp, sizeof(resp));
