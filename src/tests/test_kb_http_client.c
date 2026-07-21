@@ -2,8 +2,10 @@
 #include "kb/http/kb_http_client.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <openssl/ssl.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -267,6 +269,46 @@ static void poll_readiness_precedes_hangup(void)
    assert(close(sockets[0]) == 0);
 }
 
+typedef struct
+{
+   kb_http_result_t result;
+} resolver_stress_t;
+
+static void *resolver_stress_thread(void *context)
+{
+   resolver_stress_t *run = context;
+   run->result = kb_http_client_test__resolve("localhost", 2);
+   return NULL;
+}
+
+static void resolver_pool_is_bounded_and_reclaims(void)
+{
+   enum
+   {
+      STRESS_THREADS = 64
+   };
+   pthread_t threads[STRESS_THREADS];
+   resolver_stress_t runs[STRESS_THREADS] = {0};
+   for (size_t i = 0; i < STRESS_THREADS; i++)
+      assert(pthread_create(&threads[i], NULL, resolver_stress_thread, &runs[i]) == 0);
+   for (size_t i = 0; i < STRESS_THREADS; i++)
+   {
+      assert(pthread_join(threads[i], NULL) == 0);
+      assert(runs[i].result == KB_HTTP_OK || runs[i].result == KB_HTTP_TIMEOUT ||
+             runs[i].result == KB_HTTP_RESOLVE_ERROR);
+   }
+   size_t high_water = 0;
+   assert(kb_http_client_test__dns_wait_idle(5000, &high_water) == KB_HTTP_OK);
+   assert(high_water > 0 && high_water <= 16);
+}
+
+static void sigpipe_mask_failure_policy(void)
+{
+   assert(kb_http_client_test__sigpipe_mask_policy(0) == KB_HTTP_OK);
+   assert(kb_http_client_test__sigpipe_mask_policy(EINVAL) == KB_HTTP_INTERNAL_ERROR);
+   assert(kb_http_client_test__sigpipe_mask_policy(ENOMEM) == KB_HTTP_INTERNAL_ERROR);
+}
+
 int main(void)
 {
    content_length_boundaries();
@@ -278,6 +320,8 @@ int main(void)
    origin_path_validation();
    authenticated_tls_eof_policy();
    poll_readiness_precedes_hangup();
+   sigpipe_mask_failure_policy();
+   resolver_pool_is_bounded_and_reclaims();
    puts("kb http client: strict parser and request validation passed");
    return 0;
 }

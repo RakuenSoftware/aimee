@@ -449,68 +449,33 @@ static int deadline_expired(int64_t deadline)
    return now < 0 || now >= deadline;
 }
 
-typedef struct
+typedef struct dns_query
 {
    pthread_mutex_t mutex;
    pthread_cond_t cond;
    atomic_int refs;
    int done, abandoned;
-   struct gaicb request;
+   int gai_result;
+   struct addrinfo *result;
    struct addrinfo hints;
    char host[256];
    char service[16];
+   struct dns_query *next;
 } dns_query_t;
 
-/* getaddrinfo_a() can outlive its caller after a deadline.  Keep a slot until the
- * completion notification runs, including when gai_cancel() cannot cancel the
- * request, so repeated timeouts cannot create an unbounded queue of resolver
- * work and callback-owned allocations. */
+/* A fixed process-lifetime worker pool bounds both resolver concurrency and
+ * timed-out jobs.  Workers, rather than per-request SIGEV_THREAD callbacks,
+ * always reclaim abandoned jobs and their addrinfo results. */
+#define DNS_WORKER_COUNT      4U
 #define DNS_QUERY_PROCESS_CAP 16U
-static pthread_mutex_t dns_slots_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t dns_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t dns_work_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t dns_slots_cond;
-static pthread_once_t dns_slots_once = PTHREAD_ONCE_INIT;
+static pthread_once_t dns_pool_once = PTHREAD_ONCE_INIT;
+static dns_query_t *dns_queue_head, *dns_queue_tail;
 static size_t dns_slots_used;
-static int dns_slots_ready;
-
-static void dns_slots_init(void)
-{
-   pthread_condattr_t attr;
-   if (pthread_condattr_init(&attr) != 0)
-      return;
-   if (pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) == 0 &&
-       pthread_cond_init(&dns_slots_cond, &attr) == 0)
-      dns_slots_ready = 1;
-   pthread_condattr_destroy(&attr);
-}
-
-static kb_http_result_t dns_slot_acquire(int64_t deadline)
-{
-   if (pthread_once(&dns_slots_once, dns_slots_init) != 0 || !dns_slots_ready)
-      return KB_HTTP_INTERNAL_ERROR;
-   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
-   if (pthread_mutex_lock(&dns_slots_mutex) != 0)
-      return KB_HTTP_INTERNAL_ERROR;
-   int wait_result = 0;
-   while (dns_slots_used >= DNS_QUERY_PROCESS_CAP && wait_result == 0)
-      wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_slots_mutex, &until);
-   kb_http_result_t result = KB_HTTP_OK;
-   if (dns_slots_used >= DNS_QUERY_PROCESS_CAP)
-      result = wait_result == ETIMEDOUT || deadline_expired(deadline) ? KB_HTTP_TIMEOUT
-                                                                      : KB_HTTP_INTERNAL_ERROR;
-   else
-      dns_slots_used++;
-   pthread_mutex_unlock(&dns_slots_mutex);
-   return result;
-}
-
-static void dns_slot_release(void)
-{
-   pthread_mutex_lock(&dns_slots_mutex);
-   if (dns_slots_used)
-      dns_slots_used--;
-   pthread_cond_signal(&dns_slots_cond);
-   pthread_mutex_unlock(&dns_slots_mutex);
-}
+static size_t dns_slots_high_water;
+static int dns_pool_ready;
 
 static void dns_query_release(dns_query_t *q)
 {
@@ -522,21 +487,120 @@ static void dns_query_release(dns_query_t *q)
    }
 }
 
-static void dns_complete(union sigval value)
+static void dns_slot_release(void)
 {
-   dns_query_t *q = value.sival_ptr;
-   pthread_mutex_lock(&q->mutex);
-   q->done = 1;
-   int abandoned = q->abandoned;
-   pthread_cond_signal(&q->cond);
-   pthread_mutex_unlock(&q->mutex);
-   if (abandoned && q->request.ar_result)
+   pthread_mutex_lock(&dns_pool_mutex);
+   if (dns_slots_used)
+      dns_slots_used--;
+   pthread_cond_broadcast(&dns_slots_cond);
+   pthread_mutex_unlock(&dns_pool_mutex);
+}
+
+static void *dns_worker(void *unused)
+{
+   (void)unused;
+   for (;;)
    {
-      freeaddrinfo(q->request.ar_result);
-      q->request.ar_result = NULL;
+      pthread_mutex_lock(&dns_pool_mutex);
+      while (!dns_queue_head)
+         pthread_cond_wait(&dns_work_cond, &dns_pool_mutex);
+      dns_query_t *q = dns_queue_head;
+      dns_queue_head = q->next;
+      if (!dns_queue_head)
+         dns_queue_tail = NULL;
+      pthread_mutex_unlock(&dns_pool_mutex);
+
+      struct addrinfo *resolved = NULL;
+      int gai = getaddrinfo(q->host, q->service, &q->hints, &resolved);
+      pthread_mutex_lock(&q->mutex);
+      q->gai_result = gai;
+      if (!q->abandoned && gai == 0)
+      {
+         q->result = resolved;
+         resolved = NULL;
+      }
+      q->done = 1;
+      pthread_cond_signal(&q->cond);
+      pthread_mutex_unlock(&q->mutex);
+      if (resolved)
+         freeaddrinfo(resolved);
+      dns_slot_release();
+      dns_query_release(q);
    }
-   dns_slot_release();
-   dns_query_release(q);
+   return NULL;
+}
+
+static void dns_pool_init(void)
+{
+   pthread_condattr_t cond_attr;
+   if (pthread_condattr_init(&cond_attr) != 0)
+      return;
+   if (pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC) != 0 ||
+       pthread_cond_init(&dns_slots_cond, &cond_attr) != 0)
+   {
+      pthread_condattr_destroy(&cond_attr);
+      return;
+   }
+   pthread_condattr_destroy(&cond_attr);
+
+   pthread_attr_t thread_attr;
+   if (pthread_attr_init(&thread_attr) != 0)
+      return;
+   if (pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED) != 0)
+   {
+      pthread_attr_destroy(&thread_attr);
+      return;
+   }
+   size_t started = 0;
+   for (size_t i = 0; i < DNS_WORKER_COUNT; i++)
+   {
+      pthread_t worker;
+      if (pthread_create(&worker, &thread_attr, dns_worker, NULL) == 0)
+         started++;
+   }
+   pthread_attr_destroy(&thread_attr);
+   /* At least one permanent worker guarantees every accepted job has an owner.
+    * Detached workers and static synchronization state intentionally live until
+    * process exit; no shutdown ordering can race an in-flight resolver call. */
+   dns_pool_ready = started != 0;
+}
+
+static kb_http_result_t dns_slot_acquire(int64_t deadline)
+{
+   if (pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
+      return KB_HTTP_INTERNAL_ERROR;
+   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
+   if (pthread_mutex_lock(&dns_pool_mutex) != 0)
+      return KB_HTTP_INTERNAL_ERROR;
+   int wait_result = 0;
+   while (dns_slots_used >= DNS_QUERY_PROCESS_CAP && wait_result == 0)
+      wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_pool_mutex, &until);
+   kb_http_result_t result = KB_HTTP_OK;
+   if (deadline_expired(deadline))
+      result = KB_HTTP_TIMEOUT;
+   else if (dns_slots_used >= DNS_QUERY_PROCESS_CAP)
+      result = wait_result == ETIMEDOUT || deadline_expired(deadline) ? KB_HTTP_TIMEOUT
+                                                                      : KB_HTTP_INTERNAL_ERROR;
+   else
+   {
+      dns_slots_used++;
+      if (dns_slots_used > dns_slots_high_water)
+         dns_slots_high_water = dns_slots_used;
+   }
+   pthread_mutex_unlock(&dns_pool_mutex);
+   return result;
+}
+
+static void dns_enqueue(dns_query_t *q)
+{
+   pthread_mutex_lock(&dns_pool_mutex);
+   if (dns_queue_tail)
+      dns_queue_tail->next = q;
+   else
+      dns_queue_head = q;
+   dns_queue_tail = q;
+   pthread_cond_signal(&dns_work_cond);
+   pthread_mutex_unlock(&dns_pool_mutex);
 }
 
 static kb_http_result_t resolve_deadline(const char *host, const char *service, int64_t deadline,
@@ -578,66 +642,76 @@ static kb_http_result_t resolve_deadline(const char *host, const char *service, 
       return KB_HTTP_INTERNAL_ERROR;
    }
    pthread_condattr_destroy(&attr);
-   atomic_init(&q->refs, 2);
+   atomic_init(&q->refs, 1); /* caller; the worker reference is added only on enqueue */
    snprintf(q->host, sizeof(q->host), "%s", host);
    snprintf(q->service, sizeof(q->service), "%s", service);
    q->hints.ai_family = AF_UNSPEC;
    q->hints.ai_socktype = SOCK_STREAM;
    q->hints.ai_protocol = IPPROTO_TCP;
-   q->request.ar_name = q->host;
-   q->request.ar_service = q->service;
-   q->request.ar_request = &q->hints;
-   struct gaicb *requests[] = {&q->request};
-   struct sigevent event = {.sigev_notify = SIGEV_THREAD,
-                            .sigev_value.sival_ptr = q,
-                            .sigev_notify_function = dns_complete};
-   if (getaddrinfo_a(GAI_NOWAIT, requests, 1, &event) != 0)
+   if (deadline_expired(deadline))
    {
-      atomic_store(&q->refs, 1);
       dns_query_release(q);
       dns_slot_release();
-      return KB_HTTP_RESOLVE_ERROR;
+      return KB_HTTP_TIMEOUT;
    }
+   atomic_fetch_add(&q->refs, 1);
+   dns_enqueue(q);
    struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
    pthread_mutex_lock(&q->mutex);
    int wait_result = 0;
    while (!q->done && wait_result == 0)
       wait_result = pthread_cond_timedwait(&q->cond, &q->mutex, &until);
-   if (!q->done)
+   if (!q->done || deadline_expired(deadline))
    {
       q->abandoned = 1;
+      struct addrinfo *late_result = q->result;
+      q->result = NULL;
       pthread_mutex_unlock(&q->mutex);
-      /* EAI_CANCELED, EAI_NOTCANCELED, and EAI_ALLDONE all retain the callback
-       * reference.  glibc still issues the SIGEV_THREAD completion notification;
-       * it alone releases the process slot and the callback-owned lifetime. */
-      switch (gai_cancel(&q->request))
-      {
-      case EAI_CANCELED:
-         /* Cancellation is completion; the registered notification owns q. */
-         break;
-      case EAI_NOTCANCELED:
-         /* Resolver work continues; the registered notification owns q. */
-         break;
-      case EAI_ALLDONE:
-         /* Completion raced the timeout; its notification still owns q. */
-         break;
-      default:
-         /* An implementation-specific failure cannot prove callback absence.
-          * Retaining its reference and cap slot is the only memory-safe choice. */
-         break;
-      }
+      if (late_result)
+         freeaddrinfo(late_result);
       dns_query_release(q);
       return KB_HTTP_TIMEOUT;
    }
+   int gai = q->gai_result;
+   *result = q->result;
+   q->result = NULL;
    pthread_mutex_unlock(&q->mutex);
-   int gai = gai_error(&q->request);
-   if (gai == 0)
-   {
-      *result = q->request.ar_result;
-      q->request.ar_result = NULL;
-   }
    dns_query_release(q);
    return gai == 0 && *result ? KB_HTTP_OK : KB_HTTP_RESOLVE_ERROR;
+}
+
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__resolve(const char *host, int timeout_ms)
+{
+   int64_t now = now_ns();
+   if (!host || timeout_ms <= 0 || now < 0 || now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
+      return KB_HTTP_INVALID_ARGUMENT;
+   struct addrinfo *result = NULL;
+   kb_http_result_t status =
+       resolve_deadline(host, "443", now + (int64_t)timeout_ms * 1000000LL, &result);
+   freeaddrinfo(result);
+   return status;
+}
+
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water)
+{
+   int64_t now = now_ns();
+   if (!high_water || timeout_ms <= 0 || now < 0 ||
+       now > INT64_MAX - (int64_t)timeout_ms * 1000000LL)
+      return KB_HTTP_INVALID_ARGUMENT;
+   if (pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
+      return KB_HTTP_INTERNAL_ERROR;
+   int64_t deadline = now + (int64_t)timeout_ms * 1000000LL;
+   struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
+   pthread_mutex_lock(&dns_pool_mutex);
+   int wait_result = 0;
+   while (dns_slots_used && wait_result == 0)
+      wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_pool_mutex, &until);
+   *high_water = dns_slots_high_water;
+   kb_http_result_t result = dns_slots_used ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
+   pthread_mutex_unlock(&dns_pool_mutex);
+   return result;
 }
 
 static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
@@ -940,6 +1014,17 @@ static kb_http_result_t build_request_bytes(const kb_http_request_t *r, unsigned
    return KB_HTTP_OK;
 }
 
+static kb_http_result_t sigpipe_mask_policy(int mask_result)
+{
+   return mask_result == 0 ? KB_HTTP_OK : KB_HTTP_INTERNAL_ERROR;
+}
+
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__sigpipe_mask_policy(int mask_result)
+{
+   return sigpipe_mask_policy(mask_result);
+}
+
 kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
                                       kb_http_response_t *response, kb_http_headers_fn headers_cb,
                                       kb_http_body_fn body_cb, void *context)
@@ -964,14 +1049,22 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
    sigemptyset(&pipe_set);
    sigaddset(&pipe_set, SIGPIPE);
    sigemptyset(&initially_pending);
-   int pipe_blocked = pthread_sigmask(SIG_BLOCK, &pipe_set, &old_mask) == 0;
-   if (pipe_blocked)
-      (void)sigpending(&initially_pending);
+   kb_http_result_t result = sigpipe_mask_policy(pthread_sigmask(SIG_BLOCK, &pipe_set, &old_mask));
+   /* A failed mask leaves SIGPIPE safety unknown.  Fail before resolver or socket I/O. */
+   if (result != KB_HTTP_OK)
+      return result;
+   int pipe_blocked = 1;
+   if (sigpending(&initially_pending) != 0)
+   {
+      /* No I/O has occurred.  Best-effort restoration is safe even if it fails:
+       * the current thread then retains the protective blocked SIGPIPE mask. */
+      (void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+      return KB_HTTP_INTERNAL_ERROR;
+   }
    char service[16];
    snprintf(service, sizeof(service), "%d", 443);
    struct addrinfo *addresses = NULL;
-   kb_http_result_t result =
-       resolve_deadline(request->authority, service, connect_deadline_ns, &addresses);
+   result = resolve_deadline(request->authority, service, connect_deadline_ns, &addresses);
    int fd = -1;
    SSL_CTX *ctx = NULL;
    SSL *ssl = NULL;
@@ -1090,6 +1183,9 @@ done:
          struct timespec zero = {0};
          (void)sigtimedwait(&pipe_set, NULL, &zero);
       }
+      /* If restoration fails, leave SIGPIPE blocked.  That changes only this
+       * thread's mask and cannot terminate the process.  Preserve the exchange
+       * result because response callbacks may already have been delivered. */
       (void)pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
    }
    return result;

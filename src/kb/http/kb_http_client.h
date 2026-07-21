@@ -103,6 +103,9 @@ kb_http_result_t kb_http_tls_exchange(const kb_http_request_t *request,
 #ifdef KB_HTTP_CLIENT_TESTING
 int kb_http_client_test__tls_eof_is_authenticated(int ssl_error);
 kb_http_result_t kb_http_client_test__wait_fd(int fd, short events, int timeout_ms);
+kb_http_result_t kb_http_client_test__sigpipe_mask_policy(int mask_result);
+kb_http_result_t kb_http_client_test__resolve(const char *host, int timeout_ms);
+kb_http_result_t kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water);
 #endif
 
 #endif
