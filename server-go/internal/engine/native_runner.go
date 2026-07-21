@@ -889,6 +889,9 @@ func firstNonempty(value, fallback string) string {
 	return fallback
 }
 
+// extractJSONObject returns the exact bytes of the first parseable top-level
+// JSON object. Candidate spans are disjoint and the scan index is monotonic, so
+// every byte is scanned once and passed to json.Unmarshal at most once.
 func extractJSONObject(text string) ([]byte, error) {
 	// Delegate providers sometimes append prose, shell snippets, or a second JSON
 	// value despite an "only JSON" prompt. Parsing first-'{' through last-'}' turns
@@ -902,7 +905,7 @@ func extractJSONObject(text string) ([]byte, error) {
 	// unterminated string or escape consumes the remainder and fails closed; there
 	// cannot be a safely identifiable sibling object after malformed string data.
 	start := -1
-	depth := 0
+	var delimiters []byte
 	inString := false
 	escaped := false
 	for i := 0; i < len(text); i++ {
@@ -910,7 +913,7 @@ func extractJSONObject(text string) ([]byte, error) {
 		if start < 0 {
 			if c == '{' {
 				start = i
-				depth = 1
+				delimiters = append(delimiters[:0], c)
 			}
 			continue
 		}
@@ -929,18 +932,27 @@ func extractJSONObject(text string) ([]byte, error) {
 		switch c {
 		case '"':
 			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
+		case '{', '[':
+			delimiters = append(delimiters, c)
+		case '}', ']':
+			want := byte('{')
+			if c == ']' {
+				want = '['
+			}
+			if len(delimiters) == 0 || delimiters[len(delimiters)-1] != want {
+				return nil, errors.New("delegate returned structurally ambiguous JSON delimiters")
+			}
+			delimiters = delimiters[:len(delimiters)-1]
+			if len(delimiters) == 0 {
 				doc := []byte(text[start : i+1])
 				var value map[string]any
 				if json.Unmarshal(doc, &value) == nil {
 					return doc, nil
 				}
+				// i only advances: no byte from this failed candidate is
+				// revisited or promoted as the start of a nested candidate.
 				start = -1
-				depth = 0
+				delimiters = delimiters[:0]
 				inString = false
 				escaped = false
 			}

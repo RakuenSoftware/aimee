@@ -99,8 +99,14 @@ func TestExtractJSONObjectSkipsMalformedObjectPreamble(t *testing.T) {
 }
 
 func TestExtractJSONObjectDoesNotPromoteNestedMalformedPayload(t *testing.T) {
-	if doc, err := extractJSONObject(`{"broken":,"payload":{"verdict":"approve","findings":[]}}`); err == nil {
-		t.Fatalf("accepted nested payload from malformed outer object: %s", doc)
+	for _, response := range []string{
+		`{"broken":,"payload":{"verdict":"approve","findings":[]}}`,
+		`{"broken":[} {"verdict":"approve","findings":[]} ]}`,
+		`{"a":]}`,
+	} {
+		if doc, err := extractJSONObject(response); err == nil {
+			t.Fatalf("accepted nested or mismatched payload %q as %s", response, doc)
+		}
 	}
 }
 
