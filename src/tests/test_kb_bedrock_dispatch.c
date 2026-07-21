@@ -54,12 +54,17 @@ static kb_bedrock_credentials_t credentials(void)
 static void request_tests(void)
 {
    const char *partitions[] = {"aws", "aws-us-gov", "aws-cn"};
+   const char *regions[] = {"us-west-2", "us-gov-west-1", "cn-north-1"};
    aimee_request_t ir;
    memset(&ir, 0, sizeof(ir));
+   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "hello"};
+   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   ir.messages = &message;
+   ir.n_messages = 1;
    kb_bedrock_credentials_t c = credentials();
    for (int i = 0; i < 3; i++)
    {
-      db2_bedrock_target_t t = target(partitions[i], "us-west-2", "model/a:b");
+      db2_bedrock_target_t t = target(partitions[i], regions[i], "model/a:b");
       if (i == 1)
          snprintf(t.model_id, sizeof(t.model_id), "model:id");
       kb_bedrock_wire_request_t q;
@@ -88,8 +93,8 @@ static void request_tests(void)
    memset(&ir, 0, sizeof(ir));
    t = target("aws", "us-east-1",
               "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-v2");
-   aimee_block_t block = {.type = AIMEE_BLK_TEXT, .text = "line one\nline two"};
-   aimee_message_t message = {.role = "user", .blocks = &block, .n_blocks = 1};
+   block = (aimee_block_t){.type = AIMEE_BLK_TEXT, .text = "line one\nline two"};
+   message = (aimee_message_t){.role = "user", .blocks = &block, .n_blocks = 1};
    ir.messages = &message;
    ir.n_messages = 1;
    c.session_token = NULL;
@@ -124,6 +129,12 @@ static void request_tests(void)
    t = target("aws", "us-east-1", "model");
    memset(t.regions[0], 'x', sizeof(t.regions[0]));
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
+   t = target("aws-cn", "us-west-2", "model");
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
+   t = target("aws-us-gov", "us-west-2", "model");
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
+   t = target("aws", "cn-north-1", "model");
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
 
    t = target("aws", "us-east-1", "model");
    message.n_blocks = INT_MAX;
@@ -143,6 +154,12 @@ static void request_tests(void)
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_TARGET);
    snprintf(t.model_id, sizeof(t.model_id), "model");
    memset(&ir, 0, sizeof(ir));
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   ir.messages = &message;
+   ir.n_messages = 1;
+   message.n_blocks = 0;
+   assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
+   message.n_blocks = 1;
    ir.tool_choice = cJSON_Parse("{\"type\":\"auto\"}");
    assert(ir.tool_choice != NULL);
    assert(kb_bedrock_wire_request_build(&t, &ir, 0, &c, &q) == KB_BEDROCK_INVALID_ARGUMENT);
@@ -437,6 +454,17 @@ static void stream_order_and_abort_tests(void)
    }
 
    kb_bedrock_stream_t *stream = NULL;
+   assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
+   feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
+   feed_event(stream, "contentBlockStart",
+              "{\"contentBlockIndex\":0,\"start\":{\"toolUse\":{\"toolUseId\":\"id\","
+              "\"name\":\"tool\"}}}");
+   assert(feed_event_result(stream, "contentBlockDelta",
+                            "{\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"{}\","
+                            "\"future\":true}}}") == KB_BEDROCK_MALFORMED_STREAM);
+   assert_poisoned(stream);
+   assert(kb_bedrock_stream_clear(&stream) == KB_BEDROCK_OK);
+
    assert(kb_bedrock_stream_init(&stream, NULL, NULL) == KB_BEDROCK_OK);
    feed_event(stream, "messageStart", "{\"role\":\"assistant\"}");
    feed_event(stream, "contentBlockDelta",

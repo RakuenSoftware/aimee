@@ -176,7 +176,7 @@ static int block_ok(const aimee_block_t *b, size_t *strings, size_t *nodes, int 
 
 static int request_preflight(const aimee_request_t *ir)
 {
-   if (!ir || ir->n_system < 0 || ir->n_system > 4096 || ir->n_messages < 0 ||
+   if (!ir || ir->n_system < 0 || ir->n_system > 4096 || ir->n_messages <= 0 ||
        ir->n_messages > 1024 || ir->n_tools < 0 || ir->n_tools > 256 || ir->n_stop < 0 ||
        ir->n_stop > 64 || ir->has_top_k || ir->metadata || ir->service_tier || ir->thinking ||
        (ir->n_system && !ir->system) || (ir->n_messages && !ir->messages) ||
@@ -197,7 +197,7 @@ static int request_preflight(const aimee_request_t *ir)
    {
       const aimee_message_t *m = &ir->messages[i];
       if (!m->role || (strcmp(m->role, "user") != 0 && strcmp(m->role, "assistant") != 0) ||
-          m->n_blocks < 0 || (m->n_blocks && !m->blocks) || (size_t)m->n_blocks > 4096U - blocks ||
+          m->n_blocks <= 0 || !m->blocks || (size_t)m->n_blocks > 4096U - blocks ||
           node_budget_add(&nodes, 3) != 0 || string_budget(m->role, &strings) != 0)
          return 0;
       blocks += (size_t)m->n_blocks;
@@ -261,6 +261,17 @@ static int family_supported(const char *family)
    return 0;
 }
 
+static int partition_region_ok(const char *partition, const char *region)
+{
+   if (strcmp(partition, "aws-cn") == 0)
+      return strncmp(region, "cn-", 3) == 0;
+   if (strcmp(partition, "aws-us-gov") == 0)
+      return strncmp(region, "us-gov-", 7) == 0;
+   if (strcmp(partition, "aws") == 0)
+      return strncmp(region, "cn-", 3) != 0 && strncmp(region, "us-gov-", 7) != 0;
+   return 0;
+}
+
 static const char *policy_id(const db2_bedrock_target_t *t, bedrock_target_type_t type,
                              int *was_arn)
 {
@@ -310,7 +321,7 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
        !ascii_safe(t->invoke_region, sizeof(t->invoke_region), 0) ||
        strcmp(t->bedrock_api, "converse") != 0 || !family_supported(t->model_family) ||
        !ascii_safe(t->model_id, 201, 0) || t->n_regions == 0 || t->n_regions > 64 ||
-       t->n_underlying > 64)
+       t->n_underlying > 64 || !partition_region_ok(t->partition, t->invoke_region))
       return KB_BEDROCK_INVALID_TARGET;
    bedrock_target_type_t type;
    if (strcmp(t->target_type, "foundation") == 0)
@@ -332,7 +343,8 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
    const char *regions[64], *arns[64];
    for (size_t i = 0; i < t->n_regions; i++)
    {
-      if (!ascii_safe(t->regions[i], sizeof(t->regions[i]), 0))
+      if (!ascii_safe(t->regions[i], sizeof(t->regions[i]), 0) ||
+          !partition_region_ok(t->partition, t->regions[i]))
          return KB_BEDROCK_INVALID_TARGET;
       regions[i] = t->regions[i];
    }
@@ -917,9 +929,16 @@ static kb_bedrock_result_t process_event(kb_bedrock_stream_t *s, const char *eve
       if (strict_index(j, &idx) || !cJSON_IsObject(delta))
          return KB_BEDROCK_MALFORMED_STREAM;
       int text = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(delta, "text"));
-      int tool = cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(delta, "toolUse"));
-      int reason = cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(delta, "reasoningContent"));
+      cJSON *tool_delta = cJSON_GetObjectItemCaseSensitive(delta, "toolUse");
+      cJSON *reason_delta = cJSON_GetObjectItemCaseSensitive(delta, "reasoningContent");
+      int tool = cJSON_IsObject(tool_delta);
+      int reason = cJSON_IsObject(reason_delta);
       if (text + tool + reason != 1 || cJSON_GetArraySize(delta) != 1)
+         return KB_BEDROCK_MALFORMED_STREAM;
+      if ((tool && (cJSON_GetArraySize(tool_delta) != 1 ||
+                    !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(tool_delta, "input")))) ||
+          (reason && (cJSON_GetArraySize(reason_delta) != 1 ||
+                      !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(reason_delta, "text")))))
          return KB_BEDROCK_MALFORMED_STREAM;
       int kind = text ? AIMEE_BLK_TEXT : (tool ? AIMEE_BLK_TOOL_USE : AIMEE_BLK_THINKING);
       if (!s->open[idx])
