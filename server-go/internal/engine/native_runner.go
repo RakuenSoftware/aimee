@@ -895,11 +895,8 @@ func extractJSONObject(text string) ([]byte, error) {
 	// that harmless suffix into an infinite workflow refinement loop. Balance one
 	// candidate at a time while honoring quoted braces and escapes instead. A
 	// balanced but malformed outer object is skipped atomically: a valid-looking
-	// nested object is promoted only when its enclosing candidate never closes,
-	// which recovers from a stray opening brace in provider prose.
+	// nested object must never be promoted to the provider's top-level response.
 	start := -1
-	directChildStart := -1
-	var unclosedRootFallback []byte
 	depth := 0
 	inString := false
 	escaped := false
@@ -928,23 +925,9 @@ func extractJSONObject(text string) ([]byte, error) {
 		case '"':
 			inString = true
 		case '{':
-			if depth == 1 {
-				directChildStart = i
-			}
 			depth++
 		case '}':
 			depth--
-			if depth == 1 && directChildStart >= 0 {
-				// Keep a recovery candidate for the specific case where prose
-				// contains an unmatched opening brace before the real response.
-				// Direct children are disjoint, so validating them remains O(n).
-				doc := []byte(text[directChildStart : i+1])
-				var value map[string]any
-				if unclosedRootFallback == nil && json.Unmarshal(doc, &value) == nil {
-					unclosedRootFallback = doc
-				}
-				directChildStart = -1
-			}
 			if depth == 0 {
 				doc := []byte(text[start : i+1])
 				var value map[string]any
@@ -955,13 +938,8 @@ func extractJSONObject(text string) ([]byte, error) {
 				depth = 0
 				inString = false
 				escaped = false
-				directChildStart = -1
-				unclosedRootFallback = nil
 			}
 		}
-	}
-	if start >= 0 && unclosedRootFallback != nil {
-		return unclosedRootFallback, nil
 	}
 	return nil, errors.New("delegate returned no valid JSON object")
 }
