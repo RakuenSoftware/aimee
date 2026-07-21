@@ -27,7 +27,7 @@ FIXTURES = REPO_ROOT / "tests/fixtures/module-doc-contract"
 def locked_toolchain():
     executable_text = shutil.which("ssh-keygen")
     if executable_text is None:
-        raise unittest.SkipTest("ssh-keygen is required")
+        raise AssertionError("ssh-keygen is required by the module-doc contract suite")
     executable = Path(executable_text)
     lock = {
         "schema": "aimee.sshsig-toolchain.v1",
@@ -191,6 +191,9 @@ class ModuleDocContractTests(unittest.TestCase):
         self.assert_rule("json-size", lambda: contract.strict_json_bytes(
             b" " * (contract.MAX_JSON_BYTES + 1)
         ))
+        self.assert_rule("json-integer-range", lambda: contract.strict_json_bytes(
+            b'{"value":123456789012345678901}'
+        ))
         malformed = (
             ("issuer", "https://user@example.invalid", "oidc-issuer"),
             ("issuer", "https:///missing-host", "oidc-issuer"),
@@ -230,6 +233,7 @@ class ModuleDocContractTests(unittest.TestCase):
         })
         contract.bind_workload_to_target(workload, target, pull_request=1708)
         self.assertRegex(contract.replay_binding(workload, target), r"^[0-9a-f]{64}$")
+        self.assertRegex(contract.replay_token_identity(workload), r"^[0-9a-f]{64}$")
         for field, rule in (("run_identity", "target-run-binding"), ("attempt", "target-run-binding")):
             mismatch = dict(target)
             mismatch[field] = "different"
@@ -247,6 +251,16 @@ class ModuleDocContractTests(unittest.TestCase):
         self.assert_rule("oidc-issued-at", lambda: contract.normalize_verified_oidc_claims(
             stale, profile, wall_time=1_800_000_000
         ))
+        expires_now = dict(token_claims)
+        expires_now["exp"] = 1_800_000_000
+        self.assert_rule("oidc-validity-window", lambda: contract.normalize_verified_oidc_claims(
+            expires_now, profile, wall_time=1_800_000_000
+        ))
+        starts_now = dict(token_claims)
+        starts_now["nbf"] = 1_800_000_000
+        contract.normalize_verified_oidc_claims(
+            starts_now, profile, wall_time=1_800_000_000
+        )
         bad_attempt = dict(token_claims)
         bad_attempt[profile["claim_mappings"]["attempt"]] = "01"
         self.assert_rule("oidc-attempt", lambda: contract.normalize_verified_oidc_claims(
@@ -331,6 +345,28 @@ class ModuleDocContractTests(unittest.TestCase):
                 repo, commit
             ).read_blob("sized.bin", max_bytes=4))
 
+    def test_git_tree_entry_ceiling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.invalid"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=repo, check=True)
+            directory = repo / "many"
+            directory.mkdir()
+            for index in range(3):
+                (directory / f"{index}.txt").write_text("x\n", encoding="ascii")
+            subprocess.run(["git", "add", "many"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-qm", "many"], cwd=repo, check=True)
+            commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            previous = contract.MAX_TREE_ENTRIES
+            contract.MAX_TREE_ENTRIES = 2
+            try:
+                self.assert_rule("git-tree-entries", lambda: contract.GitBlobReader(
+                    repo, commit
+                ).list_directory("many"))
+            finally:
+                contract.MAX_TREE_ENTRIES = previous
+
     def test_external_decision_orders_crypto_resolution_and_git_reads(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -391,8 +427,23 @@ class ModuleDocContractTests(unittest.TestCase):
             )
             self.assertEqual(events, ["crypto", "resolve", "candidate"])
             self.assertEqual(decision.publisher_result["candidate_revision"], commit)
+            self.assertRegex(decision.token_replay_key, r"^[0-9a-f]{64}$")
+            self.assertRegex(decision.decision_replay_key, r"^[0-9a-f]{64}$")
+            events.clear()
+            def reject(reader, workload, target) -> str:
+                contract.fail("candidate-rejected", "fixture rejection")
+            rejected = contract.evaluate_trigger(
+                request,
+                (json.dumps(profile, separators=(",", ":")) + "\n").encode("ascii"),
+                wall_time=1_800_000_000,
+                verify_jwt=verify,
+                resolve_target=resolve,
+                validate_candidate=reject,
+                repository=repo,
+            )
+            self.assertEqual(rejected.publisher_result["conclusion"], "failure")
+            self.assertIn("rule=candidate-rejected", rejected.publisher_result["summary"])
 
-    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen is required")
     def test_atomic_candidate_validator_with_two_real_signers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -558,6 +609,14 @@ class ModuleDocContractTests(unittest.TestCase):
         bad = dict(lock)
         bad["image"] = "registry.example.invalid/aimee/sshsig:latest"
         self.assert_rule("toolchain-image", lambda: contract.validate_toolchain_lock(bad))
+        with tempfile.TemporaryDirectory() as tmp:
+            copied = Path(tmp) / "ssh-keygen"
+            shutil.copy2(executable, copied)
+            copied_lock = dict(lock)
+            copied_lock["ssh_keygen_sha256"] = contract.sha256(copied.read_bytes())
+            loaded = contract.load_locked_toolchain(copied_lock, copied)
+            copied.write_bytes(copied.read_bytes() + b"changed")
+            self.assert_rule("toolchain-binary", loaded.executable)
         target = {"candidate_revision": "b" * 40, "trigger_check_identity": "trigger-9"}
         result = {
             "schema": "aimee.module-doc-check.v1", "name": "module-doc-attestation",
@@ -566,7 +625,6 @@ class ModuleDocContractTests(unittest.TestCase):
         }
         self.assertEqual(contract.validate_publisher_result(result, target), result)
 
-    @unittest.skipUnless(shutil.which("ssh-keygen"), "ssh-keygen is required")
     def test_real_ed25519_sshsig_verification(self) -> None:
         subject = (FIXTURES / "positive/subject.json").read_bytes()
         with tempfile.TemporaryDirectory() as tmp:

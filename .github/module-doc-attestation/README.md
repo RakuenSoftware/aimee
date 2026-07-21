@@ -47,7 +47,9 @@ deployed. Before activation, operators must provide:
   audience, algorithm, and token time before returning claims to the engine;
 - a read-only repository client that translates platform API fields into the normalized repository,
   workflow, revision, run, attempt, trigger, pull-request, base, and candidate records;
-- a durable replay store that permits only one deterministic result for each engine replay key;
+- a durable replay store that atomically binds each token replay key to one decision replay key and
+  persisted result before publication. Exact retries reuse that result; a changed tuple for the same
+  token fails;
 - a repository-scoped publisher authorized only to create the named attestation check;
 - a canonical trust policy containing genuine human owner and reviewer Ed25519 public keys; and
 - an OpenSSH image selected by immutable digest plus a lock containing the SHA-256 of the exact

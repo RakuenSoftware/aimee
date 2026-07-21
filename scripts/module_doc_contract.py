@@ -49,6 +49,9 @@ MAX_DOCUMENT_BYTES = 262_144
 MAX_SUBJECT_BYTES = 4_096
 MAX_SIGNATURE_BYTES = 16_384
 MAX_INDEX_BYTES = 65_536
+MAX_INTEGER_DIGITS = 20
+MAX_TREE_BYTES = 1_048_576
+MAX_TREE_ENTRIES = 4_096
 
 SECTIONS = (
     "Purpose and non-goals",
@@ -127,6 +130,16 @@ def _reject_number(value: str) -> NoReturn:
     fail("json-number-domain", f"forbidden number {value!r}")
 
 
+def _parse_integer(value: str) -> int:
+    digits = value[1:] if value.startswith("-") else value
+    if len(digits) > MAX_INTEGER_DIGITS:
+        fail("json-integer-range", f"integer exceeds {MAX_INTEGER_DIGITS} digits")
+    try:
+        return int(value)
+    except ValueError:
+        fail("json-integer-range", "invalid integer")
+
+
 def strict_json_bytes(raw: bytes) -> object:
     if len(raw) > MAX_JSON_BYTES:
         fail("json-size", f"JSON exceeds {MAX_JSON_BYTES} bytes")
@@ -140,6 +153,7 @@ def strict_json_bytes(raw: bytes) -> object:
         value = json.loads(
             text,
             object_pairs_hook=_object_without_duplicates,
+            parse_int=_parse_integer,
             parse_float=_reject_number,
             parse_constant=_reject_number,
         )
@@ -362,7 +376,7 @@ def normalize_verified_oidc_claims(
     iat = claims["iat"]
     nbf = claims["nbf"]
     exp = claims["exp"]
-    if nbf > wall_time or wall_time > exp:
+    if nbf > wall_time or wall_time >= exp:
         fail("oidc-validity-window", "token is outside nbf/exp validity")
     if abs(wall_time - iat) > profile["clock_skew_seconds"]:
         fail("oidc-issued-at", "iat is outside the configured clock skew")
@@ -473,6 +487,14 @@ def replay_binding(workload: dict[str, object], target: dict[str, object]) -> st
     return sha256("\0".join(fields).encode("utf-8"))
 
 
+def replay_token_identity(workload: dict[str, object]) -> str:
+    issuer = workload.get("issuer")
+    token_id = workload.get("token_id")
+    if not isinstance(issuer, str) or not issuer or not isinstance(token_id, str) or not token_id:
+        fail("replay-binding", "issuer and token ID must be non-empty strings")
+    return sha256(f"{issuer}\0{token_id}".encode("utf-8"))
+
+
 def validate_v2_metadata(
     value: object, *, optional: bool, known_ids: set[str] | None = None
 ) -> dict[str, object]:
@@ -558,6 +580,28 @@ class GitBlobReader:
             fail("git-object", result.stderr.decode("utf-8", "replace").strip())
         return result.stdout
 
+    def _git_bounded(self, max_bytes: int, *arguments: str) -> bytes:
+        process = subprocess.Popen(
+            ["git", *arguments], cwd=self.repository, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        )
+        assert process.stdout is not None and process.stderr is not None
+        try:
+            output = process.stdout.read(max_bytes + 1)
+            if len(output) > max_bytes:
+                process.kill()
+                process.communicate()
+                fail("git-tree-size", f"git tree output exceeds {max_bytes} bytes")
+            stderr = process.stderr.read()
+            returncode = process.wait()
+            if returncode != 0:
+                fail("git-object", stderr.decode("utf-8", "replace").strip())
+            return output
+        finally:
+            process.stdout.close()
+            process.stderr.close()
+
     @staticmethod
     def canonical_path(path: str) -> None:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", path):
@@ -598,9 +642,14 @@ class GitBlobReader:
 
     def list_directory(self, path: str) -> dict[str, tuple[str, str]]:
         self.canonical_path(path)
-        record = self._git("ls-tree", "-z", f"{self.commit}:{path}")
+        record = self._git_bounded(
+            MAX_TREE_BYTES, "ls-tree", "-z", f"{self.commit}:{path}"
+        )
         result: dict[str, tuple[str, str]] = {}
-        for entry in (item for item in record.split(b"\0") if item):
+        entries = [item for item in record.split(b"\0") if item]
+        if len(entries) > MAX_TREE_ENTRIES:
+            fail("git-tree-entries", f"directory exceeds {MAX_TREE_ENTRIES} entries")
+        for entry in entries:
             try:
                 metadata, name = entry.split(b"\t", 1)
                 mode, kind, object_id = metadata.split(b" ", 2)
@@ -634,9 +683,14 @@ class GitBlobReader:
         if match.group("literal"):
             directory += f"/{match.group('literal')}"
         suffix = f".{match.group('suffix')}"
-        record = self._git("ls-tree", "-z", f"{self.commit}:{directory}")
+        record = self._git_bounded(
+            MAX_TREE_BYTES, "ls-tree", "-z", f"{self.commit}:{directory}"
+        )
         paths: list[str] = []
-        for entry in (item for item in record.split(b"\0") if item):
+        entries = [item for item in record.split(b"\0") if item]
+        if len(entries) > MAX_TREE_ENTRIES:
+            fail("git-tree-entries", f"directory exceeds {MAX_TREE_ENTRIES} entries")
+        for entry in entries:
             try:
                 metadata, name = entry.split(b"\t", 1)
                 mode, kind, _ = metadata.split(b" ", 2)
@@ -1235,7 +1289,8 @@ def validate_publisher_result(value: object, target: dict[str, object]) -> dict[
 class VerificationDecision(NamedTuple):
     workload: dict[str, object]
     target: dict[str, object]
-    replay_key: str
+    token_replay_key: str
+    decision_replay_key: str
     publisher_result: dict[str, object]
 
 
@@ -1265,22 +1320,33 @@ def evaluate_trigger(
     workload = normalize_verified_oidc_claims(verified_claims, profile, wall_time=wall_time)
     target = validate_candidate_target(resolve_target(workload, pull_request))
     bind_workload_to_target(workload, target, pull_request=pull_request)
-    reader = GitBlobReader(repository, target["candidate_revision"])
-    summary = validate_candidate(reader, workload, target)
-    if not isinstance(summary, str) or not summary:
-        fail("candidate-validation", "candidate validator returned no summary")
+    try:
+        reader = GitBlobReader(repository, target["candidate_revision"])
+        summary = validate_candidate(reader, workload, target)
+        if not isinstance(summary, str) or not summary:
+            fail("candidate-validation", "candidate validator returned no summary")
+        conclusion = "success"
+    except ContractError as exc:
+        summary = str(exc)[:4096]
+        conclusion = "failure"
     result = validate_publisher_result(
         {
             "schema": "aimee.module-doc-check.v1",
             "name": "module-doc-attestation",
             "candidate_revision": target["candidate_revision"],
             "external_id": target["trigger_check_identity"],
-            "conclusion": "success",
+            "conclusion": conclusion,
             "summary": summary,
         },
         target,
     )
-    return VerificationDecision(workload, target, replay_binding(workload, target), result)
+    return VerificationDecision(
+        workload,
+        target,
+        replay_token_identity(workload),
+        replay_binding(workload, target),
+        result,
+    )
 
 
 def verify_sshsig(
