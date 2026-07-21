@@ -1,0 +1,45 @@
+{
+  "allowed_algorithms": [
+    "ES256"
+  ],
+  "audience": "aimee-module-doc-verifier",
+  "claim_mappings": {
+    "actor_identity": "ci_actor",
+    "attempt": "ci_attempt",
+    "event_type": "ci_event",
+    "repository_identity": "ci_repository",
+    "run_identity": "ci_run",
+    "runner_class": "ci_runner",
+    "trigger_check_identity": "ci_trigger_check",
+    "workflow_identity": "ci_workflow",
+    "workflow_revision": "ci_workflow_revision"
+  },
+  "clock_skew_seconds": 60,
+  "issuer": "https://issuer.example.invalid",
+  "jwks": {
+    "jwk_thumbprints_sha256": [
+      "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    ],
+    "max_age_seconds": 3600,
+    "tls_spki_sha256": [
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    ],
+    "uri": "https://issuer.example.invalid/jwks"
+  },
+  "max_token_lifetime_seconds": 600,
+  "name": "protected-ci",
+  "predicates": {
+    "event_type": "protected-pull-request",
+    "repository_identity": "repository-17",
+    "workflow_identity": "module-doc-attestation-trigger",
+    "workflow_revision": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "repository_api": {
+    "base_url": "https://repository.example.invalid/api",
+    "response_schema": "aimee.candidate-target.v1",
+    "tls_spki_sha256": [
+      "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    ]
+  },
+  "schema": "aimee.ci-oidc-profile.v1"
+}

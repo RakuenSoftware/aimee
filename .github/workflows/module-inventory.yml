@@ -112,6 +112,27 @@ jobs:
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
 
+  module-doc-contract:
+    name: module-doc-contract
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Test provider-neutral OIDC, document grammar, and SSHSIG contracts
+        run: |
+          command -v ssh-keygen
+          command -v ssh-agent
+          command -v ssh-add
+          python3 -I scripts/tests/test_module_doc_contract.py -v
+          python3 -I scripts/tests/test_sign_module_docs.py -v
+
   proposal-ordering:
     name: proposal-ordering
     permissions:

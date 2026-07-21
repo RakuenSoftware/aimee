@@ -1,0 +1,9 @@
+{
+  "descriptor_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "document_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "module_id": "memory",
+  "owner_identity": "owner@example",
+  "reviewer_identity": "reviewer@example",
+  "schema": "aimee.module-doc-attestation.v1",
+  "signed_at": "2027-01-01T00:00:00Z"
+}
