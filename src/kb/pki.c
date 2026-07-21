@@ -442,10 +442,12 @@ int kb_pki_csr_validate(const char *csr_pem)
    return 0;
 }
 
-int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
-                    long valid_secs, char *cert_pem_out, size_t cert_cap)
+int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
+                            long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
+                            size_t cert_cap)
 {
-   if (!ca || !subject_cn || !subject_cn[0] || !cert_pem_out || valid_secs <= 0)
+   if (!ca || !subject_cn || !subject_cn[0] || !cert_pem_out || valid_secs <= 0 ||
+       (profile != KB_PKI_CSR_CLIENT_AUTH && profile != KB_PKI_CSR_SERVER_AUTH))
       return -1;
 
    int rc = -1;
@@ -480,9 +482,26 @@ int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subj
    if (X509_set_issuer_name(cert, X509_get_subject_name(ca_cert)) != 1)
       goto done;
 
+   if (profile == KB_PKI_CSR_SERVER_AUTH)
+   {
+      unsigned char tmp[16];
+      const char *kind =
+          (inet_pton(AF_INET, subject_cn, tmp) == 1 || inet_pton(AF_INET6, subject_cn, tmp) == 1)
+              ? "IP"
+              : "DNS";
+      char san[300];
+      int n = snprintf(san, sizeof(san), "%s:%s", kind, subject_cn);
+      if (n < 0 || (size_t)n >= sizeof(san) || !add_ext(ca_cert, cert, NID_subject_alt_name, san))
+         goto done;
+   }
+
+   const char *key_usage = profile == KB_PKI_CSR_SERVER_AUTH
+                               ? "critical,digitalSignature,keyEncipherment"
+                               : "critical,digitalSignature";
+   const char *eku = profile == KB_PKI_CSR_SERVER_AUTH ? "serverAuth" : "clientAuth";
    if (!add_ext(ca_cert, cert, NID_basic_constraints, "critical,CA:FALSE") ||
-       !add_ext(ca_cert, cert, NID_key_usage, "critical,digitalSignature") ||
-       !add_ext(ca_cert, cert, NID_ext_key_usage, "clientAuth") ||
+       !add_ext(ca_cert, cert, NID_key_usage, key_usage) ||
+       !add_ext(ca_cert, cert, NID_ext_key_usage, eku) ||
        !add_ext(ca_cert, cert, NID_subject_key_identifier, "hash") ||
        !add_ext(ca_cert, cert, NID_authority_key_identifier, "keyid:always"))
       goto done;
@@ -503,6 +522,13 @@ done:
    X509_free(ca_cert);
    EVP_PKEY_free(ca_key);
    return rc;
+}
+
+int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
+                    long valid_secs, char *cert_pem_out, size_t cert_cap)
+{
+   return kb_pki_sign_csr_profile(ca, csr_pem, subject_cn, valid_secs, KB_PKI_CSR_CLIENT_AUTH,
+                                  cert_pem_out, cert_cap);
 }
 
 /* --- chain verification --- */

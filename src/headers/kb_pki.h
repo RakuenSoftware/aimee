@@ -38,6 +38,12 @@ extern "C"
       char key_pem[KB_PKI_KEY_PEM_MAX]; /* sensitive — persist with care */
    } kb_pki_ca_t;
 
+   typedef enum
+   {
+      KB_PKI_CSR_CLIENT_AUTH = 1,
+      KB_PKI_CSR_SERVER_AUTH = 2
+   } kb_pki_csr_profile_t;
+
    /* Generate a fresh self-signed CA (RSA-2048, CN "aimee-kb-ca", ~10 year
     * validity, basicConstraints CA:TRUE) into *out. Returns 0 on success, -1 on
     * error (RNG / OpenSSL failure or PEM overflow). */
@@ -90,6 +96,14 @@ extern "C"
     * success, -1 on a malformed / unverifiable CSR or any issuance error. */
    int kb_pki_sign_csr(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_cn,
                        long valid_secs, char *cert_pem_out, size_t cert_cap);
+
+   /* Role-separated P5 issuance. The CSR contributes only its verified public
+    * key; subject and extensions are authority-controlled. CLIENT_AUTH emits
+    * exactly clientAuth. SERVER_AUTH emits exactly serverAuth and a SAN for
+    * subject_name. Unknown profiles fail closed. */
+   int kb_pki_sign_csr_profile(const kb_pki_ca_t *ca, const char *csr_pem, const char *subject_name,
+                               long valid_secs, kb_pki_csr_profile_t profile, char *cert_pem_out,
+                               size_t cert_cap);
 
    /* Validate a PEM PKCS#10 CSR WITHOUT issuing anything: it must parse, its
     * self-signature must verify (proof of private-key possession), and its key
