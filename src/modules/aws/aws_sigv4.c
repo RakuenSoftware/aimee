@@ -6,6 +6,7 @@
 
 #include "aws_sigv4.h"
 
+#include <openssl/crypto.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 #include <stdio.h>
@@ -76,6 +77,24 @@ typedef struct
    char value[AWS_SIGV4_TOKEN_MAX];
 } norm_hdr_t;
 
+static int header_name_char(unsigned char c)
+{
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+          strchr("!#$%&'*+-.^_`|~", (int)c) != NULL;
+}
+
+static int payload_hash_valid(const char *hash)
+{
+   if (strcmp(hash, AWS_SIGV4_UNSIGNED_PAYLOAD) == 0)
+      return 1;
+   if (strlen(hash) != 64)
+      return 0;
+   for (size_t i = 0; i < 64; i++)
+      if (!((hash[i] >= '0' && hash[i] <= '9') || (hash[i] >= 'a' && hash[i] <= 'f')))
+         return 0;
+   return 1;
+}
+
 /* lowercase `name`; trim + collapse inner whitespace of `value`. */
 static int normalize_header(const char *name, const char *value, norm_hdr_t *out)
 {
@@ -84,7 +103,10 @@ static int normalize_header(const char *name, const char *value, norm_hdr_t *out
       return -1;
    for (size_t i = 0; i < n; i++)
    {
-      char c = name[i];
+      unsigned char uc = (unsigned char)name[i];
+      if (!header_name_char(uc))
+         return -1;
+      char c = (char)uc;
       if (c >= 'A' && c <= 'Z')
          c = (char)(c - 'A' + 'a');
       out->name[i] = c;
@@ -103,6 +125,8 @@ static int normalize_header(const char *name, const char *value, norm_hdr_t *out
    for (size_t i = 0; i < end; i++)
    {
       char c = v[i];
+      if (((unsigned char)c < 0x20 && c != ' ' && c != '\t') || (unsigned char)c == 0x7f)
+         return -1;
       if (c == ' ' || c == '\t')
       {
          in_ws = 1;
@@ -164,6 +188,12 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
       return -1;
    if (!req->method || !req->payload_hash || !req->amz_date || !req->date || !req->region ||
        !req->service || !req->access_key_id || !req->secret_access_key)
+      return -1;
+   if (!payload_hash_valid(req->payload_hash) || (req->n_headers && !req->headers) ||
+       (req->n_query && !req->query))
+      return -1;
+   if (strlen(req->amz_date) >= sizeof(out->amz_date) ||
+       (req->session_token && strlen(req->session_token) >= sizeof(out->security_token)))
       return -1;
    if (req->n_headers > AWS_SIGV4_MAX_HEADERS || req->n_query > AWS_SIGV4_MAX_QUERY)
       return -1;
@@ -285,26 +315,28 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
 
    /* 6. Derive the signing key (HMAC chain) + sign. */
    unsigned char k_secret[260];
+   unsigned char k_date[32] = {0}, k_region[32] = {0}, k_service[32] = {0}, k_signing[32] = {0},
+                 sig[32] = {0};
+   int rc = -1;
    int ksl = snprintf((char *)k_secret, sizeof(k_secret), "AWS4%s", req->secret_access_key);
    if (ksl < 0 || (size_t)ksl >= sizeof(k_secret))
-      return -1;
-   unsigned char k_date[32], k_region[32], k_service[32], k_signing[32], sig[32];
+      goto cleanup;
    unsigned int len = 0;
    if (!HMAC(EVP_sha256(), k_secret, ksl, (const unsigned char *)req->date, strlen(req->date),
              k_date, &len))
-      return -1;
+      goto cleanup;
    if (!HMAC(EVP_sha256(), k_date, 32, (const unsigned char *)req->region, strlen(req->region),
              k_region, &len))
-      return -1;
+      goto cleanup;
    if (!HMAC(EVP_sha256(), k_region, 32, (const unsigned char *)req->service, strlen(req->service),
              k_service, &len))
-      return -1;
+      goto cleanup;
    if (!HMAC(EVP_sha256(), k_service, 32, (const unsigned char *)"aws4_request", 12, k_signing,
              &len))
-      return -1;
+      goto cleanup;
    if (!HMAC(EVP_sha256(), k_signing, 32, (const unsigned char *)out->string_to_sign,
              strlen(out->string_to_sign), sig, &len))
-      return -1;
+      goto cleanup;
    to_hex(sig, 32, out->signature);
 
    /* 7. Authorization header. */
@@ -312,6 +344,14 @@ int aws_sigv4_sign(const aws_sigv4_request_t *req, aws_sigv4_result_t *out)
                         "AWS4-HMAC-SHA256 Credential=%s/%s, SignedHeaders=%s, Signature=%s",
                         req->access_key_id, scope, out->signed_headers,
                         out->signature) >= sizeof(out->authorization))
-      return -1;
-   return 0;
+      goto cleanup;
+   rc = 0;
+cleanup:
+   OPENSSL_cleanse(k_secret, sizeof(k_secret));
+   OPENSSL_cleanse(k_date, sizeof(k_date));
+   OPENSSL_cleanse(k_region, sizeof(k_region));
+   OPENSSL_cleanse(k_service, sizeof(k_service));
+   OPENSSL_cleanse(k_signing, sizeof(k_signing));
+   OPENSSL_cleanse(sig, sizeof(sig));
+   return rc;
 }

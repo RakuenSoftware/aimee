@@ -40,7 +40,7 @@ int main(void)
       cJSON_Delete(pl);
    }
 
-   /* (b) contentBlockStart: tool_use then text */
+   /* (b) contentBlockStart is tool-use only; text/reasoning open on first delta. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
@@ -57,10 +57,7 @@ int main(void)
       cJSON_Delete(pl);
 
       n = run("contentBlockStart", "{\"contentBlockIndex\":1}", &st, d, 8, &pl);
-      assert(n == 1);
-      assert(d[0].type == AIMEE_DELTA_BLOCK_START);
-      assert(d[0].kind == AIMEE_BLK_TEXT);
-      assert(d[0].block_id == 1);
+      assert(n == -1);
       cJSON_Delete(pl);
    }
 
@@ -166,7 +163,8 @@ int main(void)
                   &st, d, 8, &pl);
       assert(n == 1 && d[0].kind == AIMEE_BLK_TOOL_USE);
       cJSON_Delete(pl);
-      n = run("contentBlockStart", "{\"contentBlockIndex\":1}", &st, d, 8, &pl);
+      n = run("contentBlockDelta", "{\"contentBlockIndex\":1,\"delta\":{\"text\":\"x\"}}", &st, d,
+              8, &pl);
       assert(n == 1 && d[0].kind == AIMEE_BLK_TEXT);
       cJSON_Delete(pl);
       /* block 2's kind established via a reasoning delta (no explicit start) */
@@ -203,14 +201,15 @@ int main(void)
       cJSON_Delete(pl);
    }
 
-   /* (k) unknown delta variant -> 0 (skip); non-object delta -> -1 */
+   /* (k) an unknown union member inside a known event is malformed; a
+    * non-object delta is malformed too. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
       int n = run("contentBlockDelta",
                   "{\"contentBlockIndex\":0,\"delta\":{\"citation\":{\"title\":\"x\"}}}", &st, d, 8,
                   &pl);
-      assert(n == 0);
+      assert(n == -1);
       cJSON_Delete(pl);
 
       n = run("contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":\"not-an-object\"}", &st, d,

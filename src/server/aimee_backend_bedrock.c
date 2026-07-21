@@ -406,5 +406,20 @@ int bedrock_converse_parse(const cJSON *resp, aimee_response_t *out, char *err, 
       if (cw && cJSON_IsNumber(cw))
          out->usage_cache_write = (long)cw->valuedouble;
    }
+   if (!out->raw || !out->role || !out->raw_stop_reason)
+      goto allocation_failure;
+   for (int i = 0; i < out->n_content; i++)
+   {
+      aimee_block_t *b = &out->content[i];
+      if (!b->raw || (b->type == AIMEE_BLK_TEXT && !b->text) ||
+          (b->type == AIMEE_BLK_TOOL_USE && (!b->tool_id || !b->tool_name || !b->tool_input)) ||
+          (b->type == AIMEE_BLK_THINKING && !b->text))
+         goto allocation_failure;
+   }
    return 0;
+allocation_failure:
+   aimee_response_free(out);
+   if (err && errn)
+      snprintf(err, errn, "bedrock_converse_parse: allocation failure");
+   return -1;
 }

@@ -636,6 +636,7 @@ $(TESTPREFIX)/unit-test-org-model-catalog-target: \
 # sweep (memory-safety gate). Links ONLY aws_eventstream.o — CRC32 is
 # self-contained, so no OpenSSL/zlib/cJSON.
 $(TESTPREFIX)/unit-test-aws-eventstream: $(OBJDIR)/tests/test_aws_eventstream.o \
+                                         $(OBJDIR)/tests/support/aws_eventstream_fixture.o \
                                          $(OBJDIR)/modules/aws/aws_eventstream.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1697,11 +1698,14 @@ $(TESTPREFIX)/unit-test-aimee-backend-bedrock: $(OBJDIR)/tests/test_aimee_backen
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-bedrock-dispatch: $(OBJDIR)/tests/test_kb_bedrock_dispatch.o \
+                                      $(OBJDIR)/tests/support/aws_eventstream_fixture.o \
                                       $(OBJDIR)/kb/kb_bedrock_egress.o \
                                       $(OBJDIR)/server/aimee_backend_bedrock.o \
+                                      $(OBJDIR)/server/aimee_ir_stream.o \
                                       $(OBJDIR)/server/aimee_ir.o $(OBJDIR)/cJSON.o \
                                       $(OBJDIR)/modules/aws/aws_sigv4.o \
-                                      $(OBJDIR)/modules/aws/aws_eventstream.o
+                                      $(OBJDIR)/modules/aws/aws_eventstream.o \
+                                      $(OBJDIR)/modules/aws/bedrock_policy.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-bedrock-live: $(OBJDIR)/tests/test_kb_bedrock_live.o \
