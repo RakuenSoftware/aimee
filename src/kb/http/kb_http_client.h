@@ -108,6 +108,9 @@ kb_http_result_t kb_http_client_test__wait_fd(int fd, short events, int timeout_
 kb_http_result_t kb_http_client_test__sigpipe_mask_policy(int mask_result);
 kb_http_result_t kb_http_client_test__resolve(const char *host, int timeout_ms, int hang);
 kb_http_result_t kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water);
+kb_http_result_t kb_http_client_test__dns_slots(size_t *used, size_t *high_water);
+kb_http_result_t kb_http_client_test__parse_resolver_response(const unsigned char *wire,
+                                                              size_t length);
 #endif
 
 #endif

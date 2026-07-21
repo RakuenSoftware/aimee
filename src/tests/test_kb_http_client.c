@@ -1,13 +1,17 @@
 #define KB_HTTP_CLIENT_TESTING 1
 #include "kb/http/kb_http_client.h"
+#include "kb/http/kb_http_resolver_protocol.h"
 
 #include <assert.h>
 #include <errno.h>
 #include <openssl/ssl.h>
 #include <poll.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 typedef struct
@@ -282,6 +286,101 @@ static void resolver_hang_releases_capacity(void)
    assert(kb_http_client_test__resolve("localhost", 2000, 0) == KB_HTTP_OK);
 }
 
+typedef struct
+{
+   int timeout_ms, hang, async_cancel;
+   kb_http_result_t result;
+} resolver_thread_t;
+
+static void *resolver_thread_main(void *opaque)
+{
+   resolver_thread_t *thread = opaque;
+   if (thread->async_cancel)
+      assert(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL) == 0);
+   thread->result = kb_http_client_test__resolve("localhost", thread->timeout_ms, thread->hang);
+   return NULL;
+}
+
+static void wait_for_dns_slots(size_t target)
+{
+   struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000L};
+   for (size_t attempt = 0; attempt < 2000; attempt++)
+   {
+      size_t used = 0, high_water = 0;
+      assert(kb_http_client_test__dns_slots(&used, &high_water) == KB_HTTP_OK);
+      if (used == target)
+         return;
+      nanosleep(&pause, NULL);
+   }
+   assert(!"resolver slot target was not reached");
+}
+
+static void resolver_cancellation_releases_exact_children(void)
+{
+   resolver_thread_t active = {.timeout_ms = 5000, .hang = 1, .async_cancel = 1};
+   pthread_t active_thread;
+   assert(pthread_create(&active_thread, NULL, resolver_thread_main, &active) == 0);
+   wait_for_dns_slots(1);
+   struct timespec helper_start = {.tv_sec = 0, .tv_nsec = 20000000L};
+   nanosleep(&helper_start, NULL);
+   assert(pthread_cancel(active_thread) == 0);
+   void *joined = NULL;
+   assert(pthread_join(active_thread, &joined) == 0 && joined == PTHREAD_CANCELED);
+   size_t high_water = 0;
+   assert(kb_http_client_test__dns_wait_idle(2000, &high_water) == KB_HTTP_OK);
+
+   enum
+   {
+      CAP = 16
+   };
+   resolver_thread_t holders[CAP];
+   pthread_t holder_threads[CAP];
+   for (size_t i = 0; i < CAP; i++)
+   {
+      holders[i] = (resolver_thread_t){.timeout_ms = 5000, .hang = 1, .async_cancel = 1};
+      assert(pthread_create(&holder_threads[i], NULL, resolver_thread_main, &holders[i]) == 0);
+   }
+   wait_for_dns_slots(CAP);
+   resolver_thread_t waiter = {.timeout_ms = 5000, .hang = 0, .async_cancel = 1};
+   pthread_t waiter_thread;
+   assert(pthread_create(&waiter_thread, NULL, resolver_thread_main, &waiter) == 0);
+   nanosleep(&helper_start, NULL);
+   assert(pthread_cancel(waiter_thread) == 0);
+   joined = NULL;
+   assert(pthread_join(waiter_thread, &joined) == 0 && joined == PTHREAD_CANCELED);
+
+   size_t used = 0;
+   assert(kb_http_client_test__dns_slots(&used, &high_water) == KB_HTTP_OK && used == CAP);
+   for (size_t i = 0; i < CAP; i++)
+      assert(pthread_cancel(holder_threads[i]) == 0);
+   for (size_t i = 0; i < CAP; i++)
+   {
+      joined = NULL;
+      assert(pthread_join(holder_threads[i], &joined) == 0 && joined == PTHREAD_CANCELED);
+   }
+   assert(kb_http_client_test__dns_wait_idle(2000, &high_water) == KB_HTTP_OK);
+   assert(high_water == CAP);
+   assert(kb_http_client_test__resolve("localhost", 2000, 0) == KB_HTTP_OK);
+}
+
+static void resolver_rejects_non_https_port(void)
+{
+   unsigned char wire[17] = {0};
+   kb_resolver_put_u32(wire, KB_RESOLVER_RESPONSE_MAGIC);
+   wire[4] = KB_RESOLVER_VERSION;
+   wire[5] = KB_RESOLVER_STATUS_OK;
+   wire[6] = 1;
+   wire[8] = 4;
+   wire[9] = 4;
+   wire[13] = 127;
+   wire[16] = 1;
+   kb_resolver_put_u16(wire + 10, 80);
+   assert(kb_http_client_test__parse_resolver_response(wire, sizeof(wire)) ==
+          KB_HTTP_RESOLVE_ERROR);
+   kb_resolver_put_u16(wire + 10, 443);
+   assert(kb_http_client_test__parse_resolver_response(wire, sizeof(wire)) == KB_HTTP_OK);
+}
+
 static void sigpipe_mask_failure_policy(void)
 {
    assert(kb_http_client_test__sigpipe_mask_policy(0) == KB_HTTP_OK);
@@ -317,6 +416,8 @@ int main(void)
    sigpipe_mask_failure_policy();
    callbacks_complete_synchronously();
    resolver_hang_releases_capacity();
+   resolver_cancellation_releases_exact_children();
+   resolver_rejects_non_https_port();
    puts("kb http client: strict parser and request validation passed");
    return 0;
 }

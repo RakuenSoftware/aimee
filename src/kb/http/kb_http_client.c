@@ -457,10 +457,23 @@ static int deadline_expired(int64_t deadline)
 #define DNS_QUERY_PROCESS_CAP 16U
 static pthread_mutex_t dns_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t dns_slots_cond;
+static pthread_cond_t dns_reap_cond = PTHREAD_COND_INITIALIZER;
 static pthread_once_t dns_pool_once = PTHREAD_ONCE_INIT;
 static size_t dns_slots_used;
 static size_t dns_slots_high_water;
+static pid_t dns_reap_queue[DNS_QUERY_PROCESS_CAP];
+static size_t dns_reap_head, dns_reap_count;
 static int dns_pool_ready;
+
+typedef struct
+{
+   int request_pipe[2];
+   int response_pipe[2];
+   pid_t pid;
+   int slot_owned;
+} resolver_cleanup_t;
+
+static void resolver_cleanup(void *opaque);
 
 static void dns_slot_release(void)
 {
@@ -468,6 +481,39 @@ static void dns_slot_release(void)
    if (dns_slots_used)
       dns_slots_used--;
    pthread_cond_broadcast(&dns_slots_cond);
+   pthread_mutex_unlock(&dns_pool_mutex);
+}
+
+static void *dns_reaper_main(void *unused)
+{
+   (void)unused;
+   for (;;)
+   {
+      pthread_mutex_lock(&dns_pool_mutex);
+      while (!dns_reap_count)
+         pthread_cond_wait(&dns_reap_cond, &dns_pool_mutex);
+      pid_t pid = dns_reap_queue[dns_reap_head];
+      dns_reap_head = (dns_reap_head + 1U) % DNS_QUERY_PROCESS_CAP;
+      dns_reap_count--;
+      pthread_mutex_unlock(&dns_pool_mutex);
+
+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+         ;
+      dns_slot_release();
+   }
+   return NULL;
+}
+
+/* The caller has already killed pid and transfers both exact-child ownership and
+ * its charged process slot. Queue capacity cannot be exhausted: every queued or
+ * reaping child still owns one of the DNS_QUERY_PROCESS_CAP slots. */
+static void dns_reap_enqueue(pid_t pid)
+{
+   pthread_mutex_lock(&dns_pool_mutex);
+   size_t tail = (dns_reap_head + dns_reap_count) % DNS_QUERY_PROCESS_CAP;
+   dns_reap_queue[tail] = pid;
+   dns_reap_count++;
+   pthread_cond_signal(&dns_reap_cond);
    pthread_mutex_unlock(&dns_pool_mutex);
 }
 
@@ -483,20 +529,50 @@ static void dns_pool_init(void)
       return;
    }
    pthread_condattr_destroy(&cond_attr);
+   pthread_attr_t thread_attr;
+   if (pthread_attr_init(&thread_attr) != 0)
+      return;
+   int thread_error = pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
+   size_t reaper_stack = 128U * 1024U;
+   if (reaper_stack < (size_t)PTHREAD_STACK_MIN)
+      reaper_stack = (size_t)PTHREAD_STACK_MIN;
+   if (!thread_error)
+      thread_error = pthread_attr_setstacksize(&thread_attr, reaper_stack);
+   for (size_t i = 0; !thread_error && i < DNS_QUERY_PROCESS_CAP; i++)
+   {
+      pthread_t reaper;
+      thread_error = pthread_create(&reaper, &thread_attr, dns_reaper_main, NULL);
+   }
+   pthread_attr_destroy(&thread_attr);
+   if (thread_error)
+      return;
    dns_pool_ready = 1;
 }
 
-static kb_http_result_t dns_slot_acquire(int64_t deadline)
+static void mutex_unlock_cleanup(void *mutex)
+{
+   pthread_mutex_unlock(mutex);
+}
+
+static kb_http_result_t dns_slot_acquire(int64_t deadline, int *slot_owned)
 {
    if (pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
       return KB_HTTP_INTERNAL_ERROR;
    struct timespec until = {.tv_sec = deadline / 1000000000LL, .tv_nsec = deadline % 1000000000LL};
-   if (pthread_mutex_lock(&dns_pool_mutex) != 0)
+   int entry_cancel_state;
+   if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &entry_cancel_state) != 0)
       return KB_HTTP_INTERNAL_ERROR;
+   if (pthread_mutex_lock(&dns_pool_mutex) != 0)
+   {
+      (void)pthread_setcancelstate(entry_cancel_state, NULL);
+      return KB_HTTP_INTERNAL_ERROR;
+   }
+   kb_http_result_t result = KB_HTTP_OK;
+   pthread_cleanup_push(mutex_unlock_cleanup, &dns_pool_mutex);
+   (void)pthread_setcancelstate(entry_cancel_state, NULL);
    int wait_result = 0;
    while (dns_slots_used >= DNS_QUERY_PROCESS_CAP && wait_result == 0)
       wait_result = pthread_cond_timedwait(&dns_slots_cond, &dns_pool_mutex, &until);
-   kb_http_result_t result = KB_HTTP_OK;
    if (deadline_expired(deadline))
       result = KB_HTTP_TIMEOUT;
    else if (dns_slots_used >= DNS_QUERY_PROCESS_CAP)
@@ -504,11 +580,17 @@ static kb_http_result_t dns_slot_acquire(int64_t deadline)
                                                                       : KB_HTTP_INTERNAL_ERROR;
    else
    {
+      int mutation_cancel_state;
+      (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &mutation_cancel_state);
       dns_slots_used++;
+      *slot_owned = 1;
       if (dns_slots_used > dns_slots_high_water)
          dns_slots_high_water = dns_slots_used;
+      entry_cancel_state = mutation_cancel_state;
    }
-   pthread_mutex_unlock(&dns_pool_mutex);
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+   pthread_cleanup_pop(1);
+   (void)pthread_setcancelstate(entry_cancel_state, NULL);
    return result;
 }
 
@@ -575,15 +657,39 @@ static int pipe_cloexec(int fds[2])
    return 0;
 }
 
-static kb_http_result_t pipe_write_deadline(int fd, const unsigned char *bytes, size_t length,
-                                            int64_t deadline)
+static int socketpair_cloexec(int fds[2])
+{
+   int raw[2];
+   if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, raw) != 0)
+      return -1;
+   for (size_t i = 0; i < 2; i++)
+   {
+      if (raw[i] > STDERR_FILENO)
+         fds[i] = raw[i];
+      else
+      {
+         fds[i] = fcntl(raw[i], F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+         close(raw[i]);
+         if (fds[i] < 0)
+         {
+            if (i)
+               close(fds[0]);
+            return -1;
+         }
+      }
+   }
+   return 0;
+}
+
+static kb_http_result_t socket_write_deadline(int fd, const unsigned char *bytes, size_t length,
+                                              int64_t deadline)
 {
    size_t at = 0;
    while (at < length)
    {
       if (deadline_expired(deadline))
          return KB_HTTP_TIMEOUT;
-      ssize_t n = write(fd, bytes + at, length - at);
+      ssize_t n = send(fd, bytes + at, length - at, MSG_NOSIGNAL);
       if (n > 0)
          at += (size_t)n;
       else if (n < 0 && errno == EINTR)
@@ -647,14 +753,23 @@ static kb_http_result_t pipe_read_deadline(int fd, unsigned char *bytes, size_t 
    }
 }
 
-static kb_http_result_t child_reap_deadline(pid_t pid, int64_t deadline, int *status)
+static kb_http_result_t child_reap_deadline(pid_t *pid, int64_t deadline, int *status)
 {
    for (;;)
    {
-      pid_t rc = waitpid(pid, status, WNOHANG);
-      if (rc == pid)
-         return deadline_expired(deadline) ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
-      if (rc < 0 && errno != EINTR)
+      int wait_cancel_state;
+      (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &wait_cancel_state);
+      pid_t rc = waitpid(*pid, status, WNOHANG);
+      if (rc == *pid)
+      {
+         *pid = -1;
+         kb_http_result_t result = deadline_expired(deadline) ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
+         (void)pthread_setcancelstate(wait_cancel_state, NULL);
+         return result;
+      }
+      int wait_error = errno;
+      (void)pthread_setcancelstate(wait_cancel_state, NULL);
+      if (rc < 0 && wait_error != EINTR)
          return KB_HTTP_INTERNAL_ERROR;
       if (deadline_expired(deadline))
          return KB_HTTP_TIMEOUT;
@@ -662,13 +777,37 @@ static kb_http_result_t child_reap_deadline(pid_t pid, int64_t deadline, int *st
    }
 }
 
-static void child_kill_reap(pid_t pid)
+static void resolver_cleanup(void *opaque)
 {
-   if (pid <= 0)
-      return;
-   (void)kill(pid, SIGKILL);
-   while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
-      ;
+   resolver_cleanup_t *cleanup = opaque;
+   int old_cancel_state;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
+   for (size_t i = 0; i < 2; i++)
+   {
+      if (cleanup->request_pipe[i] >= 0)
+      {
+         close(cleanup->request_pipe[i]);
+         cleanup->request_pipe[i] = -1;
+      }
+      if (cleanup->response_pipe[i] >= 0)
+      {
+         close(cleanup->response_pipe[i]);
+         cleanup->response_pipe[i] = -1;
+      }
+   }
+   if (cleanup->pid > 0)
+   {
+      (void)kill(cleanup->pid, SIGKILL);
+      dns_reap_enqueue(cleanup->pid);
+      cleanup->slot_owned = 0;
+      cleanup->pid = -1;
+   }
+   if (cleanup->slot_owned)
+   {
+      dns_slot_release();
+      cleanup->slot_owned = 0;
+   }
+   (void)pthread_setcancelstate(old_cancel_state, NULL);
 }
 
 static kb_http_result_t parse_resolver_response(const unsigned char *wire, size_t length,
@@ -691,7 +830,8 @@ static kb_http_result_t parse_resolver_response(const unsigned char *wire, size_
       unsigned family = wire[at], address_len = wire[at + 1];
       uint16_t port = kb_resolver_get_u16(wire + at + 2);
       at += 5;
-      if (!port || ((family != 4 || address_len != 4) && (family != 6 || address_len != 16)) ||
+      if (port != 443U ||
+          ((family != 4 || address_len != 4) && (family != 6 || address_len != 16)) ||
           at + address_len > length)
          goto malformed;
       struct addrinfo *a = calloc(1, sizeof(*a));
@@ -739,6 +879,17 @@ malformed:
    return KB_HTTP_RESOLVE_ERROR;
 }
 
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__parse_resolver_response(const unsigned char *wire, size_t length)
+{
+   struct addrinfo *result = NULL;
+   if (!wire)
+      return KB_HTTP_INVALID_ARGUMENT;
+   kb_http_result_t status = parse_resolver_response(wire, length, &result);
+   resolved_addresses_free(result);
+   return status;
+}
+
 static kb_http_result_t resolve_deadline_with(const char *host, const char *service, unsigned flags,
                                               const char *helper_override, int64_t deadline,
                                               struct addrinfo **result)
@@ -749,31 +900,41 @@ static kb_http_result_t resolve_deadline_with(const char *host, const char *serv
    if (!host_len || host_len > KB_RESOLVER_HOST_MAX || !service_len ||
        service_len > KB_RESOLVER_SERVICE_MAX || (flags & ~KB_RESOLVER_FLAG_HANG_TEST))
       return KB_HTTP_INVALID_ARGUMENT;
-   kb_http_result_t outcome = dns_slot_acquire(deadline);
-   if (outcome != KB_HTTP_OK)
-      return outcome;
-
-   int request_pipe[2] = {-1, -1}, response_pipe[2] = {-1, -1};
-   pid_t pid = -1;
+   resolver_cleanup_t cleanup = {
+       .request_pipe = {-1, -1}, .response_pipe = {-1, -1}, .pid = -1, .slot_owned = 0};
+   kb_http_result_t outcome = KB_HTTP_INTERNAL_ERROR;
    char helper_path[PATH_MAX];
    unsigned char request[8U + KB_RESOLVER_HOST_MAX + KB_RESOLVER_SERVICE_MAX] = {0};
    unsigned char response[KB_RESOLVER_WIRE_MAX];
    size_t response_len = 0;
-   if (resolver_helper_path(helper_path, helper_override) != 0 || pipe_cloexec(request_pipe) != 0 ||
-       pipe_cloexec(response_pipe) != 0)
+   pthread_cleanup_push(resolver_cleanup, &cleanup);
+   outcome = dns_slot_acquire(deadline, &cleanup.slot_owned);
+   if (outcome != KB_HTTP_OK)
+      goto done;
+   int setup_cancel_state;
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &setup_cancel_state);
+   int setup_error = resolver_helper_path(helper_path, helper_override) != 0 ||
+                     socketpair_cloexec(cleanup.request_pipe) != 0 ||
+                     pipe_cloexec(cleanup.response_pipe) != 0;
+   (void)pthread_setcancelstate(setup_cancel_state, NULL);
+   if (setup_error)
    {
       outcome = KB_HTTP_RESOLVE_ERROR;
       goto done;
    }
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &setup_cancel_state);
    posix_spawn_file_actions_t actions;
    if (posix_spawn_file_actions_init(&actions) != 0)
    {
+      (void)pthread_setcancelstate(setup_cancel_state, NULL);
       outcome = KB_HTTP_INTERNAL_ERROR;
       goto done;
    }
-   int action_error = posix_spawn_file_actions_adddup2(&actions, request_pipe[0], STDIN_FILENO);
+   int action_error =
+       posix_spawn_file_actions_adddup2(&actions, cleanup.request_pipe[0], STDIN_FILENO);
    if (!action_error)
-      action_error = posix_spawn_file_actions_adddup2(&actions, response_pipe[1], STDOUT_FILENO);
+      action_error =
+          posix_spawn_file_actions_adddup2(&actions, cleanup.response_pipe[1], STDOUT_FILENO);
    if (!action_error)
       action_error =
           posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
@@ -781,19 +942,24 @@ static kb_http_result_t resolve_deadline_with(const char *host, const char *serv
       action_error = posix_spawn_file_actions_addclosefrom_np(&actions, STDERR_FILENO + 1);
    char *const argv[] = {helper_path, NULL};
    char *const envp[] = {"LANG=C", "LC_ALL=C", NULL};
-   int spawn_error =
-       action_error ? action_error : posix_spawn(&pid, helper_path, &actions, NULL, argv, envp);
+   int spawn_error = action_error
+                         ? action_error
+                         : posix_spawn(&cleanup.pid, helper_path, &actions, NULL, argv, envp);
    posix_spawn_file_actions_destroy(&actions);
+   (void)pthread_setcancelstate(setup_cancel_state, NULL);
    if (spawn_error != 0)
    {
       outcome = KB_HTTP_RESOLVE_ERROR;
       goto done;
    }
-   close(request_pipe[0]);
-   request_pipe[0] = -1;
-   close(response_pipe[1]);
-   response_pipe[1] = -1;
-   if (fd_nonblocking(request_pipe[1]) != 0 || fd_nonblocking(response_pipe[0]) != 0)
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &setup_cancel_state);
+   close(cleanup.request_pipe[0]);
+   cleanup.request_pipe[0] = -1;
+   close(cleanup.response_pipe[1]);
+   cleanup.response_pipe[1] = -1;
+   (void)pthread_setcancelstate(setup_cancel_state, NULL);
+   if (fd_nonblocking(cleanup.request_pipe[1]) != 0 ||
+       fd_nonblocking(cleanup.response_pipe[0]) != 0)
    {
       outcome = KB_HTTP_INTERNAL_ERROR;
       goto done;
@@ -805,20 +971,22 @@ static kb_http_result_t resolve_deadline_with(const char *host, const char *serv
    request[7] = (unsigned char)service_len;
    memcpy(request + 8, host, host_len);
    memcpy(request + 8 + host_len, service, service_len);
-   outcome = pipe_write_deadline(request_pipe[1], request, 8U + host_len + service_len, deadline);
-   close(request_pipe[1]);
-   request_pipe[1] = -1;
+   outcome = socket_write_deadline(cleanup.request_pipe[1], request, 8U + host_len + service_len,
+                                   deadline);
+   (void)pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &setup_cancel_state);
+   close(cleanup.request_pipe[1]);
+   cleanup.request_pipe[1] = -1;
+   (void)pthread_setcancelstate(setup_cancel_state, NULL);
    if (outcome != KB_HTTP_OK)
       goto done;
-   outcome =
-       pipe_read_deadline(response_pipe[0], response, sizeof(response), &response_len, deadline);
+   outcome = pipe_read_deadline(cleanup.response_pipe[0], response, sizeof(response), &response_len,
+                                deadline);
    if (outcome != KB_HTTP_OK)
       goto done;
    int child_status = 0;
-   outcome = child_reap_deadline(pid, deadline, &child_status);
+   outcome = child_reap_deadline(&cleanup.pid, deadline, &child_status);
    if (outcome != KB_HTTP_OK)
       goto done;
-   pid = -1;
    if (!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
    {
       outcome = KB_HTTP_RESOLVE_ERROR;
@@ -828,16 +996,7 @@ static kb_http_result_t resolve_deadline_with(const char *host, const char *serv
                                         : parse_resolver_response(response, response_len, result);
 
 done:
-   if (pid > 0)
-      child_kill_reap(pid);
-   for (size_t i = 0; i < 2; i++)
-   {
-      if (request_pipe[i] >= 0)
-         close(request_pipe[i]);
-      if (response_pipe[i] >= 0)
-         close(response_pipe[i]);
-   }
-   dns_slot_release();
+   pthread_cleanup_pop(1);
    return outcome;
 }
 
@@ -882,6 +1041,19 @@ kb_http_client_test__dns_wait_idle(int timeout_ms, size_t *high_water)
    kb_http_result_t result = dns_slots_used ? KB_HTTP_TIMEOUT : KB_HTTP_OK;
    pthread_mutex_unlock(&dns_pool_mutex);
    return result;
+}
+
+__attribute__((visibility("hidden"))) kb_http_result_t
+kb_http_client_test__dns_slots(size_t *used, size_t *high_water)
+{
+   if (!used || !high_water || pthread_once(&dns_pool_once, dns_pool_init) != 0 || !dns_pool_ready)
+      return KB_HTTP_INVALID_ARGUMENT;
+   if (pthread_mutex_lock(&dns_pool_mutex) != 0)
+      return KB_HTTP_INTERNAL_ERROR;
+   *used = dns_slots_used;
+   *high_water = dns_slots_high_water;
+   pthread_mutex_unlock(&dns_pool_mutex);
+   return KB_HTTP_OK;
 }
 
 static kb_http_result_t wait_fd(int fd, short events, int64_t deadline)
