@@ -179,6 +179,7 @@ int git_ops_push_dir(const char *principal, const char *repo_dir, const char *re
        repo_dir,
        "config",
        "--local",
+       "--includes",
        "--name-only",
        "--get-regexp",
        "^(url\\..*\\.insteadof|http\\.|credential\\.|core\\.sshcommand|remote\\..*\\.(proxy|vcs))",
