@@ -61,7 +61,7 @@ func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClie
 		verifier = CommandVerifier{}
 	}
 	if forge == nil {
-		forge = GHForge{}
+		forge = unavailableForge{}
 	}
 	return &NativeRunner{db: db, worktrees: worktrees, agents: agents, verifier: verifier, artifacts: artifacts, workflows: workflows, forge: forge}, nil
 }

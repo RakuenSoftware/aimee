@@ -405,6 +405,47 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    return ok;
 }
 
+int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
+                             const char *base, char *out, size_t out_cap, char *err,
+                             size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
+       strchr(head, '&') || strchr(head, '?') || strchr(base, '&') || strchr(base, '?'))
+   {
+      snprintf(err, errlen, "invalid PR head/base");
+      return -1;
+   }
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   char path[700];
+   snprintf(path, sizeof(path), "pulls?state=open&head=%s:%s&base=%s&per_page=1", cx.owner, head,
+            base);
+   char *response = NULL;
+   int status = gh_get(&cx, path, &response);
+   gh_ctx_done(&cx);
+   if (status < 200 || status >= 300 || !response)
+   {
+      gh_err(response, status, "find PR", err, errlen);
+      free(response);
+      return -1;
+   }
+   int found = 0;
+   cJSON *array = cJSON_Parse(response);
+   const cJSON *first = cJSON_IsArray(array) ? cJSON_GetArrayItem(array, 0) : NULL;
+   const cJSON *url = first ? cJSON_GetObjectItem(first, "html_url") : NULL;
+   if (cJSON_IsString(url) && url->valuestring && url->valuestring[0])
+   {
+      snprintf(out, out_cap, "%s", url->valuestring);
+      found = 1;
+   }
+   cJSON_Delete(array);
+   free(response);
+   return found;
+}
+
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
                         char *err, size_t errlen)
 {

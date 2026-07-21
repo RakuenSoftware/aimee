@@ -10,12 +10,14 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http_identity.h" /* attested X-Aimee-Webuser principal */
+#include "aimee_home.h" /* aimee_home — managed Go WFE worktree root */
 #include "cJSON.h"
 #include "config.h" /* MAX_PATH_LEN */
 #include "log.h"
 #include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
 #include "git_host_cred.h"   /* per-host git credential store for /v1/git/credentials */
 #include "git_ops.h"         /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_pr_api.h"      /* narrow in-process forge operations for Go WFE */
 #include "git_org_repos.h"   /* git_org_repos_list for /v1/workspace/org-repos */
 #include "git_project.h"     /* git_project_clone/_delete for /v1/workspace/clone + delete */
 #include "git_ssh_agent.h"   /* git_ssh_agent_stop — drop live key handles on revoke */
@@ -24,10 +26,21 @@
 #include "vault_service.h"   /* vault_service_set/delete for the per-webuser ssh-key route */
 #include "webuser_editor.h"  /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
+#include "util.h" /* bounded argv execution for structural worktree checks */
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+
+extern char **environ;
+
+static const char *route_json_string(const cJSON *object, const char *key)
+{
+   const cJSON *value = object ? cJSON_GetObjectItemCaseSensitive(object, key) : NULL;
+   return (cJSON_IsString(value) && value->valuestring) ? value->valuestring : NULL;
+}
 
 /* AIMEE_WEBCHAT_GIT=0 disables the whole webchat git surface — forge-token,
  * clone, ops, per-host credentials, ssh-key, projects, session-dir, OAuth —
@@ -320,6 +333,234 @@ int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
    free(s);
    cJSON_Delete(out);
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "git output too large");
+}
+
+static int wfe_ref_valid(const char *s)
+{
+   if (!s || !s[0] || s[0] == '-' || strlen(s) > 200 || strstr(s, ".."))
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+      if (!(isalnum(*p) || *p == '.' || *p == '_' || *p == '/' || *p == '-'))
+         return 0;
+   return 1;
+}
+
+static int wfe_item_id_valid(const char *s)
+{
+   if (!s || strncmp(s, "wi_", 3) != 0 || strlen(s) > 80)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)s + 3; *p; p++)
+      if (!isalnum(*p) && *p != '_')
+         return 0;
+   return s[3] != '\0';
+}
+
+static int wfe_managed_repo(const char *workdir_in, const char *repo_in, const char *head,
+                            char *workdir, size_t work_cap, char *remote, size_t remote_cap,
+                            char *err, size_t errlen)
+{
+   (void)work_cap; /* callers provide MAX_PATH_LEN; realpath requires PATH_MAX storage */
+   char repo[MAX_PATH_LEN], prefix[MAX_PATH_LEN], top[MAX_PATH_LEN];
+   if (!workdir_in || !repo_in || !realpath(workdir_in, workdir) || !realpath(repo_in, repo))
+   {
+      snprintf(err, errlen, "managed repository path does not exist");
+      return -1;
+   }
+   if ((size_t)snprintf(prefix, sizeof(prefix), "%s/wfe-worktrees/", aimee_home()) >= sizeof(prefix) ||
+       strncmp(workdir, prefix, strlen(prefix)) != 0)
+   {
+      snprintf(err, errlen, "worktree is outside the managed WFE root");
+      return -1;
+   }
+   const char *item_id = workdir + strlen(prefix);
+   if (!wfe_item_id_valid(item_id) || strchr(item_id, '/'))
+   {
+      snprintf(err, errlen, "invalid managed worktree id");
+      return -1;
+   }
+   if (head)
+   {
+      char feature[300], slice[300];
+      snprintf(feature, sizeof(feature), "aimee/feat/%s", item_id);
+      snprintf(slice, sizeof(slice), "aimee/wi/%s", item_id);
+      if (strcmp(head, feature) != 0 && strcmp(head, slice) != 0)
+      {
+         snprintf(err, errlen, "managed branch does not match work-item id");
+         return -1;
+      }
+   }
+   struct stat st;
+   const char *top_argv[] = {"git", "-c", "core.hooksPath=/dev/null", "-C", workdir,
+                             "rev-parse", "--show-toplevel", NULL};
+   char *top_out = NULL;
+   if (lstat(workdir_in, &st) != 0 || S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode) ||
+       safe_exec_capture_cwd_env_timeout(top_argv, workdir, environ, &top_out, 4096, 5000) != 0 ||
+       !top_out)
+   {
+      free(top_out);
+      snprintf(err, errlen, "invalid managed git worktree");
+      return -1;
+   }
+   top_out[strcspn(top_out, "\r\n")] = '\0';
+   snprintf(top, sizeof(top), "%s", top_out);
+   free(top_out);
+   if (strcmp(top, workdir) != 0)
+   {
+      snprintf(err, errlen, "git top-level does not match managed worktree");
+      return -1;
+   }
+   if (head)
+   {
+      const char *branch_argv[] = {"git", "-C", workdir, "rev-parse", "--abbrev-ref", "HEAD", NULL};
+      char *branch = NULL;
+      int brc = safe_exec_capture_cwd_env_timeout(branch_argv, workdir, environ, &branch, 4096, 5000);
+      if (brc != 0 || !branch)
+      {
+         free(branch);
+         snprintf(err, errlen, "cannot resolve managed branch");
+         return -1;
+      }
+      branch[strcspn(branch, "\r\n")] = '\0';
+      int match = strcmp(branch, head) == 0;
+      free(branch);
+      if (!match)
+      {
+         snprintf(err, errlen, "managed branch mismatch");
+         return -1;
+      }
+   }
+   char repo_remote[512], work_remote[512];
+   if (git_pr_https_origin_url(repo, repo_remote, sizeof(repo_remote), err, errlen) != 0 ||
+       git_pr_https_origin_url(workdir, work_remote, sizeof(work_remote), err, errlen) != 0 ||
+       strcmp(repo_remote, work_remote) != 0)
+   {
+      snprintf(err, errlen, "worktree origin does not match admitted repository");
+      return -1;
+   }
+   snprintf(remote, remote_cap, "%s", work_remote);
+   return 0;
+}
+
+/* Mechanical authenticated forge execution for Go-owned WFE state. The raw
+ * credential never crosses this process boundary. C validates only structural
+ * security invariants and executes the explicit operation; it does not inspect
+ * DB1, interpret workflows, choose an operation, or advance a lifecycle. */
+int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "uid:", 4) != 0)
+      return err_json(resp, cap, 403, "local Unix peer required");
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   const char *op = route_json_string(body, "op");
+   const char *workdir_in = route_json_string(body, "workdir");
+   const char *repo = route_json_string(body, "repo");
+   const char *head = route_json_string(body, "head");
+   const char *base = route_json_string(body, "base");
+   const char *title = route_json_string(body, "title");
+   const cJSON *jnumber = body ? cJSON_GetObjectItemCaseSensitive(body, "number") : NULL;
+   int number = cJSON_IsNumber(jnumber) ? jnumber->valueint : 0;
+   if (!body || !op || !workdir_in || !repo || (head && !wfe_ref_valid(head)) ||
+       (base && !wfe_ref_valid(base)) || (title && strlen(title) > 256))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid forge operation request");
+   }
+   char workdir[MAX_PATH_LEN], remote[512], err[256];
+   if (wfe_managed_repo(workdir_in, repo, head, workdir, sizeof(workdir), remote, sizeof(remote),
+                        err, sizeof(err)) != 0)
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 403, err);
+   }
+   cJSON *out = cJSON_CreateObject();
+   char *detail = NULL;
+   int rc = -1;
+   if (strcmp(op, "open") == 0 && head && base &&
+       (strncmp(head, "aimee/feat/wi_", 14) == 0 || strncmp(head, "aimee/wi/wi_", 12) == 0))
+   {
+      char *push_out = NULL, url[1024];
+      rc = git_ops_push_dir(principal, workdir, remote, head, &push_out, err, sizeof(err));
+      if (rc != 0)
+         detail = push_out;
+      else
+         free(push_out);
+      if (rc == 0)
+      {
+         int found = git_pr_find_open_via_api(principal, workdir, head, base, url, sizeof(url), err,
+                                               sizeof(err));
+         if (found == 0)
+            rc = git_pr_create_via_api_ex(principal, workdir, head, base, title,
+                                          "Automated workflow output ready for human review.", url,
+                                          sizeof(url), err, sizeof(err));
+         else
+            rc = found == 1 ? 0 : -1;
+         if (rc == 0)
+            cJSON_AddStringToObject(out, "url", url);
+      }
+   }
+   else if (strcmp(op, "info") == 0 && number > 0)
+   {
+      git_pr_info_t info;
+      rc = git_pr_info_via_api(principal, workdir, number, &info, err, sizeof(err));
+      if (rc == 0)
+      {
+         cJSON_AddBoolToObject(out, "open", info.open);
+         cJSON_AddBoolToObject(out, "merged", info.merged);
+         cJSON_AddNumberToObject(out, "mergeable", info.mergeable);
+         cJSON_AddStringToObject(out, "base", info.base);
+      }
+   }
+   else if (strcmp(op, "ci") == 0 && number > 0)
+   {
+      git_pr_ci_t ci = git_pr_ci_via_api(principal, workdir, number, err, sizeof(err));
+      rc = ci == GIT_PR_CI_ERROR ? -1 : 0;
+      if (rc == 0)
+      {
+         const char *state = ci == GIT_PR_CI_PENDING ? "pending" :
+                             ci == GIT_PR_CI_FAILURE ? "failed" : "passed";
+         cJSON_AddStringToObject(out, "state", state);
+      }
+   }
+   else if (strcmp(op, "merge") == 0 && number > 0 && base &&
+            strncmp(base, "aimee/feat/wi_", 14) == 0)
+   {
+      git_pr_info_t info;
+      rc = git_pr_info_via_api(principal, workdir, number, &info, err, sizeof(err));
+      if (rc == 0 && strcmp(info.base, base) != 0)
+      {
+         snprintf(err, sizeof(err), "pull request base mismatch");
+         rc = -1;
+      }
+      if (rc == 0)
+      {
+         int merged = git_pr_merge_via_api(principal, workdir, number, err, sizeof(err));
+         rc = (merged == 0 || merged == 1) ? 0 : -1;
+      }
+   }
+   else
+      snprintf(err, sizeof(err), "unsupported forge operation");
+   cJSON_Delete(body);
+   if (rc != 0)
+   {
+      cJSON_Delete(out);
+      cJSON *failure = cJSON_CreateObject();
+      cJSON_AddStringToObject(failure, "error", err[0] ? err : "forge operation failed");
+      if (detail && detail[0])
+         cJSON_AddStringToObject(failure, "detail", detail);
+      char *serialized = cJSON_PrintUnformatted(failure);
+      cJSON_Delete(failure);
+      free(detail);
+      int n = serialized ? snprintf(resp, (size_t)cap, "%s", serialized) : -1;
+      free(serialized);
+      return (n > 0 && n < cap) ? 400 : err_json(resp, cap, 500, "forge error response too large");
+   }
+   free(detail);
+   cJSON_AddBoolToObject(out, "ok", 1);
+   char *serialized = cJSON_PrintUnformatted(out);
+   cJSON_Delete(out);
+   int n = serialized ? snprintf(resp, (size_t)cap, "%s", serialized) : -1;
+   free(serialized);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "forge response too large");
 }
 
 /* GET /v1/workspace/projects — list the calling webchat user's projects (the

@@ -149,6 +149,7 @@ int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_git(const route_req_t *rq, char *resp, int cap);
+int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_projects(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap);

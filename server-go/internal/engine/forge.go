@@ -1,12 +1,18 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type PullRequest struct {
@@ -29,30 +35,51 @@ type Forge interface {
 	Merge(context.Context, string, string, string) error
 }
 
-type GHForge struct{}
+type unavailableForge struct{}
 
-func (GHForge) Mergeable(ctx context.Context, workdir, ref string) (bool, error) {
-	out, err := ghText(ctx, workdir, "pr", "view", ref, "--json", "mergeStateStatus")
-	if err != nil {
-		return false, err
-	}
-	var view struct {
-		State string `json:"mergeStateStatus"`
-	}
-	if err := json.Unmarshal([]byte(out), &view); err != nil {
-		return false, err
-	}
-	switch strings.ToUpper(view.State) {
-	case "CLEAN", "HAS_HOOKS", "UNSTABLE":
-		return true, nil
-	case "BLOCKED", "BEHIND", "UNKNOWN":
-		return false, nil
-	default:
-		return false, nil
-	}
+func (unavailableForge) Open(context.Context, string, string, string, string, string) (PullRequest, error) {
+	return PullRequest{}, errors.New("forge resource plane is unavailable")
+}
+func (unavailableForge) CI(context.Context, string, string) (CIState, error) {
+	return CIPending, errors.New("forge resource plane is unavailable")
+}
+func (unavailableForge) Merge(context.Context, string, string, string) error {
+	return errors.New("forge resource plane is unavailable")
 }
 
-func (GHForge) Open(ctx context.Context, repo, workdir, head, base, title string) (PullRequest, error) {
+// HTTPForge asks the C resource plane to mechanically execute narrowly typed
+// authenticated operations. Go remains the sole owner of workflow policy,
+// timing, state, and transitions; credential material never crosses the socket.
+type HTTPForge struct {
+	baseURL, bearer string
+	client          *http.Client
+}
+
+type HTTPForgeConfig struct {
+	BaseURL, UnixSocket, Bearer string
+	Timeout                     time.Duration
+}
+
+func NewHTTPForge(cfg HTTPForgeConfig) (*HTTPForge, error) {
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = "http://aimee"
+	}
+	if cfg.UnixSocket == "" {
+		return nil, errors.New("forge resource plane requires a Unix socket")
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 2 * time.Minute
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	socket := cfg.UnixSocket
+	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+	}
+	return &HTTPForge{baseURL: strings.TrimRight(cfg.BaseURL, "/"), bearer: cfg.Bearer,
+		client: &http.Client{Transport: transport, Timeout: cfg.Timeout}}, nil
+}
+
+func (f *HTTPForge) Open(ctx context.Context, repo, workdir, head, base, title string) (PullRequest, error) {
 	if !managedBranch(head) {
 		return PullRequest{}, fmt.Errorf("refuse push of unmanaged branch %q", head)
 	}
@@ -67,96 +94,117 @@ func (GHForge) Open(ctx context.Context, repo, workdir, head, base, title string
 	if err != nil || repoOrigin != workOrigin {
 		return PullRequest{}, errors.New("worktree origin does not match admitted repository")
 	}
-	if _, err := gitText(ctx, workdir, "push", "-u", "origin", head); err != nil {
-		return PullRequest{}, err
-	}
-	var existing []struct {
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-		Base   string `json:"baseRefName"`
-		Head   string `json:"headRefName"`
-	}
-	if out, err := ghText(ctx, workdir, "pr", "list", "--state", "open", "--head", head, "--base", base, "--json", "number,url,baseRefName,headRefName"); err == nil && json.Unmarshal([]byte(out), &existing) == nil && len(existing) > 0 {
-		return PullRequest{Ref: existing[0].URL, URL: existing[0].URL, Base: existing[0].Base, Head: existing[0].Head}, nil
-	}
 	if title == "" {
 		title = "aimee workflow " + head
 	}
-	url, err := ghText(ctx, workdir, "pr", "create", "--head", head, "--base", base, "--title", title, "--body", "Automated workflow output ready for human review.")
-	if err != nil {
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := f.execute(ctx, map[string]any{"op": "open", "repo": repo, "workdir": workdir,
+		"head": head, "base": base, "title": title}, &result); err != nil {
 		return PullRequest{}, err
 	}
-	url = strings.TrimSpace(url)
-	if url == "" {
+	if result.URL == "" {
 		return PullRequest{}, errors.New("forge returned an empty PR reference")
 	}
-	return PullRequest{Ref: url, URL: url, Base: base, Head: head}, nil
+	return PullRequest{Ref: result.URL, URL: result.URL, Base: base, Head: head}, nil
 }
 
-func (GHForge) CI(ctx context.Context, workdir, ref string) (CIState, error) {
-	out, err := ghText(ctx, workdir, "pr", "checks", ref, "--json", "state")
-	if err != nil && strings.TrimSpace(out) == "" {
+func (f *HTTPForge) Mergeable(ctx context.Context, workdir, ref string) (bool, error) {
+	number, err := pullNumber(ref)
+	if err != nil {
+		return false, err
+	}
+	var result struct {
+		Mergeable int `json:"mergeable"`
+	}
+	if err := f.execute(ctx, map[string]any{"op": "info", "repo": workdir,
+		"workdir": workdir, "number": number}, &result); err != nil {
+		return false, err
+	}
+	return result.Mergeable == 1, nil
+}
+
+func (f *HTTPForge) CI(ctx context.Context, workdir, ref string) (CIState, error) {
+	number, err := pullNumber(ref)
+	if err != nil {
 		return CIPending, err
 	}
-	var checks []struct {
-		State string `json:"state"`
+	var result struct {
+		State CIState `json:"state"`
 	}
-	if decodeErr := json.Unmarshal([]byte(out), &checks); decodeErr != nil {
-		return CIPending, decodeErr
+	if err := f.execute(ctx, map[string]any{"op": "ci", "repo": workdir,
+		"workdir": workdir, "number": number}, &result); err != nil {
+		return CIPending, err
 	}
-	if len(checks) == 0 {
-		return CIPending, nil
+	switch result.State {
+	case CIPending, CIPassed, CIFailed:
+		return result.State, nil
+	default:
+		return CIPending, fmt.Errorf("forge returned invalid CI state %q", result.State)
 	}
-	pending := false
-	for _, check := range checks {
-		switch strings.ToUpper(check.State) {
-		case "SUCCESS", "SKIPPED", "NEUTRAL":
-		case "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED":
-			pending = true
-		default:
-			return CIFailed, nil
-		}
-	}
-	if pending {
-		return CIPending, nil
-	}
-	return CIPassed, nil
 }
 
-func (GHForge) Merge(ctx context.Context, workdir, ref, requiredBase string) error {
+func (f *HTTPForge) Merge(ctx context.Context, workdir, ref, requiredBase string) error {
 	if !strings.HasPrefix(requiredBase, "aimee/feat/wi_") {
 		return fmt.Errorf("refuse merge into unmanaged base %q", requiredBase)
 	}
-	out, err := ghText(ctx, workdir, "pr", "view", ref, "--json", "baseRefName,state,mergedAt,mergeStateStatus")
+	number, err := pullNumber(ref)
 	if err != nil {
 		return err
 	}
-	var view struct {
-		Base       string  `json:"baseRefName"`
-		State      string  `json:"state"`
-		MergedAt   *string `json:"mergedAt"`
-		MergeState string  `json:"mergeStateStatus"`
-	}
-	if err := json.Unmarshal([]byte(out), &view); err != nil {
+	var ignored map[string]any
+	return f.execute(ctx, map[string]any{"op": "merge", "repo": workdir,
+		"workdir": workdir, "number": number, "base": requiredBase}, &ignored)
+}
+
+func (f *HTTPForge) execute(ctx context.Context, input, output any) error {
+	payload, err := json.Marshal(input)
+	if err != nil {
 		return err
 	}
-	if view.Base != requiredBase {
-		return fmt.Errorf("refuse merge into %q; required feature base is %q", view.Base, requiredBase)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		f.baseURL+"/v1/internal/forge/execute", bytes.NewReader(payload))
+	if err != nil {
+		return err
 	}
-	if view.MergedAt != nil || strings.EqualFold(view.State, "MERGED") {
-		return nil
+	req.Header.Set("Content-Type", "application/json")
+	if f.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+f.bearer)
 	}
-	if strings.EqualFold(view.MergeState, "CONFLICTING") || strings.EqualFold(view.MergeState, "DIRTY") {
-		return errors.New("pull request is not mergeable")
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return err
 	}
-	_, err = ghText(ctx, workdir, "pr", "merge", ref, "--merge")
-	return err
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("forge resource %s: %s", strconv.Itoa(resp.StatusCode), safeDiagnostic(string(data)))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(output); err != nil {
+		return fmt.Errorf("decode forge response: %w", err)
+	}
+	return nil
 }
 
 func managedBranch(branch string) bool {
 	return strings.HasPrefix(branch, "aimee/wi/wi_") || strings.HasPrefix(branch, "aimee/feat/wi_")
 }
 
+func pullNumber(ref string) (int, error) {
+	part := strings.TrimSpace(ref)
+	if slash := strings.LastIndex(part, "/"); slash >= 0 {
+		part = part[slash+1:]
+	}
+	number, err := strconv.Atoi(part)
+	if err != nil || number <= 0 {
+		return 0, fmt.Errorf("invalid pull request reference %q", ref)
+	}
+	return number, nil
+}
+
+// ghText remains only for the read-only default-branch fallback used while
+// constructing local worktrees; authenticated WFE forge operations never use it.
 func ghText(ctx context.Context, workdir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = workdir

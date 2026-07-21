@@ -41,4 +41,11 @@ int git_ops_session_dir(const char *principal, const char *project, const char *
 void git_ops_register_session_isolation(int (*fn)(const char *cwd, const char *sid, char *out,
                                                   size_t out_len, int create_if_missing));
 
+/* Mechanical authenticated push for a server-confined directory. The caller
+ * owns path/branch/repository authorization. The destination is explicit (no
+ * pushurl/pushRemote lookup), hooks and credential helpers are disabled, and
+ * the credential uses the shared fd-fed resolver. */
+int git_ops_push_dir(const char *principal, const char *repo_dir, const char *remote_url,
+                     const char *branch, char **out, char *err, size_t errlen);
+
 #endif /* GIT_OPS_H */

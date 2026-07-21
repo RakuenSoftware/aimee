@@ -1854,6 +1854,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
+     * requires a kernel-attested uid: principal, making this route UDS-only. */
+    {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_internal_forge_execute},
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},

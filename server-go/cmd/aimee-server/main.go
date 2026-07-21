@@ -115,7 +115,13 @@ func main() {
 		if registryErr != nil {
 			log.Fatal(registryErr)
 		}
-		runner, err = engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, nil)
+		forge, forgeErr := engine.NewHTTPForge(engine.HTTPForgeConfig{
+			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer,
+		})
+		if forgeErr != nil {
+			log.Fatal(forgeErr)
+		}
+		runner, err = engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, forge)
 		if err != nil {
 			log.Fatal(err)
 		}
