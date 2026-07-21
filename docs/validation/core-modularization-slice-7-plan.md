@@ -2,8 +2,17 @@
 
 ## Scope and sequence
 
-This work lands as two ordered PRs because a candidate cannot establish the verifier that authorizes
-itself.
+This document describes optional governance hardening for signed descriptor-v2 attestations. It is
+not the delivery sequence for physical source ownership, ordinary module documentation, or normal
+review and CI. Those structural slices proceed independently and may land before this program.
+
+The structural policy is recorded in `core-modularization-slice-6.md`; the first independent
+physical move is recorded in `core-modularization-slice-8.md`. This program resumes only after the
+external verifier is deployed, the publisher app is pinned as the required-check source, and real
+human owner and reviewer SSH public keys are enrolled in protected-base policy.
+
+If this governance program is resumed, it lands as two ordered PRs because a candidate cannot
+establish the verifier that authorizes itself.
 
 Slice 7a lands the provider-neutral CI OIDC policy schema, external protected verifier, deterministic
 module-document parser, SSHSIG verifier, fixtures, protected trigger workflow, and check-publisher
@@ -16,6 +25,11 @@ Slice 7b then atomically migrates all twenty-six canonical descriptors to versio
 substantive document per module, and adds two human SSHSIG signatures per document. It cannot merge
 until the 7a verifier is deployed, the publisher app is pinned as the required-check source, and
 real human owner and reviewer SSH public keys are enrolled in the protected-base trust policy.
+
+That deployment gate applies only to the signed descriptor-v2 candidate described here. It cannot
+block source relocation, refactoring, ordinary module documents, design notes, contributor
+documentation, or transition ledgers. Those artifacts use normal technical review, roundtable
+review where required, repository CI, and branch protection.
 
 Descriptor v2 is metadata-only. It does not claim complete source migration, surface ownership,
 build inclusion, runtime registration, provider readiness, or generated-profile coverage. V1
