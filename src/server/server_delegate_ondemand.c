@@ -2,7 +2,7 @@
  *
  * Delegates spend ≈100% of their wall time blocked on a provider's HTTP
  * response, using no CPU and only their stack. Gating them on the small CPU
- * generic compute pool and its compute budget — a relic of the
+ * compute pool (background=2) and the 2-wide compute budget — a relic of the
  * era when the server embedded/indexed inline, before that work moved to the
  * embedder container and aimee-kb — meant a couple of slow or hung remote calls
  * wedged the entire background-delegate queue. Each delegate instead runs on
@@ -85,7 +85,7 @@ int delegate_spawn_ondemand(compute_ctx_t *cctx)
 {
    if (!cctx)
       return -1;
-   /* Bypass the generic compute budget exactly like session delegates do: a
+   /* Bypass the 2-wide compute budget exactly like session delegates do: a
     * positive executor-thread grant makes compute_ctx_begin_budget take its
     * non-blocking path (see compute_ctx_begin_budget / _release_budget). The
     * per-model limiter, not the budget, governs delegate concurrency. */

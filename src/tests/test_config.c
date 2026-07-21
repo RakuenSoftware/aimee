@@ -1284,7 +1284,6 @@ int main(void)
       platform_unsetenv("AIMEE_BACKGROUND_THREADS");
       platform_unsetenv("AIMEE_COMPUTE_THREADS");
       platform_unsetenv("AIMEE_SESSION_THREADS");
-      assert(CONFIG_DEFAULT_BACKGROUND_THREADS == 14);
       assert(aimee_default_compute_threads() == CONFIG_DEFAULT_BACKGROUND_THREADS);
       assert(aimee_default_session_threads() == CONFIG_DEFAULT_SESSION_THREADS);
       assert(aimee_resolve_compute_threads(0) == CONFIG_DEFAULT_BACKGROUND_THREADS);

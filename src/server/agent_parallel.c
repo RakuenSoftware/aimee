@@ -116,9 +116,10 @@ static void *parallel_worker(void *arg)
    return NULL;
 }
 
-/* Cap concurrent parallel_worker threads by the shared compute budget. An
- * explicit AIMEE_PARALLEL_MAX can still tighten the ceiling further. */
-static int parallel_worker_ceiling(void)
+/* Provider admission owns agent concurrency. The generic compute pool must not
+ * silently reduce an eligible panel's width; only an explicit operator safety
+ * cap may serialize the fan-out. */
+static int parallel_worker_ceiling(int task_count)
 {
    const char *env = getenv("AIMEE_PARALLEL_MAX");
    if (env && env[0])
@@ -127,7 +128,7 @@ static int parallel_worker_ceiling(void)
       if (v >= 1)
          return v;
    }
-   return aimee_resolve_compute_threads(0);
+   return task_count;
 }
 
 /* Deadline-bounded fan-out: spawn all workers, wait on a completion barrier until
@@ -318,7 +319,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       ctxs[i].creds = &creds;
    }
 
-   int ceiling = parallel_worker_ceiling();
+   int ceiling = parallel_worker_ceiling(task_count);
    int wave_start = 0;
    while (wave_start < task_count)
    {

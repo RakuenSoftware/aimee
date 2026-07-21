@@ -2421,6 +2421,9 @@ void server_shutdown(server_ctx_t *ctx)
     * They bypass the compute budget and own no socket, so any straggler past the
     * window only touches DB1 + its own ctx — safe to proceed. */
    delegate_ondemand_drain(5000);
+   /* Roundtable/aggregate coordinators are I/O-bound and deliberately bypass
+    * the generic compute pool; drain them before the run store/DB closes. */
+   server_http_op_runs_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
    pthread_cond_destroy(&ctx->compute_budget_cond);

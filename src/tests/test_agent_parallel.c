@@ -39,6 +39,8 @@ static void sleep_ms(int ms)
    nanosleep(&ts, NULL);
 }
 static atomic_int g_slow_inputs_intact;
+static atomic_int g_wave_active;
+static atomic_int g_wave_high_water;
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const char *system_prompt, const char *user_prompt, int max_tokens,
                     double temperature, agent_result_t *out)
@@ -58,6 +60,16 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                                               strcmp(system_prompt, "system-owned") == 0 &&
                                               strcmp(user_prompt, "prompt-owned") == 0 &&
                                               strcmp(cfg->default_agent, "config-owned") == 0);
+   }
+   else if (name && strcmp(name, "wave") == 0)
+   {
+      int active = atomic_fetch_add(&g_wave_active, 1) + 1;
+      int high = atomic_load(&g_wave_high_water);
+      while (active > high &&
+             !atomic_compare_exchange_weak(&g_wave_high_water, &high, active))
+         ;
+      sleep_ms(100);
+      atomic_fetch_sub(&g_wave_active, 1);
    }
    out->response = strdup("ok");
    out->success = 1;
@@ -199,6 +211,35 @@ static void test_no_deadline_runs_all(void)
    printf("  test_no_deadline_runs_all: ok\n");
 }
 
+static void test_no_deadline_ignores_generic_compute_width(void)
+{
+   enum
+   {
+      task_count = 14
+   };
+   agent_task_t tasks[task_count];
+   agent_result_t out[task_count];
+   memset(tasks, 0, sizeof(tasks));
+   memset(out, 0, sizeof(out));
+   for (int i = 0; i < task_count; i++)
+   {
+      tasks[i].agent = "wave";
+      tasks[i].role = "review";
+   }
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   atomic_store(&g_wave_active, 0);
+   atomic_store(&g_wave_high_water, 0);
+   g_aimee_compute_threads_override = 2;
+   assert(agent_run_parallel(&cfg, tasks, task_count, out, 0) == task_count);
+   g_aimee_compute_threads_override = 0;
+   assert(atomic_load(&g_wave_high_water) == task_count);
+   for (int i = 0; i < task_count; i++)
+      free(out[i].response);
+   printf("  test_no_deadline_ignores_generic_compute_width: ok (%d concurrent)\n",
+          atomic_load(&g_wave_high_water));
+}
+
 /* use_tools picks the tools-enabled runner — the difference between a review
  * panelist that can look up whether a change is reachable and one that can only
  * squint at the diff. Both routes (by name, and by role) must honour it, and a task
@@ -268,6 +309,7 @@ int main(void)
    printf("agent_parallel tests\n");
    test_deadline_abandons_hung_worker();
    test_no_deadline_runs_all();
+   test_no_deadline_ignores_generic_compute_width();
    test_use_tools_routes_to_tools_runner();
    printf("all tests passed\n");
    return 0;
