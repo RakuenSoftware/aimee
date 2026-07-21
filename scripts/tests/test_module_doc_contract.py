@@ -28,6 +28,19 @@ SPEC.loader.exec_module(contract)
 FIXTURES = REPO_ROOT / "tests/fixtures/module-doc-contract"
 
 
+def process_is_gone_or_zombie(pid: int) -> bool:
+    """Return whether Linux reports a process as vanished or a zombie."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    _, separator, tail = stat.rpartition(")")
+    fields = tail.split()
+    if not separator or not fields:
+        raise AssertionError(f"Malformed /proc/{pid}/stat")
+    return fields[0] == "Z"
+
+
 def locked_toolchain():
     executable_text = shutil.which("ssh-keygen")
     if executable_text is None:
@@ -88,6 +101,23 @@ def claims(profile: dict[str, object], now: int = 1_800_000_000) -> dict[str, ob
 
 
 class ModuleDocContractTests(unittest.TestCase):
+    def test_process_state_probe_distinguishes_exit_from_live_processes(self):
+        with mock.patch.object(Path, "read_text", side_effect=FileNotFoundError):
+            self.assertTrue(process_is_gone_or_zombie(123))
+        with mock.patch.object(Path, "read_text", side_effect=ProcessLookupError):
+            self.assertTrue(process_is_gone_or_zombie(123))
+        with mock.patch.object(
+            Path, "read_text", return_value="123 (name with spaces) Z 1 2 3"
+        ):
+            self.assertTrue(process_is_gone_or_zombie(123))
+        with mock.patch.object(
+            Path, "read_text", return_value="123 (name with spaces) S 1 2 3"
+        ):
+            self.assertFalse(process_is_gone_or_zombie(123))
+        with mock.patch.object(Path, "read_text", return_value="malformed"):
+            with self.assertRaisesRegex(AssertionError, "Malformed"):
+                process_is_gone_or_zombie(123)
+
     def assert_rule(self, rule: str, callback) -> None:
         with self.assertRaisesRegex(contract.ContractError, f"rule={rule}"):
             callback()
@@ -541,13 +571,12 @@ class ModuleDocContractTests(unittest.TestCase):
                 "orphan",
             ))
             child_pid = int(child_pid_path.read_text(encoding="ascii").strip())
-            state_path = Path(f"/proc/{child_pid}/stat")
             for _ in range(100):
-                if not state_path.exists() or state_path.read_text().split()[2] == "Z":
+                if process_is_gone_or_zombie(child_pid):
                     break
                 time.sleep(0.01)
             self.assertTrue(
-                not state_path.exists() or state_path.read_text().split()[2] == "Z",
+                process_is_gone_or_zombie(child_pid),
                 "Git descendant survived process-group timeout",
             )
             reader.budget.git_deadline = time.monotonic() - 1
