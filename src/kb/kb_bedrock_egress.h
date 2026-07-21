@@ -28,6 +28,7 @@ typedef enum
    KB_BEDROCK_INCOMPLETE_STREAM,
    KB_BEDROCK_PROVIDER_ERROR,
    KB_BEDROCK_CALLBACK_ABORT,
+   KB_BEDROCK_TRANSPORT_ERROR,
    KB_BEDROCK_BUSY,
    KB_BEDROCK_POISONED,
    KB_BEDROCK_INTERNAL_ERROR
@@ -80,6 +81,7 @@ kb_bedrock_result_t kb_bedrock_nonstream_parse(const unsigned char *body, size_t
 
 typedef int (*kb_bedrock_stream_callback_t)(const aimee_delta_t *delta, void *context);
 typedef struct kb_bedrock_stream kb_bedrock_stream_t;
+typedef struct kb_bedrock_authorized_target kb_bedrock_authorized_target_t;
 
 kb_bedrock_result_t kb_bedrock_stream_init(kb_bedrock_stream_t **stream,
                                            kb_bedrock_stream_callback_t callback, void *context);
@@ -88,13 +90,30 @@ kb_bedrock_result_t kb_bedrock_stream_feed(kb_bedrock_stream_t *stream, const un
 kb_bedrock_result_t kb_bedrock_stream_finish(kb_bedrock_stream_t *stream);
 kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **stream);
 
-/* Compatibility-only ABI. It performs no I/O and always fails closed. */
-typedef struct
-{
-   const char *model_id, *region, *partition, *endpoint;
-} kb_bedrock_target_t;
-int kb_bedrock_dispatch_https(const kb_bedrock_target_t *, const aimee_request_t *, int,
-                              const char *, const char *, const char *, const char *, const char *,
-                              const char *, const char *, char *, size_t, int *);
+/* Resolve an entitled catalog model inside the caller's already-active actor/team tenant scope.
+ * The returned target has one owner, is non-copyable, and must be cleared exactly once.  The
+ * owner must externally synchronize clear and call it only after every dispatch using the target
+ * has returned.  Its catalog contents and lifecycle are deliberately opaque so a network caller
+ * cannot substitute a raw db2 target. */
+kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
+                                                         kb_bedrock_authorized_target_t **target);
+void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **target);
+
+/* Production dispatch derives DNS, Host, SNI, and certificate authority solely from the
+ * resolver-issued target.
+ * `response` must have been initialized with kb_bedrock_response_init (or be a prior dispatch
+ * output); success is caller-owned and released with aimee_response_free.  `http_status` remains
+ * zero for every transport, framing, media, semantic, or callback failure.  A status is published
+ * only after authenticated TLS EOF and complete response framing: 200 on semantic success, or the
+ * validated non-2xx status with KB_BEDROCK_PROVIDER_ERROR. */
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t *target,
+                                                 const aimee_request_t *request,
+                                                 const kb_bedrock_credentials_t *credentials,
+                                                 aimee_response_t *response, int *http_status);
+kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *target,
+                                               const aimee_request_t *request,
+                                               const kb_bedrock_credentials_t *credentials,
+                                               kb_bedrock_stream_callback_t callback,
+                                               void *callback_context, int *http_status);
 
 #endif

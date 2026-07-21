@@ -1,4 +1,5 @@
 #include "kb_bedrock_egress.h"
+#include "http/kb_http_client.h"
 
 #include "cJSON.h"
 #include "modules/aws/bedrock_policy.h"
@@ -6,11 +7,15 @@
 #include <limits.h>
 #include <math.h>
 #include <openssl/crypto.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define KB_BEDROCK_REQUEST_MAGIC 0xbed60c01U
+#define KB_BEDROCK_TARGET_MAGIC  UINT64_C(0x7f8c5a316bed6a91)
+#define KB_BEDROCK_TARGET_READY  0x91c4a72eU
+#define KB_BEDROCK_TARGET_BUSY   0x3628df05U
 #define KB_JSON_NODE_MAX         16384U
 #define KB_JSON_DEPTH_MAX        64U
 
@@ -27,6 +32,14 @@ struct kb_bedrock_stream
    unsigned char open[64], used[64], kind[64];
    int message_started, message_stopped, metadata, busy, finished, poisoned;
    kb_bedrock_result_t fatal;
+};
+
+struct kb_bedrock_authorized_target
+{
+   uint64_t magic;
+   uint64_t magic_inverse;
+   atomic_uint state;
+   db2_bedrock_target_t raw;
 };
 
 static int ascii_safe(const char *s, size_t max, int empty)
@@ -425,6 +438,8 @@ static const char *policy_id(const db2_bedrock_target_t *t, bedrock_target_type_
    return t->model_id + n;
 }
 
+static int model_path_ok(const char *id);
+
 static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, int streaming)
 {
    if (!t || t->endpoint[0] || !ascii_safe(t->bedrock_api, sizeof(t->bedrock_api), 0) ||
@@ -487,6 +502,100 @@ static kb_bedrock_result_t target_policy_check(const db2_bedrock_target_t *t, in
    OPENSSL_cleanse(policy, cap);
    free(policy);
    return ok ? KB_BEDROCK_OK : KB_BEDROCK_INVALID_TARGET;
+}
+
+static kb_bedrock_result_t authorized_target_create(const db2_bedrock_target_t *raw,
+                                                    kb_bedrock_authorized_target_t **out)
+{
+   if (out)
+      *out = NULL;
+   if (!out || !raw)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   kb_bedrock_result_t result = target_policy_check(raw, 0);
+   if (result == KB_BEDROCK_OK)
+      result = target_policy_check(raw, 1);
+   if (result == KB_BEDROCK_OK && !model_path_ok(raw->model_id))
+      result = KB_BEDROCK_INVALID_TARGET;
+   if (result != KB_BEDROCK_OK)
+      return result;
+   kb_bedrock_authorized_target_t *target = calloc(1, sizeof(*target));
+   if (!target)
+      return KB_BEDROCK_INTERNAL_ERROR;
+   target->raw = *raw;
+   atomic_init(&target->state, KB_BEDROCK_TARGET_READY);
+   target->magic = KB_BEDROCK_TARGET_MAGIC;
+   target->magic_inverse = ~KB_BEDROCK_TARGET_MAGIC;
+   *out = target;
+   return KB_BEDROCK_OK;
+}
+
+kb_bedrock_result_t kb_bedrock_authorized_target_resolve(int64_t team_id, const char *model_id,
+                                                         kb_bedrock_authorized_target_t **out)
+{
+   if (out)
+      *out = NULL;
+   db2_bedrock_target_t raw;
+   if (!out || team_id <= 0 || !ascii_safe(model_id, sizeof(raw.model_id), 0))
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   memset(&raw, 0, sizeof(raw));
+   db2_bedrock_target_result_t resolved = db2_model_bedrock_target_resolve(team_id, model_id, &raw);
+   kb_bedrock_result_t result;
+   if (resolved == DB2_BEDROCK_TARGET_OK)
+      result =
+          ascii_safe(raw.model_id, sizeof(raw.model_id), 0) && strcmp(raw.model_id, model_id) == 0
+              ? authorized_target_create(&raw, out)
+              : KB_BEDROCK_INVALID_TARGET;
+   else if (resolved == DB2_BEDROCK_TARGET_UNAVAILABLE || resolved == DB2_BEDROCK_TARGET_INVALID)
+      result = KB_BEDROCK_INVALID_TARGET;
+   else
+      result = KB_BEDROCK_INTERNAL_ERROR;
+   OPENSSL_cleanse(&raw, sizeof(raw));
+   return result;
+}
+
+void kb_bedrock_authorized_target_clear(kb_bedrock_authorized_target_t **slot)
+{
+   if (!slot || !*slot)
+      return;
+   kb_bedrock_authorized_target_t *target = *slot;
+   if (target->magic != KB_BEDROCK_TARGET_MAGIC ||
+       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC ||
+       atomic_load_explicit(&target->state, memory_order_acquire) != KB_BEDROCK_TARGET_READY)
+      return;
+   *slot = NULL;
+   target->magic = 0;
+   target->magic_inverse = 0;
+   OPENSSL_cleanse(target, sizeof(*target));
+   free(target);
+}
+
+static kb_bedrock_result_t authorized_target_acquire(kb_bedrock_authorized_target_t *target,
+                                                     const db2_bedrock_target_t **raw)
+{
+   *raw = NULL;
+   if (!target)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   if (target->magic != KB_BEDROCK_TARGET_MAGIC ||
+       target->magic_inverse != ~KB_BEDROCK_TARGET_MAGIC)
+      return KB_BEDROCK_INVALID_TARGET;
+   unsigned expected = KB_BEDROCK_TARGET_READY;
+   if (!atomic_compare_exchange_strong_explicit(&target->state, &expected, KB_BEDROCK_TARGET_BUSY,
+                                                memory_order_acq_rel, memory_order_acquire))
+      return expected == KB_BEDROCK_TARGET_BUSY ? KB_BEDROCK_BUSY : KB_BEDROCK_POISONED;
+   *raw = &target->raw;
+   return KB_BEDROCK_OK;
+}
+
+static void authorized_target_release(kb_bedrock_authorized_target_t *target)
+{
+   if (target && target->magic == KB_BEDROCK_TARGET_MAGIC &&
+       target->magic_inverse == ~KB_BEDROCK_TARGET_MAGIC)
+   {
+      unsigned expected = KB_BEDROCK_TARGET_BUSY;
+      (void)atomic_compare_exchange_strong_explicit(&target->state, &expected,
+                                                    KB_BEDROCK_TARGET_READY, memory_order_release,
+                                                    memory_order_relaxed);
+   }
 }
 
 void kb_bedrock_wire_request_init(kb_bedrock_wire_request_t *r)
@@ -1396,24 +1505,278 @@ kb_bedrock_result_t kb_bedrock_stream_clear(kb_bedrock_stream_t **sp)
    return KB_BEDROCK_OK;
 }
 
-int kb_bedrock_dispatch_https(const kb_bedrock_target_t *t, const aimee_request_t *ir, int stream,
-                              const char *ak, const char *sk, const char *tok, const char *amz,
-                              const char *date, const char *ca, const char *cc, char *out,
-                              size_t cap, int *status)
+typedef struct
 {
-   (void)t;
-   (void)ir;
-   (void)stream;
-   (void)ak;
-   (void)sk;
-   (void)tok;
-   (void)amz;
-   (void)date;
-   (void)ca;
-   (void)cc;
-   if (out && cap)
-      out[0] = 0;
-   if (status)
-      *status = 0;
-   return -1;
+   int streaming;
+   int observed_status;
+   const char *media_type;
+   kb_bedrock_result_t first_result;
+   unsigned char *body;
+   size_t body_len, body_capacity;
+   kb_bedrock_stream_t *stream;
+   kb_bedrock_stream_callback_t callback;
+   void *callback_context;
+   aimee_delta_t terminal;
+   int terminal_pending;
+} bedrock_dispatch_context_t;
+
+static int dispatch_stream_delta(const aimee_delta_t *delta, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   if (delta->type == AIMEE_DELTA_TURN_STOP)
+   {
+      if (context->terminal_pending)
+      {
+         context->first_result = KB_BEDROCK_MALFORMED_STREAM;
+         return -1;
+      }
+      context->terminal = (aimee_delta_t){.type = AIMEE_DELTA_TURN_STOP,
+                                          .stop_reason = delta->stop_reason,
+                                          .usage_in = delta->usage_in,
+                                          .usage_out = delta->usage_out};
+      context->terminal_pending = 1;
+      return 0;
+   }
+   if (context->callback && context->callback(delta, context->callback_context) != 0)
+   {
+      context->first_result = KB_BEDROCK_CALLBACK_ABORT;
+      return -1;
+   }
+   return 0;
+}
+
+static kb_http_gate_t dispatch_headers(const kb_http_response_t *response, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   /* Observation is private until transport framing and TLS EOF are both authenticated. */
+   context->observed_status = response->status;
+   if (response->status != 200)
+      return KB_HTTP_GATE_DISCARD;
+   if (strcmp(response->content_type, context->media_type) != 0)
+   {
+      context->first_result =
+          context->streaming ? KB_BEDROCK_MALFORMED_STREAM : KB_BEDROCK_MALFORMED_RESPONSE;
+      return KB_HTTP_GATE_ABORT;
+   }
+   return KB_HTTP_GATE_DELIVER;
+}
+
+static int dispatch_body_reserve(bedrock_dispatch_context_t *context, size_t add)
+{
+   if (add > KB_BEDROCK_BODY_MAX - context->body_len)
+      return -1;
+   size_t need = context->body_len + add;
+   if (need <= context->body_capacity)
+      return 0;
+   size_t capacity = context->body_capacity ? context->body_capacity : 4096U;
+   while (capacity < need)
+   {
+      if (capacity > KB_BEDROCK_BODY_MAX / 2U)
+      {
+         capacity = KB_BEDROCK_BODY_MAX;
+         break;
+      }
+      capacity *= 2U;
+   }
+   unsigned char *next = malloc(capacity);
+   if (!next)
+      return -1;
+   if (context->body_len)
+      memcpy(next, context->body, context->body_len);
+   if (context->body)
+   {
+      OPENSSL_cleanse(context->body, context->body_capacity);
+      free(context->body);
+   }
+   context->body = next;
+   context->body_capacity = capacity;
+   return 0;
+}
+
+static kb_http_body_action_t dispatch_body(const unsigned char *bytes, size_t length, void *opaque)
+{
+   bedrock_dispatch_context_t *context = opaque;
+   if (context->first_result != KB_BEDROCK_OK)
+      return KB_HTTP_BODY_CALLER_ABORT;
+   if (context->streaming)
+   {
+      kb_bedrock_result_t result = kb_bedrock_stream_feed(context->stream, bytes, length);
+      if (result != KB_BEDROCK_OK)
+      {
+         if (context->first_result == KB_BEDROCK_OK)
+            context->first_result = result;
+         return KB_HTTP_BODY_CALLER_ABORT;
+      }
+      return KB_HTTP_BODY_CONTINUE;
+   }
+   if (dispatch_body_reserve(context, length) != 0)
+   {
+      context->first_result = length > KB_BEDROCK_BODY_MAX - context->body_len
+                                  ? KB_BEDROCK_TOO_LARGE
+                                  : KB_BEDROCK_INTERNAL_ERROR;
+      return KB_HTTP_BODY_CALLER_ABORT;
+   }
+   memcpy(context->body + context->body_len, bytes, length);
+   context->body_len += length;
+   return KB_HTTP_BODY_CONTINUE;
+}
+
+static kb_bedrock_result_t map_transport_result(kb_http_result_t result)
+{
+   if (result == KB_HTTP_TOO_LARGE)
+      return KB_BEDROCK_TOO_LARGE;
+   if (result == KB_HTTP_INVALID_ARGUMENT)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   if (result == KB_HTTP_INTERNAL_ERROR)
+      return KB_BEDROCK_INTERNAL_ERROR;
+   return KB_BEDROCK_TRANSPORT_ERROR;
+}
+
+static kb_bedrock_result_t dispatch_exchange(const db2_bedrock_target_t *target,
+                                             const aimee_request_t *ir,
+                                             const kb_bedrock_credentials_t *credentials,
+                                             int streaming, kb_bedrock_stream_callback_t callback,
+                                             void *callback_context, aimee_response_t *response,
+                                             int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (response)
+      aimee_response_free(response);
+   if (!target || !ir || !credentials || !http_status || (!streaming && !response))
+      return KB_BEDROCK_INVALID_ARGUMENT;
+
+   kb_bedrock_wire_request_t wire;
+   kb_bedrock_wire_request_init(&wire);
+   kb_bedrock_result_t result =
+       kb_bedrock_wire_request_build(target, ir, streaming, credentials, &wire);
+   if (result != KB_BEDROCK_OK)
+   {
+      kb_bedrock_wire_request_clear(&wire);
+      return result;
+   }
+
+   kb_bedrock_header_t engine_headers[KB_BEDROCK_MAX_HEADERS];
+   kb_http_header_t http_headers[KB_BEDROCK_MAX_HEADERS];
+   size_t header_count = 0;
+   result = kb_bedrock_wire_request_headers(&wire, engine_headers, KB_BEDROCK_MAX_HEADERS,
+                                            &header_count);
+   if (result != KB_BEDROCK_OK)
+      goto done;
+   for (size_t i = 0; i < header_count; i++)
+   {
+      http_headers[i].name = engine_headers[i].name;
+      http_headers[i].value = engine_headers[i].value;
+   }
+
+   bedrock_dispatch_context_t context = {
+       .streaming = streaming,
+       .media_type = streaming ? "application/vnd.amazon.eventstream" : "application/json",
+       .first_result = KB_BEDROCK_OK,
+       .callback = callback,
+       .callback_context = callback_context};
+   if (streaming)
+   {
+      result = kb_bedrock_stream_init(&context.stream, dispatch_stream_delta, &context);
+      if (result != KB_BEDROCK_OK)
+         goto done;
+   }
+   kb_http_request_t request = {.authority = wire.host,
+                                .method = "POST",
+                                .target = wire.encoded_path,
+                                .headers = http_headers,
+                                .header_count = header_count,
+                                .body = (const unsigned char *)wire.body,
+                                .body_len = wire.body_len,
+                                .response_body_max = KB_BEDROCK_BODY_MAX,
+                                .connect_timeout_ms = 5000,
+                                .total_timeout_ms = 30000};
+   kb_http_response_t metadata;
+   int publish_status = 0;
+   kb_http_result_t transport =
+       kb_http_tls_exchange(&request, &metadata, dispatch_headers, dispatch_body, &context);
+   if (context.first_result != KB_BEDROCK_OK)
+      result = context.first_result;
+   else if (transport != KB_HTTP_OK)
+      result = map_transport_result(transport);
+   else if (context.observed_status != metadata.status || context.observed_status < 100 ||
+            context.observed_status > 599)
+      result = KB_BEDROCK_TRANSPORT_ERROR;
+   else if (context.observed_status != 200)
+   {
+      result = KB_BEDROCK_PROVIDER_ERROR;
+      if (context.observed_status < 200 || context.observed_status > 299)
+         publish_status = context.observed_status;
+   }
+   else if (streaming)
+   {
+      result = kb_bedrock_stream_finish(context.stream);
+      if (result == KB_BEDROCK_OK && !context.terminal_pending)
+         result = KB_BEDROCK_INCOMPLETE_STREAM;
+      else if (result == KB_BEDROCK_OK && context.callback &&
+               context.callback(&context.terminal, context.callback_context) != 0)
+         result = KB_BEDROCK_CALLBACK_ABORT;
+   }
+   else
+      result = kb_bedrock_nonstream_parse(context.body, context.body_len, response);
+
+   if (result == KB_BEDROCK_OK)
+      publish_status = 200;
+   *http_status = publish_status;
+
+   if (context.body)
+   {
+      OPENSSL_cleanse(context.body, context.body_capacity);
+      free(context.body);
+   }
+   if (context.stream)
+      (void)kb_bedrock_stream_clear(&context.stream);
+   OPENSSL_cleanse(&context.terminal, sizeof(context.terminal));
+done:
+   kb_bedrock_wire_request_clear(&wire);
+   if (result != KB_BEDROCK_OK && response)
+      aimee_response_free(response);
+   return result;
+}
+
+kb_bedrock_result_t kb_bedrock_dispatch_buffered(kb_bedrock_authorized_target_t *target,
+                                                 const aimee_request_t *request,
+                                                 const kb_bedrock_credentials_t *credentials,
+                                                 aimee_response_t *response, int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (response)
+      aimee_response_free(response);
+   if (!request || !credentials || !response || !http_status)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = dispatch_exchange(raw, request, credentials, 0, NULL, NULL, response, http_status);
+      authorized_target_release(target);
+   }
+   return result;
+}
+
+kb_bedrock_result_t kb_bedrock_dispatch_stream(kb_bedrock_authorized_target_t *target,
+                                               const aimee_request_t *request,
+                                               const kb_bedrock_credentials_t *credentials,
+                                               kb_bedrock_stream_callback_t callback,
+                                               void *callback_context, int *http_status)
+{
+   if (http_status)
+      *http_status = 0;
+   if (!request || !credentials || !http_status)
+      return KB_BEDROCK_INVALID_ARGUMENT;
+   const db2_bedrock_target_t *raw = NULL;
+   kb_bedrock_result_t result = authorized_target_acquire(target, &raw);
+   if (result == KB_BEDROCK_OK)
+   {
+      result = dispatch_exchange(raw, request, credentials, 1, callback, callback_context, NULL,
+                                 http_status);
+      authorized_target_release(target);
+   }
+   return result;
 }
