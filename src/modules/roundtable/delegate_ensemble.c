@@ -17,6 +17,7 @@
 #include "persona.h"
 #include "dstr.h"
 #include "roundtable_seat_resolve.h"
+#include "roundtable_preset.h"
 #include "roundtable_chair.h"
 #include "roundtable_verify.h"
 #include "token_tracker.h"
@@ -621,10 +622,9 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
             out->response && out->response[0])
       return 0;
 
-   /* Fallback: the configured aggregator failed or returned empty. Try each
-    * panelist by name (no-tools) until one synthesizes — a single flaky
-    * aggregator model must not collapse the whole round to an artifact-less
-    * degrade when other capable panelists are available. */
+   /* Fallback: try one alternate panelist. Synthesis/repair is bounded overhead,
+    * never authority to retry across an arbitrarily large configured roster. */
+   int fallbacks_tried = 0;
    for (int i = 0; i < cfg->ensemble_reference_count; i++)
    {
       if (deadline_abs_ms > 0 && monotonic_ms() >= deadline_abs_ms)
@@ -638,6 +638,8 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
       const char *cand = cfg->ensemble_reference_models[i];
       if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
          continue;
+      if (fallbacks_tried++ >= 1)
+         break;
       free(out->response);
       memset(out, 0, sizeof(*out));
       if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
@@ -1352,24 +1354,103 @@ int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg
    return 0;
 }
 
+static const char *panel_agent_provider(const agent_t *ag)
+{
+   return ag->provider[0] ? ag->provider : ag->name;
+}
+
+static int panel_provider_seats(const agent_config_t *acfg, const int seated[],
+                                const char *provider)
+{
+   int total = 0;
+   for (int i = 0; i < acfg->agent_count; i++)
+      if (strcmp(panel_agent_provider(&acfg->agents[i]), provider) == 0)
+         total += seated[i];
+   return total;
+}
+
+static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t *acfg,
+                                       const int seated[])
+{
+   int best = -1;
+   int best_agent_seats = 0;
+   int best_provider_seats = 0;
+
+   /* Represent every provider before assigning a second seat to one. */
+   for (int i = 0; i < acfg->agent_count; i++)
+   {
+      const agent_t *ag = &acfg->agents[i];
+      int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
+      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+          seated[i] >= capacity)
+         continue;
+      if (panel_provider_seats(acfg, seated, panel_agent_provider(ag)) == 0)
+         return i;
+   }
+
+   /* Then represent every model, preferring the least represented provider. */
+   for (int i = 0; i < acfg->agent_count; i++)
+   {
+      const agent_t *ag = &acfg->agents[i];
+      int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
+      if (seated[i] != 0 || !ensemble_panelist_eligible(cfg, ag) ||
+          !agent_is_available_for_routing(ag) || seated[i] >= capacity)
+         continue;
+      int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
+      if (best < 0 || provider_seats < best_provider_seats)
+      {
+         best = i;
+         best_provider_seats = provider_seats;
+      }
+   }
+   if (best >= 0)
+      return best;
+
+   /* Finally cycle across already represented models. Lower per-model count is
+    * primary; provider count is the tie-breaker that keeps providers balanced. */
+   for (int i = 0; i < acfg->agent_count; i++)
+   {
+      const agent_t *ag = &acfg->agents[i];
+      int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
+      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+          seated[i] >= capacity)
+         continue;
+      int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
+      if (best < 0 || seated[i] < best_agent_seats ||
+          (seated[i] == best_agent_seats && provider_seats < best_provider_seats))
+      {
+         best = i;
+         best_agent_seats = seated[i];
+         best_provider_seats = provider_seats;
+      }
+   }
+   return best;
+}
+
 void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
 {
-   /* Replace each "$random" seat with a concretely-picked review-capable agent,
-    * excluding models already seated (pinned seats + prior random picks) for
-    * diversity. A $random seat that cannot be filled (roster exhausted) is DROPPED
-    * — an interactive roundtable degrades rather than fails; the fail-on-
-    * unfulfillable rule is the autonomous gate's, where a pinned model is a hard
-    * requirement. Pinned seats pass through untouched (the availability filter
-    * below drops an unavailable pinned model). Runs before the authorization /
-    * availability filters so a resolved seat is a real, filterable agent. */
+   /* Fill every configured seat. Provider diversity comes first, then model
+    * diversity, then balanced reuse up to each model's max_parallel capacity.
+    * A seat is dropped only when total eligible capacity is genuinely exhausted;
+    * the caller compares the result with the preset's exact seat count and fails
+    * closed instead of running a partial configured roundtable. */
    char models[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_models[0]];
    char personas[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_personas[0]];
-   const char *used[ENSEMBLE_MAX_REFS];
-   int n = 0, nused = 0;
+   int seated[MAX_AGENTS];
+   int n = 0;
+   memset(seated, 0, sizeof seated);
 
    for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
       if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
-         used[nused++] = cfg->ensemble_reference_models[i];
+      {
+         const agent_t *ag = agent_find((agent_config_t *)acfg, cfg->ensemble_reference_models[i]);
+         if (ag)
+         {
+            int idx = (int)(ag - acfg->agents);
+            if (idx >= 0 && idx < acfg->agent_count)
+               seated[idx]++;
+         }
+      }
 
    for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
    {
@@ -1382,17 +1463,16 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
          n++;
          continue;
       }
-      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
       if (idx < 0)
       {
          aimee_log(LOG_WARN, "delegate.panel",
-                   "no review-capable agent left for a $random seat -> dropping it");
+                   "roundtable capacity exhausted before every $random seat could be filled");
          continue;
       }
       snprintf(models[n], sizeof models[n], "%s", acfg->agents[idx].name);
       snprintf(personas[n], sizeof personas[n], "%s", persona);
-      if (nused < ENSEMBLE_MAX_REFS)
-         used[nused++] = acfg->agents[idx].name; /* stable pointer into acfg for this call */
+      seated[idx]++;
       n++;
    }
 
@@ -1409,7 +1489,7 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    /* An aggregator explicitly set to "$random" resolves the same way. */
    if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
    {
-      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
+      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
       if (idx >= 0)
          snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
                   acfg->agents[idx].name);
@@ -1441,8 +1521,12 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
          continue;
       }
       if (n != i)
+      {
          snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
                   "%s", name);
+         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
+                  "%s", cfg->ensemble_reference_personas[i]);
+      }
       n++;
    }
    cfg->ensemble_reference_count = n;
@@ -1482,8 +1566,12 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
          continue;
       }
       if (n != i)
+      {
          snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
                   "%s", name);
+         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
+                  "%s", cfg->ensemble_reference_personas[i]);
+      }
       n++;
    }
    cfg->ensemble_reference_count = n;
@@ -1498,31 +1586,23 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
                cfg->ensemble_reference_models[0]);
 }
 
-void ensemble_fill_panel_capacity(config_t *cfg, const agent_config_t *acfg)
+void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
 {
    if (!cfg || !acfg)
       return;
 
+   /* No saved preset means there is no authority for a larger panel. Discard
+    * legacy ensemble.reference_models rather than treating them as implicit
+    * pins that can bypass the two-seat contract. */
+   cfg->ensemble_reference_count = 0;
+   cfg->ensemble_reference_persona_count = 0;
+   cfg->ensemble_aggregator[0] = '\0';
    int seated[MAX_AGENTS];
-   memset(seated, 0, sizeof(seated));
+   memset(seated, 0, sizeof seated);
 
-   /* The surviving configured entries are positive pins. Count them against
-    * their agent's capacity, but never use their presence to exclude another
-    * eligible agent. */
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
-   {
-      const agent_t *ag = agent_find((agent_config_t *)acfg, cfg->ensemble_reference_models[i]);
-      if (!ag)
-         continue;
-      int idx = (int)(ag - acfg->agents);
-      if (idx >= 0 && idx < acfg->agent_count)
-         seated[idx]++;
-   }
-
-   /* Provider diversity first: seat one agent for every distinct provider not
-    * already represented by a pin. A missing provider name is scoped to the
-    * agent name so unrelated legacy agents are never collapsed together. */
-   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS; i++)
+   /* Provider diversity first. A missing provider name is scoped to the agent
+    * name so unrelated legacy agents are never collapsed together. */
+   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
       if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
@@ -1551,9 +1631,8 @@ void ensemble_fill_panel_capacity(config_t *cfg, const agent_config_t *acfg)
       seated[i] = 1;
    }
 
-   /* Agent diversity second: represent every other eligible agent before any
-    * already-seated agent consumes a second slot. */
-   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS; i++)
+   /* If only one provider exists, use a second distinct eligible agent. */
+   for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < 2; i++)
    {
       const agent_t *ag = &acfg->agents[i];
       if (seated[i] > 0 || !ensemble_panelist_eligible(cfg, ag) ||
@@ -1566,36 +1645,43 @@ void ensemble_fill_panel_capacity(config_t *cfg, const agent_config_t *acfg)
       seated[i] = 1;
    }
 
-   /* Then fill the panel round-robin. Repeating an agent name is intentional:
-    * each entry is one concurrent participant invocation, and max_parallel is
-    * that agent's seat capacity rather than a uniqueness constraint. */
-   int added;
-   do
-   {
-      added = 0;
-      for (int i = 0; i < acfg->agent_count && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS;
-           i++)
-      {
-         const agent_t *ag = &acfg->agents[i];
-         if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag))
-            continue;
-         int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-         if (seated[i] >= capacity)
-            continue;
-         int pos = cfg->ensemble_reference_count++;
-         snprintf(cfg->ensemble_reference_models[pos], sizeof(cfg->ensemble_reference_models[pos]),
-                  "%s", ag->name);
-         cfg->ensemble_reference_personas[pos][0] = '\0';
-         seated[i]++;
-         added = 1;
-      }
-   } while (added && cfg->ensemble_reference_count < ENSEMBLE_MAX_REFS);
-
-   if (cfg->ensemble_reference_persona_count < cfg->ensemble_reference_count)
-      cfg->ensemble_reference_persona_count = cfg->ensemble_reference_count;
-   if (!cfg->ensemble_aggregator[0] && cfg->ensemble_reference_count > 0)
+   cfg->ensemble_reference_persona_count = cfg->ensemble_reference_count;
+   if (cfg->ensemble_reference_count > 0)
       snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
                cfg->ensemble_reference_models[0]);
+}
+
+int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+                                   char *err, size_t err_n)
+{
+   if (err && err_n)
+      err[0] = '\0';
+   int acquired = roundtable_preset_resolve_runtime(requested, cfg, NULL, 0, err, err_n);
+   if (acquired < 0)
+      return -1;
+   if (!acquired)
+   {
+      ensemble_fill_implicit_panel(cfg, acfg);
+      if (cfg->ensemble_reference_count > 0)
+         return 0;
+      if (err && err_n)
+         snprintf(err, err_n, "no enabled review agent is currently available");
+      return -1;
+   }
+
+   const int exact_seats = cfg->ensemble_reference_count;
+   if (ensemble_validate_panel_pins(cfg, acfg, err, err_n) != 0)
+      return -1;
+   ensemble_filter_panel_authorization(cfg, acfg);
+   ensemble_filter_panel_availability(cfg, acfg);
+   if (cfg->ensemble_reference_count != exact_seats)
+   {
+      if (err && err_n)
+         snprintf(err, err_n, "roundtable requires %d seats but only %d are currently available",
+                  exact_seats, cfg->ensemble_reference_count);
+      return -1;
+   }
+   return 0;
 }
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,

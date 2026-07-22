@@ -623,12 +623,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                           "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
-   /* ensemble_review */
+   /* roundtable_review */
    {
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new(
-              "ensemble_review",
+              "roundtable_review",
               "Run the multi-agent roundtable in review mode against caller-provided diff "
               "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
               "describe items_round while artifact is artifact_round (the best round); "
@@ -644,10 +644,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                           "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}}}}]},"
-                          "\"rounds\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":16,"
-                          "\"description\":\"Max review rounds.\"},"
-                          "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
-                          "\"description\":\"Round execution mode.\"}},"
+                          "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
+                          "roundtable preset to use. Omit to use the configured default.\"}},"
                           "\"required\":[\"diff\"]}")));
    }
 
