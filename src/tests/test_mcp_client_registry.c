@@ -441,9 +441,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
    "git "                                                                                          \
-   "{action,async,base,body,branch,command,count,depth,diff_stat,files,force,index,job_id,"        \
-   "message,mirror,mode,name,number,path,prune,rebase,ref,remote,source,staged,stat_only,state,"   \
-   "title,url,wait} req:command\n"                                                                 \
+   "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
+   "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
+   "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
    "graph {command,entity,episode_key,limit,query} req:command\n"                                  \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \

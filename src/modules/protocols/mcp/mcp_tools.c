@@ -1036,7 +1036,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/watch/merge_status/wait), stash "
+           "(create/view/list/edit/checks/merge_status/merge), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status)."},
           {"message", "string",
@@ -1057,7 +1057,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"title", "string", "pr: title (create/edit)."},
           {"body", "string", "pr: body (create/edit)."},
           {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
-          {"wait", "boolean", "pr checks: poll until checks settle."},
+          {"wait", "boolean",
+           "Deprecated for pr checks: blocking waits are rejected; poll snapshots instead."},
+          {"auto", "boolean",
+           "pr merge: enable GitHub auto-merge so protected moving branches merge when ready."},
+          {"merge_method", "string", "pr merge: merge / squash / rebase (default merge)."},
+          {"expected_head_sha", "string", "pr merge: refuse if the head SHA has moved."},
           {"state", "string", "issue: filter open/closed/all (default open)."},
           {"url", "string", "clone: repository URL."},
           {"path", "string", "clone: local path; verify: repo path."},
