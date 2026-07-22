@@ -1,6 +1,8 @@
 /* test_server_http.c: unit tests for the aimee-server /v1 persona routes and
  * the per-session persona store (no socket I/O). */
 #include "server_http.h"
+#include "server_http_internal.h"
+#include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
 #include "agent_config.h"
@@ -16,6 +18,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/socket.h>
+
+/* Narrow response-writer seams not otherwise needed by this route-only unit. */
+const char *ingress_preinject_turn_id(void)
+{
+   return "";
+}
+int anthropic_http_response_retry_after(void)
+{
+   return 0;
+}
+int server_conn_io_write_all(int fd, const void *buf, int n)
+{
+   const unsigned char *cursor = buf;
+   int sent = 0;
+   while (sent < n)
+   {
+      ssize_t rc = write(fd, cursor + sent, (size_t)(n - sent));
+      if (rc <= 0)
+         return -1;
+      sent += (int)rc;
+   }
+   return 0;
+}
 
 /* Stub completion handler: proves the route dispatches to a registered handler
  * and passes the body through, without linking the real inference stack. */
@@ -1597,6 +1623,42 @@ int main(void)
       assert(server_http_route("GET", "/v1/workspace/projects", NULL, 0, resp, sizeof(resp)) ==
              403);
       unsetenv("AIMEE_WEBCHAT_GIT");
+   }
+
+   /* Negotiated buffered responses use real RFC 1952 gzip framing and remain
+    * byte-equivalent after bounded decoding. */
+   {
+      int pair[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      char body[8193];
+      for (size_t i = 0; i < sizeof(body) - 1; i++)
+         body[i] = (char)('a' + ((i * 31 + (i / 97) * 7) % 26));
+      body[sizeof(body) - 1] = '\0';
+      server_http_gzip_set(1);
+      send_response(pair[0], 200, body, "gzip-test");
+      close(pair[0]);
+      unsigned char wire[16385];
+      size_t used = 0;
+      for (;;)
+      {
+         ssize_t n = read(pair[1], wire + used, sizeof(wire) - used - 1);
+         if (n <= 0)
+            break;
+         used += (size_t)n;
+      }
+      close(pair[1]);
+      wire[used] = '\0';
+      char *payload = strstr((char *)wire, "\r\n\r\n");
+      assert(payload && strstr((char *)wire, "Content-Encoding: gzip\r\n"));
+      assert(strstr((char *)wire, "Accept-Request-Encoding: gzip\r\n"));
+      payload += 4;
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      assert(http_gzip_decompress(payload, used - (size_t)(payload - (char *)wire), 1u << 20, 1000,
+                                  &decoded, &decoded_len) == 0);
+      assert(decoded_len == strlen(body) && memcmp(decoded, body, decoded_len) == 0);
+      free(decoded);
+      server_http_gzip_set(0);
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);

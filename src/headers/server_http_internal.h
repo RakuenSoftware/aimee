@@ -121,6 +121,8 @@ typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 void server_http_keepalive_set(int enabled);
 int server_http_keepalive_peek(void);
 int server_http_keepalive_take(void);
+void server_http_gzip_set(int enabled);
+int server_http_gzip_peek(void);
 
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
