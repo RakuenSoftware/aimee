@@ -84,10 +84,10 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    {
       agent_request_creds_t creds;
       agent_request_creds_snapshot(&creds);
-      atomic_store(&g_op_context_clean,
-                   run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
-                       creds.codex_token[0] == '\0' && creds.codex_account_id[0] == '\0' &&
-                       creds.vault_principal[0] == '\0');
+      atomic_store(&g_op_context_clean, run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
+                                            creds.codex_token[0] == '\0' &&
+                                            creds.codex_account_id[0] == '\0' &&
+                                            creds.vault_principal[0] == '\0');
    }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to

@@ -16,7 +16,7 @@
 #include "persona.h"
 #include "role_templates.h"
 #include "agent_config.h" /* clear request-local agent credentials between pooled op runs */
-#include "util.h" /* safe_strdup, aimee_base64_* */
+#include "util.h"         /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
