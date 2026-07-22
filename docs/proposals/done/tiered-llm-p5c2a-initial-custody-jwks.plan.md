@@ -1,6 +1,6 @@
 # P5-C2a management-token and JWKS trust-root bootstrap
 
-- **State:** planned.
+- **State:** complete.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P7 KMS signed-HWM custody and P5-C1b's fixed RS256 token contract.
 - **Followed by:** P5-C2b immutable signed-JWKS publication, P5-C2c authenticated fetch/durable server cache, P5-C2d token authority, then P5-C3 action composition.
