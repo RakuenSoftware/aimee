@@ -33,9 +33,9 @@
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
-#include "aimee_backend.h"   /* Slice 3: openai_backend_parse (IR response path) */
-#include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
+#include "aimee_ir_serve.h"                  /* Slice 5: IR live request-build */
+#include <aimee/translation/aimee_backend.h> /* Slice 3: openai_backend_parse (IR response path) */
+#include "aimee_ir_stream.h"                 /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "log.h"

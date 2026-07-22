@@ -119,7 +119,15 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                     path.write_text(path.read_text().replace(
                         value.canonical_include, Path(value.legacy_header).name
                     ))
-                self.assert_rejected(contract, mutate, "canonical-include-missing")
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    self.fixture(root)
+                    mutate(root, contract)
+                    with self.assertRaisesRegex(
+                        checker.CheckError,
+                        r"rule=(canonical-include-missing|non-canonical-module-include)",
+                    ):
+                        checker.validate(root)
 
     def test_unlisted_legacy_ir_include_is_rejected(self) -> None:
         contract = next(item for item in checker.CONTRACTS if item.module == "ir-messaging")

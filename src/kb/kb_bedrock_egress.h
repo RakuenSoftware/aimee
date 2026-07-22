@@ -1,7 +1,7 @@
 #ifndef KB_BEDROCK_EGRESS_H
 #define KB_BEDROCK_EGRESS_H
 #include <stddef.h>
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 #include "../modules/aws/aws_sigv4.h"
 #include "../modules/aws/aws_eventstream.h"
 typedef struct

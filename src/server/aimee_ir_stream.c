@@ -1,7 +1,7 @@
 /* aimee_ir_stream.c -- see aimee_ir_stream.h. */
 #include "aimee_ir_stream.h"
 
-#include "aimee_backend.h" /* converse_stop_reason (shared with the non-stream parse) */
+#include <aimee/translation/aimee_backend.h> /* converse_stop_reason (shared with the non-stream parse) */
 #include "cJSON.h"
 
 #include <stdio.h>

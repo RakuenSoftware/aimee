@@ -4,7 +4,7 @@
  * NOTE (Slice 2): TOOL_RESULT blocks -> OpenAI role:"tool" messages (the split) are
  * applied per the tool_result-grouping ruling in the follow-up; this covers
  * system-lowering, text/tool_use, tool definitions, params, and response parse. */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 #include "util.h" /* text_split_reasoning_prefix, strip_llm_private_scaffold */

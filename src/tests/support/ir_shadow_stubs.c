@@ -26,7 +26,7 @@ __attribute__((weak)) void aimee_ir_shadow_compare_response(const struct parsed_
  * resolve without the whole backend/IR chain. The backend parse stubs return -1
  * (IR "could not parse"), which leaves the delegate turn loop with an empty parsed
  * response -- fine for tests that don't assert on it. Real objects win when linked. */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 #include <aimee/ir/aimee_ir.h>
 
 __attribute__((weak)) int anthropic_backend_parse(const struct cJSON *resp, aimee_response_t *out,

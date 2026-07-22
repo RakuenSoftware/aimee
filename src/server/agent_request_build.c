@@ -10,7 +10,7 @@
 #include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
 #include "config.h"
 #include <aimee/ir/aimee_ir.h>
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>

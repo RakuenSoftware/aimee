@@ -1,7 +1,7 @@
 /* aimee_backend_anthropic.c -- IR <-> Anthropic Messages API (upstream provider).
  * The IR is Anthropic-shaped by design, so this is the most direct mapping; the
  * OpenAI/Responses backends convert the same IR to their wire. See aimee_backend.h. */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 

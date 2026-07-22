@@ -37,6 +37,10 @@ class RefactorBaselineTests(unittest.TestCase):
         self.assertIn("src/modules/ir/include/aimee/ir/aimee_ir.h", files)
         self.assertIn("src/modules/ir/include/aimee/ir/aimee_ir_metrics.h", files)
         self.assertIn(
+            "src/modules/translation/include/aimee/translation/aimee_backend.h",
+            files,
+        )
+        self.assertIn(
             "src/modules/translation/include/aimee/translation/aimee_frontend.h",
             files,
         )

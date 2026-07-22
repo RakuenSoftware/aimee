@@ -4,7 +4,7 @@
 #include "aimee_ir_shadow.h"
 
 #include "agent_protocol.h" /* parsed_response_t (response comparison) */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 #include <aimee/translation/aimee_frontend.h>
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "cJSON.h"

@@ -9,14 +9,21 @@
     "supported": false
   },
   "sources": [
+    "src/modules/translation/aimee_backend_anthropic.c",
+    "src/modules/translation/aimee_backend_bedrock.c",
+    "src/modules/translation/aimee_backend_openai.c",
+    "src/modules/translation/aimee_backend_responses.c",
     "src/modules/translation/aimee_frontend_anthropic.c",
     "src/modules/translation/aimee_frontend_openai.c",
     "src/modules/translation/aimee_frontend_responses.c"
   ],
   "public_headers": [
+    "src/modules/translation/include/aimee/translation/aimee_backend.h",
     "src/modules/translation/include/aimee/translation/aimee_frontend.h"
   ],
   "tests": [
+    "src/tests/test_aimee_backend.c",
+    "src/tests/test_aimee_backend_bedrock.c",
     "src/tests/test_aimee_frontend.c"
   ],
   "docs": [

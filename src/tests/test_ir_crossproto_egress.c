@@ -12,7 +12,7 @@
 
 #include <aimee/ir/aimee_ir.h>
 #include <aimee/translation/aimee_frontend.h>
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 
 /* Build the Anthropic egress bytes for a request expressed in `wire`. */

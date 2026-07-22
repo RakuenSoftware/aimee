@@ -4,7 +4,7 @@
  * dependency. The Converse body is IDENTICAL for Converse and ConverseStream (they
  * differ only by endpoint), so build is stream-agnostic. modelId is a URI parameter,
  * NOT a body field, so it is never emitted here. See aimee_backend.h. */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 
