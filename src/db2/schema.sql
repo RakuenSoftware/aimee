@@ -7112,6 +7112,231 @@ ALTER TABLE kb_enrollments ADD CONSTRAINT kb_enrollments_authority_id_chk
   CHECK (authority_id ~ '^[0-9a-f]{32}$');
 CREATE INDEX IF NOT EXISTS idx_kbenroll_authority ON kb_enrollments(authority_id);
 
+-- P5-B2b primary-only management client instance/certificate lineage.  These
+-- rows contain public metadata and digests only; certificate/key bundles and
+-- workload proofs never enter PostgreSQL.
+CREATE TABLE IF NOT EXISTS kb_management_instance_grant (
+  installation_id TEXT PRIMARY KEY CHECK (installation_id ~ '^[0-9a-f]{32}$'),
+  replacement_operation_id TEXT UNIQUE
+    CHECK (replacement_operation_id IS NULL OR replacement_operation_id ~ '^[0-9a-f]{64}$'),
+  replacement_lineage_id TEXT NOT NULL CHECK (replacement_lineage_id ~ '^[0-9a-f]{32}$'),
+  replaces_installation_id TEXT REFERENCES kb_management_instance_grant(installation_id),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  workload_issuer TEXT NOT NULL CHECK (char_length(workload_issuer) BETWEEN 1 AND 600),
+  workload_subject TEXT NOT NULL CHECK (char_length(workload_subject) BETWEEN 1 AND 600),
+  proof_anchor TEXT NOT NULL CHECK (proof_anchor ~ '^[0-9a-f]{64}$'),
+  custody_anchor TEXT NOT NULL CHECK (custody_anchor ~ '^[0-9a-f]{64}$'),
+  binding_digest TEXT NOT NULL CHECK (binding_digest ~ '^[0-9a-f]{64}$'),
+  expected_ca_issuer TEXT NOT NULL CHECK (char_length(expected_ca_issuer) BETWEEN 1 AND 600),
+  expected_ca_fingerprint TEXT NOT NULL CHECK (expected_ca_fingerprint ~ '^[0-9a-f]{64}$'),
+  creator_identity TEXT NOT NULL CHECK (char_length(creator_identity) BETWEEN 1 AND 600),
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending','consumed','revoked','expired')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now()+interval '24 hours'),
+  consumed_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  CHECK (expires_at>created_at),
+  CHECK ((state='pending' AND consumed_at IS NULL AND revoked_at IS NULL) OR
+         (state='consumed' AND consumed_at IS NOT NULL AND revoked_at IS NULL) OR
+         (state='revoked' AND revoked_at IS NOT NULL) OR
+         (state='expired' AND consumed_at IS NULL AND revoked_at IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_live_custody
+  ON kb_management_instance_grant(custody_anchor) WHERE state IN ('pending','consumed');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_live_binding
+  ON kb_management_instance_grant(binding_digest) WHERE state IN ('pending','consumed');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_pending_lineage
+  ON kb_management_instance_grant(replacement_lineage_id) WHERE state='pending';
+
+CREATE TABLE IF NOT EXISTS kb_management_instance (
+  installation_id TEXT PRIMARY KEY REFERENCES kb_management_instance_grant(installation_id),
+  replacement_lineage_id TEXT NOT NULL CHECK (replacement_lineage_id ~ '^[0-9a-f]{32}$'),
+  authority_id TEXT NOT NULL UNIQUE CHECK (authority_id ~ '^[0-9a-f]{32}$'),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  workload_issuer TEXT NOT NULL CHECK (char_length(workload_issuer) BETWEEN 1 AND 600),
+  workload_subject TEXT NOT NULL CHECK (char_length(workload_subject) BETWEEN 1 AND 600),
+  proof_anchor TEXT NOT NULL CHECK (proof_anchor ~ '^[0-9a-f]{64}$'),
+  custody_anchor TEXT NOT NULL CHECK (custody_anchor ~ '^[0-9a-f]{64}$'),
+  binding_digest TEXT NOT NULL CHECK (binding_digest ~ '^[0-9a-f]{64}$'),
+  expected_ca_issuer TEXT NOT NULL CHECK (char_length(expected_ca_issuer) BETWEEN 1 AND 600),
+  expected_ca_fingerprint TEXT NOT NULL CHECK (expected_ca_fingerprint ~ '^[0-9a-f]{64}$'),
+  current_generation BIGINT NOT NULL DEFAULT 0 CHECK (current_generation>=0),
+  current_enrollment_id BIGINT REFERENCES kb_enrollments(id),
+  state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active','revoked','replaced')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at TIMESTAMPTZ,
+  replaced_at TIMESTAMPTZ,
+  CHECK ((state='active' AND revoked_at IS NULL AND replaced_at IS NULL) OR
+         (state='revoked' AND revoked_at IS NOT NULL AND replaced_at IS NULL) OR
+         (state='replaced' AND replaced_at IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_live_custody
+  ON kb_management_instance(custody_anchor) WHERE state='active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_live_binding
+  ON kb_management_instance(binding_digest) WHERE state='active';
+
+CREATE TABLE IF NOT EXISTS kb_management_instance_issue (
+  operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{64}$'),
+  installation_id TEXT NOT NULL REFERENCES kb_management_instance(installation_id),
+  issue_kind TEXT NOT NULL CHECK (issue_kind IN ('initial','renew')),
+  generation BIGINT NOT NULL CHECK (generation>=1),
+  previous_enrollment_id BIGINT REFERENCES kb_enrollments(id),
+  previous_cert_issuer TEXT,
+  previous_cert_serial_norm TEXT,
+  previous_cert_fingerprint TEXT,
+  csr_digest TEXT NOT NULL CHECK (csr_digest ~ '^[0-9a-f]{64}$'),
+  csr_spki_digest TEXT NOT NULL CHECK (csr_spki_digest ~ '^[0-9a-f]{64}$'),
+  public_bundle_digest TEXT CHECK (public_bundle_digest IS NULL OR public_bundle_digest ~ '^[0-9a-f]{64}$'),
+  cert_issuer TEXT,
+  cert_serial_norm TEXT,
+  cert_fingerprint TEXT,
+  cert_spki_digest TEXT,
+  cert_not_before TIMESTAMPTZ,
+  cert_not_after TIMESTAMPTZ,
+  enrollment_id BIGINT REFERENCES kb_enrollments(id),
+  state TEXT NOT NULL DEFAULT 'pending'
+    CHECK (state IN ('pending','active','expired','quarantined')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pending_expires_at TIMESTAMPTZ NOT NULL DEFAULT (now()+interval '10 minutes'),
+  activated_at TIMESTAMPTZ,
+  terminal_at TIMESTAMPTZ,
+  CHECK (pending_expires_at>created_at),
+  CHECK ((issue_kind='initial' AND previous_enrollment_id IS NULL AND
+          previous_cert_issuer IS NULL AND previous_cert_serial_norm IS NULL AND
+          previous_cert_fingerprint IS NULL) OR
+         (issue_kind='renew' AND previous_enrollment_id IS NOT NULL AND
+          previous_cert_issuer IS NOT NULL AND previous_cert_serial_norm ~ '^[0-9a-f]{1,128}$' AND
+          previous_cert_fingerprint ~ '^[0-9a-f]{64}$')),
+  CHECK ((state='pending' AND public_bundle_digest IS NULL AND enrollment_id IS NULL AND
+          activated_at IS NULL AND terminal_at IS NULL) OR
+         (state='active' AND public_bundle_digest ~ '^[0-9a-f]{64}$' AND
+          cert_issuer IS NOT NULL AND cert_serial_norm ~ '^[0-9a-f]{1,128}$' AND
+          cert_fingerprint ~ '^[0-9a-f]{64}$' AND cert_spki_digest ~ '^[0-9a-f]{64}$' AND
+          cert_not_before IS NOT NULL AND cert_not_after IS NOT NULL AND
+          enrollment_id IS NOT NULL AND activated_at IS NOT NULL AND terminal_at IS NULL) OR
+         (state IN ('expired','quarantined') AND enrollment_id IS NULL AND
+          activated_at IS NULL AND terminal_at IS NOT NULL)),
+  UNIQUE(installation_id,generation)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_issue_cert_identity
+  ON kb_management_instance_issue(cert_issuer,cert_serial_norm)
+  WHERE cert_serial_norm IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_issue_cert_fingerprint
+  ON kb_management_instance_issue(cert_fingerprint) WHERE cert_fingerprint IS NOT NULL;
+
+ALTER TABLE kb_management_instance_grant ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_instance_grant FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_instance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_instance FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_instance_issue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_instance_issue FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS kb_mi_grant_definer_only ON kb_management_instance_grant;
+CREATE POLICY kb_mi_grant_definer_only ON kb_management_instance_grant
+  USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+DROP POLICY IF EXISTS kb_mi_instance_definer_only ON kb_management_instance;
+CREATE POLICY kb_mi_instance_definer_only ON kb_management_instance
+  USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+DROP POLICY IF EXISTS kb_mi_issue_definer_only ON kb_management_instance_issue;
+CREATE POLICY kb_mi_issue_definer_only ON kb_management_instance_issue
+  USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+
+CREATE OR REPLACE FUNCTION kb_management_instance_grant_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF TG_OP IN ('DELETE','TRUNCATE') THEN
+    RAISE EXCEPTION 'management instance grant is retained' USING ERRCODE='55000';
+  END IF;
+  IF ROW(NEW.installation_id,NEW.replacement_operation_id,NEW.replacement_lineage_id,
+         NEW.replaces_installation_id,NEW.team_id,NEW.workload_issuer,NEW.workload_subject,
+         NEW.proof_anchor,NEW.custody_anchor,NEW.binding_digest,NEW.expected_ca_issuer,
+         NEW.expected_ca_fingerprint,NEW.creator_identity,NEW.created_at,NEW.expires_at)
+     IS DISTINCT FROM
+     ROW(OLD.installation_id,OLD.replacement_operation_id,OLD.replacement_lineage_id,
+         OLD.replaces_installation_id,OLD.team_id,OLD.workload_issuer,OLD.workload_subject,
+         OLD.proof_anchor,OLD.custody_anchor,OLD.binding_digest,OLD.expected_ca_issuer,
+     OLD.expected_ca_fingerprint,OLD.creator_identity,OLD.created_at,OLD.expires_at)
+     OR NOT ((OLD.state='pending' AND NEW.state IN ('consumed','revoked','expired')) OR
+             (OLD.state='consumed' AND NEW.state='revoked')) THEN
+    RAISE EXCEPTION 'management instance grant mutation denied' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_mi_grant_update_guard ON kb_management_instance_grant;
+CREATE TRIGGER kb_mi_grant_update_guard BEFORE UPDATE ON kb_management_instance_grant
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_grant_guard();
+DROP TRIGGER IF EXISTS kb_mi_grant_delete_guard ON kb_management_instance_grant;
+CREATE TRIGGER kb_mi_grant_delete_guard BEFORE DELETE ON kb_management_instance_grant
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_grant_guard();
+DROP TRIGGER IF EXISTS kb_mi_grant_truncate_guard ON kb_management_instance_grant;
+CREATE TRIGGER kb_mi_grant_truncate_guard BEFORE TRUNCATE ON kb_management_instance_grant
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_instance_grant_guard();
+
+CREATE OR REPLACE FUNCTION kb_management_instance_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF TG_OP IN ('DELETE','TRUNCATE') THEN
+    RAISE EXCEPTION 'management instance is retained' USING ERRCODE='55000';
+  END IF;
+  IF ROW(NEW.installation_id,NEW.replacement_lineage_id,NEW.authority_id,NEW.team_id,
+         NEW.workload_issuer,NEW.workload_subject,NEW.proof_anchor,NEW.custody_anchor,
+         NEW.binding_digest,NEW.expected_ca_issuer,NEW.expected_ca_fingerprint,NEW.created_at)
+     IS DISTINCT FROM
+     ROW(OLD.installation_id,OLD.replacement_lineage_id,OLD.authority_id,OLD.team_id,
+         OLD.workload_issuer,OLD.workload_subject,OLD.proof_anchor,OLD.custody_anchor,
+         OLD.binding_digest,OLD.expected_ca_issuer,OLD.expected_ca_fingerprint,OLD.created_at)
+     OR OLD.state<>'active' OR
+     NOT ((NEW.state='active' AND NEW.current_generation=OLD.current_generation+1 AND
+           NEW.current_enrollment_id IS NOT NULL) OR
+          (NEW.state='revoked' AND NEW.current_generation=OLD.current_generation AND
+           NEW.current_enrollment_id IS NOT DISTINCT FROM OLD.current_enrollment_id) OR
+          (NEW.state='replaced' AND NEW.current_generation=OLD.current_generation AND
+           NEW.current_enrollment_id IS NOT DISTINCT FROM OLD.current_enrollment_id)) THEN
+    RAISE EXCEPTION 'management instance mutation denied' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_mi_instance_update_guard ON kb_management_instance;
+CREATE TRIGGER kb_mi_instance_update_guard BEFORE UPDATE ON kb_management_instance
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_guard();
+DROP TRIGGER IF EXISTS kb_mi_instance_delete_guard ON kb_management_instance;
+CREATE TRIGGER kb_mi_instance_delete_guard BEFORE DELETE ON kb_management_instance
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_guard();
+DROP TRIGGER IF EXISTS kb_mi_instance_truncate_guard ON kb_management_instance;
+CREATE TRIGGER kb_mi_instance_truncate_guard BEFORE TRUNCATE ON kb_management_instance
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_instance_guard();
+
+CREATE OR REPLACE FUNCTION kb_management_instance_issue_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF TG_OP IN ('DELETE','TRUNCATE') THEN
+    RAISE EXCEPTION 'management instance issue is retained' USING ERRCODE='55000';
+  END IF;
+  IF ROW(NEW.operation_id,NEW.installation_id,NEW.issue_kind,NEW.generation,
+         NEW.previous_enrollment_id,NEW.previous_cert_issuer,NEW.previous_cert_serial_norm,
+         NEW.previous_cert_fingerprint,NEW.csr_digest,NEW.csr_spki_digest,NEW.created_at,
+         NEW.pending_expires_at)
+     IS DISTINCT FROM
+     ROW(OLD.operation_id,OLD.installation_id,OLD.issue_kind,OLD.generation,
+         OLD.previous_enrollment_id,OLD.previous_cert_issuer,OLD.previous_cert_serial_norm,
+         OLD.previous_cert_fingerprint,OLD.csr_digest,OLD.csr_spki_digest,OLD.created_at,
+         OLD.pending_expires_at)
+     OR OLD.state<>'pending' OR NEW.state NOT IN ('active','expired','quarantined') THEN
+    RAISE EXCEPTION 'management instance issue mutation denied' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_mi_issue_update_guard ON kb_management_instance_issue;
+CREATE TRIGGER kb_mi_issue_update_guard BEFORE UPDATE ON kb_management_instance_issue
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_issue_guard();
+DROP TRIGGER IF EXISTS kb_mi_issue_delete_guard ON kb_management_instance_issue;
+CREATE TRIGGER kb_mi_issue_delete_guard BEFORE DELETE ON kb_management_instance_issue
+  FOR EACH ROW EXECUTE FUNCTION kb_management_instance_issue_guard();
+DROP TRIGGER IF EXISTS kb_mi_issue_truncate_guard ON kb_management_instance_issue;
+CREATE TRIGGER kb_mi_issue_truncate_guard BEFORE TRUNCATE ON kb_management_instance_issue
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_instance_issue_guard();
+
 CREATE TABLE IF NOT EXISTS org_egress_binding (
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   model_id TEXT NOT NULL REFERENCES org_model_catalog(model_id),
