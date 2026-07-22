@@ -177,10 +177,11 @@ static int exact_extensions(X509 *cert)
    int aki_index = X509_get_ext_by_NID(cert, NID_authority_key_identifier, -1);
    X509_EXTENSION *bc_ext = bc_index >= 0 ? X509_get_ext(cert, bc_index) : NULL;
    X509_EXTENSION *ku_ext = ku_index >= 0 ? X509_get_ext(cert, ku_index) : NULL;
-   int ok = X509_get_ext_count(cert) == 6 && bc && !bc->ca && bc_ext &&
+   int ok = X509_get_ext_count(cert) == 6 && bc && !bc->ca && !bc->pathlen && bc_ext &&
             X509_EXTENSION_get_critical(bc_ext) == 1 && ku && ku_ext &&
             X509_EXTENSION_get_critical(ku_ext) == 1 && ASN1_BIT_STRING_get_bit(ku, 0) == 1;
-   for (int i = 1; ok && i < 9; ++i)
+   int ku_bits = ku ? ASN1_STRING_length(ku) * 8 : 0;
+   for (int i = 1; ok && i < ku_bits; ++i)
       if (ASN1_BIT_STRING_get_bit(ku, i))
          ok = 0;
    ok = ok && eku && sk_ASN1_OBJECT_num(eku) == 1 &&

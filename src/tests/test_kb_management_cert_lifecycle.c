@@ -1,11 +1,16 @@
 #include "kb/kb_management_cert_codec.h"
 #include "kb/kb_management_cert_crypto.h"
+#include "kb/kb_management_cert_storage.h"
 
 #include <openssl/crypto.h>
 
 #include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static int zeroed(const void *p, size_t n)
 {
@@ -200,12 +205,42 @@ static void test_management_leaf_profile(void)
    kb_management_cert_key_material_clear(&material);
 }
 
+static void test_storage_rejects_oversize_and_fifo(void)
+{
+   char path[] = "/tmp/aimee-p5b2c-storage.XXXXXX";
+   assert(mkdtemp(path));
+   kb_management_cert_storage_t storage = {.dir_fd = open(path, O_RDONLY | O_DIRECTORY)};
+   assert(storage.dir_fd >= 0);
+   char operation[65];
+   fill_hex(operation, 64, 'a');
+   uint8_t byte = 1;
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, &byte,
+                                           KB_MANAGEMENT_CERT_CANDIDATE_MAX + 1U) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(faccessat(storage.dir_fd,
+                    "candidate.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    F_OK, 0) != 0);
+
+   const char fifo[] =
+       "intent.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+   assert(mkfifoat(storage.dir_fd, fifo, 0600) == 0);
+   uint8_t output[32];
+   size_t output_len = 9;
+   assert(kb_management_cert_storage_read(&storage, "intent", operation, output, sizeof(output),
+                                          &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(output_len == 0 && zeroed(output, sizeof(output)));
+   assert(unlinkat(storage.dir_fd, fifo, 0) == 0);
+   close(storage.dir_fd);
+   assert(rmdir(path) == 0);
+}
+
 int main(void)
 {
    test_plaintext_codecs();
    test_record_codecs();
    test_key_and_csr();
    test_management_leaf_profile();
+   test_storage_rejects_oversize_and_fifo();
    puts("test_kb_management_cert_lifecycle: ok");
    return 0;
 }

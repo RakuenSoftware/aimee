@@ -125,7 +125,7 @@ static kb_management_cert_storage_result_t read_name(kb_management_cert_storage_
       OPENSSL_cleanse(out, cap);
    if (!storage || storage->dir_fd < 0 || !name || !out || !cap || !out_len)
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
-   int fd = openat(storage->dir_fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+   int fd = openat(storage->dir_fd, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
       return errno == ENOENT ? KB_MANAGEMENT_STORAGE_MISSING : KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    if (!checked_file(fd))
@@ -220,7 +220,8 @@ kb_management_cert_storage_result_t kb_management_cert_storage_stage(
     const void *bytes, size_t len)
 {
    char name[80];
-   if (!storage || storage->dir_fd < 0 || record_name(kind, operation, name) || !bytes || !len)
+   if (!storage || storage->dir_fd < 0 || record_name(kind, operation, name) || !bytes || !len ||
+       len > KB_MANAGEMENT_CERT_CANDIDATE_MAX)
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0 && errno == EEXIST)
@@ -239,7 +240,12 @@ kb_management_cert_storage_result_t kb_management_cert_storage_stage(
    kb_management_cert_storage_result_t rc = KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    if (!checked_file(fd) || complete_write(fd, bytes, len) || fdatasync(fd))
       goto failed;
-   if (verify_contents(fd, bytes, len) || close(fd) || fsync(storage->dir_fd))
+   if (verify_contents(fd, bytes, len))
+   {
+      close(fd);
+      goto unlink_failed;
+   }
+   if (close(fd) || fsync(storage->dir_fd))
       goto unlink_failed;
    return KB_MANAGEMENT_STORAGE_OK;
 
