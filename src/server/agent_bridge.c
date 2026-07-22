@@ -147,7 +147,9 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
       if (agent_is_local_llama_compat(agent) || is_minimax)
          cJSON_AddBoolToObject(req, "parallel_tool_calls", 0);
       /* mistral and minimax default to not using tools without an explicit directive. */
-      if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
+      if (agent && agent->require_initial_tool_call)
+         cJSON_AddStringToObject(req, "tool_choice", "required");
+      else if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
          cJSON_AddStringToObject(req, "tool_choice", "auto");
    }
 
@@ -190,7 +192,11 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
    else
       cJSON_AddItemReferenceToObject(req, "input", input);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+         cJSON_AddStringToObject(req, "tool_choice", "required");
+   }
 
    return req;
 }
@@ -218,7 +224,14 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    else
       cJSON_AddItemReferenceToObject(req, "messages", messages);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+      {
+         cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+         cJSON_AddStringToObject(choice, "type", "any");
+      }
+   }
 
    model_sampling_apply_anthropic(agent, req, temperature);
 

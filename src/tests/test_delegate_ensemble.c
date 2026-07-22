@@ -22,7 +22,14 @@ static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
 static char g_aggregator_fallback_who[128] = "";
 static int g_cancel_after_checks = -1;
+static int g_suppress_successful_tool_calls = 0;
 static char g_last_parallel_prompt[8192];
+static int g_named_require_initial_tool;
+
+void agent_run_require_initial_tool_call(int on)
+{
+   g_named_require_initial_tool = on ? 1 : 0;
+}
 
 /* Capture the per-task participant selector the engine sets, so a test can
  * assert the §0.1 routing fix: each fan-out task must be pointed at its own
@@ -37,6 +44,7 @@ static int g_captured_count = 0;
  * persona_compose stub returns strdup(name), so the captured system_prompt is
  * the persona name. */
 static char g_captured_personas[CAP_MAX][128];
+static int g_captured_require_tool[CAP_MAX];
 
 /* Stub: the engine composes a panelist persona into the system prompt. Return a
  * heap copy of the name so the caller's free() is balanced and the captured
@@ -92,6 +100,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
                tasks[i].agent ? tasks[i].agent : "(null)");
       snprintf(g_captured_personas[i], sizeof(g_captured_personas[i]), "%s",
                tasks[i].system_prompt ? tasks[i].system_prompt : "(null)");
+      g_captured_require_tool[i] = tasks[i].require_initial_tool_call;
    }
    for (int i = 0; i < count; i++)
       memset(&out[i], 0, sizeof(out[i]));
@@ -153,6 +162,9 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       }
       out[i].prompt_tokens = 50;
       out[i].completion_tokens = 50;
+      out[i].tool_calls = tasks[i].require_initial_tool_call ? 1 : 0;
+      out[i].successful_tool_calls =
+          !g_suppress_successful_tool_calls && tasks[i].require_initial_tool_call ? 1 : 0;
       out[i].success = 1;
    }
    return count;
@@ -202,6 +214,20 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", name ? name : "");
    out->success = 1;
    return 0;
+}
+
+int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out)
+{
+   int rc =
+       agent_run_named(cfg, name, role, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (rc == 0 && g_named_require_initial_tool)
+   {
+      out->tool_calls = 1;
+      out->successful_tool_calls = 1;
+   }
+   return rc;
 }
 
 /* The aggregator/synthesis step runs without tools: by NAME (agent_run_named)
@@ -490,6 +516,8 @@ static void reset_modes(void)
    g_named_calls = 0;
    g_aggregator_calls = 0;
    g_cancel_after_checks = -1;
+   g_suppress_successful_tool_calls = 0;
+   g_named_require_initial_tool = 0;
    g_last_parallel_prompt[0] = '\0';
 }
 
@@ -1401,6 +1429,7 @@ static void test_roundtable_review_assigns_personas(void)
    g_parallel_mode = 6; /* each review panelist returns {"items":[],"overall":"ok"} */
    memset(g_captured_personas, 0, sizeof(g_captured_personas));
    config_t cfg = make_cfg(1, 2, 10.0); /* 3 reference models, no configured personas */
+   cfg.roundtable_require_evidence = 1;
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
@@ -1415,6 +1444,13 @@ static void test_roundtable_review_assigns_personas(void)
    assert(strcmp(g_captured_personas[0], "original-request") == 0);
    assert(strcmp(g_captured_personas[1], "security") == 0);
    assert(strcmp(g_captured_personas[2], "architect") == 0);
+   assert(g_captured_require_tool[0] == 1);
+   assert(g_captured_require_tool[1] == 1);
+   assert(g_captured_require_tool[2] == 1);
+   assert(result.participants_tool_used == 3);
+   assert(result.participant_tool_calls == 3);
+   assert(result.participant_successful_tool_calls == 3);
+   assert(result.evidence_coverage_incomplete == 0);
    /* A tool-capable panel must verify production wiring against what actually
     * ships, rather than treating a source-diff call site as runtime evidence. */
    assert(strstr(g_last_parallel_prompt, "which build target and implementation actually ship") !=
@@ -1423,6 +1459,32 @@ static void test_roundtable_review_assigns_personas(void)
    assert(strstr(g_last_parallel_prompt, "Do not infer shipped behavior from a diff") != NULL);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_review_assigns_personas: ok\n");
+}
+
+static void test_roundtable_no_tool_use_is_visible_degradation(void)
+{
+   reset_modes();
+   g_parallel_mode = 6;
+   g_suppress_successful_tool_calls = 1; /* provider called a tool, but it failed */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   cfg.roundtable_require_evidence = 1;
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   assert(delegate_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
+   assert(result.degraded == 1);
+   assert(result.participants_tool_used == 0);
+   assert(result.participant_tool_calls == 3);
+   assert(result.participant_successful_tool_calls == 0);
+   assert(result.evidence_coverage_incomplete == 1);
+   assert(strstr(result.artifact, "Production-wiring and shipped-artifact conclusions remain") !=
+          NULL);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_no_tool_use_is_visible_degradation: ok\n");
 }
 
 static void test_roundtable_captures_original_request_alignment(void)
@@ -1468,6 +1530,21 @@ static void test_roundtable_captures_original_request_alignment(void)
    capture_round_review_items(&results[2], 1, &out, 3);
    assert(strcmp(out.original_request_alignment, "unclear") == 0);
    assert(strstr(out.original_request_alignment_summary, "No panelist") != NULL);
+
+   results[0].response = "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
+                         "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}";
+   results[0].successful_tool_calls = 0;
+   memset(&out, 0, sizeof out);
+   capture_round_review_items(results, 1, &out, 4);
+   assert(out.item_count == 1);
+   assert(out.items[0].tool_grounded == 0);
+
+   results[1].response = results[0].response;
+   results[1].successful_tool_calls = 1;
+   memset(&out, 0, sizeof out);
+   capture_round_review_items(results, 2, &out, 4);
+   assert(out.item_count == 1);
+   assert(out.items[0].tool_grounded == 1); /* grounded duplicate upgrades provenance */
    printf("  test_roundtable_captures_original_request_alignment: ok\n");
 }
 
@@ -1853,6 +1930,7 @@ int main(void)
    test_panel_treats_providerless_agents_as_distinct();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
+   test_roundtable_no_tool_use_is_visible_degradation();
    test_roundtable_captures_original_request_alignment();
    test_roundtable_aggregator_fallback_synthesizes();
    test_parse_lenient_prose_with_code_braces();

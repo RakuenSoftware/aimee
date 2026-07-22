@@ -56,6 +56,8 @@ verify_action_t roundtable_grade_item(replay_status_t st, int factual, const cha
  * already present, so a dedup merge preserves panelist attribution. */
 static void merge_sources(roundtable_review_item_t *dst, const roundtable_review_item_t *src)
 {
+   if (src && src->tool_grounded)
+      dst->tool_grounded = 1;
    if (!src->sources[0])
       return;
    char tmp[sizeof(src->sources)];

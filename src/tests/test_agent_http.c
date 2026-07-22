@@ -908,6 +908,55 @@ static void test_openai_request_omits_empty_tools(void)
    printf("openai_request_omits_empty_tools OK\n");
 }
 
+static void test_evidence_review_requires_initial_tool_choice(void)
+{
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+   snprintf(agent.provider, sizeof(agent.provider), "openai");
+   snprintf(agent.model, sizeof(agent.model), "gpt-test");
+   agent.require_initial_tool_call = 1;
+   cJSON *messages = make_one_user_message();
+   cJSON *tools = make_one_dummy_tool();
+
+   cJSON *openai = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(openai, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(openai);
+
+   snprintf(agent.provider, sizeof(agent.provider), "minimax");
+   snprintf(agent.model, sizeof(agent.model), "MiniMax-M3");
+   cJSON *minimax = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(minimax, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(minimax);
+
+   snprintf(agent.provider, sizeof(agent.provider), "mistral");
+   snprintf(agent.model, sizeof(agent.model), "mistral-large");
+   cJSON *mistral = agent_build_request_openai(&agent, messages, tools, 32, 0.0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(mistral, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(mistral);
+
+   cJSON *responses = agent_build_request_responses(&agent, messages, tools, "review");
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses, "tool_choice")), "required") ==
+          0);
+   cJSON_Delete(responses);
+
+   cJSON *anthropic = agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
+   cJSON *choice = cJSON_GetObjectItem(anthropic, "tool_choice");
+   assert(cJSON_IsObject(choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "type")), "any") == 0);
+   cJSON_Delete(anthropic);
+
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
+   assert(agent_require_initial_tool_choice(1, 0, 1) == 1);
+   assert(agent_require_initial_tool_choice(1, 1, 1) == 0);
+   assert(agent_require_initial_tool_choice(1, 0, 0) == 0);
+   assert(agent_require_initial_tool_choice(0, 0, 1) == 0);
+   printf("evidence_review_requires_initial_tool_choice OK\n");
+}
+
 static void test_provider_network_error_mentions_local_http_init(void)
 {
    const char *msg = provider_error_message(PROVIDER_ERR_NETWORK);
@@ -998,6 +1047,7 @@ int main(void)
 
    test_openai_request_llama_compat_options();
    test_openai_request_omits_empty_tools();
+   test_evidence_review_requires_initial_tool_choice();
    test_provider_network_error_mentions_local_http_init();
    test_minimax_driver_has_own_caps();
 
