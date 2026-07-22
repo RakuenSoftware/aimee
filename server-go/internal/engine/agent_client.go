@@ -296,8 +296,9 @@ func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Tim
 			return errors.Join(ErrDelegateUnassignedExpired,
 				fmt.Errorf("delegate job %d is no longer pending and unassigned; durable mapping retained", jobID))
 		}
-	} else if err := c.cancelRemote(jobID, context.Background()); err != nil {
-		return errors.Join(ErrDelegateUnassignedExpired, fmt.Errorf("cancel expired delegate job %d: %w", jobID, err))
+	} else {
+		return errors.Join(ErrDelegateUnassignedExpired,
+			errors.New("Go unassigned-job cancellation authority is not configured; durable mapping retained"))
 	}
 	if c.store != nil {
 		forgetCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

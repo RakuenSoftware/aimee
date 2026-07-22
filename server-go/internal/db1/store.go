@@ -155,7 +155,7 @@ func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reas
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
 SET status='cancelled',cancelled_at=datetime('now'),cancel_reason=?,updated_at=datetime('now')
-WHERE id=? AND status='pending' AND trim(agent_name)=''`, reason, jobID)
+WHERE id=? AND status='pending' AND agent_name=''`, reason, jobID)
 	if err != nil {
 		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
 	}

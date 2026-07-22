@@ -304,14 +304,14 @@ func TestCancelUnassignedDelegateJobIsAtomicAndAssignmentSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name) VALUES
-		(41,'pending',''),(42,'pending','codex'),(43,'running','codex')`); err != nil {
+		(41,'pending',''),(42,'pending','codex'),(43,'running','codex'),(44,'pending',' ')`); err != nil {
 		t.Fatal(err)
 	}
 	cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), 41, "lease expired")
 	if err != nil || !cancelled {
 		t.Fatalf("cancel pending unassigned: cancelled=%v err=%v", cancelled, err)
 	}
-	for _, id := range []int{42, 43} {
+	for _, id := range []int{42, 43, 44} {
 		cancelled, err = store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired")
 		if err != nil || cancelled {
 			t.Fatalf("job %d assignment guard: cancelled=%v err=%v", id, cancelled, err)
