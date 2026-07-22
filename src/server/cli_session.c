@@ -139,7 +139,11 @@ void cli_session_mark_baseline(cli_session_t *s)
 
 static void cli_session_capture_cmd(const cli_session_t *s, char *cmd, size_t cmd_len)
 {
-   snprintf(cmd, cmd_len, "tmux capture-pane -p -t '%s' 2>/dev/null", s->session_name);
+   /* -J joins visually wrapped pane rows back into their logical line. Without
+    * it, JSON strings wider than the pane acquire literal newlines and become
+    * invalid. -S - includes scrollback from the start of the pane so a long
+    * answer cannot lose its opening object/fields above the visible 50 rows. */
+   snprintf(cmd, cmd_len, "tmux capture-pane -p -J -S - -t '%s' 2>/dev/null", s->session_name);
 }
 
 int cli_session_is_alive(const cli_session_t *s)
