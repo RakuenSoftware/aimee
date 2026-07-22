@@ -13,6 +13,27 @@ TESTLINK_MIN = @mkdir -p $(dir $@) && $(CC)
 # Keep it overridable so flaky-debug sessions can force TEST_RUN_JOBS=1.
 TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)
 
+.PHONY: unit-test-server-management-tls
+unit-test-server-management-tls: $(TESTPREFIX)/unit-test-server-management-tls
+	$<
+
+$(TESTPREFIX)/unit-test-server-management-tls: $(OBJDIR)/tests/test_server_management_tls.o \
+                                                $(OBJDIR)/server/server_tls.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto -lpthread
+
+.PHONY: unit-test-server-management-listener-live
+unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-management-listener-live
+	$<
+
+P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
+                           $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) \
+                           $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) \
+                           $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
+
+$(TESTPREFIX)/unit-test-server-management-listener-live: \
+    $(OBJDIR)/tests/test_server_management_listener_live.o $(P5B3C_LIVE_SERVER_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_SERVER)
+
 # Common object sets for tests
 TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/config/config_mode.o $(OBJDIR)/modules/config/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
@@ -522,6 +543,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
+               $(TESTPREFIX)/unit-test-server-management-tls \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
                $(TESTPREFIX)/unit-test-kb-management-health-exchange \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-client \

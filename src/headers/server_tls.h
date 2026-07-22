@@ -37,6 +37,14 @@ extern "C"
    int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
                        const char *client_ca_path);
 
+   /* Build the distinct P5 management-listener context. The three PEM files are
+    * opened without following symlinks, captured once into bounded buffers, and
+    * used for both the stored SHA-256 identities and context construction. The
+    * published context is process-lifetime owned. A later call succeeds only
+    * when all three captured PEM byte strings are identical to the originals. */
+   int server_tls_management_init(const char *cert_path, const char *key_path,
+                                  const char *client_ca_path);
+
    /* Extract the verified mTLS client identity from a handshaked SSL: writes the
     * peer leaf cert's CN into cn_out (and hex serial into serial_out) and returns
     * 1 iff the peer presented a cert AND it verified OK against the client CA;
@@ -79,6 +87,7 @@ extern "C"
     * register its SSL on the conn-io shim (NULL on failure — caller closes fd);
     * and the teardown (unregister + shutdown + free). */
    SSL *server_tls_begin(int fd);
+   SSL *server_tls_management_begin(int fd);
    void server_tls_end(int fd, SSL *ssl);
 
 #ifdef __cplusplus

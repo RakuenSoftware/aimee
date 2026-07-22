@@ -52,12 +52,13 @@ static void *conn_worker(void *arg)
    /* TLS handshake runs HERE (in the worker, never blocking the accept loop) and
     * registers the SSL on the conn-io shim; this worker owns it end to end
     * (SSE-offload is refused over TLS, so it never crosses threads). */
-   SSL *ssl = j->is_tls ? server_tls_begin(j->fd) : NULL;
+   SSL *ssl = j->is_management ? server_tls_management_begin(j->fd)
+                               : (j->is_tls ? server_tls_begin(j->fd) : NULL);
    if (!(j->is_tls && !ssl)) /* skip handle_conn only when the TLS handshake failed */
    {
       do
       {
-         handle_conn(j->fd, j->is_tcp);
+         handle_conn(j->fd, j->is_tcp, j->is_management);
       } while (j->is_tls && server_http_keepalive_take());
    }
    server_tls_end(j->fd, ssl);
@@ -69,7 +70,7 @@ static void *conn_worker(void *arg)
 
 /* Hand an accepted connection to a detached worker (which closes fd). Returns 1
  * if offloaded, 0 if the caller should handle it inline (cap hit / no resources). */
-int conn_offload(int fd, int is_tcp, int is_tls)
+int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
 {
    if (atomic_fetch_add(&g_conn_live, 1) >= CONN_LIVE_MAX)
    {
@@ -85,6 +86,7 @@ int conn_offload(int fd, int is_tcp, int is_tls)
    j->fd = fd;
    j->is_tcp = is_tcp;
    j->is_tls = is_tls;
+   j->is_management = is_management;
    pthread_attr_t attr;
    pthread_attr_t *ap = NULL;
    if (pthread_attr_init(&attr) == 0)
