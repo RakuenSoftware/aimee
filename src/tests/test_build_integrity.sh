@@ -32,10 +32,11 @@ fi
 # A native crash must both produce evidence and cause the two-plane container
 # to restart. `tail --pid` deadlocks on a zombie child because the supervising
 # shell cannot reap that child until tail returns.
-if grep -qF 'ulimit -c unlimited' ../deploy/container/server-entrypoint.sh; then
-    pass "server entrypoint enables core dumps"
+if [ "$(grep -cF 'ulimit -c unlimited' ../deploy/container/server-entrypoint.sh)" -ge 2 ] &&
+   grep -qF "runuser -u aimee -- sh -c 'ulimit -c unlimited" ../deploy/container/server-entrypoint.sh; then
+    pass "server entrypoint enables core dumps after runuser limit reset"
 else
-    fail "server entrypoint leaves native crash core dumps disabled"
+    fail "server entrypoint leaves native crash core dumps disabled after runuser"
 fi
 if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
    grep -qF 'print $3 " " $22' ../deploy/container/server-entrypoint.sh &&

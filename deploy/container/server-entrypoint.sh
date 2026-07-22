@@ -178,7 +178,10 @@ runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
-runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
+# runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
+# parent entrypoint configured them. Raise the soft limit again as the final
+# unprivileged child operation so the actual server process inherits it.
+runuser -u aimee -- sh -c 'ulimit -c unlimited 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
