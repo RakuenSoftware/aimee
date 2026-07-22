@@ -84,6 +84,14 @@ SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
     * cert-less handshake so a not-yet-enrolled client can reach /v1/enroll/redeem
     * to bootstrap. kb_tls_serve_conn gates everything else on cert presence. */
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   static const unsigned char session_id_context[] = "aimee-kb-mtls";
+   if (SSL_CTX_set_session_id_context(ctx, session_id_context,
+                                      (unsigned int)(sizeof(session_id_context) - 1)) != 1)
+   {
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
    return ctx;
 }
 
@@ -100,6 +108,7 @@ SSL_CTX *kb_tls_client_ctx(const char *ca_cert_pem, const char *client_cert_pem,
       return NULL;
    }
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
    return ctx;
 }
 
@@ -350,19 +359,22 @@ done:
    return rc;
 }
 
-kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port, const char *ca_cert_pem,
-                                              const char *client_cert_pem,
-                                              const char *client_key_pem)
+static kb_tls_client_conn_t *client_conn_open_owned_ctx(const char *host, int port, SSL_CTX *ctx,
+                                                        SSL_SESSION *session)
 {
-   if (!host || !host[0] || strlen(host) >= 256 || port <= 0 || port > 65535 || !ca_cert_pem)
+   if (!host || !host[0] || strlen(host) >= 256 || port <= 0 || port > 65535 || !ctx)
+   {
+      SSL_CTX_free(ctx);
       return NULL;
+   }
    kb_tls_client_conn_t *conn = calloc(1, sizeof(*conn));
    if (!conn)
+   {
+      SSL_CTX_free(ctx);
       return NULL;
+   }
    conn->fd = -1;
-   conn->ctx = kb_tls_client_ctx(ca_cert_pem, client_cert_pem, client_key_pem);
-   if (!conn->ctx)
-      goto fail;
+   conn->ctx = ctx;
 
    char portstr[16];
    snprintf(portstr, sizeof(portstr), "%d", port);
@@ -391,6 +403,8 @@ kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port, const 
    conn->ssl = SSL_new(conn->ctx);
    if (!conn->ssl)
       goto fail;
+   if (session && SSL_set_session(conn->ssl, session) != 1)
+      goto fail;
    SSL_set_fd(conn->ssl, conn->fd);
    SSL_set_tlsext_host_name(conn->ssl, host);
    SSL_set1_host(conn->ssl, host);
@@ -402,6 +416,39 @@ kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port, const 
 fail:
    kb_tls_client_conn_close(conn);
    return NULL;
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port, const char *ca_cert_pem,
+                                              const char *client_cert_pem,
+                                              const char *client_key_pem)
+{
+   SSL_CTX *ctx = kb_tls_client_ctx(ca_cert_pem, client_cert_pem, client_key_pem);
+   return client_conn_open_owned_ctx(host, port, ctx, NULL);
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open_ctx(const char *host, int port, SSL_CTX *ctx)
+{
+   if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+      return NULL;
+   return client_conn_open_owned_ctx(host, port, ctx, NULL);
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port, SSL_CTX *ctx,
+                                                      SSL_SESSION *session)
+{
+   if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+      return NULL;
+   return client_conn_open_owned_ctx(host, port, ctx, session);
+}
+
+int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn)
+{
+   return conn && conn->ssl ? SSL_session_reused(conn->ssl) : 0;
+}
+
+SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn)
+{
+   return conn && conn->ssl ? SSL_get1_session(conn->ssl) : NULL;
 }
 
 int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
