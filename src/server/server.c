@@ -2190,9 +2190,22 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    else
    {
       db1_apply_server_pragmas();
+      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+      if (orphaned < 0)
+         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+      else if (orphaned > 0)
+         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
       if (server_mgmt_status_init() != 0)
          LOG_WARN("server", "management status nonce initialization failed");
    }
+   /* Container cleanup is independent of DB availability. No worker pool exists
+    * yet, so a matching container cannot belong to this server generation. */
+   int orphan_containers = delegate_backend_docker_remove_orphans();
+   if (orphan_containers < 0)
+      LOG_WARN("server", "could not reconcile delegate containers from the prior process");
+   else if (orphan_containers > 0)
+      LOG_INFO("server", "removed %d delegate containers orphaned by the prior process",
+               orphan_containers);
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
