@@ -609,16 +609,20 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifactHash}
 	approvals, voters := 0, len(seats)
 	var cost float64
-	var unreachable []string
+	type requiredFailure struct {
+		seat panelSeat
+		err  error
+	}
+	var requiredFailures []requiredFailure
+	validPersona := make(map[string]bool)
 	for range seats {
 		o := <-ch
 		cost += o.cost
 		if o.err != nil {
 			if o.seat.required {
-				unreachable = append(unreachable, o.seat.persona+": "+o.err.Error())
-			} else {
-				voters--
+				requiredFailures = append(requiredFailures, requiredFailure{seat: o.seat, err: o.err})
 			}
+			voters--
 			continue
 		}
 		echoStage, echoOK := normalizeRoundtableStage(o.result.ArtifactStage)
@@ -628,6 +632,7 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 		}
 		alignment := strings.ToLower(strings.TrimSpace(o.result.OriginalRequestAlignment.Status))
 		alignmentOK := alignment == "aligned"
+		alignmentRecognized := alignmentOK || alignment == "drifted" || alignment == "unclear"
 		if !alignmentOK {
 			if alignment != "drifted" && alignment != "unclear" {
 				alignment = "unclear"
@@ -648,6 +653,7 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 			// The feedback finding already prevents advancement; also exclude this
 			// vote from quorum so the fail-closed invariant is local and explicit.
 			if alignmentOK {
+				validPersona[o.seat.persona] = true
 				approvals++
 			}
 			continue
@@ -656,9 +662,23 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-malformed", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer returned a contradictory or incomplete verdict", Recommendation: "return approve with no findings, or changes with actionable findings"})
 			continue
 		}
+		if alignmentRecognized {
+			validPersona[o.seat.persona] = true
+		}
 		for i, f := range o.result.Findings {
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: firstNonempty(f.ID, fmt.Sprintf("%s-%d", o.seat.persona, i+1)), Persona: o.seat.persona, Severity: firstNonempty(f.Severity, "blocking"), Location: f.Location, Summary: f.Summary, Recommendation: f.Recommendation})
 		}
+	}
+	var unreachable []string
+	for _, failure := range requiredFailures {
+		// Required config names a review lens, not an exclusive agent. Capacity
+		// fill repeats those lenses, so any valid duplicate satisfies an unpinned
+		// required persona when its initially assigned slot loses admission. An
+		// explicit positive pin remains strict and cannot be substituted.
+		if !failure.seat.pinned && validPersona[failure.seat.persona] {
+			continue
+		}
+		unreachable = append(unreachable, failure.seat.persona+": "+failure.err.Error())
 	}
 	return feedback, approvals, voters, cost, strings.Join(unreachable, "; ")
 }
