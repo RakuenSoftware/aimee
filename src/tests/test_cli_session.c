@@ -57,8 +57,10 @@ static void install_fake_tmux(void)
     * line (never stabilises); `banner_retry` animates a │-prefixed box line whose
     * prose contains "Retrying in" (mimics the welcome banner — must NOT be read as
     * a provider error); `busy_tool` returns a STATIC pane whose footer still shows
-    * "esc to interrupt" (a long-running tool — recv must NOT finalize it); anything
-    * else returns a static pane. send-keys is logged so the cancel/error tests can
+    * "esc to interrupt" (a long-running tool — recv must NOT finalize it);
+    * `prompt_then_answer` holds a pasted prompt static past the stability threshold
+    * before rendering a Claude assistant bullet; anything else returns a static
+    * pane. send-keys is logged so the cancel/error tests can
     * assert the interrupt key. */
    fprintf(f,
            "#!/bin/sh\n"
@@ -80,13 +82,18 @@ static void install_fake_tmux(void)
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo '\xe2\x94\x82 stream-stall hint now reads Retrying in seconds frame "
            "'\"$c\"' end';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = prompt_then_answer ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      if [ \"$c\" -le 6 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
+           "else printf '%%s\\n' '\xe2\x9d\xaf pasted repair prompt' "
+           "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
            "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
-           counter, counter, counter, counter, counter, counter, counter, counter, counter,
-           g_sendlog, g_createlog);
+           counter, counter, counter, counter, counter, counter, counter, counter, counter, counter,
+           counter, counter, g_sendlog, g_createlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -185,6 +192,20 @@ static void test_recv_ok_on_stable_pane(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
    assert(rc == 0);
    assert(strstr(buf, "STATIC OUTPUT") != NULL);
+}
+
+static void test_recv_does_not_return_static_prompt_as_answer(void)
+{
+   setenv("FAKE_TMUX_MODE", "prompt_then_answer", 1);
+   char counter[300];
+   snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
+   unlink(counter);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   assert(rc == 0);
+   assert(strcmp(buf, "{\"ok\":true}") == 0);
 }
 
 static void test_recv_dead_session(void)
@@ -1034,6 +1055,10 @@ int main(void)
 
    printf("test_recv_ok_on_stable_pane... ");
    test_recv_ok_on_stable_pane();
+   printf("OK\n");
+
+   printf("test_recv_does_not_return_static_prompt_as_answer... ");
+   test_recv_does_not_return_static_prompt_as_answer();
    printf("OK\n");
 
    printf("test_recv_dead_session... ");

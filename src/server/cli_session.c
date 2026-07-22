@@ -1014,6 +1014,8 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    long long start = mono_ms();
    int err_active = 0;      /* 1 once the pane is in a provider-error state */
    long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
+   int saw_answer = 0;
+   int marker_cli = strstr(s->cli_kind, "claude") != NULL || strstr(s->cli_kind, "codex") != NULL;
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
 
@@ -1101,6 +1103,18 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       if (cli_session_capture(s, cap, sizeof(cap)) != 0)
          continue;
 
+      /* A freshly pasted prompt can leave the pane static for several polls
+       * before the CLI begins inference. It is user/composer text, not a reply.
+       * Remember whether a known TUI has ever rendered a new assistant marker;
+       * completion below must not return the baseline delta until that happens.
+       * Once seen, the marker may scroll off a long answer, so retain the bit. */
+      if (marker_cli && !saw_answer)
+      {
+         char *marked = cli_extract_impl(cap, s->cli_kind, s->baseline, 0);
+         saw_answer = marked && marked[0];
+         free(marked);
+      }
+
       /* Stream the clean answer's growth as it is produced: extract this turn's
        * response so far and emit only the newly appended suffix. */
       if (g_stream_cb)
@@ -1187,6 +1201,11 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
             }
             else
             {
+               if (marker_cli && !saw_answer)
+               {
+                  stable = 0;
+                  continue;
+               }
                char *resp = cli_session_extract_response(cap, s->cli_kind, s->baseline);
                snprintf(out, out_max, "%s", resp ? resp : "");
                free(resp);
