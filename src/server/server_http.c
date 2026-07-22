@@ -52,7 +52,6 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-#define SHTTP_READ_MAX 8192
 /* Max request body. The OpenAI/Codex Responses surface sends large bodies — a
  * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
  * conversation/tool-call history (175KB+ and growing), so the cap must be well
@@ -364,26 +363,6 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
 int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
 {
    return !is_tcp || mtls_mode < 2 || mtls_authenticated;
-}
-
-static int management_health_route(const char *method, const char *path)
-{
-   return method && path &&
-          ((!strcmp(method, "POST") && !strcmp(path, "/v1/management/challenge")) ||
-           (!strcmp(method, "GET") && !strcmp(path, "/v1/management/health")));
-}
-
-server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
-                                                          int verified_peer, int management_profile,
-                                                          const char *peer_cn)
-{
-   int route = management_health_route(method, path);
-   int profile = verified_peer && management_profile;
-   if (route)
-      return profile && peer_cn && strcmp(peer_cn, "p5-kb-management") == 0
-                 ? SERVER_HTTP_MANAGEMENT_ALLOW
-                 : SERVER_HTTP_MANAGEMENT_DENY;
-   return profile ? SERVER_HTTP_MANAGEMENT_DENY : SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE;
 }
 
 /* Routes deliberately reachable over the TCP listener regardless of
@@ -1062,17 +1041,23 @@ int server_http_route(const char *method, const char *path, const char *body, in
 
 /* ── socket listener ────────────────────────────────────────────────────── */
 
-static int g_listen_fd = -1;    /* UDS listener (always bound) */
-static int g_tcp_fd = -1;       /* optional localhost TCP listener */
-static int g_tls_fd = -1;       /* optional native-TLS listener (phase 1b) */
-static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
-static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
-static int g_remote_writes = 0; /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+static int g_listen_fd = -1;         /* UDS listener (always bound) */
+static int g_tcp_fd = -1;            /* optional localhost TCP listener */
+static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) */
+static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
+static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
+static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
+static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock =
     PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
 static pthread_t g_thread;
-static volatile int g_running = 0;
+static atomic_int g_running = 0;
+static int g_thread_active = 0;
+/* Serializes listener publication and teardown. In particular, start cannot
+ * reuse a just-closed fd until the old accept loop has observed its stop and
+ * exited. */
+static pthread_mutex_t g_listener_lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
 
 const char *server_http_default_path(void)
 {
@@ -1474,7 +1459,7 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
-void handle_conn(int fd, int is_tcp)
+void handle_conn(int fd, int is_tcp, int is_management)
 {
    char buf[SHTTP_READ_MAX];
    int total = 0;
@@ -1489,6 +1474,14 @@ void handle_conn(int fd, int is_tcp)
          break;
    }
    buf[total] = '\0';
+
+   /* The dedicated lane never classifies or dispatches an unterminated or
+    * header-overflow request. Generic listeners retain their legacy parser. */
+   if (is_management && !strstr(buf, "\r\n\r\n"))
+   {
+      send_response(fd, 400, "{\"error\":\"bad management request\"}", NULL);
+      return;
+   }
 
    char method[16] = {0};
    char path[512] = {0};
@@ -1537,6 +1530,17 @@ void handle_conn(int fd, int is_tcp)
                              request_id, sizeof(request_id));
    }
 
+   /* The management lane rejects malformed/ambiguous framing before peer
+    * classification, so authorization results cannot become a parser oracle. */
+   if (is_management &&
+       (!server_http_management_request_syntax_valid(method, path, buf, (size_t)total) ||
+        (server_http_management_health_route(method, path) &&
+         !server_http_management_framing_valid(method, path, buf, (size_t)total))))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
+      return;
+   }
+
    /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
     * durable roster row before the bearer gate so required-mode clients do not
     * still depend on the shared bearer. This remains authentication only: the
@@ -1544,74 +1548,78 @@ void handle_conn(int fd, int is_tcp)
    int mtls_authenticated = 0;
    int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
+   char rc_cn[256] = "", rc_serial[80] = "";
+   int have_verified_peer = 0;
+   int have_management_peer = 0;
+   server_tls_peer_cert_t management_peer;
+   memset(&management_peer, 0, sizeof(management_peer));
    if (server_conn_io_has_ssl(fd))
    {
-      char rc_cn[256] = "", rc_serial[80] = "";
       SSL *request_ssl = server_conn_io_get_ssl(fd);
-      int have_verified_peer =
+      have_verified_peer =
           server_tls_peer_identity(request_ssl, rc_cn, sizeof(rc_cn), rc_serial, sizeof(rc_serial));
-      server_tls_peer_cert_t management_peer;
-      memset(&management_peer, 0, sizeof(management_peer));
-      int have_management_peer =
+      have_management_peer =
           have_verified_peer && server_tls_peer_cert(request_ssl, &management_peer) == 1;
-      server_http_management_auth_t management_auth =
-          server_http_management_auth(method, path, have_management_peer,
-                                      management_peer.management_profile, management_peer.cn);
-      if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
+   }
+   server_http_management_auth_t management_auth =
+       server_http_management_auth(method, path, is_management, have_management_peer,
+                                   management_peer.management_profile, management_peer.cn);
+   if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
+   {
+      int status = server_http_management_health_route(method, path) ? 401 : 403;
+      send_response(fd, status,
+                    status == 401 ? "{\"error\":{\"message\":\"a verified management client "
+                                    "certificate is required on the management listener\",\"type\":"
+                                    "\"authentication_error\"}}"
+                                  : "{\"error\":{\"message\":\"management transport is not "
+                                    "authorized for this route\",\"type\":\"permission_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> %d (management transport) req_id=%s", method, path, status,
+               request_id);
+      return;
+   }
+   if (management_auth == SERVER_HTTP_MANAGEMENT_ALLOW)
+   {
+      management_authenticated = 1;
+   }
+   else if (have_verified_peer && rc_serial[0])
+   {
+      pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
+      if (cs != PKI_CERT_VALID)
       {
-         int status = management_health_route(method, path) ? 401 : 403;
-         send_response(fd, status,
-                       status == 401
-                           ? "{\"error\":{\"message\":\"a verified management client "
-                             "certificate is required\",\"type\":\"authentication_error\"}}"
-                           : "{\"error\":{\"message\":\"management client certificate is "
-                             "not authorized for this route\",\"type\":\"permission_error\"}}",
+         LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
+                  path, pki_cert_status_str(cs), rc_serial, request_id);
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"client certificate is no longer valid "
+                       "(revoked, expired, or unrecognized)\",\"type\":"
+                       "\"authentication_error\"}}",
                        request_id);
-         LOG_INFO("server.http", "%s %s -> %d (management transport) req_id=%s", method, path,
-                  status, request_id);
          return;
       }
-      if (management_auth == SERVER_HTTP_MANAGEMENT_ALLOW)
-         management_authenticated = 1;
-      else if (have_verified_peer && rc_serial[0])
+      mtls_authenticated = 1;
+      /* Presentation writes are migration-only. Once required, the durable
+       * roster is still checked above but the steady-state request path does
+       * not take DB1's write gate or recompute the whole roster hash. */
+      if (mtls_mode == 1)
       {
-         pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
-         if (cs != PKI_CERT_VALID)
+         long ramp_now = (long)time(NULL);
+         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
+         else if (pki_mtls_ramp_ready(ramp_now) == 1)
          {
-            LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
-                     path, pki_cert_status_str(cs), rc_serial, request_id);
-            send_response(
-                fd, 403,
-                "{\"error\":{\"message\":\"client certificate is no longer valid "
-                "(revoked, expired, or unrecognized)\",\"type\":\"authentication_error\"}}",
-                request_id);
-            return;
-         }
-         mtls_authenticated = 1;
-         /* Presentation writes are migration-only. Once required, the durable
-          * roster is still checked above but the steady-state request path does
-          * not take DB1's write gate or recompute the whole roster hash. */
-         if (mtls_mode == 1)
-         {
-            long ramp_now = (long)time(NULL);
-            if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
-               LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
-            else if (pki_mtls_ramp_ready(ramp_now) == 1)
+            SSL_CTX *prepared = server_tls_prepare_required();
+            if (!prepared)
+               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
+            else
             {
-               SSL_CTX *prepared = server_tls_prepare_required();
-               if (!prepared)
-                  LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
+               int advanced = pki_mtls_ramp_advance(ramp_now);
+               if (advanced == 1)
+                  server_tls_activate_required(prepared);
                else
                {
-                  int advanced = pki_mtls_ramp_advance(ramp_now);
-                  if (advanced == 1)
-                     server_tls_activate_required(prepared);
-                  else
-                  {
-                     server_tls_discard_prepared(prepared);
-                     if (advanced < 0)
-                        LOG_WARN("server.http", "mTLS ramp durable advance failed");
-                  }
+                  server_tls_discard_prepared(prepared);
+                  if (advanced < 0)
+                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
                }
             }
          }
@@ -1704,7 +1712,7 @@ void handle_conn(int fd, int is_tcp)
    /* Per-bearer rate limit on the TCP listener (the UDS listener is local and
     * never throttled). Connections are handled concurrently, so g_rate_state is
     * mutated under g_rate_lock. */
-   if (is_tcp)
+   if (is_tcp && !management_authenticated)
    {
       pthread_mutex_lock(&g_rate_lock);
       int retry = server_http_rate_check(&g_rate_state, g_rate_limit, (long)time(NULL));
@@ -2010,6 +2018,9 @@ void handle_conn(int fd, int is_tcp)
  * thread/fd use; over the cap the connection is handled inline by the accept
  * thread (degrades to serial under overload, never dropped). */
 atomic_int g_conn_live = 0;
+/* Keep management health traffic from exhausting data workers, and vice
+ * versa. Both pools retain the same 32 MiB per-worker stack bound. */
+atomic_int g_management_conn_live = 0;
 
 /* Single accept loop over both listeners: poll the UDS (and the TCP fd when
  * bound), accept whichever is ready, and hand each connection to a per-
@@ -2017,11 +2028,11 @@ atomic_int g_conn_live = 0;
 static void *listener_thread(void *arg)
 {
    (void)arg;
-   while (g_running)
+   while (atomic_load(&g_running))
    {
-      struct pollfd pfds[3];
+      struct pollfd pfds[4];
       int n = 0;
-      int uds_idx = -1, tcp_idx = -1, tls_idx = -1;
+      int uds_idx = -1, tcp_idx = -1, tls_idx = -1, management_idx = -1;
       if (g_listen_fd >= 0)
       {
          pfds[n].fd = g_listen_fd;
@@ -2040,6 +2051,12 @@ static void *listener_thread(void *arg)
          pfds[n].events = POLLIN;
          tls_idx = n++;
       }
+      if (g_management_tls_fd >= 0)
+      {
+         pfds[n].fd = g_management_tls_fd;
+         pfds[n].events = POLLIN;
+         management_idx = n++;
+      }
       if (n == 0)
          break;
 
@@ -2055,28 +2072,36 @@ static void *listener_thread(void *arg)
 
       if (uds_idx >= 0 && (pfds[uds_idx].revents & POLLIN))
       {
-         int fd = accept(g_listen_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 0, 0))
+         int fd = accept(pfds[uds_idx].fd, NULL, NULL);
+         if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
-            handle_conn(fd, 0);
+            handle_conn(fd, 0, 0);
             close(fd);
          }
       }
       if (tcp_idx >= 0 && (pfds[tcp_idx].revents & POLLIN))
       {
-         int fd = accept(g_tcp_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 1, 0))
+         int fd = accept(pfds[tcp_idx].fd, NULL, NULL);
+         if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
-            handle_conn(fd, 1);
+            handle_conn(fd, 1, 0);
             close(fd);
          }
       }
       if (tls_idx >= 0 && (pfds[tls_idx].revents & POLLIN))
       {
-         int fd = accept(g_tls_fd, NULL, NULL);
+         int fd = accept(pfds[tls_idx].fd, NULL, NULL);
          /* TLS conns must run in a worker (the handshake + SSL live there); if the
           * conn cap is hit we drop rather than handle inline (no SSL here). */
-         if (fd >= 0 && !conn_offload(fd, 1, 1))
+         if (fd >= 0 && !conn_offload(fd, 1, 1, 0))
+            close(fd);
+      }
+      if (management_idx >= 0 && (pfds[management_idx].revents & POLLIN))
+      {
+         int fd = accept(pfds[management_idx].fd, NULL, NULL);
+         /* Like data TLS, management TLS must never handshake on the accept
+          * thread. The cap is shared so a second listener cannot double it. */
+         if (fd >= 0 && !conn_offload(fd, 1, 1, 1))
             close(fd);
       }
    }
@@ -2126,11 +2151,63 @@ static int tcp_listen(int tcp_port, const char *bearer_token, int allow_external
    return fd;
 }
 
+static int management_tcp_listen(const server_http_management_config_t *config)
+{
+   if (!config || !config->enabled || config->port < 1 || config->port > UINT16_MAX)
+      return -1;
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   if (fd < 0)
+      return -1;
+   int yes = 1;
+   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+   struct sockaddr_in addr;
+   memset(&addr, 0, sizeof(addr));
+   addr.sin_family = AF_INET;
+   addr.sin_port = htons((uint16_t)config->port);
+   addr.sin_addr.s_addr = config->bind_addr;
+   if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(fd, SHTTP_BACKLOG) < 0)
+   {
+      close(fd);
+      return -1;
+   }
+   return fd;
+}
+
+static void close_listener_fd(int *fd)
+{
+   if (fd && *fd >= 0)
+   {
+      shutdown(*fd, SHUT_RDWR);
+      close(*fd);
+      *fd = -1;
+   }
+}
+
 int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                       int rate_limit_per_min, int remote_writes)
 {
-   if (g_running || g_listen_fd >= 0)
+   pthread_mutex_lock(&g_listener_lifecycle_lock);
+   if (atomic_load(&g_running) || g_thread_active || g_listen_fd >= 0)
+   {
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return -1;
+   }
+   server_http_management_config_t management;
+   if (server_http_management_config_from_env(&management) != 0)
+   {
+      LOG_ERROR("server.http", "invalid or partial dedicated management listener configuration");
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return SERVER_HTTP_START_MGMT_FATAL;
+   }
+   if (management.enabled &&
+       server_tls_management_init(management.cert, management.key, management.client_ca) != 0)
+   {
+      server_http_management_set_error("management TLS certificate/key/CA");
+      LOG_ERROR("server.http", "dedicated management TLS configuration is not loadable");
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return SERVER_HTTP_START_MGMT_FATAL;
+   }
+   int listener_failure = management.enabled ? SERVER_HTTP_START_MGMT_FATAL : -1;
    if (!uds_path || !uds_path[0])
       uds_path = server_http_default_path();
 
@@ -2142,13 +2219,17 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    unlink(uds_path);
    g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
    if (g_listen_fd < 0)
-      return -1;
+   {
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
+   }
    if (bind(g_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
        listen(g_listen_fd, SHTTP_BACKLOG) < 0)
    {
       close(g_listen_fd);
       g_listen_fd = -1;
-      return -1;
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
    }
 
    /* Optional localhost TCP listener for OpenAI-style external tools. */
@@ -2175,7 +2256,24 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                    tls_port);
    }
 
-   g_running = 1;
+   if (management.enabled)
+   {
+      g_management_tls_fd = management_tcp_listen(&management);
+      if (g_management_tls_fd < 0)
+      {
+         server_http_management_set_error("management listener bind");
+         LOG_ERROR("server.http", "failed to bind dedicated management listener on %s:%d",
+                   management.bind, management.port);
+         close_listener_fd(&g_tls_fd);
+         close_listener_fd(&g_tcp_fd);
+         close_listener_fd(&g_listen_fd);
+         unlink(uds_path);
+         pthread_mutex_unlock(&g_listener_lifecycle_lock);
+         return SERVER_HTTP_START_MGMT_FATAL;
+      }
+   }
+
+   atomic_store(&g_running, 1);
    /* The listener thread runs dispatch-backed /v1 routes inline (rh_dispatch_op
     * -> loopback_rpc -> server_dispatch -> handler), whose call chains carry
     * large on-stack frames. The glibc default thread stack (~8 MB, NOT widened
@@ -2194,7 +2292,9 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_attr_destroy(lattr_p);
    if (prc != 0)
    {
-      g_running = 0;
+      if (management.enabled)
+         server_http_management_set_error("management listener thread");
+      atomic_store(&g_running, 0);
       close(g_listen_fd);
       g_listen_fd = -1;
       if (g_tcp_fd >= 0)
@@ -2202,38 +2302,49 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
          close(g_tcp_fd);
          g_tcp_fd = -1;
       }
+      close_listener_fd(&g_tls_fd);
+      close_listener_fd(&g_management_tls_fd);
       unlink(uds_path);
-      return -1;
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
    }
-   pthread_detach(g_thread);
+   g_thread_active = 1;
    /* The TLS listener (when up) logs its own "native TLS enabled" line from server_tls. */
    if (g_tcp_fd >= 0)
       LOG_INFO("server.http", "HTTP /v1 on %s and 127.0.0.1:%d (bearer, loopback only)", uds_path,
                tcp_port);
    else
       LOG_INFO("server.http", "HTTP /v1 on %s", uds_path);
+   if (g_management_tls_fd >= 0)
+      LOG_INFO("server.http", "dedicated management mTLS on %s:%d", management.bind,
+               management.port);
+   pthread_mutex_unlock(&g_listener_lifecycle_lock);
    return 0;
 }
 
 void server_http_stop(void)
 {
-   g_running = 0;
+   pthread_mutex_lock(&g_listener_lifecycle_lock);
+   atomic_store(&g_running, 0);
+   /* Wake poll/accept without releasing descriptor numbers yet. Closing first
+    * would let an unrelated thread reuse a number while the old accept loop
+    * still holds it in its poll snapshot. */
    if (g_listen_fd >= 0)
-   {
       shutdown(g_listen_fd, SHUT_RDWR);
-      close(g_listen_fd);
-      g_listen_fd = -1;
-   }
    if (g_tcp_fd >= 0)
-   {
       shutdown(g_tcp_fd, SHUT_RDWR);
-      close(g_tcp_fd);
-      g_tcp_fd = -1;
-   }
    if (g_tls_fd >= 0)
-   {
       shutdown(g_tls_fd, SHUT_RDWR);
-      close(g_tls_fd);
-      g_tls_fd = -1;
+   if (g_management_tls_fd >= 0)
+      shutdown(g_management_tls_fd, SHUT_RDWR);
+   if (g_thread_active)
+   {
+      pthread_join(g_thread, NULL);
+      g_thread_active = 0;
    }
+   close_listener_fd(&g_listen_fd);
+   close_listener_fd(&g_tcp_fd);
+   close_listener_fd(&g_tls_fd);
+   close_listener_fd(&g_management_tls_fd);
+   pthread_mutex_unlock(&g_listener_lifecycle_lock);
 }

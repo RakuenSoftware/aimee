@@ -622,24 +622,152 @@ int main(void)
     *     nonce/status routes have no generic cert/bearer fallback, while a
     *     management-profile leaf cannot escape onto any other route. --- */
    {
-      assert(server_http_management_auth("POST", "/v1/management/challenge", 1, 1,
+      assert(server_http_management_auth("POST", "/v1/management/challenge", 1, 1, 1,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
-      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1,
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 1,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
-      assert(server_http_management_auth("GET", "/v1/management/health", 0, 0, NULL) ==
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 0, 0, NULL) ==
              SERVER_HTTP_MANAGEMENT_DENY);
-      assert(server_http_management_auth("GET", "/v1/management/health", 1, 0,
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 0,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
-      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, "generic-client") ==
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, 1,
+                                         "generic-client") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 1, 1, 1, "p5-kb-management") ==
              SERVER_HTTP_MANAGEMENT_DENY);
-      assert(server_http_management_auth("GET", "/v1/health", 1, 1, "p5-kb-management") ==
-             SERVER_HTTP_MANAGEMENT_DENY);
-      assert(server_http_management_auth("POST", "/v1/management/action", 1, 1,
+      assert(server_http_management_auth("POST", "/v1/management/action", 1, 1, 1,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
-      assert(server_http_management_auth("GET", "/v1/health", 1, 0, "generic-client") ==
+      assert(server_http_management_auth("GET", "/v1/health", 0, 1, 0, "generic-client") ==
              SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE);
-      assert(server_http_management_auth("POST", "/v1/management/health", 1, 1,
+      assert(server_http_management_auth("POST", "/v1/management/health", 1, 1, 1,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      /* Cross-lane denial is unconditional: neither the exact management leaf
+       * on data TLS nor a bearer/UDS request can reach these handlers. */
+      assert(server_http_management_auth("POST", "/v1/management/challenge", 0, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 0, 0, 0, NULL) ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 0, 1, 1, "p5-kb-management") ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+   }
+
+   /* --- Dedicated management environment packet and bind policy. --- */
+   {
+      static const char *const vars[] = {
+          "AIMEE_SERVER_MGMT_BIND",    "AIMEE_SERVER_MGMT_PORT",       "AIMEE_SERVER_MGMT_TLS_CERT",
+          "AIMEE_SERVER_MGMT_TLS_KEY", "AIMEE_SERVER_MGMT_CLIENT_CA",  "AIMEE_SERVER_ID",
+          "AIMEE_MGMT_STATUS_KEY_ID",  "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+      };
+      for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
+         unsetenv(vars[i]);
+      server_http_management_config_t mc;
+      assert(server_http_management_config_from_env(&mc) == 0 && !mc.enabled);
+      uint32_t bind_addr = 0;
+      assert(server_http_management_bind_addr("127.0.0.1", &bind_addr) == 0);
+      assert(bind_addr == htonl(INADDR_LOOPBACK));
+      assert(server_http_management_bind_addr("0.0.0.0", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("255.255.255.255", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("169.254.1.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("224.0.0.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("127.000.0.1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("localhost", &bind_addr) == -1);
+      assert(server_http_management_bind_addr("::1", &bind_addr) == -1);
+      assert(server_http_management_bind_addr(NULL, &bind_addr) == -1);
+      assert(server_http_management_bind_addr("127.0.0.1", NULL) == -1);
+
+      setenv("AIMEE_SERVER_MGMT_BIND", "127.0.0.1", 1);
+      assert(server_http_management_config_from_env(&mc) == -1); /* partial */
+      setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
+      setenv("AIMEE_SERVER_MGMT_TLS_CERT", "/etc/aimee/management/server.pem", 1);
+      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
+      setenv("AIMEE_SERVER_MGMT_CLIENT_CA", "/etc/aimee/management/client-ca.pem", 1);
+      setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);
+      setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-v1", 1);
+      setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled && mc.port == 9443);
+      assert(strcmp(mc.bind, "127.0.0.1") == 0);
+      assert(strcmp(mc.cert, "/etc/aimee/management/server.pem") == 0);
+      unsetenv("AIMEE_SERVER_MGMT_BIND");
+      assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled);
+      assert(strcmp(mc.bind, "127.0.0.1") == 0);
+      setenv("AIMEE_SERVER_MGMT_BIND", "127.0.0.1", 1);
+
+      const char *bad_ports[] = {"", "0", "09443", "+9443", "65536", "9443x"};
+      for (size_t i = 0; i < sizeof(bad_ports) / sizeof(bad_ports[0]); i++)
+      {
+         setenv("AIMEE_SERVER_MGMT_PORT", bad_ports[i], 1);
+         assert(server_http_management_config_from_env(&mc) == -1);
+      }
+      setenv("AIMEE_SERVER_MGMT_PORT", "9443", 1);
+      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "relative.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/../server.key", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
+      setenv("AIMEE_SERVER_ID", "bad/server", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);
+      setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
+             "A123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
+         unsetenv(vars[i]);
+   }
+
+   /* --- Management requests use one exact, bodyless HTTP/1.1 frame. --- */
+   {
+      const char challenge[] = "POST /v1/management/challenge HTTP/1.1\r\nHost: server.test\r\n"
+                               "Content-Type: application/json\r\nContent-Length: 0\r\n"
+                               "Connection: keep-alive\r\n\r\n";
+      const char health[] = "GET /v1/management/health HTTP/1.1\r\nHost: server.test\r\n"
+                            "X-Aimee-Management-Status: staple\r\n"
+                            "Content-Type: application/json\r\nContent-Length: 0\r\n"
+                            "Connection: keep-alive\r\n\r\n";
+      assert(server_http_management_framing_valid("POST", "/v1/management/challenge", challenge,
+                                                  strlen(challenge)) == 1);
+      assert(server_http_management_framing_valid("GET", "/v1/management/health", health,
+                                                  strlen(health)) == 1);
+      const char duplicate[] = "GET /v1/management/health HTTP/1.1\r\nContent-Length: 0\r\n"
+                               "Content-Length: 0\r\n\r\n";
+      const char duplicate_status[] =
+          "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n"
+          "X-Aimee-Management-Status: one\r\nX-Aimee-Management-Status: two\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char transfer[] = "GET /v1/management/health HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
+                              "Content-Length: 0\r\n\r\n";
+      const char expect[] = "GET /v1/management/health HTTP/1.1\r\nExpect: 100-continue\r\n"
+                            "Content-Length: 0\r\n\r\n";
+      const char upgrade[] = "GET /v1/management/health HTTP/1.1\r\nUpgrade: websocket\r\n"
+                             "Content-Length: 0\r\n\r\n";
+      const char connection_upgrade[] =
+          "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n"
+          "X-Aimee-Management-Status: staple\r\nContent-Type: application/json\r\n"
+          "Content-Length: 0\r\nConnection: Upgrade\r\n\r\n";
+      const char body[] = "POST /v1/management/challenge HTTP/1.1\r\nContent-Length: 1\r\n\r\nx";
+      const char no_length[] = "GET /v1/management/health HTTP/1.1\r\nHost: x\r\n\r\n";
+      const char query[] = "GET /v1/management/health?x=1 HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+      const char lf[] = "GET /v1/management/health HTTP/1.1\nContent-Length: 0\n\n";
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", duplicate,
+                                                   strlen(duplicate)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", duplicate_status,
+                                                   strlen(duplicate_status)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", transfer,
+                                                   strlen(transfer)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", expect,
+                                                   strlen(expect)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", upgrade,
+                                                   strlen(upgrade)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health",
+                                                   connection_upgrade, strlen(connection_upgrade)));
+      assert(!server_http_management_framing_valid("POST", "/v1/management/challenge", body,
+                                                   strlen(body)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", no_length,
+                                                   strlen(no_length)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", query,
+                                                   strlen(query)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", lf, strlen(lf)));
+      assert(!server_http_management_framing_valid("GET", "/v1/management/health", health,
+                                                   strlen(health) - 1));
    }
 
    /* --- typed SSE framing: embedded newlines become repeated data: lines --- */

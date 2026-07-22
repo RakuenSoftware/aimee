@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define SERVER_HTTP_MGMT_PATH_MAX    4096
+#define SERVER_HTTP_START_MGMT_FATAL (-2)
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -30,6 +33,28 @@ extern "C"
    int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char *repo,
                       const char *submitter, struct cJSON **out, char *err, size_t errlen);
 
+   typedef struct
+   {
+      int enabled;
+      int port;
+      uint32_t bind_addr;
+      char bind[16];
+      char cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char key[SERVER_HTTP_MGMT_PATH_MAX];
+      char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
+   } server_http_management_config_t;
+
+   /* Parse the all-or-none dedicated-management listener environment packet.
+    * Returns 0 for a valid disabled or enabled packet, -1 for partial/malformed
+    * configuration. No file is opened here; TLS initialization owns that check. */
+   int server_http_management_config_from_env(server_http_management_config_t *out);
+   const char *server_http_management_last_error(void);
+
+   /* Pure strict helpers used by startup/request tests. */
+   int server_http_management_bind_addr(const char *text, uint32_t *out);
+   int server_http_management_framing_valid(const char *method, const char *path,
+                                            const char *request, size_t request_len);
+
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;
     * filesystem-permission auth, no token) is always bound. When tcp_port > 0
@@ -37,7 +62,9 @@ extern "C"
     * also bound and gated by `Authorization: Bearer <bearer_token>`; a
     * configured port with no bearer is refused (UDS still binds). Returns 0 if
     * the UDS bound, -1 on error. Idempotent-safe: a second call while running
-    * returns -1. rate_limit_per_min caps authorized TCP requests per 60s
+    * returns -1. A configured management-listener failure returns the distinct
+    * SERVER_HTTP_START_MGMT_FATAL so the process can fail closed. rate_limit_per_min caps
+    * authorized TCP requests per 60s
     * window (0 = unlimited); over-limit ⇒ 429 + Retry-After. */
    int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                          int rate_limit_per_min, int remote_writes);
@@ -129,7 +156,7 @@ extern "C"
       SERVER_HTTP_MANAGEMENT_DENY = 2
    } server_http_management_auth_t;
    server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
-                                                             int verified_peer,
+                                                             int management_lane, int verified_peer,
                                                              int management_profile,
                                                              const char *peer_cn);
 

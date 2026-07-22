@@ -6,11 +6,16 @@
 #include <stdatomic.h>
 #include "cJSON.h"
 #include "persona.h"
+#define SHTTP_READ_MAX 8192
 /* Cross-TU declarations for the server_http cluster (server_http.c + the .c files
  * split out of it: conn_worker / sse / response / config_routes). Formerly these
  * were file-local statics shared by textual .inc inclusion. */
 /* promoted cross-TU (former .inc statics) */
-int conn_offload(int fd, int is_tcp, int is_tls);
+int conn_offload(int fd, int is_tcp, int is_tls, int is_management);
+int server_http_management_health_route(const char *method, const char *path);
+int server_http_management_request_syntax_valid(const char *method, const char *path,
+                                                const char *request, size_t request_len);
+void server_http_management_set_error(const char *error);
 cJSON *persona_to_json(const persona_t *p);
 void request_id_header(char *dst, size_t n, const char *request_id);
 void retrieval_event_header(char *dst, size_t n);
@@ -33,14 +38,17 @@ void send_response(int fd, int status, const char *body, const char *request_id)
 void handle_session_events(int fd, const char *id_in, const char *request_id);
 
 extern atomic_int g_conn_live;
-#define CONN_LIVE_MAX 64
+extern atomic_int g_management_conn_live;
+#define CONN_LIVE_MAX            64
+#define CONN_MANAGEMENT_LIVE_MAX 16
 typedef struct
 {
    int fd;
    int is_tcp;
    int is_tls;
+   int is_management;
 } conn_job_t;
-void handle_conn(int fd, int is_tcp);
+void handle_conn(int fd, int is_tcp, int is_management);
 /* promoted cross-TU (former .inc statics) */
 int emit(char *resp, int cap, cJSON *obj);
 int err_json(char *resp, int cap, int status, const char *msg);
