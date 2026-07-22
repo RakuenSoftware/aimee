@@ -2219,8 +2219,39 @@ static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *r
    close(sv[1]);
 }
 
+/* Read one Content-Length-framed response without waiting for connection close. */
+static int mtls_read_response(SSL *ssl, char *resp, size_t cap)
+{
+   size_t total = 0, expected = 0;
+   while (total + 1 < cap)
+   {
+      int n = SSL_read(ssl, resp + total, (int)(cap - total - 1));
+      if (n <= 0)
+         return -1;
+      total += (size_t)n;
+      resp[total] = '\0';
+      char *head_end = strstr(resp, "\r\n\r\n");
+      if (head_end && !expected)
+      {
+         char *length = strstr(resp, "Content-Length: ");
+         if (!length || length > head_end)
+            return -1;
+         expected = (size_t)(head_end + 4 - resp) + strtoul(length + 16, NULL, 10);
+         if (expected >= cap)
+            return -1;
+      }
+      if (expected && total >= expected)
+      {
+         resp[expected] = '\0';
+         return (int)expected;
+      }
+   }
+   return -1;
+}
+
 static void test_mtls_serve(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
    assert(kb_pki_ca_generate(&ca) == 0);
    char scert[KB_PKI_CERT_PEM_MAX], skey[KB_PKI_KEY_PEM_MAX];
@@ -2240,6 +2271,48 @@ static void test_mtls_serve(void)
                 resp, sizeof(resp));
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
+   assert(strstr(resp, "Connection: close"));
+
+   /* HTTP/1.1 stays reusable by default. The certificate authority is checked
+    * again for request N+1, so revocation takes effect before its route runs. */
+   {
+      int sv[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+      mtls_serve_arg_t sa = {sctx, sv[0]};
+      pthread_t th;
+      assert(pthread_create(&th, NULL, mtls_serve_thread, &sa) == 0);
+      SSL *c = SSL_new(cctx);
+      assert(c);
+      SSL_set_fd(c, sv[1]);
+      assert(SSL_connect(c) == 1);
+      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "200 OK") && strstr(resp, "Connection: keep-alive"));
+
+      test_kb_enrollment_authority_set(0);
+      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, second, (int)strlen(second)) == (int)strlen(second));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "403 Forbidden") && strstr(resp, "Connection: close"));
+      assert(!strstr(resp, "\"status\":\"ok\""));
+      test_kb_enrollment_authority_set(1);
+      SSL_shutdown(c);
+      SSL_free(c);
+      pthread_join(th, NULL);
+      close(sv[0]);
+      close(sv[1]);
+   }
+
+   /* Pipelining remains fail-closed: callers must wait for each response. */
+   mtls_request(sctx, cctx,
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n"
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request(sctx, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\rX-Test: no\r\n\r\n", resp,
+                sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
 
    /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
     * request target, and 64 KiB total request head+body. */
