@@ -618,6 +618,30 @@ int main(void)
       unsetenv("AIMEE_API_BEARER_TOKEN");
    }
 
+   /* --- P5-B3b dedicated management transport classification. The two
+    *     nonce/status routes have no generic cert/bearer fallback, while a
+    *     management-profile leaf cannot escape onto any other route. --- */
+   {
+      assert(server_http_management_auth("POST", "/v1/management/challenge", 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/health", 0, 0, NULL) ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 0,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/management/health", 1, 1, "generic-client") ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 1, 1, "p5-kb-management") ==
+             SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("POST", "/v1/management/action", 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+      assert(server_http_management_auth("GET", "/v1/health", 1, 0, "generic-client") ==
+             SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE);
+      assert(server_http_management_auth("POST", "/v1/management/health", 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+   }
+
    /* --- typed SSE framing: embedded newlines become repeated data: lines --- */
    {
       char frame[256];

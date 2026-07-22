@@ -1149,12 +1149,12 @@ static void test_panel_does_not_implicitly_exclude_primary(void)
    assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "claude") == 0);
 
-   /* Unpinned capacity filling includes every eligible review agent. */
+   /* An unconfigured/direct panel is bounded to two diverse agents. */
    config_t seed_cfg;
    memset(&seed_cfg, 0, sizeof(seed_cfg));
    snprintf(seed_cfg.provider, sizeof(seed_cfg.provider), "claude");
-   ensemble_fill_panel_capacity(&seed_cfg, &acfg);
-   assert(seed_cfg.ensemble_reference_count == 9); /* default max_parallel=3 each */
+   ensemble_fill_implicit_panel(&seed_cfg, &acfg);
+   assert(seed_cfg.ensemble_reference_count == 2);
    assert(strcmp(seed_cfg.ensemble_reference_models[0], "codex") == 0);
 
    printf("  test_panel_does_not_implicitly_exclude_primary: ok\n");
@@ -1217,7 +1217,7 @@ static void test_specific_panel_pin_is_hard_requirement(void)
    printf("  test_specific_panel_pin_is_hard_requirement: ok\n");
 }
 
-static void test_panel_fills_every_agent_capacity_diversity_first(void)
+static void test_implicit_panel_ignores_legacy_roster_and_caps_two(void)
 {
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
@@ -1239,7 +1239,7 @@ static void test_panel_fills_every_agent_capacity_diversity_first(void)
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   /* A configured MiniMax seat is a must-use pin, not an exclusion of codex. */
+   /* Legacy ensemble fields do not authorize a larger/direct panel. */
    cfg.ensemble_reference_count = 1;
    cfg.ensemble_reference_persona_count = 1;
    snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]),
@@ -1248,33 +1248,57 @@ static void test_panel_fills_every_agent_capacity_diversity_first(void)
             "security");
    snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "MiniMax-M3");
 
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   ensemble_filter_panel_availability(&cfg, &acfg);
-   ensemble_fill_panel_capacity(&cfg, &acfg);
+   ensemble_fill_implicit_panel(&cfg, &acfg);
 
-   assert(cfg.ensemble_reference_count == 14);
-   assert(strcmp(cfg.ensemble_reference_models[0], "MiniMax-M3") == 0);
-   assert(strcmp(cfg.ensemble_reference_personas[0], "security") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "MiniMax-M3") == 0);
-   /* Diversity pass seats codex before any repeated provider seat. */
-   assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
-   int codex_count = 0, minimax_count = 0;
-   for (int i = 0; i < cfg.ensemble_reference_count; i++)
-   {
-      if (strcmp(cfg.ensemble_reference_models[i], "codex") == 0)
-         codex_count++;
-      if (strcmp(cfg.ensemble_reference_models[i], "MiniMax-M3") == 0)
-         minimax_count++;
-   }
-   assert(codex_count == 10);
-   assert(minimax_count == 4);
+   assert(cfg.ensemble_reference_count == 2);
+   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "MiniMax-M3") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "codex") == 0);
 
    reset_modes();
    delegate_ensemble_result_t result;
    assert(delegate_ensemble_run(&acfg, &cfg, "exercise every filled panel seat", &result) == 0);
-   assert(result.participants_total == 14);
+   assert(result.participants_total == 2);
    assert(result.participants_failed == 0);
-   printf("  test_panel_fills_every_agent_capacity_diversity_first: ok\n");
+   printf("  test_implicit_panel_ignores_legacy_roster_and_caps_two: ok\n");
+}
+
+static void test_configured_random_seats_fill_balanced_capacity(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof acfg);
+   acfg.agent_count = 2;
+   const char *names[] = {"codex", "minimax"};
+   const char *providers[] = {"openai", "minimax"};
+   const int capacities[] = {3, 2};
+   for (int i = 0; i < acfg.agent_count; i++)
+   {
+      agent_t *ag = &acfg.agents[i];
+      ag->enabled = 1;
+      ag->max_parallel = capacities[i];
+      snprintf(ag->name, sizeof ag->name, "%s", names[i]);
+      snprintf(ag->provider, sizeof ag->provider, "%s", providers[i]);
+      snprintf(ag->roles[0], sizeof ag->roles[0], "review");
+      ag->role_count = 1;
+   }
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   cfg.ensemble_reference_count = 5;
+   cfg.ensemble_reference_persona_count = 5;
+   for (int i = 0; i < cfg.ensemble_reference_count; i++)
+      snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i],
+               "$random");
+
+   ensemble_resolve_random_seats(&cfg, &acfg);
+
+   assert(cfg.ensemble_reference_count == 5);
+   assert(strcmp(cfg.ensemble_reference_models[0], "codex") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "minimax") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[2], "codex") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[3], "minimax") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[4], "codex") == 0);
+   printf("  test_configured_random_seats_fill_balanced_capacity: ok\n");
 }
 
 static void test_panel_prioritizes_distinct_providers(void)
@@ -1297,11 +1321,10 @@ static void test_panel_prioritizes_distinct_providers(void)
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   ensemble_fill_panel_capacity(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 3);
+   ensemble_fill_implicit_panel(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
    assert(strcmp(cfg.ensemble_reference_models[0], "anthropic-a") == 0);
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[2], "anthropic-b") == 0);
    printf("  test_panel_prioritizes_distinct_providers: ok\n");
 }
 
@@ -1324,13 +1347,12 @@ static void test_panel_treats_providerless_agents_as_distinct(void)
 
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   ensemble_fill_panel_capacity(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 3);
+   ensemble_fill_implicit_panel(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
    /* An absent provider is scoped to the agent name, so unrelated legacy
     * agents are both represented during the provider-diversity pass. */
    assert(strcmp(cfg.ensemble_reference_models[0], "legacy-a") == 0);
    assert(strcmp(cfg.ensemble_reference_models[1], "legacy-b") == 0);
-   assert(strcmp(cfg.ensemble_reference_models[2], "codex") == 0);
    printf("  test_panel_treats_providerless_agents_as_distinct: ok\n");
 }
 
@@ -1819,7 +1841,8 @@ int main(void)
    test_panel_does_not_implicitly_exclude_primary();
    test_panel_filter_drops_unavailable();
    test_specific_panel_pin_is_hard_requirement();
-   test_panel_fills_every_agent_capacity_diversity_first();
+   test_implicit_panel_ignores_legacy_roster_and_caps_two();
+   test_configured_random_seats_fill_balanced_capacity();
    test_panel_prioritizes_distinct_providers();
    test_panel_treats_providerless_agents_as_distinct();
    test_panel_persona_name_assignment();

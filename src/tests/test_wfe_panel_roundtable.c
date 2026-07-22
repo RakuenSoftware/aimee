@@ -112,6 +112,23 @@ int main(void)
       assert(v[0].kind == WFE_V_REQUEST_CHANGES && v[1].kind == WFE_V_REQUEST_CHANGES);
    }
 
+   /* Lenses are verdict dimensions, not seats. A configured table may have
+    * fewer seats than the workflow has lenses, so round-robin attribution can
+    * deliberately assign one seated agent to multiple lenses. Every assigned
+    * lens must receive that agent's finding without creating another seat. */
+   {
+      static const char *lens[3] = {"security", "qa", "architecture"};
+      static const char *seat[3] = {"codex", "mimo", "codex"};
+      reset_aligned(rt);
+      add_item(rt, "blocking", "src/a.c:2", "shared-seat defect", "codex");
+      wfe_verdict_t v[3];
+      assert(wfe_panel_verdicts_from_roundtable(rt, lens, seat, 3, "H", dir, v) == 3);
+      assert(v[0].kind == WFE_V_REQUEST_CHANGES && v[0].high_sev_blockers == 1);
+      assert(v[1].kind == WFE_V_APPROVE && v[1].high_sev_blockers == 0);
+      assert(v[2].kind == WFE_V_REQUEST_CHANGES && v[2].high_sev_blockers == 1);
+      assert(strcmp(v[0].model, "codex") == 0 && strcmp(v[2].model, "codex") == 0);
+   }
+
    /* attribution is a token compare: agent "mimo" never matches "mimo-pro" */
    {
       reset_aligned(rt);

@@ -103,13 +103,13 @@ static int send_mcp_result_structured(server_conn_t *conn, cJSON *content, cJSON
    return server_send_ok(conn, resp);
 }
 
-static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
+static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
 {
    cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
    if (!cJSON_IsString(diff) || !diff->valuestring || !diff->valuestring[0])
-      return server_send_error(conn, "ensemble_review requires 'diff'", NULL);
+      return server_send_error(conn, "roundtable_review requires 'diff'", NULL);
    if (strlen(diff->valuestring) < 20)
-      return server_send_error(conn, "ensemble_review requires 'diff' of at least 20 characters",
+      return server_send_error(conn, "roundtable_review requires 'diff' of at least 20 characters",
                                NULL);
 
    cJSON *body = cJSON_CreateObject();
@@ -123,7 +123,8 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
       if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
       {
          cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'brief' must be a string or object", NULL);
+         return server_send_error(conn, "roundtable_review 'brief' must be a string or object",
+                                  NULL);
       }
       cJSON *brief_copy = cJSON_Duplicate(brief, 1);
       if (!brief_copy)
@@ -133,29 +134,16 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
       }
       cJSON_AddItemToObject(body, "brief", brief_copy);
    }
-   cJSON *rounds = cJSON_GetObjectItemCaseSensitive(args, "rounds");
-   if (rounds)
+   cJSON *roundtable = cJSON_GetObjectItemCaseSensitive(args, "roundtable");
+   if (roundtable)
    {
-      if (!cJSON_IsNumber(rounds) || rounds->valuedouble < 1 || rounds->valuedouble > 16 ||
-          rounds->valuedouble != (double)rounds->valueint)
+      if (!cJSON_IsString(roundtable) || !roundtable->valuestring || !roundtable->valuestring[0])
       {
          cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'rounds' must be an integer from 1 to 16",
+         return server_send_error(conn, "roundtable_review 'roundtable' must name a saved preset",
                                   NULL);
       }
-      cJSON_AddNumberToObject(body, "rounds", rounds->valuedouble);
-   }
-   cJSON *turns = cJSON_GetObjectItemCaseSensitive(args, "turns");
-   if (turns)
-   {
-      if (!cJSON_IsString(turns) || (strcmp(turns->valuestring, "parallel") != 0 &&
-                                     strcmp(turns->valuestring, "sequential") != 0))
-      {
-         cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'turns' must be parallel or sequential",
-                                  NULL);
-      }
-      cJSON_AddStringToObject(body, "turns", turns->valuestring);
+      cJSON_AddStringToObject(body, "roundtable", roundtable->valuestring);
    }
 
    char *line = cJSON_PrintUnformatted(body);
@@ -171,7 +159,8 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
    {
       cJSON *err = cJSON_Parse(respbuf);
       cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
-      const char *text = cJSON_IsString(msg) ? msg->valuestring : "could not queue ensemble_review";
+      const char *text =
+          cJSON_IsString(msg) ? msg->valuestring : "could not queue roundtable_review";
       int rc = server_send_error(conn, text, NULL);
       cJSON_Delete(err);
       return rc;
@@ -1739,9 +1728,9 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return rc;
    }
 
-   if (strcmp(tool, "ensemble_review") == 0)
+   if (strcmp(tool, "roundtable_review") == 0)
    {
-      int rc = handle_mcp_ensemble_review(conn, jargs);
+      int rc = handle_mcp_roundtable_review(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;
@@ -1767,7 +1756,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
     * pipeline_* tool to its handler, which sends its own response on conn (like
-    * ensemble_review/delegate). Capability is enforced against the matching
+    * roundtable_review/delegate). Capability is enforced against the matching
     * pipeline.* method (status/list = read; others = delegate; gate also needs an
     * operator principal inside the handler). MCP arg names mirror the method's. */
    if (strncmp(tool, "pipeline_", 9) == 0)

@@ -3,13 +3,30 @@ package engine
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
+
+func configuredTestRoundtable(t *testing.T) *roundtablecfg.Store {
+	t.Helper()
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"$random","persona":"security"},{"model":"$random","persona":"qa"}],"min_successful":2}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
 
 func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
 	got := strings.Join(defaultVerifyCommand(), " ")
@@ -265,6 +282,7 @@ func TestNativeRoundtableFailsClosedWithoutLiveRosterCapability(t *testing.T) {
 func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	agents := &recordingAgents{}
 	runner := &NativeRunner{agents: agents}
+	runner.SetRoundtableStore(configuredTestRoundtable(t))
 	proposal := strings.Repeat("proposal 漢字\n", 200_000) + "PROPOSAL_END"
 	proposalArtifact := wfe.Artifact{Type: "proposal", Content: []byte(proposal), Hash: wfe.Hash([]byte(proposal))}
 	planResult, err := runner.author(context.Background(), StepRequest{WorkItem: db1.WorkItem{Repo: "/repo"}, Node: wfe.Node{Params: map[string]any{}}, Proposal: proposal, Inputs: map[string]wfe.Artifact{"proposal": proposalArtifact}}, "plan")
@@ -301,7 +319,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 	agents.mu.Lock()
 	defer agents.mu.Unlock()
-	if len(agents.requests) != 5 {
+	if len(agents.requests) != 4 {
 		t.Fatalf("requests=%d", len(agents.requests))
 	}
 	foundPin, foundDynamicQA := false, false
@@ -331,35 +349,6 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 	if !foundPin || !foundDynamicQA {
 		t.Fatalf("UI pin semantics not preserved: %+v", agents.requests)
-	}
-}
-
-func TestFillPanelCapacityUsesEverySlotWithDiversityFirst(t *testing.T) {
-	configured := []panelSeat{
-		{persona: "security", delegate: "codex", required: true},
-		{persona: "qa", required: true},
-		{persona: "contrarian", required: false},
-	}
-	roster := []EligibleAgent{
-		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
-		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
-	}
-	seats, err := fillPanelCapacity(configured, roster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 5 {
-		t.Fatalf("seats=%+v", seats)
-	}
-	got := []string{seats[0].delegate, seats[1].delegate, seats[2].delegate, seats[3].delegate, seats[4].delegate}
-	want := []string{"codex", "minimax", "codex", "minimax", "codex"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("delegates=%v want=%v", got, want)
-		}
-	}
-	if !seats[0].required || !seats[1].required || seats[2].required || seats[3].required || seats[4].required {
-		t.Fatalf("required prefix not preserved: %+v", seats)
 	}
 }
 
@@ -423,59 +412,6 @@ func TestPanelCapacityRoundsHaveDistinctDurableJobKeys(t *testing.T) {
 	}
 }
 
-func TestFillPanelCapacityInterleavesProvidersBeforeFillingAllSeats(t *testing.T) {
-	configured := []panelSeat{{persona: "correctness"}}
-	roster := []EligibleAgent{
-		{Name: "codex-a", Provider: "openai", MaxParallel: 2},
-		{Name: "codex-b", Provider: "openai", MaxParallel: 1},
-		{Name: "minimax", Provider: "minimax", MaxParallel: 2},
-	}
-	seats, err := fillPanelCapacity(configured, roster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, seat := range seats {
-		got = append(got, seat.delegate)
-	}
-	want := []string{"codex-a", "minimax", "codex-b", "codex-a", "minimax"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("delegates=%v want=%v", got, want)
-	}
-}
-
-func TestFillPanelCapacityExhaustsAsymmetricCapacity(t *testing.T) {
-	seats, err := fillPanelCapacity([]panelSeat{{persona: "review"}}, []EligibleAgent{
-		{Name: "codex", Provider: "chatgpt", MaxParallel: 3},
-		{Name: "minimax", Provider: "anthropic", MaxParallel: 1},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, seat := range seats {
-		got = append(got, seat.delegate)
-	}
-	if strings.Join(got, ",") != "codex,minimax,codex,codex" {
-		t.Fatalf("asymmetric capacity was not exhausted: %v", got)
-	}
-}
-
-func TestFillPanelCapacityRepeatsAllRequiredLensesWithoutWeakeningThem(t *testing.T) {
-	seats, err := fillPanelCapacity([]panelSeat{{persona: "security", required: true}}, []EligibleAgent{{Name: "codex", MaxParallel: 3}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 3 || !seats[0].required || seats[1].required || seats[2].required {
-		t.Fatalf("required seat semantics changed during capacity fill: %+v", seats)
-	}
-	for _, seat := range seats {
-		if seat.persona != "security" {
-			t.Fatalf("configured review lens was replaced: %+v", seats)
-		}
-	}
-}
-
 func TestPanelAdmissionIsControlPlaneWide(t *testing.T) {
 	release, admitted := tryAcquirePanelAdmission()
 	if !admitted {
@@ -491,65 +427,6 @@ func TestPanelAdmissionIsControlPlaneWide(t *testing.T) {
 		t.Fatal("panel capacity was not released")
 	}
 	release()
-}
-
-func TestFillPanelCapacityCyclesEveryConfiguredLensInMixedPanel(t *testing.T) {
-	seats, err := fillPanelCapacity([]panelSeat{
-		{persona: "security", required: true},
-		{persona: "contrarian"},
-	}, []EligibleAgent{{Name: "codex", MaxParallel: 4}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 4 || seats[2].persona != "security" || seats[3].persona != "contrarian" {
-		t.Fatalf("surplus seats did not cycle every configured lens: %+v", seats)
-	}
-}
-
-func TestFillPanelCapacityUsesDistinctAgentsForRequiredSeatsWhenAvailable(t *testing.T) {
-	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", required: true}}
-	roster := []EligibleAgent{
-		{Name: "codex", Provider: "chatgpt", MaxParallel: 2},
-		{Name: "minimax", Provider: "anthropic", MaxParallel: 2},
-	}
-	seats, err := fillPanelCapacity(configured, roster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 4 || seats[0].delegate != "codex" || seats[1].delegate != "minimax" {
-		t.Fatalf("required seats did not consume distinct diversity-first slots: %+v", seats)
-	}
-}
-
-func TestFillPanelCapacityBackfillsUnavailableOptionalPin(t *testing.T) {
-	configured := []panelSeat{{persona: "security", required: true}, {persona: "qa", delegate: "unavailable", pinned: true}}
-	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}, {Name: "minimax", MaxParallel: 1}}
-	seats, err := fillPanelCapacity(configured, roster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 3 {
-		t.Fatalf("optional pin under-filled live capacity: %+v", seats)
-	}
-	for _, seat := range seats {
-		if seat.delegate == "unavailable" {
-			t.Fatalf("unavailable optional positive pin survived eligibility: %+v", seats)
-		}
-	}
-}
-
-func TestFillPanelCapacityRejectsUnavailableRequiredPinButSkipsOptionalPin(t *testing.T) {
-	roster := []EligibleAgent{{Name: "codex", MaxParallel: 2}}
-	if _, err := fillPanelCapacity([]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, roster); err == nil {
-		t.Fatal("unavailable required pin accepted")
-	}
-	seats, err := fillPanelCapacity([]panelSeat{{persona: "qa", required: true}, {persona: "security", delegate: "kimi"}}, roster)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seats) != 2 || seats[0].delegate != "codex" || seats[1].delegate != "codex" {
-		t.Fatalf("seats=%+v", seats)
-	}
 }
 
 func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.T) {

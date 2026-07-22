@@ -44,6 +44,7 @@
 #include "platform_process.h"
 #include "prompts.h"
 #include "persona.h"
+#include "roundtable_preset.h"
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
@@ -1910,6 +1911,22 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* Resolve the one runtime panel contract shared by aggregate and roundtable.
+ * A saved preset contributes its exact seats. Only the no-preset fallback is
+ * synthesized, and that helper has a structural two-seat maximum. */
+static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *acfg, char *err,
+                                    size_t err_n)
+{
+   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+   {
+      snprintf(err, err_n, "roundtable must name a saved preset");
+      return -1;
+   }
+   const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
+   return ensemble_prepare_runtime_panel(requested, cfg, acfg, err, err_n);
+}
+
 /* Convene the ensemble panel from enabled registry agents when no explicit
  * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
@@ -1940,16 +1957,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   char pin_err[256];
-   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+   char pin_err[256] = "no enabled review agent is currently available";
+   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
       return server_send_error(conn, pin_err, NULL);
-   /* reference_models are positive pins, not an exhaustive roster. Validate
-    * them, then fill every eligible provider seat to configured capacity. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
-   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -2088,13 +2098,22 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
    config_t cfg;
    config_load(&cfg);
+   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+      return server_send_error(conn, "roundtable must name a saved preset", NULL);
+   const char *requested_roundtable = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
+   char preset_err[256];
+   int acquired = roundtable_preset_resolve_runtime(requested_roundtable, &cfg, NULL, 0, preset_err,
+                                                    sizeof preset_err);
+   if (acquired < 0)
+      return server_send_error(conn, preset_err, NULL);
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
-   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                : ROUNDTABLE_PARALLEL;
-   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 1;
-   opts.converge_threshold = cfg.roundtable_converge_threshold;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   /* A roundtable has one independent analysis phase. Discussion cycles are a
+    * separate, issue-driven phase and must never be expressed as panel rounds. */
+   opts.max_rounds = 1;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
    opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
    cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
@@ -2115,18 +2134,6 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
       opts.mode = ROUNDTABLE_REVIEW;
-   cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
-   if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
-      opts.turns = ROUNDTABLE_SEQUENTIAL;
-   else if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "parallel") == 0)
-      opts.turns = ROUNDTABLE_PARALLEL;
-   cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
-   if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
-   {
-      opts.max_rounds = (int)jrounds->valuedouble;
-      if (opts.max_rounds > ROUNDTABLE_MAX_ROUNDS_REQUEST)
-         opts.max_rounds = ROUNDTABLE_MAX_ROUNDS_REQUEST;
-   }
    cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
    if (cJSON_IsBool(japply))
       opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
@@ -2138,19 +2145,12 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
-   char pin_err[256];
-   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+   char pin_err[256] = "no enabled review agent is currently available";
+   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
    {
       free(brief.rendered);
       return server_send_error(conn, pin_err, NULL);
    }
-   /* reference_models are positive pins, not an exhaustive roster. Validate
-    * them, then fill every eligible provider seat to configured capacity. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
-   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    /* Give the tool-less panelists read-only access to aimee memory + the code
@@ -2170,20 +2170,15 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
-   cJSON_AddNumberToObject(resp, "rounds_run", result.rounds_run);
-   cJSON_AddBoolToObject(resp, "converged", result.converged ? 1 : 0);
    cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
    cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
    cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "best_round", result.best_round);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "participants_required_failed",
                            result.participants_required_failed);
-   cJSON_AddNumberToObject(resp, "items_round", result.items_round);
-   cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    add_roundtable_arrays(resp, &result);
    delegate_roundtable_result_free(&result);

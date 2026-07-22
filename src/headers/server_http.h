@@ -117,6 +117,22 @@ extern "C"
                                             int mtls_mode, int mtls_authenticated);
    int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
 
+   /* Dedicated P5 management transport classifier. The management leaf is
+    * authorized only for the nonce/status health pair; those routes never fall
+    * back to a generic roster certificate or bearer, and a management-profile
+    * leaf never falls through to a generic route. TLS verification itself is
+    * completed by server_tls_peer_cert before this pure classifier is called. */
+   typedef enum
+   {
+      SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE = 0,
+      SERVER_HTTP_MANAGEMENT_ALLOW = 1,
+      SERVER_HTTP_MANAGEMENT_DENY = 2
+   } server_http_management_auth_t;
+   server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
+                                                             int verified_peer,
+                                                             int management_profile,
+                                                             const char *peer_cn);
+
    /* Parse one HTTP header value (case-insensitive name) from a raw request
     * buffer into out (NUL-terminated, bounded by n). Returns 1 when found, 0
     * otherwise. Shared with the request-context populator. */

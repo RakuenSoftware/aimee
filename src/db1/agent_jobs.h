@@ -139,6 +139,11 @@ extern "C"
    /* Cancel one job by id with a reason. Returns rows changed (0/1). */
    int db1_agent_job_cancel_by_id(int job_id, const char *reason);
 
+   /* Cancel every pending/running delegate row left by an earlier server
+    * process. Call once during server startup, before any worker can exist.
+    * Empty results receive the cancellation reason; existing results remain. */
+   int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
+
    /* Cancel all 'running' jobs older than `threshold_seconds`, with a
     * fixed reason. Returns rows changed. */
    int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason);

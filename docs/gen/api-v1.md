@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 79
+Total endpoints: 80
 
 ## Endpoints
 
@@ -753,7 +753,7 @@ Request body (`application/json`).
 Responses:
 
 - `200` — Catalog entry upserted
-- `400` — Invalid model_id
+- `400` — Invalid model_id, provider, or wire
 - `401` — Authentication required
 - `403` — Not authorized (not an org-admin)
 
@@ -767,7 +767,7 @@ Responses:
 
 - `200` — Entitlement granted
 - `401` — Authentication required
-- `403` — Not authorized (not an org-admin)
+- `403` — Not authorized (not an org-admin), or unknown model/team
 
 ### `POST /v1/models/org/remove`
 
@@ -790,7 +790,7 @@ Request body (`application/json`).
 Responses:
 
 - `200` — Catalog entry upserted
-- `400` — Invalid model_id
+- `400` — Invalid model_id, provider, or wire
 - `401` — Authentication required
 - `403` — Not authorized (not an org-admin)
 
@@ -997,6 +997,28 @@ Responses:
 - `200` — Search results
 - `400` — Bad request (missing query)
 - `401` — Unauthorized
+
+### `GET /v1/servers/{server_id}/health`
+
+Verify a registered server through the management health exchange
+
+Performs the live, nonce-bound management challenge and signed-status exchange. It does not return the registry's cached heartbeat row.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200` — Live management health verification succeeded
+- `400` — Invalid team or management health request
+- `401` — Authentication required
+- `403` — Server health request denied
+- `404` — Server not found
+- `409` — Registry state changed during the exchange
+- `502` — Management health integrity verification failed
+- `503` — Management health runtime or dependency unavailable
 
 ### `GET /v1/team`
 
