@@ -27,6 +27,13 @@ fi
     ulimit -Hc 0
     AIMEE_REQUIRE_PERSISTENT_CORES=0 aimee_enable_core_dumps 2>/dev/null
 )
+AIMEE_CORE_DIR="$tmp/missing" AIMEE_CORE_SELFTEST=1 \
+    AIMEE_REQUIRE_PERSISTENT_CORES=0 aimee_verify_core_dump 2>/dev/null
+if AIMEE_CORE_DIR="$tmp/missing" AIMEE_CORE_SELFTEST=1 \
+    AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_verify_core_dump 2>/dev/null; then
+    echo "core-storage: required self-test failure did not fail closed" >&2
+    exit 1
+fi
 
 printf '%s/core.%%e.%%p\n' "$core_dir" > "$pattern_file"
 AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \

@@ -135,8 +135,7 @@ aimee_prepare_core_storage() {
 # Produce a real core as the final unprivileged launch user. Appliance profiles
 # enable this: startup is refused unless the kernel writes a non-empty file into
 # the mounted persistent directory. The retained core is direct boot evidence.
-aimee_verify_core_dump() {
-    [ "${AIMEE_CORE_SELFTEST:-0}" = 1 ] || return 0
+aimee_verify_core_dump_strict() {
     _core_dir=${AIMEE_CORE_DIR:-/mnt/media/cores}
     _pattern_file=${AIMEE_CORE_PATTERN_FILE:-/proc/sys/kernel/core_pattern}
     _core_pattern=$(cat "$_pattern_file" 2>/dev/null) || return 1
@@ -151,7 +150,7 @@ aimee_verify_core_dump() {
             if [ "$(cat /proc/sys/kernel/core_uses_pid 2>/dev/null || printf 0)" = 1 ]; then
                 _core_pattern="$_core_pattern.%p"
             else
-                printf '[server-entrypoint] fatal: controlled core cannot be attributed without %%p\n' >&2
+                printf '[server-entrypoint] core self-test error: controlled core cannot be attributed without %%p\n' >&2
                 return 1
             fi
     fi
@@ -181,15 +180,28 @@ aimee_verify_core_dump() {
     done
     rm -f "$_marker"
     if [ -z "$_produced" ]; then
-        printf '[server-entrypoint] fatal: controlled SIGSEGV produced no persistent core in %s\n' \
+        printf '[server-entrypoint] core self-test error: controlled SIGSEGV produced no persistent core in %s\n' \
             "$_core_dir" >&2
         return 1
     fi
     if ! aimee_is_elf_core "$_produced"; then
-        printf '[server-entrypoint] fatal: controlled SIGSEGV output is not an ELF core: %s\n' \
+        printf '[server-entrypoint] core self-test error: controlled SIGSEGV output is not an ELF core: %s\n' \
             "$_produced" >&2
         return 1
     fi
     printf '[server-entrypoint] controlled SIGSEGV verified persistent core: %s\n' \
         "$_produced"
+}
+
+aimee_verify_core_dump() {
+    [ "${AIMEE_CORE_SELFTEST:-0}" = 1 ] || return 0
+    if aimee_verify_core_dump_strict; then
+        return 0
+    fi
+    if [ "${AIMEE_REQUIRE_PERSISTENT_CORES:-0}" = 1 ]; then
+        printf '[server-entrypoint] fatal: persistent core self-test failed\n' >&2
+        return 1
+    fi
+    printf '[server-entrypoint] warning: optional persistent core self-test failed\n' >&2
+    return 0
 }
