@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -77,19 +76,12 @@ func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requ
 	if group, ok := r.agents.(DelegateGroupClient); ok {
 		return group.DelegateGroup(ctx, requests)
 	}
-	// Lightweight test/resource-plane implementations need only implement the
-	// primitive. The fallback preserves the group contract and concurrency.
+	// Roundtable never reconstructs grouped delegation or participant identity.
+	// A resource plane without the generic group contract is unavailable to it.
 	out := make([]DelegateGroupResult, len(requests))
-	var wg sync.WaitGroup
-	wg.Add(len(requests))
 	for i := range requests {
-		go func(i int) {
-			defer wg.Done()
-			out[i].Result, out[i].Err = r.agents.Delegate(ctx, requests[i])
-			out[i].Participant = out[i].Result.Agent
-		}(i)
+		out[i].Err = errors.New("delegate service does not support grouped delegation")
 	}
-	wg.Wait()
 	return out
 }
 
@@ -496,8 +488,6 @@ type panelResponse struct {
 }
 type panelSeat struct {
 	persona, selector, participant string
-	required                       bool
-	pinned                         bool
 	ordinal                        int
 }
 
@@ -522,8 +512,8 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		// metadata is only an optional lens/pin overlay; it must not be required to
 		// enter the one shared roundtable route. The direct fallback consumes only
 		// the first two lenses by contract.
-		for _, persona := range []string{"original-request", "security", "architect", "qa", "reviewer"} {
-			lenses = append(lenses, panelSeat{persona: persona, required: true})
+		for _, persona := range []string{"original-request", "reviewer"} {
+			lenses = append(lenses, panelSeat{persona: persona})
 		}
 	}
 	lensNames := make([]string, 0, len(lenses))
@@ -542,7 +532,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	}
 	seats := make([]panelSeat, 0, len(panel.Seats))
 	for _, seat := range panel.Seats {
-		seats = append(seats, panelSeat{persona: seat.Persona, selector: seat.Selector, required: true, pinned: seat.Pinned})
+		seats = append(seats, panelSeat{persona: seat.Persona, selector: seat.Selector})
 	}
 	for i := range seats {
 		seats[i].ordinal = i
@@ -652,31 +642,24 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		parsed, err := panelResponse{}, call.Err
 		if err == nil {
 			var doc []byte
-			doc, err = extractJSONObject(call.Result.Response)
+			doc, err = extractJSONObject(call.Response)
 			if err == nil {
 				err = json.Unmarshal(doc, &parsed)
 			}
 		}
 		seat := seats[i]
 		seat.participant = call.Participant
-		outcomes[i] = outcome{seat: seat, result: parsed, cost: call.Result.CostUSD, err: err}
+		outcomes[i] = outcome{seat: seat, result: parsed, cost: call.CostUSD, err: err}
 	}
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifactHash}
 	reports := make([]panelSeatReport, 0, len(seats))
 	approvals, voters := 0, len(seats)
 	var cost float64
-	type requiredFailure struct {
-		seat panelSeat
-		err  error
-	}
-	var requiredFailures []requiredFailure
-	validPersona := make(map[string]bool)
+	var seatFailures []string
 	for _, o := range outcomes {
 		cost += o.cost
 		if o.err != nil {
-			if o.seat.required {
-				requiredFailures = append(requiredFailures, requiredFailure{seat: o.seat, err: o.err})
-			}
+			seatFailures = append(seatFailures, o.seat.persona+": "+o.err.Error())
 			voters--
 			continue
 		}
@@ -688,7 +671,6 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		reports = append(reports, panelSeatReport{Seat: o.seat, Response: o.result})
 		alignment := strings.ToLower(strings.TrimSpace(o.result.OriginalRequestAlignment.Status))
 		alignmentOK := alignment == "aligned"
-		alignmentRecognized := alignmentOK || alignment == "drifted" || alignment == "unclear"
 		if !alignmentOK {
 			if alignment != "drifted" && alignment != "unclear" {
 				alignment = "unclear"
@@ -709,7 +691,6 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			// The feedback finding already prevents advancement; also exclude this
 			// vote from quorum so the fail-closed invariant is local and explicit.
 			if alignmentOK {
-				validPersona[o.seat.persona] = true
 				approvals++
 			}
 			continue
@@ -718,25 +699,11 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-malformed", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer returned a contradictory or incomplete verdict", Recommendation: "return approve with no findings, or changes with actionable findings"})
 			continue
 		}
-		if alignmentRecognized {
-			validPersona[o.seat.persona] = true
-		}
 		for i, f := range o.result.Findings {
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: firstNonempty(f.ID, fmt.Sprintf("%s-%d", o.seat.persona, i+1)), Persona: o.seat.persona, Severity: firstNonempty(f.Severity, "blocking"), Location: f.Location, Summary: f.Summary, Recommendation: f.Recommendation})
 		}
 	}
-	var unreachable []string
-	for _, failure := range requiredFailures {
-		// Required config names a review lens, not an exclusive agent. Capacity
-		// fill repeats those lenses, so any valid duplicate satisfies an unpinned
-		// required persona when its initially assigned slot loses admission. An
-		// explicit positive pin remains strict and cannot be substituted.
-		if !failure.seat.pinned && validPersona[failure.seat.persona] {
-			continue
-		}
-		unreachable = append(unreachable, failure.seat.persona+": "+failure.err.Error())
-	}
-	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(unreachable, "; "), Reports: reports}
+	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
 }
 
 // runPanelRound remains the focused test seam for independent analysis.
@@ -997,11 +964,11 @@ func panelSeats(node wfe.Node) []panelSeat {
 	var out []panelSeat
 	for _, p := range required {
 		selector := pins[p]
-		out = append(out, panelSeat{persona: p, selector: selector, required: true, pinned: selector != ""})
+		out = append(out, panelSeat{persona: p, selector: selector})
 	}
 	for _, p := range eligible {
 		selector := pins[p]
-		out = append(out, panelSeat{persona: p, selector: selector, pinned: selector != ""})
+		out = append(out, panelSeat{persona: p, selector: selector})
 	}
 	return out
 }

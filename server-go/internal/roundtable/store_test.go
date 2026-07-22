@@ -21,9 +21,9 @@ func writePreset(t *testing.T, dir string, p preset) {
 func TestConfiguredRoundtablePreservesExactSeatSpecifications(t *testing.T) {
 	dir := t.TempDir()
 	writePreset(t, dir, preset{Name: "large", MinSuccessful: 2, Discussion: true, DeadlineMS: 12345, Chairman: "$random", ChairmanEnabled: true, Seats: []presetSeat{
-		{Model: "$random", Persona: "security"},
-		{Model: "codex", Persona: "qa"},
-		{Model: "$random", Persona: "architect"},
+		{Selector: "$random", Persona: "security"},
+		{Selector: "codex", Persona: "qa"},
+		{Selector: "$random", Persona: "architect"},
 	}})
 	store, _ := NewStore(dir, func() (string, error) { return "large", nil })
 	panel, err := store.Resolve("", []string{"reviewer"}, nil)
@@ -33,14 +33,14 @@ func TestConfiguredRoundtablePreservesExactSeatSpecifications(t *testing.T) {
 	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 3 || panel.MinSuccessful != 2 || !panel.Discussion || panel.DeadlineMS != 12345 || !panel.ChairmanEnabled || panel.Chairman != "" {
 		t.Fatalf("panel=%+v", panel)
 	}
-	if panel.Seats[0].Selector != "" || panel.Seats[0].Pinned || panel.Seats[1].Selector != "codex" || !panel.Seats[1].Pinned || panel.Seats[2].Selector != "" {
+	if panel.Seats[0].Selector != "" || panel.Seats[1].Selector != "codex" || panel.Seats[2].Selector != "" {
 		t.Fatalf("roundtable resolved delegate-owned random seats: %+v", panel.Seats)
 	}
 }
 
 func TestEnabledChairmanRequiresSpecification(t *testing.T) {
 	dir := t.TempDir()
-	writePreset(t, dir, preset{Name: "missing", ChairmanEnabled: true, Seats: []presetSeat{{Model: "$random"}}})
+	writePreset(t, dir, preset{Name: "missing", ChairmanEnabled: true, Seats: []presetSeat{{Selector: "$random"}}})
 	store, _ := NewStore(dir, func() (string, error) { return "missing", nil })
 	if _, err := store.Resolve("", nil, nil); err == nil {
 		t.Fatal("enabled chairman silently accepted without a delegate specification")
@@ -50,7 +50,7 @@ func TestEnabledChairmanRequiresSpecification(t *testing.T) {
 func TestConfiguredRoundtableAlwaysRequestsEverySeat(t *testing.T) {
 	dir := t.TempDir()
 	writePreset(t, dir, preset{Name: "five", Seats: []presetSeat{
-		{Model: "$random"}, {Model: "$random"}, {Model: "$random"}, {Model: "$random"}, {Model: "$random"},
+		{Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"}, {Selector: "$random"},
 	}})
 	store, _ := NewStore(dir, func() (string, error) { return "five", nil })
 	panel, err := store.Resolve("", nil, nil)

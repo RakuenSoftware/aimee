@@ -4,6 +4,7 @@
 #include "json_fluent.h"
 #include "util.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,14 +23,20 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 }
 #else
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+#define GO_ROUNDTABLE_IO_TIMEOUT_SECS 420
+#define GO_ROUNDTABLE_MAX_RESPONSE (16u * 1024u * 1024u)
 
 static int write_all(int fd, const char *data, size_t size)
 {
    while (size > 0)
    {
       ssize_t n = write(fd, data, size);
+      if (n < 0 && errno == EINTR)
+         continue;
       if (n <= 0)
          return -1;
       data += n;
@@ -86,6 +93,13 @@ static char *post_go_roundtable(const char *body, int *status)
    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
    if (fd < 0)
       return NULL;
+   struct timeval io_timeout = {.tv_sec = GO_ROUNDTABLE_IO_TIMEOUT_SECS, .tv_usec = 0};
+   if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout)) != 0 ||
+       setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout)) != 0)
+   {
+      close(fd);
+      return NULL;
+   }
    struct sockaddr_un addr;
    memset(&addr, 0, sizeof addr);
    addr.sun_family = AF_UNIX;
@@ -96,18 +110,30 @@ static char *post_go_roundtable(const char *body, int *status)
       close(fd);
       return NULL;
    }
-   char head[512];
-   int head_n = snprintf(head, sizeof head,
-                         "POST /v1/roundtable/review HTTP/1.1\r\nHost: aimee\r\n"
-                         "Content-Type: application/json\r\nContent-Length: %zu\r\n"
-                         "Connection: close\r\n\r\n",
-                         strlen(body));
-   if (head_n <= 0 || head_n >= (int)sizeof head || write_all(fd, head, (size_t)head_n) != 0 ||
-       write_all(fd, body, strlen(body)) != 0)
+   const char *bearer = getenv("AIMEE_API_BEARER_TOKEN");
+   if (!bearer)
+      bearer = "";
+   size_t head_cap = strlen(bearer) + 512;
+   char *head = malloc(head_cap);
+   if (!head)
    {
       close(fd);
       return NULL;
    }
+   int head_n = snprintf(head, head_cap,
+                         "POST /v1/roundtable/review HTTP/1.1\r\nHost: aimee\r\n"
+                         "Content-Type: application/json\r\nContent-Length: %zu\r\n%s%s%s"
+                         "Connection: close\r\n\r\n",
+                         strlen(body), bearer[0] ? "Authorization: Bearer " : "", bearer,
+                         bearer[0] ? "\r\n" : "");
+   if (head_n <= 0 || (size_t)head_n >= head_cap || write_all(fd, head, (size_t)head_n) != 0 ||
+       write_all(fd, body, strlen(body)) != 0)
+   {
+      free(head);
+      close(fd);
+      return NULL;
+   }
+   free(head);
    size_t cap = 8192, used = 0;
    char *raw = malloc(cap);
    if (!raw)
@@ -119,7 +145,15 @@ static char *post_go_roundtable(const char *body, int *status)
    {
       if (used + 4097 > cap)
       {
+         if (cap >= GO_ROUNDTABLE_MAX_RESPONSE)
+         {
+            free(raw);
+            close(fd);
+            return NULL;
+         }
          cap *= 2;
+         if (cap > GO_ROUNDTABLE_MAX_RESPONSE)
+            cap = GO_ROUNDTABLE_MAX_RESPONSE;
          char *grown = realloc(raw, cap);
          if (!grown)
          {
@@ -130,6 +164,8 @@ static char *post_go_roundtable(const char *body, int *status)
          raw = grown;
       }
       ssize_t n = read(fd, raw + used, cap - used - 1);
+      if (n < 0 && errno == EINTR)
+         continue;
       if (n <= 0)
          break;
       used += (size_t)n;
@@ -220,7 +256,6 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    cJSON_Delete(response);
    if (!result)
       return server_send_error(conn, "Go roundtable returned no result", NULL);
-   cJSON_AddBoolToObject(result, "ok", 1);
    return server_send_ok(conn, result);
 }
 #endif

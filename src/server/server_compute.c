@@ -659,6 +659,7 @@ void delegate_worker(void *arg)
    cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
+   cJSON *jparticipant = cJSON_GetObjectItemCaseSensitive(req, "participant");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
@@ -683,6 +684,7 @@ void delegate_worker(void *arg)
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
    const char *via_name = cJSON_IsString(jvia) ? jvia->valuestring : NULL;
+   const char *participant = cJSON_IsString(jparticipant) ? jparticipant->valuestring : NULL;
    cJSON *jacp_cmd = cJSON_GetObjectItemCaseSensitive(req, "acp_command");
    cJSON *jacp_args = cJSON_GetObjectItemCaseSensitive(req, "acp_args");
    const char *acp_command =
@@ -743,6 +745,36 @@ void delegate_worker(void *arg)
       delegation_compute_error(cctx, "failed to load agent config");
       compute_ctx_free(cctx);
       return;
+   }
+   /* A participant is a delegate-service continuation token. Resolve it here,
+    * behind the generic delegation boundary, so coordinators never learn or
+    * retain the concrete agent identity. The durable job row survives service
+    * restarts and therefore makes discussion continuity restart-safe. */
+   char participant_agent[MAX_AGENT_NAME] = "";
+   if (participant && participant[0])
+   {
+      int prior_job_id = 0;
+      char trailing = '\0';
+      if ((via_name && via_name[0]) ||
+          sscanf(participant, "delegate-job:%d%c", &prior_job_id, &trailing) != 1 ||
+          prior_job_id <= 0)
+      {
+         delegation_compute_error(cctx, "invalid delegate participant continuation");
+         compute_ctx_free(cctx);
+         return;
+      }
+      db1_agent_job_t prior;
+      memset(&prior, 0, sizeof(prior));
+      if (db1_agent_job_get(prior_job_id, &prior) != 0 || !prior.agent_name[0])
+      {
+         db1_agent_job_free(&prior);
+         delegation_compute_error(cctx, "delegate participant continuation is unknown");
+         compute_ctx_free(cctx);
+         return;
+      }
+      snprintf(participant_agent, sizeof(participant_agent), "%s", prior.agent_name);
+      db1_agent_job_free(&prior);
+      via_name = participant_agent;
    }
    /* Inline --acp <cmd>: synthesize an ephemeral kind:acp agent and route to it
     * by name, exactly like --via. The external ACP agent runs its own model, so

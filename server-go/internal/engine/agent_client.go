@@ -47,6 +47,10 @@ type DelegateRequest struct {
 	// false omits it and preserves automatic evidence. This is a deliberate wire
 	// field; DurableSlot and RetryTag are Go-local and must never be sent.
 	ProvidedTarget bool
+	// routeSelected distinguishes a delegate-service group assignment from an
+	// operator pin. A selected seat may be generically rerouted after a terminal
+	// provider failure; an operator pin never may.
+	routeSelected bool
 	// acceptPartial is reserved for native branch-producing blocks whose worktree output
 	// is independently committed and verified by the Go native runner. Structured
 	// and prose blocks must receive a complete resource-plane result.
@@ -56,8 +60,11 @@ type DelegateRequest struct {
 type DelegateResult struct {
 	Response string
 	Agent    string
-	CostUSD  float64
-	Partial  bool
+	// Participant is an opaque delegate-service continuation token. Consumers
+	// may return it to the delegate service but must not interpret it.
+	Participant string
+	CostUSD     float64
+	Partial     bool
 }
 
 type AgentClient interface {
@@ -69,29 +76,13 @@ type AgentClient interface {
 // evidence and optional positive pins; delegate owns all unpinned routing.
 type DelegateGroupResult struct {
 	Participant string
-	Result      DelegateResult
+	Response    string
+	CostUSD     float64
 	Err         error
 }
 
 type DelegateGroupClient interface {
 	DelegateGroup(context.Context, []DelegateRequest) []DelegateGroupResult
-}
-
-type EligibleAgent struct {
-	Name        string
-	Provider    string
-	MaxParallel int
-}
-
-// AgentRosterClient is implemented by resource planes that can expose the live
-// enabled roster. WFE uses it to fill every eligible roundtable slot; it never
-// persists provider failures as exclusions. Production binds the roster endpoint
-// to the same authenticated Unix socket (or explicitly authenticated transport)
-// used by delegate execution; the resource plane owns tenant filtering and exact,
-// case-sensitive role names. BaseURL remains supported for loopback tests and
-// authenticated remote resource-plane deployments.
-type AgentRosterClient interface {
-	EligibleAgents(context.Context, string) ([]EligibleAgent, error)
 }
 
 type AgentHTTPConfig struct {
@@ -129,8 +120,6 @@ type HTTPAgentClient struct {
 	pendingTimeout   func() time.Duration
 	cancelUnassigned func(context.Context, int, string, time.Duration) (bool, error)
 	store            *db1.Store
-	participantMu    sync.RWMutex
-	participants     map[string]string
 }
 
 func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
@@ -171,8 +160,7 @@ func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
 	}
 	return &HTTPAgentClient{baseURL: strings.TrimRight(cfg.BaseURL, "/"), bearer: cfg.Bearer,
 		client: &http.Client{Transport: transport, Timeout: cfg.RequestTimeout}, pollEvery: cfg.PollEvery,
-		pendingTimeout: timeoutSource, cancelUnassigned: cfg.CancelUnassigned, store: cfg.Store,
-		participants: make(map[string]string)}, nil
+		pendingTimeout: timeoutSource, cancelUnassigned: cfg.CancelUnassigned, store: cfg.Store}, nil
 }
 
 func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
@@ -190,7 +178,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 	const maxRouteAttempts = 3
 	for attempt := 0; ; attempt++ {
 		result, err := c.delegateOnce(ctx, request)
-		if err == nil || request.Delegate != "" || request.Participant != "" ||
+		if err == nil || (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
 			!errors.Is(err, ErrDelegateTerminal) ||
 			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
 			return result, err
@@ -199,6 +187,8 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		// generic delegate admission, whose router can select another currently
 		// eligible agent. No failed agent is persisted as an exclusion.
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
+		request.Delegate = ""
+		request.routeSelected = false
 	}
 }
 
@@ -212,17 +202,11 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	}
 	// Empty means ordinary eligibility routing. A non-empty delegate is an
 	// explicit positive pin from the workflow, never an exclusion list.
-	selector := request.Delegate
-	if request.Participant != "" {
-		c.participantMu.RLock()
-		selector = c.participants[request.Participant]
-		c.participantMu.RUnlock()
-		if selector == "" {
-			return DelegateResult{}, errors.New("delegate participant handle is unknown or expired")
-		}
+	if request.Delegate != "" {
+		payload["via"] = request.Delegate
 	}
-	if selector != "" {
-		payload["via"] = selector
+	if request.Participant != "" {
+		payload["participant"] = request.Participant
 	}
 	key := delegateJobKey(request)
 	var launched struct {
@@ -274,11 +258,12 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			return DelegateResult{}, err
 		}
 		var status struct {
-			JobStatus string  `json:"job_status"`
-			Result    string  `json:"result"`
-			Agent     string  `json:"agent_name"`
-			CostUSD   float64 `json:"cost_usd"`
-			Error     string  `json:"error"`
+			JobStatus   string  `json:"job_status"`
+			Result      string  `json:"result"`
+			Agent       string  `json:"agent_name"`
+			Participant string  `json:"participant"`
+			CostUSD     float64 `json:"cost_usd"`
+			Error       string  `json:"error"`
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
@@ -319,7 +304,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		switch status.JobStatus {
 		case "done":
-			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD}, nil
+			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: status.Participant, CostUSD: status.CostUSD}, nil
 		case "partial":
 			if strings.TrimSpace(status.Result) == "" {
 				if c.store != nil {
@@ -363,24 +348,157 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 }
 
 func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	planned, err := c.planDelegateGroup(ctx, requests)
+	if err != nil {
+		out := make([]DelegateGroupResult, len(requests))
+		for i := range out {
+			out[i].Err = err
+		}
+		return out
+	}
 	out := make([]DelegateGroupResult, len(requests))
 	var wg sync.WaitGroup
 	wg.Add(len(requests))
 	for i := range requests {
 		go func(i int) {
 			defer wg.Done()
-			out[i].Result, out[i].Err = c.Delegate(ctx, requests[i])
-			if out[i].Err == nil && out[i].Result.Agent != "" {
-				sum := sha256.Sum256([]byte(delegateJobKey(requests[i]) + "\x00" + out[i].Result.Agent))
-				out[i].Participant = fmt.Sprintf("participant:%x", sum[:16])
-				c.participantMu.Lock()
-				c.participants[out[i].Participant] = out[i].Result.Agent
-				c.participantMu.Unlock()
+			result, err := c.Delegate(ctx, planned[i])
+			out[i].Response, out[i].CostUSD, out[i].Participant, out[i].Err = result.Response, result.CostUSD, result.Participant, err
+			if out[i].Err == nil && strings.TrimSpace(out[i].Participant) == "" {
+				out[i].Err = errors.New("delegate service returned no participant handle")
 			}
 		}(i)
 	}
 	wg.Wait()
 	return out
+}
+
+type delegateCandidate struct {
+	Name, Provider, Model string
+	Roles, Personas       []string
+	MaxParallel           int
+}
+
+func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []DelegateRequest) ([]DelegateRequest, error) {
+	planned := append([]DelegateRequest(nil), requests...)
+	needsRoute := false
+	for _, request := range planned {
+		if request.Delegate == "" && request.Participant == "" {
+			needsRoute = true
+			break
+		}
+	}
+	if !needsRoute {
+		return planned, nil
+	}
+	candidates, err := c.delegateCandidates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load delegate group eligibility: %w", err)
+	}
+	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
+	for _, request := range planned {
+		if request.Delegate == "" || request.Participant != "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate.Name == request.Delegate {
+				providerUses[candidate.Provider]++
+				modelUses[candidate.Model]++
+				agentUses[candidate.Name]++
+				break
+			}
+		}
+	}
+	for i := range planned {
+		request := &planned[i]
+		if request.Delegate != "" || request.Participant != "" {
+			continue
+		}
+		best := -1
+		for j, candidate := range candidates {
+			if agentUses[candidate.Name] >= candidate.MaxParallel || !matchesSelector(candidate.Roles, request.Role) || !matchesSelector(candidate.Personas, request.Persona) {
+				continue
+			}
+			if best < 0 || candidateLess(candidate, candidates[best], providerUses, modelUses, agentUses) {
+				best = j
+			}
+		}
+		if best < 0 {
+			return nil, fmt.Errorf("delegate service cannot fill seat %d (%s/%s) within enabled capacity", i+1, request.Role, request.Persona)
+		}
+		chosen := candidates[best]
+		request.Delegate = chosen.Name
+		request.routeSelected = true
+		providerUses[chosen.Provider]++
+		modelUses[chosen.Model]++
+		agentUses[chosen.Name]++
+	}
+	return planned, nil
+}
+
+func candidateLess(a, b delegateCandidate, providerUses, modelUses, agentUses map[string]int) bool {
+	as := boolInt(providerUses[a.Provider] > 0) + boolInt(modelUses[a.Model] > 0)
+	bs := boolInt(providerUses[b.Provider] > 0) + boolInt(modelUses[b.Model] > 0)
+	if as != bs {
+		return as < bs
+	}
+	if agentUses[a.Name] != agentUses[b.Name] {
+		return agentUses[a.Name] < agentUses[b.Name]
+	}
+	return a.Name < b.Name
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func matchesSelector(values []string, wanted string) bool {
+	if len(values) == 0 {
+		return true
+	}
+	for _, value := range values {
+		if value == "all" || value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCandidate, error) {
+	var response struct {
+		Agents []struct {
+			Name        string   `json:"name"`
+			Provider    string   `json:"provider"`
+			Model       string   `json:"model"`
+			Enabled     bool     `json:"enabled"`
+			PrimaryOnly bool     `json:"primary_only"`
+			MaxParallel int      `json:"max_parallel"`
+			Roles       []string `json:"roles"`
+			Personas    []string `json:"personas"`
+		} `json:"agents"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
+		return nil, err
+	}
+	var candidates []delegateCandidate
+	for _, agent := range response.Agents {
+		if !agent.Enabled || agent.PrimaryOnly || strings.TrimSpace(agent.Name) == "" || agent.MaxParallel < 1 {
+			continue
+		}
+		provider := strings.TrimSpace(agent.Provider)
+		model := strings.TrimSpace(agent.Model)
+		if provider == "" {
+			provider = agent.Name
+		}
+		if model == "" {
+			model = agent.Name
+		}
+		candidates = append(candidates, delegateCandidate{Name: agent.Name, Provider: provider, Model: model, Roles: agent.Roles, Personas: agent.Personas, MaxParallel: agent.MaxParallel})
+	}
+	return candidates, nil
 }
 
 func isTerminalDelegateStatus(status string) bool {
@@ -422,48 +540,6 @@ func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Tim
 func delegateJobKey(request DelegateRequest) string {
 	keyMaterial, _ := json.Marshal(request)
 	return fmt.Sprintf("%s:%s:%s:%x", request.WorkItemID, request.Stage, request.ExecutionVersion, sha256.Sum256(keyMaterial))
-}
-
-func (c *HTTPAgentClient) EligibleAgents(ctx context.Context, role string) ([]EligibleAgent, error) {
-	role = strings.TrimSpace(role)
-	if role == "" {
-		return nil, errors.New("eligible-agent role is required")
-	}
-	var response struct {
-		Agents []struct {
-			Name        string   `json:"name"`
-			Provider    string   `json:"provider"`
-			Enabled     bool     `json:"enabled"`
-			PrimaryOnly bool     `json:"primary_only"`
-			MaxParallel int      `json:"max_parallel"`
-			Roles       []string `json:"roles"`
-		} `json:"agents"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/v1/agent/list", nil, &response); err != nil {
-		return nil, err
-	}
-	var eligible []EligibleAgent
-	for _, agent := range response.Agents {
-		agent.Name = strings.TrimSpace(agent.Name)
-		if !agent.Enabled || agent.PrimaryOnly || agent.Name == "" || agent.MaxParallel < 1 {
-			continue
-		}
-		roleOK := false
-		for _, allowed := range agent.Roles {
-			allowed = strings.TrimSpace(allowed)
-			if allowed == "" {
-				continue
-			}
-			if allowed == "all" || allowed == role {
-				roleOK = true
-				break
-			}
-		}
-		if roleOK {
-			eligible = append(eligible, EligibleAgent{Name: agent.Name, Provider: agent.Provider, MaxParallel: agent.MaxParallel})
-		}
-	}
-	return eligible, nil
 }
 
 func (c *HTTPAgentClient) cancelRemoteAndForget(jobID int, key string, parent context.Context) error {

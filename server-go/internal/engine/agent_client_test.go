@@ -77,7 +77,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 			jobID := launches.Add(1)
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": jobID})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -111,7 +111,7 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -132,6 +132,11 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 	var vias []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/v1/agent/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "codex", "provider": "openai", "model": "gpt", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+				{"name": "minimax", "provider": "minimax", "model": "m3", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
+			}})
 		case "/v1/delegate/run":
 			var payload map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&payload)
@@ -140,7 +145,7 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 			mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1)})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -162,12 +167,15 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 		if result.Err != nil {
 			t.Fatal(result.Err)
 		}
+		if result.Participant != "delegate-job:1" {
+			t.Fatalf("participant = %q, want delegate-issued continuation", result.Participant)
+		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	sort.Strings(vias)
-	if fmt.Sprint(vias) != "[<nil> <nil> codex]" {
-		t.Fatalf("delegate group rewrote random specifications: %v", vias)
+	if fmt.Sprint(vias) != "[codex codex minimax]" {
+		t.Fatalf("delegate group did not fill diverse seats: %v", vias)
 	}
 }
 
@@ -892,39 +900,6 @@ func TestDelegateJobKeyIncludesExplicitEligibilityFallback(t *testing.T) {
 	fallback.RetryTag = "eligible-fallback:0:kimi"
 	if delegateJobKey(assigned) == delegateJobKey(fallback) {
 		t.Fatal("eligibility fallback reused the assigned delegate job key")
-	}
-}
-
-func TestHTTPAgentClientEligibleRosterUsesEnabledRoleCapacity(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/agent/list" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
-			{"name": "codex", "provider": "chatgpt", "enabled": true, "max_parallel": 10, "roles": []string{"all"}},
-			{"name": "minimax", "provider": "anthropic", "enabled": true, "max_parallel": 4, "roles": []string{"review"}},
-			{"name": "primary", "provider": "claude", "enabled": true, "primary_only": true, "max_parallel": 4, "roles": []string{"all"}},
-			{"name": "disabled", "provider": "openai", "enabled": false, "max_parallel": 3, "roles": []string{"all"}},
-			{"name": "code-only", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{"code"}},
-			{"name": "   ", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{"all"}},
-			{"name": "empty-role", "provider": "openai", "enabled": true, "max_parallel": 2, "roles": []string{""}},
-		}})
-	}))
-	defer server.Close()
-	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	roster, err := client.EligibleAgents(context.Background(), "review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(roster) != 2 || roster[0].Name != "codex" || roster[0].MaxParallel != 10 || roster[1].Name != "minimax" {
-		t.Fatalf("roster=%+v", roster)
-	}
-	if _, err := client.EligibleAgents(context.Background(), ""); err == nil {
-		t.Fatal("empty eligibility role accepted")
 	}
 }
 

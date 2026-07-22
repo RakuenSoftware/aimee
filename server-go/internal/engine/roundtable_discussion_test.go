@@ -26,6 +26,10 @@ func (a *discussionTestAgents) Delegate(_ context.Context, request DelegateReque
 	return DelegateResult{Response: response}, err
 }
 
+func (a *discussionTestAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
 func discussionAnalysis(severity string) panelAnalysis {
 	return panelAnalysis{
 		Feedback: wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: "hash", Findings: []wfe.Finding{{ID: "direction", Persona: "architecture", Severity: severity, Summary: "the direction is wrong"}}},

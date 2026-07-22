@@ -154,12 +154,12 @@ func (r *NativeRunner) runDiscussionCycle(ctx context.Context, req StepRequest, 
 		parsed, err := discussionResponse{}, call.Err
 		if err == nil {
 			var doc []byte
-			doc, err = extractJSONObject(call.Result.Response)
+			doc, err = extractJSONObject(call.Response)
 			if err == nil {
 				err = json.Unmarshal(doc, &parsed)
 			}
 		}
-		outcomes[i] = outcome{response: parsed, cost: call.Result.CostUSD, err: err}
+		outcomes[i] = outcome{response: parsed, cost: call.CostUSD, err: err}
 	}
 	votes := make(map[string][2]int)
 	successful := 0

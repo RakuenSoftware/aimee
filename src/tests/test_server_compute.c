@@ -1286,6 +1286,10 @@ static void test_delegate_status_handler(void)
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "done") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "role")->valuestring, "code") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "agent_name")->valuestring, "codex") == 0);
+   char participant[64];
+   snprintf(participant, sizeof(participant), "delegate-job:%d", job_id);
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "participant")->valuestring, participant) ==
+          0);
    assert(cJSON_GetObjectItem(g_last_response, "cursor_turn")->valueint == 3);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "result")->valuestring, "ok") == 0);
    cJSON_Delete(req);

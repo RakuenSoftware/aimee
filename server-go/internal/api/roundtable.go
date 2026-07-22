@@ -14,6 +14,7 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request roundtable.ReviewRequest
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 	decoder := jsonDecoder(r.Body)
 	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -25,6 +26,11 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.roundtable.Review(r.Context(), request)
 	if err != nil {
+		var validation roundtable.ValidationError
+		if errors.As(err, &validation) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error(), "roundtable": result})
+			return
+		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": err.Error(), "roundtable": result})
 		return
 	}

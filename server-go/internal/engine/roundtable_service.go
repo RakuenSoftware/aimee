@@ -18,12 +18,12 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 	}
 	request.Artifact = strings.TrimSpace(request.Artifact)
 	if len(request.Artifact) < 20 {
-		return roundtablecfg.RunResult{}, errors.New("roundtable artifact must be at least 20 characters")
+		return roundtablecfg.RunResult{}, roundtablecfg.ValidationError{Message: "roundtable artifact must be at least 20 characters"}
 	}
 	stage, ok := normalizeRoundtableStage(request.ArtifactStage)
 	if !ok {
 		if strings.TrimSpace(request.ArtifactStage) != "" {
-			return roundtablecfg.RunResult{}, fmt.Errorf("unsupported artifact stage %q", request.ArtifactStage)
+			return roundtablecfg.RunResult{}, roundtablecfg.ValidationError{Message: fmt.Sprintf("unsupported artifact stage %q", request.ArtifactStage)}
 		}
 		stage = "frozen_diff"
 	}

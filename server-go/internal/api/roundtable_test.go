@@ -12,11 +12,23 @@ import (
 
 type fakeRoundtableReviewer struct {
 	request roundtable.ReviewRequest
+	err     error
 }
 
 func (f *fakeRoundtableReviewer) Review(_ context.Context, request roundtable.ReviewRequest) (roundtable.RunResult, error) {
 	f.request = request
-	return roundtable.RunResult{Artifact: "approved", Approved: true, ParticipantsTotal: 3, ParticipantsUsed: 3}, nil
+	return roundtable.RunResult{Artifact: "approved", Approved: true, ParticipantsTotal: 3, ParticipantsUsed: 3}, f.err
+}
+
+func TestRoundtableReviewEndpointRejectsValidationErrors(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	server.SetRoundtableReviewer(&fakeRoundtableReviewer{err: roundtable.ValidationError{Message: "invalid artifact"}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/roundtable/review", strings.NewReader(`{"artifact":"invalid"}`))
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestRoundtableReviewEndpointRoutesToGoEngine(t *testing.T) {

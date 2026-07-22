@@ -2,6 +2,10 @@ package roundtable
 
 import "github.com/JBailes/aimee/server-go/internal/wfe"
 
+type ValidationError struct{ Message string }
+
+func (e ValidationError) Error() string { return e.Message }
+
 type ReviewRequest struct {
 	Artifact        string `json:"artifact"`
 	OriginalRequest string `json:"original_request"`
@@ -19,6 +23,6 @@ type RunResult struct {
 	DeadlineHit        bool                `json:"deadline_hit"`
 	ParticipantsTotal  int                 `json:"participants_total"`
 	ParticipantsFailed int                 `json:"participants_failed"`
-	ParticipantsUsed   int                 `json:"participants_tool_used"`
+	ParticipantsUsed   int                 `json:"participants_used"`
 	CostUSD            float64             `json:"cost_usd"`
 }

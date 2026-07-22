@@ -15,7 +15,6 @@ const DefaultDeadlineMS = 360000
 type Seat struct {
 	Persona  string
 	Selector string
-	Pinned   bool
 }
 
 type Panel struct {
@@ -30,8 +29,8 @@ type Panel struct {
 }
 
 type presetSeat struct {
-	Model   string `json:"model"`
-	Persona string `json:"persona"`
+	Selector string `json:"model"`
+	Persona  string `json:"persona"`
 }
 
 type preset struct {
@@ -117,17 +116,17 @@ func resolvePreset(p preset, lenses []string, pins map[string]string) (Panel, er
 		if persona == "" {
 			persona = lensAt(lenses, i)
 		}
-		model := strings.TrimSpace(configured.Model)
+		selector := strings.TrimSpace(configured.Selector)
 		if pinned := strings.TrimSpace(pins[persona]); pinned != "" {
-			model = pinned
+			selector = pinned
 		}
 		// Empty is the generic delegate contract's eligibility selector. The
 		// roundtable intentionally does not inspect the roster or resolve random
 		// seats; delegate owns routing, diversity, capacity, and temporary health.
-		if model == "$random" {
-			model = ""
+		if selector == "$random" {
+			selector = ""
 		}
-		seats = append(seats, Seat{Persona: persona, Selector: model, Pinned: pins[persona] != "" || configured.Model != "" && configured.Model != "$random"})
+		seats = append(seats, Seat{Persona: persona, Selector: selector})
 	}
 	minimum := p.MinSuccessful
 	if minimum <= 0 {
@@ -157,8 +156,7 @@ func directPanel(lenses []string, pins map[string]string) (Panel, error) {
 	for i := 0; i < DirectMaxSeats; i++ {
 		persona := lensAt(lenses, i)
 		name := strings.TrimSpace(pins[persona])
-		pinned := name != ""
-		seats = append(seats, Seat{Persona: persona, Selector: name, Pinned: pinned})
+		seats = append(seats, Seat{Persona: persona, Selector: name})
 	}
 	return Panel{Seats: seats, MinSuccessful: len(seats)}, nil
 }
