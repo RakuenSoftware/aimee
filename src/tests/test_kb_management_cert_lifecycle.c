@@ -23,7 +23,20 @@ void db2_lease_end(void) {}
 int vault_server_kek(uint8_t kek[32])
 {
    memset(kek, 0, 32);
-   return -1;
+   return 0;
+}
+int vault_secret_encrypt(const uint8_t dek[32], const uint8_t *aad, size_t aad_len,
+                         const uint8_t *plaintext, size_t plaintext_len, uint8_t nonce[12],
+                         uint8_t *ciphertext, uint8_t tag[16])
+{
+   (void)dek;
+   (void)aad;
+   (void)aad_len;
+   memset(nonce, 0x44, 12);
+   memset(tag, 0x44, 16);
+   for (size_t i = 0; i < plaintext_len; ++i)
+      ciphertext[i] = plaintext[i] ^ 0x44;
+   return 0;
 }
 int vault_secret_decrypt(const uint8_t dek[32], const uint8_t *aad, size_t aad_len,
                          const uint8_t nonce[12], const uint8_t *ciphertext, size_t ciphertext_len,
@@ -32,12 +45,15 @@ int vault_secret_decrypt(const uint8_t dek[32], const uint8_t *aad, size_t aad_l
    (void)dek;
    (void)aad;
    (void)aad_len;
-   (void)nonce;
-   (void)ciphertext;
-   (void)ciphertext_len;
-   (void)tag;
-   (void)plaintext;
-   return -1;
+   for (size_t i = 0; i < 12; ++i)
+      if (nonce[i] != 0x44)
+         return -1;
+   for (size_t i = 0; i < 16; ++i)
+      if (tag[i] != 0x44)
+         return -1;
+   for (size_t i = 0; i < ciphertext_len; ++i)
+      plaintext[i] = ciphertext[i] ^ 0x44;
+   return 0;
 }
 
 db2_management_client_instance_result_t db2_management_client_instance_binding_init(
@@ -104,6 +120,13 @@ typedef struct
    unsigned activate_count;
    unsigned snapshot_count;
    unsigned mutate_snapshot_once;
+   unsigned mutate_snapshot_pairs;
+   unsigned mutate_snapshot_pair_call;
+   int mutate_identity_once;
+   int mutate_attested_identity_once;
+   kb_workload_result_t attest_failure_once;
+   db2_management_client_instance_result_t snapshot_failure;
+   unsigned snapshot_failure_count;
    kb_management_cert_crash_point_t crash_point;
    int crash_armed;
    int arena_fail_step;
@@ -131,7 +154,20 @@ static kb_workload_result_t mock_attest(void *opaque, const uint8_t challenge[32
 {
    (void)challenge;
    (void)binding;
-   *out = ((lifecycle_mock_t *)opaque)->identity;
+   lifecycle_mock_t *mock = opaque;
+   if (mock->attest_failure_once)
+   {
+      kb_workload_result_t result = mock->attest_failure_once;
+      mock->attest_failure_once = 0;
+      return result;
+   }
+   *out = mock->identity;
+   if (mock->mutate_attested_identity_once)
+   {
+      mock->mutate_attested_identity_once = 0;
+      strcpy(out->subject, "spiffe://example.test/kb/changed");
+      out->proof_anchor_id[0] ^= 0xff;
+   }
    return KB_WORKLOAD_OK;
 }
 
@@ -291,12 +327,29 @@ static db2_management_client_instance_result_t mock_snapshot(
    (void)installation;
    (void)binding;
    mock->snapshot_count++;
+   if (mock->snapshot_failure_count)
+   {
+      mock->snapshot_failure_count--;
+      memset(out, 0, sizeof(*out));
+      return mock->snapshot_failure;
+   }
    if (!mock->active)
    {
       memset(out, 0, sizeof(*out));
       return DB2_MANAGEMENT_CLIENT_INSTANCE_DENIED;
    }
    *out = mock->enrollment;
+   if (mock->mutate_identity_once)
+   {
+      mock->mutate_identity_once = 0;
+      strcpy(out->cert_identity, "not-the-management-identity");
+   }
+   if (mock->mutate_snapshot_pairs && ++mock->mutate_snapshot_pair_call == 2)
+   {
+      out->revocation_generation++;
+      mock->mutate_snapshot_pair_call = 0;
+      mock->mutate_snapshot_pairs--;
+   }
    if (mock->mutate_snapshot_once && --mock->mutate_snapshot_once == 0)
       out->revocation_generation++;
    return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
@@ -735,6 +788,31 @@ static void remove_tree_files(const char *path)
    assert(rmdir(path) == 0);
 }
 
+static void test_noncanonical_custodied_hex(void)
+{
+   char dir[] = "/tmp/aimee-p5b2c-hex.XXXXXX";
+   assert(mkdtemp(dir));
+   kb_pki_ca_t ca, loaded;
+   assert(kb_pki_ca_generate(&ca) == 0 && kb_pki_ca_save_custodied(dir, &ca) == 0);
+   char path[512];
+   assert(snprintf(path, sizeof(path), "%s/ca-key.vault", dir) > 0);
+   int fd = open(path, O_RDWR | O_CLOEXEC);
+   assert(fd >= 0);
+   char envelope[KB_PKI_KEY_PEM_MAX * 2 + 256];
+   ssize_t n = read(fd, envelope, sizeof(envelope));
+   assert(n > 0 && (size_t)n < sizeof(envelope));
+   char *digit = memchr(envelope, '4', (size_t)n);
+   assert(digit);
+   *digit = '['; /* The former decoder incorrectly mapped '[' to nibble 4. */
+   assert(lseek(fd, 0, SEEK_SET) == 0 && write(fd, envelope, (size_t)n) == n &&
+          ftruncate(fd, n) == 0 && close(fd) == 0);
+   memset(&loaded, 0xa5, sizeof(loaded));
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(zeroed(&loaded, sizeof(loaded)));
+   OPENSSL_cleanse(&ca, sizeof(ca));
+   remove_tree_files(dir);
+}
+
 static void test_lifecycle_orchestration(void)
 {
    char ca_dir[] = "/tmp/aimee-p5b2c-ca.XXXXXX";
@@ -795,6 +873,26 @@ static void test_lifecycle_orchestration(void)
           mock.snapshot_count == snapshots_before + 4);
    kb_management_cert_bundle_clear(&bundle);
 
+   /* A second before/after change exhausts the single whole-load retry and is
+    * stable contradictory state, not a third retry or a released bundle. */
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.mutate_snapshot_pairs = 2;
+   mock.mutate_snapshot_pair_call = 0;
+   snapshots_before = mock.snapshot_count;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_INTEGRITY);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)) &&
+          mock.snapshot_count == snapshots_before + 4);
+
+   /* The independently verified leaf identity is part of the release proof. */
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.mutate_identity_once = 1;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_INTEGRITY);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
+
    /* Inclusive threshold starts renewal. A crash after activation leaves the
     * old current plus durable pending/candidate, then restart promotes exactly
     * the DB-current generation without another activation. */
@@ -831,6 +929,71 @@ static void test_lifecycle_orchestration(void)
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_OK);
    assert(active.generation == 3);
+
+   /* Recovered renewals reject a maximal authoritative generation before the
+    * +1 comparison, avoiding signed overflow even under UBSAN. */
+   mock.now = mock.enrollment.cert_not_after_epoch - 1200;
+   mock.crash_point = KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING;
+   mock.crash_armed = 1;
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+          KB_MANAGEMENT_CERT_UNAVAILABLE);
+   int64_t saved_generation = mock.enrollment.generation;
+   mock.enrollment.generation = INT64_MAX;
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+          KB_MANAGEMENT_CERT_INTEGRITY);
+   assert(zeroed(&active, sizeof(active)));
+   mock.enrollment.generation = saved_generation;
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+          KB_MANAGEMENT_CERT_OK);
+
+   /* Every durability boundary is restartable without a duplicate activation
+    * or a second operation coordinate. AFTER_BEGIN/AFTER_ACTIVATE are covered
+    * above; cover the remaining boundaries on successive renewals. */
+   const kb_management_cert_crash_point_t boundaries[] = {
+       KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT, KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING,
+       KB_MANAGEMENT_CERT_CRASH_AFTER_CANDIDATE, KB_MANAGEMENT_CERT_CRASH_AFTER_PROMOTE};
+   for (size_t i = 0; i < sizeof(boundaries) / sizeof(boundaries[0]); ++i)
+   {
+      mock.now = mock.enrollment.cert_not_after_epoch - 1200;
+      mock.crash_point = boundaries[i];
+      mock.crash_armed = 1;
+      unsigned prior_activations = mock.activate_count;
+      assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+             KB_MANAGEMENT_CERT_UNAVAILABLE);
+      assert(zeroed(&active, sizeof(active)));
+      assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+             KB_MANAGEMENT_CERT_OK);
+      assert(mock.activate_count == prior_activations + 1);
+   }
+
+   /* Provider unavailability, DB retry exhaustion, and a changed attested
+    * identity all fail closed and clear caller outputs. */
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.attest_failure_once = KB_WORKLOAD_UNAVAILABLE;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_UNAVAILABLE);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.snapshot_failure = DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
+   mock.snapshot_failure_count = 3;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_UNAVAILABLE);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.snapshot_failure = DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY;
+   mock.snapshot_failure_count = 3;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_UNAVAILABLE);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
+   memset(&bundle, 0xa5, sizeof(bundle));
+   memset(&loaded, 0xa5, sizeof(loaded));
+   mock.mutate_attested_identity_once = 1;
+   assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
+          KB_MANAGEMENT_CERT_INTEGRITY);
+   assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
 
    kb_management_cert_lifecycle_close(lifecycle);
    remove_tree_files(bundle_dir);
@@ -1244,6 +1407,7 @@ int main(void)
    test_key_and_csr();
    test_lifecycle_constructor_guards();
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
+   test_noncanonical_custodied_hex();
    test_lifecycle_orchestration();
 #endif
    test_management_leaf_profile();

@@ -399,7 +399,11 @@ static int active_equal(const db2_management_client_active_t *a,
 static int candidate_matches_active(const kb_management_cert_candidate_view_t *c,
                                     const db2_management_client_active_t *a)
 {
-   return !strcmp(c->installation_id, a->installation_id) &&
+   return a->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE &&
+          a->issue_kind == (a->generation == 1 ? DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL
+                                                : DB2_MANAGEMENT_CLIENT_ISSUE_RENEW) &&
+          !strcmp(a->cert_identity, "p5-kb-management") &&
+          !strcmp(c->installation_id, a->installation_id) &&
           !strcmp(c->lineage_id, a->replacement_lineage_id) &&
           !strcmp(c->operation_id, a->operation_id) && !strcmp(c->authority_id, a->authority_id) &&
           c->generation == a->generation &&
@@ -1238,7 +1242,8 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       goto done_intent;
    }
    if (pending.pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_RENEWAL &&
-       (!previous || previous->generation + 1 != pending.pending.generation ||
+       (!previous || previous->generation == INT64_MAX ||
+        previous->generation + 1 != pending.pending.generation ||
         strcmp(previous->replacement_lineage_id, pending.pending.lineage_id) ||
         strcmp(previous->authority_id, pending.pending.authority_id)))
    {
@@ -1610,25 +1615,41 @@ kb_management_cert_result_t kb_management_cert_load_active(kb_management_cert_li
    kb_management_cert_result_t rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    cancel_output_t cancel_output = {.bundle = bundle, .active = out};
    pthread_cleanup_push(cancel_output_clear, &cancel_output);
-   int changed = 0;
-   for (unsigned attempt = 0; attempt < 3; ++attempt)
+   for (unsigned snapshot_attempt = 0; snapshot_attempt < 2; ++snapshot_attempt)
    {
-      secret_arena_t arena;
-      if (secret_arena_open(lifecycle, &arena))
+      int changed = 0;
+      for (unsigned db_attempt = 0; db_attempt < 3; ++db_attempt)
+      {
+         secret_arena_t arena;
+         if (secret_arena_open(lifecycle, &arena))
+         {
+            rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
+            break;
+         }
+         rc = load_once(lifecycle, bundle, out, &changed, &arena);
+         secret_arena_close(&arena);
+         if (rc != DB_RETRY_RESULT)
+            break;
+         struct timespec delay = {.tv_sec = 0, .tv_nsec = (long)(25U << db_attempt) * 1000000L};
+         nanosleep(&delay, NULL);
+      }
+      if (rc == DB_RETRY_RESULT)
       {
          rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
          break;
       }
-      rc = load_once(lifecycle, bundle, out, &changed, &arena);
-      secret_arena_close(&arena);
-      if (!changed && rc != DB_RETRY_RESULT)
+      if (!changed)
          break;
-      changed = 0;
-      struct timespec delay = {.tv_sec = 0, .tv_nsec = (long)(25U << attempt) * 1000000L};
+      if (snapshot_attempt == 1)
+      {
+         rc = KB_MANAGEMENT_CERT_INTEGRITY;
+         kb_management_cert_bundle_clear(bundle);
+         memset(out, 0, sizeof(*out));
+         break;
+      }
+      struct timespec delay = {.tv_sec = 0, .tv_nsec = 25000000L};
       nanosleep(&delay, NULL);
    }
-   if (rc == DB_RETRY_RESULT)
-      rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    db2_lease_end();
    pthread_mutex_unlock(&lifecycle->mutex);
    pthread_setcancelstate(old_cancel, NULL);

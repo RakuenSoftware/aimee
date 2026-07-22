@@ -101,10 +101,12 @@ static int unhx(const char *in, size_t n, uint8_t *out, size_t cap)
       return -1;
    for (size_t i = 0; i < n / 2; i++)
    {
-      int a = (in[i * 2] <= '9' ? in[i * 2] - '0' : in[i * 2] - 'a' + 10),
-          b = (in[i * 2 + 1] <= '9' ? in[i * 2 + 1] - '0' : in[i * 2 + 1] - 'a' + 10);
-      if (a < 0 || a > 15 || b < 0 || b > 15)
+      unsigned char ac = (unsigned char)in[i * 2], bc = (unsigned char)in[i * 2 + 1];
+      if (!((ac >= '0' && ac <= '9') || (ac >= 'a' && ac <= 'f')) ||
+          !((bc >= '0' && bc <= '9') || (bc >= 'a' && bc <= 'f')))
          return -1;
+      int a = ac <= '9' ? ac - '0' : ac - 'a' + 10;
+      int b = bc <= '9' ? bc - '0' : bc - 'a' + 10;
       out[i] = (uint8_t)((a << 4) | b);
    }
    return 0;
