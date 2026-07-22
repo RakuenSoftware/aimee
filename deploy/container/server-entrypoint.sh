@@ -206,12 +206,9 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- aimee-wfe \
-        --home "$AIMEE_HOME" \
-        --socket "$AIMEE_WFE_HTTP_SOCKET" \
-        --config "$AIMEE_HOME/aimee.yaml" \
-        --workflow-dir "$AIMEE_HOME/workflows" \
-        --agent-service-socket "$AIMEE_HOME/aimee-http.sock" &
+    runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
     wfe_pid=$!
 fi
 

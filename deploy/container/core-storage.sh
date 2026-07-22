@@ -59,7 +59,7 @@ aimee_prepare_core_storage() {
     fi
 
     case "$_core_pattern" in
-        "$_core_dir"/*)
+        /*)
             if [ "$_required" = 1 ]; then
                 _core_root=$(readlink -f "$_core_dir" 2>/dev/null || true)
                 _core_parent=$(readlink -f "$(dirname "$_core_pattern")" 2>/dev/null || true)
@@ -81,6 +81,14 @@ aimee_prepare_core_storage() {
                         "$_core_pattern" >&2
                     return 1
                 fi
+            else
+                _core_root=$(readlink -f "$_core_dir" 2>/dev/null || true)
+                _core_parent=$(readlink -f "$(dirname "$_core_pattern")" 2>/dev/null || true)
+                if [ -z "$_core_root" ] || [ "$_core_parent" != "$_core_root" ]; then
+                    printf '[server-entrypoint] warning: core_pattern is outside persistent core storage: %s\n' \
+                        "$_core_pattern" >&2
+                    return 0
+                fi
             fi
             printf '[server-entrypoint] native crash evidence: %s (%s)\n' \
                 "$_core_pattern" "$_core_dir"
@@ -89,12 +97,6 @@ aimee_prepare_core_storage() {
             printf '[server-entrypoint] %s: core_pattern uses an external collector, not %s: %s\n' \
                 "$([ "$_required" = 1 ] && printf fatal || printf warning)" \
                 "$_core_dir" "$_core_pattern" >&2
-            [ "$_required" = 1 ] && return 1
-            ;;
-        /*)
-            printf '[server-entrypoint] %s: core_pattern is outside persistent core storage: %s\n' \
-                "$([ "$_required" = 1 ] && printf fatal || printf warning)" \
-                "$_core_pattern" >&2
             [ "$_required" = 1 ] && return 1
             ;;
         *)
@@ -150,9 +152,9 @@ aimee_verify_core_dump() {
         -e 's/%[A-Za-z]/*/g' -e 's/__AIMEE_LITERAL_PERCENT__/%/g')
     _wait=0
     _produced=
-    while [ "$_wait" -lt 50 ]; do
+    while [ "$_wait" -lt 300 ]; do
         _produced=$(find "$_core_dir" -maxdepth 1 -type f -path "$_core_glob" -newer "$_marker" \
-            ! -name '.core-selftest.*' -size +0c -print 2>/dev/null | head -n 1)
+            ! -name '.core-selftest.*' -size +4095c -print 2>/dev/null | head -n 1)
         [ -n "$_produced" ] && break
         _wait=$((_wait + 1))
         sleep 0.1
@@ -161,6 +163,12 @@ aimee_verify_core_dump() {
     if [ -z "$_produced" ]; then
         printf '[server-entrypoint] fatal: controlled SIGSEGV produced no persistent core in %s\n' \
             "$_core_dir" >&2
+        return 1
+    fi
+    _magic=$(od -An -tx1 -N4 "$_produced" 2>/dev/null | tr -d ' \n')
+    if [ "$_magic" != 7f454c46 ]; then
+        printf '[server-entrypoint] fatal: controlled SIGSEGV output is not an ELF core: %s\n' \
+            "$_produced" >&2
         return 1
     fi
     printf '[server-entrypoint] controlled SIGSEGV verified persistent core: %s\n' \

@@ -23,6 +23,10 @@ AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage
 [ -d "$core_dir" ] && [ "$(stat -c %a "$core_dir")" = 1777 ]
 
+ln -s "$core_dir" "$tmp/core-alias"
+AIMEE_CORE_DIR="$tmp/core-alias/" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
+    AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage
+
 printf '/tmp/not-persistent/core.%%p\n' > "$pattern_file"
 if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage 2>/dev/null; then
@@ -55,6 +59,13 @@ printf '%s/core.%%%%p\n' "$core_dir" > "$pattern_file"
 if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage 2>/dev/null; then
     echo "core-storage: required mode accepted escaped %%p as PID attribution" >&2
+    exit 1
+fi
+
+printf '%s/core.%%p\n' "$core_dir" > "$pattern_file"
+if AIMEE_CORE_DIR=relative/cores AIMEE_CORE_PATTERN_FILE="$pattern_file" \
+    AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage 2>/dev/null; then
+    echo "core-storage: required mode accepted a relative core directory" >&2
     exit 1
 fi
 
