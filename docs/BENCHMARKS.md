@@ -156,6 +156,11 @@ The projection does not manufacture samples or fill coverage gaps. Promotion
 still requires at least 10,000 attempts in the projected artifact and a passing
 `check-latency-slo` result.
 
+The KB mTLS listener defaults to 64 live connections. Operators may lower the
+bound with `AIMEE_KB_MTLS_MAX_CONNECTIONS` (1–64); invalid values fail startup.
+`kb_mtls_connection_stats()` exposes the configured limit plus current live and
+queued counts for transport capture without exposing request content.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

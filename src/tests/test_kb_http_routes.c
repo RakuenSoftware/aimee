@@ -2241,6 +2241,31 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
 
+   /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
+    * request target, and 64 KiB total request head+body. */
+   char oversized_headers[8192];
+   size_t oversized_len = (size_t)snprintf(oversized_headers, sizeof(oversized_headers),
+                                           "GET /v1/health HTTP/1.1\r\nHost: kb\r\n");
+   for (int i = 0; i < 65; i++)
+      oversized_len +=
+          (size_t)snprintf(oversized_headers + oversized_len,
+                           sizeof(oversized_headers) - oversized_len, "X-Test-%d: a\r\n", i);
+   snprintf(oversized_headers + oversized_len, sizeof(oversized_headers) - oversized_len, "\r\n");
+   mtls_request(sctx, cctx, oversized_headers, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   char oversized_uri[4200];
+   const char oversized_uri_suffix[] = " HTTP/1.1\r\nHost: kb\r\n\r\n";
+   memcpy(oversized_uri, "GET /", 5);
+   memset(oversized_uri + 5, 'a', 4096);
+   memcpy(oversized_uri + 5 + 4096, oversized_uri_suffix, sizeof(oversized_uri_suffix));
+   mtls_request(sctx, cctx, oversized_uri, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   mtls_request(sctx, cctx, "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 65536\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "413 Payload Too Large"));
+
    /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
     * authority function; none of it is accepted from JSON or the CN label. */
    {
@@ -2401,7 +2426,15 @@ static void test_mtls_listener(void)
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
 
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
+   assert(kb_mtls_start(0, cfg, "localhost") == -1);
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "4", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == 0);
+   int connection_limit = 0, connections_live = -1, connections_queued = -1;
+   kb_mtls_connection_stats(&connection_limit, &connections_live, &connections_queued);
+   assert(connection_limit == 4);
+   assert(connections_live == 0);
+   assert(connections_queued == 0);
    int port = kb_mtls_bound_port();
    assert(port > 0);
 
@@ -2538,6 +2571,7 @@ static void test_mtls_listener(void)
 
    SSL_CTX_free(cctx);
    kb_mtls_stop();
+   unsetenv("AIMEE_KB_MTLS_MAX_CONNECTIONS");
    assert(kb_mtls_bound_port() == 0);
 
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca.pem", cfg);
