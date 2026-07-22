@@ -36,6 +36,11 @@ struct kb_workload_provider
    int mutex_ready;
 };
 
+kb_workload_provider_kind_t kb_workload_provider_kind(const kb_workload_provider_t *provider)
+{
+   return provider ? provider->kind : KB_WORKLOAD_PROVIDER_NONE;
+}
+
 static int printable(const char *text, size_t max)
 {
    if (!text)

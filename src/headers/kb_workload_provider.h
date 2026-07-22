@@ -62,6 +62,8 @@ extern "C"
 
    kb_workload_result_t kb_workload_provider_open(const kb_workload_provider_config_t *,
                                                   kb_workload_provider_t **);
+   /* Returns the provider's constructor-validated immutable kind. */
+   kb_workload_provider_kind_t kb_workload_provider_kind(const kb_workload_provider_t *);
    kb_workload_result_t kb_workload_attest(kb_workload_provider_t *,
                                            const unsigned char challenge[KB_WORKLOAD_CHALLENGE_LEN],
                                            const unsigned char binding[KB_WORKLOAD_BINDING_LEN],
