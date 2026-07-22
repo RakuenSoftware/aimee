@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "substantive": [
+    "module-runtime",
+    "plugin-loader"
+  ],
+  "debt": [
+    "audit",
+    "benchmarks",
+    "config",
+    "control-web",
+    "delegates",
+    "execution-policy",
+    "gateway",
+    "git",
+    "governance",
+    "ir",
+    "kb-synthesis",
+    "learning",
+    "memory",
+    "protocols",
+    "response-composition",
+    "roundtable",
+    "routing",
+    "runtime-web",
+    "skills",
+    "tools",
+    "translation",
+    "vault",
+    "workflows",
+    "workspace"
+  ]
+}

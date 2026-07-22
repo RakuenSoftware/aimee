@@ -1,131 +1,111 @@
-# Plugin-loader module
+# plugin-loader module
 
 ## Purpose and non-goals
 
-Plugin-loader discovers plugin manifests in bundled, user, and project directories, merges
-same-named entries by precedence, checks required environment variables, and asks the existing
-plugin runtime to load enabled entries. Its owned implementation is
-`src/modules/plugin-loader/plugin_loader.c`; its public discovery header lives at
-`src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h` and is included as
-`aimee/plugin-loader/plugin_loader.h`.
-
-This module does not own the core extension ABI, extension registries, or pre-LLM hook contract.
-It does own optional plugin manifest persistence, management commands, and dynamic loading. The
-manifest implementation is `src/modules/plugin-loader/plugin.c`; its canonical contract is
-`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h`, included as
-`aimee/plugin-loader/plugin.h`.
-
-## Classification and link profile
-
-The descriptor at `src/modules/plugin-loader/module.yaml` classifies the module as optional and
-default-disabled. Make selects it with `AIMEE_WITH_PLUGIN_LOADER=1` (or omits it with `0`); CMake
-uses `-DAIMEE_WITH_PLUGIN_LOADER=ON|OFF`. Both default to disabled.
-
-The disabled profile omits the loader sources and the plugin-management command and server handler
-translation units. Startup discovery, manifest hook/tool aggregation, CLI/HTTP routes, and dashboard
-surfaces are compiled out, including their generated OpenAPI entries. The web GUI also hides its
-plugin drawer when its capability probe gets the absent-route response. The required extension ABI
-remains available from module-runtime. See `docs/validation/core-modularization-slice-11.md` for the
-complete disabled-surface proof.
+`plugin-loader` is the optional, default-disabled implementation for manifest discovery, installed-state
+management, and dynamic-library loading at `src/modules/plugin-loader/plugin_loader.c` and
+`src/modules/plugin-loader/plugin.c`. It does not own extension types, typed registries, or the
+pre-LLM hook contract; those remain required in
+[module-runtime](module-runtime.md#purpose-and-non-goals). It does not provide runtime unload.
 
 ## Public contracts
 
-The discovery header exports three functions:
-
-- `plugin_loader_set_install_prefix` selects the bundled-plugin prefix.
-- `plugin_loader_scan_dir` parses plugin subdirectories into caller-owned `plugin_t` storage.
-- `plugin_loader_discover_all` discovers, filters, and registers plugins without making individual
-  plugin failures fatal to server startup.
-
-`plugin_load_and_register` is documented under the optional contract in
-`aimee/plugin-loader/plugin.h`; it is the only entry point that installs bridges and invokes
-`on_init`, and it does not invoke `on_shutdown` in this slice.
-
-The discovery header includes the canonical loader contract for `plugin_t`, manifest parsing, and
-load registration. That contract depends one-way on `aimee/module-runtime/extension.h`;
-module-runtime never includes plugin-loader.
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h` exports
+`plugin_loader_set_install_prefix`, `plugin_loader_scan_dir`, and `plugin_loader_discover_all`.
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h` exports manifest parsing,
+installed-registry operations,
+install/enable/remove, hook/tool aggregation, conflict checks, `plugin_manifest_parse`, and
+`plugin_load_and_register`. It consumes the required `plugin_permission_name` and
+`plugin_permission_from_str` vocabulary.
+Loader types consume `aimee/module-runtime/extension.h` one way; module-runtime never includes this
+module.
 
 ## Dependencies and consumers
 
-The implementation consumes configuration, Aimee home-path resolution, logging, manifest parsing,
-load-registration contracts, and the memory-provider/context-engine registration bridges it
-installs on dynamic-plugin contexts. Direct consumers of the relocated header are the implementation
-itself, Aimee Runtime startup in `src/server/server_main.c`, and the focused loader test in
-`src/tests/test_plugin_loader.c`. The server include and discovery call are both guarded by
-`AIMEE_WITH_PLUGIN_LOADER`, so the disabled profile has no required-to-optional compile or link edge.
+- `audit`: records governed plugin-management actions through the core audit contract.
+- `config`: supplies Aimee paths and loader-related environment/config state.
+- `execution-policy`: guards plugin management and execution decisions.
+- `memory`: supplies the memory-provider bridge installed on a dynamic extension context.
+- `module-runtime`: owns the required extension ABI and registries populated by the loader.
+- `response-composition`: supplies the context-engine bridge installed by the loader.
 
-The descriptor therefore declares the required `memory` and `response-composition` dependencies in
-addition to `module-runtime`, configuration, execution policy, and audit.
+Consumers are guarded Runtime startup in `src/server/server_main.c`, guarded CLI/server/dashboard
+management surfaces, and the focused plugin tests. A disabled build has no required-to-optional
+compile or link edge.
+
+## Providers and readiness
+
+The in-tree `plugin-loader` manifest/dynamic-library implementation is the reference provider. Readiness is
+compile-time selection plus successful startup discovery; individual malformed or unloadable
+plugins do not make Runtime startup fail. There is no alternate loader provider or hot-unload
+provider.
 
 ## Configuration and activation
 
-This source move adds no settings and changes no defaults. `AIMEE_INSTALL_PREFIX` remains the
-fallback bundled-plugin prefix. Project-local discovery remains gated by
-`AIMEE_ENABLE_PROJECT_PLUGINS`; a missing or `0` value skips that source. User and bundled discovery
-retain their existing behavior. Individual entries must already be enabled before they are loaded.
+- `runtime_toggle.supported`: `false`; loader selection is compile-time and process-lifetime.
 
-## Discovery order and data
+Make enables it with `AIMEE_WITH_PLUGIN_LOADER=1`; CMake uses
+`-DAIMEE_WITH_PLUGIN_LOADER=ON`. Both default off. `AIMEE_INSTALL_PREFIX` selects the bundled
+prefix, and `AIMEE_ENABLE_PROJECT_PLUGINS` gates project-local discovery. Individual manifest
+entries must also be enabled before loading.
 
-Discovery visits bundled plugins, then user plugins, then project plugins. Later sources replace an
-earlier same-named entry. Plugin manifests and the in-memory `plugin_t` representation are owned
-here; this split does not introduce a new persistence format or migration.
+## Surfaces
+
+When selected, the module provides the `plugin` CLI command, plugin-management HTTP/OpenAPI routes,
+dashboard endpoints, the GUI plugin drawer, and manifest-provided hook/tool registrations. When
+omitted, the disabled profile has none of those surfaces and the GUI hides the drawer after capability probing.
+The exact absence proof is in `docs/validation/core-modularization-slice-11.md`.
+
+## Data and migrations
+
+The module owns plugin manifests and `plugins/installed.json` under the configured Aimee directory.
+Disabling it neither reads nor deletes that state; re-enabling reads it again. Discovery precedence
+is bundled, user, then project, with later same-name entries replacing earlier ones. No schema or
+data migration is introduced by the ownership split.
 
 ## Security and privacy
 
-Project discovery stays opt-in because project content is less trusted than bundled or user-owned
-content. Missing required environment variables cause an entry to be skipped. Dynamic-loading,
-permission, execution-policy, and audit enforcement are not redesigned here. The management entry
-points and their existing server/dashboard authorization guards are unchanged by the source move.
-OIDC and SSHSIG module documentation attestation are separate governance hardening and do not gate
-this physical move.
+`AIMEE_ENABLE_PROJECT_PLUGINS` makes project discovery opt-in because project content is less trusted. Missing required environment
+variables cause an entry to be skipped. Core execution-policy, audit, and required runtime
+contracts remain authoritative; loader omission cannot weaken those core controls. Dynamic plugin
+code shares the Runtime process and must therefore be treated as trusted executable code.
 
-## Failure behavior and diagnostics
+## Supported journeys
 
-An absent discovery directory is an empty result. An allocation failure reports an error and lets
-startup continue without discovered plugins. A malformed manifest is logged and skipped. Missing
-required environment variables and load failures are logged per plugin; discovery continues and
-summarizes load failures for the caller.
+An enabled build discovers manifests, filters disabled or unsatisfied entries, creates a
+module-runtime context, installs memory/context bridges, loads the library, registers contributions,
+and invokes `on_init`. Operators can inspect and manage installed entries through the guarded CLI,
+HTTP, dashboard, and GUI surfaces. A default build runs the unrelated core journeys without any
+loader object or surface.
 
-## Tests
+## Tests and failure behavior
 
-`unit-test-plugin-loader` covers empty and missing directories, manifest discovery, precedence,
-capacity limits, required-environment handling, and project-plugin gating.
-`scripts/check_module_source_ownership.py` separately proves the old source and header are gone,
-the exact canonical files exist, Make and CMake each compile one canonical source, the Make test
-graph uses its canonical object, and every header consumer uses the canonical include.
+`unit-test-plugin-loader` at `src/tests/test_plugin_loader.c` covers missing/empty directories,
+parsing, precedence, capacity,
+environment requirements, and project gating. `unit-test-plugin` covers manifests, persistence,
+context registration, and loader lifecycle behavior in `src/tests/test_plugin.c`. Missing directories are empty results;
+malformed manifests, missing environment, and individual load failures are logged and skipped.
+Allocation failure reports an error while startup continues without discovered plugins.
 
-## Compatibility and migration gap
+## Operational diagnostics
 
-Symbols, function signatures, configuration, discovery order, and error handling are unchanged.
-This slice adds no installed public-header export; there is no forwarding header at
-`src/headers/plugin_loader.h`. Any future export or compatibility shim needs an explicit contract
-decision.
+`plugin-loader` startup logs report skipped manifests and load failures. The enabled/disabled profile gate checks
+objects, symbols, CLI, routes, OpenAPI, dashboards, and GUI capability behavior. There is no
+independent loader health endpoint and no runtime transition from absent to ready.
 
-The contract split is complete: `plugin_manifest_parse`, `plugin_load_and_register`, registry
-persistence, install/enable/remove, manifest hook/tool aggregation, and dynamic loading live here.
-Canonical consumers include `src/modules/plugin-loader/plugin.c`,
-`src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h`, and
-`src/tests/test_plugin.c`.
+## Compatibility
 
-The required runtime co-locates `plugin_permission_name` and `plugin_permission_from_str` with the
-permission enum. Plugin-loader consumes that stable vocabulary when reading and writing manifests.
-For dynamic libraries, plugin-loader sets identity and memory/context bridge callbacks before it
-invokes `register()`. If registration succeeds, plugin-loader invokes the plugin's `on_init`
-against the registered context. `on_shutdown` is the registered shutdown callback that
-`plugin_ctx_destroy` would invoke; in the current build, plugin-loader does not call
-`plugin_ctx_destroy` during normal operation, and plugin contexts and library handles remain alive
-for the process lifetime. No plugin unload path exists in this slice, so bridge code is never
-unloaded while a plugin can call it. A future unload-capable slice must invoke `on_shutdown` before
-destroying the context and calling `dlclose` on the handle.
+Manifest formats, registry paths, discovery order, symbol signatures, and stored state remain
+compatible with the former root-level implementation. No forwarding header exists for
+`src/headers/plugin_loader.h`; repository consumers use the canonical include. Required
+`plugin_*` ABI names live in module-runtime and are not evidence that this optional module is core.
 
-Disabling the loader does not read, migrate, or delete plugin manifests or the
-`plugins/installed.json` registry under the configured Aimee directory. That state remains dormant
-and is read again if a later build enables the loader.
+## Extension and removal
 
-## Extension and removal rules
-
-New discovery sources, public functions, or dependencies require updating the module descriptor,
-this document, `scripts/check_module_source_ownership.py`, and focused tests together. Removal from
-required binaries is not complete until the contract split and build-profile proof land. Ordinary
-module documentation and physical source extraction use normal review and CI; signed descriptor-v2
-attestations remain a separate governance program.
+New discovery sources, public functions, dependencies, settings, or surfaces must update the
+descriptor, both build systems, absence/profile tests, and this document. The loader currently
+keeps contexts and library handles for process lifetime and never calls `plugin_ctx_destroy` during
+normal operation; an unload-capable extension must call shutdown before `dlclose`. The old
+root-level sources and forwarding includes are forbidden by
+`scripts/check_module_source_ownership.py`. Removing this optional module must continue to preserve
+module-runtime and every unrelated core journey.
