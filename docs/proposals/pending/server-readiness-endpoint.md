@@ -193,6 +193,40 @@ answers the four blocking findings raised in review (liveness/readiness
 contract, status-code matrix, execution model, and the unachievable red-before-
 green criterion). Nothing here is validated by execution yet; §2 is the gate.
 
+## §7a Known follow-ups from implementation review
+
+Adversarial review of the implementation (2026-07-22) raised three points that
+were accepted as valid but deliberately not fixed in the first change. They are
+recorded here so they are not rediscovered as new findings. Note the review ran
+**degraded** — one of two seats failed — so these are single-reviewer findings
+that were verified against the source rather than accepted on the panel's word.
+
+1. **Sampler lifecycle.** The sampler is a detached thread with an infinite
+   loop and no stop/join protocol, and `fork()` behavior is undefined (a child
+   inherits `g_ready_thread_started` and possibly a locked mutex without
+   inheriting the thread). This matches the existing precedent in
+   `src/server/agent_logging.c:121-129`, so it is not a new deviation — but if
+   that pattern is ever given a real lifecycle, readiness should move with it.
+2. **Is aimee-kb genuinely required?** The roll-up reports not-ready when kb is
+   down, which drains the instance even if chat and session paths remain
+   serviceable. The proposal committed to "ready only if every dependency is
+   ok" and review accepted it, so the implementation follows it — but this is
+   the §4 over-reporting risk in concrete form. Resolving it properly needs an
+   inventory of which workloads actually require kb, which is a deployment
+   question, not a code one. Watch it in first deployment.
+3. **Information exposure.** `/v1/ready` is public and unauthenticated (like
+   `/v1/health`) but returns named dependencies and outage timing, which is more
+   operational detail than the generic liveness probe gives away. Options are a
+   minimal public roll-up with details behind authentication, or an explicit
+   decision that this is acceptable on the deployment's trust boundary. Not
+   resolved here.
+
+A fourth review point — that tests assert on substrings rather than parsing the
+JSON — is acknowledged: assertions could pass on a malformed body. The
+status/body consistency check added in review closes the case that mattered
+(a 200 disagreeing with its own body), but full semantic assertions remain
+worth doing.
+
 ## §7 Rejected, with reasons
 
 The original draft bundled two further slices. Both were dropped in adversarial
