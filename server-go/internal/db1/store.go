@@ -146,6 +146,25 @@ func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
 	return err
 }
 
+// ForgetDelegateJobIfMatches physically compare-deletes a durable mapping by
+// execution key and job ID. It returns true only when exactly that row was
+// deleted; a later retry under the same logical key is preserved.
+func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobID int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if key == "" || jobID <= 0 {
+		return false, errors.New("delegate execution key and job id are required")
+	}
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM lifecycle_delegate_job WHERE execution_key=? AND job_id=?`, key, jobID)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
+}
+
 // CancelUnassignedDelegateJob atomically reaps only a pending resource-plane job
 // that no agent has claimed. The predicate prevents a lease race from cancelling
 // work after assignment.

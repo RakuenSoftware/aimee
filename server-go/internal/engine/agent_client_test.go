@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,6 +48,243 @@ func TestHTTPAgentClientReusesDurableRemoteJob(t *testing.T) {
 	}
 	if launches.Load() != 1 {
 		t.Fatalf("launches=%d, want durable reuse", launches.Load())
+	}
+}
+
+func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var launches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if provided, ok := payload["provided_target"].(bool); !ok || !provided {
+				t.Errorf("provided review target missing from payload %v", payload)
+			}
+			for _, localOnly := range []string{"durable_slot", "DurableSlot", "durableslot", "retry_tag", "RetryTag"} {
+				if _, leaked := payload[localOnly]; leaked {
+					t.Errorf("local durable-key field %q leaked in payload %v", localOnly, payload)
+				}
+			}
+			jobID := launches.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": jobID})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "qa", Prompt: "review complete artifact",
+		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true}
+	for _, slot := range []string{"panel:gate:round:1:seat:0", "panel:gate:round:1:seat:1"} {
+		request.DurableSlot = slot
+		if _, err := client.Delegate(t.Context(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if launches.Load() != 2 {
+		t.Fatalf("distinct durable slots launched %d jobs", launches.Load())
+	}
+}
+
+func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if _, present := payload["provided_target"]; present {
+				t.Errorf("ordinary delegate request claimed a provided target: %v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review worktree"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	statusStarted := make(chan struct{})
+	statusRelease := make(chan struct{})
+	var statusOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 45})
+		case "/v1/delegate/status":
+			statusOnce.Do(func() { close(statusStarted) })
+			<-statusRelease
+		case "/v1/jobs/cancel":
+			_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review complete artifact",
+		WorkItemID: "wi_cancel_false", Stage: "gate", ExecutionVersion: "v1"}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := client.Delegate(ctx, request)
+		done <- callErr
+	}()
+	<-statusStarted
+	cancel()
+	callErr := <-done
+	close(statusRelease)
+	if !errors.Is(callErr, context.Canceled) {
+		t.Fatalf("context cancellation was replaced: %v", callErr)
+	}
+	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 45 {
+		t.Fatalf("unacknowledged remote cancellation mapping job=%d err=%v", jobID, err)
+	}
+}
+
+func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	statusStarted := make(chan struct{})
+	statusRelease := make(chan struct{})
+	var statusOnce sync.Once
+	var singularCancels atomic.Int32
+	var pluralCancels atomic.Int32
+	var cancelledJobID atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 43})
+		case "/v1/delegate/status":
+			statusOnce.Do(func() { close(statusStarted) })
+			<-statusRelease
+		case "/v1/job/cancel":
+			singularCancels.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+		case "/v1/jobs/cancel":
+			pluralCancels.Add(1)
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if len(body) != 2 || body["reason"] != "WFE turn cancelled" {
+				t.Errorf("cancel body=%v", body)
+			}
+			jobID, _ := body["job_id"].(float64)
+			cancelledJobID.Store(int32(jobID))
+			_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_cancel", Stage: "gate", ExecutionVersion: "v1"}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := client.Delegate(ctx, request)
+		done <- callErr
+	}()
+	<-statusStarted
+	cancel()
+	if callErr := <-done; !errors.Is(callErr, context.Canceled) {
+		t.Fatalf("delegate cancellation error=%v", callErr)
+	}
+	close(statusRelease)
+	if singularCancels.Load() != 0 || pluralCancels.Load() != 1 || cancelledJobID.Load() != 43 {
+		t.Fatalf("singular=%d plural=%d job_id=%d", singularCancels.Load(), pluralCancels.Load(), cancelledJobID.Load())
+	}
+	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("acknowledged cancelled delegate retained its durable mapping")
+	}
+}
+
+func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
+	tests := []struct {
+		name, response string
+		status         int
+	}{
+		{name: "explicit false", response: `{"cancelled":false}`},
+		{name: "missing field", response: `{}`},
+		{name: "null field", response: `{"cancelled":null}`},
+		{name: "numeric field", response: `{"cancelled":1}`},
+		{name: "wrong type", response: `{"cancelled":"true"}`},
+		{name: "error status with true body", status: http.StatusInternalServerError, response: `{"cancelled":true}`},
+		{name: "empty body"},
+		{name: "no content", status: http.StatusNoContent},
+		{name: "non json", response: `cancelled`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/jobs/cancel" {
+					http.NotFound(w, r)
+					return
+				}
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				_, _ = w.Write([]byte(tc.response))
+			}))
+			defer server.Close()
+			client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const key = "cancel-unacknowledged"
+			if err := store.SaveDelegateJob(t.Context(), key, 44); err != nil {
+				t.Fatal(err)
+			}
+			cancelErr := client.cancelRemoteAndForget(44, key, t.Context())
+			if cancelErr == nil {
+				t.Fatal("unacknowledged cancellation returned success")
+			}
+			if !errors.Is(cancelErr, ErrDelegateCancelUnacknowledged) {
+				t.Fatalf("cancel error=%v", cancelErr)
+			}
+			if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 44 {
+				t.Fatalf("unacknowledged cancellation mapping job=%d err=%v", jobID, err)
+			}
+		})
 	}
 }
 
@@ -176,6 +414,48 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	}
 	if launches.Load() != 2 {
 		t.Fatalf("expired mapping replayed old job; launches=%d", launches.Load())
+	}
+}
+
+func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var launches atomic.Int32
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			launches.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 20})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "running", "agent_name": ""})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
+		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_running", Stage: "gate", ExecutionVersion: "v1"}
+	if _, err := client.Delegate(t.Context(), request); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
+		t.Fatalf("unassigned running job did not return structured expiry: %v", err)
+	}
+	if launches.Load() != 1 || cancellations.Load() != 1 {
+		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
+	}
+	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("expired running job retained its durable mapping")
 	}
 }
 
