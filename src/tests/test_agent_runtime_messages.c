@@ -88,15 +88,21 @@ static void test_degenerate_retry_budget(void)
    cJSON *messages = cJSON_CreateArray();
    int turn = 0;
    int retry_count = 0;
+   int force_text_only_retry = 0;
 
-   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count) == 1);
+   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count,
+                                                  &force_text_only_retry) == 1);
    assert(turn == 1);
    assert(retry_count == 1);
+   assert(force_text_only_retry == 1);
    assert(cJSON_GetArraySize(messages) == 1);
 
-   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count) == 0);
+   force_text_only_retry = 0;
+   assert(agent_session_retry_degenerate_response(messages, &turn, &retry_count,
+                                                  &force_text_only_retry) == 0);
    assert(turn == 1);
    assert(retry_count == 1);
+   assert(force_text_only_retry == 0);
    assert(cJSON_GetArraySize(messages) == 1);
 
    cJSON_Delete(messages);
