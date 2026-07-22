@@ -2249,6 +2249,36 @@ static int mtls_read_response(SSL *ssl, char *resp, size_t cap)
    return -1;
 }
 
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t cv;
+   int ready;
+   int go;
+} mtls_pool_gate_t;
+
+typedef struct
+{
+   mtls_pool_gate_t *gate;
+   int ok;
+} mtls_pool_request_arg_t;
+
+static void *mtls_pool_request_thread(void *opaque)
+{
+   mtls_pool_request_arg_t *arg = opaque;
+   pthread_mutex_lock(&arg->gate->lock);
+   arg->gate->ready++;
+   pthread_cond_broadcast(&arg->gate->cv);
+   while (!arg->gate->go)
+      pthread_cond_wait(&arg->gate->cv, &arg->gate->lock);
+   pthread_mutex_unlock(&arg->gate->lock);
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/health", NULL, &status);
+   arg->ok = status == 200 && response && strstr(response, "\"status\":\"ok\"");
+   free(response);
+   return NULL;
+}
+
 static void test_mtls_serve(void)
 {
    extern void test_kb_enrollment_authority_set(int status);
@@ -2501,11 +2531,11 @@ static void test_mtls_listener(void)
 
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
-   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "4", 1);
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == 0);
    int connection_limit = 0, connections_live = -1, connections_queued = -1;
    kb_mtls_connection_stats(&connection_limit, &connections_live, &connections_queued);
-   assert(connection_limit == 4);
+   assert(connection_limit == 8);
    assert(connections_live == 0);
    assert(connections_queued == 0);
    int port = kb_mtls_bound_port();
@@ -2643,6 +2673,47 @@ static void test_mtls_listener(void)
       assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
       assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
       g_test_registry_heartbeat_allow = 0;
+      int pool_total = 0, pool_idle = 0, pool_busy = -1, pool_waiters = -1;
+      unsigned long pool_exhausted = 1;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_exhausted == 0);
+
+      enum
+      {
+         POOL_TEST_CLIENTS = 16
+      };
+      mtls_pool_gate_t gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0};
+      pthread_t pool_threads[POOL_TEST_CLIENTS];
+      mtls_pool_request_arg_t pool_args[POOL_TEST_CLIENTS];
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pool_args[i] = (mtls_pool_request_arg_t){.gate = &gate, .ok = 0};
+         assert(pthread_create(&pool_threads[i], NULL, mtls_pool_request_thread, &pool_args[i]) ==
+                0);
+      }
+      pthread_mutex_lock(&gate.lock);
+      while (gate.ready != POOL_TEST_CLIENTS)
+         pthread_cond_wait(&gate.cv, &gate.lock);
+      gate.go = 1;
+      pthread_cond_broadcast(&gate.cv);
+      pthread_mutex_unlock(&gate.lock);
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pthread_join(pool_threads[i], NULL);
+         assert(pool_args[i].ok);
+      }
+      pthread_cond_destroy(&gate.cv);
+      pthread_mutex_destroy(&gate.lock);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total >= 1 && pool_total <= 2 && pool_total == pool_idle && pool_busy == 0 &&
+             pool_waiters == 0);
+      kb_client_mtls_pool_reset();
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0);
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);

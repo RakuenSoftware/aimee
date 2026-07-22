@@ -171,6 +171,13 @@ It accepts only strict HTTP/1.1 responses with one `Content-Length`, a head no
 larger than 64 KiB, and a body smaller than the caller's bounded buffer; it reads
 that body exactly and never treats EOF as a successful response delimiter.
 
+The resident server→KB transport pools by its single enrolled endpoint and
+identity generation: at most 8 total connections, 2 idle, 64 waiting borrowers,
+a 30-second idle lifetime, 10-minute maximum age, and 1,000 requests per
+connection. Only one replacement handshake runs at once. Certificate rotation
+invalidates the generation, and `kb_client_mtls_pool_stats()` reports aggregate
+total/idle/busy/waiter occupancy without identity labels.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.
