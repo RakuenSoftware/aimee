@@ -37,6 +37,59 @@ static long helper_fd_limit(void)
    return limit > 3 ? limit : 1024;
 }
 
+/* The authority deliberately starts with stdio closed. Ensure the helper pipe
+ * never occupies 0/1/2 before fork: otherwise dup2(write, 1) may be a no-op and
+ * the subsequent endpoint cleanup can close the helper's stdout. CLOEXEC also
+ * makes every pre-exec failure path closed by construction. */
+static int helper_raise_fd(int *fd)
+{
+   if (!fd || *fd < 0)
+      return -1;
+   if (*fd > STDERR_FILENO)
+   {
+      int flags = fcntl(*fd, F_GETFD);
+      return flags >= 0 && fcntl(*fd, F_SETFD, flags | FD_CLOEXEC) == 0 ? 0 : -1;
+   }
+#ifdef F_DUPFD_CLOEXEC
+   int raised = fcntl(*fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+#else
+   int raised = fcntl(*fd, F_DUPFD, STDERR_FILENO + 1);
+   if (raised >= 0)
+   {
+      int flags = fcntl(raised, F_GETFD);
+      if (flags < 0 || fcntl(raised, F_SETFD, flags | FD_CLOEXEC) != 0)
+      {
+         close(raised);
+         raised = -1;
+      }
+   }
+#endif
+   if (raised < 0)
+      return -1;
+   close(*fd);
+   *fd = raised;
+   return 0;
+}
+
+static int helper_pipe(int p[2])
+{
+   if (!p)
+      return -1;
+#if defined(__linux__)
+   if (pipe2(p, O_CLOEXEC) != 0)
+      return -1;
+#else
+   if (pipe(p) != 0)
+      return -1;
+#endif
+   if (helper_raise_fd(&p[0]) == 0 && helper_raise_fd(&p[1]) == 0)
+      return 0;
+   close(p[0]);
+   close(p[1]);
+   p[0] = p[1] = -1;
+   return -1;
+}
+
 static void helper_close_fds(long limit)
 {
    close(STDIN_FILENO);
@@ -60,7 +113,7 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
        access(helper, X_OK) != 0)
       return -1;
    int p[2];
-   if (pipe(p) != 0)
+   if (helper_pipe(p) != 0)
       return -1;
    long fd_limit = helper_fd_limit();
    pid_t pid = fork();
@@ -75,7 +128,8 @@ static int hwm_call(const char *op, const char *key, uint64_t expected, uint64_t
       char e[32], n[32];
       snprintf(e, sizeof(e), "%llu", (unsigned long long)expected);
       snprintf(n, sizeof(n), "%llu", (unsigned long long)next);
-      dup2(p[1], 1);
+      if (dup2(p[1], STDOUT_FILENO) != STDOUT_FILENO)
+         _exit(127);
       close(p[0]);
       close(p[1]);
       helper_close_fds(fd_limit);
@@ -150,7 +204,7 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
        access(helper, X_OK) != 0)
       return -1;
    int p[2];
-   if (pipe(p) != 0)
+   if (helper_pipe(p) != 0)
       return -1;
    long fd_limit = helper_fd_limit();
    pid_t pid = fork();
@@ -162,7 +216,8 @@ static int get_kek(void *v, uint8_t out[VAULT_KEK_LEN])
    }
    if (pid == 0)
    {
-      dup2(p[1], STDOUT_FILENO);
+      if (dup2(p[1], STDOUT_FILENO) != STDOUT_FILENO)
+         _exit(127);
       close(p[0]);
       close(p[1]);
       helper_close_fds(fd_limit);

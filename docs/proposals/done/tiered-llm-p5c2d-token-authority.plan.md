@@ -222,6 +222,13 @@ PG17 gate proves both the closed membership graph and correct authorization unde
 caller timezone. CT260 passed that gate after deliberately seeding and repairing inbound and
 outbound membership edges.
 
+The first exact-head rerun then exposed a checked-fd interaction between those fixes and the KMS
+provider: after the authority intentionally closed stdio, `pipe()` could allocate descriptors 0
+and 1, making the helper child's `dup2(write_fd, 1)` a no-op before cleanup closed descriptor 1.
+Both KMS helper paths now create CLOEXEC pipes, raise both endpoints above stdio before `fork`, and
+check the remap. Permanent decrypt and signed-HWM regressions close all three stdio descriptors
+before provider use and prove the helper still returns exactly its bounded response.
+
 Explicitly revoke EXECUTE on every new SECURITY DEFINER function from PUBLIC and every unrelated
 role before granting the authority role, and assert the full closure in PG17. The ordinary
 `aimee_kb_runtime` role receives no execution on these functions and no access to encrypted
