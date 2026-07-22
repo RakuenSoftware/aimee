@@ -126,6 +126,18 @@
       "blast_radius": "The gate reads repository files only, never a live database, network service, built binary, or ambient toolchain.",
       "independent_review": "The implementation plan and exact diff are reviewed by the modularization roundtable.",
       "evidence": ["docs/validation/core-modularization-slice-12.md", "docs/refactor-baselines.md"]
+    },
+    {
+      "slice": 13,
+      "state": "present_and_verified",
+      "disposition": "Added the strict individual module-documentation catalog and promoted the runtime/loading family without creating placeholder docs.",
+      "production": {"added": [], "deleted": [], "consolidated": ["module-runtime and plugin-loader now share one documentation schema and cross-link their ownership boundary"]},
+      "fallbacks": ["24 module documents remain explicit status debt"],
+      "net_growth": {"status": "none", "rationale": "", "rejected_simpler_alternative": "", "revisit": ""},
+      "consumers": ["module maintainers", "modular-refactor CI"],
+      "blast_radius": "Documentation and repository validation only; no production source, descriptor, build, route, config, or runtime behavior changes.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-13.md", "docs/modules/module-runtime.md", "docs/modules/plugin-loader.md"]
     }
   ]
 }
