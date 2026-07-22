@@ -275,6 +275,65 @@ static void file_content(const char *project, const char *path, char *out, size_
    aimee_pg_finalize(st);
 }
 
+/* Summed co_edited weight between two basenames (symmetric). -1 on error. */
+static int cochange_pair_weight(const char *a, const char *b)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "SELECT COALESCE(SUM(weight),0) FROM entity_edges WHERE relation = 'co_edited'"
+       " AND ((source = ?1 AND target = ?2) OR (source = ?2 AND target = ?1))",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", a);
+   aimee_pg_bind_text(st, "?2", b);
+   int w = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? aimee_pg_column_int(st, 0) : -1;
+   aimee_pg_finalize(st);
+   return w;
+}
+
+/* co_edited edges touching any z*.c file (bulk-commit gate check). -1 on error. */
+static int cochange_bulk_edge_count(void)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT count(*) FROM entity_edges WHERE relation = 'co_edited'"
+                        " AND (source LIKE 'z%.c' OR target LIKE 'z%.c')",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   int n = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? aimee_pg_column_int(st, 0) : -1;
+   aimee_pg_finalize(st);
+   return n;
+}
+
+/* A temp git repo with a designed co-change history: a.c & b.c change together
+ * across init + 5 commits (weight 6), plus a 30-file bulk commit that must be
+ * gated (> the bulk threshold). */
+static char *create_cochange_repo(void)
+{
+   char *dir = malloc(PATH_MAX);
+   assert(dir != NULL);
+   snprintf(dir, PATH_MAX, "%s/aimee-cochange-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+   char cmd[4096];
+   snprintf(cmd, sizeof(cmd),
+            "cd %s && git init -q && git config user.email t@t && git config user.name t && "
+            "printf 'int a(){return 1;}\\n' > a.c && printf 'int b(){return 2;}\\n' > b.c && "
+            "printf 'int c(){return 3;}\\n' > c.c && printf 'int d(){return 4;}\\n' > d.c && "
+            "git add -A && git commit -qm init && "
+            "for i in 1 2 3 4 5; do printf '// %%d\\n' \"$i\" >> a.c; printf '// %%d\\n' \"$i\" "
+            ">> b.c; git commit -qam \"ab$i\"; done && "
+            "printf '// c\\n' >> c.c && git commit -qam conly && "
+            "for n in $(seq 1 30); do printf 'int z%%d(){return 1;}\\n' \"$n\" > z$n.c; done && "
+            "git add -A && git commit -qm bulk",
+            dir);
+   assert(system(cmd) == 0);
+   return dir;
+}
+
 int main(void)
 {
    printf("index: ");
@@ -521,6 +580,43 @@ int main(void)
       char body[256];
       file_content("pushproj", ".gitmodules", body, sizeof(body));
       assert(strcmp(body, gitmod_body) == 0);
+   }
+
+   /* --- production co-change path: canonical scan populates co_edited edges from
+    * git history, the bulk gate holds, re-scan is idempotent, and blast radius
+    * surfaces a co-edited file with no structural import link. This guards the
+    * regression where the backfill lived only in the stubbed index.c. --- */
+   {
+      char *repo = create_cochange_repo();
+      int inspected = 0;
+      int scanned = canonical_index_scan_project("cochangeproj", repo, 1, &inspected);
+      assert(scanned >= 0);
+
+      /* a.c + b.c co-changed in init + 5 commits -> weight 6 (> the >3 blast read
+       * threshold). */
+      int wab = cochange_pair_weight("a.c", "b.c");
+      assert(wab >= 4);
+      /* the 30-file bulk commit is over the gate: it contributes no co_edited edges. */
+      assert(cochange_bulk_edge_count() == 0);
+
+      /* Re-scan must not double-count (per-project HEAD marker). */
+      int scanned2 = canonical_index_scan_project("cochangeproj", repo, 1, &inspected);
+      assert(scanned2 >= 0);
+      assert(cochange_pair_weight("a.c", "b.c") == wab);
+
+      /* Blast radius surfaces b.c as co-edited with a.c (they share no import). */
+      blast_radius_t br;
+      assert(canonical_index_blast_radius("cochangeproj", "a.c", &br) == 0);
+      int found_coedited = 0;
+      for (int i = 0; i < br.dependent_count; i++)
+         if (strstr(br.dependents[i], "b.c") && strstr(br.dependents[i], "co-edited"))
+            found_coedited = 1;
+      assert(found_coedited);
+
+      char rmcmd[512];
+      snprintf(rmcmd, sizeof(rmcmd), "rm -rf %s", repo);
+      (void)system(rmcmd);
+      free(repo);
    }
 
    /* Cleanup */
