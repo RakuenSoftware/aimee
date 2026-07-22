@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee_ir_rescue.h"
+#include <aimee/delegates/aimee_ir_rescue.h>
 #include "cJSON.h"
 
 /* The dialect parser consults the tool registry only on its bare-JSON/bracket rescue
@@ -109,7 +109,55 @@ int main(void)
       printf("  PASS: prose without a call is untouched\n");
    }
 
-   /* 5. Degenerate input must not crash. */
+   /* 5. A mixed response preserves pass-through block order and ownership while
+    * inserting retained prose and the rescued call at the source TEXT position. */
+   {
+      aimee_ir_metrics_reset();
+      aimee_response_t *r = calloc(1, sizeof(*r));
+      r->content = calloc(3, sizeof(*r->content));
+      r->n_content = 3;
+      r->content[0].type = AIMEE_BLK_THINKING;
+      r->content[0].text = strdup("private reasoning");
+      r->content[1].type = AIMEE_BLK_TEXT;
+      r->content[1].text = strdup("I will run it\n" XMLCALL);
+      r->content[2].type = AIMEE_BLK_TEXT;
+      r->content[2].text = strdup("trailing prose");
+      r->stop_reason = AIMEE_STOP_END_TURN;
+      char *thinking = r->content[0].text;
+      char *trailing = r->content[2].text;
+
+      int n = aimee_ir_rescue_tool_calls(r, 0);
+      assert(n == 1);
+      assert(r->n_content == 4);
+      /* aimee_block_t owns pass-through text directly, so pointer identity
+       * proves the rewrite transferred that ownership without copying it. */
+      assert(r->content[0].type == AIMEE_BLK_THINKING && r->content[0].text == thinking);
+      assert(r->content[1].type == AIMEE_BLK_TEXT && strstr(r->content[1].text, "run it"));
+      assert(r->content[2].type == AIMEE_BLK_TOOL_USE);
+      assert(r->content[3].type == AIMEE_BLK_TEXT && r->content[3].text == trailing);
+      assert(r->stop_reason == AIMEE_STOP_TOOL_USE);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
+      aimee_response_free(r);
+      printf("  PASS: mixed block order and pass-through ownership preserved\n");
+   }
+
+   /* 6. One rewritten response counts as one recovery even when it contains
+    * multiple calls; the return value continues to count individual calls. */
+   {
+      aimee_ir_metrics_reset();
+      aimee_response_t *r = resp_of(AIMEE_BLK_TEXT, XMLCALL "\n" XMLCALL);
+      int n = aimee_ir_rescue_tool_calls(r, 0);
+      assert(n == 2);
+      assert(r->n_content == 2);
+      assert(r->content[0].type == AIMEE_BLK_TOOL_USE);
+      assert(r->content[1].type == AIMEE_BLK_TOOL_USE);
+      assert(r->stop_reason == AIMEE_STOP_TOOL_USE);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
+      aimee_response_free(r);
+      printf("  PASS: multiple calls count as one rescue recovery\n");
+   }
+
+   /* 7. Degenerate input must not crash. */
    assert(aimee_ir_rescue_tool_calls(NULL, 0) == 0);
    printf("  PASS: NULL response is a no-op\n");
 

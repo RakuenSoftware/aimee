@@ -381,6 +381,30 @@ CONTRACTS = (
         test_cmake_source="../modules/translation/aimee_ir_stream.c",
         legacy_test_cmake_source="../server/aimee_ir_stream.c",
     ),
+    Contract(
+        module="delegates-ir-rescue",
+        legacy_source="src/server/aimee_ir_rescue.c",
+        legacy_header="src/headers/aimee_ir_rescue.h",
+        canonical_source="src/modules/delegates/aimee_ir_rescue.c",
+        canonical_header=(
+            "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h"
+        ),
+        canonical_include="aimee/delegates/aimee_ir_rescue.h",
+        make_source="modules/delegates/aimee_ir_rescue.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/delegates/aimee_ir_rescue.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_rescue.o",
+        consumers=(
+            "src/modules/delegates/aimee_ir_rescue.c",
+            "src/posix/agent_ir_parse.c",
+            "src/tests/test_aimee_ir_rescue.c",
+        ),
+        document="docs/modules/delegates.md",
+        document_markers=("IR-side prose tool-call rescue", "aimee_ir_rescue_tool_calls"),
+        test_cmake_source=None,
+        legacy_test_cmake_source=None,
+    ),
 )
 
 LEGACY_MODULE_ROOTS = (

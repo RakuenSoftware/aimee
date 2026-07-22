@@ -14,5 +14,14 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/delegates/aimee_ir_rescue.c"
+  ],
+  "tests": [
+    "src/tests/test_aimee_ir_rescue.c"
+  ],
+  "docs": [
+    "docs/modules/delegates.md"
+  ]
 }
