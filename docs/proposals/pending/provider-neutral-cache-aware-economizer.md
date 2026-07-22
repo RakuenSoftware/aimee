@@ -29,7 +29,7 @@ atomic provider dispatch. A conflict with the safety specification is a release-
 | Existing surface | Disposition before release |
 |---|---|
 | `gw_economizer_measure()` | replace estimates with local provider planner call; empty registry yields pass-through |
-| `gw_buffered_mutate()` | place behind `econ_serialize_once()`; cannot mutate without reviewed registry membership |
+| `gw_buffered_mutate()` | remove from production dispatch; a future reviewed transform enters before `econ_wire_snapshot` |
 | pristine request buffer | retained only until the one wire commit; never used for post-send restore/resend |
 | `context_reduce()` | no production caller until a concrete transform receives separate approval |
 | `tool_condense_apply()` | disable production caller; lossy condensation is outside v2 |
@@ -58,7 +58,7 @@ local provider/model/API classifier
                   PASS_THROUGH only
                          |
                          v
-       econ_serialize_once() + atomic first wire write
+       immutable econ_wire_snapshot + exact-length transport
 ```
 
 Classification, pricing lookup, contract lookup, tokenization, proof construction, and registry
@@ -143,7 +143,7 @@ opaque signed-generation handle. Cohort disablement atomically increments the ge
 the first wire write.
 
 `econ_proof_t` is an affine in-memory object. It is created for one call and two fully serialized
-buffer objects, consumed once by `econ_serialize_once()`, and cannot be persisted, cached, copied to
+buffer objects, consumed once by the wire-snapshot selector, and cannot be persisted, cached, copied to
 another tenant/call, or looked up by generation. No prompt-derived digest is logged.
 
 For every scenario, authorization hard-asserts:
@@ -234,28 +234,25 @@ Both alternatives use the same pinned canonical JSON serializer, including ident
 whitespace, escaping, system/message block order, and unknown-field preservation. The protected
 serialized byte ranges—not decoded semantic objects—are compared for exact equality.
 
-## Single dispatch fence
+## Immutable wire-snapshot fence
 
-`econ_serialize_once()` becomes the sole economizer-aware path allowed to write provider bytes. It:
+The initial empty-registry release freezes the final provider body at the last economizer-aware
+boundary:
 
-1. receives the authenticated tenant context and pristine logical request;
-2. fully serializes pristine and, only if registry membership exists, one candidate without network IO;
-3. constructs and validates one affine proof;
-4. locks the tenant cohort's generation mutex, revalidates tenant/account, endpoint, pinned snapshot,
-   tokenizer, price table, provider contracts, cohort, registry, and kill-switch generations, consumes
-   the proof, closes the alternate buffer path, and calls the nonbuffering socket write while holding
-   the mutex;
-5. in that same atomic operation, selects exactly one fully serialized buffer and issues the first
-   write. The linearization point is the
-   first positive-byte result from that socket write. A terminal error writes no alternate buffer.
+1. `off` returns the already serialized pristine body without allocation or registry work;
+2. `proof_gated` verifies the signed registry and, because it must be empty, selects only pristine;
+3. the selected bytes are copied into an immutable `econ_wire_snapshot` with an explicit length; and
+4. buffered, streaming, and retry transports receive that exact pointer and length until the call
+   finishes.
 
-Generation updates use the same mutex and therefore cannot complete between validation and the first
-positive byte. No planner or serializer operation holds the mutex before step 4.
+No production path may rebuild, restore, or substitute an economizer representation after snapshot
+selection. Ordinary transport retry remains owned by the existing retry layer. It may duplicate the
+same request after an ambiguous failure, but every attempt uses the same snapshot bytes. This release
+does not claim exactly-once delivery or an atomic first-positive-byte generation lease.
 
-Before the first write, any failure selects pristine pass-through. After the first byte is written,
-the economizer cannot restore, resend, retry, regenerate a candidate, or write the alternate buffer.
-Ordinary client/provider retry behavior outside the economizer remains separately owned and cannot use
-the proof or transform a retry.
+The stronger proof-consuming generation lease described by the normative safety specification is a
+future prerequisite for a non-empty transform registry. It is intentionally not implied by the
+empty-registry snapshot fence.
 
 ## Tenant isolation
 
@@ -311,7 +308,7 @@ reduction, effective savings rate, or equivalent under another name.
 
 1. Add checked money, named token buckets, scenario arrays, reason codes, and affine proof ownership.
 2. Add the signed empty registry and exact membership/generation validation.
-3. Implement `econ_serialize_once()` as the unconditional single-dispatch fence.
+3. Implement `econ_wire_snapshot` as the immutable empty-registry dispatch fence.
 
 ### Slice 2 — OpenAI local planner skeleton
 
@@ -342,14 +339,15 @@ reduction, effective savings rate, or equivalent under another name.
 - All cache fields and protected bytes/states are unchanged.
 - Unknown residency is full-priced symmetrically; other unknown semantics are indeterminate.
 - Every cost component has a finite authoritative bound or the decision is indeterminate.
-- The actual first wire write is the generation revalidation linearization point.
-- Fault injection proves exactly one buffer can write and restore/resend is absent.
+- Exact-length transports retain one immutable selected buffer across ordinary retries.
+- Fault injection proves retries cannot substitute an alternate representation and restore/resend is absent.
 - Cross-tenant tests reject classifier, handle, proof, registry, and kill-switch mismatches.
 - Source/link scans prove zero mutable module-global provider/account/cohort handles and zero remote
   token-count symbols reachable from the production dispatch fence. The sole exception file names a
   separately linked offline-test binary and its exact remote-count symbols; it is signed and reviewed
   per release, and production artifacts may match none of its entries.
-- Cohort and kill-switch generations participate in the atomic first-wire revalidation.
+- A non-empty registry remains blocked until cohort and kill-switch generations participate in an
+  atomic wire-commit revalidation.
 - Compile-time assertions pin scenario counts, tokenizer guard bands, and every finite margin formula.
 - No live shadow mode, savings delta, task/session aggregate, or remote token-count path exists.
 - Schema/source scans reject every baseline-minus-candidate delta or percentage-reduction field,

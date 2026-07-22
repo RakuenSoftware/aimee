@@ -755,43 +755,53 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    }
 }
 
-/* The economizer control. The canonical (and only) form is a STRING:
- * `economizer: off|safe|aggressive`. A deprecated OBJECT form ({enabled,aggressive})
- * from the retired two-tier surface is still accepted and mapped to a tier (with a
- * one-line WARN) so an existing config file keeps loading. The per-tier lever values
- * are internal presets (econ_preset), not config keys. */
-void config_parse_economizer_section(config_t *cfg, cJSON *root)
+/* Parse the only supported public shape: economizer: {mode: off|proof_gated}.
+ * Explicit legacy values fail activation; they never map to a new mode. */
+int config_parse_economizer_section(config_t *cfg, cJSON *root)
 {
    cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
-   if (cJSON_IsString(econ) && econ->valuestring)
+   if (!econ)
+      return 0;
+   if (!cJSON_IsObject(econ))
    {
-      const char *v = econ->valuestring;
-      /* Warn (don't fail) on an unrecognized tier so a typo like "agressive" doesn't
-       * silently resolve to safe -- fail-safe to the lossless default, but loudly. */
-      if (strcasecmp(v, "off") && strcasecmp(v, "0") && strcasecmp(v, "false") &&
-          strcasecmp(v, "safe") && strcasecmp(v, "aggressive") && strcasecmp(v, "aggro"))
-         fprintf(stderr, "aimee: config warning: unknown economizer tier \"%s\"; using \"safe\"\n",
-                 v);
-      cfg->economizer_tier = econ_tier_parse(v);
+      fprintf(stderr, "aimee: config error: scalar economizer values are no longer supported; use "
+                      "economizer: {mode: off|proof_gated}\n");
+      return -1;
    }
-   else if (cJSON_IsObject(econ))
+
+   cJSON *mode = NULL;
+   int fields = 0;
+   cJSON *field;
+   cJSON_ArrayForEach(field, econ)
    {
-      /* Deprecated back-compat: map the old {enabled,aggressive} pair onto a tier. */
-      int enabled = 1, aggressive = 0;
-      cJSON *e = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
-      if (cJSON_IsBool(e))
-         enabled = cJSON_IsTrue(e) ? 1 : 0;
-      e = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
-      if (cJSON_IsBool(e))
-         aggressive = cJSON_IsTrue(e) ? 1 : 0;
-      cfg->economizer_tier = !enabled     ? ECON_TIER_OFF
-                             : aggressive ? ECON_TIER_AGGRESSIVE
-                                          : ECON_TIER_SAFE;
+      fields++;
+      if (field->string && strcmp(field->string, "mode") == 0 && !mode)
+         mode = field;
+      else
+      {
+         fprintf(stderr,
+                 "aimee: config error: invalid economizer field \"%s\"; only mode is allowed\n",
+                 field->string ? field->string : "");
+         return -1;
+      }
+   }
+   if (fields != 1 || !cJSON_IsString(mode) || !mode->valuestring)
+   {
+      fprintf(stderr, "aimee: config error: economizer.mode must be exactly off or proof_gated\n");
+      return -1;
+   }
+   int parsed = econ_mode_parse(mode->valuestring);
+   if (parsed < 0)
+   {
       fprintf(stderr,
-              "aimee: config warning: `economizer: {enabled,aggressive}` is deprecated; use "
-              "`economizer: %s` (mapped for you)\n",
-              econ_tier_name(cfg->economizer_tier));
+              "aimee: config error: economizer mode \"%s\" is unsupported; legacy "
+              "safe/aggressive modes cannot be migrated automatically; choose off or "
+              "proof_gated explicitly\n",
+              mode->valuestring);
+      return -1;
    }
+   cfg->economizer_mode = parsed;
+   return 0;
 }
 
 /* Clamp an integer to [lo, hi]. */

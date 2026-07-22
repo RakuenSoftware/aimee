@@ -1113,16 +1113,10 @@ typedef struct config
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
 
-   /* The SINGLE economizer control (src/modules/economizer/). One of ECON_TIER_*.
-    * Selects a provider-aware strategy: OFF = verbatim passthrough (no reduction,
-    * no Anthropic cache breakpoint); SAFE = Anthropic prompt caching + deterministic
-    * freeze-on-first-send tool condensation + recall-restorable history fold on
-    * OpenAI; AGGRESSIVE = + lossy tool-body compress and live inbound /v1 mutation
-    * (OpenAI-family egress only — Anthropic context is NEVER mutated at any tier).
-    * The concrete per-tier lever values are resolved by econ_preset() (an internal
-    * preset, never a user-facing config surface). See docs/features/economizer.md.
-    * Default ECON_TIER_SAFE. */
-   int economizer_tier;
+   /* The single economizer mode. OFF is the pristine baseline. PROOF_GATED
+    * verifies the signed empty registry and freezes the completed provider body;
+    * it cannot select a transform in this release. Default OFF. */
+   int economizer_mode;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
     * enabling/disabling the pipeline modules — memory (request stage), governance (response
@@ -1145,8 +1139,8 @@ typedef struct config
    int module_governance;
    int module_delegates;
    int module_workflows;
-   /* The economizer module toggle. econ_tier() returns ECON_TIER_OFF whenever this is
-    * user-disabled (0), so the `modules:` off-switch overrides the economizer tier. */
+   /* The economizer module toggle. econ_mode() returns ECON_MODE_OFF whenever this is
+    * user-disabled (0), so the `modules:` off-switch overrides the economizer mode. */
    int module_economizer;
 
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
@@ -2096,19 +2090,17 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
 
-/* The economizer tier — the single user control. See docs/features/economizer.md. */
-enum
+/* The only economizer modes. OFF is the baseline; PROOF_GATED freezes the
+ * completed body behind the signed-empty-registry fence. */
+typedef enum
 {
-   ECON_TIER_OFF = 0,  /* verbatim passthrough: no caching, no reduction */
-   ECON_TIER_SAFE = 1, /* lossless: Anthropic caching + frozen tool condensation; OpenAI recall */
-   ECON_TIER_AGGRESSIVE = 2 /* + lossy fold/compress; OpenAI live mutation */
-};
+   ECON_MODE_OFF = 0,
+   ECON_MODE_PROOF_GATED = 1
+} econ_mode_t;
 
-/* Resolve the economizer tier (ECON_TIER_*). The single point that decides
- * off/safe/aggressive; every economizer predicate routes through it. */
-int econ_tier(const config_t *cfg);
-const char *econ_tier_name(int tier); /* "off"/"safe"/"aggressive" */
-int econ_tier_parse(const char *s);   /* string -> ECON_TIER_* (default SAFE on unknown) */
+int econ_mode(const config_t *cfg);
+const char *econ_mode_name(int mode); /* "off"/"proof_gated" */
+int econ_mode_parse(const char *s);   /* mode, or -1 for legacy/unknown */
 
 /* Semantic-guardrails escalation mode — the single control that replaced the
  * enabled/dry_run/advisory_only/allow_ml_only_block quad. */
@@ -2122,10 +2114,10 @@ enum
 const char *guardrails_semantic_mode_name(int mode); /* "off"/"dry_run"/"advisory"/"enforce" */
 int guardrails_semantic_mode_parse(const char *s);   /* string -> GSEM_MODE_* (OFF on unknown) */
 
-/* Economizer resolution — compute EFFECTIVE gates from the tier without mutating config_t
- * (so config_save round-trips the raw user value). */
-int econ_reduction_master_on(const config_t *cfg); /* tier != off */
-int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-only at call site) */
+/* Legacy reduction gates remain temporarily for isolated old modules. They are
+ * hard-disabled in every mode and have no production request-path caller. */
+int econ_reduction_master_on(const config_t *cfg);
+int econ_gateway_mutate_on(const config_t *cfg);
 
 /* Resolve whether a pluggable module is enabled, from the layered enablement surface. This is
  * the ONE place module enablement is decided; every wire site calls it with the module's tristate
@@ -2137,24 +2129,16 @@ int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-o
  * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
 int config_module_enabled(int config_tristate, int env_default);
 
-/* The concrete economizer lever values for a config's tier. These are INTERNAL
- * presets (never a user-facing config surface): econ_preset() maps econ_tier(cfg)
- * to the levers the reduction subsystem consumes at each seam.
- *   OFF        -> everything 0 (verbatim passthrough).
- *   SAFE       -> history_fold + command_filter (recall-restorable / deterministic,
- *                 cache-safe on Anthropic); compress off; no live gateway mutation.
- *   AGGRESSIVE -> + compress (lossy tool-body shrink) + gateway_seam (live inbound
- *                 /v1 mutation, OpenAI-family egress only).
- * gateway_session_disable_ttl_ms is the per-session circuit-breaker TTL for the
- * aggressive live-mutation path. Pure: reads cfg only. */
+/* Deprecated compatibility shape for isolated legacy unit tests. econ_preset()
+ * always zeroes it; no mode can reactivate these levers. */
 typedef struct
 {
-   int history_fold;         /* fold old history (SAFE + AGGRESSIVE) */
-   int compress;             /* lossy tool-result body shrink (AGGRESSIVE) */
-   int command_filter;       /* deterministic tool-output condensation (SAFE + AGGRESSIVE) */
+   int history_fold;
+   int compress;
+   int command_filter;
    int freeze_guard_horizon; /* break-even reuse horizon for the fold freeze guard */
-   int gateway_seam;         /* live inbound /v1 mutation seam active (AGGRESSIVE) */
-   int gateway_session_disable_ttl_ms; /* circuit-breaker TTL (ms) for the live mutator */
+   int gateway_seam;
+   int gateway_session_disable_ttl_ms;
 } econ_preset_t;
 
 void econ_preset(const config_t *cfg, econ_preset_t *out);

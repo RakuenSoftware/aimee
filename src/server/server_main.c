@@ -177,7 +177,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
    config_t cfg;
    memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
-   config_load(&cfg);
+   if (config_load(&cfg) != 0)
+   {
+      startup_notify(notify_fd, "error: invalid configuration\n");
+      aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
+      audit_log_close();
+      return 1;
+   }
    /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
@@ -187,10 +193,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a
     * restart and without an unsafe cross-thread setenv. */
 
-   /* Surface the active economizer tier at startup (observability). off = verbatim
-    * passthrough; safe = caching + lossless reduction; aggressive = + lossy compress
-    * and live inbound /v1 mutation. See docs/features/economizer.md. */
-   aimee_log(LOG_INFO, "economizer", "tier=%s", econ_tier_name(econ_tier(&cfg)));
+   /* Surface the active fail-closed economizer mode at startup. */
+   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode(&cfg)));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the

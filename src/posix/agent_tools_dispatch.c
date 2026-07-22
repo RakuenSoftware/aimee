@@ -2211,16 +2211,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
 
    cJSON_Delete(args);
 
-   /* Apply compaction to all non-bash tool results. The bash tool already
-    * compacts stdout and stderr individually before building its JSON result,
-    * so applying compaction again here would double-compact it. */
-   if (result && strcmp(name, "bash") != 0)
-   {
-      char *compacted = agent_compress_tool_result(result, strlen(result), name);
-      free(result);
-      result = compacted;
-   }
-
    return result;
 }
 
