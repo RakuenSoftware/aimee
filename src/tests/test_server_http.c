@@ -3,12 +3,16 @@
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
+#include "agent_config.h"
+#include "cJSON.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -48,6 +52,7 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 static _Thread_local char g_disp_method[96];
 static _Thread_local char g_disp_body[24576];
 static char g_agg_body[24576];
+static atomic_int g_op_context_clean;
 static server_ctx_t g_test_server_ctx;
 static int g_test_server_ctx_available = 1;
 
@@ -68,6 +73,22 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       if (q && (size_t)(q - p) < sizeof(g_disp_method))
          snprintf(g_disp_method, sizeof(g_disp_method), "%.*s", (int)(q - p), p);
    }
+   if (strcmp(g_disp_method, "test.poison_op_context") == 0)
+   {
+      run_cmd_set_cwd("/client-only/checkout");
+      agent_set_request_session("stale-session");
+      agent_set_request_codex_creds("stale-token", "stale-account");
+      agent_set_request_vault_principal("stale-principal");
+   }
+   else if (strcmp(g_disp_method, "test.inspect_op_context") == 0)
+   {
+      agent_request_creds_t creds;
+      agent_request_creds_snapshot(&creds);
+      atomic_store(&g_op_context_clean,
+                   run_cmd_get_cwd() == NULL && creds.session_id[0] == '\0' &&
+                       creds.codex_token[0] == '\0' && creds.codex_account_id[0] == '\0' &&
+                       creds.vault_principal[0] == '\0');
+   }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
@@ -79,6 +100,28 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 server_ctx_t *server_active_ctx(void)
 {
    return g_test_server_ctx_available ? &g_test_server_ctx : NULL;
+}
+
+static void submit_and_wait_op(const char *method)
+{
+   char response[8192];
+   assert(server_http_submit_op_run(method, "{}", CAPS_ALL, response, sizeof(response)) == 200);
+   cJSON *queued = cJSON_Parse(response);
+   assert(queued);
+   const char *run_id = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(queued, "id"));
+   assert(run_id && run_id[0]);
+   char saved_id[128];
+   snprintf(saved_id, sizeof(saved_id), "%s", run_id);
+   cJSON_Delete(queued);
+   openai_run_status_t status = OPENAI_RUN_QUEUED;
+   for (int i = 0; i < 100; i++)
+   {
+      assert(openai_runs_store_status(saved_id, &status));
+      if (openai_run_status_terminal(status))
+         break;
+      usleep(10000);
+   }
+   assert(status == OPENAI_RUN_COMPLETED);
 }
 
 /* The HTTP router owns only the adapter around management authorization. The
@@ -1221,6 +1264,20 @@ int main(void)
       g_disp_method[0] = '\0';
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
+
+      /* A pooled orchestration worker must begin every op with empty checkout
+       * and credential TLS, even when the previous op leaked both. This is the
+       * roundtable artifact/Codex-seat isolation boundary under concurrency.
+       * Keep the normal four-worker coverage above, then use a fresh one-worker
+       * pool solely to guarantee that poison and inspect reuse one thread. */
+      compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
+      assert(compute_pool_init(&g_test_server_ctx.orchestration_pool, 1) == 0);
+      atomic_store(&g_op_context_clean, 0);
+      submit_and_wait_op("test.poison_op_context");
+      submit_and_wait_op("test.inspect_op_context");
+      assert(atomic_load(&g_op_context_clean) == 1);
+      openai_runs_store_reset();
+
       assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));

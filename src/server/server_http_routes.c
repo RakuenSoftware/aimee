@@ -15,6 +15,7 @@
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
+#include "agent_config.h" /* clear request-local agent credentials between pooled op runs */
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "config.h"
@@ -1027,9 +1028,26 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
    return s;
 }
 
+/* Orchestration workers are pooled. Every field below is thread-local, but that
+ * only prevents cross-thread races: without an explicit turn boundary, the next
+ * op scheduled on the same worker inherits the previous op's checkout and
+ * credential context. In particular, an interactive roundtable could make a
+ * server-hosted Codex seat `cd` into another client's nonexistent checkout and
+ * return no content. Clear on both sides of every op dispatch so request-local
+ * panel/preset/artifact state cannot bleed through worker reuse. */
+static void op_run_clear_thread_context(void)
+{
+   run_cmd_set_cwd(NULL);
+   agent_set_request_session(NULL);
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_set_request_vault_principal(NULL);
+   agent_set_request_cancel(NULL);
+}
+
 static void op_run_worker_run(void *arg)
 {
    op_run_job_t *j = (op_run_job_t *)arg;
+   op_run_clear_thread_context();
    compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
    char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
@@ -1053,6 +1071,7 @@ static void op_run_worker_run(void *arg)
    }
 
    int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
+   op_run_clear_thread_context();
    /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
     * failed run; anything else is the completed result payload. */
    int ok = (rc >= 200 && rc < 300);
