@@ -5,7 +5,10 @@
 
 #include "cJSON.h"
 
+#include <limits.h>
+#include <math.h>
 #include <openssl/core_names.h>
+#include <openssl/crypto.h>
 #include <openssl/ec.h>
 #include <openssl/evp.h>
 #include <openssl/param_build.h>
@@ -52,14 +55,70 @@ static size_t b64url_decode(const char *in, size_t in_len, unsigned char *out, s
    return o;
 }
 
-static int b64url_decode_str(const char *in, size_t in_len, char *out, size_t out_cap)
+static int b64url_decode_str(const char *in, size_t in_len, char *out, size_t out_cap,
+                             size_t *decoded_len)
 {
-   if (out_cap == 0)
+   if (out_cap == 0 || !decoded_len)
       return -1;
    size_t n = b64url_decode(in, in_len, (unsigned char *)out, out_cap - 1);
    if (n == (size_t)-1)
       return -1;
    out[n] = '\0';
+   *decoded_len = n;
+   return 0;
+}
+
+static void cjson_cleanse(cJSON *item)
+{
+   for (cJSON *current = item; current; current = current->next)
+   {
+      if (current->child)
+         cjson_cleanse(current->child);
+      if (current->valuestring)
+         OPENSSL_cleanse(current->valuestring, strlen(current->valuestring));
+      if (current->string)
+         OPENSSL_cleanse(current->string, strlen(current->string));
+   }
+}
+
+static void cjson_cleanse_delete(cJSON *item)
+{
+   cjson_cleanse(item);
+   cJSON_Delete(item);
+}
+
+static int checked_double_to_long(double value, long *out)
+{
+   const double exclusive_upper = (double)LONG_MAX + 1.0;
+   if (!out || !isfinite(value) || value < (double)LONG_MIN || value >= exclusive_upper)
+      return 0;
+   *out = (long)value;
+   return 1;
+}
+
+static int json_has_decoded_nul_escape(const char *raw, size_t length)
+{
+   int in_string = 0;
+   for (size_t i = 0; i < length; ++i)
+   {
+      if (!in_string)
+      {
+         if (raw[i] == '"')
+            in_string = 1;
+         continue;
+      }
+      if (raw[i] == '"')
+      {
+         in_string = 0;
+         continue;
+      }
+      if (raw[i] != '\\' || i + 1 >= length)
+         continue;
+      if (raw[i + 1] == 'u' && i + 5 < length && raw[i + 2] == '0' && raw[i + 3] == '0' &&
+          raw[i + 4] == '0' && raw[i + 5] == '0')
+         return 1;
+      ++i;
+   }
    return 0;
 }
 
@@ -141,7 +200,7 @@ static EVP_PKEY *jwks_pubkey(const char *jwks_json, const char *kid, int want_ec
    EVP_PKEY *pkey = NULL;
    if (!cJSON_IsArray(keys))
    {
-      cJSON_Delete(root);
+      cjson_cleanse_delete(root);
       return NULL;
    }
    const char *want_kty = want_ec ? "EC" : "RSA";
@@ -170,11 +229,11 @@ static EVP_PKEY *jwks_pubkey(const char *jwks_json, const char *kid, int want_ec
    }
    if (!chosen || ((!kid || !kid[0]) && match_count != 1))
    {
-      cJSON_Delete(root);
+      cjson_cleanse_delete(root);
       return NULL;
    }
    pkey = want_ec ? jwks_ec_p256_key(chosen) : jwks_rsa_key(chosen);
-   cJSON_Delete(root);
+   cjson_cleanse_delete(root);
    return pkey;
 }
 
@@ -249,22 +308,35 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
                                             const char *expected_iss, const char *expected_aud,
                                             long now, aws_webid_claims_t *out)
 {
+   if (out)
+      memset(out, 0, sizeof(*out));
+
+   aws_webid_status_t st = AWS_WEBID_ERR_MALFORMED;
+   char hdr_json[1024] = {0};
+   char kid[256] = {0};
+   unsigned char sig[512] = {0};
+   char *pl_json = NULL;
+   cJSON *hdr = NULL, *pl = NULL;
+   EVP_PKEY *pkey = NULL;
    if (!token || !jwks_json || !jwks_json[0])
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
 
    /* Fail CLOSED on a missing/empty expectation: an unconfigured issuer or
     * audience must never silently accept ANY iss/aud (a misconfiguration would
     * otherwise trust arbitrarily-issued tokens). Both are mandatory. */
    if (!expected_iss || !expected_iss[0] || !expected_aud || !expected_aud[0])
-      return AWS_WEBID_ERR_CLAIMS;
+   {
+      st = AWS_WEBID_ERR_CLAIMS;
+      goto done;
+   }
 
    /* Split the compact JWS into three segments. */
    const char *dot1 = strchr(token, '.');
    if (!dot1)
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
    const char *dot2 = strchr(dot1 + 1, '.');
    if (!dot2)
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
    const char *hdr_b64 = token;
    size_t hdr_len = (size_t)(dot1 - token);
    const char *pl_b64 = dot1 + 1;
@@ -272,15 +344,16 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
    const char *sig_b64 = dot2 + 1;
    size_t sig_len = strlen(sig_b64);
    if (hdr_len == 0 || pl_len == 0 || sig_len == 0 || strchr(sig_b64, '.'))
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
 
    /* Header: alg must be RS256 or ES256; capture kid. */
-   char hdr_json[1024];
-   if (b64url_decode_str(hdr_b64, hdr_len, hdr_json, sizeof(hdr_json)) != 0)
-      return AWS_WEBID_ERR_MALFORMED;
-   cJSON *hdr = cJSON_Parse(hdr_json);
+   size_t hdr_json_len = 0;
+   if (b64url_decode_str(hdr_b64, hdr_len, hdr_json, sizeof(hdr_json), &hdr_json_len) != 0 ||
+       memchr(hdr_json, '\0', hdr_json_len) || json_has_decoded_nul_escape(hdr_json, hdr_json_len))
+      goto done;
+   hdr = cJSON_Parse(hdr_json);
    if (!hdr)
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
    cJSON *alg = cJSON_GetObjectItemCaseSensitive(hdr, "alg");
    int want_ec = -1;
    if (cJSON_IsString(alg))
@@ -290,19 +363,24 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
       else if (strcmp(alg->valuestring, "ES256") == 0)
          want_ec = 1;
    }
-   char kid[256] = "";
    cJSON *kidj = cJSON_GetObjectItemCaseSensitive(hdr, "kid");
    if (cJSON_IsString(kidj))
       snprintf(kid, sizeof(kid), "%s", kidj->valuestring);
-   cJSON_Delete(hdr);
+   cjson_cleanse_delete(hdr);
+   hdr = NULL;
    if (want_ec < 0)
-      return AWS_WEBID_ERR_UNSUPPORTED_ALG;
+   {
+      st = AWS_WEBID_ERR_UNSUPPORTED_ALG;
+      goto done;
+   }
 
    /* Resolve key + verify signature over the raw "header.payload" bytes. */
-   EVP_PKEY *pkey = jwks_pubkey(jwks_json, kid, want_ec);
+   pkey = jwks_pubkey(jwks_json, kid, want_ec);
    if (!pkey)
-      return AWS_WEBID_ERR_NO_KEY;
-   unsigned char sig[512];
+   {
+      st = AWS_WEBID_ERR_NO_KEY;
+      goto done;
+   }
    size_t siglen = b64url_decode(sig_b64, sig_len, sig, sizeof(sig));
    int verified = 0;
    if (siglen != (size_t)-1 && siglen > 0)
@@ -312,25 +390,30 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
                          : rsa_verify(pkey, hdr_b64, si_len, sig, siglen);
    }
    EVP_PKEY_free(pkey);
+   pkey = NULL;
    if (!verified)
-      return AWS_WEBID_ERR_BAD_SIGNATURE;
+   {
+      st = AWS_WEBID_ERR_BAD_SIGNATURE;
+      goto done;
+   }
 
    /* Signature good — decode + validate claims (verify-then-trust). */
-   char *pl_json = malloc(pl_len + 1);
+   pl_json = malloc(pl_len + 1);
    if (!pl_json)
-      return AWS_WEBID_ERR_MALFORMED;
-   if (b64url_decode_str(pl_b64, pl_len, pl_json, pl_len + 1) != 0)
-   {
-      free(pl_json);
-      return AWS_WEBID_ERR_MALFORMED;
-   }
-   cJSON *pl = cJSON_Parse(pl_json);
+      goto done;
+   size_t pl_json_len = 0;
+   if (b64url_decode_str(pl_b64, pl_len, pl_json, pl_len + 1, &pl_json_len) != 0 ||
+       memchr(pl_json, '\0', pl_json_len) || json_has_decoded_nul_escape(pl_json, pl_json_len))
+      goto done;
+   pl = cJSON_Parse(pl_json);
+   OPENSSL_cleanse(pl_json, pl_len + 1);
    free(pl_json);
+   pl_json = NULL;
    if (!pl)
-      return AWS_WEBID_ERR_MALFORMED;
+      goto done;
 
-   aws_webid_status_t st = AWS_WEBID_OK;
    const long skew = 60;
+   st = AWS_WEBID_OK;
    do
    {
       cJSON *iss = cJSON_GetObjectItemCaseSensitive(pl, "iss");
@@ -353,8 +436,13 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
          st = AWS_WEBID_ERR_CLAIMS;
          break;
       }
-      long expiry = (long)exp->valuedouble;
-      if (expiry + skew < now)
+      long expiry = 0;
+      if (!checked_double_to_long(exp->valuedouble, &expiry))
+      {
+         st = AWS_WEBID_ERR_CLAIMS;
+         break;
+      }
+      if ((long double)expiry + (long double)skew < (long double)now)
       {
          st = AWS_WEBID_ERR_EXPIRED;
          break;
@@ -365,15 +453,15 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
          st = AWS_WEBID_ERR_IAT;
          break;
       }
-      long iat_v = (long)iat->valuedouble;
-      if (iat_v < 0 || iat_v > now + skew)
+      long iat_v = 0;
+      if (!checked_double_to_long(iat->valuedouble, &iat_v) || iat_v < 0 ||
+          (long double)iat_v > (long double)now + (long double)skew)
       {
          st = AWS_WEBID_ERR_IAT;
          break;
       }
       if (out)
       {
-         memset(out, 0, sizeof(*out));
          out->expiry = expiry;
          out->issued_at = iat_v;
          if (cJSON_IsString(iss))
@@ -386,7 +474,20 @@ aws_webid_status_t aws_webidentity_validate(const char *token, const char *jwks_
       }
    } while (0);
 
-   cJSON_Delete(pl);
+done:
+   if (st != AWS_WEBID_OK && out)
+      memset(out, 0, sizeof(*out));
+   cjson_cleanse_delete(pl);
+   cjson_cleanse_delete(hdr);
+   if (pl_json)
+   {
+      OPENSSL_cleanse(pl_json, pl_len + 1);
+      free(pl_json);
+   }
+   EVP_PKEY_free(pkey);
+   OPENSSL_cleanse(sig, sizeof(sig));
+   OPENSSL_cleanse(kid, sizeof(kid));
+   OPENSSL_cleanse(hdr_json, sizeof(hdr_json));
    return st;
 }
 
