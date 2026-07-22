@@ -1415,6 +1415,12 @@ static void test_roundtable_review_assigns_personas(void)
    assert(strcmp(g_captured_personas[0], "original-request") == 0);
    assert(strcmp(g_captured_personas[1], "security") == 0);
    assert(strcmp(g_captured_personas[2], "architect") == 0);
+   /* A tool-capable panel must verify production wiring against what actually
+    * ships, rather than treating a source-diff call site as runtime evidence. */
+   assert(strstr(g_last_parallel_prompt, "which build target and implementation actually ship") !=
+          NULL);
+   assert(strstr(g_last_parallel_prompt, "label the claim unverified") != NULL);
+   assert(strstr(g_last_parallel_prompt, "Do not infer shipped behavior from a diff") != NULL);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_review_assigns_personas: ok\n");
 }

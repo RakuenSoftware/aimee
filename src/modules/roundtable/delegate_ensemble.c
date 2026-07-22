@@ -658,8 +658,14 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
        mode == ROUNDTABLE_REVIEW
            ? "You have no filesystem, git, shell, or write access in this review. The SHARED "
              "ARTIFACT is the authoritative change under review; use the offered read-only Aimee "
-             "index tools for surrounding repository facts. Never claim to have read files or run "
-             "git — and "
+             "tools for surrounding repository facts. Never claim to have read files or run git "
+             "unless an offered tool returned that evidence. A source-level wiring claim is not "
+             "verified merely because the artifact calls or edits a named function: use Aimee "
+             "tools to trace which build target and implementation actually ship, and where "
+             "possible inspect or exercise the packaged/runtime path. If that production-path "
+             "trace is unavailable, label the claim unverified and report the missing evidence. "
+             "Do not infer shipped behavior from a diff in isolation. "
+             "Also "
              "never report a finding like \"the change is not applied / not in the tree\" (you "
              "cannot observe the tree; the artifact is the change). "
              "First compare the proposed direction to the ORIGINAL REQUEST in TASK. A useful "
@@ -730,17 +736,16 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    }
 
    /* Read-only aimee context (memory recall + code-graph snippets), assembled by
-    * the server-side caller. Panelists have no tools, so this block is the only
-    * way they see aimee memory and the code graph; it is authoritative reference,
-    * not something they can re-query. */
+    * the server-side caller. It is useful seed evidence, but tool-enabled review
+    * panelists may and should re-query facts whose production wiring matters. */
    const char *context_block = "";
    char *owned_context_block = NULL;
    if (context && context[0])
    {
-      owned_context_block =
-          xasprintf3("AIMEE CONTEXT (read-only reference — aimee memory + code graph):\n", context,
-                     "\nUse this context as grounding; it is authoritative reference you cannot "
-                     "re-query.\n\n");
+      owned_context_block = xasprintf3(
+          "AIMEE CONTEXT (read-only reference — aimee memory + code graph):\n", context,
+          "\nUse this context as grounding and re-query checkable claims with the offered "
+          "read-only tools when production wiring matters.\n\n");
       if (!owned_context_block)
       {
          free(owned_brief_block);
