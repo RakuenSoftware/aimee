@@ -13,17 +13,19 @@ exercise_exit() (
     aimee_supervise_plane_pair "$server_pid" "$wfe_pid"
     [ "$AIMEE_FIRST_EXIT" = "$first" ]
     ! kill -0 "$peer" 2>/dev/null
-    # Model the entrypoint's contract: after supervision returns it exits
-    # nonzero so restartPolicy restarts the entire unit.
-    exit 1
+    return 0
 )
 
-if exercise_exit server; then
-    echo "FAIL: server-plane exit did not terminate the unit" >&2
+if ! exercise_exit server; then
+    echo "FAIL: server-plane exit was not detected or its peer survived" >&2
     exit 1
 fi
-if exercise_exit wfe; then
-    echo "FAIL: WFE-plane exit did not terminate the unit" >&2
+if ! exercise_exit wfe; then
+    echo "FAIL: WFE-plane exit was not detected or its peer survived" >&2
     exit 1
 fi
+# The helper verifies first-exit attribution and peer teardown. The entrypoint
+# separately converts that successful supervision result into a nonzero unit
+# exit so restartPolicy recreates both planes.
+grep -q 'status=1' ../deploy/container/server-entrypoint.sh
 echo "server-plane-supervisor: ok (both exit directions terminate peer and unit)"
