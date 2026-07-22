@@ -25,6 +25,7 @@ static kb_workload_result_t g_jwt_result = KB_WORKLOAD_OK;
 static int g_bad_frame, g_bad_anchor, g_bad_proof;
 static kb_workload_helper_result_t g_jwks_open_result = KB_WORKLOAD_HELPER_OK;
 static int g_invoke_count, g_jwks_open_count, g_cancel_during_invoke;
+static int g_jwt_validate_count, g_unknown_kid_remaining;
 
 static void put_u32(unsigned char out[4], uint32_t value)
 {
@@ -150,13 +151,22 @@ int mock_proof_verify(const kb_workload_proof_key_t *key, kb_workload_operation_
    return g_bad_proof ? -1 : 0;
 }
 
-kb_workload_result_t mock_jwt_validate(const void *token, size_t token_len, const void *jwks,
-                                       size_t jwks_len, const char *issuer, const char *audience,
-                                       uint64_t now, uint32_t max_age, kb_workload_identity_t *out)
+kb_workload_result_t mock_jwt_validate_ex(const void *token, size_t token_len, const void *jwks,
+                                          size_t jwks_len, const char *issuer, const char *audience,
+                                          uint64_t now, uint32_t max_age,
+                                          kb_workload_identity_t *out, int *reload_jwks)
 {
    assert(token && token_len == 5 && jwks && jwks_len == 2 && issuer && audience && now &&
-          max_age == 300);
+          max_age == 300 && reload_jwks);
+   ++g_jwt_validate_count;
+   *reload_jwks = 0;
    memset(out, 0, sizeof(*out));
+   if (g_unknown_kid_remaining > 0)
+   {
+      --g_unknown_kid_remaining;
+      *reload_jwks = 1;
+      return KB_WORKLOAD_INTEGRITY;
+   }
    if (g_jwt_result != KB_WORKLOAD_OK)
       return g_jwt_result;
    strcpy(out->issuer, issuer);
@@ -187,6 +197,7 @@ static void reset(void)
    g_jwks_open_result = KB_WORKLOAD_HELPER_OK;
    g_bad_frame = g_bad_anchor = g_bad_proof = 0;
    g_cancel_during_invoke = 0;
+   g_unknown_kid_remaining = 0;
 }
 
 typedef struct
@@ -221,6 +232,18 @@ int main(void)
    cfg = config();
    cfg.jwks_path = "/bad//jwks";
    assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_INVALID && !provider);
+   cfg = config();
+   cfg.expected_issuer = "https://issuer example";
+   assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_INVALID && !provider);
+   cfg = config();
+   cfg.expected_audience = "aimee test";
+   assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_INVALID && !provider);
+   cfg = config();
+   cfg.expected_issuer = "https://issuer.example\tbad";
+   assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_INVALID && !provider);
+   cfg = config();
+   cfg.expected_audience = "aimee\nbad";
+   assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_INVALID && !provider);
 
    cfg = config();
    assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_OK && provider);
@@ -241,6 +264,23 @@ int main(void)
                              sizeof(output), &output_len) == KB_WORKLOAD_OK);
    assert(output_len == 5 && !memcmp(output, "plain", 5));
    assert(g_jwks_open_count == 4); /* one fresh checked read per operation */
+
+   int reads_before_rotation = g_jwks_open_count;
+   int validates_before_rotation = g_jwt_validate_count;
+   reset();
+   g_unknown_kid_remaining = 1;
+   assert(kb_workload_attest(provider, challenge, binding, &identity) == KB_WORKLOAD_OK);
+   assert(g_jwks_open_count == reads_before_rotation + 2 &&
+          g_jwt_validate_count == validates_before_rotation + 2);
+   reads_before_rotation = g_jwks_open_count;
+   validates_before_rotation = g_jwt_validate_count;
+   reset();
+   g_unknown_kid_remaining = 2;
+   memset(&identity, 0xa5, sizeof(identity));
+   assert(kb_workload_attest(provider, challenge, binding, &identity) == KB_WORKLOAD_INTEGRITY);
+   assert(g_jwks_open_count == reads_before_rotation + 2 &&
+          g_jwt_validate_count == validates_before_rotation + 2 && identity.issuer[0] == 0);
+   reset();
 
    memcpy(output + 1, "secret", 6);
    output_len = 99;
@@ -288,8 +328,12 @@ int main(void)
    g_bad_proof = 1;
    assert(kb_workload_attest(provider, challenge, binding, &identity) == KB_WORKLOAD_INTEGRITY);
    reset();
+   reads_before_rotation = g_jwks_open_count;
+   validates_before_rotation = g_jwt_validate_count;
    g_jwt_result = KB_WORKLOAD_INVALID;
    assert(kb_workload_attest(provider, challenge, binding, &identity) == KB_WORKLOAD_INTEGRITY);
+   assert(g_jwks_open_count == reads_before_rotation + 1 &&
+          g_jwt_validate_count == validates_before_rotation + 1);
    reset();
    g_jwks_open_result = KB_WORKLOAD_HELPER_UNAVAILABLE;
    assert(kb_workload_attest(provider, challenge, binding, &identity) == KB_WORKLOAD_UNAVAILABLE);

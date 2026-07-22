@@ -196,13 +196,15 @@ done:
    return ok ? 0 : -1;
 }
 
-kb_workload_result_t kb_workload_jwt_validate(const void *token_raw, size_t token_len,
-                                              const void *jwks_raw, size_t jwks_len,
-                                              const char *expected_issuer,
-                                              const char *expected_audience, uint64_t now,
-                                              uint32_t max_token_age_seconds,
-                                              kb_workload_identity_t *out)
+kb_workload_result_t kb_workload_jwt_validate_ex(const void *token_raw, size_t token_len,
+                                                 const void *jwks_raw, size_t jwks_len,
+                                                 const char *expected_issuer,
+                                                 const char *expected_audience, uint64_t now,
+                                                 uint32_t max_token_age_seconds,
+                                                 kb_workload_identity_t *out, int *reload_jwks)
 {
+   if (reload_jwks)
+      *reload_jwks = 0;
    if (out)
       memset(out, 0, sizeof(*out));
    if (!token_raw || !token_len || token_len > WORKLOAD_TOKEN_MAX || !jwks_raw || !jwks_len ||
@@ -214,13 +216,13 @@ kb_workload_result_t kb_workload_jwt_validate(const void *token_raw, size_t toke
 
    char *token = malloc(token_len + 1);
    char *jwks = malloc(jwks_len + 1);
-   unsigned char *payload = malloc(token_len + 1);
+   unsigned char *payload = NULL;
    kb_workload_identity_t candidate;
    aws_webid_claims_t ignored;
    memset(&candidate, 0, sizeof(candidate));
    memset(&ignored, 0, sizeof(ignored));
    kb_workload_result_t result = KB_WORKLOAD_INTEGRITY;
-   if (!token || !jwks || !payload)
+   if (!token || !jwks)
    {
       result = KB_WORKLOAD_UNAVAILABLE;
       goto done;
@@ -229,6 +231,25 @@ kb_workload_result_t kb_workload_jwt_validate(const void *token_raw, size_t toke
    token[token_len] = '\0';
    memcpy(jwks, jwks_raw, jwks_len);
    jwks[jwks_len] = '\0';
+
+   /* The common verifier selects the JWKS key and authenticates the compact JWS
+    * before the workload-specific parser reparses any claims. Only an unknown kid
+    * is a rotation signal; every other verification failure is final. */
+   aws_webid_status_t webid = aws_webidentity_validate(token, jwks, expected_issuer,
+                                                       expected_audience, (long)now, &ignored);
+   if (webid != AWS_WEBID_OK)
+   {
+      if (reload_jwks && webid == AWS_WEBID_ERR_NO_KEY)
+         *reload_jwks = 1;
+      goto done;
+   }
+
+   payload = malloc(token_len + 1);
+   if (!payload)
+   {
+      result = KB_WORKLOAD_UNAVAILABLE;
+      goto done;
+   }
 
    const char *first = memchr(token, '.', token_len);
    const char *second =
@@ -242,9 +263,6 @@ kb_workload_result_t kb_workload_jwt_validate(const void *token_raw, size_t toke
    payload[payload_len] = '\0';
    if (strict_claims(payload, payload_len, expected_issuer, expected_audience, now,
                      max_token_age_seconds, &candidate) != 0)
-      goto done;
-   if (aws_webidentity_validate(token, jwks, expected_issuer, expected_audience, (long)now,
-                                &ignored) != AWS_WEBID_OK)
       goto done;
    unsigned int digest_len = 0;
    if (EVP_Digest(token_raw, token_len, candidate.token_hash, &digest_len, EVP_sha256(), NULL) !=
@@ -278,4 +296,15 @@ done:
       free(jwks);
    }
    return result;
+}
+
+kb_workload_result_t kb_workload_jwt_validate(const void *token_raw, size_t token_len,
+                                              const void *jwks_raw, size_t jwks_len,
+                                              const char *expected_issuer,
+                                              const char *expected_audience, uint64_t now,
+                                              uint32_t max_token_age_seconds,
+                                              kb_workload_identity_t *out)
+{
+   return kb_workload_jwt_validate_ex(token_raw, token_len, jwks_raw, jwks_len, expected_issuer,
+                                      expected_audience, now, max_token_age_seconds, out, NULL);
 }

@@ -15,4 +15,13 @@ kb_workload_result_t kb_workload_jwt_validate(const void *token, size_t token_le
                                               uint32_t max_token_age_seconds,
                                               kb_workload_identity_t *out);
 
+/* Provider-internal variant. `reload_jwks` is cleared on entry and set only when
+ * the common signature verifier reports that the token's kid has no JWKS key. */
+kb_workload_result_t kb_workload_jwt_validate_ex(const void *token, size_t token_len,
+                                                 const void *jwks, size_t jwks_len,
+                                                 const char *expected_issuer,
+                                                 const char *expected_audience, uint64_t now,
+                                                 uint32_t max_token_age_seconds,
+                                                 kb_workload_identity_t *out, int *reload_jwks);
+
 #endif

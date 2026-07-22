@@ -1813,7 +1813,7 @@ $(OBJDIR)/tests/kb_workload_provider_mocked.o: kb/kb_workload_provider.c
 	  -Dkb_workload_proof_key_close=mock_proof_key_close \
 	  -Dkb_workload_proof_anchor_id=mock_proof_anchor \
 	  -Dkb_workload_proof_verify=mock_proof_verify \
-	  -Dkb_workload_jwt_validate=mock_jwt_validate -o $@ $<
+	  -Dkb_workload_jwt_validate_ex=mock_jwt_validate_ex -o $@ $<
 
 $(TESTPREFIX)/unit-test-kb-workload-provider: \
     $(OBJDIR)/tests/test_kb_workload_provider.o \

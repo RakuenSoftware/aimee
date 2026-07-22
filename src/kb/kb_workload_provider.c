@@ -44,7 +44,7 @@ static int printable(const char *text, size_t max)
    if (!n || n > max)
       return 0;
    for (size_t i = 0; i < n; ++i)
-      if ((unsigned char)text[i] < 0x20 || (unsigned char)text[i] > 0x7e)
+      if ((unsigned char)text[i] < 0x21 || (unsigned char)text[i] > 0x7e)
          return 0;
    return 1;
 }
@@ -134,18 +134,25 @@ static kb_workload_result_t validate_jwt(kb_workload_provider_t *provider,
    unsigned char *jwks = malloc(WORKLOAD_JWKS_MAX);
    if (!jwks)
       return KB_WORKLOAD_UNAVAILABLE;
-   size_t jwks_len = 0;
-   kb_workload_result_t result =
-       checked_file_read(provider->jwks_path, jwks, WORKLOAD_JWKS_MAX, &jwks_len);
-   if (result == KB_WORKLOAD_OK)
+   kb_workload_result_t result = KB_WORKLOAD_UNAVAILABLE;
+   time_t now = time(NULL);
+   if (now > 0)
    {
-      time_t now = time(NULL);
-      if (now <= 0)
-         result = KB_WORKLOAD_UNAVAILABLE;
-      else
-         result = kb_workload_jwt_validate(
+      for (int attempt = 0; attempt < 2; ++attempt)
+      {
+         size_t jwks_len = 0;
+         int reload_jwks = 0;
+         OPENSSL_cleanse(jwks, WORKLOAD_JWKS_MAX);
+         result = checked_file_read(provider->jwks_path, jwks, WORKLOAD_JWKS_MAX, &jwks_len);
+         if (result != KB_WORKLOAD_OK)
+            break;
+         result = kb_workload_jwt_validate_ex(
              wire->token.ptr, wire->token.len, jwks, jwks_len, provider->expected_issuer,
-             provider->expected_audience, (uint64_t)now, provider->max_token_age_seconds, identity);
+             provider->expected_audience, (uint64_t)now, provider->max_token_age_seconds, identity,
+             &reload_jwks);
+         if (!reload_jwks || attempt == 1)
+            break;
+      }
    }
    OPENSSL_cleanse(jwks, WORKLOAD_JWKS_MAX);
    free(jwks);

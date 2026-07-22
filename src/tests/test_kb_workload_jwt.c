@@ -42,7 +42,7 @@ static EVP_PKEY *key_generate(void)
    return key;
 }
 
-static char *jwks_make(EVP_PKEY *key)
+static char *jwks_make(EVP_PKEY *key, const char *kid)
 {
    BIGNUM *n = NULL, *e = NULL;
    assert(EVP_PKEY_get_bn_param(key, OSSL_PKEY_PARAM_RSA_N, &n) == 1);
@@ -52,9 +52,10 @@ static char *jwks_make(EVP_PKEY *key)
    BN_free(n);
    BN_free(e);
    char *ns = b64url(nb, (size_t)nl), *es = b64url(eb, (size_t)el);
-   char *out = malloc(strlen(ns) + strlen(es) + 128);
+   char *out = malloc(strlen(ns) + strlen(es) + strlen(kid) + 128);
    assert(out);
-   sprintf(out, "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"k1\",\"n\":\"%s\",\"e\":\"%s\"}]}", ns, es);
+   sprintf(out, "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"%s\",\"n\":\"%s\",\"e\":\"%s\"}]}", kid, ns,
+           es);
    free(ns);
    free(es);
    return out;
@@ -117,7 +118,7 @@ static void rejected(const char *payload, EVP_PKEY *key, const char *jwks)
 int main(void)
 {
    EVP_PKEY *key = key_generate();
-   char *jwks = jwks_make(key);
+   char *jwks = jwks_make(key, "k1");
    kb_workload_identity_t out;
    static const char valid[] =
        "{\"iss\":\"https://spire.test\",\"sub\":\"spiffe://test/kb/instance-1\","
@@ -136,6 +137,26 @@ int main(void)
                                    "https://spire.test", "aimee-kb", 1000, 300,
                                    &out) == KB_WORKLOAD_OK &&
           memcmp(out.token_hash, expected_hash, sizeof(expected_hash)) == 0);
+
+   EVP_PKEY *other_key = key_generate();
+   char *unknown_kid_jwks = jwks_make(other_key, "k2");
+   char *wrong_key_jwks = jwks_make(other_key, "k1");
+   int reload_jwks = -1;
+   memset(&out, 0xa5, sizeof(out));
+   assert(kb_workload_jwt_validate_ex(valid_jwt, strlen(valid_jwt), unknown_kid_jwks,
+                                      strlen(unknown_kid_jwks), "https://spire.test", "aimee-kb",
+                                      1000, 300, &out, &reload_jwks) == KB_WORKLOAD_INTEGRITY &&
+          reload_jwks == 1);
+   assert_zero(&out);
+   reload_jwks = -1;
+   assert(kb_workload_jwt_validate_ex(valid_jwt, strlen(valid_jwt), wrong_key_jwks,
+                                      strlen(wrong_key_jwks), "https://spire.test", "aimee-kb",
+                                      1000, 300, &out, &reload_jwks) == KB_WORKLOAD_INTEGRITY &&
+          reload_jwks == 0);
+   assert_zero(&out);
+   free(unknown_kid_jwks);
+   free(wrong_key_jwks);
+   EVP_PKEY_free(other_key);
    free(valid_jwt);
 
    /* A singleton audience array is unambiguous and accepted. */
@@ -206,6 +227,13 @@ int main(void)
             long_sub);
    rejected(payload, key, jwks);
 
+   memset(&out, 0xa5, sizeof(out));
+   reload_jwks = -1;
+   assert(kb_workload_jwt_validate_ex("x\0y", 3, jwks, strlen(jwks), "https://spire.test",
+                                      "aimee-kb", 1000, 300, &out,
+                                      &reload_jwks) == KB_WORKLOAD_INVALID &&
+          reload_jwks == 0);
+   assert_zero(&out);
    memset(&out, 0xa5, sizeof(out));
    assert(kb_workload_jwt_validate("x\0y", 3, jwks, strlen(jwks), "https://spire.test", "aimee-kb",
                                    1000, 300, &out) == KB_WORKLOAD_INVALID);
