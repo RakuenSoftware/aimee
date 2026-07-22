@@ -93,7 +93,7 @@ Confirm each of the following, in order:
 
    The two epochs should match (within a second or two).
 
-2. **The backend now returns the expected agents.**
+2. **The backend now returns the expected agents.** Re-run `GET /v1/agents`:
 
    ```sh
    curl -fsS http://localhost:8080/v1/agents
