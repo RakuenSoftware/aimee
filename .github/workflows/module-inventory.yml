@@ -127,6 +127,12 @@ jobs:
             --check-schema src/modules
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
+      - name: Enforce governance capability ownership
+        run: python3 -I -S scripts/check_capability_ownership.py --config-root "$GITHUB_WORKSPACE"
+      - name: Validate governance ownership from a non-repository working directory
+        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_capability_ownership.py" --config-root "$GITHUB_WORKSPACE"
+      - name: Test governance capability ownership failure modes
+        run: python3 -I scripts/tests/test_check_capability_ownership.py -v
 
   module-doc-contract:
     name: module-doc-contract
