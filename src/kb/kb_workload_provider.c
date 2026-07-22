@@ -302,6 +302,8 @@ done:
    free(response);
    if (cancellation_disabled)
    {
+      /* Restore the caller's state first, then deliver any cancellation deferred
+       * while the provider mutex and helper lifecycle were protected. */
       (void)pthread_setcancelstate(old_cancel_state, NULL);
       pthread_testcancel();
    }

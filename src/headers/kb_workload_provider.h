@@ -49,6 +49,7 @@ typedef struct
    uint64_t expires_at;
    unsigned char proof_anchor_id[KB_WORKLOAD_ANCHOR_LEN];
    unsigned char custody_anchor_id[KB_WORKLOAD_ANCHOR_LEN];
+   /* SHA-256 of the exact compact JWT bytes received on the helper wire. */
    unsigned char token_hash[KB_WORKLOAD_TOKEN_HASH_LEN];
 } kb_workload_identity_t;
 
