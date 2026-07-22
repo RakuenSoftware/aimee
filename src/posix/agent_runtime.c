@@ -138,6 +138,41 @@ static int agent_should_inject_respond_tool(const agent_t *agent, const char *ro
    return 1;
 }
 
+static int agent_tool_result_usable(const char *result)
+{
+   int usable = result && result[0] && strncmp(result, "error", 5) != 0;
+   if (usable && result[0] == '{')
+   {
+      cJSON *root = cJSON_Parse(result);
+      if (root)
+      {
+         if (cJSON_GetObjectItemCaseSensitive(root, "error"))
+            usable = 0;
+         cJSON_Delete(root);
+      }
+   }
+   return usable;
+}
+
+static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
+                                               char *last_tool_name, size_t last_tool_name_n,
+                                               char *last_tool_result, size_t last_tool_result_n)
+{
+   static const char *const name = "list_files";
+   static const char *const args = "{\"path\":\".\"}";
+   char *result = dispatch_tool_call_ctx(name, args, timeout_ms);
+   agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
+   if (last_tool_name && last_tool_name_n)
+      snprintf(last_tool_name, last_tool_name_n, "%s", name);
+   if (last_tool_result && last_tool_result_n)
+      snprintf(last_tool_result, last_tool_result_n, "%.500s", result ? result : "");
+   int usable = agent_tool_result_usable(result);
+   if (usable)
+      agent_session_append_repository_evidence(messages, name, args, result);
+   free(result);
+   return usable;
+}
+
 static int request_prompt_token_estimate(cJSON *messages, const char *system_prompt)
 {
    int tokens = session_compact_estimate_tokens(messages);
@@ -934,8 +969,21 @@ native_provider_http:
        * to delegate calls here: the primary spawns delegates via the very Task/Subagent
        * tool this would drop, so policing the primary's response would neuter aimee's
        * own delegation. Drop count discarded, as in the ingress (anthropic_http.c). */
+      int denied_calls = 0;
+      char denied_tool[64] = "";
       if (role != NULL)
+      {
+         for (int i = 0; i < parsed.call_count; i++)
+         {
+            if (gateway_policy_is_denied_tool(parsed.calls[i].name))
+            {
+               if (!denied_tool[0])
+                  snprintf(denied_tool, sizeof denied_tool, "%s", parsed.calls[i].name);
+               denied_calls++;
+            }
+         }
          gateway_policy_police_parsed_response(&parsed);
+      }
 
       /* Log response trace */
       agent_trace_log(0, turn, "response", parsed.content ? parsed.content : "(tool_calls)", NULL,
@@ -944,6 +992,38 @@ native_provider_http:
       if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
                                              successful_tool_calls))
          required_evidence_responses++;
+
+      /* ChatGPT can expose provider-native Task/Agent tools outside the function
+       * catalog and ignore a named tool_choice. The gateway must still deny those
+       * delegation calls, but an evidence-gated seat must not become permanently
+       * unusable as a result. When policing removed every call, perform one
+       * deterministic, read-only repository bootstrap and return its output to
+       * that same seat. This is a fallback for a denied native call, not a general
+       * substitute for model-selected tools. */
+      /* This value is intentionally captured after policy compaction. A mixed
+       * [denied, allowed] response retains its allowed call and never falls back. */
+      int remaining_calls_after_policy = parsed.call_count;
+      if (agent_required_evidence_needs_fallback(agent->require_initial_tool_call,
+                                                 successful_tool_calls, chatgpt, denied_calls,
+                                                 remaining_calls_after_policy))
+      {
+         aimee_log(LOG_WARN, "agent.evidence",
+                   "provider selected denied tool '%s'; bootstrapping seat with list_files",
+                   denied_tool[0] ? denied_tool : "Subagent");
+         total_calls++;
+         if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
+                                                 sizeof last_tool_name, last_tool_result,
+                                                 sizeof last_tool_result))
+         {
+            successful_tool_calls++;
+            if (turn >= max_t - 1 && max_t < initial_max_t + 1)
+               max_t++;
+            turn++;
+            agent_free_parsed_response(&parsed);
+            continue;
+         }
+         consecutive_errors++;
+      }
 
       /* Accumulate tokens */
       out->prompt_tokens += parsed.prompt_tokens;
@@ -1416,18 +1496,7 @@ native_provider_http:
          /* An attempted lookup is not evidence. Validation/policy/directive
           * failures never reach this branch; dispatch failures conventionally
           * return "error:" or a JSON object containing an error member. */
-         int usable_tool_result =
-             result_str && result_str[0] && strncmp(result_str, "error", 5) != 0;
-         if (usable_tool_result && result_str[0] == '{')
-         {
-            cJSON *result_json = cJSON_Parse(result_str);
-            if (result_json)
-            {
-               if (cJSON_GetObjectItemCaseSensitive(result_json, "error"))
-                  usable_tool_result = 0;
-               cJSON_Delete(result_json);
-            }
-         }
+         int usable_tool_result = agent_tool_result_usable(result_str);
          if (usable_tool_result)
             successful_tool_calls++;
 

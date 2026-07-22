@@ -36,6 +36,7 @@
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
 #include "shadow_mirror.h"        /* generic shadow-traffic mirror */
+#include "http_content_encoding.h"
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1523,6 +1524,8 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
 
 void handle_conn(int fd, int is_tcp, int is_management)
 {
+   server_http_keepalive_set(0);
+   server_http_gzip_set(0);
    char buf[SHTTP_READ_MAX];
    int total = 0;
    while (total < SHTTP_READ_MAX - 1)
@@ -1802,6 +1805,31 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
+   config_t transport_cfg;
+   config_load(&transport_cfg);
+   char connection_header[128] = "";
+   int keepalive_requested =
+       server_conn_io_has_ssl(fd) && server_http_keepalive_route_eligible(path) &&
+       http_header(buf, "Connection", connection_header, sizeof(connection_header)) &&
+       strcasestr(connection_header, "keep-alive") != NULL &&
+       strcasestr(connection_header, "close") == NULL;
+   if (transport_cfg.transport_server_keepalive_enabled && keepalive_requested)
+   {
+      if (!server_http_keepalive_framing_valid(buf, (size_t)total))
+      {
+         send_response(fd, 400, "{\"error\":\"invalid keep-alive request framing\"}", request_id);
+         return;
+      }
+      server_http_keepalive_set(1);
+   }
+   char accept_encoding[128] = "";
+   int gzip_allowed =
+       transport_cfg.transport_thinclient_gzip_enabled && server_http_gzip_route_eligible(path);
+   server_http_gzip_set(
+       gzip_allowed &&
+       http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
+       strcasestr(accept_encoding, "gzip") != NULL);
+
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
    {
@@ -1925,6 +1953,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
       body = malloc((size_t)body_len + 1);
       if (body)
       {
+         int declared_body_len = body_len;
          int already = 0;
          const char *bs = strstr(buf, "\r\n\r\n");
          if (bs)
@@ -1946,7 +1975,54 @@ void handle_conn(int fd, int is_tcp, int is_management)
             already += n;
          }
          body[already] = '\0';
+         if (server_http_keepalive_peek() && already != declared_body_len)
+         {
+            server_http_keepalive_set(0);
+            send_response(fd, 400, "{\"error\":\"incomplete keep-alive request body\"}",
+                          request_id);
+            free(body);
+            return;
+         }
          body_len = already;
+      }
+      else if (body_len > 0 && server_http_keepalive_peek())
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 500, "{\"error\":\"oom\"}", request_id);
+         return;
+      }
+   }
+
+   char content_encoding[64] = "";
+   if (http_header(buf, "Content-Encoding", content_encoding, sizeof(content_encoding)) &&
+       content_encoding[0])
+   {
+      if (!gzip_allowed || strcasecmp(content_encoding, "gzip") != 0 || !body)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 415, "{\"error\":\"unsupported content encoding\"}", request_id);
+         free(body);
+         return;
+      }
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      const char *head_end = strstr(buf, "\r\n\r\n");
+      size_t head_bytes = head_end ? (size_t)(head_end + 4 - buf) : (size_t)total;
+      size_t decoded_cap = head_bytes < 64u * 1024u ? 64u * 1024u - head_bytes : 0;
+      int gzip_rc = decoded_cap ? http_gzip_decompress(body, (size_t)body_len, decoded_cap, 50,
+                                                       &decoded, &decoded_len)
+                                : -2;
+      free(body);
+      body = (char *)decoded;
+      body_len = (int)decoded_len;
+      if (gzip_rc != 0)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, gzip_rc == -2 ? 413 : 400,
+                       gzip_rc == -2 ? "{\"error\":\"decompressed body limit exceeded\"}"
+                                     : "{\"error\":\"malformed gzip body\"}",
+                       request_id);
+         return;
       }
    }
 
@@ -2010,7 +2086,13 @@ void handle_conn(int fd, int is_tcp, int is_management)
    /* Streaming completions take the SSE path (separate from the buffered unary
     * route). With no stream handler registered the request falls through to the
     * unary handler, which rejects streaming. */
-   if (strcmp(method, "POST") == 0 && openai_request_bool(body, "stream"))
+   int streaming_request = strcmp(method, "POST") == 0 && openai_request_bool(body, "stream");
+   if (streaming_request)
+   {
+      server_http_keepalive_set(0);
+      server_http_gzip_set(0);
+   }
+   if (streaming_request)
    {
       if (strcmp(path, "/v1/chat/completions") == 0 && g_chat_stream_handler)
       {
