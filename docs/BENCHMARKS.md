@@ -133,6 +133,29 @@ make -C src test-latency-slo
 make -C src check-latency-slo LATENCY_SLO_INPUT=/absolute/path/result.json
 ```
 
+The detailed capture format is `transport_benchmark.v1`. Its authoritative
+network profiles and workload matrix live in
+`benchmarks/transport/profiles.json`; the validator requires every timing,
+byte-count, connection, pool, and process field to be present. A stage that the
+current probe cannot measure is recorded explicitly as `null` and appears as a
+coverage gap rather than disappearing from the artifact. `timings_ms.total` is
+always required.
+
+Validate a capture and project it into the SLO evaluator's narrower input:
+
+```bash
+make -C src test-transport-artifact
+make -C src check-transport-artifact \
+  TRANSPORT_ARTIFACT_INPUT=/absolute/path/capture.json \
+  LATENCY_SLO_OUTPUT=/absolute/path/latency-slo.json
+make -C src check-latency-slo \
+  LATENCY_SLO_INPUT=/absolute/path/latency-slo.json
+```
+
+The projection does not manufacture samples or fill coverage gaps. Promotion
+still requires at least 10,000 attempts in the projected artifact and a passing
+`check-latency-slo` result.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.
