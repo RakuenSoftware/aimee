@@ -95,6 +95,7 @@ var policyDefaults = map[string]any{
 	"autonomy.max_resumes":           50,
 	"autonomy.stale_abandon_secs":    3600,
 	"autonomy.concurrency":           2,
+	"autonomy.delegate_pending_secs": 120,
 }
 
 var configurableTypes = map[string]string{
@@ -102,7 +103,14 @@ var configurableTypes = map[string]string{
 	"trigger.scan_interval_secs": "int",
 	"autonomy.max_wall_secs":     "int", "autonomy.max_turns": "int",
 	"autonomy.max_resumes": "int", "autonomy.stale_abandon_secs": "int",
-	"autonomy.concurrency": "int",
+	"autonomy.concurrency":           "int",
+	"autonomy.delegate_pending_secs": "int",
+}
+
+type intBounds struct{ min, max int64 }
+
+var configurableIntBounds = map[string]intBounds{
+	"autonomy.delegate_pending_secs": {min: 2, max: 3600},
 }
 
 func (s *Store) Values() (map[string]any, error) {
@@ -322,6 +330,9 @@ func validateKeyValue(key string, value any) error {
 		n, ok := number(value)
 		if !ok || n < 0 {
 			return fmt.Errorf("%s must be a non-negative integer", key)
+		}
+		if bounds, bounded := configurableIntBounds[key]; bounded && (n < bounds.min || n > bounds.max) {
+			return fmt.Errorf("%s must be between %d and %d", key, bounds.min, bounds.max)
 		}
 	case "bool":
 		if _, ok := value.(bool); !ok {
