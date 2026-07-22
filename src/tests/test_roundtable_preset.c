@@ -25,6 +25,7 @@ static const char *PRESET_JSON = "{"
                                  "  \"max_rounds\": 3,"
                                  "  \"converge_threshold\": 2,"
                                  "  \"deadline_ms\": 360000,"
+                                 "  \"discussion\": true,"
                                  "  \"turns\": \"parallel\","
                                  "  \"pipeline\": {"
                                  "    \"done_bar\": \"zero_blocking\","
@@ -55,6 +56,7 @@ static void check_fields(const roundtable_preset_t *p)
    assert(p->max_rounds == 3);
    assert(p->converge_threshold == 2);
    assert(p->deadline_ms == 360000);
+   assert(p->discussion == 1);
    assert(strcmp(p->turns, "parallel") == 0);
    assert(strcmp(p->pipeline_done_bar, "zero_blocking") == 0);
    assert(p->pipeline_max_passes == 4);

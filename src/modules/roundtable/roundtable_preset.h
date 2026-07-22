@@ -50,6 +50,7 @@ typedef struct
    int max_rounds;
    int converge_threshold;
    int deadline_ms;
+   int discussion;
    char turns[16]; /* "parallel" | "sequential" */
 
    /* Authoring pipeline (roundtable.pipeline_*). */

@@ -175,6 +175,7 @@ static void preset_fill_from_object(const cJSON *root, roundtable_preset_t *out)
    out->max_rounds = (int)json_num(root, "max_rounds", 0);
    out->converge_threshold = (int)json_num(root, "converge_threshold", 0);
    out->deadline_ms = (int)json_num(root, "deadline_ms", 0);
+   out->discussion = json_bool(root, "discussion", 0);
    snprintf(out->turns, sizeof(out->turns), "%s", json_str(root, "turns", "parallel"));
 
    const cJSON *pl = cJSON_GetObjectItemCaseSensitive(root, "pipeline");
@@ -220,6 +221,7 @@ cJSON *roundtable_preset_to_json(const roundtable_preset_t *p)
    cJSON_AddNumberToObject(root, "max_rounds", p->max_rounds);
    cJSON_AddNumberToObject(root, "converge_threshold", p->converge_threshold);
    cJSON_AddNumberToObject(root, "deadline_ms", p->deadline_ms);
+   cJSON_AddBoolToObject(root, "discussion", p->discussion ? 1 : 0);
    cJSON_AddStringToObject(root, "turns", p->turns);
 
    cJSON *pl = cJSON_AddObjectToObject(root, "pipeline");

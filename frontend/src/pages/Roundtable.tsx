@@ -52,6 +52,7 @@ type Preset = {
   min_successful: number;
   max_cost_usd: number;
   deadline_ms: number;
+  discussion: boolean;
   pipeline: Pipeline;
 };
 type PresetSummary = { name: string; description?: string; active?: boolean; synthesized?: boolean };
@@ -89,6 +90,7 @@ function emptyPreset(name: string): Preset {
     min_successful: 2,
     max_cost_usd: 0,
     deadline_ms: 360000,
+    discussion: false,
     pipeline: { ...DEFAULT_PIPELINE },
   };
 }
@@ -367,6 +369,14 @@ export default function Roundtable() {
                   <label style={lbl}>Max cost (USD, 0 = none)</label>
                   {numField(form.max_cost_usd, (n) => patch({ max_cost_usd: n }))}
                 </div>
+                <label style={{ ...lbl, alignSelf: "center", marginBottom: 0 }} title="After independent analysis, let the seated agents compare reports. Ordinary issues always stop after one cycle; only a disputed foundational issue can extend discussion until a strict majority forms.">
+                  <input
+                    type="checkbox"
+                    checked={form.discussion}
+                    onChange={(e) => patch({ discussion: e.target.checked })}
+                  />{" "}
+                  Discussion mode
+                </label>
               </div>
 
               {/* Execution guard. Independent analysis always runs once in parallel. */}
