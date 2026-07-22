@@ -19,6 +19,7 @@ import (
 	appconfig "github.com/JBailes/aimee/server-go/internal/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
+	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -127,10 +128,19 @@ func main() {
 		if forgeErr != nil {
 			log.Fatal(forgeErr)
 		}
-		runner, err = engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, forge)
-		if err != nil {
-			log.Fatal(err)
+		nativeRunner, runnerErr := engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, forge)
+		if runnerErr != nil {
+			log.Fatal(runnerErr)
 		}
+		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"), func() (string, error) {
+			name, _, err := configStore.StringValue("roundtable.default")
+			return name, err
+		})
+		if roundtableErr != nil {
+			log.Fatal(roundtableErr)
+		}
+		nativeRunner.SetRoundtableStore(roundtables)
+		runner = nativeRunner
 	}
 	if runner != nil {
 		workflowEngine, err := engine.New(store, artifacts, *workflowDir, runner)

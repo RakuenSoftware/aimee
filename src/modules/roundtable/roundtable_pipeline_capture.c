@@ -163,7 +163,7 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
 
    rtp_attempt_t att;
    if (rtp_attempt_get_by_run(run_id, &att) != 0)
-      return 0; /* not a pipeline run — ordinary ensemble_review, untouched */
+      return 0; /* not a pipeline run — ordinary roundtable_review, untouched */
 
    rtp_pass_t pass;
    int have_pass = (rtp_pass_get(att.pass_id, &pass) == 0);

@@ -1,19 +1,16 @@
 /* wfe_live_panel.c -- the live roundtable panel provider.
  *
  * gate.roundtable calls this to convene a diverse panel THROUGH THE ROUNDTABLE
- * ENGINE (delegate_roundtable_run, REVIEW mode): one structured-review panelist
- * per REQUIRED persona, whose findings are captured as review items with
+ * ENGINE (delegate_roundtable_run, REVIEW mode): the exact seats from the
+ * named/default configured roundtable (or at most two fallback agents), whose findings are captured as review items with
  * replayable evidence, deduped across the panel, replay-VERIFIED against the
  * gate's worktree (wfe_replay_worktree — interpretation never blocks, a
  * contradicted claim is rejected), and finally mapped onto per-lens verdicts
  * (wfe_panel_verdicts_from_roundtable) for the fail-closed wfe_gate_decide.
  * Registered from wfe_autonomy_register.
  *
- * Seat semantics are unchanged from the pre-engine panel: a PINNED seat model
- * is never substituted (unfulfillable -> the run FAILS); a "$random" or
- * unmatched lens picks any review-capable agent, preferring panel diversity but
- * reusing a seated agent when the roster is smaller than the panel; and when NO
- * review agent is eligible right now the panel QUEUES for a seat up to
+ * A configured seat model is never silently substituted; when no review agent
+ * is eligible right now the panel QUEUES for a seat up to
  * AIMEE_PANEL_SEAT_WAIT_SECS before the gate degrades.
  *
  * NOTE: the engine embeds the change in the prompt, and panelists additionally
@@ -36,8 +33,6 @@
 #include "config.h"
 #include "delegate_ensemble.h"
 #include "log.h"
-#include "roundtable_preset.h"
-#include "roundtable_seat_resolve.h"
 #include "roundtable_verify.h"
 
 #include <stdio.h>
@@ -124,103 +119,6 @@ static char *build_review_task(const wfe_review_packet_t *pkt)
    return buf;
 }
 
-/* The seat model bound to `persona` in the active roundtable preset, or NULL when
- * no seat matches (the caller then treats the lens as "$random"). The model may
- * itself be the "$random" sentinel — a seat the user explicitly set to random. */
-static const char *seat_model_for_persona(const roundtable_preset_t *preset, const char *persona)
-{
-   if (!preset || !persona || !persona[0])
-      return NULL;
-   for (int i = 0; i < preset->seat_count; i++)
-      if (strcmp(preset->seats[i].persona, persona) == 0)
-         return preset->seats[i].model;
-   return NULL;
-}
-
-/* Load the roundtable preset this gate convenes into *preset for its
- * persona->model bindings. `requested` is the node's params.roundtable (the gate
- * may name a specific preset); when empty it falls back to the configured default
- * (roundtable.default, else "default"). Returns 1 on success, 0 when no preset
- * loads — in which case every lens resolves as "$random", preserving the
- * pre-preset "any review-capable agent per persona" behaviour. A NAMED preset
- * that does not load is logged, since it is likely a workflow authoring error. */
-static int load_panel_preset(roundtable_preset_t *preset, const char *requested)
-{
-   memset(preset, 0, sizeof *preset);
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   const char *name = "default";
-   if (config_load(&cfg) == 0 && cfg.roundtable_default[0])
-      name = cfg.roundtable_default;
-   if (requested && requested[0])
-      name = requested; /* the node's explicit choice wins over the default */
-   if (roundtable_preset_load(name, preset) == 0)
-      return 1;
-   if (requested && requested[0])
-      aimee_log(LOG_WARN, "wfe-panel",
-                "roundtable preset '%s' not found -> every lens falls back to $random", requested);
-   return 0;
-}
-
-/* Resolve every lens to a concrete review agent. Pinned seats resolve exactly
- * once (unfulfillable -> WFE_PANEL_PINNED_FAIL); $random seats prefer a UNIQUE
- * agent per lens and downgrade to reuse when the roster is smaller than the
- * panel. Returns 0 with seat[0..nlens-1] set (pointers into acfg), or a
- * WFE_PANEL_* sentinel; `*any_pinned` reports whether any seat is pinned.
- * Returns 1 when no review agent is eligible AT ALL right now (caller queues). */
-static int resolve_seats(agent_config_t *acfg, const roundtable_preset_t *preset, int have_preset,
-                         const char *const *required, int nlens, const char *seat[],
-                         int *any_pinned)
-{
-   const char *used[MAX_AGENTS];
-   int nused = 0;
-   *any_pinned = 0;
-   for (int i = 0; i < nlens; i++)
-      seat[i] = NULL;
-
-   for (int i = 0; i < nlens; i++)
-   {
-      const char *model = have_preset ? seat_model_for_persona(preset, required[i]) : NULL;
-      if (rt_seat_is_random(model))
-         continue; /* $random / unmatched -> second pass */
-      int idx = -1;
-      if (rt_resolve_seat_model(acfg, model, "review", used, nused, &idx) != RT_SEAT_OK)
-      {
-         aimee_log(LOG_WARN, "wfe-panel", "pinned model '%s' for lens '%s' unavailable -> fail run",
-                   model, required[i]);
-         return WFE_PANEL_PINNED_FAIL;
-      }
-      seat[i] = acfg->agents[idx].name;
-      *any_pinned = 1;
-      if (nused < MAX_AGENTS)
-         used[nused++] = seat[i];
-   }
-
-   for (int i = 0; i < nlens; i++)
-   {
-      if (seat[i])
-         continue;
-      int idx = -1, reused = 0;
-      rt_seat_resolve_t rc =
-          rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", used, nused, &idx);
-      if (rc == RT_SEAT_RANDOM_EXHAUSTED)
-      {
-         rc = rt_resolve_seat_model(acfg, RT_SEAT_RANDOM, "review", NULL, 0, &idx);
-         reused = 1;
-      }
-      if (rc != RT_SEAT_OK || idx < 0 || idx >= acfg->agent_count)
-         return 1; /* no eligible review agent at all right now -> queue */
-      seat[i] = acfg->agents[idx].name;
-      if (reused)
-         aimee_log(LOG_INFO, "wfe-panel",
-                   "reusing agent '%s' for lens '%s' (fewer eligible review agents than lenses)",
-                   seat[i], required[i]);
-      else if (nused < MAX_AGENTS)
-         used[nused++] = seat[i];
-   }
-   return 0;
-}
-
 /* Convene the review roundtable through the engine and map the verified items
  * to per-lens verdicts. Returns the number of lenses filled (nlens on success,
  * 0 when the panel degrades so the gate parks) or a WFE_PANEL_* sentinel. */
@@ -241,14 +139,6 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (nlens > WFE_PANEL_MAX)
       nlens = WFE_PANEL_MAX;
 
-   roundtable_preset_t preset;
-   int have_preset = load_panel_preset(&preset, pkt->roundtable);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   if (config_load(&cfg) != 0)
-      return WFE_PANEL_UNREACHABLE;
-
    char *task = build_review_task(pkt);
    if (!task)
       return WFE_PANEL_UNREACHABLE;
@@ -267,28 +157,35 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       clock_gettime(CLOCK_MONOTONIC, &qn);
       int final = (qn.tv_sec - q0.tv_sec) >= seat_wait || seat_wait == 0;
 
-      const char *seat[WFE_PANEL_MAX];
-      int any_pinned = 0;
-      int src = resolve_seats(&acfg, &preset, have_preset, required, nlens, seat, &any_pinned);
-      if (src == WFE_PANEL_PINNED_FAIL)
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+      if (config_load(&cfg) != 0 || agent_load_config(&acfg) != 0)
       {
-         rc_final = WFE_PANEL_PINNED_FAIL;
-         break;
-      }
-      if (src == 1)
-      {
-         /* Nothing seatable right now: queue for a seat until the deadline. */
          if (final)
          {
-            aimee_log(LOG_WARN, "wfe-panel", "no viable review agent for the panel -> degrade");
-            rc_final = 0;
+            rc_final = WFE_PANEL_UNREACHABLE;
+            break;
+         }
+         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
+         nanosleep(&nap, NULL);
+         continue;
+      }
+
+      char panel_err[256];
+      if (ensemble_prepare_runtime_panel(pkt->roundtable, &cfg, &acfg, panel_err,
+                                         sizeof panel_err) != 0)
+      {
+         if (final)
+         {
+            aimee_log(LOG_WARN, "wfe-panel", "%s -> park", panel_err);
+            rc_final = (pkt->roundtable && pkt->roundtable[0]) || cfg.roundtable_default[0]
+                           ? WFE_PANEL_PINNED_FAIL
+                           : 0;
             break;
          }
          if (!queued_logged)
          {
-            aimee_log(LOG_INFO, "wfe-panel",
-                      "no eligible review agent for %d lens(es); queueing up to %lds", nlens,
-                      seat_wait);
+            aimee_log(LOG_INFO, "wfe-panel", "%s; queueing up to %lds", panel_err, seat_wait);
             queued_logged = 1;
          }
          struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
@@ -296,50 +193,15 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          continue;
       }
 
-      /* Panel composition = the resolved seats; each lens rides in as the
-       * panelist's persona. The engine's internal index-backed replay stays
-       * OFF: the gate verifies against the WORKTREE below instead (the index
-       * lags the change under review). All lenses are required, so anything
-       * short of a full panel is a failed attempt. */
-      cfg.ensemble_reference_count = nlens;
-      cfg.ensemble_reference_persona_count = nlens;
-      char required_models[WFE_PANEL_MAX][128];
+      const int panel_count = cfg.ensemble_reference_count;
+      const char *lens_seat[WFE_PANEL_MAX];
       for (int i = 0; i < nlens; i++)
-      {
-         snprintf(cfg.ensemble_reference_models[i], sizeof cfg.ensemble_reference_models[i], "%s",
-                  seat[i]);
-         snprintf(cfg.ensemble_reference_personas[i], sizeof cfg.ensemble_reference_personas[i],
-                  "%s", required[i]);
-         snprintf(required_models[i], sizeof required_models[i], "%s", seat[i]);
-      }
-      /* Preset/lens bindings above are positive must-use seats. They do not cap
-       * the panel: fill every remaining eligible provider slot, diversity first,
-       * so a 10-seat codex plus a 4-seat MiniMax roster actually runs 14
-       * concurrent reviews rather than one invocation per provider name. */
-      ensemble_filter_panel_authorization(&cfg, &acfg);
-      ensemble_filter_panel_availability(&cfg, &acfg);
-      ensemble_fill_panel_capacity(&cfg, &acfg);
-      /* Both filters only remove/compact and fill only appends. Therefore any
-       * removed required seat necessarily changes this positional prefix. */
-      int required_intact = cfg.ensemble_reference_count >= nlens;
-      for (int i = 0; required_intact && i < nlens; i++)
-         if (strcmp(cfg.ensemble_reference_models[i], required_models[i]) != 0)
-            required_intact = 0;
-      if (!required_intact)
-      {
-         aimee_log(LOG_WARN, "wfe-panel",
-                   "required seat prefix changed after filtering/fill (%d/%d seats)%s",
-                   cfg.ensemble_reference_count, nlens, final ? " -> degrade" : " -> retry");
-         if (final)
-         {
-            rc_final = 0;
-            break;
-         }
-         struct timespec nap = {WFE_PANEL_SEAT_POLL_SECS, 0};
-         nanosleep(&nap, NULL);
-         continue;
-      }
-      cfg.ensemble_min_successful = nlens;
+         lens_seat[i] = cfg.ensemble_reference_models[i % panel_count];
+
+      /* Acquired roundtable seats are the whole panel. Review lenses are verdict
+       * dimensions, not authorization to add more agents; attribute each lens
+       * to an actual panel seat round-robin. */
+      cfg.ensemble_min_successful = panel_count;
       cfg.roundtable_replay_verify_enabled = 0;
 
       roundtable_opts_t opts;
@@ -348,7 +210,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       opts.turns = ROUNDTABLE_PARALLEL;
       opts.max_rounds = 1;
       opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
-      opts.required_participants = nlens;
+      opts.required_participants = panel_count;
 
       roundtable_result_t rt;
       memset(&rt, 0, sizeof rt);
@@ -363,7 +225,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       {
          aimee_log(LOG_WARN, "wfe-panel",
                    "panel attempt: %d/%d required and %d/%d total panelist(s) failed%s%s",
-                   rt.participants_required_failed, nlens, rt.participants_failed,
+                   rt.participants_required_failed, panel_count, rt.participants_failed,
                    rt.participants_total, rt.degraded ? " (degraded)" : "",
                    final ? " -> degrade" : " -> re-seat and retry");
          delegate_roundtable_result_free(&rt);
@@ -393,7 +255,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                    rt.rejected_reason[i], rt.rejected[i].sources, rt.rejected[i].location,
                    rt.rejected[i].summary);
 
-      int filled = wfe_panel_verdicts_from_roundtable(&rt, required, seat, nlens,
+      int filled = wfe_panel_verdicts_from_roundtable(&rt, required, lens_seat, nlens,
                                                       pkt->artifact_hash, pkt->workdir, out);
       for (int i = 0; i < filled; i++)
          aimee_log(LOG_INFO, "wfe-panel", "lens '%s' verdict %s from agent '%s' (%d blocker(s))",

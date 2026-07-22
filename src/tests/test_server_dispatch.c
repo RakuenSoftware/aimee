@@ -1393,7 +1393,7 @@ static void test_large_mcp_call_payload_within_limit(void)
    char *msg = malloc(size + 1);
    assert(msg != NULL);
    snprintf(msg, size + 1,
-            "{\"method\":\"mcp.call\",\"tool\":\"ensemble_review\",\"arguments\":{\"diff\":\"");
+            "{\"method\":\"mcp.call\",\"tool\":\"roundtable_review\",\"arguments\":{\"diff\":\"");
    size_t used = strlen(msg);
    memset(msg + used, 'a', size - used - 4);
    msg[size - 4] = '"';
