@@ -110,6 +110,20 @@ static void test_registry_generation_denies(void)
    PASS("registry_generation_denies");
 }
 
+static void test_registry_tuple_serialization_is_complete(void)
+{
+   econ_registry_key_t key = valid_key();
+   char tuple[512];
+   size_t n = 0;
+   assert(econ_registry_key_serialize(&key, tuple, sizeof(tuple), &n) == 0);
+   assert(n == strlen(tuple));
+   assert(strcmp(tuple, "provider=1,endpoint=1,model=2,tokenizer=3,pricing=4,contracts=5,"
+                        "transform=6,version=7\n") == 0);
+   key.transform_version = 0;
+   assert(econ_registry_key_serialize(&key, tuple, sizeof(tuple), &n) == -1);
+   PASS("registry_tuple_serialization_is_complete");
+}
+
 int main(void)
 {
    printf("economizer_proof tests:\n");
@@ -118,6 +132,7 @@ int main(void)
    test_every_scenario_must_win();
    test_overflow_and_invalid_bounds_are_indeterminate();
    test_registry_generation_denies();
+   test_registry_tuple_serialization_is_complete();
    printf("ALL PASS\n");
    return 0;
 }

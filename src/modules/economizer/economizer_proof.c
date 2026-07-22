@@ -26,9 +26,9 @@ static const econ_registry_t production_registry = {
     .entry_count = 0,
 };
 
-/* Signed release artifact for the initial empty registry. The verifier below
- * rejects non-empty registries until canonical tuple serialization is added by
- * a separately reviewed change. */
+/* Signed release artifact for the initial empty registry. The verifier builds
+ * the complete canonical manifest (including every tuple) and compares it with
+ * this checked-in artifact before signature verification. */
 static const unsigned char registry_manifest[] = "AIMEE-ECONOMIZER-REGISTRY-V1\n"
                                                  "generation=1\n"
                                                  "entry_count=0\n";
@@ -75,6 +75,50 @@ static int key_valid(const econ_registry_key_t *key)
           key->transform_version != 0;
 }
 
+int econ_registry_key_serialize(const econ_registry_key_t *key, char *dst, size_t cap,
+                                size_t *written)
+{
+   if (written)
+      *written = 0;
+   if (!key_valid(key) || !dst || !cap || !written)
+      return -1;
+   int n = snprintf(
+       dst, cap,
+       "provider=%u,endpoint=%u,model=%llu,tokenizer=%llu,pricing=%llu,"
+       "contracts=%llu,transform=%llu,version=%llu\n",
+       (unsigned)key->provider, (unsigned)key->endpoint_id,
+       (unsigned long long)key->model_snapshot_id, (unsigned long long)key->tokenizer_id,
+       (unsigned long long)key->pricing_table_id, (unsigned long long)key->contract_versions,
+       (unsigned long long)key->transform_id, (unsigned long long)key->transform_version);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   *written = (size_t)n;
+   return 0;
+}
+
+static int registry_manifest_build(const econ_registry_t *registry, unsigned char *dst, size_t cap,
+                                   size_t *written)
+{
+   if (!registry || !dst || !written || (registry->entry_count && !registry->entries))
+      return -1;
+   int n = snprintf((char *)dst, cap,
+                    "AIMEE-ECONOMIZER-REGISTRY-V1\ngeneration=%llu\nentry_count=%zu\n",
+                    (unsigned long long)registry->generation, registry->entry_count);
+   if (n < 0 || (size_t)n >= cap)
+      return -1;
+   size_t used = (size_t)n;
+   for (size_t i = 0; i < registry->entry_count; i++)
+   {
+      size_t tuple_len = 0;
+      if (econ_registry_key_serialize(&registry->entries[i].key, (char *)dst + used, cap - used,
+                                      &tuple_len) != 0)
+         return -1;
+      used += tuple_len;
+   }
+   *written = used;
+   return 0;
+}
+
 static int money_add(econ_money_t a, econ_money_t b, econ_money_t *out)
 {
    if (!out || a < 0 || b < 0 || a > INT64_MAX - b)
@@ -95,18 +139,17 @@ size_t econ_registry_entry_count(void)
 
 int econ_registry_signature_valid(void)
 {
-   /* The current signature covers an empty registry only. This explicit guard
-    * prevents future entries from inheriting trust without tuple signing. */
-   if (production_registry.generation != ECON_PRODUCTION_REGISTRY_GENERATION ||
-       production_registry.entry_count != 0 || production_registry.entries != NULL)
+   /* The checked-in release signature is still for the empty registry. The
+    * canonical builder nevertheless covers every tuple, so a future registry
+    * cannot inherit trust by changing only an entry-count field. */
+   if (production_registry.generation != ECON_PRODUCTION_REGISTRY_GENERATION)
       return 0;
 
-   unsigned char canonical[128];
-   int n = snprintf((char *)canonical, sizeof(canonical),
-                    "AIMEE-ECONOMIZER-REGISTRY-V1\ngeneration=%llu\nentry_count=%zu\n",
-                    (unsigned long long)production_registry.generation,
-                    production_registry.entry_count);
-   if (n < 0 || (size_t)n != sizeof(registry_manifest) - 1 ||
+   unsigned char canonical[4096];
+   size_t canonical_len = 0;
+   if (registry_manifest_build(&production_registry, canonical, sizeof(canonical),
+                               &canonical_len) != 0 ||
+       canonical_len != sizeof(registry_manifest) - 1 ||
        memcmp(canonical, registry_manifest, sizeof(registry_manifest) - 1) != 0)
       return 0;
 
@@ -114,8 +157,8 @@ int econ_registry_signature_valid(void)
                                                sizeof(registry_public_key));
    EVP_MD_CTX *ctx = key ? EVP_MD_CTX_new() : NULL;
    int ok = ctx && EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, key) == 1 &&
-            EVP_DigestVerify(ctx, registry_signature, sizeof(registry_signature), registry_manifest,
-                             sizeof(registry_manifest) - 1) == 1;
+            EVP_DigestVerify(ctx, registry_signature, sizeof(registry_signature), canonical,
+                             canonical_len) == 1;
    EVP_MD_CTX_free(ctx);
    EVP_PKEY_free(key);
    return ok ? 1 : 0;

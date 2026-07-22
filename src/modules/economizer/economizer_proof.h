@@ -140,6 +140,11 @@ extern "C"
    size_t econ_registry_entry_count(void);
    int econ_registry_signature_valid(void);
 
+   /* Canonical tuple serialization used by signed registry manifests. This is
+    * data formatting only and grants no registry membership. */
+   int econ_registry_key_serialize(const econ_registry_key_t *key, char *dst, size_t cap,
+                                   size_t *written);
+
    /* Check provider-planner cost bounds without authorizing a transform. This
     * pure helper has no ECON_INTERVENE value; only econ_proof_evaluate() can
     * produce an authorization decision. */

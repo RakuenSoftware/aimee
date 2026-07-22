@@ -119,6 +119,8 @@ static void test_delegate_roundtable_brief_marshaled(void)
    char *argv[] = {"review this change thoroughly",
                    "--mode",
                    "review",
+                   "--roundtable",
+                   "deep-review",
                    "--turns",
                    "parallel",
                    "--rounds",
@@ -128,12 +130,13 @@ static void test_delegate_roundtable_brief_marshaled(void)
                    "--brief-json",
                    "{\"questions\":[\"does auth hold?\"]}",
                    "--apply"};
-   cJSON *req = marshal_delegate_roundtable(12, argv);
+   cJSON *req = marshal_delegate_roundtable(14, argv);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate.roundtable") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
                  "review this change thoroughly") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "mode")->valuestring, "review") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "roundtable")->valuestring, "deep-review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "turns")->valuestring, "parallel") == 0);
    assert(cJSON_GetObjectItem(req, "rounds")->valueint == 2);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "apply")));
