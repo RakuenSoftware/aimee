@@ -29,6 +29,10 @@ type DelegateRequest struct {
 	Stage            string
 	ExecutionVersion string
 	RetryTag         string
+	// DurableSlot distinguishes parallel logical consumers of an otherwise
+	// identical request. It participates in the local job key only and is never
+	// sent to the resource plane as routing configuration.
+	DurableSlot string
 	// ArtifactStage is the validated workflow artifact stage a review delegate
 	// must evaluate. It is carried structurally so runner collaborators and test
 	// doubles never need to recover authority from prompt prose.
@@ -83,9 +87,12 @@ const (
 	MinDelegatePendingTimeout     = 2 * time.Second
 	DefaultDelegatePendingTimeout = 2 * time.Minute
 	MaxDelegatePendingTimeout     = time.Hour
+	delegateCancelTimeout         = 10 * time.Second
+	delegateForgetTimeout         = 3 * time.Second
 )
 
 var ErrDelegateUnassignedExpired = errors.New("unassigned delegate lease expired")
+var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
 
 // HTTPAgentClient talks to the agent service as a resource plane. It owns no
 // workflow state or transitions; losing it parks the Go-owned run and a later
@@ -191,7 +198,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 	unassignedSince := time.Now()
 	for {
 		if err := ctx.Err(); err != nil {
-			_ = c.cancelRemote(launched.JobID, ctx)
+			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
 			return DelegateResult{}, err
 		}
 		var status struct {
@@ -203,7 +210,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
-				_ = c.cancelRemote(launched.JobID, ctx)
+				_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
 				return DelegateResult{}, ctx.Err()
 			}
 			// Once the resource plane has acknowledged that a job is waiting
@@ -214,7 +221,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			if !unassignedSince.IsZero() {
 				select {
 				case <-ctx.Done():
-					_ = c.cancelRemote(launched.JobID, ctx)
+					_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
 					return DelegateResult{}, ctx.Err()
 				case <-ticker.C:
 					continue
@@ -272,7 +279,7 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			// The remote resource-plane job outlives an HTTP poll unless it is
 			// explicitly cancelled. Wait for the cancellation acknowledgement so
 			// a wall-cap resume cannot overlap the old job in the same worktree.
-			_ = c.cancelRemote(launched.JobID, ctx)
+			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
 			return DelegateResult{}, ctx.Err()
 		case <-ticker.C:
 		}
@@ -362,12 +369,32 @@ func (c *HTTPAgentClient) EligibleAgents(ctx context.Context, role string) ([]El
 	return eligible, nil
 }
 
-func (c *HTTPAgentClient) cancelRemote(jobID int, parent context.Context) error {
-	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 10*time.Second)
+func (c *HTTPAgentClient) cancelRemoteAndForget(jobID int, key string, parent context.Context) error {
+	cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), delegateCancelTimeout)
 	defer cancel()
-	var ignored map[string]any
-	return c.doJSON(cancelCtx, http.MethodPost, "/v1/job/cancel",
-		map[string]any{"job_id": jobID, "reason": "WFE turn cancelled"}, &ignored)
+	var response struct {
+		Cancelled *bool `json:"cancelled"`
+	}
+	// Delegate jobs live on the plural /v1/jobs resource. The singular
+	// /v1/job/cancel endpoint controls coordinated jobs and can return HTTP 200
+	// while leaving a delegate pending forever.
+	if err := c.doJSON(cancelCtx, http.MethodPost, "/v1/jobs/cancel",
+		map[string]any{"job_id": jobID, "reason": "WFE turn cancelled"}, &response); err != nil {
+		return fmt.Errorf("%w: job %d: %w", ErrDelegateCancelUnacknowledged, jobID, err)
+	}
+	if response.Cancelled == nil || !*response.Cancelled {
+		return fmt.Errorf("%w: job %d", ErrDelegateCancelUnacknowledged, jobID)
+	}
+	if c.store == nil || key == "" {
+		return nil
+	}
+	// /v1/jobs/cancel atomically marks the delegate job cancelled before it
+	// returns cancelled=true. Give local cleanup an independent bounded window;
+	// if it fails, replay remains safe because status observes that terminal row.
+	forgetCtx, forgetCancel := context.WithTimeout(context.WithoutCancel(parent), delegateForgetTimeout)
+	defer forgetCancel()
+	_, err := c.store.ForgetDelegateJobIfMatches(forgetCtx, key, jobID)
+	return err
 }
 
 func (c *HTTPAgentClient) doJSON(ctx context.Context, method, path string, input, output any) error {

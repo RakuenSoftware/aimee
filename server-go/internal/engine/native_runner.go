@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -518,7 +519,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		if prior != "" {
 			prompt += "\n\nPRIOR PANEL FINDINGS:\n" + prior + "\n\nReconsider the artifact and the other reviewers' findings. Preserve valid blockers, remove invalid or duplicate blockers, and approve only if no actionable blocker remains."
 		}
-		feedback, approvals, voters, cost, unreachable := r.runPanelRound(ctx, req, seats, prompt, reviewed.Hash, stage)
+		feedback, approvals, voters, cost, unreachable := r.runPanelRound(ctx, req, seats, prompt, reviewed.Hash, stage, round)
 		totalCost += cost
 		if unreachable != "" {
 			return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: unreachable, CostUSD: totalCost}, nil
@@ -561,7 +562,7 @@ func normalizeRoundtableStage(raw string) (string, bool) {
 	}
 }
 
-func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats []panelSeat, prompt, artifactHash, artifactStage string) (wfe.ReviewFeedback, int, int, float64, string) {
+func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats []panelSeat, prompt, artifactHash, artifactStage string, panelRound int) (wfe.ReviewFeedback, int, int, float64, string) {
 	type outcome struct {
 		seat   panelSeat
 		result panelResponse
@@ -572,13 +573,16 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 	for _, seat := range seats {
 		seat := seat
 		go func() {
-			res, err := r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, ArtifactStage: artifactStage})
+			// Repeated persona/agent pairs must not collide and reuse one remote
+			// result, so each capacity seat carries a distinct durable slot.
+			seatSlot := panelSeatDurableSlot(req, panelRound, seat.ordinal)
+			res, err := r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: seatSlot, ArtifactStage: artifactStage})
 			if err != nil && !seat.pinned && seat.delegate != "" {
 				// Capacity assignments are routing hints for this panel run, not UI
 				// pins. If the assigned subscription is temporarily unavailable,
 				// retry through ordinary live eligibility after that failed slot has
 				// released its lease. Never persist the failure as an exclusion.
-				res, err = r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Prompt: prompt, Workdir: req.WorkItem.Worktree, RetryTag: fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate), ArtifactStage: artifactStage})
+				res, err = r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Prompt: prompt, Workdir: req.WorkItem.Worktree, RetryTag: fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate), DurableSlot: seatSlot, ArtifactStage: artifactStage})
 			}
 			if err != nil {
 				ch <- outcome{seat: seat, err: err}
@@ -647,6 +651,14 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 		}
 	}
 	return feedback, approvals, voters, cost, strings.Join(unreachable, "; ")
+}
+
+func panelSeatDurableSlot(req StepRequest, panelRound, ordinal int) string {
+	// Hash the structured identity so delimiters or control bytes in an identifier
+	// cannot alias a different work-item/node tuple. Round and seat stay readable
+	// because they are bounded integers assigned by this runner.
+	identity, _ := json.Marshal([]string{req.WorkItem.ID, req.Node.ID})
+	return fmt.Sprintf("panel:%x:round:%d:seat:%d", sha256.Sum256(identity), panelRound, ordinal)
 }
 
 func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult, error) {
