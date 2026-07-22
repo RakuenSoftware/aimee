@@ -1,7 +1,8 @@
 # Proposal: Faster mTLS transport between thin clients, aimee-server, and aimee-kb
 
-- **State:** proposed (pending — not started)
+- **State:** accepted (implementation complete; default promotion pending measured canary)
 - **Date:** 2026-07-22
+- **Implementation updated:** 2026-07-22
 - **Scope:** thin-client ↔ aimee-server and aimee-server ↔ aimee-kb transport only
 - **Related:** `tiered-llm-p8-thinclient-mtls.md`,
   `tiered-llm-p8a-mtls-per-request-revocation.plan.md`, and
@@ -10,11 +11,11 @@
 
 ## Thesis
 
-Aimee currently spends more transport time establishing connections than moving
-useful bytes. Both remote paths use HTTP/1.1 correctly, but ordinary requests say
-`Connection: close`; server→kb additionally rebuilds its TLS context, resolves the
-peer, connects, completes an mTLS handshake, serves one request, and closes. The kb
-mTLS listener also handles accepted connections serially.
+The baseline implementation spent more transport time establishing connections
+than moving useful bytes. Both remote paths used one-shot HTTP/1.1;
+server→kb additionally rebuilt its TLS context, resolved the peer, connected,
+completed an mTLS handshake, served one request, and closed. The kb mTLS listener
+also handled accepted connections serially.
 
 The first performance packet is therefore **bounded concurrency plus connection
 reuse**, not a protocol rewrite. HTTP body compression is the next explicit lever:
@@ -41,9 +42,44 @@ request-layer identity, revocation, or capability checks.
 | Automatic retries | Reads only, before any response byte, on a bounded transport-failure allowlist. Mutations are not automatically retried without a separately specified idempotency contract. |
 | Short-lived CLI processes | Keep-alive helps multiple calls within one process, streams, webchat, gateways, and other resident clients. It cannot reuse a socket across separate hook/CLI processes. Cross-process brokering is not smuggled into this packet. |
 
-## §0 Current implementation and measured hypothesis
+## Implementation record
 
-The proposal is grounded in the current code, not a generic HTTP wish list:
+The engineering packets are merged to `testing`. All behavior-changing transport
+features remain off by default until the P0/P7 measurement and canary gates are
+satisfied; implementation completion is not evidence for default promotion.
+
+| Packet | Merged delivery | Result |
+|---|---|---|
+| P0 | PR #1782 (`18f67e32`) | Reproducible transport artifacts, impairment profiles, and `latency_slo.v1` evaluation contract. |
+| P1 authority | PR #1786 (`2a551642`) | Immutable certificate issuer/serial authority checks fail closed. |
+| P1 framing | PR #1787 (`818a5b4c`) | Strict bounded reusable HTTP/1.1 framing. |
+| P1 kb reuse | PR #1795 (`9c424004`) | Bounded concurrent kb TLS serving and persistent request loop. |
+| P2 client framing | PR #1799 (`297591cb`) | Exact response framing for server→kb reuse. |
+| P2a pool | PR #1800 (`16c769e6`) | Bounded server→kb TLS connection pooling. |
+| P4 | PR #1803 (`447705ef`) | Long-lived TLS contexts and bounded session reuse. |
+| P7 mechanism | PR #1805 (`9cd7a115`) | Independent, live-reloadable, default-off rollout flags. |
+| P3 | PR #1811 (`a3cb11d3`) | Negotiated bounded gzip for allowlisted buffered thin-client routes, with codec-less fallback. |
+| P2b | PR #1813 (`df23f9e7`) | Bounded per-thread thin-client TLS reuse and reusable server loop; streaming stays one-shot. |
+
+The remaining work is operational evidence, not another unconditional transport
+implementation packet:
+
+- run the declared ≥10,000-attempt profiles and retain their artifacts before
+  promoting any default;
+- progress P7 cohorts only when their 24-hour gates pass, with an unenabled
+  control cohort and automatic rollback active;
+- leave server→kb gzip off unless its separate remote-link threshold is met;
+- leave HTTP/2 deferred unless the P5 multiplexing gate is reproduced; and
+- leave P6 closed unless measurements identify repeated, safe sequential calls.
+
+No production result, 24-hour soak, or 10,000-attempt artifact is claimed by this
+record. Until those exist, one-shot uncompressed HTTP/1.1 remains the default and
+is the rollback path.
+
+## §0 Baseline and measured hypothesis
+
+The proposal was grounded in the pre-implementation code, not a generic HTTP wish
+list. The following bullets describe that baseline and are retained for audit:
 
 - `src/aimee_client.c` opens a socket, completes TLS, sends
   `Connection: close`, reads until EOF, and tears the connection down for each
@@ -63,7 +99,7 @@ The proposal is grounded in the current code, not a generic HTTP wish list:
   checks the verified peer fingerprint through the legacy enrollment revocation
   helper, returns
   `Connection: close`, and closes.
-- The kb framing limits today are 64 KiB for a whole request and 256 KiB for the
+- The kb framing limits at baseline were 64 KiB for a whole request and 256 KiB for the
   route response; the server-side kb client allocates a 1 MiB response buffer.
 - TLS contexts use a TLS 1.2 minimum and can negotiate TLS 1.3 where the platform
   supports it. TLS-level compression is not used and must remain disabled.
@@ -115,10 +151,10 @@ sample records:
 - open/idle/busy/draining pool entries, kb accept backlog, active handshakes,
   errors, retries, CPU, RSS, and file descriptors.
 
-P0 first implements the `latency_slo.v1` evaluator proposed in
-`docs/BENCHMARKS.md` and binds it to `make check-latency-slo`; the evaluator does
-not exist in-tree yet, so no later promotion gate may claim conformance before
-that target passes. Its contract is at least 10,000 eligible attempts, fixed
+P0 implemented the `latency_slo.v1` evaluator specified in
+`docs/BENCHMARKS.md` and bound it to `make check-latency-slo`; no later promotion
+gate may claim conformance before that target passes on the candidate artifact.
+Its contract is at least 10,000 eligible attempts, fixed
 eligibility before execution, nearest-rank percentiles, and the one-sided 95%
 confidence bound for the combined failure/tail budget. The applicable regression
 ceilings are the path budgets in `docs/BENCHMARKS.md` (global <10 ms p50 / <20 ms
