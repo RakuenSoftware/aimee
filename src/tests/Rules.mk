@@ -523,6 +523,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
+               $(TESTPREFIX)/unit-test-kb-management-health-exchange \
+               $(TESTPREFIX)/unit-test-kb-mgmt-status-client \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
@@ -1762,6 +1764,21 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-authority: \
     $(OBJDIR)/tests/test_kb_mgmt_status_authority.o \
     $(OBJDIR)/kb/kb_mgmt_status_authority.o $(OBJDIR)/kb/kb_mgmt_status.o \
     $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-management-health-exchange: \
+    $(OBJDIR)/tests/test_kb_management_health_exchange.o \
+    $(OBJDIR)/kb/kb_management_health_exchange.o \
+    $(OBJDIR)/kb/kb_mgmt_status_authority.o $(OBJDIR)/kb/kb_mgmt_status.o \
+    $(OBJDIR)/kb/kb_mgmt_endpoint.o $(OBJDIR)/kb/kb_mgmt_client.o \
+    $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-status-client: \
+    $(OBJDIR)/tests/test_kb_mgmt_status_client.o \
+    $(OBJDIR)/kb/kb_mgmt_status_client.o $(OBJDIR)/kb/kb_mgmt_client.o \
+    $(OBJDIR)/kb/kb_mgmt_endpoint.o $(OBJDIR)/kb/http/kb_tls.o \
+    $(OBJDIR)/kb/pki.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status-custody: \

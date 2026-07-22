@@ -462,7 +462,8 @@ KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workloa
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
 KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_cert_binding.c \
-           kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c
+           kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c \
+           kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes

@@ -199,7 +199,8 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
    aimee_pg_bind_int64(s, "?1", team);
    aimee_pg_bind_text(s, "?2", id);
    int rc = -1;
-   if (aimee_pg_step(s, e, sizeof(e)) == AIMEE_PG_ROW)
+   aimee_pg_step_t step = aimee_pg_step(s, e, sizeof(e));
+   if (step == AIMEE_PG_ROW)
    {
       memset(r, 0, sizeof(*r));
       cp(r->server_id, sizeof(r->server_id), aimee_pg_column_text(s, 0));
@@ -213,6 +214,8 @@ int db2_server_registry_snapshot(int64_t team, const char *id, db2_server_snapsh
       r->revocation_generation = aimee_pg_column_int64(s, 8);
       rc = 0;
    }
+   else if (step == AIMEE_PG_DONE)
+      rc = 1;
    aimee_pg_finalize(s);
    return rc;
 }
