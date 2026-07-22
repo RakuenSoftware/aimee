@@ -17,7 +17,7 @@ static void test_registry_init(void)
    assert(delegate_driver_get("openai") != NULL);
    assert(delegate_driver_get("anthropic") != NULL);
    assert(delegate_driver_get("chatgpt") != NULL);
-   assert(delegate_driver_get("gemini") != NULL);
+   assert(delegate_driver_get("gemini") != NULL); /* -> openai via fallback */
    assert(delegate_driver_get("mistral") != NULL);
 
    /* Ollama maps to the OpenAI-compatible driver */
@@ -67,8 +67,12 @@ static void test_driver_names(void)
    d = delegate_driver_get("chatgpt");
    assert(strcmp(d->name, "chatgpt") == 0);
 
+   /* gemini has no driver of its own any more: it speaks the OpenAI shape, so the
+    * unknown-provider fallback hands it the openai driver. Pinned by identity
+    * rather than by "not NULL" -- the fallback returns openai for ANY unknown
+    * name, so != NULL would pass even if the routing were wrong. */
    d = delegate_driver_get("gemini");
-   assert(strcmp(d->name, "gemini") == 0);
+   assert(d != NULL && strcmp(d->name, "openai") == 0);
 
    d = delegate_driver_get("mistral");
    assert(strcmp(d->name, "mistral") == 0);
@@ -147,15 +151,6 @@ static void test_build_url(void)
    d = delegate_driver_get("mistral");
    assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
    assert(strcmp(url, "https://api.mistral.ai/v1/chat/completions") == 0);
-
-   /* Gemini: .../models/{model}:generateContent */
-   snprintf(agent.endpoint, sizeof(agent.endpoint),
-            "https://generativelanguage.googleapis.com/v1beta");
-   snprintf(agent.model, sizeof(agent.model), "gemini-1.5-pro");
-   d = delegate_driver_get("gemini");
-   assert(delegate_build_url(d, &agent, url, sizeof(url)) == 0);
-   assert(strstr(url, "generateContent") != NULL);
-   assert(strstr(url, "gemini-1.5-pro") != NULL);
 }
 
 static void test_get_caps(void)

@@ -147,7 +147,9 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
       if (agent_is_local_llama_compat(agent) || is_minimax)
          cJSON_AddBoolToObject(req, "parallel_tool_calls", 0);
       /* mistral and minimax default to not using tools without an explicit directive. */
-      if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
+      if (agent && agent->require_initial_tool_call)
+         cJSON_AddStringToObject(req, "tool_choice", "required");
+      else if ((agent && strcmp(agent->provider, "mistral") == 0) || is_minimax)
          cJSON_AddStringToObject(req, "tool_choice", "auto");
    }
 
@@ -190,7 +192,60 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
    else
       cJSON_AddItemReferenceToObject(req, "input", input);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+      {
+         /* The ChatGPT Responses transport can expose provider-native tools in
+          * addition to this request's function catalog.  A generic `required`
+          * choice therefore does not guarantee that the first call is one Aimee
+          * can execute: Codex may select Task/Agent, which the gateway correctly
+          * removes, leaving an evidence-gated reviewer with no repository lookup.
+          *
+          * Pin only the first turn to an advertised read/search function.  Once
+          * it succeeds the runtime clears require_initial_tool_call and every
+          * advertised tool is available normally on subsequent turns. */
+         static const char *const preferred[] = {"code_search", "find_symbol", "grep",
+                                                 "list_files",  "read_file",   NULL};
+         const char *selected = NULL;
+         for (int p = 0; preferred[p] && !selected; p++)
+         {
+            cJSON *tool;
+            cJSON_ArrayForEach(tool, tools)
+            {
+               cJSON *name = cJSON_GetObjectItem(tool, "name");
+               if (!cJSON_IsString(name))
+               {
+                  cJSON *fn = cJSON_GetObjectItem(tool, "function");
+                  name = cJSON_GetObjectItem(fn, "name");
+               }
+               if (cJSON_IsString(name) && strcmp(name->valuestring, preferred[p]) == 0)
+               {
+                  selected = name->valuestring;
+                  break;
+               }
+            }
+         }
+         if (!selected)
+         {
+            cJSON *first = cJSON_GetArrayItem(tools, 0);
+            cJSON *name = cJSON_GetObjectItem(first, "name");
+            if (!cJSON_IsString(name))
+            {
+               cJSON *fn = cJSON_GetObjectItem(first, "function");
+               name = cJSON_GetObjectItem(fn, "name");
+            }
+            if (cJSON_IsString(name))
+               selected = name->valuestring;
+         }
+         if (selected)
+         {
+            cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+            cJSON_AddStringToObject(choice, "type", "function");
+            cJSON_AddStringToObject(choice, "name", selected);
+         }
+      }
+   }
 
    return req;
 }
@@ -218,7 +273,14 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    else
       cJSON_AddItemReferenceToObject(req, "messages", messages);
    if (tools && cJSON_GetArraySize(tools) > 0)
+   {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
+      if (agent && agent->require_initial_tool_call)
+      {
+         cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+         cJSON_AddStringToObject(choice, "type", "any");
+      }
+   }
 
    model_sampling_apply_anthropic(agent, req, temperature);
 
@@ -227,57 +289,16 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
 
 /* --- Response parsers --- */
 
-/* Strip <think>...</think> blocks from a model response.
+/* Split a <think>...</think> reasoning preamble off a model response.
  * Qwen3 and similar reasoning models embed thinking in the content field when
  * the llama.cpp server is not configured to separate it into reasoning_content.
- * Returns a new malloc'd string; caller must free. Returns NULL on alloc failure. */
-static char *strip_thinking_blocks(const char *text)
-{
-   if (!text)
-      return NULL;
-   if (!strstr(text, "<think>") && !strstr(text, "</think>"))
-      return strdup(text);
-
-   size_t len = strlen(text);
-   char *out = malloc(len + 1);
-   if (!out)
-      return NULL;
-
-   size_t wpos = 0;
-   const char *p = text;
-   while (*p)
-   {
-      if (strncmp(p, "<think>", 7) == 0)
-      {
-         const char *end = strstr(p + 7, "</think>");
-         if (end)
-         {
-            p = end + 8;
-            while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
-               p++;
-            continue;
-         }
-      }
-      if (strncmp(p, "</think>", 8) == 0)
-      {
-         p += 8;
-         while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
-            p++;
-         continue;
-      }
-      out[wpos++] = *p++;
-   }
-   out[wpos] = '\0';
-
-   /* Trim leading whitespace */
-   size_t start = 0;
-   while (out[start] == '\n' || out[start] == '\r' || out[start] == ' ' || out[start] == '\t')
-      start++;
-   if (start > 0)
-      memmove(out, out + start, strlen(out + start) + 1);
-
-   return out;
-}
+ *
+ * Prefix-anchored via the shared text_split_reasoning_prefix(): this previously
+ * removed <think> pairs (and bare close tags) from ANYWHERE in the text, which
+ * silently corrupted any answer that legitimately discussed the tag — the same
+ * defect that killed curator jobs summarising this very function. One rule, one
+ * implementation, shared with provider_client.c and llm-chat.py.
+ * Returns a new malloc'd string; caller must free. NULL on alloc failure. */
 static int append_text(char **out, const char *text)
 {
    if (!text || !text[0])
@@ -296,203 +317,9 @@ static int append_text(char **out, const char *text)
    *out = grown;
    return 0;
 }
-static char *openai_content_to_text(cJSON *content, int include_thinking)
-{
-   if (!content)
-      return NULL;
-   if (cJSON_IsString(content) && content->valuestring[0])
-      return strdup(content->valuestring);
-   if (!cJSON_IsArray(content))
-      return NULL;
-
-   char *out = NULL;
-   int n = cJSON_GetArraySize(content);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *part = cJSON_GetArrayItem(content, i);
-      if (cJSON_IsString(part))
-      {
-         if (append_text(&out, part->valuestring) != 0)
-            break;
-         continue;
-      }
-      if (!cJSON_IsObject(part))
-         continue;
-
-      const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(part, "type"));
-      if (!type)
-         continue;
-      if (strcmp(type, "text") == 0 || strcmp(type, "output_text") == 0)
-      {
-         const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(part, "text"));
-         if (append_text(&out, text) != 0)
-            break;
-      }
-      else if (include_thinking &&
-               (strcmp(type, "thinking") == 0 || strcmp(type, "reasoning") == 0))
-      {
-         cJSON *thinking = cJSON_GetObjectItem(part, "thinking");
-         if (!thinking)
-            thinking = cJSON_GetObjectItem(part, "reasoning");
-         char *text = openai_content_to_text(thinking, 0);
-         if (text)
-         {
-            if (append_text(&out, text) != 0)
-            {
-               free(text);
-               break;
-            }
-            free(text);
-         }
-      }
-   }
-   return out;
-}
 
 /* Capture the provider-reported model id (the response's "model" field) into the
  * parsed result, so billing can prefer it over the requested/served alias. */
-static void parse_capture_model(cJSON *root, parsed_response_t *out)
-{
-   cJSON *m = cJSON_GetObjectItem(root, "model");
-   if (m && cJSON_IsString(m) && m->valuestring)
-      snprintf(out->model, sizeof(out->model), "%s", m->valuestring);
-}
-
-void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   parse_capture_model(root, out);
-
-   /* Usage */
-   cJSON *usage = cJSON_GetObjectItem(root, "usage");
-   if (usage)
-   {
-      cJSON *pt = cJSON_GetObjectItem(usage, "prompt_tokens");
-      cJSON *ct = cJSON_GetObjectItem(usage, "completion_tokens");
-      if (pt && cJSON_IsNumber(pt))
-         out->prompt_tokens = pt->valueint;
-      if (ct && cJSON_IsNumber(ct))
-         out->completion_tokens = ct->valueint;
-   }
-
-   cJSON *choices = cJSON_GetObjectItem(root, "choices");
-   if (!choices || !cJSON_IsArray(choices) || cJSON_GetArraySize(choices) == 0)
-      return;
-
-   cJSON *choice = cJSON_GetArrayItem(choices, 0);
-   cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
-   if (finish && cJSON_IsString(finish) && finish->valuestring)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", finish->valuestring);
-   cJSON *message = cJSON_GetObjectItem(choice, "message");
-   if (!message)
-      return;
-
-   if (finish && cJSON_IsString(finish) && strcmp(finish->valuestring, "tool_calls") == 0)
-   {
-      out->is_tool_call = 1;
-      out->assistant_message = cJSON_Duplicate(message, 1);
-
-      cJSON *tool_calls = cJSON_GetObjectItem(message, "tool_calls");
-      if (tool_calls && cJSON_IsArray(tool_calls))
-      {
-         int n = cJSON_GetArraySize(tool_calls);
-         if (n > AGENT_MAX_TOOL_CALLS)
-            n = AGENT_MAX_TOOL_CALLS;
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *tc = cJSON_GetArrayItem(tool_calls, i);
-            cJSON *tc_id = cJSON_GetObjectItem(tc, "id");
-            cJSON *fn = cJSON_GetObjectItem(tc, "function");
-            if (!fn)
-               continue;
-            cJSON *fn_name = cJSON_GetObjectItem(fn, "name");
-            cJSON *fn_args = cJSON_GetObjectItem(fn, "arguments");
-
-            parsed_tool_call_t *call = &out->calls[out->call_count];
-            if (tc_id && cJSON_IsString(tc_id))
-               snprintf(call->id, sizeof(call->id), "%s", tc_id->valuestring);
-            if (fn_name && cJSON_IsString(fn_name))
-               snprintf(call->name, sizeof(call->name), "%s", fn_name->valuestring);
-            call->arguments = tool_call_copy_valid_arguments(fn_args);
-            tool_call_normalize_assistant_arguments(out->assistant_message, i, call->arguments);
-            out->call_count++;
-         }
-         tool_call_sanitize_assistant_arguments(out->assistant_message);
-      }
-   }
-   else
-   {
-      /* Text response */
-      cJSON *content = cJSON_GetObjectItem(message, "content");
-      out->content = openai_content_to_text(content, 0);
-
-      /* Reasoning models (e.g. qwen3) may return empty content with
-         reasoning_content holding the actual output. Fall back to it. */
-      if (!out->content || !out->content[0])
-      {
-         cJSON *reasoning = cJSON_GetObjectItem(message, "reasoning_content");
-         if (reasoning)
-         {
-            free(out->content);
-            out->content = openai_content_to_text(reasoning, 1);
-         }
-      }
-
-      /* Strip <think>...</think> blocks that Qwen3/reasoning models embed in
-       * content when the server doesn't separate them into reasoning_content. */
-      if (out->content && (strstr(out->content, "<think>") || strstr(out->content, "</think>")))
-      {
-         char *stripped = strip_thinking_blocks(out->content);
-         if (stripped)
-         {
-            free(out->content);
-            out->content = stripped[0] ? stripped : (free(stripped), NULL);
-         }
-      }
-      if (out->content)
-      {
-         char *stripped = strip_llm_private_scaffold(out->content);
-         if (stripped)
-         {
-            free(out->content);
-            out->content = stripped;
-         }
-      }
-
-      /* Compatibility: some llama.cpp builds return finish_reason="stop" even
-       * when tool_calls are present in the message. Detect and promote. */
-      cJSON *tc_arr = cJSON_GetObjectItem(message, "tool_calls");
-      if (tc_arr && cJSON_IsArray(tc_arr) && cJSON_GetArraySize(tc_arr) > 0)
-      {
-         free(out->content);
-         out->content = NULL;
-         out->is_tool_call = 1;
-         out->assistant_message = cJSON_Duplicate(message, 1);
-         int n = cJSON_GetArraySize(tc_arr);
-         if (n > AGENT_MAX_TOOL_CALLS)
-            n = AGENT_MAX_TOOL_CALLS;
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *tc = cJSON_GetArrayItem(tc_arr, i);
-            cJSON *tc_id = cJSON_GetObjectItem(tc, "id");
-            cJSON *fn = cJSON_GetObjectItem(tc, "function");
-            if (!fn)
-               continue;
-            cJSON *fn_name = cJSON_GetObjectItem(fn, "name");
-            cJSON *fn_args = cJSON_GetObjectItem(fn, "arguments");
-            parsed_tool_call_t *call = &out->calls[out->call_count];
-            if (tc_id && cJSON_IsString(tc_id))
-               snprintf(call->id, sizeof(call->id), "%s", tc_id->valuestring);
-            if (fn_name && cJSON_IsString(fn_name))
-               snprintf(call->name, sizeof(call->name), "%s", fn_name->valuestring);
-            call->arguments = tool_call_copy_valid_arguments(fn_args);
-            tool_call_normalize_assistant_arguments(out->assistant_message, i, call->arguments);
-            out->call_count++;
-         }
-         tool_call_sanitize_assistant_arguments(out->assistant_message);
-      }
-   }
-}
 
 /* Extract content and tool calls from a single Responses API output item cJSON. */
 static void parse_responses_output_item(cJSON *item, parsed_response_t *out)
@@ -741,144 +568,87 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
                               completed_response);
    free(data);
 }
-void agent_parse_response_responses(const char *body, parsed_response_t *out)
+
+/* 1 if `resp`'s output array already carries a non-empty output_text part. */
+static int responses_object_has_output_text(cJSON *resp)
 {
-   memset(out, 0, sizeof(*out));
-   if (!body)
-      return;
-   cJSON *collected_output = cJSON_CreateArray();
-   char *delta_text = NULL;
-   char *done_text = NULL;
-   char *part_text = NULL;
-   cJSON *completed_resp = NULL;
-   responses_parse_sse_events(body, out, collected_output, &delta_text, &done_text, &part_text,
-                              &completed_resp);
-   responses_take_longer_content(out, &part_text);
-   responses_take_longer_content(out, &done_text);
-   responses_take_longer_content(out, &delta_text);
-
-   /* Pass 2: if output_item.done yielded nothing, fall back to response.completed */
-   if (!out->content && !out->is_tool_call)
+   cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+   if (!cJSON_IsArray(output))
+      return 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, output)
    {
-      cJSON *resp = NULL;
-      if (completed_resp)
-         resp = cJSON_Duplicate(completed_resp, 1);
-      else
-         resp = cJSON_Parse(body);
-      if (resp)
-      {
-         cJSON *output = cJSON_GetObjectItem(resp, "output");
-         if (output && cJSON_IsArray(output))
-         {
-            int n = cJSON_GetArraySize(output);
-            for (int i = 0; i < n; i++)
-               parse_responses_output_item(cJSON_GetArrayItem(output, i), out);
-         }
-         cJSON_Delete(resp);
-      }
-   }
-   /* Collect usage from response.completed */
-   if (completed_resp)
-   {
-      cJSON *usage = cJSON_GetObjectItem(completed_resp, "usage");
-      if (usage)
-      {
-         cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-         cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-         if (it && cJSON_IsNumber(it))
-            out->prompt_tokens = it->valueint;
-         if (ot && cJSON_IsNumber(ot))
-            out->completion_tokens = ot->valueint;
-         cJSON *cw = cJSON_GetObjectItem(usage, "cache_creation_input_tokens");
-         cJSON *cr = cJSON_GetObjectItem(usage, "cache_read_input_tokens");
-         if (cw && cJSON_IsNumber(cw))
-            out->cache_write_tokens = cw->valueint;
-         if (cr && cJSON_IsNumber(cr))
-            out->cache_read_tokens = cr->valueint;
-      }
-   }
-   cJSON_Delete(completed_resp);
-   /* For multi-turn tool use, store collected output items as assistant_message */
-   if (out->is_tool_call)
-      out->assistant_message = collected_output;
-   else
-      cJSON_Delete(collected_output);
-}
-void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   parse_capture_model(root, out);
-
-   /* Usage */
-   cJSON *usage = cJSON_GetObjectItem(root, "usage");
-   if (usage)
-   {
-      cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-      cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-      if (it && cJSON_IsNumber(it))
-         out->prompt_tokens = it->valueint;
-      if (ot && cJSON_IsNumber(ot))
-         out->completion_tokens = ot->valueint;
-      cJSON *cw = cJSON_GetObjectItem(usage, "cache_creation_input_tokens");
-      cJSON *cr = cJSON_GetObjectItem(usage, "cache_read_input_tokens");
-      if (cw && cJSON_IsNumber(cw))
-         out->cache_write_tokens = cw->valueint;
-      if (cr && cJSON_IsNumber(cr))
-         out->cache_read_tokens = cr->valueint;
-   }
-
-   /* Check stop_reason for tool_use */
-   cJSON *stop = cJSON_GetObjectItem(root, "stop_reason");
-   if (stop && cJSON_IsString(stop) && stop->valuestring)
-      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", stop->valuestring);
-   int has_tool_use = (stop && cJSON_IsString(stop) && strcmp(stop->valuestring, "tool_use") == 0);
-
-   cJSON *content = cJSON_GetObjectItem(root, "content");
-   if (!content || !cJSON_IsArray(content))
-      return;
-
-   /* Extract text and tool_use blocks from content array */
-   int n = cJSON_GetArraySize(content);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *block = cJSON_GetArrayItem(content, i);
-      cJSON *type = cJSON_GetObjectItem(block, "type");
-      if (!type || !cJSON_IsString(type))
+      cJSON *type = cJSON_GetObjectItemCaseSensitive(item, "type");
+      if (!type || !cJSON_IsString(type) || strcmp(type->valuestring, "message") != 0)
          continue;
-
-      if (strcmp(type->valuestring, "tool_use") == 0 && out->call_count < AGENT_MAX_TOOL_CALLS)
-      {
-         out->is_tool_call = 1;
-         parsed_tool_call_t *call = &out->calls[out->call_count];
-         cJSON *id = cJSON_GetObjectItem(block, "id");
-         cJSON *nm = cJSON_GetObjectItem(block, "name");
-         cJSON *input = cJSON_GetObjectItem(block, "input");
-
-         if (id && cJSON_IsString(id))
-            snprintf(call->id, sizeof(call->id), "%s", id->valuestring);
-         if (nm && cJSON_IsString(nm))
-            snprintf(call->name, sizeof(call->name), "%s", nm->valuestring);
-         if (input)
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
+      cJSON *part = NULL;
+      if (cJSON_IsArray(content))
+         cJSON_ArrayForEach(part, content)
          {
-            char *s = cJSON_PrintUnformatted(input);
-            call->arguments = s ? s : strdup("{}");
+            cJSON *pt = cJSON_GetObjectItemCaseSensitive(part, "type");
+            cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
+            if (pt && cJSON_IsString(pt) && strcmp(pt->valuestring, "output_text") == 0 && tx &&
+                cJSON_IsString(tx) && tx->valuestring[0])
+               return 1;
          }
-         else
-            call->arguments = strdup("{}");
-         out->call_count++;
-      }
-      else if (strcmp(type->valuestring, "text") == 0 && !has_tool_use)
+   }
+   return 0;
+}
+
+/* Extract the Responses (codex) "response object" -- the one carrying the `output`
+ * item array -- from an SSE body, so the IR responses_backend_parse (and the response
+ * shadow) can consume the same shape the JSON wires do. Prefers the response.completed
+ * event's payload; falls back to parsing the whole body as a single JSON object
+ * (non-streaming).
+ *
+ * Codex streams the answer text as output_text deltas and its completed event's
+ * message body is often EMPTY, so responses_backend_parse would see no text (while the
+ * legacy parser recovered it from the deltas). Fold the SSE-aggregated text -- the
+ * same text legacy uses, captured in the scratch parse below -- back into the object's
+ * output when the completed message lacks it, so the object is self-contained. Returns
+ * a new cJSON the caller owns, or NULL. */
+cJSON *agent_responses_sse_response_object(const char *body)
+{
+   if (!body)
+      return NULL;
+   parsed_response_t scratch;
+   memset(&scratch, 0, sizeof(scratch));
+   cJSON *collected = cJSON_CreateArray();
+   char *delta_text = NULL, *done_text = NULL, *part_text = NULL;
+   cJSON *completed = NULL;
+   responses_parse_sse_events(body, &scratch, collected, &delta_text, &done_text, &part_text,
+                              &completed);
+   /* Fold the streamed text into scratch.content the same way the legacy parser does
+    * (output_item.done text, else content_part.done, else the output_text deltas --
+    * longest wins). These helpers consume the passed-in strings. */
+   responses_take_longer_content(&scratch, &part_text);
+   responses_take_longer_content(&scratch, &done_text);
+   responses_take_longer_content(&scratch, &delta_text);
+   cJSON_Delete(collected);
+
+   cJSON *resp = completed ? completed : cJSON_Parse(body);
+   if (resp && scratch.content && scratch.content[0] && !responses_object_has_output_text(resp))
+   {
+      cJSON *output = cJSON_GetObjectItemCaseSensitive(resp, "output");
+      if (!cJSON_IsArray(output))
+         output = cJSON_AddArrayToObject(resp, "output");
+      if (cJSON_IsArray(output))
       {
-         cJSON *text = cJSON_GetObjectItem(block, "text");
-         if (text && cJSON_IsString(text))
-            out->content = strdup(text->valuestring);
+         cJSON *msg = cJSON_CreateObject();
+         cJSON_AddStringToObject(msg, "type", "message");
+         cJSON *content = cJSON_AddArrayToObject(msg, "content");
+         cJSON *part = cJSON_CreateObject();
+         cJSON_AddStringToObject(part, "type", "output_text");
+         cJSON_AddStringToObject(part, "text", scratch.content);
+         cJSON_AddItemToArray(content, part);
+         cJSON_AddItemToArray(output, msg);
       }
    }
-
-   /* Store the full content array as assistant_message for multi-turn */
-   if (out->is_tool_call)
-      out->assistant_message = cJSON_Duplicate(content, 1);
+   agent_free_parsed_response(&scratch);
+   return resp;
 }
+
 void agent_free_parsed_response(parsed_response_t *p)
 {
    for (int i = 0; i < p->call_count; i++)
@@ -1452,303 +1222,6 @@ int message_history_repair(cJSON *messages)
  * and the direct agent-loop code share the same implementation.
  * ================================================================ */
 
-/* Convert an OpenAI-format messages array to Gemini "contents" format.
- * Handles text messages, tool-call assistant messages, and tool-result messages. */
-static cJSON *messages_to_gemini_contents(cJSON *messages)
-{
-   cJSON *contents = cJSON_CreateArray();
-   if (!messages)
-      return contents;
-
-   int n = cJSON_GetArraySize(messages);
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *msg = cJSON_GetArrayItem(messages, i);
-      if (!msg)
-         continue;
-
-      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "role"));
-      if (!role)
-         continue;
-
-      /* Skip system messages — handled via systemInstruction */
-      if (strcmp(role, "system") == 0)
-         continue;
-
-      /* Tool result message: role=tool, tool_call_id=fn_name, content=result */
-      if (strcmp(role, "tool") == 0)
-      {
-         const char *fn_name = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "tool_call_id"));
-         const char *result = cJSON_GetStringValue(cJSON_GetObjectItem(msg, "content"));
-         if (!fn_name)
-            fn_name = "unknown";
-         if (!result)
-            result = "";
-
-         /* Gemini function response: role=user, parts=[{functionResponse:{name, response}}] */
-         cJSON *item = cJSON_CreateObject();
-         cJSON_AddStringToObject(item, "role", "user");
-         cJSON *parts = cJSON_CreateArray();
-         cJSON *fr_part = cJSON_CreateObject();
-         cJSON *func_resp = cJSON_CreateObject();
-         cJSON_AddStringToObject(func_resp, "name", fn_name);
-         /* Wrap result in a response object */
-         cJSON *resp_obj = cJSON_CreateObject();
-         cJSON_AddStringToObject(resp_obj, "result", result);
-         cJSON_AddItemToObject(func_resp, "response", resp_obj);
-         cJSON_AddItemToObject(fr_part, "functionResponse", func_resp);
-         cJSON_AddItemToArray(parts, fr_part);
-         cJSON_AddItemToObject(item, "parts", parts);
-         cJSON_AddItemToArray(contents, item);
-         continue;
-      }
-
-      /* Gemini uses "model" instead of "assistant" */
-      const char *gemini_role = (strcmp(role, "assistant") == 0) ? "model" : "user";
-
-      cJSON *item = cJSON_CreateObject();
-      cJSON_AddStringToObject(item, "role", gemini_role);
-      cJSON *parts = cJSON_CreateArray();
-
-      /* Check for tool calls in an assistant message (OpenAI format: tool_calls array) */
-      cJSON *tool_calls = cJSON_GetObjectItem(msg, "tool_calls");
-      if (tool_calls && cJSON_IsArray(tool_calls))
-      {
-         /* Convert OpenAI tool_calls to Gemini functionCall parts */
-         int tc_n = cJSON_GetArraySize(tool_calls);
-         for (int j = 0; j < tc_n; j++)
-         {
-            cJSON *tc = cJSON_GetArrayItem(tool_calls, j);
-            cJSON *fn = cJSON_GetObjectItem(tc, "function");
-            if (!fn)
-               continue;
-            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
-            const char *args_str = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
-            cJSON *args_obj = args_str ? cJSON_Parse(args_str) : cJSON_CreateObject();
-
-            cJSON *fc_part = cJSON_CreateObject();
-            cJSON *func_call = cJSON_CreateObject();
-            cJSON_AddStringToObject(func_call, "name", name ? name : "");
-            cJSON_AddItemToObject(func_call, "args", args_obj ? args_obj : cJSON_CreateObject());
-            cJSON_AddItemToObject(fc_part, "functionCall", func_call);
-            cJSON_AddItemToArray(parts, fc_part);
-         }
-      }
-      /* Check for native Gemini parts already stored in the assistant_message */
-      else if (strcmp(gemini_role, "model") == 0)
-      {
-         cJSON *native_parts = cJSON_GetObjectItem(msg, "parts");
-         if (native_parts && cJSON_IsArray(native_parts))
-         {
-            /* Already in Gemini format — clone the parts */
-            int pn = cJSON_GetArraySize(native_parts);
-            for (int j = 0; j < pn; j++)
-               cJSON_AddItemToArray(parts, cJSON_Duplicate(cJSON_GetArrayItem(native_parts, j), 1));
-            goto add_item; /* parts already built */
-         }
-         /* Fall through to text content handling */
-         cJSON *content_j = cJSON_GetObjectItem(msg, "content");
-         if (content_j && cJSON_IsString(content_j))
-         {
-            cJSON *part = cJSON_CreateObject();
-            cJSON_AddStringToObject(part, "text", content_j->valuestring);
-            cJSON_AddItemToArray(parts, part);
-         }
-      }
-      else
-      {
-         /* User message: plain text or array of content blocks */
-         cJSON *content_j = cJSON_GetObjectItem(msg, "content");
-         if (content_j && cJSON_IsString(content_j))
-         {
-            cJSON *part = cJSON_CreateObject();
-            cJSON_AddStringToObject(part, "text", content_j->valuestring);
-            cJSON_AddItemToArray(parts, part);
-         }
-         else if (content_j && cJSON_IsArray(content_j))
-         {
-            int pn = cJSON_GetArraySize(content_j);
-            for (int j = 0; j < pn; j++)
-            {
-               cJSON *src = cJSON_GetArrayItem(content_j, j);
-               const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(src, "type"));
-               if (!type)
-                  continue;
-               if (strcmp(type, "text") == 0)
-               {
-                  const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(src, "text"));
-                  if (txt)
-                  {
-                     cJSON *part = cJSON_CreateObject();
-                     cJSON_AddStringToObject(part, "text", txt);
-                     cJSON_AddItemToArray(parts, part);
-                  }
-               }
-            }
-         }
-      }
-
-   add_item:
-      cJSON_AddItemToObject(item, "parts", parts);
-      cJSON_AddItemToArray(contents, item);
-   }
-   return contents;
-}
-cJSON *agent_build_request_gemini(const agent_t *agent, cJSON *messages, cJSON *tools,
-                                  const char *system_prompt, int max_tokens, double temperature,
-                                  const char *cache_name)
-{
-   cJSON *req = cJSON_CreateObject();
-
-   /* System instruction — only if not using a prompt cache
-    * (cache already contains the system instruction) */
-   if (system_prompt && system_prompt[0] && (!cache_name || !cache_name[0]))
-   {
-      cJSON *sys_inst = cJSON_CreateObject();
-      cJSON *parts = cJSON_CreateArray();
-      cJSON *part = cJSON_CreateObject();
-      cJSON_AddStringToObject(part, "text", system_prompt);
-      cJSON_AddItemToArray(parts, part);
-      cJSON_AddItemToObject(sys_inst, "parts", parts);
-      cJSON_AddItemToObject(req, "systemInstruction", sys_inst);
-   }
-
-   /* Contents (conversation history in Gemini format) */
-   cJSON *contents = messages_to_gemini_contents(messages);
-   cJSON_AddItemToObject(req, "contents", contents);
-
-   /* Tools (convert from OpenAI format) */
-   if (tools && cJSON_GetArraySize(tools) > 0)
-   {
-      cJSON *gemini_tools = cJSON_CreateArray();
-      cJSON *func_decls = cJSON_CreateArray();
-
-      int tn = cJSON_GetArraySize(tools);
-      for (int i = 0; i < tn; i++)
-      {
-         cJSON *tool = cJSON_GetArrayItem(tools, i);
-         cJSON *func = cJSON_GetObjectItem(tool, "function");
-         if (!func)
-            continue;
-         cJSON_AddItemToArray(func_decls, cJSON_Duplicate(func, 1));
-      }
-
-      cJSON *tool_obj = cJSON_CreateObject();
-      cJSON_AddItemToObject(tool_obj, "functionDeclarations", func_decls);
-      cJSON_AddItemToArray(gemini_tools, tool_obj);
-      cJSON_AddItemToObject(req, "tools", gemini_tools);
-   }
-
-   /* Generation config */
-   cJSON *gen_cfg = cJSON_CreateObject();
-   cJSON_AddNumberToObject(gen_cfg, "maxOutputTokens", agent_request_max_tokens(agent, max_tokens));
-   if (temperature >= 0)
-      cJSON_AddNumberToObject(gen_cfg, "temperature", temperature);
-   cJSON_AddItemToObject(req, "generationConfig", gen_cfg);
-
-   /* Attach cached content reference if provided */
-   if (cache_name && cache_name[0])
-      cJSON_AddStringToObject(req, "cachedContent", cache_name);
-
-   (void)agent; /* model is not in the request body for Gemini (it's in the URL) */
-   return req;
-}
-void agent_parse_response_gemini(cJSON *root, parsed_response_t *out)
-{
-   memset(out, 0, sizeof(*out));
-
-   if (!root)
-      return;
-
-   /* Usage metadata: promptTokenCount, candidatesTokenCount,
-    * cachedContentTokenCount (prompt cache hit) */
-   cJSON *usage = cJSON_GetObjectItem(root, "usageMetadata");
-   if (usage)
-   {
-      cJSON *pt = cJSON_GetObjectItem(usage, "promptTokenCount");
-      cJSON *ct = cJSON_GetObjectItem(usage, "candidatesTokenCount");
-      cJSON *cc = cJSON_GetObjectItem(usage, "cachedContentTokenCount");
-      if (pt && cJSON_IsNumber(pt))
-         out->prompt_tokens = pt->valueint;
-      if (ct && cJSON_IsNumber(ct))
-         out->completion_tokens = ct->valueint;
-      if (cc && cJSON_IsNumber(cc) && cc->valueint > 0)
-      {
-         /* Treat cached tokens as "cache read" to match Anthropic's convention */
-         out->cache_read_tokens = cc->valueint;
-         aimee_log(LOG_DEBUG, "gemini_cache", "prompt cache hit: %d tokens read from cache",
-                   cc->valueint);
-      }
-   }
-
-   cJSON *candidates = cJSON_GetObjectItem(root, "candidates");
-   if (!candidates || cJSON_GetArraySize(candidates) == 0)
-      return;
-
-   cJSON *candidate = cJSON_GetArrayItem(candidates, 0);
-   cJSON *content = cJSON_GetObjectItem(candidate, "content");
-   if (!content)
-      return;
-
-   cJSON *parts = cJSON_GetObjectItem(content, "parts");
-   if (!parts)
-      return;
-
-   int n = cJSON_GetArraySize(parts);
-   int has_tool_call = 0;
-
-   for (int i = 0; i < n; i++)
-   {
-      cJSON *part = cJSON_GetArrayItem(parts, i);
-      cJSON *text = cJSON_GetObjectItem(part, "text");
-      cJSON *func_call = cJSON_GetObjectItem(part, "functionCall");
-
-      if (func_call && out->call_count < AGENT_MAX_TOOL_CALLS)
-      {
-         has_tool_call = 1;
-         parsed_tool_call_t *tc = &out->calls[out->call_count++];
-         const char *fn_name = cJSON_GetStringValue(cJSON_GetObjectItem(func_call, "name"));
-         cJSON *args = cJSON_GetObjectItem(func_call, "args");
-         if (fn_name)
-         {
-            snprintf(tc->name, sizeof(tc->name), "%s", fn_name);
-            /* Gemini uses the function name as the call identifier (no separate ID) */
-            snprintf(tc->id, sizeof(tc->id), "%s", fn_name);
-         }
-         if (args)
-            tc->arguments = cJSON_PrintUnformatted(args);
-         else
-            tc->arguments = strdup("{}");
-      }
-      else if (text && cJSON_IsString(text) && !has_tool_call)
-      {
-         /* Concatenate text parts */
-         if (!out->content)
-         {
-            out->content = strdup(text->valuestring);
-         }
-         else
-         {
-            size_t old_len = strlen(out->content);
-            size_t add_len = strlen(text->valuestring);
-            char *buf = malloc(old_len + add_len + 1);
-            if (buf)
-            {
-               memcpy(buf, out->content, old_len);
-               memcpy(buf + old_len, text->valuestring, add_len + 1);
-               free(out->content);
-               out->content = buf;
-            }
-         }
-      }
-   }
-
-   out->is_tool_call = has_tool_call;
-   /* Store the Gemini content block (with role+parts) as assistant_message for
-    * multi-turn conversations.  posix/agent.c appends it directly to messages. */
-   out->assistant_message = cJSON_Duplicate(content, 1);
-}
-
 /* ================================================================
  * From: agent_http.c
  * ================================================================ */
@@ -1851,144 +1324,6 @@ const provider_health_t *provider_health_get(const char *provider_name)
          return &s_provider_health[i].health;
    }
    return NULL;
-}
-
-/* ================================================================
- * Gemini Prompt Caching
- *
- * Gemini supports explicit prompt caching ("cached content") where system
- * context is uploaded once and referenced by name in subsequent requests.
- * Unlike Anthropic's inline cache_control blocks, Gemini requires a separate
- * HTTP POST to create the cache resource, then a "cachedContent" name field
- * in each generateContent request.
- *
- * Cache creation may fail (prompt too small, unsupported model version,
- * quota exceeded). In all error cases we return -1 and the caller proceeds
- * with a normal uncached request — no error is surfaced to the user.
- * ================================================================ */
-int gemini_prompt_cache_create(const char *endpoint_base, const char *auth_header,
-                               const char *model, const char *system_prompt, int timeout_ms,
-                               char *cache_name_out, size_t name_len)
-{
-   cache_name_out[0] = '\0';
-
-   if (!model || !model[0] || !system_prompt || !system_prompt[0])
-      return -1;
-
-   /* Gemini cached-content requires model in "models/{name}" form */
-   char full_model[256];
-   if (strncmp(model, "models/", 7) == 0)
-      snprintf(full_model, sizeof(full_model), "%s", model);
-   else
-      snprintf(full_model, sizeof(full_model), "models/%s", model);
-
-   /* Build request body:
-    *   { "model": "models/...", "systemInstruction": {"parts": [{"text":"..."}]},
-    *     "ttl": "3600s" }
-    * The Gemini caching API caches the system instruction (and optionally seed
-    * contents) so they do not need to be re-sent on every generateContent call. */
-   cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "model", full_model);
-
-   cJSON *sys_inst = cJSON_CreateObject();
-   cJSON *parts = cJSON_CreateArray();
-   cJSON *part = cJSON_CreateObject();
-   cJSON_AddStringToObject(part, "text", system_prompt);
-   cJSON_AddItemToArray(parts, part);
-   cJSON_AddItemToObject(sys_inst, "parts", parts);
-   cJSON_AddItemToObject(body, "systemInstruction", sys_inst);
-
-   cJSON_AddStringToObject(body, "ttl", "3600s");
-
-   char *body_str = cJSON_PrintUnformatted(body);
-   cJSON_Delete(body);
-   if (!body_str)
-      return -1;
-
-   /* POST to {endpoint_base}/cachedContents */
-   const char *base = (endpoint_base && endpoint_base[0])
-                          ? endpoint_base
-                          : "https://generativelanguage.googleapis.com/v1beta";
-   char url[512];
-   snprintf(url, sizeof(url), "%s/cachedContents", base);
-
-   char *response = NULL;
-   int http_status = agent_http_post(url, auth_header, body_str, &response, timeout_ms, NULL);
-   free(body_str);
-
-   if (http_status != 200 || !response)
-   {
-      aimee_log(LOG_DEBUG, "gemini_cache",
-                "cache creation failed (HTTP %d) — proceeding without cache", http_status);
-      free(response);
-      return -1;
-   }
-
-   /* Parse: { "name": "cachedContents/abc123", ..., "usageMetadata": {...} } */
-   cJSON *resp = cJSON_Parse(response);
-   free(response);
-   if (!resp)
-      return -1;
-
-   cJSON *name = cJSON_GetObjectItem(resp, "name");
-   if (!name || !cJSON_IsString(name) || !name->valuestring[0])
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-
-   snprintf(cache_name_out, name_len, "%s", name->valuestring);
-
-   /* Log cache creation with token count if available */
-   cJSON *usage = cJSON_GetObjectItem(resp, "usageMetadata");
-   if (usage)
-   {
-      cJSON *tc = cJSON_GetObjectItem(usage, "totalTokenCount");
-      if (tc && cJSON_IsNumber(tc))
-         aimee_log(LOG_DEBUG, "gemini_cache", "prompt cache created: %s (%d tokens)",
-                   cache_name_out, tc->valueint);
-      else
-         aimee_log(LOG_DEBUG, "gemini_cache", "prompt cache created: %s", cache_name_out);
-   }
-   else
-   {
-      aimee_log(LOG_DEBUG, "gemini_cache", "prompt cache created: %s", cache_name_out);
-   }
-
-   cJSON_Delete(resp);
-   return 0;
-}
-void gemini_prompt_cache_attach(cJSON *req, const char *cache_name)
-{
-   if (!req || !cache_name || !cache_name[0])
-      return;
-
-   /* Remove systemInstruction — it lives inside the cached content now */
-   cJSON_DeleteItemFromObject(req, "systemInstruction");
-
-   /* Reference the cached content in the request */
-   cJSON_AddStringToObject(req, "cachedContent", cache_name);
-}
-void gemini_prompt_cache_delete(const char *endpoint_base, const char *auth_header,
-                                const char *cache_name, int timeout_ms)
-{
-   if (!cache_name || !cache_name[0])
-      return;
-
-   const char *base = (endpoint_base && endpoint_base[0])
-                          ? endpoint_base
-                          : "https://generativelanguage.googleapis.com/v1beta";
-
-   char url[512];
-   snprintf(url, sizeof(url), "%s/%s", base, cache_name);
-
-   int http_status = agent_http_delete(url, auth_header, timeout_ms);
-   if (http_status == 200 || http_status == 204)
-      aimee_log(LOG_DEBUG, "gemini_cache", "prompt cache deleted: %s", cache_name);
-   else
-      aimee_log(LOG_DEBUG, "gemini_cache",
-                "prompt cache delete returned HTTP %d for %s (will expire via TTL)", http_status,
-                cache_name);
 }
 
 /* ================================================================

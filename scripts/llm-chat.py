@@ -149,6 +149,39 @@ def _stream_content(resp: urllib.request.addinfourl) -> None:
     sys.stdout.write("\n")
 
 
+def split_reasoning(message: dict[str, Any]) -> tuple[str, str]:
+    """Return (content, reasoning) with reasoning separated from the answer.
+
+    THE CONTRACT: stdout carries the answer and nothing else. Reasoning is a
+    distinct thing and belongs in a distinct field — the same split
+    aimee_ir.h models as AIMEE_BLK_THINKING.
+
+    Compliant servers do this for us: llama.cpp under --jinja (and the DeepSeek/
+    Qwen APIs) return a separate `reasoning_content`, leaving `content` clean.
+    Endpoints that instead INLINE a <think>...</think> preamble get normalised to
+    the same shape here — once, at the wire boundary, where the raw response is
+    still structured — instead of every consumer re-deriving it from text.
+
+    That re-derivation is exactly what went wrong: curator-extract.py split on
+    the LAST "</think>" anywhere in the answer, so summarising a function whose
+    own job is stripping think blocks cut the JSON mid-string and killed the job.
+    Meanwhile llm-rewrite.py and learning-synthesize.py did no stripping at all —
+    the same contract, understood three different ways. One place, one rule.
+    """
+    content = message.get("content") or ""
+    reasoning = message.get("reasoning_content") or ""
+    if reasoning:
+        return content, reasoning          # server already split it; trust that
+    # Inlining endpoint: a reasoning block is a PREFIX. An occurrence anywhere
+    # else belongs to the answer (a docstring may legitimately discuss the tag).
+    if content.lstrip().startswith("<think>"):
+        head = content.lstrip()
+        end = head.find("</think>")
+        if end != -1:
+            return head[end + len("</think>") :].strip(), head[len("<think>") : end].strip()
+    return content, reasoning
+
+
 def _emit(resp: urllib.request.addinfourl, emit_json: bool) -> None:
     payload = json.loads(resp.read())
     if emit_json:
@@ -156,9 +189,15 @@ def _emit(resp: urllib.request.addinfourl, emit_json: bool) -> None:
         sys.stdout.write("\n")
         return
     try:
-        content = payload["choices"][0]["message"]["content"] or ""
+        message = payload["choices"][0]["message"]
     except (KeyError, IndexError) as exc:
         sys.exit(f"llm-chat: malformed response: {exc}\n{json.dumps(payload)[:500]}")
+    content, reasoning = split_reasoning(message)
+    # Don't discard the reasoning: stderr keeps it out of the answer on stdout
+    # while leaving it visible to the kb logs for debugging a bad extraction.
+    if reasoning and os.environ.get("LLM_EMIT_REASONING") == "1":
+        sys.stderr.write(f"llm-chat: reasoning ({len(reasoning)} chars): {reasoning[:2000]}\n")
+        sys.stderr.flush()
     sys.stdout.write(content)
     if not content.endswith("\n"):
         sys.stdout.write("\n")

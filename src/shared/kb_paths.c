@@ -38,13 +38,3 @@ const char *kb_default_bg_socket_path(void)
       snprintf(path, sizeof(path), "%s-bg.sock", base);
    return path;
 }
-
-const char *kb_client_default_socket_path(void)
-{
-   return kb_default_socket_path();
-}
-
-const char *kb_client_default_bg_socket_path(void)
-{
-   return kb_default_bg_socket_path();
-}

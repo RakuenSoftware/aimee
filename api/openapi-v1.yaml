@@ -89,6 +89,17 @@ components:
         error:
           type: string
 
+    ServerLiveHealthResponse:
+      type: object
+      additionalProperties: false
+      required: [server_id, status]
+      properties:
+        server_id:
+          type: string
+        status:
+          type: string
+          const: ok
+
     # ── Phase 3–4: Ingest API and corpus staging schemas ───────────────────
 
     DocIngestResponse:
@@ -684,6 +695,96 @@ components:
         chunks_deleted:
           type: integer
 
+    MaintenancePurgeProjectRequest:
+      type: object
+      required: [project, generation, purge_id]
+      properties:
+        project:
+          type: string
+        generation:
+          type: string
+          description: Fence generation token (no spaces).
+        purge_id:
+          type: string
+          description: Purge operation id (no spaces).
+        takeover:
+          type: boolean
+          description: >
+            Displace a LIVE fence held by another owner. Without it a live
+            foreign fence is refused with 409.
+
+    MaintenancePurgeProjectResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        ok:
+          type: boolean
+          description: True only when every store delete succeeded.
+        project:
+          type: string
+        generation:
+          type: string
+        purge_id:
+          type: string
+        fence_replaced:
+          type: boolean
+        displaced:
+          type: object
+          description: Present when fence_replaced — the displaced owner's ids.
+          properties:
+            generation:
+              type: string
+            purge_id:
+              type: string
+        stores:
+          type: object
+          description: >
+            Per-store outcome, in fan-out order — a deleted-row count on
+            success (0 for primitives that report no count) or
+            {"error": "..."} on failure.
+          additionalProperties: true
+
+    MaintenancePurgeFenceRequest:
+      type: object
+      required: [project, generation, purge_id]
+      properties:
+        project:
+          type: string
+        generation:
+          type: string
+        purge_id:
+          type: string
+
+    MaintenancePurgeHeartbeatResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        refreshed:
+          type: boolean
+        fence:
+          type: string
+          description: >
+            Present when refreshed is false — the current fence as
+            "generation purge_id" (empty when no fence exists).
+
+    MaintenancePurgeClearResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        cleared:
+          type: boolean
+        fence:
+          type: string
+          description: >
+            Present when cleared is false — the current fence as
+            "generation purge_id" (empty when no fence exists).
+
     PipelineStatusResponse:
       type: object
       properties:
@@ -968,6 +1069,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /servers/{server_id}/health:
+    get:
+      operationId: getServerLiveHealth
+      summary: Verify a registered server through the management health exchange
+      description: >-
+        Performs the live, nonce-bound management challenge and signed-status
+        exchange. It does not return the registry's cached heartbeat row.
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 127
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: team
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Live management health verification succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServerLiveHealthResponse"
+        "400":
+          description: Invalid team or management health request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Server health request denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Registry state changed during the exchange
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Management health integrity verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Management health runtime or dependency unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /console/overview:
     get:
       operationId: getConsoleOverview
@@ -997,6 +1171,552 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /team:
+    post:
+      operationId: createTeam
+      summary: Create a team (org-admin or bootstrap owner)
+      description: >
+        Creates an org team. The org-admin capability is enforced at the DB layer
+        (RLS write policies); a non-admin caller receives 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "201":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  name: { type: string }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+    get:
+      operationId: listTeams
+      summary: List the caller's visible teams
+      responses:
+        "200":
+          description: Teams
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  teams:
+                    type: array
+                    items: { type: object }
+        "401": { description: Authentication required }
+  /team/member:
+    post:
+      operationId: addTeamMember
+      summary: Add a member to a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, identity_key]
+              properties:
+                team: { type: integer }
+                identity_key: { type: string }
+                default: { type: boolean }
+      responses:
+        "200": { description: Member added }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+    delete:
+      operationId: removeTeamMember
+      summary: Remove a member from a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, identity_key]
+              properties:
+                team: { type: integer }
+                identity_key: { type: string }
+      responses:
+        "200": { description: Member removed }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+  /project:
+    post:
+      operationId: createProject
+      summary: Create a project under a team (org-admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parent, name]
+              properties:
+                parent: { type: integer }
+                name: { type: string }
+                access_mode: { type: string, enum: [team-open, restricted] }
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  parent: { type: integer }
+                  name: { type: string }
+                  access_mode: { type: string }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized }
+    get:
+      operationId: listProjects
+      summary: List projects (optionally filtered by ?team=)
+      parameters:
+        - name: team
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: { type: object }
+        "401": { description: Authentication required }
+  /models/entitled:
+    get:
+      operationId: listEntitledModels
+      summary: List the caller's entitled org models (P2a)
+      description: >
+        Returns the org models the authenticated caller is entitled to use — the join
+        of the org model catalog with the caller's team entitlements, actor-bound to the
+        verified principal (a caller can never see another principal's entitled models).
+        Catalog-only: the surface carries provider/wire/endpoint/model_id/display_name
+        and NO credential or slot reference. Disabled catalog entries are excluded.
+      responses:
+        "200":
+          description: Entitled models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        model_id: { type: string }
+                        display_name: { type: string }
+                        provider: { type: string }
+                        wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                        endpoint: { type: string }
+        "401": { description: Authentication required }
+  /models/org/add:
+    post:
+      operationId: addOrgModel
+      summary: Create or update an org model catalog entry (org-admin, P2a)
+      description: >
+        Upserts a catalog entry (keyed by model_id). Org-admin gated at the DB layer and
+        WORM-audited atomically with the mutation; a non-admin caller receives 403.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, provider, wire]
+              properties:
+                model_id: { type: string }
+                provider: { type: string }
+                wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                display_name: { type: string }
+                endpoint: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Catalog entry upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  model_id: { type: string }
+        "400": { description: "Invalid model_id, provider, or wire" }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/set:
+    post:
+      operationId: setOrgModel
+      summary: Alias of /models/org/add — upsert an org model catalog entry (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, provider, wire]
+              properties:
+                model_id: { type: string }
+                provider: { type: string }
+                wire: { type: string, enum: [anthropic, openai, responses, gemini] }
+                display_name: { type: string }
+                endpoint: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Catalog entry upserted }
+        "400": { description: "Invalid model_id, provider, or wire" }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/remove:
+    post:
+      operationId: removeOrgModel
+      summary: Remove an org model catalog entry and its entitlements (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id]
+              properties:
+                model_id: { type: string }
+      responses:
+        "200":
+          description: Catalog entry removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  removed: { type: integer }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /models/org/entitle:
+    post:
+      operationId: entitleOrgModel
+      summary: Grant a team access to an org model (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, team]
+              properties:
+                model_id: { type: string }
+                team: { type: integer }
+      responses:
+        "200": { description: Entitlement granted }
+        "401": { description: Authentication required }
+        "403": { description: "Not authorized (not an org-admin), or unknown model/team" }
+  /models/org/unentitle:
+    post:
+      operationId: unentitleOrgModel
+      summary: Revoke a team's access to an org model (org-admin, P2a)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model_id, team]
+              properties:
+                model_id: { type: string }
+                team: { type: integer }
+      responses:
+        "200": { description: Entitlement revoked }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /insights/spend:
+    get:
+      operationId: getOrgSpend
+      summary: Authorized org spend report, grouped per model + per project (P3b)
+      description: >
+        Returns org spend aggregated over the settled rollup for day in [since, until],
+        broken down per billable model and per project with a reconciling total (the sum
+        of the per-model costs equals total.cost_usd exactly). Authorization is enforced
+        at the DB layer inside a SECURITY DEFINER aggregation function: the caller must be
+        an org-admin OR a lead of the requested team; a team-absent request is the
+        org-wide report and is admin-only. cost_usd is emitted as a NUMERIC string (never
+        a float) so finance export loses no precision. Read-only.
+      parameters:
+        - name: team
+          in: query
+          required: false
+          description: Team id. Absent = the org-wide (admin-only) report.
+          schema: { type: integer }
+        - name: project
+          in: query
+          required: false
+          description: Optional project filter.
+          schema: { type: integer }
+        - name: since
+          in: query
+          required: true
+          description: Inclusive start day, ISO YYYY-MM-DD.
+          schema: { type: string }
+        - name: until
+          in: query
+          required: true
+          description: Inclusive end day, ISO YYYY-MM-DD.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spend report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team: { type: integer, nullable: true }
+                  project: { type: integer }
+                  since: { type: string }
+                  until: { type: string }
+                  total:
+                    type: object
+                    properties:
+                      prompt_tokens: { type: integer }
+                      completion_tokens: { type: integer }
+                      cache_read_tokens: { type: integer }
+                      cache_write_tokens: { type: integer }
+                      cost_usd: { type: string }
+                      calls: { type: integer }
+                  by_team:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id: { type: integer }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+                  by_model:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        billable_model: { type: string }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+                  by_project:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id: { type: integer, nullable: true }
+                        prompt_tokens: { type: integer }
+                        completion_tokens: { type: integer }
+                        cache_read_tokens: { type: integer }
+                        cache_write_tokens: { type: integer }
+                        cost_usd: { type: string }
+                        calls: { type: integer }
+        "400": { description: Missing or malformed team/project/since/until }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (org-admin or team-lead required) }
+  /budget/set:
+    post:
+      operationId: setBudget
+      summary: Set a team/project period budget cap (org-admin, P4a)
+      description: >
+        Upserts the hard-cap config for (team, optional project, period). Org-admin gated
+        at the DB layer and WORM-audited atomically with the mutation; a non-admin caller
+        receives 403. A hard reduction of the limit below the current period's already
+        committed (spend + reserved) is rejected as retroactive (409). limit_usd and
+        soft_limit_usd are NUMERIC decimal strings (never floats). soft_limit_usd is a
+        config-only operator-signal threshold (P4a does not enforce it — a soft limit
+        never refuses). BUDGET ONLY: the rate limiter is deferred to P4b; the
+        reserve-before-dispatch enforcement rides with P2b.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, period, limit_usd]
+              properties:
+                team: { type: integer }
+                project: { type: integer }
+                period: { type: string, enum: [day, month] }
+                limit_usd: { type: string }
+                soft_limit_usd: { type: string }
+      responses:
+        "200":
+          description: Budget cap upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  team: { type: integer }
+                  project: { type: integer }
+                  period: { type: string }
+        "400": { description: Missing or malformed team/period/limit_usd/project/soft_limit_usd }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+        "409": { description: Retroactive reduction below current committed spend+reserved }
+  /budget/show:
+    get:
+      operationId: showBudget
+      summary: Show a team's budget caps + current-period counters (org-admin or team-lead, P4a)
+      description: >
+        Returns every configured cap for the team (optionally filtered to one project),
+        each joined to its current UTC period counter: limit, spend, reserved, and
+        remaining (= limit - spend - reserved). Authorization is enforced at the DB layer
+        inside a SECURITY DEFINER function — the caller must be an org-admin OR a lead of
+        the requested team. All money fields are NUMERIC strings (never floats).
+      parameters:
+        - name: team
+          in: query
+          required: true
+          description: Team id (required).
+          schema: { type: integer }
+        - name: project
+          in: query
+          required: false
+          description: Optional project filter; absent shows every cap for the team.
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Budget caps + current-period counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team: { type: integer }
+                  project: { type: integer }
+                  count: { type: integer }
+                  budgets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        team_id: { type: integer }
+                        project_id: { type: integer, nullable: true }
+                        period: { type: string }
+                        period_id: { type: string }
+                        limit_usd: { type: string }
+                        soft_limit_usd: { type: string, nullable: true }
+                        spend_usd: { type: string }
+                        reserved_usd: { type: string }
+                        remaining_usd: { type: string }
+        "400": { description: Missing or malformed team/project }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (org-admin or team-lead required) }
+  /rate/policy:
+    post:
+      operationId: setRatePolicy
+      summary: Set a keyed fixed-window rate-limit policy (org-admin, P4b)
+      description: >
+        Upserts the admin-set rate policy for (dim, scope). dim is the limiter dimension
+        (team | project | cert | model | cred_slot); scope is the concrete id/name, or "*"
+        for the dim default applied when no specific row exists. window_seconds is the
+        fixed-window width and max_count the requests admitted per window (max_count = 0 is
+        an always-deny). Org-admin gated at the DB layer and WORM-audited atomically with
+        the mutation; a non-admin caller receives 403. The policy is authoritative and
+        never caller-supplied at enforcement time — the P2b egress path passes only the
+        resolved identity to org_rate_check, which looks the policy up. RATE ONLY: the
+        enforcement wiring at egress rides with P2b; the budget core is P4a.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dim, scope, window_seconds, max_count]
+              properties:
+                dim: { type: string, enum: [team, project, cert, model, cred_slot] }
+                scope: { type: string }
+                window_seconds: { type: integer }
+                max_count: { type: integer }
+      responses:
+        "200":
+          description: Rate policy upserted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  dim: { type: string }
+                  scope: { type: string }
+                  window_seconds: { type: integer }
+                  max_count: { type: integer }
+        "400": { description: Missing or malformed dim/scope/window_seconds/max_count }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (not an org-admin) }
+  /rate/show:
+    get:
+      operationId: showRatePolicy
+      summary: Show a keyed rate-limit policy (org-admin or team-lead, P4b)
+      description: >
+        Returns the rate policy for the exact (dim, scope) pair (0 or 1 row).
+        Authorization is enforced at the DB layer inside a SECURITY DEFINER function — the
+        caller must be an org-admin, OR (for dim=team) a lead of that team, OR (for
+        dim=project) a lead of the team that owns the project. The global dims (model,
+        cred_slot) and the "*" default are admin-only. Read-only.
+      parameters:
+        - name: dim
+          in: query
+          required: true
+          description: Limiter dimension (team | project | cert | model | cred_slot).
+          schema: { type: string, enum: [team, project, cert, model, cred_slot] }
+        - name: scope
+          in: query
+          required: true
+          description: The concrete id/name, or "*" for the dim default.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Rate policy (0 or 1 row)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dim: { type: string }
+                  scope: { type: string }
+                  count: { type: integer }
+                  policies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        dim: { type: string }
+                        scope: { type: string }
+                        window_seconds: { type: integer }
+                        max_count: { type: integer }
+        "400": { description: Missing or malformed dim/scope }
+        "401": { description: Authentication required }
+        "403": { description: Not authorized (org-admin or team-lead required) }
   /enrollments:
     get:
       operationId: listEnrollments
@@ -2069,6 +2789,111 @@ paths:
                 $ref: "#/components/schemas/MaintenanceClearResponse"
         "400":
           description: Missing project
+        "401":
+          description: Unauthorized
+        "500":
+          description: Clear failed
+
+  /maintenance/purge-project:
+    post:
+      operationId: postMaintenancePurgeProject
+      summary: Purge every kb store for a project under a generation fence
+      description: >
+        Writes the project-purge generation fence, then deletes the project
+        from every kb store the ingest path writes (chunks, file index,
+        vectors, code embeddings, curator code-unit vectors, canonical index,
+        code-unit jobs, pdf vectors, minhash), continuing past per-store
+        failures. The fence is NOT cleared here — call purge-finalize (or
+        purge-cancel) once the caller's own deletion completed. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeProjectRequest"
+      responses:
+        "200":
+          description: Purge fan-out completed (see per-store outcomes)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeProjectResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "409":
+          description: A live fence is held by another owner (takeover absent)
+        "500":
+          description: Fence write failed
+
+  /maintenance/purge-heartbeat:
+    post:
+      operationId: postMaintenancePurgeHeartbeat
+      summary: Refresh the project-purge fence heartbeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Heartbeat outcome (refreshed false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeHeartbeatResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "500":
+          description: Heartbeat failed
+
+  /maintenance/purge-finalize:
+    post:
+      operationId: postMaintenancePurgeFinalize
+      summary: Clear the project-purge fence after deletion completed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Clear outcome (cleared false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeClearResponse"
+        "400":
+          description: Missing or invalid parameters
+        "401":
+          description: Unauthorized
+        "500":
+          description: Clear failed
+
+  /maintenance/purge-cancel:
+    post:
+      operationId: postMaintenancePurgeCancel
+      summary: Clear the project-purge fence on abort
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MaintenancePurgeFenceRequest"
+      responses:
+        "200":
+          description: Clear outcome (cleared false on fence mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenancePurgeClearResponse"
+        "400":
+          description: Missing or invalid parameters
         "401":
           description: Unauthorized
         "500":

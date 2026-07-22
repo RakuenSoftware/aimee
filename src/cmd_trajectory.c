@@ -102,6 +102,12 @@ static void trajectory_batch_cmd(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
 }
 
+static const subcmd_t cmd_trajectory_subs[] = {
+    {"export", "export a session trajectory", trajectory_export_cmd},
+    {"batch", "run a batch over a task corpus", trajectory_batch_cmd},
+    {NULL, NULL, NULL},
+};
+
 void cmd_trajectory(app_ctx_t *ctx, int argc, char **argv)
 {
    const char *sub = argc > 0 ? argv[0] : NULL;
@@ -110,10 +116,6 @@ void cmd_trajectory(app_ctx_t *ctx, int argc, char **argv)
       argc--;
       argv++;
    }
-   if (sub && strcmp(sub, "export") == 0)
-      trajectory_export_cmd(ctx, argc, argv);
-   else if (sub && strcmp(sub, "batch") == 0)
-      trajectory_batch_cmd(ctx, argc, argv);
-   else
+   if (!sub || subcmd_dispatch(cmd_trajectory_subs, sub, ctx, argc, argv) != 0)
       trajectory_usage();
 }

@@ -520,7 +520,8 @@ void kb_file_index_store_from_path(const char *project, const char *file_path, c
                                    const char *src_path)
 {
    char *full = kb_read_file_all(src_path);
-   db2_kb_file_index_upsert(project, file_path, hash, full);
+   /* Fenced: the file index is a purge-matrix store (slice 2). */
+   kb_file_index_upsert_fenced(project, file_path, hash, full);
    free(full);
 }
 
@@ -546,25 +547,58 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
        strcmp(stored, hash) == 0)
       return 0; /* unchanged — already ingested */
 
-   delete_file_chunks(project, source_path);
+   if (delete_file_chunks(project, source_path) != 0)
+      return -1; /* purge fence: drop this document */
 
    text_chunk_t *chunks = malloc(MAX_CHUNKS_PER_FILE * sizeof(text_chunk_t));
    if (!chunks)
       return -1;
    int n_chunks = chunk_content(content, len, chunks, MAX_CHUNKS_PER_FILE);
+   if (n_chunks <= 0)
+   {
+      free(chunks);
+      return 0;
+   }
 
-   int embedded = 0;
+   /* Phase 1: all chunk rows + neighbour links in ONE guarded, fenced
+    * transaction — the advisory guard must not be held across the slow
+    * embedder round-trips below (which also drop the pool lease). */
+   int64_t *doc_ids = malloc((size_t)n_chunks * sizeof(int64_t));
+   if (!doc_ids)
+   {
+      free(chunks);
+      return -1;
+   }
+   if (kb_purge_fenced_txn_begin(project) != 1)
+   {
+      free(doc_ids);
+      free(chunks);
+      return -1; /* purge fence: drop this document */
+   }
    int64_t prev_doc_id = 0;
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      int64_t doc_id = db2_kb_documents_insert_chunk(
+      doc_ids[ci] = db2_kb_documents_insert_chunk(
           project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
           chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
-      if (doc_id < 0)
+      if (doc_ids[ci] < 0)
          continue;
-      db2_kb_documents_link_neighbours(doc_id, prev_doc_id);
-      prev_doc_id = doc_id;
-      if (!effective_cmd[0])
+      db2_kb_documents_link_neighbours(doc_ids[ci], prev_doc_id);
+      prev_doc_id = doc_ids[ci];
+   }
+   if (kb_purge_fenced_txn_commit() != 0)
+   {
+      free(doc_ids);
+      free(chunks);
+      return -1;
+   }
+
+   /* Phase 2: embed each committed chunk. */
+   int embedded = 0;
+   for (int ci = 0; ci < n_chunks; ci++)
+   {
+      int64_t doc_id = doc_ids[ci];
+      if (doc_id < 0 || !effective_cmd[0])
          continue;
 
       char embed_text[4096];
@@ -580,13 +614,14 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       if (dim > 0)
       {
          accept_generated_embedding(doc_id, vec, dim);
-         sync_vector_embedding(doc_id, vec, dim);
+         kb_sync_vector_embedding_fenced(project, doc_id, vec, dim);
          embedded++;
       }
    }
+   free(doc_ids);
    free(chunks);
    /* Store the whole file body too (served by GET /v1/kb/file), not just chunks. */
-   db2_kb_file_index_upsert(project, source_path, hash, content);
+   kb_file_index_upsert_fenced(project, source_path, hash, content);
    return embedded;
 }
 

@@ -4,12 +4,13 @@
 #include "agent_tools.h"
 #include "agent_exec.h"
 #include "workspace.h"
+#include "workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
-#include "headers/mcp_client_registry.h"
+#include "mcp_client_registry.h"
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"
@@ -56,6 +57,34 @@ _Thread_local static char g_parent_write_root[MAX_PATH_LEN] = {0};
  * delegate is not write-capable and ALL file writes are refused. Set per
  * delegation from the delegate's write policy; reset on guard clear. */
 _Thread_local static int g_write_capable = 1;
+
+/* The toolset THIS THREAD's turn resolves against, overriding the role.
+ *
+ * Thread-local for the same reason g_write_capable above is: delegate turns run on
+ * POOLED worker threads and overlap by design (session_threads defaults above 1,
+ * and review panels fan out through agent_run_parallel). This was the process-wide
+ * AIMEE_ACTIVE_TOOLSET env var, set per turn with a save/restore bracket that made
+ * it LOOK scoped. Measured: with 4 concurrent turns, 3 of 4 resolved the LAST
+ * writer's toolset — a reviewer could hold a coder's tools, which is the boundary
+ * agent_tools_tool_allowed_for_role exists to enforce.
+ *
+ * Lives here, beside its reader, rather than in the dispatch TU: the state and the
+ * code that resolves against it belong together. The env var is still honoured (it
+ * is how the single-process CLI passes --toolset); this takes precedence. */
+_Thread_local static char g_active_toolset[128];
+
+void agent_tools_set_active_toolset(const char *toolset)
+{
+   if (toolset && toolset[0])
+      snprintf(g_active_toolset, sizeof(g_active_toolset), "%s", toolset);
+   else
+      g_active_toolset[0] = '\0';
+}
+
+const char *agent_tools_active_toolset(void)
+{
+   return g_active_toolset[0] ? g_active_toolset : NULL;
+}
 
 static int agent_tools_path_under_root(const char *path, const char *root)
 {
@@ -166,12 +195,23 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
    if (!cfg.require_session_worktree)
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
-    * escapes. Match ONLY the canonical managed-worktree location (not the
-    * looser "/.aimee-" prefix is_aimee_worktree_path() accepts), consistent
-    * with the client-side attn_session_isolation_blocked check. */
+    * escapes. Match the canonical managed-worktree location plus the workflow
+    * engine's per-work-item worktrees (not the looser "/.aimee-" prefix
+    * is_aimee_worktree_path() accepts), consistent with the client-side
+    * attn_session_isolation_blocked check. /wfe-worktrees/ is the same fix
+    * #1314 applied to the guardrail layer: a wfe delegate's target IS an
+    * isolated worktree — without it, this backstop (default ON) refused every
+    * native write_file/edit_file into a wfe worktree, so implement delegates
+    * that edit via file tools produced no-op rounds while bash-writers slipped
+    * through — the whole fleet's convergence depended on each model's tool
+    * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
-   return strstr(norm, "/.aimee/worktrees/") != NULL ? 0 : 1;
+   if (strstr(norm, "/.aimee/worktrees/") != NULL)
+      return 0;
+   if (strstr(norm, "/wfe-worktrees/") != NULL)
+      return 0;
+   return 1;
 }
 
 static int tools_array_has_name(cJSON *tools, const char *name, int openai_format)
@@ -382,12 +422,37 @@ int agent_tools_role_current_code_only(const char *role)
           strcmp(role, "inspect") == 0;
 }
 
+/* The three read-only worktree tools review_indexed carries under slice 7. Kept as
+ * an explicit allowlist so the reachability grant below can never widen to a write
+ * or exec tool. */
+static int is_review_read_tool(const char *name)
+{
+   return name && (strcmp(name, "read_file") == 0 || strcmp(name, "list_files") == 0 ||
+                   strcmp(name, "grep") == 0);
+}
+
+/* A review panelist's read tools resolve through workspace_provider_active(). The
+ * review worktree is reachable through every provider EXCEPT a DETACHED remote
+ * seat, whose read_all marshals to the serving client's filesystem rather than the
+ * review's tree. SHARED (server worktree), CONTAINER (:ro sandbox mount), and MIRROR
+ * (server-side reconstructed worktree) all present the right tree. */
+static int review_worktree_reachable(void)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+   return !ws || ws->kind != WS_PROVIDER_DETACHED;
+}
+
 int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
 {
    if (!tool_name || !tool_name[0])
       return 0;
 
-   const char *toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
+   /* This thread's turn first: the env var is process-wide, so on a pooled worker a
+    * concurrent delegate's value would otherwise decide what THIS one may call. The
+    * env var stays as the single-process CLI's --toolset channel. */
+   const char *toolset_name = agent_tools_active_toolset();
+   if (!toolset_name || !toolset_name[0])
+      toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
       toolset_name = toolset_for_delegate_role(role);
    if (toolset_name && toolset_name[0])
@@ -397,10 +462,25 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
       int n = toolset_resolve_effective(toolset_name, tools, TOOLSET_MAX_TOOLS, err, sizeof(err));
       if (n >= 0)
       {
+         int in_set = 0;
          for (int i = 0; i < n; i++)
             if (strcmp(tools[i], tool_name) == 0)
-               return 1;
-         return 0;
+            {
+               in_set = 1;
+               break;
+            }
+         if (!in_set)
+            return 0;
+         /* Slice 7 (reviewers): review_indexed carries the read-only worktree tools
+          * (read_file/list_files/grep), but they resolve through
+          * workspace_provider_active(). Grant them ONLY when the worktree is
+          * reachable — a DETACHED remote seat's read marshals to the serving
+          * client's fs, not the review's tree, so deny there. review_indexed never
+          * carries write_file/edit_file/bash, so a reviewer still cannot edit. */
+         if (is_review_read_tool(tool_name) && strcmp(toolset_name, "review_indexed") == 0 &&
+             !review_worktree_reachable())
+            return 0;
+         return 1;
       }
       LOG_WARN("toolset", "failed to resolve toolset '%s': %s", toolset_name,
                err[0] ? err : "unknown error");
@@ -459,7 +539,13 @@ static const char *tool_def_name(cJSON *tool)
 
 void agent_tools_filter_for_role(cJSON *tools, const char *role)
 {
-   const char *toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
+   /* This turn's toolset first (thread-local, panel-safe per #1374), then the
+    * single-process CLI's env channel — matching agent_tools_tool_allowed_for_role
+    * so what we advertise and what we enforce never disagree (e.g. a panel sets its
+    * toolset thread-locally, not via the env). */
+   const char *toolset_name = agent_tools_active_toolset();
+   if (!toolset_name || !toolset_name[0])
+      toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
@@ -547,6 +633,20 @@ static void tp_prop(cJSON *props, const char *name, const char *type, const char
    cJSON_AddItemToObject(props, name, p);
 }
 
+/* An array-of-strings property. Separate from tp_prop because a bare
+ * {"type":"array"} is incomplete JSON Schema — `items` is what tells a provider
+ * what the array holds, and strict ones reject the schema without it. */
+static void tp_prop_str_array(cJSON *props, const char *name, const char *desc)
+{
+   cJSON *p = cJSON_CreateObject();
+   cJSON_AddStringToObject(p, "type", "array");
+   cJSON_AddStringToObject(p, "description", desc);
+   cJSON *items = cJSON_CreateObject();
+   cJSON_AddStringToObject(items, "type", "string");
+   cJSON_AddItemToObject(p, "items", items);
+   cJSON_AddItemToObject(props, name, p);
+}
+
 static cJSON *tp_bash(void)
 {
    cJSON *params = tp_obj();
@@ -585,6 +685,13 @@ static cJSON *tp_read_file(void)
            "File path. Prefer paths relative to the current workspace directory.");
    tp_prop(props, "offset", "integer", "Line offset to start reading from");
    tp_prop(props, "limit", "integer", "Maximum number of lines to read");
+   tp_prop(props, "raw", "boolean",
+           "Return raw bytes with no line anchors (for grep pipelines / binary sniffing). "
+           "Default false: each line is prefixed 'LINE:HASH| ' and a snapshot id is minted so "
+           "edit_file can edit by anchor without re-emitting the text.");
+   tp_prop(props, "mode", "string",
+           "'outline' returns the tree-sitter symbol skeleton (signatures + LINE:HASH anchors, no "
+           "bodies) — one cheap call to map a large file, then read/edit one span by anchor.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -626,16 +733,44 @@ static cJSON *tp_edit_file(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "path", "string",
            "File path to edit. Prefer paths relative to the current workspace directory.");
-   tp_prop(props, "old_string", "string",
-           "Exact existing text to replace (must be unique unless replace_all).");
-   tp_prop(props, "new_string", "string", "Replacement text.");
+   /* Anchored (primary) path. */
+   tp_prop(props, "snapshot_id", "string",
+           "The snapshot id from the read_file that produced the anchors below. Required for "
+           "anchored edits.");
+   {
+      cJSON *edits = cJSON_CreateObject();
+      cJSON_AddStringToObject(edits, "type", "array");
+      cJSON_AddStringToObject(
+          edits, "description",
+          "Anchored edits applied atomically against snapshot_id. Each item is one of: "
+          "{op:\"replace\", at:\"LINE:HASH\", text} | "
+          "{op:\"replace_range\", from:\"LINE:HASH\", to:\"LINE:HASH\", text} | "
+          "{op:\"insert_after\", at:\"LINE:HASH\", text} | "
+          "{op:\"delete_range\", from:\"LINE:HASH\", to:\"LINE:HASH\"}. "
+          "Anchors are the 'LINE:HASH' tokens read_file printed; the server owns all offset "
+          "arithmetic. IMPORTANT: 'text' is the raw replacement content only — do NOT include the "
+          "'LINE:HASH| ' display prefix in it. Example: to change line shown as '12:a3|   return "
+          "1;' send {op:\"replace\", at:\"12:a3\", text:\"  return 2;\"}. On drift the call "
+          "returns "
+          "status:\"stale_anchor\" with re-anchored context and a fresh snapshot_id.");
+      cJSON *items = cJSON_CreateObject();
+      cJSON_AddStringToObject(items, "type", "object");
+      cJSON_AddItemToObject(edits, "items", items);
+      cJSON_AddItemToObject(props, "edits", edits);
+   }
+   tp_prop(props, "dry_run", "boolean",
+           "Preview only: return the unified diff and structural blast radius without writing.");
+   /* Legacy (deprecated) string-replace path, retained for one release. */
+   tp_prop(
+       props, "old_string", "string",
+       "Deprecated fallback. Exact existing text to replace (unique unless replace_all). Prefer "
+       "snapshot_id + edits[].");
+   tp_prop(props, "new_string", "string", "Replacement text (with old_string).");
    tp_prop(props, "replace_all", "boolean",
-           "Replace every occurrence instead of requiring uniqueness.");
+           "Replace every occurrence instead of requiring uniqueness (with old_string).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("old_string"));
-   cJSON_AddItemToArray(req, cJSON_CreateString("new_string"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -673,12 +808,11 @@ static cJSON *tp_git_log(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    tp_prop(props, "count", "integer", "Number of commits (default 10)");
    cJSON_AddItemToObject(params, "properties", props);
-   cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToObject(params, "required", req);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
 }
 
@@ -689,6 +823,10 @@ static cJSON *tp_grep(void)
    tp_prop(props, "path", "string", "Directory or file to search in");
    tp_prop(props, "pattern", "string", "Pattern to search for (basic regex)");
    tp_prop(props, "max_results", "integer", "Max results (default 50)");
+   tp_prop(props, "anchored", "boolean",
+           "Return each hit as a ready edit anchor ('line:HASH| text') grouped under a "
+           "'path  snapshot=...' header, so a match can be edited via edit_file with no "
+           "intervening read. Default false (plain file:line:text).");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("path"));
@@ -701,11 +839,98 @@ static cJSON *tp_git_diff(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    tp_prop(props, "ref", "string", "Git ref to diff against (optional)");
    cJSON_AddItemToObject(params, "properties", props);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
+   return params;
+}
+
+/* The git WRITE tools. These exist so a delegate has an aimee route to commit /
+ * push / open a PR at all: before this, the native builtin set carried read-only
+ * git (log/diff/status), so the ONLY way for a delegate to land work was shelling
+ * out to `git` — which is exactly what require_aimee_git forbids. A rule with no
+ * permitted alternative is just breakage, so the tools land first.
+ *
+ * They dispatch through mcp_git_run_tool, i.e. the same path an external MCP
+ * client takes, so the safety rails (worktree refusal, branch ownership, the
+ * verify gate, AI-attribution stripping) hold identically on both surfaces. */
+static cJSON *tp_git_commit(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "message", "string", "Commit message");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
+   /* `files` is how anything gets STAGED — including a file you just created.
+    * There is deliberately no add-everything flag: sensitive paths are screened
+    * per file. Omit it and only already-staged changes are committed. */
+   tp_prop_str_array(props, "files",
+                     "Paths to stage before committing (git add -- <files>). REQUIRED for a new "
+                     "or unstaged file; without it only already-staged changes are committed.");
+   cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
+   cJSON_AddItemToArray(req, cJSON_CreateString("message"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_git_push(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
+   /* No upstream arg: the handler pushes the current branch and sets upstream itself. */
+   tp_prop(props, "force", "boolean", "Force-push with lease (default false)");
+   tp_prop(props, "mirror", "boolean", "Push to the configured mirror remote (default false)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
+   return params;
+}
+
+static cJSON *tp_git_branch(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "action", "string", "list | create | switch | claim | delete | orphan");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
+   tp_prop(props, "name", "string", "Branch name (for create/switch/claim/delete)");
+   tp_prop(props, "base", "string", "Base ref for create (defaults to the current HEAD)");
+   tp_prop(props, "remote", "boolean", "Include remote branches when listing");
+   tp_prop(props, "force", "boolean", "Force the operation (e.g. delete an unmerged branch)");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("action"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_git_pr(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "action", "string",
+           "create | view | list | edit | checks | watch | merge_status | merge");
+   tp_prop(props, "path", "string",
+           "Path to the git repository / worktree — the SAME path you pass to git_status. "
+           "Without it the repo is resolved from the session, which may not be your worktree.");
+   tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
+   tp_prop(props, "title", "string", "PR title (for create/edit)");
+   tp_prop(props, "body", "string", "PR body (for create/edit)");
+   tp_prop(props, "base", "string", "Base branch (for create/edit)");
+   tp_prop(props, "merge_method", "string", "merge | squash | rebase (for merge; default merge)");
+   tp_prop(props, "expected_head_sha", "string",
+           "For merge: refuse if the PR head has moved from this SHA (drift safety)");
+   tp_prop(props, "wait", "boolean", "For checks: poll until the checks settle");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("action"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -714,11 +939,10 @@ static cJSON *tp_git_status(void)
 {
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
-   tp_prop(props, "path", "string", "Path to the git repository");
+   tp_prop(props, "path", "string",
+           "Path to the git repository (optional — defaults to your session worktree)");
    cJSON_AddItemToObject(params, "properties", props);
-   cJSON *req = cJSON_CreateArray();
-   cJSON_AddItemToArray(req, cJSON_CreateString("path"));
-   cJSON_AddItemToObject(params, "required", req);
+   cJSON_AddItemToObject(params, "required", cJSON_CreateArray());
    return params;
 }
 
@@ -771,6 +995,26 @@ static cJSON *tp_web_search(void)
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("query"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_web_read(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "ref", "string",
+           "A web_search handle (e.g. 'r2') or a raw http(s) URL. The page is fetched once "
+           "server-side (egress-guarded) and only the query-relevant spans are returned.");
+   tp_prop(props, "query", "string",
+           "What to extract. Exact API names / error strings / versions in the query are "
+           "guaranteed into the result (literal leg) above topical spans.");
+   tp_prop(props, "span", "integer", "Return exactly span N (1-based) instead of ranking.");
+   tp_prop(props, "mode", "string",
+           "'full' spills the entire stripped page by ref (retrieve with tool_output_get).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("ref"));
    cJSON_AddItemToObject(params, "required", req);
    return params;
 }
@@ -873,6 +1117,57 @@ static cJSON *tp_find_symbol(void)
    return params;
 }
 
+static cJSON *tp_read_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol name whose definition span to fetch (e.g. a function "
+           "or type name).");
+   tp_prop(props, "path", "string",
+           "Optional file to search. Omit to resolve via the code index (which may return "
+           "candidates to disambiguate).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_edit_symbol(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "symbol", "string",
+           "Symbol to rewrite. Use a fully-qualified name when the bare name is not unique; if it "
+           "resolves to multiple definitions the server returns candidates rather than guessing.");
+   tp_prop(props, "path", "string",
+           "Optional file to scope the resolve (recommended to disambiguate overloaded names).");
+   tp_prop(props, "op", "string",
+           "Only 'replace_body' (default): replace the symbol's whole "
+           "definition span with 'text'.");
+   tp_prop(props, "text", "string", "The new definition (whole symbol body).");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("symbol"));
+   cJSON_AddItemToArray(req, cJSON_CreateString("text"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
+static cJSON *tp_run_tests(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "command", "string",
+           "The test command to run (e.g. 'pytest -q', 'cargo test', 'make unit-tests').");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("command"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_search_memory(void)
 {
    cJSON *params = tp_obj();
@@ -911,7 +1206,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "Run a bounded Python or Bash script with a scrubbed environment. Returns JSON with "
      "stdout, stderr, exit_code, duration_ms, and truncation flags.",
      tp_execute_script, TSURF_CHAT},
-    {"read_file", "Read a file and return its contents.", tp_read_file, TSURF_ALL},
+    {"read_file",
+     "Read a file. By default each line is prefixed with a stable 'LINE:HASH| ' anchor and a "
+     "snapshot id is minted: edit_file can then edit lines by anchor without you re-emitting "
+     "their text. Pass raw:true for un-anchored bytes.",
+     tp_read_file, TSURF_ALL},
     {"tool_output_get",
      "Retrieve the full, unfiltered output that aimee condensed. Pass the ref from a "
      "'[output condensed by aimee ... ref \"tc-...\"]' pointer to get the complete original "
@@ -919,10 +1218,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_tool_output_get, TSURF_ALL},
     {"write_file", "Write content to a file (overwrites).", tp_write_file, TSURF_ALL},
     {"edit_file",
-     "Make a surgical edit to an existing file by replacing old_string with new_string. "
-     "Prefer this over write_file when changing part of a file — you do not need to "
-     "reproduce the whole file. old_string must match the file exactly (including "
-     "whitespace/indentation) and be unique unless replace_all is true.",
+     "Edit an existing file. Preferred: anchored edits — pass the snapshot_id from read_file "
+     "plus edits[] citing 'LINE:HASH' anchors ({op:replace|replace_range|insert_after|"
+     "delete_range}); the batch is verified against the snapshot and applied atomically, so you "
+     "never re-emit surrounding text and the server owns all offset math. dry_run:true previews "
+     "the diff + blast radius. Legacy fallback: old_string/new_string/replace_all string-replace.",
      tp_edit_file, TSURF_ALL},
     {"list_files", "List files in a directory, optionally matching a glob pattern.", tp_list_files,
      TSURF_ALL},
@@ -935,6 +1235,25 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      TSURF_ALL},
     {"git_status", "Show git status (porcelain format) for a repository.", tp_git_status,
      TSURF_ALL},
+    /* Git writes go through these, never through `bash`: they run on aimee-server,
+     * where the forge credential is resolved per call and stays in process memory
+     * instead of reaching a child's environment. They also carry the rails a raw
+     * `git` command has no idea about — branch ownership, the verify gate, and
+     * attribution stripping. Appended after the read-only git tools so the
+     * pre-existing surface order (which the tools/list golden pins) is untouched. */
+    {"git_commit",
+     "Commit staged (or, with add_all, all) changes in the session worktree. Use this instead "
+     "of running `git commit` in a shell.",
+     tp_git_commit, TSURF_ALL},
+    {"git_push",
+     "Push the current branch to the forge. Authenticates on aimee-server; you do not need "
+     "(and will not have) git credentials. Use this instead of running `git push`.",
+     tp_git_push, TSURF_ALL},
+    {"git_branch", "List, create, claim, or show the current git branch.", tp_git_branch,
+     TSURF_ALL},
+    {"git_pr",
+     "Create, view, list, edit, or check a pull request. Use this instead of running `gh`.",
+     tp_git_pr, TSURF_ALL},
     {"env_get", "Get the value of an environment variable.", tp_env_get, TSURF_ALL},
     {"test",
      "Check file/dir existence, type, and permissions. "
@@ -945,8 +1264,15 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      tp_code_search, TSURF_CHAT},
     {"web_search",
      "Search the web for current documentation, error messages, or API "
-     "references. Returns titles, URLs, and snippets for the top results.",
+     "references. Returns titles, URLs, and snippets for the top results, which web_read can then "
+     "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
+    {"web_read",
+     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
+     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
+     "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
+     tp_web_read, TSURF_ALL},
     {"create_note",
      "Create or append to an investigation note. Notes capture findings, hypotheses, "
      "and reasoning during debugging. If a note with the same title already exists, "
@@ -986,6 +1312,21 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "indexed codebase. Returns file:line matches. Prefer this over grep for finding where "
      "something is defined or which header to include.",
      tp_find_symbol, TSURF_ALL},
+    {"read_symbol",
+     "Fetch just a symbol's definition span (anchored, editable) instead of reading the whole "
+     "enclosing file. Pass 'path' to read from a specific file, or omit it to resolve via the "
+     "code index.",
+     tp_read_symbol, TSURF_ALL},
+    {"edit_symbol",
+     "Rewrite a whole symbol (function/type) by name — the server resolves its definition span and "
+     "swaps it, so you don't reproduce the old body. Overloaded/shadowed names return candidates "
+     "instead of a blind resolve; pass a fully-qualified name or 'path' to disambiguate.",
+     tp_edit_symbol, TSURF_ALL},
+    {"run_tests",
+     "Run a test command and return a compact result: pass/fail, exit code, and the framework "
+     "summary + every failure — the full log is spilled and retrievable via tool_output_get. "
+     "Prefer this over bash for tests so a green suite costs a line.",
+     tp_run_tests, TSURF_ALL},
     {"search_memory",
      "Search aimee's knowledge base for stored facts, prior decisions, and project context. "
      "Use before starting any task to check for relevant prior work or constraints.",
@@ -996,6 +1337,124 @@ static const builtin_tool_def_t g_builtin_tools[] = {
  * using that surface's JSON shape:
  *   TSURF_CHAT: {"type":"function","function":{name,description,parameters}}
  *   TSURF_RESP: {"type":"function",name,description,parameters}            */
+/* The git-write seam. Registered by the server at startup; NULL everywhere else
+ * (thin client, unit tests), where the git-write tools are simply not offered. */
+static agent_git_write_fn g_git_write_fn = NULL;
+
+void agent_tools_set_git_write_provider(agent_git_write_fn fn)
+{
+   g_git_write_fn = fn;
+}
+
+agent_git_write_fn agent_tools_git_write_provider(void)
+{
+   return g_git_write_fn;
+}
+
+int agent_tools_is_git_write(const char *name)
+{
+   if (!name)
+      return 0;
+   return strcmp(name, "git_commit") == 0 || strcmp(name, "git_push") == 0 ||
+          strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0;
+}
+
+/* The MCP-derived surface: tools declared once in the server's MCP table and
+ * registered here so aimee's own agents get them too. See agent_tools.h. */
+static agent_mcp_call_fn g_mcp_call_fn = NULL;
+static agent_mcp_advert_fn g_mcp_advert_fn = NULL;
+static char g_mcp_tools[256][64];
+static int g_mcp_tool_count = 0;
+
+void agent_tools_set_mcp_provider(agent_mcp_call_fn call, agent_mcp_advert_fn advert)
+{
+   g_mcp_call_fn = call;
+   g_mcp_advert_fn = advert;
+}
+
+agent_mcp_call_fn agent_tools_mcp_call_provider(void)
+{
+   return g_mcp_call_fn;
+}
+
+void agent_tools_register_mcp_tool(const char *name)
+{
+   if (!name || !name[0])
+      return;
+   if (agent_tools_is_mcp_derived(name))
+      return;
+   if (g_mcp_tool_count >= (int)(sizeof(g_mcp_tools) / sizeof(g_mcp_tools[0])))
+   {
+      LOG_ERROR("agent_tools", "MCP tool registry full (%d); '%s' DROPPED and uncallable",
+                g_mcp_tool_count, name);
+      return;
+   }
+   snprintf(g_mcp_tools[g_mcp_tool_count++], sizeof(g_mcp_tools[0]), "%s", name);
+}
+
+int agent_tools_is_mcp_derived(const char *name)
+{
+   if (!name)
+      return 0;
+   for (int i = 0; i < g_mcp_tool_count; i++)
+      if (strcmp(g_mcp_tools[i], name) == 0)
+         return 1;
+   return 0;
+}
+
+/* Advertise the MCP-derived tools, reusing each tool's own MCP schema. A tool whose
+ * advert the provider cannot produce is skipped rather than offered with an empty
+ * schema: an agent handed a parameterless git_commit will call it wrong. */
+static void emit_mcp_tools(cJSON *tools, unsigned surface)
+{
+   if (!g_mcp_call_fn || !g_mcp_advert_fn)
+      return;
+   for (int i = 0; i < g_mcp_tool_count; i++)
+   {
+      cJSON *advert = g_mcp_advert_fn(g_mcp_tools[i]);
+      cJSON *schema = cJSON_DetachItemFromObjectCaseSensitive(advert, "inputSchema");
+      cJSON *desc = cJSON_GetObjectItemCaseSensitive(advert, "description");
+      if (!schema || !cJSON_IsString(desc))
+      {
+         LOG_WARN("agent_tools", "MCP tool '%s' has no usable advert; not offered natively",
+                  g_mcp_tools[i]);
+         cJSON_Delete(advert);
+         cJSON_Delete(schema);
+         continue;
+      }
+      cJSON *tool = cJSON_CreateObject();
+      cJSON_AddStringToObject(tool, "type", "function");
+      if (surface == TSURF_CHAT)
+      {
+         cJSON *fn = cJSON_CreateObject();
+         cJSON_AddStringToObject(fn, "name", g_mcp_tools[i]);
+         cJSON_AddStringToObject(fn, "description", desc->valuestring);
+         cJSON_AddItemToObject(fn, "parameters", schema);
+         cJSON_AddItemToObject(tool, "function", fn);
+      }
+      else
+      {
+         cJSON_AddStringToObject(tool, "name", g_mcp_tools[i]);
+         cJSON_AddStringToObject(tool, "description", desc->valuestring);
+         cJSON_AddItemToObject(tool, "parameters", schema);
+      }
+      cJSON_AddItemToArray(tools, tool);
+      cJSON_Delete(advert);
+   }
+}
+
+static agent_shell_git_gate_fn g_shell_git_gate = NULL;
+
+void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
+{
+   g_shell_git_gate = fn;
+}
+
+agent_shell_git_gate_fn agent_tools_shell_git_gate(void)
+{
+   return g_shell_git_gate;
+}
+
 static void emit_builtin_tools(cJSON *tools, unsigned surface)
 {
    size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
@@ -1003,6 +1462,12 @@ static void emit_builtin_tools(cJSON *tools, unsigned surface)
    {
       const builtin_tool_def_t *d = &g_builtin_tools[i];
       if (!(d->surfaces & surface))
+         continue;
+      /* Never advertise a tool that cannot run: without the server's git dispatcher
+       * the git-write tools have no implementation behind them. Offering them anyway
+       * would teach an agent to call a tool that always errors — and, worse, would
+       * let require_aimee_git point at tools that do not exist. */
+      if (agent_tools_is_git_write(d->name) && !g_git_write_fn)
          continue;
       cJSON *tool = cJSON_CreateObject();
       cJSON_AddStringToObject(tool, "type", "function");
@@ -1028,6 +1493,7 @@ cJSON *build_tools_array(void)
 {
    cJSON *tools = cJSON_CreateArray();
    emit_builtin_tools(tools, TSURF_CHAT);
+   emit_mcp_tools(tools, TSURF_CHAT);
    append_remote_tools(tools, 1);
    return tools;
 }
@@ -1037,6 +1503,7 @@ cJSON *build_tools_array_responses(void)
 {
    cJSON *tools = cJSON_CreateArray();
    emit_builtin_tools(tools, TSURF_RESP);
+   emit_mcp_tools(tools, TSURF_RESP);
    append_remote_tools(tools, 0);
    return tools;
 }

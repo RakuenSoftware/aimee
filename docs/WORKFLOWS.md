@@ -111,26 +111,47 @@ A roundtable node carries its panel in `params`:
       required: [security, architect, qa, reviewer]   # persona names
       eligible: [contrarian]                           # may join if available
     quorum: 4
-    max_rounds: 6
   on_pass: proposal_pr
   on_fail: draft
 ```
 
-Panel entries are **persona** names, see [Personas](personas.md). Each panelist
-is a persona run on a delegate model; the gate passes when the quorum of
-panelists approve (or fails after `max_rounds`). Panelists are dispatched **in
-parallel**, so a round costs roughly one model's latency rather than the sum.
+Panel entries are **persona** names, see [Personas](personas.md). Each configured
+seat performs one independent analysis in parallel. The gate passes when the
+roundtable's configured minimum succeeds with no blocking finding.
 
-**Which model reviews each persona** comes from the active roundtable preset (the
-one the GUI edits and `roundtable.default` selects). For each required persona the
-gate looks up the matching seat and honors its model:
+If Discussion mode is enabled on that preset, all successful seats compare the
+independent reports once. Nits, suggestions, and ordinary defects cannot extend
+discussion beyond that cycle. Only disagreement about a foundational issue may
+continue, carrying just the contested stable issue IDs until a strict majority
+forms. Deadline or quorum loss parks the gate instead of inventing consensus.
+Strict majority is measured over successful seats returning a complete valid
+ballot in that cycle; abstentions remain in the denominator but do not alone
+extend discussion. The preset's `deadline_ms` covers analysis and discussion
+together, with zero/omitted legacy values normalized to 360 seconds.
+
+An optional configured chairman runs once after deterministic synthesis and
+submits the final structured feedback. The chairman is a positive, visible agent
+selection, not an exclusion rule. Failure, malformed output, wrong artifact
+stage, or missing original-request alignment parks the gate; it never triggers a
+roster-wide fallback. When disabled, deterministic synthesis is final.
+
+Roundtable presets are execution policy. Agents and automation may read and use
+them, but create, edit, delete, and default-selection operations require the
+attested `webuser:admin` appliance administrator. Generic API capabilities,
+other authenticated web users, and local Unix-socket access do not authorize
+those mutations.
+
+**Which models review the artifact** comes from the acquired roundtable preset.
+The preset the GUI edits and `roundtable.default` selects is used unless the gate
+names another preset. Its exact seats are the complete panel; required personas
+are review/verdict dimensions and do not create additional seats:
 
 - a **specific pinned model** is dispatched to that **exact** agent. If that model
   is not enabled/routable for the `review` role — or its dispatch fails — the run
   **fails** (a pinned model is a hard requirement, never silently swapped);
-- a **`$random`** seat (or a persona with no matching seat) picks **any**
-  review-capable agent and retries a different one until one is accepted, so a
-  flaky agent doesn't stall the gate.
+- a **`$random`** seat picks an available review-capable agent;
+- when no saved preset can be acquired, the fallback panel contains at most two
+  review-capable agents, selected across providers where possible.
 
 Set a seat to a specific model or to *Random* in the Roundtable page of the GUI.
 An agent is "review-capable" unless its `exec_roles` explicitly omit `review`
@@ -151,8 +172,8 @@ one workflow can use different panels:
     quorum: 4
 ```
 
-If the named preset does not exist the gate logs a warning and every lens falls
-back to `$random`.
+If an explicitly named or configured-default preset does not exist, the gate
+parks with a configuration error; it never silently substitutes another panel.
 
 There is **no engine privilege** over a user-authored workflow: `build` is just
 one composition of the same catalog you compose from. Clone it and edit freely.
@@ -439,13 +460,20 @@ These are real today and worth knowing before you lean on workflows:
    agents — but all of them require a `proposal_md`: there is still no way to
    start a workflow whose entry node isn't `author.proposal` without supplying
    proposal text. (There is still no Run button on the **Edit Workflows** page.)
-2. **Forge operations are process-global.** Per-step blocks now resolve their
-   working directory from the work-item's `repo` (when it names a local
-   directory; `$AIMEE_WORKFLOW_REPO`/cwd otherwise), so a triggered run executes
-   in its configured workspace. But the forge half (`git push`, `gh pr …` via
-   the vaulted runner) still runs in the server's own checkout, so PR-opening
-   workflows against a workspace that is not the server's primary repo are not
-   yet fully wired.
+2. **Forge binding requires a local-path `repo`.** Every stage — the per-work-item
+   worktree, each step's working directory, *and* the forge half (`git push`,
+   the GitHub REST create/CI/merge, and the vaulted credential) — resolves its
+   directory from the work-item's `repo` via `wfe_repo_local()`. When `repo`
+   names a **local directory** (a trigger rule's absolute `pipeline.workspace`,
+   or an explicit dev-submit path) that repo wins end-to-end: the run's branch is
+   created in *that* checkout, pushed from *that* checkout, and the PR is opened
+   against the slug read from *that* checkout's `origin` — so a triggered
+   `watch-dir` run reaches a real PR in its configured workspace. The residual
+   gap is only when `repo` is **not** a local path — a bare `owner/name`
+   identifier or a clone URL — for which `wfe_repo_local()` falls back to
+   `$AIMEE_WORKFLOW_REPO`/cwd (the server's own checkout). So a dev-submit that
+   names a repo the server hasn't checked out is not yet workspace-isolated;
+   point the run at an absolute `pipeline.workspace`/`repo` path to bind it.
 3. **Composer ergonomics.** New steps are added disconnected; you wire order in
    the inspector. The **Edit Workflows** page has no live run/progress view — you
    start and watch runs on the separate **Workflow Actions** tab.
@@ -455,3 +483,5 @@ These are real today and worth knowing before you lean on workflows:
 - [Personas](personas.md), the identities that staff roundtable panels and steps.
 - [Delegates](DELEGATES.md), how steps dispatch model work.
 - [Architecture](ARCHITECTURE.md), where the workflow engine sits.
+
+Autonomous runs are gated: only work that passes review advances.

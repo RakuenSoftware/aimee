@@ -5,7 +5,7 @@
 #ifndef DEC_KB_DETECT_H
 #define DEC_KB_DETECT_H 1
 
-#include "headers/config.h"
+#include "config.h"
 
 #ifdef __cplusplus
 extern "C"

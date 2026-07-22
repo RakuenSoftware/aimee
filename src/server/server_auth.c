@@ -60,12 +60,11 @@ const method_policy_t method_registry[] = {
     {"wm.*", CAP_SESSION_READ, "working memory operation"},
     /* Per-session primary agent selection */
     {"primary.*", CAP_SESSION_READ, "primary agent selection"},
-    {"work.list", CAP_SESSION_READ, "work queue list"},
-    {"work.stats", CAP_SESSION_READ, "work queue stats"},
     {"work.*", CAP_TOOL_EXECUTE, "work queue operation"},
     {"attempt.*", CAP_SESSION_READ, "attempt log operation"},
     /* Dashboard (prefix) */
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
+    {"economizer.*", CAP_DASHBOARD_READ, "economizer telemetry"},
     {"audit.verify", CAP_DASHBOARD_READ, "WORM audit chain verify"},
     {"audit.checkpoint", CAP_TOOL_EXECUTE, "WORM audit checkpoint"},
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
@@ -106,6 +105,7 @@ const method_policy_t method_registry[] = {
     {"vault.delete", CAP_DELEGATE, "delete a vault credential"},
     {"vault.lock", CAP_DELEGATE, "lock the credential vault"},
     {"cert.issue", CAP_DELEGATE, "issue an mTLS client cert"},
+    {"cert.sign", CAP_DELEGATE, "sign a client-generated mTLS CSR"},
     {"cert.list", CAP_DELEGATE, "list issued mTLS client certs"},
     {"cert.revoke", CAP_DELEGATE, "revoke an mTLS client cert"},
     {"jobs.list", CAP_DELEGATE, "list delegate jobs"},
@@ -124,6 +124,8 @@ const method_policy_t method_registry[] = {
     {"delegate.log", CAP_DELEGATE, "delegation episode log"},
     {"delegate.backend_list", CAP_DELEGATE, "list delegate execution backends"},
     {"delegate.backend_exec", CAP_DELEGATE, "execute through a delegate backend"},
+    {"delegate.sandbox_list", CAP_DELEGATE, "list delegate sandbox images"},
+    {"delegate.sandbox_gc", CAP_DELEGATE, "prune delegate sandbox images"},
     {"episode.list", CAP_DELEGATE, "list delegation episodes"},
     {"agent.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
@@ -204,7 +206,6 @@ const method_policy_t method_registry[] = {
     /* Rules generation creates rules via LLM (admin), unlike the rules.* reads. */
     {"rules.generate", CAP_RULES_ADMIN, "generate collab rules"},
     /* Work board is a read view (the work.* default is tool:execute). */
-    {"work.board", CAP_SESSION_READ, "work board view"},
     /* Delegate worktree maintenance. */
     {"worktree.gc", CAP_TOOL_EXECUTE, "garbage-collect delegate worktrees"},
     /* Sentinel */

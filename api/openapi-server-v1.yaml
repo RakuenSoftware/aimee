@@ -27,6 +27,29 @@ components:
       properties:
         status: { type: string, example: ok }
         service: { type: string, example: aimee-server }
+    ReadyResponse:
+      type: object
+      properties:
+        ready: { type: boolean, example: true }
+        status:
+          type: string
+          description: "ok when every dependency sampled ok; degraded when one failed; unknown when not sampled yet or the sample is stale"
+          enum: [ok, degraded, unknown]
+        service: { type: string, example: aimee-server }
+        sampled_at:
+          type: integer
+          nullable: true
+          description: "Epoch seconds when the snapshot was taken; null before the first sample"
+        age_seconds:
+          type: integer
+          nullable: true
+          description: "Age of the snapshot in seconds; null before the first sample"
+        dependencies:
+          type: object
+          description: "Per-dependency state; each value is ok, fail, or unknown"
+          properties:
+            db1: { type: string, example: ok }
+            kb: { type: string, example: ok }
     VersionResponse:
       type: object
       properties:
@@ -272,6 +295,105 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /ready:
+    get:
+      summary: Readiness probe
+      description: >
+        Reports whether the server can serve work right now, with per-dependency
+        state. Distinct from /health, which is liveness only and always returns
+        200 while the process is up. An orchestrator should restart on a
+        /health failure but only drain on a /ready failure. The answer comes
+        from a snapshot sampled on a background interval, so this route performs
+        no dependency I/O. It fails closed: before the first sample, past the
+        staleness bound, or when any dependency failed, the answer is 503.
+      security: []
+      responses:
+        "200":
+          description: Every dependency sampled ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+        "503":
+          description: "Not ready: a dependency failed, or state is unknown because no sample has completed or the snapshot is stale"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+  /management/action:
+    post:
+      summary: Execute an authenticated management control-plane action
+      description: >
+        Verifies the caller's management JWT, peer identity, capability, and
+        request digest before dispatching the management action.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Management action accepted
+          content:
+            application/json:
+              schema: { type: object }
+        "403":
+          description: Management action denied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Management control plane is not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /management/challenge:
+    post:
+      summary: Issue a nonce for a read-only management health check
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and health-check purpose.
+      responses:
+        "200":
+          description: Management challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management status verification is not configured }
+  /management/health:
+    get:
+      summary: Verify a nonce-bound online revocation staple
+      description: >
+        Read-only health probe for the reverse management channel. Requires the
+        same live mTLS connection used to obtain the challenge and consumes the
+        nonce on every identifiable verification attempt.
+      parameters:
+        - in: header
+          name: X-Aimee-Management-Status
+          required: true
+          schema: { type: string, maxLength: 4096 }
+          description: Strict signed management-status JSON staple
+      responses:
+        "200":
+          description: Peer and target status verified
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, server_id]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  server_id: { type: string }
+        "401": { description: Missing or invalid peer certificate or staple }
+        "403": { description: Authenticated peer, target, or purpose mismatch }
+        "409": { description: Replayed, expired, conflicting, or rolled-back challenge }
+        "503": { description: Management status verification is unavailable }
   /version:
     get:
       summary: Build version
@@ -395,6 +517,15 @@ paths:
       responses:
         "200":
           description: "{defs:[{name,valid,version}]}"
+          content:
+            application/json:
+              schema: { type: object }
+  /workflow/triggers:
+    get:
+      summary: Configured trigger rules (aimee.yaml trigger_rules) that auto-start runs
+      responses:
+        "200":
+          description: "{max_concurrent,triggers:[{source,event,schedule,mode,template,workspace,max_spend_usd?}]}"
           content:
             application/json:
               schema: { type: object }
@@ -927,6 +1058,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runs/{id}/events:
     get:
       summary: Stream a run's output as SSE (replay for completed runs)
@@ -940,6 +1076,11 @@ paths:
           description: text/event-stream of response.output_text.delta events + a terminal done event
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -959,6 +1100,11 @@ paths:
               schema: { type: object }
         "404":
           description: No such run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "410":
+          description: Run interrupted by server replacement or evicted from the live store
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -1627,24 +1773,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work:
-    get:
-      summary: List work-queue items
-      responses:
-        "200":
-          description: Work items envelope
-          content:
-            application/json:
-              schema: { type: object }
-  /work/stats:
-    get:
-      summary: Work-queue counts by state
-      responses:
-        "200":
-          description: Work stats envelope
-          content:
-            application/json:
-              schema: { type: object }
   /hud:
     get:
       summary: Session HUD status snapshot
@@ -1809,6 +1937,10 @@ paths:
   /config/set:
     post:
       summary: Set one configuration value
+      description: >
+        Roundtable policy keys are operator-controlled and require the
+        server-token-attested `webuser:admin` appliance administrator; generic
+        capabilities and local Unix-socket access are insufficient.
       requestBody:
         content:
           application/json:
@@ -1819,6 +1951,11 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "403":
+          description: Roundtable policy mutation was not authorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /cron:
     get:
       summary: List cron jobs
@@ -1968,6 +2105,15 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /delegate/sandbox/images:
+    get:
+      summary: List build-from-spec sandbox images (aimee-sbx:*) with created time, size, and in-use flag
+      responses: { "200": { description: Sandbox image list, content: { application/json: { schema: { type: object } } } } }
+  /delegate/sandbox/gc:
+    post:
+      summary: Prune sandbox images not referenced by any container and older than max_age_days (keeps the most recent)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: GC report, content: { application/json: { schema: { type: object } } } } }
   /vault/unlock:
     post:
       summary: "Unlock the credential vault (uid root key over UDS, or webuser login password under server.token)"
@@ -2013,6 +2159,35 @@ paths:
       summary: Issue an mTLS client cert for a CN (operator-gated; returns cert + one-time key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Issued, content: { application/json: { schema: { type: object } } } } }
+  /cert/sign:
+    post:
+      summary: Sign a locally generated mTLS client CSR (operator-gated; private key never leaves the client)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cn, csr]
+              properties:
+                cn: { type: string, minLength: 1 }
+                csr: { type: string, minLength: 1, description: PEM-encoded PKCS#10 CSR }
+                days: { type: integer, minimum: 1, maximum: 3650, default: 90 }
+      responses:
+        "200":
+          description: Signed client certificate
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, cn, serial, cert]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  cn: { type: string }
+                  serial: { type: string }
+                  cert: { type: string, description: PEM-encoded X.509 certificate }
+        "400": { description: Invalid CSR or request }
+        "403": { description: Operator authorization required }
   /cert/list:
     post:
       summary: List issued mTLS client certs (serial, cn, expiry, revoked)
@@ -2023,6 +2198,31 @@ paths:
       summary: Revoke an mTLS client cert by serial (operator-gated)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Revoked, content: { application/json: { schema: { type: object } } } } }
+  /management/action:
+    post:
+      summary: Authorize a management action with mTLS identity and a management JWT
+      description: >
+        Validates the configured issuer, audience, capability, peer identity,
+        request-body digest, and replay-protected JWT ID before dispatch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Management action authorized and dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, actor, jti]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+                  actor: { type: string }
+                  jti: { type: string }
+        "403": { description: Management action denied }
+        "503": { description: Management control plane is not configured }
   /delegate/reply:
     post:
       summary: Reply to a delegate
@@ -2144,6 +2344,10 @@ paths:
     get:
       summary: Per-delegate run statistics
       responses: { "200": { description: Per-delegate run stats, content: { application/json: { schema: { type: object } } } } }
+  /economizer/stats:
+    get:
+      summary: Economizer telemetry (gateway mutation counters, tool-condense savings, avoided-$)
+      responses: { "200": { description: Economizer stats, content: { application/json: { schema: { type: object } } } } }
   /agent/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
@@ -2216,16 +2420,6 @@ paths:
       summary: Test a provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Test result, content: { application/json: { schema: { type: object } } } } }
-  /provider/slot_acquire:
-    post:
-      summary: Acquire a provider slot
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Slot, content: { application/json: { schema: { type: object } } } } }
-  /provider/slot_release:
-    post:
-      summary: Release a provider slot
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Released, content: { application/json: { schema: { type: object } } } } }
   /model/list:
     get:
       summary: List models (provider catalog)
@@ -2466,40 +2660,6 @@ paths:
       summary: Batch trajectory export
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Batch result, content: { application/json: { schema: { type: object } } } } }
-  /work/add_batch:
-    post:
-      summary: Add a batch of work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Added, content: { application/json: { schema: { type: object } } } } }
-  /work/board:
-    get:
-      summary: Work board view
-      responses: { "200": { description: Board, content: { application/json: { schema: { type: object } } } } }
-  /work/cancel:
-    post:
-      summary: Cancel a work item
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Cancelled, content: { application/json: { schema: { type: object } } } } }
-  /work/clear:
-    post:
-      summary: Clear work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Cleared, content: { application/json: { schema: { type: object } } } } }
-  /work/gc:
-    post:
-      summary: Garbage-collect work items
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Collected, content: { application/json: { schema: { type: object } } } } }
-  /work/release:
-    post:
-      summary: Release a claimed work item
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Released, content: { application/json: { schema: { type: object } } } } }
-  /work/sync_proposals:
-    post:
-      summary: Sync work items from proposals
-      requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Synced, content: { application/json: { schema: { type: object } } } } }
   /wm/context:
     post:
       summary: Working-memory context
@@ -2654,6 +2814,28 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /server/forensics:
+    get:
+      summary: Recent server shutdown forensics
+      description: >-
+        Privileged, read-only access to recent clean-signal and inferred unclean-exit
+        records from the server host. Capability: tool:execute.
+      responses:
+        "200":
+          description: Recent shutdown records, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recent_shutdowns:
+                    type: array
+                    items: { type: object }
+        "403":
+          description: Insufficient capability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/build:
     post:
       summary: Build the knowledge base (async; poll GET /runs/{id})
@@ -2667,6 +2849,17 @@ paths:
   /kb/update:
     post:
       summary: Update the knowledge base (async; poll GET /runs/{id})
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/docs/push:
+    post:
+      summary: Push document contents into the knowledge base (async; poll GET /runs/{id})
+      description: >-
+        Upload document bytes from the caller's workspace into the knowledge
+        base. The workspace-owning tier reads the files and streams their
+        content to aimee-kb, so a stateless/remote aimee-kb that cannot see the
+        caller's filesystem still ingests them (unlike the path-forwarding
+        kb.build).
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /graph/sync_code:
@@ -3006,99 +3199,6 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/add:
-    post:
-      summary: Add a work-queue item (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [title]
-              properties:
-                title: { type: string }
-                desc: { type: string }
-                source: { type: string }
-      responses:
-        "200":
-          description: Work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing title or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/claim:
-    post:
-      summary: Claim a work-queue item (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id: { type: string }
-                lane: { type: string }
-                effort: { type: string }
-      responses:
-        "200":
-          description: Claimed work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-  /work/complete:
-    post:
-      summary: Mark a work-queue item done (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [id]
-              properties:
-                id: { type: string }
-      responses:
-        "200":
-          description: Updated work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing id or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
-  /work/fail:
-    post:
-      summary: Mark a work-queue item failed (local-only)
-      description: Mutating route; reachable only on the local Unix-domain socket.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [id]
-              properties:
-                id: { type: string }
-      responses:
-        "200":
-          description: Updated work item envelope
-          content:
-            application/json:
-              schema: { type: object }
-        "400":
-          description: Missing id or invalid body
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /wm/set:
     post:
       summary: Set a working-memory entry (local-only)
@@ -3419,6 +3519,62 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /shadow/enable:
+    post:
+      summary: Arm shadow-traffic publishing (runtime-only; resets to off on restart)
+      description: >-
+        Operator-only (CAP_SHADOW_ADMIN, full-trust). Arms the shadow-traffic
+        mirror so subscribers receive a copy of each completion request. In-memory
+        only: never persisted, so a restart always boots disarmed.
+      responses:
+        "200":
+          description: Armed
+  /shadow/disable:
+    post:
+      summary: Disarm shadow-traffic publishing and forget all subscribers
+      description: Operator-only (CAP_SHADOW_ADMIN, full-trust). Hard stop.
+      responses:
+        "200":
+          description: Disarmed
+  /shadow/subscribe:
+    post:
+      summary: Register a subscriber to receive mirrored completion traffic
+      description: >-
+        Operator-only (CAP_SHADOW_ADMIN, full-trust). The caller's real /v1
+        ingress (`url`) receives a fire-and-forget copy of each completion request,
+        tagged X-Aimee-Shadow, authenticated with the supplied `bearer`. Refused
+        while publishing is disarmed. Idempotent by url.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: Subscriber's /v1 base URL }
+                bearer: { type: string, description: Bearer presented to the subscriber }
+      responses:
+        "200":
+          description: Subscribed
+        "403":
+          description: Shadow publishing is disarmed
+  /shadow/unsubscribe:
+    post:
+      summary: Remove a shadow-traffic subscriber
+      description: Operator-only (CAP_SHADOW_ADMIN, full-trust).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string }
+      responses:
+        "200":
+          description: Unsubscribed (or absent)
   /chat/completions:
     post:
       summary: Create a chat completion
@@ -3878,6 +4034,7 @@ paths:
                         synthesized: { type: boolean }
     post:
       summary: Create a roundtable preset (name in body)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -3894,9 +4051,15 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/active:
     post:
       summary: Make a preset the active roundtable (mirror its values into live config)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -3921,6 +4084,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/{name}:
     get:
       summary: Show a roundtable preset by name
@@ -3942,6 +4110,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
     put:
       summary: Create or edit the named roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -3963,8 +4132,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     delete:
       summary: Remove a roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -3982,6 +4157,11 @@ paths:
                   deleted: { type: boolean }
         "404":
           description: No preset to remove
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4283,7 +4463,14 @@ paths:
               required: [url]
               properties:
                 url: { type: string, description: Git remote URL (https or ssh) }
-                name: { type: string, description: Project name (default - the repo basename) }
+                name: { type: string, description: Repo name (default - the repo basename) }
+                org:
+                  type: string
+                  description: >
+                    Optional org override. Default - the URL's single-segment
+                    owner path (sanitized); a multi-segment owner (GitLab
+                    subgroups) clones flat unless this is given. The project
+                    ref becomes "<org>/<name>".
                 token:
                   type: string
                   description: >
@@ -4299,9 +4486,32 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
-                  name: { type: string }
+                  name:
+                    type: string
+                    description: The project ref ("<org>/<repo>" or flat "<repo>").
+                  org_note:
+                    type: string
+                    description: >
+                      Present when a multi-segment owner path bailed to a flat
+                      clone; explains how to place it with an explicit org.
+                  kb_indexed:
+                    type: boolean
+                    description: >
+                      Whether the clone was also pushed to the knowledge service
+                      (/v1/code/scan) for code-unit synthesis + embeddings.
+                  kb_reason:
+                    type: string
+                    description: Why the kb scan was skipped (present when kb_indexed is false).
         "400":
-          description: Invalid URL/name, or the project already exists
+          description: Invalid URL/name/org (validation failure)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: >-
+            Identity conflict: the project already exists, the org name clashes
+            with a flat project (or vice versa), or the ref is already bound to
+            a different canonical remote (the other remote is never echoed).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4325,7 +4535,25 @@ paths:
               schema:
                 type: object
                 properties:
-                  projects: { type: array, items: { type: string } }
+                  projects:
+                    type: array
+                    items: { type: string }
+                    description: Project refs ("<org>/<repo>" or flat "<repo>").
+                  details:
+                    type: array
+                    description: Per-project detail rows.
+                    items:
+                      type: object
+                      properties:
+                        ref: { type: string }
+                        org: { type: string, description: Empty for a flat/legacy project. }
+                        name: { type: string }
+                        remote:
+                          type: string
+                          description: >
+                            Credential-free canonical remote (absent for legacy
+                            clones without a sidecar).
+                  root: { type: string }
         "403":
           description: Not a webchat user
           content:
@@ -4427,6 +4655,14 @@ paths:
                         ok: { type: boolean }
                         project: { type: string, nullable: true }
                         error: { type: string, nullable: true }
+                        kb_indexed:
+                          type: boolean
+                          description: >
+                            Whether the clone was also pushed to the knowledge
+                            service (/v1/code/scan) for synthesis + embeddings.
+                        kb_reason:
+                          type: string
+                          description: Why the kb scan was skipped (present when kb_indexed is false).
         "400":
           description: Missing host/owner/repos, or too many repos (max 100)
           content:
@@ -4434,6 +4670,163 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
         "403":
           description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/projects/delete:
+    post:
+      summary: Delete a cloned project under the calling webchat user's workspace
+      description: >
+        Delete the project at `ref` ("<org>/<repo>" or flat "<repo>") from the
+        authenticated `webuser:` principal's workspace (webchat project
+        lifecycle, slice 2). Identity comes EXCLUSIVELY from the attested
+        `X-Aimee-Webuser` layer; a ref outside the caller's tree is a plain
+        404. Under the project lifecycle lock the last holder of the ref runs
+        the fenced knowledge purge before the filesystem removal; other
+        holders keep the shared knowledge (`kb_status` "retained"). When the
+        knowledge service is unreachable or a store fails, the delete aborts
+        with 503 and nothing is destroyed unless `force` is true, in which
+        case the filesystem proceeds and the response carries the full
+        per-store detail (`kb_status` "forced"). Every attempt — including
+        aborts — writes structured webuser_project_delete_audit_v1 lines
+        sharing the echoed `purge_id`. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ref]
+              properties:
+                ref:
+                  type: string
+                  description: The project ref ("<org>/<repo>" or flat "<repo>").
+                force:
+                  type: boolean
+                  description: >
+                    Proceed with the filesystem removal even when the knowledge
+                    purge fails or the service is unreachable. The response and
+                    audit carry the per-store outcome so the purge can be
+                    re-run to convergence later.
+      responses:
+        "200":
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  ref: { type: string }
+                  kb_status:
+                    type: string
+                    enum: [purged, retained, forced]
+                    description: >
+                      purged — last holder, all knowledge stores cleared;
+                      retained — other holders keep the shared knowledge;
+                      forced — filesystem removed despite a kb failure.
+                  purge_id:
+                    type: string
+                    description: >
+                      The operation id shared by every audit line and the
+                      knowledge fence for this delete.
+                  kb:
+                    type: object
+                    additionalProperties: true
+                    description: >
+                      Per-store purge detail (row counts, or {"error": ...})
+                      when a purge ran; absent when retained.
+        "400":
+          description: Missing/invalid ref
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: The ref does not resolve under the caller's workspace
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: >
+            Knowledge service unavailable or a store failed (without force):
+            nothing was removed; the body's `kb` member carries the detail. A
+            failed purge-cancel is reported here too ("purge committed but
+            unfinished") — re-running the delete converges.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  kb:
+                    type: object
+                    additionalProperties: true
+  /internal/forge/execute:
+    post:
+      summary: Mechanically execute an authenticated forge operation for Go WFE
+      description: >
+        Internal Unix-socket-only resource-plane seam. The Go WFE supplies an
+        already-decided typed operation; C confines it to a managed WFE
+        worktree and repository, retains the credential, and performs only the
+        authenticated transport. This endpoint owns no workflow state or
+        lifecycle decision and is unavailable over TCP/TLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op, workdir]
+              properties:
+                op: { type: string, enum: [push, open, info, ci, merge] }
+                workdir: { type: string }
+                head:
+                  oneOf:
+                    - { type: string, maxLength: 91, pattern: '^aimee/feat/wi_[A-Za-z0-9_]+$' }
+                    - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
+                base: { type: string }
+                title: { type: string, minLength: 1, maxLength: 256 }
+                number: { type: integer, minimum: 1 }
+              oneOf:
+                - required: [head]
+                  properties: { op: { enum: [push] } }
+                  not:
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
+                - required: [head, base, title]
+                  properties: { op: { enum: [open] } }
+                  not: { required: [number] }
+                - required: [number]
+                  properties: { op: { enum: [info, ci] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                - required: [base, number]
+                  properties: { op: { enum: [merge] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [title] }]
+      responses:
+        "200":
+          description: Mechanical forge operation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+        "400":
+          description: Invalid request or forge operation failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Non-UDS caller or unmanaged repository/worktree
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

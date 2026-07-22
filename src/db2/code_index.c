@@ -605,6 +605,28 @@ int db2_code_index_purge_hidden_pollution(void)
    return total;
 }
 
+int db2_code_index_project_delete(const char *name)
+{
+   if (!name || !name[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[CIDX_ERRBUF] = "";
+   /* Children (files -> file_exports/file_imports/terms/code_calls/
+    * file_contents) all cascade off the projects row (schema.sql FKs). */
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "DELETE FROM projects WHERE name = ?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", name);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE) ? changes : -1;
+}
+
 int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *data)
 {
    if (!data)

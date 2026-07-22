@@ -439,9 +439,9 @@ corresponding `config_*.c` module.
 | `rewind` | object | Conversation rewind settings. |
 | `search` | object | Search behavior. |
 | `compact` | object | Context compaction (`compact.enabled`). |
-| `ecomode` | bool | Reduced-resource mode. |
 | `lsp_servers` | array | Language servers to launch for diagnostics. |
 | `mcp` / `mcp_clients` | object/array | MCP server transport and downstream MCP clients. |
+| `client_integrations_enabled` | bool | Auto-register aimee's MCP server + hooks into external AI-tool configs (Claude Code, Gemini, Copilot, Codex) on each run (default `true`; set `false` to opt out). See [§25](#25-integrations). |
 | `computer_use` | object | Computer-use tool settings. |
 | `transport` | object | Server transport (socket/TCP) settings. |
 | `otel` | object | OpenTelemetry export. |
@@ -576,7 +576,9 @@ installs and enables service units where supported; otherwise start the server
 with `aimee server start`. Commands are grouped into tiers, **core** (shown by
 `aimee help`), **advanced**, and **admin** (both shown by `aimee help --all`).
 
-Bare `aimee` (or `aimee chat`) launches the interactive primary-agent chat TUI.
+Bare `aimee` prints usage. There is no built-in interactive chat client: talk to
+the primary agent through any OpenAI-compatible front end (see below), the web
+chat, or `aimee acp-serve` from an ACP editor such as Zed.
 
 ---
 
@@ -678,14 +680,6 @@ routes. Use `aimee delegate plan` and `aimee delegate launch` for the currently
 routed work-packet flow.
 
 See [§14](#14-roadmaps-and-the-autonomous-loop).
-
-### 7.7 Work queue, `aimee work`
-
-Inter-session task queue (claim/complete coordination).
-
-- `work add` · `work add-batch [--from-proposals]` · `work claim` · `work complete` · `work fail`.
-- `work list` · `work board [--history ITEM]` · `work stats`.
-- `work cancel` · `work release` · `work clear` · `work gc [--max-age N]` · `work sync-proposals`.
 
 See [§15](#15-the-work-queue).
 
@@ -951,7 +945,7 @@ referenced projects, and subtasks).
 
 Guardrails are enforced *server-side*, clients cannot bypass them. See
 [`docs/SECURITY.md`](docs/SECURITY.md) for the trust model and
-`src/guardrails.c` / `src/guardrails_orchestrator.c` for the implementation.
+`src/modules/guardrails/guardrails.c` / `src/modules/guardrails/guardrails_orchestrator.c` for the implementation.
 
 ---
 
@@ -1048,20 +1042,6 @@ single-track autonomous dispatch, but they are not current thin-client commands.
 The routed path today is reviewed delegate packet planning plus coordinated jobs.
 
 ---
-
-## 15. The work queue
-
-The work queue coordinates tasks across sessions: one session adds items,
-another claims and completes them, with stale-claim garbage collection.
-
-```bash
-aimee work add "Fix flaky test in auth_test.c"
-aimee work add-batch --from-proposals      # seed from accepted proposals
-aimee work claim                            # take the next ready item
-aimee work complete <id>                    # or: work fail <id>
-aimee work board                            # kanban view
-aimee work gc --max-age 24                  # release stale claims
-```
 
 `work sync-proposals` closes items whose underlying proposal has moved;
 `work stats` reports queue health.
@@ -1287,7 +1267,7 @@ HTTP API generated from [`api/openapi-v1.yaml`](api/openapi-v1.yaml).
 |------|-------------|-------|
 | Claude Code | Hooks + MCP, or any primary model via the Anthropic ingress | `./install.sh` / `aimee claude-proxy enable` |
 | Codex CLI | Hooks + MCP + local plugin, or any primary model via the Responses ingress | `./install.sh` / `~/.codex/config.toml` |
-| OpenCode | TUI front end (`opencode attach`), any primary model via the OpenAI-compatible ingress | `./install.sh` |
+| OpenCode | Any primary model via the OpenAI-compatible ingress | `./install.sh` |
 | Gemini CLI | Hooks | `./install.sh` |
 | Mistral Vibe | Provider-CLI primary + subscription-plan delegates (incl. `mistral-plan`) | `aimee agent setup mistral-plan` |
 | GitHub Copilot | MCP server | `./install.sh` |
@@ -1300,6 +1280,15 @@ setups. Switching tools preserves all memory and
 context because everything lives in the shared server/KB, not in the tool. Direct
 Codex and Mistral primary sessions use server-side structured conversation state;
 explicit legacy routes (e.g. `codex-cli`) still use the provider CLI.
+
+**Opting out of auto-registration.** To stop aimee from writing itself into
+external tool configs, set `aimee config set client_integrations_enabled false`
+or export `AIMEE_NO_CLIENT_INTEGRATIONS=1` (the env var overrides the config key
+and is also honored by `install.sh` / `configure-hooks.sh`). Registration then
+becomes a no-op across all tools (Claude Code, Gemini, Copilot, Codex). This does
+not affect per-project `.mcp.json`: running `aimee setup` in a project directory
+still wires aimee into that single project, so you can confine aimee to one
+project instead of registering it globally.
 
 ### Claude Code on any primary model (Anthropic ingress)
 
@@ -1366,8 +1355,8 @@ and swaps the model. Switch models with `aimee primary <agent>`.
 
 Tools that speak the OpenAI Chat Completions wire format point at
 `POST /v1/chat/completions` (SSE streaming supported) and run on aimee's primary
-agent the same way. This covers OpenCode (also launchable as a TUI through
-`opencode attach`), VS Code configured with aimee as an OpenAI-compatible model
+agent the same way. This covers OpenCode, VS Code configured with aimee as an
+OpenAI-compatible model
 (see [docs/VSCODE.md](docs/VSCODE.md)), and any custom client. Whatever front end
 you choose, the memory, guardrails, and delegation are identical because they
 live in the shared server and KB, not in the tool.
@@ -1515,8 +1504,8 @@ depend on session history.
 
 Thread pools and concurrency are tunable in `aimee.yaml`
 (`compute_threads`, `worker_threads`, `background_threads`, `concurrency.
-per_model.<model>`). `ecomode: true` reduces resource use. Service-unit memory
-limits cap the server and KB independently.
+per_model.<model>`). Service-unit memory limits cap the server and KB
+independently.
 
 ### 27.5 Scaling and multi-user deployment
 
@@ -1659,6 +1648,7 @@ platform support in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 | `AIMEE_SESSION_ID` | Bind the current process to a session id. |
 | `AIMEE_SESSION_START_VERBOSE` | Include broad diagnostic sections in the session brief. |
 | `AIMEE_HOOK_CLIENT` | Identify the calling tool to the hook layer. |
+| `AIMEE_NO_CLIENT_INTEGRATIONS` | If set to any value other than `0`/`false`, aimee skips auto-registering itself into external AI-tool configs. Overrides `client_integrations_enabled` (forces off only); honored by the aimee binary and by `install.sh` / `configure-hooks.sh`. |
 | `AIMEE_MCP_CWD` | Working directory for the MCP bridge. |
 | `AIMEE_ACTIVE_TOOLSET` / `AIMEE_TOOLSETS_CONFIG` | Select / locate the active toolset. |
 | `AIMEE_GUARDRAILS_PATH` | Override guardrail policy path. |

@@ -2,8 +2,12 @@
 /aimee
 /aimee-client
 /aimee-server
+aimee-forwarder
 /aimee-mcp
 /aimee-kb
+/aimee-kb-resolver
+/aimee-negation-eval
+/aimee-blast-radius-eval
 /aimee-webchat
 /aimee-gateway
 src/build/
@@ -27,6 +31,7 @@ session-state.json
 
 # Per-project aimee state (local/environment-specific, never committed)
 .aimee/
+!.aimee/project.yaml  # aimee's own committed delegate-sandbox toolchain declaration
 .aimee-rules
 
 # IDE
@@ -135,3 +140,14 @@ src/vendor/tree-sitter-groovy/
 src/vendor/tree-sitter-objc/
 src/vendor/tree-sitter-elixir/
 src/vendor/tree-sitter-powershell/
+
+# wfe run bookkeeping. The scope node writes an intent record into the work
+# item's checkout; it describes the run, not the product, so implement must not
+# commit it into the branch it is building. Ignored so a slice PR carries only
+# its engineering diff. See wfe_manager_artifacts.c (intent_self_referential).
+.wfe-scope.json
+intent_record_*.json
+.rt-tmp/
+
+# Local default output from `go build ./cmd/aimee-server` in the Go rewrite.
+/server-go/aimee-server

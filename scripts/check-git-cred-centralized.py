@@ -45,9 +45,9 @@ CALL_RE = re.compile(r"\b(" + "|".join(BANNED) + r")\s*\(")
 # Files allowed to name these primitives: the policy that composes them, the
 # files that define them, and the per-host-vault seam. Paths are repo-relative.
 EXEMPT = {
-    "src/server/git_cred_inject.c",   # THE policy — composes the rungs
-    "src/server/git_host_resolve.c",  # defines git_host_resolve_token
-    "src/forge_credentials.c",        # defines the forge_cred_build_* primitives
+    "src/modules/git/git_cred_inject.c",   # THE policy — composes the rungs
+    "src/modules/git/git_host_resolve.c",  # defines git_host_resolve_token
+    "src/modules/git/forge_credentials.c",        # defines the forge_cred_build_* primitives
 }
 
 

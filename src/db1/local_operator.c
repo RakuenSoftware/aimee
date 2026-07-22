@@ -9,17 +9,17 @@
 
 static int begin_tx(sqlite3 *db)
 {
-   return sqlite3_exec(db, "BEGIN IMMEDIATE TRANSACTION", NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
+   return db1_txn_begin(db, "BEGIN IMMEDIATE TRANSACTION");
 }
 
 static void rollback_tx(sqlite3 *db)
 {
-   sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+   db1_txn_end(db, "ROLLBACK");
 }
 
 static int commit_tx(sqlite3 *db)
 {
-   return sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
+   return db1_txn_end(db, "COMMIT");
 }
 
 static int clear_active(sqlite3 *db)

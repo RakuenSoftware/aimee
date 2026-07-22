@@ -4,7 +4,7 @@
 #include "../db2/ontology_evolution.h"
 #include "../db2/rel_types_store.h"
 #include "../db2/db2_test_shim.h"
-#include "../headers/memory_ontology.h"
+#include "memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

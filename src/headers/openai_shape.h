@@ -222,6 +222,14 @@ extern "C"
     * resp[cap]. Returns bytes written, or -1. */
    int openai_format_error(char *resp, int cap, const char *type, const char *message);
 
+   /* As openai_format_error, but also stamps an aimee-specific error code
+    * (>=1000, see aimee_errors.h) into error.code and logs it when aimee_code>0,
+    * for aimee-internal faults (no primary, routing/credentials). The wire HTTP
+    * status is still chosen by the caller's return value. aimee_code==0 is
+    * identical to openai_format_error. */
+   int openai_format_error_code(char *resp, int cap, const char *type, const char *message,
+                                int aimee_code);
+
    /* P2c (response-side tool policing, OpenAI streaming): emit the tool-call
     * tail of the `response.*` SSE sequence for a parsed_response_t that carries
     * `calls[]` (the post-police shape — calls[] may be empty if every entry was

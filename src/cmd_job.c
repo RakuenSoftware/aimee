@@ -372,10 +372,7 @@ void cmd_job(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   config_t db1_cfg;
-   config_load(&db1_cfg);
-   if (db1_init(db1_cfg.db1_path) != 0)
-      fatal("cannot initialize DB1");
+   cmd_require_db1("cannot initialize DB1");
 
    subcmd_dispatch(job_subcmds, argv[0], ctx, argc - 1, argv + 1);
 }

@@ -323,6 +323,27 @@ static void sub_transition(app_ctx_t *ctx, int argc, char **argv, const char *to
    cJSON_Delete(upd_resp);
 }
 
+static void sub_suppress(app_ctx_t *ctx, int argc, char **argv)
+{
+   sub_transition(ctx, argc, argv, CURIOSITY_STATE_SUPPRESSED);
+}
+
+static void sub_resolve(app_ctx_t *ctx, int argc, char **argv)
+{
+   sub_transition(ctx, argc, argv, CURIOSITY_STATE_RESOLVED);
+}
+
+static const subcmd_t mem_curiosity_subs[] = {
+    {"list", "list curiosities", sub_list},
+    {"create", "create a curiosity", sub_create},
+    {"sweep", "sweep curiosities", sub_sweep},
+    {"rescore", "rescore curiosities", sub_rescore},
+    {"route", "route curiosities", sub_route},
+    {"suppress", "suppress a curiosity", sub_suppress},
+    {"resolve", "resolve a curiosity", sub_resolve},
+    {NULL, NULL, NULL},
+};
+
 void mem_curiosity(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -330,20 +351,6 @@ void mem_curiosity(app_ctx_t *ctx, int argc, char **argv)
    const char *sub = argv[0];
    argc--;
    argv++;
-   if (strcmp(sub, "list") == 0)
-      sub_list(ctx, argc, argv);
-   else if (strcmp(sub, "create") == 0)
-      sub_create(ctx, argc, argv);
-   else if (strcmp(sub, "sweep") == 0)
-      sub_sweep(ctx, argc, argv);
-   else if (strcmp(sub, "rescore") == 0)
-      sub_rescore(ctx, argc, argv);
-   else if (strcmp(sub, "route") == 0)
-      sub_route(ctx, argc, argv);
-   else if (strcmp(sub, "suppress") == 0)
-      sub_transition(ctx, argc, argv, CURIOSITY_STATE_SUPPRESSED);
-   else if (strcmp(sub, "resolve") == 0)
-      sub_transition(ctx, argc, argv, CURIOSITY_STATE_RESOLVED);
-   else
+   if (subcmd_dispatch(mem_curiosity_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown curiosity subcommand: %s", sub);
 }

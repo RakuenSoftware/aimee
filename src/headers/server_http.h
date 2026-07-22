@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define SERVER_HTTP_MGMT_PATH_MAX    4096
+#define SERVER_HTTP_START_MGMT_FATAL (-2)
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -30,6 +33,28 @@ extern "C"
    int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char *repo,
                       const char *submitter, struct cJSON **out, char *err, size_t errlen);
 
+   typedef struct
+   {
+      int enabled;
+      int port;
+      uint32_t bind_addr;
+      char bind[16];
+      char cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char key[SERVER_HTTP_MGMT_PATH_MAX];
+      char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
+   } server_http_management_config_t;
+
+   /* Parse the all-or-none dedicated-management listener environment packet.
+    * Returns 0 for a valid disabled or enabled packet, -1 for partial/malformed
+    * configuration. No file is opened here; TLS initialization owns that check. */
+   int server_http_management_config_from_env(server_http_management_config_t *out);
+   const char *server_http_management_last_error(void);
+
+   /* Pure strict helpers used by startup/request tests. */
+   int server_http_management_bind_addr(const char *text, uint32_t *out);
+   int server_http_management_framing_valid(const char *method, const char *path,
+                                            const char *request, size_t request_len);
+
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;
     * filesystem-permission auth, no token) is always bound. When tcp_port > 0
@@ -37,7 +62,9 @@ extern "C"
     * also bound and gated by `Authorization: Bearer <bearer_token>`; a
     * configured port with no bearer is refused (UDS still binds). Returns 0 if
     * the UDS bound, -1 on error. Idempotent-safe: a second call while running
-    * returns -1. rate_limit_per_min caps authorized TCP requests per 60s
+    * returns -1. A configured management-listener failure returns the distinct
+    * SERVER_HTTP_START_MGMT_FATAL so the process can fail closed. rate_limit_per_min caps
+    * authorized TCP requests per 60s
     * window (0 = unlimited); over-limit ⇒ 429 + Retry-After. */
    int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                          int rate_limit_per_min, int remote_writes);
@@ -110,6 +137,34 @@ extern "C"
    uint32_t server_http_route_caps(const char *method, const char *path);
    uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes);
 
+   /* Roundtable policy mutations require an attested interactive webuser in
+    * addition to their ordinary route capability. Exposed for policy tests. */
+   int route_roundtable_mutation_authorized(const char *principal);
+   int roundtable_policy_config_key(const char *key);
+
+   /* Effective caps for a request after thin-client mTLS authentication. When
+    * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
+    * gets the authenticated (but not full-trust) set. */
+   uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
+                                            int mtls_mode, int mtls_authenticated);
+   int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated);
+
+   /* Dedicated P5 management transport classifier. The management leaf is
+    * authorized only for the nonce/status health pair; those routes never fall
+    * back to a generic roster certificate or bearer, and a management-profile
+    * leaf never falls through to a generic route. TLS verification itself is
+    * completed by server_tls_peer_cert before this pure classifier is called. */
+   typedef enum
+   {
+      SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE = 0,
+      SERVER_HTTP_MANAGEMENT_ALLOW = 1,
+      SERVER_HTTP_MANAGEMENT_DENY = 2
+   } server_http_management_auth_t;
+   server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
+                                                             int management_lane, int verified_peer,
+                                                             int management_profile,
+                                                             const char *peer_cn);
+
    /* Parse one HTTP header value (case-insensitive name) from a raw request
     * buffer into out (NUL-terminated, bounded by n). Returns 1 when found, 0
     * otherwise. Shared with the request-context populator. */
@@ -125,6 +180,8 @@ extern "C"
                                              const char *path, uint32_t caps);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
+   int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method,
+                                      const char *path, int remote_writes);
 
    /* server_http_route_is_local_only: 1 iff the (method,path) route is a
     * data-plane write. Historical name retained: at remote_writes=off these
@@ -329,6 +386,34 @@ extern "C"
     * generic body→(resp,status) shape; 503 until registered. Wired by
     * openai_chat_register (it pulls the agent dependency closure). */
    void server_http_set_runs_handler(server_http_completion_fn fn);
+
+   /* GET /v1/ready readiness seam. Unlike the JSON-provider seams above, a
+    * readiness answer carries a status code as well as a body, so the provider
+    * mirrors the models-raw shape: write the JSON body into resp[cap] and
+    * return the HTTP status (200 ready, 503 not ready).
+    *
+    * The provider must not perform I/O — it serves a snapshot sampled off the
+    * request path — so that a slow or wedged dependency cannot stall the
+    * listener. Until a provider is registered the route reports every
+    * dependency `unknown` and answers 503: readiness fails closed, so an
+    * unsampled server is never advertised as ready. Wired by
+    * server_native_register (it pulls the dependency closure). */
+   typedef int (*server_http_ready_fn)(char *resp, int cap);
+   void server_http_set_ready_provider(server_http_ready_fn fn);
+
+   /* Readiness sampler (server/server_ready.c). server_ready_register() takes
+    * one sample synchronously, starts the background sampler, and registers the
+    * provider above. server_ready_sample_now() forces a synchronous sample so a
+    * caller never has to wait on the interval. */
+   void server_ready_register(void);
+   void server_ready_sample_now(void);
+
+   /* The readiness decision as a pure function (no globals, locks, or I/O), so
+    * roll-up and staleness behavior can be tested by passing a clock instead of
+    * sleeping past a real interval. db1_ok/kb_ok: 1 ok, 0 fail, -1 unknown.
+    * Writes the JSON body and returns the HTTP status (200 ready / 503 not). */
+   int server_ready_render(int db1_ok, int kb_ok, long sampled_at, long now, int stale_secs,
+                           char *resp, int cap);
 
    void server_native_register(void);
 

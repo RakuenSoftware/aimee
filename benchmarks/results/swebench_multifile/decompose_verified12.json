@@ -1,0 +1,165 @@
+{
+  "provenance": {
+    "primary": "codex",
+    "primary_model": "gpt-5.6-sol",
+    "pool": [
+      "MiniMax-M3",
+      "mimo-v2.5-pro",
+      "kimi-k2.7-code"
+    ],
+    "instances": [
+      "astropy__astropy-13398",
+      "django__django-11138",
+      "django__django-11400",
+      "django__django-11532",
+      "django__django-11734",
+      "django__django-13121",
+      "django__django-15629",
+      "django__django-16263",
+      "pylint-dev__pylint-4551",
+      "pylint-dev__pylint-6386",
+      "sympy__sympy-13091",
+      "sympy__sympy-16597"
+    ],
+    "timing": "server-side per-job duration (updated_at-created_at); critical path",
+    "split_arm": "file-split (localize -> per-file workers -> concat)",
+    "ledger_windows": {
+      "default": [
+        31639,
+        31651
+      ],
+      "split": [
+        31651,
+        31699
+      ]
+    }
+  },
+  "tokens": {
+    "default": {
+      "realized_prompt": 289233,
+      "realized_completion": 46133,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    },
+    "split_manager": {
+      "realized_prompt": 23586,
+      "realized_completion": 20138,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    }
+  },
+  "cost_usd": {
+    "default": 0.8229,
+    "split_manager": 0.2309
+  },
+  "latency_s": {
+    "default": {
+      "max_s": 170.0,
+      "median_s": 91.0,
+      "mean_s": 85.9
+    },
+    "split": {
+      "max_s": 223.0,
+      "median_s": 118.0,
+      "mean_s": 120.7
+    }
+  },
+  "per_instance": {
+    "astropy__astropy-13398": {
+      "default_latency_s": 91.0,
+      "split_latency_s": 100.0,
+      "n_files": 3,
+      "localize_s": 54.0,
+      "file_max_s": 46.0,
+      "latency_s": 100.0
+    },
+    "django__django-11138": {
+      "default_latency_s": 69.0,
+      "split_latency_s": 69.0,
+      "n_files": 3,
+      "localize_s": 16.0,
+      "file_max_s": 53.0,
+      "latency_s": 69.0
+    },
+    "django__django-11400": {
+      "default_latency_s": 31.0,
+      "split_latency_s": 66.0,
+      "n_files": 3,
+      "localize_s": 13.0,
+      "file_max_s": 53.0,
+      "latency_s": 66.0
+    },
+    "django__django-11532": {
+      "default_latency_s": 40.0,
+      "split_latency_s": 19.0,
+      "n_files": 1,
+      "localize_s": 6.0,
+      "file_max_s": 13.0,
+      "latency_s": 19.0
+    },
+    "django__django-11734": {
+      "default_latency_s": 69.0,
+      "split_latency_s": 101.0,
+      "n_files": 2,
+      "localize_s": 87.0,
+      "file_max_s": 14.0,
+      "latency_s": 101.0
+    },
+    "django__django-13121": {
+      "default_latency_s": 91.0,
+      "split_latency_s": 223.0,
+      "n_files": 4,
+      "localize_s": 77.0,
+      "file_max_s": 146.0,
+      "latency_s": 223.0
+    },
+    "django__django-15629": {
+      "default_latency_s": 91.0,
+      "split_latency_s": 107.0,
+      "n_files": 4,
+      "localize_s": 54.0,
+      "file_max_s": 53.0,
+      "latency_s": 107.0
+    },
+    "django__django-16263": {
+      "default_latency_s": 103.0,
+      "split_latency_s": 118.0,
+      "n_files": 4,
+      "localize_s": 54.0,
+      "file_max_s": 64.0,
+      "latency_s": 118.0
+    },
+    "pylint-dev__pylint-4551": {
+      "default_latency_s": 114.0,
+      "split_latency_s": 189.0,
+      "n_files": 4,
+      "localize_s": 38.0,
+      "file_max_s": 151.0,
+      "latency_s": 189.0
+    },
+    "pylint-dev__pylint-6386": {
+      "default_latency_s": 43.0,
+      "split_latency_s": 169.0,
+      "n_files": 2,
+      "localize_s": 54.0,
+      "file_max_s": 115.0,
+      "latency_s": 169.0
+    },
+    "sympy__sympy-13091": {
+      "default_latency_s": 170.0,
+      "split_latency_s": 162.0,
+      "n_files": 21,
+      "localize_s": 21.0,
+      "file_max_s": 141.0,
+      "latency_s": 162.0
+    },
+    "sympy__sympy-16597": {
+      "default_latency_s": 119.0,
+      "split_latency_s": 125.0,
+      "n_files": 3,
+      "localize_s": 72.0,
+      "file_max_s": 53.0,
+      "latency_s": 125.0
+    }
+  }
+}

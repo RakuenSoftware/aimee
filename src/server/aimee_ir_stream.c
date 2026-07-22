@@ -1,8 +1,11 @@
 /* aimee_ir_stream.c -- see aimee_ir_stream.h. */
 #include "aimee_ir_stream.h"
 
+#include "aimee_backend.h" /* converse_stop_reason (shared with the non-stream parse) */
 #include "cJSON.h"
 
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -166,6 +169,212 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
    }
 #undef SLOT
    return n;
+}
+
+void converse_stream_state_init(converse_stream_state_t *st)
+{
+   if (!st)
+      return;
+   memset(st, 0, sizeof *st);
+}
+
+static int converse_index(const cJSON *payload, int *out)
+{
+   const cJSON *it =
+       payload ? cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "contentBlockIndex") : NULL;
+   if (!cJSON_IsNumber(it) || !isfinite(it->valuedouble) ||
+       floor(it->valuedouble) != it->valuedouble || it->valuedouble < 0 ||
+       it->valuedouble >= AIMEE_STREAM_MAX_TOOLS)
+      return -1;
+   *out = (int)it->valuedouble;
+   return 0;
+}
+
+static int converse_usage(const cJSON *usage, const char *name, long *out)
+{
+   const cJSON *it = usage ? cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name) : NULL;
+   if (!cJSON_IsNumber(it) || !isfinite(it->valuedouble) || it->valuedouble < 0 ||
+       it->valuedouble > 9007199254740991.0 || it->valuedouble > LONG_MAX ||
+       floor(it->valuedouble) != it->valuedouble)
+      return -1;
+   *out = (long)it->valuedouble;
+   return 0;
+}
+
+static int converse_optional_usage(const cJSON *usage, const char *name)
+{
+   if (!cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name))
+      return 0;
+   long ignored;
+   return converse_usage(usage, name, &ignored);
+}
+
+/* Is `ev` one of the known ConverseStream exception event-types? */
+static int converse_is_exception(const char *ev)
+{
+   return strcmp(ev, "internalServerException") == 0 ||
+          strcmp(ev, "modelStreamErrorException") == 0 || strcmp(ev, "validationException") == 0 ||
+          strcmp(ev, "throttlingException") == 0 || strcmp(ev, "serviceUnavailableException") == 0;
+}
+
+int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *payload,
+                                      converse_stream_state_t *st, aimee_delta_t *out, int max)
+{
+   if (!event_type || !st || !out || max <= 0)
+      return 0;
+
+   if (strcmp(event_type, "messageStart") == 0)
+   {
+      if (!payload || !ostr(payload, "role") || strcmp(ostr(payload, "role"), "assistant") != 0)
+         return -1;
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_TURN_START;
+      return 1;
+   }
+
+   if (strcmp(event_type, "contentBlockStart") == 0)
+   {
+      if (!payload)
+         return -1;
+      int idx;
+      if (converse_index(payload, &idx) != 0)
+         return -1; /* a valid Converse stream never has an out-of-range index */
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_BLOCK_START;
+      out[0].block_id = idx;
+      const cJSON *start = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "start");
+      const cJSON *tu = start ? cJSON_GetObjectItemCaseSensitive((cJSON *)start, "toolUse") : NULL;
+      if (!cJSON_IsObject(start) || !cJSON_IsObject(tu) || !ostr(tu, "toolUseId") ||
+          !ostr(tu, "name") || cJSON_GetArraySize(start) != 1 || st->kind_set[idx])
+         return -1;
+      aimee_block_type_t kind = AIMEE_BLK_TOOL_USE;
+      out[0].tool_id = ostr(tu, "toolUseId");
+      out[0].tool_name = ostr(tu, "name");
+      out[0].kind = kind;
+      if (idx >= 0 && idx < AIMEE_STREAM_MAX_TOOLS)
+      {
+         st->kind[idx] = kind;
+         st->kind_set[idx] = 1;
+      }
+      return 1;
+   }
+
+   if (strcmp(event_type, "contentBlockDelta") == 0)
+   {
+      if (!payload)
+         return -1;
+      int idx;
+      if (converse_index(payload, &idx) != 0)
+         return -1;
+      const cJSON *delta = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "delta");
+      if (!delta || !cJSON_IsObject(delta))
+         return -1; /* structurally-malformed KNOWN event -> drop the stream */
+      const char *text = ostr(delta, "text");
+      const cJSON *tu = cJSON_GetObjectItemCaseSensitive((cJSON *)delta, "toolUse");
+      const char *tuin = tu ? ostr(tu, "input") : NULL;
+      const cJSON *rc = cJSON_GetObjectItemCaseSensitive((cJSON *)delta, "reasoningContent");
+      const char *rtext = rc ? ostr(rc, "text") : NULL;
+      if (!!text + !!tuin + !!rtext != 1)
+         return -1;
+      aimee_block_type_t kind;
+      /* kind self-identifies from the delta's own union variant. */
+      if (text)
+      {
+         kind = AIMEE_BLK_TEXT;
+      }
+      else if (tuin)
+      {
+         /* toolUse.input is a JSON-STRING fragment accumulated across deltas -- emit
+          * it verbatim, do NOT parse. */
+         kind = AIMEE_BLK_TOOL_USE;
+      }
+      else
+      {
+         kind = AIMEE_BLK_THINKING;
+      }
+      if (st->kind_set[idx] && st->kind[idx] != kind)
+         return -1;
+      if (!st->kind_set[idx] && kind == AIMEE_BLK_TOOL_USE)
+         return -1;
+      int first = !st->kind_set[idx];
+      if (first && max < 2)
+         return -1;
+      int delta_slot = first ? 1 : 0;
+      if (first)
+      {
+         memset(&out[0], 0, sizeof out[0]);
+         out[0].type = AIMEE_DELTA_BLOCK_START;
+         out[0].block_id = idx;
+         out[0].kind = kind;
+         st->kind[idx] = kind;
+         st->kind_set[idx] = 1;
+      }
+      memset(&out[delta_slot], 0, sizeof out[delta_slot]);
+      out[delta_slot].type = AIMEE_DELTA_BLOCK_DELTA;
+      out[delta_slot].block_id = idx;
+      out[delta_slot].kind = kind;
+      if (kind == AIMEE_BLK_TOOL_USE)
+         out[delta_slot].tool_args_delta = tuin;
+      else
+         out[delta_slot].text_delta = text ? text : rtext;
+      return first ? 2 : 1;
+   }
+
+   if (strcmp(event_type, "contentBlockStop") == 0)
+   {
+      if (!payload)
+         return -1;
+      int idx;
+      if (converse_index(payload, &idx) != 0)
+         return -1;
+      if (!st->kind_set[idx])
+         return -1;
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_BLOCK_STOP;
+      out[0].block_id = idx;
+      out[0].kind = st->kind[idx];
+      return 1;
+   }
+
+   if (strcmp(event_type, "messageStop") == 0)
+   {
+      if (!payload || !ostr(payload, "stopReason") || st->message_stop_seen || st->terminal_emitted)
+         return -1;
+      st->pending_stop_reason = converse_stop_reason(ostr(payload, "stopReason"));
+      st->message_stop_seen = 1;
+      return 0; /* metadata supplies usage for the single terminal IR delta */
+   }
+
+   if (strcmp(event_type, "metadata") == 0)
+   {
+      if (!st->message_stop_seen || st->terminal_emitted)
+         return -1;
+      aimee_delta_t terminal = {.type = AIMEE_DELTA_TURN_STOP,
+                                .stop_reason = st->pending_stop_reason};
+      const cJSON *usage =
+          payload ? cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage") : NULL;
+      if (!cJSON_IsObject(usage) || converse_usage(usage, "inputTokens", &terminal.usage_in) != 0 ||
+          converse_usage(usage, "outputTokens", &terminal.usage_out) != 0 ||
+          converse_optional_usage(usage, "cacheReadInputTokens") != 0 ||
+          converse_optional_usage(usage, "cacheWriteInputTokens") != 0)
+         return -1;
+      out[0] = terminal;
+      st->terminal_emitted = 1;
+      /* aimee_delta_t has no cache fields -> cache tokens dropped on the stream path. */
+      return 1;
+   }
+
+   if (converse_is_exception(event_type))
+   {
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_ERROR;
+      const char *msg = payload ? ostr(payload, "message") : NULL;
+      out[0].error_message = msg ? msg : event_type;
+      return 1;
+   }
+
+   /* a genuinely-unknown event_type (a future Converse event) -> 0 deltas. */
+   return 0;
 }
 
 /* wrap a cJSON `data` object as an SSE frame "event: <ev>\ndata: <json>\n\n"

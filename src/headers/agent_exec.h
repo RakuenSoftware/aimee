@@ -27,6 +27,20 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
 
+/* Per-thread override of agent_run/agent_run_ex tool-mode inference. agent_run_ex
+ * normally derives use_tools from the routed agent's config (tools_enabled +
+ * exec-role); a delegate that decided tools-OFF (CLI --no-tools -> force_tools=0)
+ * calls agent_run, so that inference would re-enable tools and ignore the
+ * decision. The delegate no-tools path sets this to 1 around its agent_run call
+ * to force use_tools=0 for the turn, then clears it. Scoped per-thread so
+ * agent_run's other ~28 callers are unaffected. */
+void agent_run_force_no_tools(int on);
+
+/* Per-thread: make agent_dispatch_one's admission acquire FAIL FAST (at-limit) instead of
+ * blocking, so a fan-out / fallback caller tries a different agent rather than queueing on
+ * a busy one. Default off = block+queue (correct for a pinned single-agent turn). */
+void agent_dispatch_set_fail_fast(int on);
+
 /* Like agent_run, but with an explicit sampling temperature. agent_run is the
  * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
  * byte-unchanged; the parallel fan-out path uses this to honour a per-task
@@ -41,6 +55,24 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const char *system_prompt, const char *user_prompt, int max_tokens,
                     double temperature, agent_result_t *out);
+
+/* agent_run_named, but WITH tools. Exists for review panelists: they must route by
+ * NAME (each lens is bound to a seat model) yet still reach aimee, and the two
+ * existing tools-enabled runners select by role only.
+ *
+ * Panelists were tool-less, which is why a diff-only reviewer could not answer
+ * "does anything call this?" or "is this file product?" — questions that decide
+ * whether a change is real. With tools, the role's toolset applies: `review` maps
+ * to `review_indexed` (code_search / find_symbol / search_memory / search_docs),
+ * i.e. the diff plus aimee's own code + memory tooling, and no filesystem or write
+ * tools. write_capable is pinned 0 regardless of the agent's config. */
+int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out);
+
+/* Thread-local invocation policy used by parallel task workers. It affects only
+ * the next in-thread named tool run and must be cleared by the caller. */
+void agent_run_require_initial_tool_call(int on);
 
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
@@ -119,12 +151,16 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
  * dropping them when the provider stream errors mid-flight. */
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind);
-/* Record a context-economizer ledger row (usage_kind="avoided", FORECAST-only —
- * see context_reduce.h). Forward-declared struct so this broad header need not
- * pull in context_reduce.h; the caller includes it for the full type. */
-struct reduce_result_s;
-void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
-                                const char *agent_name, const char *role);
+/* Build a token-audit row for a provider ingress path from raw usage counts and
+ * record it, folding the memset+snprintf+field-copy boilerplate the provider
+ * ingress handlers otherwise repeat per call site. requested_model/stop_reason
+ * tolerate NULL (stored as ""). kind==NULL records via agent_record_token_audit
+ * (i.e. "realized"); a non-NULL kind ("realized"/"partial"/...) routes through
+ * agent_record_token_audit_kind. The caller owns the enable/threshold guard. */
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind);
 /* Master gate (proposal §2/§7 rollout knob): returns 1 when
  * ingress_usage_accounting_enabled is set. The stateless ingress handlers call
  * this before writing their cost rows so ingress accounting can be flipped on
@@ -310,10 +346,19 @@ static inline int agent_http_effective_connect_timeout_ms(int request_timeout_ms
 }
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
+/* SSRF-safe GET: connect to the caller-validated numeric `pinned_ip` (no DNS
+ * re-resolution) with Host/SNI still taken from the URL host. */
+int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,
+                          char **response_buf, int timeout_ms);
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers);
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers);
+/* Exact-length JSON POST used by immutable provider-wire snapshots. Unlike the
+ * compatibility wrapper above, this never recomputes the body boundary. */
+int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
+                          size_t body_len, char **response_buf, int timeout_ms,
+                          const char *extra_headers);
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
                                  const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers);
@@ -332,6 +377,9 @@ int agent_http_get_stream(const char *url, const char *extra_headers, agent_http
 int agent_http_post_stream(const char *url, const char *auth_header, const char *body,
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers);
+int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
+                                 size_t body_len, agent_http_stream_cb callback, void *userdata,
+                                 int timeout_ms, const char *extra_headers);
 int agent_http_post_form(const char *url, const char *body, char **response_buf, int timeout_ms);
 void agent_http_init(void);
 void agent_http_cleanup(void);
@@ -346,16 +394,10 @@ void agent_http_cleanup(void);
  * On success fills cache_name_out and returns 0; returns -1 on any error.
  * endpoint_base: e.g. "https://generativelanguage.googleapis.com/v1beta" (NULL = default)
  * timeout_ms: per-request HTTP timeout */
-int gemini_prompt_cache_create(const char *endpoint_base, const char *auth_header,
-                               const char *model, const char *system_prompt, int timeout_ms,
-                               char *cache_name_out, size_t name_len);
 
 /* Attach a cached-content reference to an already-built Gemini request body.
  * Removes "systemInstruction" (it lives in the cache) and adds "cachedContent". */
-void gemini_prompt_cache_attach(struct cJSON *req, const char *cache_name);
 
 /* Delete a cached-content resource. Errors are logged at DEBUG, never surfaced. */
-void gemini_prompt_cache_delete(const char *endpoint_base, const char *auth_header,
-                                const char *cache_name, int timeout_ms);
 
 #endif /* DEC_AGENT_EXEC_H */

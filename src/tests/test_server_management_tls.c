@@ -1,0 +1,229 @@
+#include "config.h"
+#include "log.h"
+#include "pki.h"
+#include "server_conn_io.h"
+#include "server_tls.h"
+
+#include <assert.h>
+#include <openssl/ssl.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+/* Narrow link stubs: this test exercises only the dedicated context and exact
+ * peer profile, never the generic config/roster path. */
+const char *config_default_dir(void)
+{
+   return "/nonexistent";
+}
+int config_load(config_t *cfg)
+{
+   memset(cfg, 0, sizeof(*cfg));
+   return 0;
+}
+int pki_ca_ensure(void)
+{
+   return -1;
+}
+int pki_is_revoked(const char *serial)
+{
+   (void)serial;
+   return 1;
+}
+int pki_mtls_ramp_init(int mode)
+{
+   return mode;
+}
+int pki_ensure_self_signed_server_cert(const char *cert, const char *key)
+{
+   (void)cert;
+   (void)key;
+   return -1;
+}
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
+void server_conn_io_set_ssl(int fd, SSL *ssl)
+{
+   (void)fd;
+   (void)ssl;
+}
+void server_conn_io_clear(int fd)
+{
+   (void)fd;
+}
+
+static void write_text(const char *path, const char *text)
+{
+   FILE *f = fopen(path, "wb");
+   assert(f);
+   assert(fwrite(text, 1, strlen(text), f) == strlen(text));
+   assert(fclose(f) == 0);
+}
+
+static void command(const char *cmd)
+{
+   assert(system(cmd) == 0);
+}
+
+typedef struct
+{
+   int fd;
+   int profile;
+} server_arg_t;
+
+static void *accept_one(void *opaque)
+{
+   server_arg_t *arg = opaque;
+   SSL *ssl = server_tls_management_begin(arg->fd);
+   if (ssl)
+   {
+      server_tls_peer_cert_t peer;
+      assert(server_tls_peer_cert(ssl, &peer) == 1);
+      arg->profile = peer.management_profile;
+      server_tls_end(arg->fd, ssl);
+   }
+   else
+      arg->profile = -2;
+   close(arg->fd);
+   return NULL;
+}
+
+static int present(const char *ca, const char *cert, const char *key)
+{
+   int sv[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+   server_arg_t arg = {.fd = sv[0], .profile = -1};
+   pthread_t thread;
+   assert(pthread_create(&thread, NULL, accept_one, &arg) == 0);
+
+   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   assert(ctx);
+   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   assert(SSL_CTX_load_verify_locations(ctx, ca, NULL) == 1);
+   if (cert && key)
+   {
+      assert(SSL_CTX_use_certificate_chain_file(ctx, cert) == 1);
+      assert(SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) == 1);
+   }
+   SSL *ssl = SSL_new(ctx);
+   assert(ssl && SSL_set_fd(ssl, sv[1]) == 1);
+   if (SSL_connect(ssl) == 1)
+      SSL_shutdown(ssl);
+   SSL_free(ssl);
+   SSL_CTX_free(ctx);
+   close(sv[1]);
+   assert(pthread_join(thread, NULL) == 0);
+   return arg.profile;
+}
+
+int main(void)
+{
+   signal(SIGPIPE, SIG_IGN);
+   char dir[] = "/tmp/aimee-mgmt-tls-XXXXXX";
+   assert(mkdtemp(dir));
+   char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], dual[256],
+       dualkey[256], ca_server[256], ca_server_key[256], ca_client[256], ca_client_key[256],
+       serverext[256], ext[256], dualext[256], ca_server_ext[256], ca_client_ext[256],
+       other_ca[256], linkpath[256], cmd[4096];
+#define PATH(name, suffix) snprintf(name, sizeof(name), "%s/%s", dir, suffix)
+   PATH(ca, "ca.pem");
+   PATH(cakey, "ca.key");
+   PATH(server, "server.pem");
+   PATH(serverkey, "server.key");
+   PATH(client, "client.pem");
+   PATH(clientkey, "client.key");
+   PATH(dual, "dual.pem");
+   PATH(dualkey, "dual.key");
+   PATH(ca_server, "ca-server.pem");
+   PATH(ca_server_key, "ca-server.key");
+   PATH(ca_client, "ca-client.pem");
+   PATH(ca_client_key, "ca-client.key");
+   PATH(serverext, "server.ext");
+   PATH(ext, "client.ext");
+   PATH(dualext, "dual.ext");
+   PATH(ca_server_ext, "ca-server.ext");
+   PATH(ca_client_ext, "ca-client.ext");
+   PATH(other_ca, "other-ca.pem");
+   PATH(linkpath, "server-link.pem");
+#undef PATH
+
+   write_text(serverext,
+              "basicConstraints=critical,CA:FALSE\n"
+              "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n");
+   write_text(ext, "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n"
+                   "extendedKeyUsage=clientAuth\n"
+                   "1.3.6.1.4.1.55555.5.1=DER:"
+                   "61696d65652d70352d6b622d6d616e6167656d656e742d7631\n");
+   write_text(dualext, "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n"
+                       "extendedKeyUsage=clientAuth,serverAuth\n"
+                       "1.3.6.1.4.1.55555.5.1=DER:"
+                       "61696d65652d70352d6b622d6d616e6167656d656e742d7631\n");
+   write_text(ca_server_ext,
+              "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyCertSign\n"
+              "extendedKeyUsage=serverAuth\n");
+   write_text(ca_client_ext,
+              "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyCertSign\n"
+              "extendedKeyUsage=clientAuth\n"
+              "1.3.6.1.4.1.55555.5.1=DER:"
+              "61696d65652d70352d6b622d6d616e6167656d656e742d7631\n");
+   snprintf(cmd, sizeof(cmd),
+            "openssl req -x509 -newkey rsa:2048 -nodes -subj /CN=management-ca -days 1 "
+            "-keyout %s -out %s >/dev/null 2>&1 && "
+            "openssl req -newkey rsa:2048 -nodes -subj /CN=management-server -keyout %s "
+            "-out %s/server.csr >/dev/null 2>&1 && "
+            "openssl x509 -req -in %s/server.csr -CA %s -CAkey %s -CAcreateserial -days 1 "
+            "-extfile %s -out %s >/dev/null 2>&1 && "
+            "openssl req -newkey rsa:2048 -nodes -subj /CN=p5-kb-management -keyout %s "
+            "-out %s/client.csr >/dev/null 2>&1 && "
+            "openssl x509 -req -in %s/client.csr -CA %s -CAkey %s -days 1 -extfile %s -out %s "
+            ">/dev/null 2>&1 && "
+            "openssl req -newkey rsa:2048 -nodes -subj /CN=p5-kb-management -keyout %s "
+            "-out %s/dual.csr >/dev/null 2>&1 && "
+            "openssl x509 -req -in %s/dual.csr -CA %s -CAkey %s -days 1 -extfile %s -out %s "
+            ">/dev/null 2>&1",
+            cakey, ca, serverkey, dir, dir, ca, cakey, serverext, server, clientkey, dir, dir, ca,
+            cakey, ext, client, dualkey, dir, dir, ca, cakey, dualext, dual);
+   command(cmd);
+
+   snprintf(cmd, sizeof(cmd),
+            "openssl req -newkey rsa:2048 -nodes -subj /CN=management-server -keyout %s "
+            "-out %s/ca-server.csr >/dev/null 2>&1 && "
+            "openssl x509 -req -in %s/ca-server.csr -CA %s -CAkey %s -days 1 -extfile %s "
+            "-out %s >/dev/null 2>&1 && "
+            "openssl req -newkey rsa:2048 -nodes -subj /CN=p5-kb-management -keyout %s "
+            "-out %s/ca-client.csr >/dev/null 2>&1 && "
+            "openssl x509 -req -in %s/ca-client.csr -CA %s -CAkey %s -days 1 -extfile %s "
+            "-out %s >/dev/null 2>&1",
+            ca_server_key, dir, dir, ca, cakey, ca_server_ext, ca_server, ca_client_key, dir, dir,
+            ca, cakey, ca_client_ext, ca_client);
+   command(cmd);
+
+   assert(symlink(server, linkpath) == 0);
+   assert(server_tls_management_init(linkpath, serverkey, ca) == -1);
+   assert(server_tls_management_init(ca_server, ca_server_key, ca) == -1);
+   assert(server_tls_management_init(server, ca_server_key, ca) == -1);
+   assert(server_tls_management_init(server, serverkey, ca) == 0);
+   assert(server_tls_management_init(server, serverkey, ca) == 0);
+   assert(present(ca, NULL, NULL) == -2);
+   assert(present(ca, client, clientkey) == 1);
+   assert(present(ca, dual, dualkey) == 0);
+   assert(present(ca, ca_client, ca_client_key) != 1);
+
+   snprintf(cmd, sizeof(cmd), "cp %s %s && printf '\\n' >> %s", ca, other_ca, other_ca);
+   command(cmd);
+   assert(server_tls_management_init(server, serverkey, other_ca) == -1);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf %s", dir);
+   command(cmd);
+   puts("test_server_management_tls: ok");
+   return 0;
+}

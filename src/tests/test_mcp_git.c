@@ -9,6 +9,7 @@
 #include <sqlite3.h>
 #include "aimee.h"
 #include "mcp_git.h"
+#include "workspace_provider.h"
 #include "git_verify.h"
 #include "cJSON.h"
 #include "db_schema.h"
@@ -444,6 +445,59 @@ static void test_git_commit_skips_sensitive(void)
    teardown_git_repo();
 }
 
+/* A CONTAINER-sandboxed delegate runs `--network none` on a minimal image with no
+ * git binary and no forge credential, so aimee's git tooling must execute on the
+ * SERVER against the path-identity bind-mounted worktree — never route into the
+ * container. Regression for the delegate-sandbox E2E where every git_* call died
+ * with "git: command not found" because mcp_git_run dispatched through the container
+ * provider's exec_shell. The spy mimics that no-git failure: if git were still
+ * routed into the container the commit would fail and the spy would be hit. */
+static int g_container_shell_spy_called;
+static char *container_shell_spy(const workspace_provider_t *p, const char *cmd, int *exit_code)
+{
+   (void)p;
+   (void)cmd;
+   g_container_shell_spy_called = 1;
+   if (exit_code)
+      *exit_code = 127; /* as if `git` were absent from the sandbox image */
+   return strdup("bash: git: command not found\n");
+}
+
+static void test_git_container_provider_runs_on_server(void)
+{
+   setup_git_repo();
+   system("git checkout -q -b test-sandbox");
+
+   FILE *fp = fopen("sbx.txt", "w");
+   fputs("sandbox\n", fp);
+   fclose(fp);
+   system("git add sbx.txt");
+
+   workspace_provider_t container;
+   memset(&container, 0, sizeof(container));
+   container.kind = WS_PROVIDER_CONTAINER;
+   container.exec_shell = container_shell_spy;
+   workspace_provider_set_active(&container);
+   g_container_shell_spy_called = 0;
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "sandbox commit");
+   cJSON *resp = handle_git_commit(args);
+   workspace_provider_clear_active();
+
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   /* git ran on the server (the commit really landed), NOT through the container
+    * spy — so a no-git sandbox image no longer blocks a delegate's commit. */
+   assert(g_container_shell_spy_called == 0);
+   assert(strstr(text, "committed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   teardown_git_repo();
+   printf("  PASS: test_git_container_provider_runs_on_server\n");
+}
+
 /* --- Test handle_git_push in non-git directory --- */
 
 static void test_git_push_requires_branch(void)
@@ -717,7 +771,7 @@ static void test_git_pr_wait_missing_number(void)
    cJSON_Delete(args);
 }
 
-static void test_git_pr_wait_parses_plain_checks_output(void)
+static void test_git_pr_wait_is_rejected_without_running_gh(void)
 {
    char tmpdir[] = "/tmp/aimee-test-gh-XXXXXX";
    assert(mkdtemp(tmpdir) != NULL);
@@ -726,17 +780,7 @@ static void test_git_pr_wait_parses_plain_checks_output(void)
    snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
    FILE *fp = fopen(gh_path, "w");
    assert(fp != NULL);
-   fputs("#!/bin/sh\n"
-         "for arg in \"$@\"; do\n"
-         "  if [ \"$arg\" = \"--json\" ]; then\n"
-         "    echo 'unexpected --json' >&2\n"
-         "    exit 2\n"
-         "  fi\n"
-         "done\n"
-         "printf 'unit-tests\\tpass\\t1s\\thttps://example.test/unit\\n'\n"
-         "printf 'lint\\tfail\\t2s\\thttps://example.test/lint\\n'\n"
-         "exit 1\n",
-         fp);
+   fputs("#!/bin/sh\nexit 99\n", fp);
    fclose(fp);
    assert(chmod(gh_path, 0700) == 0);
 
@@ -757,7 +801,56 @@ static void test_git_pr_wait_parses_plain_checks_output(void)
    cJSON *resp = handle_git_pr(args);
    char *text = get_mcp_text(resp);
    assert(text != NULL);
-   assert(strstr(text, "checks complete: 1/2 failed, 1 passed") != NULL);
+   assert(strstr(text, "blocking PR check waits are disabled") != NULL);
+   assert(strstr(text, "poll") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   if (saved_path[0])
+      assert(setenv("PATH", saved_path, 1) == 0);
+   else
+      unsetenv("PATH");
+   char cmd[640];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
+static void test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge(void)
+{
+   char tmpdir[] = "/tmp/aimee-test-gh-auto-XXXXXX";
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char gh_path[512];
+   snprintf(gh_path, sizeof(gh_path), "%s/gh", tmpdir);
+   FILE *fp = fopen(gh_path, "w");
+   assert(fp != NULL);
+   fputs("#!/bin/sh\n"
+         "if [ \"$1\" = pr ] && [ \"$2\" = checks ]; then exit 8; fi\n"
+         "if [ \"$1\" = pr ] && [ \"$2\" = merge ]; then exit 0; fi\n"
+         "exit 2\n",
+         fp);
+   fclose(fp);
+   assert(chmod(gh_path, 0700) == 0);
+
+   const char *old_path = getenv("PATH");
+   char saved_path[4096] = "";
+   if (old_path)
+      snprintf(saved_path, sizeof(saved_path), "%s", old_path);
+   char new_path[8192];
+   snprintf(new_path, sizeof(new_path), "%s%s%s", tmpdir, old_path ? ":" : "",
+            old_path ? old_path : "");
+   assert(setenv("PATH", new_path, 1) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "merge");
+   cJSON_AddNumberToObject(args, "number", 123);
+   cJSON_AddBoolToObject(args, "auto", 1);
+   cJSON *resp = handle_git_pr(args);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "--auto") != NULL);
+   assert(strstr(text, "\"auto_merge_enabled\":true") != NULL);
+   assert(strstr(text, "\"merged\":false") != NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
@@ -1426,7 +1519,7 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
 {
    char tmpdir[256], fake_home[256], fake_bin_dir[256];
    const char fake_gh_script[] = "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n"
-                                 "  printf '[{\"number\":537}]\\n'\n"
+                                 "  printf '[{\"number\":537,\"headRefOid\":\"merged-head\"}]\\n'\n"
                                  "  exit 0\n"
                                  "fi\n"
                                  "exit 1\n";
@@ -1434,6 +1527,10 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--abbrev-ref\" ] && "
        "[ \"$3\" = \"HEAD\" ]; then\n"
        "  printf 'feature-reused\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then\n"
+       "  printf 'merged-head\\n'\n"
        "  exit 0\n"
        "fi\n"
        "exit 1\n";
@@ -1460,6 +1557,60 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
    assert(text != NULL);
    assert(strstr(text, "Branch Reuse: BLOCKED") != NULL);
    assert(strstr(text, "already has a merged PR") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(chdir(saved_cwd) == 0);
+
+   {
+      char cmd[1024];
+      snprintf(cmd, sizeof(cmd), "rm -rf '%s'", fake_bin_dir);
+      system(cmd);
+   }
+   verify_test_teardown(tmpdir, fake_home);
+}
+
+static void test_verify_prepare_pr_allows_reused_branch_with_new_head(void)
+{
+   char tmpdir[256], fake_home[256], fake_bin_dir[256];
+   const char fake_gh_script[] = "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n"
+                                 "  printf '[{\"number\":537,\"headRefOid\":\"merged-head\"}]\\n'\n"
+                                 "  exit 0\n"
+                                 "fi\n"
+                                 "exit 1\n";
+   const char fake_git_script[] =
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--abbrev-ref\" ] && "
+       "[ \"$3\" = \"HEAD\" ]; then\n"
+       "  printf 'testing\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then\n"
+       "  printf 'new-testing-head\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "exit 1\n";
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-reused-pr-new-head");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "verify:\n"
+                          "  enforce: false\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: echo ok\n");
+   verify_test_set_fake_path(fake_bin_dir, sizeof(fake_bin_dir));
+   verify_test_write_fake_gh(fake_bin_dir, fake_gh_script);
+   verify_test_write_fake_git(fake_bin_dir, fake_git_script);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "prepare-pr");
+   cJSON_AddStringToObject(args, "base", "main");
+   cJSON *resp = handle_git_verify(NULL, args, NULL);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "Branch Reuse: BLOCKED") == NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
@@ -2256,6 +2407,7 @@ int main(void)
    test_git_commit_missing_message();
    test_git_commit_success();
    test_git_commit_skips_sensitive();
+   test_git_container_provider_runs_on_server();
    test_git_push_requires_branch();
    test_git_branch_missing_action();
    test_git_branch_create_and_list();
@@ -2270,7 +2422,8 @@ int main(void)
    test_git_pr_edit_requires_fields();
    test_git_pr_checks_missing_number();
    test_git_pr_wait_missing_number();
-   test_git_pr_wait_parses_plain_checks_output();
+   test_git_pr_wait_is_rejected_without_running_gh();
+   test_git_pr_auto_merge_accepts_pending_checks_without_claiming_merge();
    assert(check_branch_has_merged_pr_for(NULL) == 0);
    assert(check_branch_has_merged_pr_for("") == 0);
    test_git_issue_list_defaults();
@@ -2299,6 +2452,7 @@ int main(void)
    test_verify_load_config_falls_back_to_verify_local();
    test_verify_load_config_old_flat_format_ignored();
    test_verify_prepare_pr_blocks_branch_with_merged_pr();
+   test_verify_prepare_pr_allows_reused_branch_with_new_head();
 
    /* Verify gate enforcement tests */
    test_verify_gate_not_enforced_without_enforce_flag();

@@ -249,10 +249,11 @@ def call_llm(prompt: str, max_tokens: int) -> tuple[str | None, str | None]:
 
 def strip_fences(text: str) -> str:
     text = text.strip()
-    # Reasoning models (e.g. MiniMax-M3, Qwen3) prepend a <think>...</think>
-    # block; keep only what follows the final close tag.
-    if "</think>" in text:
-        text = text.rsplit("</think>", 1)[1].strip()
+    # No <think> handling here by design: llm-chat.py splits reasoning off at the
+    # wire boundary (see split_reasoning), so stdout carries the answer only. A
+    # "</think>" reaching this function is therefore CONTENT — e.g. a docstring
+    # about stripping think blocks — and must survive. Re-deriving the split from
+    # text here is what previously cut valid JSON mid-string and killed the job.
     if text.startswith("```"):
         lines = text.splitlines()
         end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)

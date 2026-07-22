@@ -8,6 +8,8 @@
 
 #include <stddef.h>
 
+#include "aimee_ir.h" /* aimee_response_t */
+
 struct cJSON;
 
 /* Build the provider request body from `req` (an Anthropic Messages request) via
@@ -15,9 +17,17 @@ struct cJSON;
  * else OpenAI chat). The served model is overridden to `agent_model` and, when
  * `max_tokens_override > 0`, the token cap is set to it (mirrors the legacy path's
  * agent shaping). Returns a malloc'd JSON string the caller frees, or NULL to fall
- * back to the legacy translator. */
+ * back to the legacy translator.
+ *
+ * `want_stream` decides the upstream stream flag EXPLICITLY rather than inheriting
+ * the client's. They are not the same question: the caller may serve the client an
+ * SSE stream while fetching the upstream reply BUFFERED and replaying it. Passing
+ * the client's flag through caused exactly that bug — the buffered-replay path
+ * asked the provider to stream and then cJSON_Parse'd the SSE ("primary provider
+ * returned an unparseable reply"). */
 char *aimee_ir_build_provider_body(const struct cJSON *req, const char *driver_name,
-                                   const char *agent_model, int max_tokens_override);
+                                   const char *agent_model, int max_tokens_override,
+                                   int want_stream);
 
 /* 1 if the IR live-path flag is enabled (config-only: AIMEE_IR_PATH env). */
 int aimee_ir_path_enabled(void);
@@ -46,5 +56,14 @@ int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
 struct cJSON *aimee_ir_build_from_chat(const char *agent_model, const struct cJSON *messages,
                                        const struct cJSON *tools, const char *system,
                                        const char *driver_name);
+
+/* Slice 3 gate (AIMEE_IR_RESP_PATH env, DEFAULT-OFF): route the OPENAI-WIRE buffered
+ * response parse through the IR. Per-wire; anthropic + responses stay on legacy. */
+int aimee_ir_resp_path_enabled(void);
+
+struct parsed_response;
+/* TRANSITIONAL: IR response -> legacy parsed_response_t (see .c). Remove once emit +
+ * police are IR-native. */
+void aimee_ir_response_to_parsed(const aimee_response_t *r, struct parsed_response *out);
 
 #endif /* DEC_AIMEE_IR_SERVE_H */

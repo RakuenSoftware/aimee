@@ -17,6 +17,10 @@
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
 #include "db2_internal.h"
+#include "entity_edges.h"     /* co_edited backfill: edge upsert / co_targets read */
+#include "index.h"            /* cochange_pairs_for_commit / cochange_is_hex_sha */
+#include "kb_runtime_state.h" /* db2_kb_purge_fence_active: commit-point fence check */
+#include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
 
 #include "aimee.h"
 #include "db_postgres.h"
@@ -196,14 +200,18 @@ static int ci_file_modified_since(void *conn, int64_t project_id, const char *re
 
 /* ---- File body replacement (transactional) --------------------- */
 
-static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, const char *content)
+/* Returns 0 on success, -1 when the write was aborted at its commit point
+ * because a purge fence is active for `project` (webchat-project-lifecycle
+ * slice 2) — callers must stop the scan for that project. */
+static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
+                                const char *content)
 {
    char err[CI_ERRBUF] = "";
 
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
-      return;
+      return 0;
    }
 
    db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
@@ -365,11 +373,32 @@ static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, c
          aimee_pg_finalize(st);
    }
 
+   /* Generation-fence check INSIDE the transaction, immediately before
+    * COMMIT: an in-flight scan that started pre-fence still cannot commit
+    * index rows for a project being purged. The advisory guard serializes
+    * this check+commit against the fence-publish transaction, closing the
+    * "checked no-fence, fence lands, stale commit" window. */
+   if (db2_kb_purge_txn_guard(project) != 0)
+   {
+      LOG_WARN(CI_LOG_TAG, "purge guard failed for project '%s': aborting index write",
+               project ? project : "?");
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   if (db2_kb_purge_fence_active(project))
+   {
+      LOG_WARN(CI_LOG_TAG, "purge fence active for project '%s': aborting index write",
+               project ? project : "?");
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+
    if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
    {
       LOG_WARN(CI_LOG_TAG, "COMMIT failed: %s", err);
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
    }
+   return 0;
 }
 
 /* CSS migration assistant (WP-C/D): build the style graph for .css files and the
@@ -1028,6 +1057,163 @@ static char *ci_read_file_content(const char *path, size_t *out_len)
 
 /* ---- Public API: scan ----------------------------------------- */
 
+/* --- Git co-change backfill (production path) ---
+ *
+ * The shipped scanner is canonical_index_scan_project (index.c's index_scan_project
+ * is compiled to a stub in aimee-kb), so the git co-change mining and its
+ * co_edited-edge read must live here to actually run. Files that change together
+ * in a commit are accumulated as co_edited edges (weight = co-change count); the
+ * pure pairing/validation policy is shared with index.c via cochange.c. */
+#define CI_COCHANGE_MAX_FILES  25  /* bulk-commit gate */
+#define CI_COCHANGE_NAME_CAP   64  /* per-commit distinct basenames held */
+#define CI_COCHANGE_CKPT_EVERY 200 /* commits between marker checkpoints */
+
+static void ci_cochange_flush(char names[][128], int ncount, cochange_pair_t *pairs, int max_pairs)
+{
+   int np = cochange_pairs_for_commit(names, ncount, CI_COCHANGE_MAX_FILES, pairs, max_pairs);
+   for (int p = 0; p < np; p++)
+   {
+      int added = 0;
+      db2_entity_edge_upsert(pairs[p].a, "co_edited", pairs[p].b, 0, (int)REL_CO_EDITED,
+                             (int)NODE_FILE, (int)NODE_FILE, &added);
+   }
+}
+
+/* Mine git history under `abs_root` into co_edited edges. Incremental via a
+ * per-project HEAD marker in kb_runtime_state; the marker is validated as a git
+ * object id and shell-escaped before interpolation. See index.c for the full
+ * rationale (this is the production twin of index_backfill_cochange). */
+static void ci_backfill_cochange(const char *project, const char *abs_root)
+{
+   char *esc = shell_escape(abs_root);
+   if (!esc)
+      return;
+   char cmd[MAX_PATH_LEN * 2 + 512];
+   int rc;
+
+   snprintf(cmd, sizeof(cmd), "git -C %s rev-parse HEAD 2>/dev/null", esc);
+   char *head = run_cmd(cmd, &rc);
+   if (rc != 0 || !head)
+   {
+      free(head);
+      free(esc);
+      return;
+   }
+   head[strcspn(head, "\r\n")] = '\0';
+   if (!cochange_is_hex_sha(head))
+   {
+      free(head);
+      free(esc);
+      return;
+   }
+
+   char key[192];
+   snprintf(key, sizeof(key), "cochange_head:%s", project);
+   char marker[128] = "";
+   int have_marker = (db2_kb_runtime_state_get(key, marker, sizeof(marker)) == 0 && marker[0]);
+   if (have_marker && !cochange_is_hex_sha(marker))
+   {
+      db2_kb_runtime_state_set(key, head);
+      free(head);
+      free(esc);
+      return;
+   }
+
+   char revspec[160] = "";
+   if (have_marker)
+   {
+      if (strcmp(marker, head) == 0)
+      {
+         free(head);
+         free(esc);
+         return;
+      }
+      char *emarker = shell_escape(marker);
+      const char *m = emarker ? emarker : marker;
+      snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s HEAD 2>/dev/null", esc, m);
+      char *anc = run_cmd(cmd, &rc);
+      free(anc);
+      if (rc != 0)
+      {
+         db2_kb_runtime_state_set(key, head);
+         free(emarker);
+         free(head);
+         free(esc);
+         return;
+      }
+      snprintf(revspec, sizeof(revspec), "%s..HEAD", m);
+      free(emarker);
+   }
+
+   snprintf(cmd, sizeof(cmd),
+            "git -C %s log --no-merges -M --reverse --format='@@%%H' --name-only %s 2>/dev/null",
+            esc, revspec);
+   char *log = run_cmd(cmd, &rc);
+   free(esc);
+   if (rc != 0 || !log)
+   {
+      free(log);
+      free(head);
+      return;
+   }
+
+   const int max_pairs = CI_COCHANGE_MAX_FILES * (CI_COCHANGE_MAX_FILES - 1) / 2;
+   cochange_pair_t *pairs = malloc(sizeof(*pairs) * (size_t)max_pairs);
+   if (!pairs)
+   {
+      free(log);
+      free(head);
+      return;
+   }
+
+   char names[CI_COCHANGE_NAME_CAP][128];
+   int ncount = 0;
+   int in_commit = 0;
+   char cur_sha[128] = "";
+   int done = 0;
+   for (char *line = log, *nl; line && *line; line = nl ? nl + 1 : NULL)
+   {
+      nl = strchr(line, '\n');
+      if (nl)
+         *nl = '\0';
+      if (line[0] == '@' && line[1] == '@')
+      {
+         if (in_commit)
+         {
+            ci_cochange_flush(names, ncount, pairs, max_pairs);
+            if (cochange_is_hex_sha(cur_sha) && ++done >= CI_COCHANGE_CKPT_EVERY)
+            {
+               db2_kb_runtime_state_set(key, cur_sha);
+               done = 0;
+            }
+         }
+         snprintf(cur_sha, sizeof(cur_sha), "%s", line + 2);
+         in_commit = 1;
+         ncount = 0;
+         continue;
+      }
+      if (!in_commit || !line[0])
+         continue;
+      const char *base = strrchr(line, '/');
+      base = base ? base + 1 : line;
+      const char *ext = ci_get_extension(base);
+      if (!ext || !ext[0] || ci_is_binary_extension(ext))
+         continue;
+      if (ncount >= CI_COCHANGE_NAME_CAP)
+         continue;
+      snprintf(names[ncount], sizeof(names[0]), "%s", base);
+      ncount++;
+   }
+   if (in_commit)
+      ci_cochange_flush(names, ncount, pairs, max_pairs);
+
+   db2_kb_runtime_state_set(key, head);
+
+   free(pairs);
+   free(log);
+   free(head);
+}
+
 int canonical_index_scan_project(const char *name, const char *root, int force, int *inspected_out)
 {
    if (inspected_out)
@@ -1037,9 +1223,11 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    if (!conn)
       return -1;
 
-   /* CSS style-graph write path is opt-in; read once per scan (WP-C). */
-   config_t css_cfg;
-   int css_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
+   /* CSS style-graph and git co-change write paths are opt-in; read once per scan. */
+   config_t scan_cfg;
+   int cfg_ok = (config_load(&scan_cfg) == 0);
+   int css_on = cfg_ok && scan_cfg.css_style_graph_enabled;
+   int cochange_on = cfg_ok && scan_cfg.code_cochange_git_enabled;
 
    char abs_root[MAX_PATH_LEN];
    if (realpath(root, abs_root) == NULL)
@@ -1106,7 +1294,15 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
       }
 
       const char *ext = ci_get_extension(full);
-      ci_replace_file_data(conn, file_id, ext, content);
+      if (ci_replace_file_data(conn, name, file_id, ext, content) != 0)
+      {
+         /* Purge fence: abort the whole scan for this project. */
+         free(content);
+         for (int j = i; j < list.count; j++)
+            free(list.paths[j]);
+         free(list.paths);
+         return -1;
+      }
       ci_css_index_file(file_id, ext, content, css_on);
 
       free(content);
@@ -1115,6 +1311,11 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    }
 
    free(list.paths);
+
+   /* Seed co_edited edges from git history (incremental after the first scan). */
+   if (cochange_on)
+      ci_backfill_cochange(name, abs_root);
+
    return scanned;
 }
 
@@ -1128,9 +1329,11 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    if (!name || !name[0] || !files || file_count < 0)
       return -1;
 
-   /* CSS style-graph write path is opt-in; read once per scan (WP-C). */
-   config_t css_cfg;
-   int css_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
+   /* CSS style-graph and git co-change write paths are opt-in; read once per scan. */
+   config_t scan_cfg;
+   int cfg_ok = (config_load(&scan_cfg) == 0);
+   int css_on = cfg_ok && scan_cfg.css_style_graph_enabled;
+   int cochange_on = cfg_ok && scan_cfg.code_cochange_git_enabled;
 
    void *conn = ci_conn();
    if (!conn)
@@ -1159,13 +1362,26 @@ int canonical_index_scan_files(const char *name, const char *root_label,
          continue;
 
       const char *css_ext = ci_get_extension(rel);
-      ci_replace_file_data(conn, file_id, css_ext, content);
+      if (ci_replace_file_data(conn, name, file_id, css_ext, content) != 0)
+      {
+         /* Purge fence: abort the whole scan for this project. */
+         if (inspected_out)
+            *inspected_out = inspected;
+         return -1;
+      }
       ci_css_index_file(file_id, css_ext, content, css_on);
       scanned++;
    }
 
    if (inspected_out)
       *inspected_out = inspected;
+
+   /* Seed co_edited edges from git history when the pushed root_label is a real
+    * repo the kb can reach (co-located client). A "remote" / inaccessible path
+    * fails the git probe and no-ops, so this is safe for true remote pushes. */
+   if (cochange_on && root_label && root_label[0] && strcmp(root_label, "remote") != 0)
+      ci_backfill_cochange(name, root_label);
+
    return scanned;
 }
 
@@ -1363,6 +1579,38 @@ int canonical_index_blast_radius(const char *project, const char *file_path, bla
             }
          }
          aimee_pg_finalize(st);
+      }
+   }
+
+   /* Expand with co_edited graph edges (weight > 3): files that historically
+    * change together but have no structural import edge. Basename-keyed to match
+    * how the backfill and the in-session co-edit path write these edges. */
+   {
+      const char *slash = strrchr(file_path, '/');
+      const char *match_name = slash ? slash + 1 : file_path;
+
+      char co_buf[16][128];
+      int n = db2_entity_edge_co_targets(match_name, "co_edited", 3, co_buf, 16);
+      for (int b = 0; b < n && out->dependent_count < CI_MAX_DEPS; b++)
+      {
+         const char *related = co_buf[b];
+         if (!related[0] || strcmp(related, match_name) == 0)
+            continue;
+         int dup = 0;
+         for (int d = 0; d < out->dependent_count; d++)
+         {
+            if (strstr(out->dependents[d], related))
+            {
+               dup = 1;
+               break;
+            }
+         }
+         if (!dup)
+         {
+            snprintf(out->dependents[out->dependent_count], MAX_PATH_LEN, "%s (co-edited)",
+                     related);
+            out->dependent_count++;
+         }
       }
    }
 

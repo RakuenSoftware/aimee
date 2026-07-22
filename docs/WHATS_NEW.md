@@ -7,6 +7,24 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
+- **Removed: the interactive chat client and `aimee chat`.** Bare `aimee` now
+  prints usage instead of launching a TUI. The OpenCode frontend bridge and the
+  native fallback loop are gone. Reach the primary agent through any
+  OpenAI-compatible front end pointed at `POST /v1/chat/completions` (OpenCode,
+  VS Code, custom clients — unchanged), the web chat, or `aimee acp-serve` from
+  an ACP editor such as Zed. The `/persona` slash command lived in the removed
+  bridge; use `aimee persona use <name>` instead.
+- **Removed: the `aimee work` queue.** `work add|add-batch|claim|complete|fail|
+  list|board|cancel|release|clear|gc|sync-proposals|stats`, the `/v1/work/*`
+  routes, and the `work_list` / `work_board` MCP tools are gone. **Upgrading drops
+  the `work_queue` and `work_queue_log` tables**, including any rows still in
+  them: nothing reads that data any more, and leaving the tables behind would
+  make an upgraded database permanently different from a fresh install. If you
+  still need the contents, dump them before upgrading.
+- **Removed: `aimee migrate v2`.** The server side was retired some time ago and
+  answers `UNKNOWN_METHOD`; the command could not do anything but fail. The
+  client plumbing is now gone too.
+
 - **Roundtable panels run in parallel**: the workflow `gate.roundtable` now
   dispatches all reviewers concurrently (bounded by the compute-thread ceiling,
   with a per-round deadline so one hung model can't wedge the panel) instead of
@@ -98,7 +116,18 @@ credentials live in the server's **sealed vault**; see
   transcripts and build progress dropped), with the full output spilled for lossless
   recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
   [features/tool-output-condensation.md](features/tool-output-condensation.md).
-- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a single
+- **Retired: the `aimee-combined` all-in-one appliance image.** The single image
+  that bundled `aimee-server` + `aimee-kb` + a CPU LLM (models baked in) is gone —
+  `Dockerfile.combined`, `compose.combined.yaml`, and `combined-entrypoint.sh` are
+  removed. Use the **split stack** instead: `docker compose -f deploy/compose/aimee.yaml up -d`
+  brings up `aimee-server` + `aimee-kb` + a CPU `aimee-llm` + Postgres in one command
+  (add `-f deploy/compose/aimee.gpu.yaml` for a GPU synth tier). The self-deploying
+  server is unchanged — the setup wizard still provisions `aimee-kb` + a CPU
+  `aimee-llm` on demand over the mounted Docker socket. The pure-CPU appliance LLM
+  is now the pre-baked **`aimee-llm-cpu`** image (cpu-tier GGUFs baked in; serves
+  offline with no first-boot download and no `/models` volume). See
+  [QUICKSTART.md](QUICKSTART.md).
+- **Self-hosted GPU inference tiers**: the `aimee-llm` inference image is a
   **model-less** image whose **tier** is chosen at runtime via `AIMEE_LLM_TIER` — the models
   download on first boot into a `/models` volume, so there is nothing baked and no per-tier
   image to pull. `cpu` runs retrieval on any host (~6.5 GB download), `small` a Gemma 4 12B
@@ -137,6 +166,19 @@ credentials live in the server's **sealed vault**; see
   authenticates server-side as a primary provider or delegate, with no
   per-session push from the client. A legacy plaintext token is migrated and
   scrubbed on first use.
+- **SSH-key clones for private / SSH-only repos, plus a single wizard for git
+  account setup**: when you connect a git account with an SSH key, cloning an
+  `ssh://…` or `git@host:owner/repo.git` URL (e.g. a corporate Bitbucket) now
+  actually uses that key, instead of being silently rewritten to HTTPS. git runs
+  with `GIT_SSH_COMMAND` forcing `BatchMode=yes, ConnectTimeout=5,
+  StrictHostKeyChecking=accept-new`: trust-on-first-use records the remote's
+  **public** host key on first contact (and verifies it strictly thereafter) in
+  a **per-principal** `known_hosts` under the sealed tmpfs runtime dir, not the
+  shared `~/.ssh/known_hosts`; the private key still never leaves the in-memory
+  ssh-agent. The setup wizard's Connection step now picks **one** auth method
+  (OAuth sign-in / access token / SSH key) and shows only that method's fields,
+  and the Projects page's duplicated inline auth UI is replaced with a single
+  **+ Connect git account** button that opens the same wizard flow in a modal.
 - **Workspaces ingested from the client**: `aimee workspace add <path>` resolves
   the path locally, registers it as `detached`, and pushes the files to the
   server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap), the

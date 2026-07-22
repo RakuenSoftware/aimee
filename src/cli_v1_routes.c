@@ -139,6 +139,7 @@ static const struct
    int timeout_ms;            /* 0 = CLIENT_DEFAULT_TIMEOUT_MS */
 } rpc_routes[] = {
     {"init", "", "init.run", NULL, NULL, 0},
+    {"doctor", "forensics", "doctor.forensics", NULL, NULL, 0},
     {"memory", "search", "memory.search", NULL, NULL, 60000},
     {"memory", "recall", "memory.recall", NULL, NULL, 60000},
     {"memory", "store", "memory.store", NULL, NULL, 60000},
@@ -150,6 +151,7 @@ static const struct
     {"memory", "show", "memory.get", NULL, NULL, 60000},
     {"memory", "read", "memory.read", NULL, NULL, 60000},
     {"memory", "stats", "memory.stats", NULL, NULL, 60000},
+    {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
     {"index", "scan", "index.scan", NULL, NULL, 300000},
     {"index", "overview", "index.list", NULL, "projects", 0},
@@ -226,24 +228,13 @@ static const struct
     {"pipeline", "resume", "pipeline.resume", NULL, NULL, 0},
     {"pipeline", "advance", "pipeline.advance", NULL, NULL, 300000},
     {"pipeline", "gate", "pipeline.gate", NULL, NULL, 300000},
-    {"work", "add", "work.add", NULL, NULL, 0},
-    {"work", "add-batch", "work.add_batch", NULL, NULL, 0},
-    {"work", "claim", "work.claim", NULL, NULL, 0},
-    {"work", "complete", "work.complete", NULL, NULL, 0},
-    {"work", "fail", "work.fail", NULL, NULL, 0},
-    {"work", "list", "work.list", NULL, "items", 0},
-    {"work", "board", "work.board", NULL, NULL, 0},
-    {"work", "cancel", "work.cancel", NULL, NULL, 0},
-    {"work", "release", "work.release", NULL, NULL, 0},
-    {"work", "clear", "work.clear", NULL, NULL, 0},
-    {"work", "gc", "work.gc", NULL, NULL, 0},
-    {"work", "sync-proposals", "work.sync_proposals", NULL, NULL, 0},
-    {"work", "stats", "work.stats", NULL, NULL, 0},
     {"delegate", "launch", "delegate.launch", NULL, NULL, 300000},
     {"delegate", "status", "delegate.status", NULL, NULL, 0},
     {"delegate", "--list-roles", "agent.list", NULL, "agents", 0},
     {"delegate", "log", "delegate.log", NULL, "episodes", 0},
     {"delegate", "history", "delegate.log", NULL, "episodes", 0},
+    {"delegate", "sandbox list", "delegate.sandbox_list", NULL, "images", 0},
+    {"delegate", "sandbox gc", "delegate.sandbox_gc", NULL, NULL, 60000},
     /* MoA ensemble aggregate: positional[0] is the PROMPT (not a role). Async —
      * forwards to POST /v1/delegate/aggregate and polls GET /v1/runs/{id}. This
      * specific route is what makes `aimee delegate aggregate "<prompt>"` reach the
@@ -328,7 +319,6 @@ static const struct
     {"get-help", NULL, "get_help", "mcp.call", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
     {"git", "verify", "git.verify", "mcp.call", NULL, 900000},
-    {"migrate", "v2", "migrate.v2", NULL, NULL, 900000},
     {"provider", "list", "provider.list", NULL, "providers", 300000},
     {"provider", "show", "provider.show", NULL, NULL, 0},
     {"provider", "models", "provider.models", NULL, "models", 300000},
@@ -1321,15 +1311,31 @@ cJSON *marshal_worktree_gc(int argc, char **argv)
    return req;
 }
 
-static const char *resolve_work_session_env(void)
+cJSON *marshal_delegate_sandbox_gc(int argc, char **argv)
 {
-   const char *s = getenv("AIMEE_SESSION_ID");
-   if (s && s[0])
-      return s;
-   s = getenv("CLAUDE_SESSION_ID");
-   if (s && s[0])
-      return s;
-   return "default";
+   static const char *bool_flags[] = {"dry-run", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = marshal_no_args("delegate.sandbox_gc");
+
+   /* Age floor in days (default 7). 0 means "any age" — prune everything not in use
+    * beyond the keep-recent floor. */
+   int days = rpc_get_int(&opts, "days", 7);
+   if (days < 0)
+      days = 0;
+   if (days > 3650)
+      days = 3650;
+   cJSON_AddNumberToObject(req, "max_age_days", days);
+
+   int keep = rpc_get_int(&opts, "keep", 3);
+   if (keep < 0)
+      keep = 0;
+   cJSON_AddNumberToObject(req, "keep", keep);
+
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddTrueToObject(req, "dry_run");
+   return req;
 }
 
 static const char *resolve_delegate_session_env(void)
@@ -1362,113 +1368,6 @@ static const char *resolve_delegate_session_env(void)
    memcpy(sid, p, len);
    sid[len] = '\0';
    return sid[0] ? sid : NULL;
-}
-
-static void marshal_add_client_cwd(cJSON *req)
-{
-   char cwd_buf[4096];
-   if (req && getcwd(cwd_buf, sizeof(cwd_buf)))
-      cJSON_AddStringToObject(req, "client_cwd", cwd_buf);
-}
-
-cJSON *marshal_work_request(const char *method, int argc, char **argv)
-{
-   static const char *bool_flags[] = {"from-proposals", "no-sync-proposals", NULL};
-   rpc_opts_t opts;
-   rpc_parse(argc, argv, bool_flags, &opts);
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
-
-   const char *v;
-   if (strcmp(method, "work.add") == 0)
-   {
-      if (opts.pos_count > 0)
-         cJSON_AddStringToObject(req, "title", opts.positional[0]);
-      if ((v = rpc_get(&opts, "desc")) && v[0])
-         cJSON_AddStringToObject(req, "description", v);
-      if ((v = rpc_get(&opts, "source")) && v[0])
-         cJSON_AddStringToObject(req, "source", v);
-      cJSON_AddNumberToObject(req, "priority", rpc_get_int(&opts, "priority", 0));
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-   }
-   else if (strcmp(method, "work.add_batch") == 0)
-   {
-      if (rpc_get(&opts, "from-proposals"))
-         cJSON_AddTrueToObject(req, "from_proposals");
-      if ((v = rpc_get(&opts, "dir")) && v[0])
-         cJSON_AddStringToObject(req, "dir", v);
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-      marshal_add_client_cwd(req);
-   }
-   else if (strcmp(method, "work.claim") == 0)
-   {
-      v = rpc_get(&opts, "id");
-      if (!v && opts.pos_count > 0)
-         v = opts.positional[0];
-      if (v && v[0])
-         cJSON_AddStringToObject(req, "id", v);
-      if ((v = rpc_get(&opts, "effort")) && v[0])
-         cJSON_AddStringToObject(req, "effort", v);
-      if ((v = rpc_get(&opts, "tag")) && v[0])
-         cJSON_AddStringToObject(req, "tag", v);
-      if ((v = rpc_get(&opts, "exclude-tag")) && v[0])
-         cJSON_AddStringToObject(req, "exclude_tag", v);
-      cJSON_AddNumberToObject(req, "skip", rpc_get_int(&opts, "skip", 0));
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-   }
-   else if (strcmp(method, "work.complete") == 0 || strcmp(method, "work.fail") == 0)
-   {
-      v = rpc_get(&opts, "id");
-      if (!v && opts.pos_count > 0)
-         v = opts.positional[0];
-      if (v && v[0])
-         cJSON_AddStringToObject(req, "id", v);
-      if ((v = rpc_get(&opts, "result")) && v[0])
-         cJSON_AddStringToObject(req, "result", v);
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-   }
-   else if (strcmp(method, "work.list") == 0)
-   {
-      if ((v = rpc_get(&opts, "status")) && v[0])
-         cJSON_AddStringToObject(req, "status_filter", v);
-   }
-   else if (strcmp(method, "work.cancel") == 0 || strcmp(method, "work.release") == 0)
-   {
-      v = rpc_get(&opts, "id");
-      if (!v && opts.pos_count > 0)
-         v = opts.positional[0];
-      if (v && v[0])
-         cJSON_AddStringToObject(req, "id", v);
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-   }
-   else if (strcmp(method, "work.clear") == 0)
-   {
-      if ((v = rpc_get(&opts, "status")) && v[0])
-         cJSON_AddStringToObject(req, "status_filter", v);
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-   }
-   else if (strcmp(method, "work.gc") == 0)
-   {
-      int hours = rpc_get_int(&opts, "max-age", 2);
-      if (hours < 1)
-         hours = 1;
-      cJSON_AddNumberToObject(req, "max_age_hours", hours);
-      if (rpc_get(&opts, "no-sync-proposals"))
-         cJSON_AddTrueToObject(req, "no_sync_proposals");
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-      marshal_add_client_cwd(req);
-   }
-   else if (strcmp(method, "work.sync_proposals") == 0)
-   {
-      if ((v = rpc_get(&opts, "base")) && v[0])
-         cJSON_AddStringToObject(req, "base", v);
-      cJSON_AddStringToObject(req, "session_id", resolve_work_session_env());
-      marshal_add_client_cwd(req);
-   }
-
-   return req;
 }
 
 cJSON *marshal_insights_overview(int argc, char **argv)

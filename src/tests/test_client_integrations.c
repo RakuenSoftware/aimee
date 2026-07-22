@@ -368,6 +368,90 @@ static void test_claude_hooks_create_post_hook_on_fresh_settings(void)
    system(cmd);
 }
 
+/* 1 if root.permissions.deny[] contains the exact string `tool`. */
+static int perms_deny_has(cJSON *root, const char *tool)
+{
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   cJSON *deny = perms ? cJSON_GetObjectItemCaseSensitive(perms, "deny") : NULL;
+   for (int i = 0; cJSON_IsArray(deny) && i < cJSON_GetArraySize(deny); i++)
+   {
+      cJSON *e = cJSON_GetArrayItem(deny, i);
+      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+static int stub_delegates_available(void)
+{
+   return 1;
+}
+static int stub_delegates_none(void)
+{
+   return 0;
+}
+static int stub_delegates_unknown(void)
+{
+   return -1;
+}
+
+/* The sub-agent-ban gate: ensure_claude_code_hooks installs the subagent-guard
+ * PreToolUse hook + permissions.deny [Task, Agent] ONLY when the injected delegate
+ * probe reports usable delegates, and removes both when it does not. An "unknown"
+ * probe (server down) must leave settings untouched. Config subagent_ban_enabled
+ * defaults ON (no aimee.yaml opt-out in the test env). */
+static void test_claude_hooks_subagent_ban_gate(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-subagent-ban-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   char settings_path[512];
+   snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
+
+   /* Delegates available -> install the guard hook AND the static deny backstop. */
+   FILE *fp = fopen(settings_path, "w");
+   assert(fp != NULL);
+   fputs("{}", fp);
+   fclose(fp);
+   client_integrations_set_delegate_probe(stub_delegates_available);
+   ensure_claude_code_hooks(settings_path);
+   cJSON *root = read_json_file(settings_path);
+   cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
+   assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
+   assert(perms_deny_has(root, "Task"));
+   assert(perms_deny_has(root, "Agent"));
+   /* The attention-guard matcher no longer claims Task|Agent (the dedicated guard
+    * owns them now). */
+   assert(hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
+   cJSON_Delete(root);
+
+   /* Delegates gone -> the SAME settings must have the guard + deny removed. */
+   client_integrations_set_delegate_probe(stub_delegates_none);
+   ensure_claude_code_hooks(settings_path);
+   root = read_json_file(settings_path);
+   hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
+   assert(!hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
+   assert(!perms_deny_has(root, "Task"));
+   assert(!perms_deny_has(root, "Agent"));
+   cJSON_Delete(root);
+
+   /* Re-install, then an UNKNOWN probe (server unreachable) must leave it as-is. */
+   client_integrations_set_delegate_probe(stub_delegates_available);
+   ensure_claude_code_hooks(settings_path);
+   client_integrations_set_delegate_probe(stub_delegates_unknown);
+   ensure_claude_code_hooks(settings_path);
+   root = read_json_file(settings_path);
+   hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
+   assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
+   assert(perms_deny_has(root, "Task"));
+   cJSON_Delete(root);
+
+   client_integrations_set_delegate_probe(NULL); /* don't leak into other tests */
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 static void test_claude_hooks_patch_existing_matcher(void)
 {
    char tmpdir[512];
@@ -1020,6 +1104,69 @@ static void test_write_text_file_no_op(void)
    unlink(tmppath);
 }
 
+/* --- Test the client-integrations opt-out gate --- */
+
+static void test_client_integrations_optout_gate(void)
+{
+   /* Hermetic config: point AIMEE_HOME at an empty temp dir so the gate reads
+    * an aimee.yaml under our control (absent -> default client_integrations
+    * ON). */
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-ci-optout-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+
+   /* platform_unsetenv is not declared in this include context, and the gate
+    * treats "0"/"false"/empty as "not opted out", so "0" stands in for unset. */
+   char old_home[512] = {0};
+   const char *prev_home = getenv("AIMEE_HOME");
+   if (prev_home)
+      snprintf(old_home, sizeof(old_home), "%s", prev_home);
+
+   platform_setenv("AIMEE_HOME", tmpdir);
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+
+   /* Default config, no env override -> integrations allowed. */
+   assert(client_integrations_allowed() == 1);
+
+   /* Env override opts out regardless of config. */
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "1");
+   assert(client_integrations_allowed() == 0);
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "yes");
+   assert(client_integrations_allowed() == 0);
+
+   /* "0" and "false" are treated as unset, so the (default-ON) config wins. */
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+   assert(client_integrations_allowed() == 1);
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "false");
+   assert(client_integrations_allowed() == 1);
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+
+   /* Config-driven opt-out: client_integrations_enabled: false closes the gate
+    * even with no env override. */
+   char yaml_path[600];
+   snprintf(yaml_path, sizeof(yaml_path), "%s/aimee.yaml", tmpdir);
+   FILE *fp = fopen(yaml_path, "w");
+   assert(fp != NULL);
+   fputs("client_integrations_enabled: false\n", fp);
+   fclose(fp);
+   assert(client_integrations_allowed() == 0);
+
+   /* And the env override still wins the other way: "0" cannot re-enable it once
+    * the config disables it (env only forces OFF, never ON). */
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+   assert(client_integrations_allowed() == 0);
+
+   /* Restore AIMEE_HOME (best-effort) and neutralize the opt-out env so later
+    * code in this process sees a clean state. */
+   platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+   if (old_home[0])
+      platform_setenv("AIMEE_HOME", old_home);
+
+   char rm_cmd[600];
+   snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf '%s'", tmpdir);
+   system(rm_cmd);
+}
+
 int main(void)
 {
    printf("client_integrations: ");
@@ -1036,6 +1183,7 @@ int main(void)
    test_claude_hooks_create_post_hook_on_fresh_settings();
    test_claude_hooks_patch_existing_matcher();
    test_claude_hooks_repoint_stale_command();
+   test_claude_hooks_subagent_ban_gate();
    test_codex_plugin_enabled_fresh();
    test_codex_plugin_enabled_preserves_existing();
    test_codex_plugin_enabled_idempotent();
@@ -1050,6 +1198,7 @@ int main(void)
    test_claude_trust_idempotent();
    test_claude_trust_preserves_other_projects();
    test_claude_trust_no_op_when_claude_json_missing();
+   test_client_integrations_optout_gate();
 
    printf("all tests passed\n");
    return 0;

@@ -11,7 +11,7 @@
 
 #include "db1.h"
 #include "wfe_store.h"
-#include "server/wfe_live_foreach.h"
+#include "wfe_live_foreach.h"
 
 /* A minimal but valid "slice" workflow so wfe_work_item_resolve can pin its version
  * + start stage (the spawner needs those to create children). */

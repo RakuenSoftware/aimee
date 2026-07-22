@@ -1,7 +1,7 @@
 /* test_extract_patterns.c: typed-fact §6 pattern-first extraction + §4
  * retraction scan. Pure logic. P5. */
-#include "../headers/memory_extract_patterns.h"
-#include "../headers/memory_ontology.h"
+#include "memory_extract_patterns.h"
+#include "memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

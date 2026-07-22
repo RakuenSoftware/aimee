@@ -10,20 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-char *tool_call_copy_valid_arguments(cJSON *fn_args)
-{
-   if (cJSON_IsString(fn_args))
-   {
-      cJSON *check = cJSON_Parse(fn_args->valuestring);
-      if (check)
-      {
-         cJSON_Delete(check);
-         return strdup(fn_args->valuestring);
-      }
-   }
-   return strdup("{}");
-}
-
 void tool_call_normalize_assistant_arguments(cJSON *assistant_message, int index,
                                              const char *arguments)
 {

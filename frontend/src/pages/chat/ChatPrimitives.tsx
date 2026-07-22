@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { tokens } from '@rakuensoftware/smoothgui';
+import { Button, tokens, DiffViewer } from '@rakuensoftware/smoothgui';
 import { escHtml, renderMd } from './markdown';
 
 interface BootstrapStack {
@@ -23,12 +23,12 @@ export function BootstrapBanner({ onGenerate, onDismiss, stacks }: BannerProps) 
       <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#8c8' }}>No .aimee-rules file found</div>
       <div style={{ fontSize: '12px', color: '#bbb', margin: '3px 0' }}>{stackText}</div>
       <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-        <button onClick={onGenerate} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer', border: '1px solid #2d4d2d', background: '#1a3a1a', color: '#8c8' }}>
+        <Button variant="primary" size="sm" onClick={onGenerate}>
           Generate .aimee-rules
-        </button>
-        <button onClick={onDismiss} style={{ padding: '5px 12px', fontSize: '12px', borderRadius: '4px', cursor: 'pointer', border: `1px solid ${tokens.borderMedium}`, background: 'transparent', color: tokens.textSecondary }}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDismiss}>
           Dismiss
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -106,19 +106,10 @@ export const TurnSummaryCard = memo(function TurnSummaryCard({ text }: { text: s
 });
 
 export const DiffBlock = memo(function DiffBlock({ path, diff }: { path?: string; diff: string }) {
-  const lines = diff.split('\n');
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: '#0d1117', borderLeft: '3px solid #444', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
       <summary style={{ cursor: 'pointer', color: '#8bf', fontSize: '12px', fontFamily: 'monospace' }}>{path ? `diff: ${path}` : 'diff'}</summary>
-      <pre style={{ margin: '6px 0 0', fontSize: '11px', fontFamily: 'monospace', lineHeight: 1.4, overflow: 'auto', maxHeight: '300px' }}>
-        {lines.map((line, i) => {
-          let color = '#ccc';
-          if (line.startsWith('+') && !line.startsWith('+++')) color = '#4ec94e';
-          else if (line.startsWith('-') && !line.startsWith('---')) color = '#f87171';
-          else if (line.startsWith('@@')) color = '#60a5fa';
-          return <span key={i} style={{ color, display: 'block' }}>{line}</span>;
-        })}
-      </pre>
+      <DiffViewer diff={diff} />
     </details>
   );
 });

@@ -40,4 +40,24 @@ int toolset_resolve_effective(const char *name, char out[][TOOLSET_TOOL_MAX], in
 int toolset_tool_known(const char *name);
 const char *toolset_for_delegate_role(const char *role);
 
+/* Register a tool that exists on aimee's MCP surface and should also be callable
+ * by aimee's own agents, placing it in `toolset` (an existing builtin set).
+ *
+ * The MCP dispatch table is the single source of truth for which tools exist; the
+ * server walks it at startup and registers every entry marked native. This tier
+ * cannot link the server tier, so the names arrive by registration rather than by
+ * a direct read — the same shape as the git-write and forge provider seams.
+ *
+ * Both KNOWN_TOOLS (does this name exist?) and the builtin toolsets (may this role
+ * call it?) grow from these registrations, so a tool declared once in the MCP table
+ * becomes callable everywhere without a second edit. That is the point: the four
+ * registries this collapses had to agree by hand, and when they silently disagreed
+ * the tool was advertised and uncallable, or absent from aimee's own agents while
+ * every external client had it.
+ *
+ * MUST be called before the first toolset_registry_init(). Unregistered (thin
+ * client, unit tests) the list is empty and every toolset resolves exactly as
+ * before — no test needs to know this exists. */
+void toolset_register_native_tool(const char *name, const char *toolset);
+
 #endif /* DEC_TOOLSET_H */

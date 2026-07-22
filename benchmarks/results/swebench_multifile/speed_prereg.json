@@ -1,0 +1,197 @@
+{
+  "methodology": "pre-registered; latency=ledger duration_ms (queue-free); same model both arms; no localize; sole tenant",
+  "summary": {
+    "instances": 12,
+    "with_data": 12,
+    "parallel_faster_count": 10,
+    "median_speedup": 1.82,
+    "mean_speedup": 1.95
+  },
+  "per_instance": {
+    "astropy__astropy-13398": {
+      "files": 3,
+      "monolithic_ms": 67366,
+      "parallel_max_ms": 36999,
+      "parallel_calls_ms": [
+        36999,
+        31483,
+        5677
+      ],
+      "speedup": 1.82,
+      "mono_tokens": 17157,
+      "parallel_tokens": 24490
+    },
+    "django__django-11138": {
+      "files": 4,
+      "monolithic_ms": 81102,
+      "parallel_max_ms": 50042,
+      "parallel_calls_ms": [
+        50042,
+        17419,
+        15638,
+        9587
+      ],
+      "speedup": 1.62,
+      "mono_tokens": 30695,
+      "parallel_tokens": 39740
+    },
+    "django__django-11400": {
+      "files": 3,
+      "monolithic_ms": 32674,
+      "parallel_max_ms": 30569,
+      "parallel_calls_ms": [
+        30569,
+        7708,
+        6565
+      ],
+      "speedup": 1.07,
+      "mono_tokens": 20228,
+      "parallel_tokens": 23600
+    },
+    "django__django-11532": {
+      "files": 5,
+      "monolithic_ms": 52959,
+      "parallel_max_ms": 22895,
+      "parallel_calls_ms": [
+        22895,
+        17754,
+        17641,
+        13306,
+        10469
+      ],
+      "speedup": 2.31,
+      "mono_tokens": 20624,
+      "parallel_tokens": 31104
+    },
+    "django__django-11734": {
+      "files": 3,
+      "monolithic_ms": 39808,
+      "parallel_max_ms": 36041,
+      "parallel_calls_ms": [
+        36041,
+        17077,
+        12675
+      ],
+      "speedup": 1.1,
+      "mono_tokens": 17395,
+      "parallel_tokens": 21066
+    },
+    "django__django-13121": {
+      "files": 4,
+      "monolithic_ms": 83012,
+      "parallel_max_ms": 51052,
+      "parallel_calls_ms": [
+        51052,
+        42083,
+        21560,
+        20620
+      ],
+      "speedup": 1.63,
+      "mono_tokens": 22565,
+      "parallel_tokens": 30047
+    },
+    "django__django-15629": {
+      "files": 4,
+      "monolithic_ms": 81403,
+      "parallel_max_ms": 32820,
+      "parallel_calls_ms": [
+        32820,
+        17719,
+        11740,
+        8415
+      ],
+      "speedup": 2.48,
+      "mono_tokens": 25929,
+      "parallel_tokens": 31249
+    },
+    "django__django-16263": {
+      "files": 4,
+      "monolithic_ms": 80865,
+      "parallel_max_ms": 82709,
+      "parallel_calls_ms": [
+        82709,
+        24297,
+        12949,
+        8273
+      ],
+      "speedup": 0.98,
+      "mono_tokens": 27292,
+      "parallel_tokens": 33215
+    },
+    "pylint-dev__pylint-4551": {
+      "files": 4,
+      "monolithic_ms": 94447,
+      "parallel_max_ms": 38458,
+      "parallel_calls_ms": [
+        38458,
+        37479,
+        35738,
+        25074
+      ],
+      "speedup": 2.46,
+      "mono_tokens": 22498,
+      "parallel_tokens": 29054
+    },
+    "pylint-dev__pylint-6386": {
+      "files": 4,
+      "monolithic_ms": 27667,
+      "parallel_max_ms": 39768,
+      "parallel_calls_ms": [
+        39768,
+        31960,
+        28361,
+        7838
+      ],
+      "speedup": 0.7,
+      "mono_tokens": 18864,
+      "parallel_tokens": 27097
+    },
+    "sympy__sympy-13091": {
+      "files": 21,
+      "monolithic_ms": 115026,
+      "parallel_max_ms": 22026,
+      "parallel_calls_ms": [
+        22026,
+        19152,
+        17002,
+        16024,
+        15112,
+        13371,
+        12209,
+        12070,
+        11729,
+        9945,
+        9062,
+        8993,
+        8808,
+        8645,
+        8618,
+        8475,
+        7586,
+        7211,
+        6793,
+        6572,
+        5497
+      ],
+      "speedup": 5.22,
+      "mono_tokens": 80801,
+      "parallel_tokens": 158513
+    },
+    "sympy__sympy-16597": {
+      "files": 6,
+      "monolithic_ms": 108477,
+      "parallel_max_ms": 54651,
+      "parallel_calls_ms": [
+        54651,
+        39337,
+        27050,
+        17102,
+        7739,
+        3665
+      ],
+      "speedup": 1.98,
+      "mono_tokens": 30987,
+      "parallel_tokens": 38688
+    }
+  }
+}

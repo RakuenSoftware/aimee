@@ -9,9 +9,11 @@ How to point `aimee-kb` at the model backend that does its **embedding**,
 in-process. It *calls* one over HTTP. Inference lives in a separate **`aimee-llm`
 container** (the unified Vulkan llama.cpp stack, deployed as the SmoothNAS
 `aimee-llm` plugin) or any external OpenAI-compatible endpoint. `aimee-llm` is a
-single **model-less** image: the **tier** (`cpu` / `small` / `mid` / `large`) is
+**model-less** image: the **tier** (`cpu` / `small` / `mid` / `large`) is
 chosen at runtime via `AIMEE_LLM_TIER` and the models are downloaded on first
-boot. You only ever give the kb a **URL**. The tiers themselves are documented in
+boot. (For offline CPU-only deploys a pre-baked **`aimee-llm-cpu`** variant ships
+the cpu tier's models in the image; either way the kb just sees a container at
+`aimee-llm:8742`.) You only ever give the kb a **URL**. The tiers themselves are documented in
 [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Tiers: what each backend provides

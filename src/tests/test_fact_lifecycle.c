@@ -7,8 +7,8 @@
 #include "../db2/db2_test_shim.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
-#include "../headers/memory_ontology.h"
-#include "../headers/memory_fact_gate.h"
+#include "memory_ontology.h"
+#include "memory_fact_gate.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

@@ -28,7 +28,7 @@ MCP dispatch (`src/server/server.c:924`, `src/server/server_compute_async.c:206`
 the gateway rewrites the primary's LLM traffic in aimee's own process
 (`src/gateway_policy.c`), workflow gates are engine-owned and HMAC-non-forgeable
 (`src/workflow/wfe_approval.c`), and a hash-chained, MAC-checkpointed WORM store
-exists and verifies (`src/audit_worm.c`, `src/audit_worm_chain.c`). What is missing
+exists and verifies (`src/modules/audit/audit_worm.c`, `src/modules/audit/audit_worm_chain.c`). What is missing
 is the last mile that turns "we log verdicts" into "we can attest verdicts":
 
 1. the tamper-evident chain is **default-off** (`audit_worm_enabled` has no
@@ -77,8 +77,8 @@ datatracker.ietf.org draft-sharif-agent-audit-trail.
 | Piece | Where | Status |
 | --- | --- | --- |
 | Per-tool-call verdict + exactly-once audit emit | `pre_tool_check` wrapper, `src/guardrails_action_audit.c:90-146` (fail-open post-verdict; actor primary/delegate; keyed-HMAC `args_hash`) | shipped, default-on to `audit.log` |
-| Hash-chained WORM store, MAC checkpoints, green/amber/red verify | `src/audit_worm.c`, `src/audit_worm_chain.c`; dedicated chain key `.audit-chain-key` | shipped, **default-off dual-write** |
-| Sealing to kernel-immutable segments (crypto-only degrade) | `src/audit_worm.c` (`VACUUM INTO` + `FS_IMMUTABLE_FL`) | shipped; sealer runs in-process, sidecar deferred |
+| Hash-chained WORM store, MAC checkpoints, green/amber/red verify | `src/modules/audit/audit_worm.c`, `src/modules/audit/audit_worm_chain.c`; dedicated chain key `.audit-chain-key` | shipped, **default-off dual-write** |
+| Sealing to kernel-immutable segments (crypto-only degrade) | `src/modules/audit/audit_worm.c` (`VACUUM INTO` + `FS_IMMUTABLE_FL`) | shipped; sealer runs in-process, sidecar deferred |
 | Decision records (status / supersedes / revisit / linked policy, one-active-per-scope) | `decision_log`, `db2_decision_log_record()` | shipped |
 | Vault write audit (append-only, key fingerprints) | `src/server/server_vault.c:185-214` | shipped, separate unchained log |
 | kb-side WORM twin (`kb_audit_event`, byte-identical chain code) | db2, plpgsql WORM triggers | shipped, default-off |

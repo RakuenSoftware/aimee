@@ -105,10 +105,76 @@ def check_llm_chat() -> None:
     print("  llm-chat.py: ok")
 
 
+def _chat_stub(message: dict):
+    """A stub /v1/chat/completions returning the given assistant message."""
+
+    class ChatStub(BaseHTTPRequestHandler):
+        def log_message(self, *a):  # quiet
+            pass
+
+        def do_POST(self):
+            assert self.path.rstrip("/") == "/v1/chat/completions", self.path
+            length = int(self.headers.get("content-length", "0") or "0")
+            self.rfile.read(length)
+            body = json.dumps({"choices": [{"message": message}]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return ChatStub
+
+
+def _chat(message: dict, env_extra: dict | None = None) -> str:
+    server, url = _serve(_chat_stub(message))
+    try:
+        env = {"LLM_ENDPOINT": f"{url}/v1", "LLM_MODEL": "stub", "LLM_API_KEY": ""}
+        env.update(env_extra or {})
+        return _run("llm-chat.py", env, "say something")
+    finally:
+        server.shutdown()
+
+
+def check_llm_chat_reasoning_split() -> None:
+    """THE CONTRACT: stdout carries the answer, never the reasoning.
+
+    llm-chat.py is the ONE wire boundary for every sidecar (curator-extract,
+    curator-synthesize, llm-rewrite, learning-synthesize). Consumers must never
+    re-derive this from text — doing so is what cut valid JSON mid-string when a
+    payload merely mentioned the tag.
+    """
+    # 1. Compliant server (llama.cpp --jinja): reasoning already separated.
+    out = _chat({"content": "the-answer", "reasoning_content": "my hidden reasoning"})
+    assert "the-answer" in out, f"answer missing: {out!r}"
+    assert "hidden reasoning" not in out, f"reasoning leaked to stdout: {out!r}"
+
+    # 2. Inlining server: a <think> PREFIX must be split off here, not downstream.
+    out = _chat({"content": "<think>deliberating {\"draft\":1}</think>\nthe-answer"})
+    assert "the-answer" in out, f"answer missing: {out!r}"
+    assert "deliberating" not in out, f"reasoning leaked to stdout: {out!r}"
+    assert "<think>" not in out, f"think tag leaked to stdout: {out!r}"
+
+    # 3. THE REGRESSION: a mention of the tag in the ANSWER must survive intact.
+    #    (A docstring about stripping think blocks is still an answer.)
+    answer = '{"summary":"drops the </think> tag if present"}'
+    out = _chat({"content": answer})
+    assert "</think>" in out, f"tag in content was eaten: {out!r}"
+    assert json.loads(out.strip())["summary"], f"answer corrupted: {out!r}"
+
+    # 4. Both together: prefix stripped, mention preserved.
+    out = _chat({"content": '<think>hmm</think>\n{"summary":"handles </think> tags"}'})
+    parsed = json.loads(out.strip())
+    assert parsed["summary"] == "handles </think> tags", f"got {parsed!r}"
+
+    print("  llm-chat.py reasoning split: ok")
+
+
 def main() -> int:
     print("sidecar-clients:")
     check_embed_remote()
     check_llm_chat()
+    check_llm_chat_reasoning_split()
     print("sidecar-clients: ok")
     return 0
 

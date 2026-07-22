@@ -105,6 +105,33 @@ static void test_job_create(void)
    printf("  PASS: test_job_create\n");
 }
 
+/* --- Test: ad-hoc job (WFE_COORD_PLAN_ID) vs. accidental plan_id 0 --- */
+
+static void test_adhoc_job_create(void)
+{
+   sqlite3 *db = setup();
+
+   /* The workflow engine enqueues plan-less delegate jobs with the sentinel. */
+   int adhoc = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
+   assert(adhoc > 0);
+   db1_coord_job_t job;
+   assert(db1_coord_job_get(adhoc, &job) == 0);
+   assert(job.plan_id == WFE_COORD_PLAN_ID);
+
+   /* An ad-hoc job still drives real tasks + dispatch on job_id alone. */
+   int tid = db1_coord_job_add_task(adhoc, 0, "[]", "code", "do it", "/wt", "architect");
+   assert(tid > 0);
+
+   /* But an accidental plan_id 0 (or other non-positive) is still rejected — the
+    * sentinel is the ONLY exception, so plan-based callers can't slip a bad id
+    * through unnoticed. */
+   assert(db1_coord_job_create(0, 1) < 0);
+   assert(db1_coord_job_create(-2, 1) < 0);
+
+   teardown(db);
+   printf("  PASS: test_adhoc_job_create\n");
+}
+
 /* --- Test: add tasks and list them --- */
 
 static void test_add_and_list_tasks(void)
@@ -115,15 +142,25 @@ static void test_add_and_list_tasks(void)
    int job_id = db1_coord_job_create(plan_id, 3);
    assert(job_id > 0);
 
-   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
-   int t3 = db1_coord_job_add_task(job_id, 0, "[\"src/baz.c\"]", "", "", "");
+   int t1 =
+       db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "code", "do it", "/wt", "architect");
+   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
+   int t3 = db1_coord_job_add_task(job_id, 0, "[\"src/baz.c\"]", "", "", "", "engineer");
    assert(t1 > 0 && t2 > 0 && t3 > 0);
 
    db1_coord_task_t tasks[10];
    int count = db1_coord_job_list_tasks(job_id, tasks, 10);
    assert(count == 3);
    assert(strcmp(tasks[0].status, "pending") == 0);
+
+   /* The persona named at enqueue must round-trip through the dispatch read — this
+    * is what lets the workflow engine (or the coord planner) pick a per-task
+    * delegate identity instead of the dispatcher forcing 'engineer'. */
+   char role[64] = "", prompt[64] = "", files[128] = "", cwd[64] = "", persona[64] = "";
+   assert(db1_coord_task_get_dispatch(t1, role, sizeof role, prompt, sizeof prompt, files,
+                                      sizeof files, cwd, sizeof cwd, persona, sizeof persona) == 0);
+   assert(strcmp(persona, "architect") == 0);
+   assert(strcmp(role, "code") == 0);
 
    db1_coord_job_t job;
    db1_coord_job_get(job_id, &job);
@@ -142,8 +179,8 @@ static void test_claim_no_conflict(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    db1_coord_task_t task;
    int tid = db1_coord_job_claim_next(job_id, "delegate-1", &task);
@@ -177,9 +214,9 @@ static void test_file_conflict(void)
    int job_id = db1_coord_job_create(plan_id, 3);
 
    /* Two tasks touch the same file */
-   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/bar.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/independent.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/shared.c\",\"src/bar.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/independent.c\"]", "", "", "", "engineer");
 
    /* Claim first task */
    db1_coord_task_t task1;
@@ -211,7 +248,7 @@ static void test_has_file_conflict(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    /* Claim it */
    db1_coord_task_t task;
@@ -235,8 +272,8 @@ static void test_complete_task(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim and complete first task */
    db1_coord_task_t task;
@@ -276,8 +313,8 @@ static void test_fail_task(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim and fail first task */
    db1_coord_task_t task;
@@ -313,7 +350,7 @@ static void test_release_claim(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    /* Claim then release */
    db1_coord_task_t task;
@@ -339,7 +376,7 @@ static void test_bounded_preempt_release(void)
 
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    db1_coord_task_t task;
    int tid = db1_coord_job_claim_next(job_id, "delegate-1", &task);
@@ -359,6 +396,53 @@ static void test_bounded_preempt_release(void)
    printf("  PASS: test_bounded_preempt_release\n");
 }
 
+static void test_previous_boot_recovery_and_fencing(void)
+{
+   sqlite3 *db = setup();
+
+   int plan_id = create_test_plan(db);
+   int job_id = db1_coord_job_create(plan_id, 3);
+   int recover_id = db1_coord_job_add_task(job_id, 0, "[\"src/recover.c\"]", "code", "recover",
+                                           "/wt", "engineer");
+   int live_id =
+       db1_coord_job_add_task(job_id, 0, "[\"src/live.c\"]", "code", "live", "/wt", "engineer");
+   assert(recover_id > 0 && live_id > 0);
+
+   db1_coord_task_t task;
+   assert(db1_coord_job_claim_next(job_id, "coord-old-boot", &task) == recover_id);
+   assert(db1_coord_job_claim_next(job_id, "coord-live-boot", &task) == live_id);
+
+   int requeued = -1, failed = -1;
+   assert(db1_coord_job_recover_owner("coord-old-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 1 && failed == 0);
+
+   db1_coord_task_t tasks[4];
+   assert(db1_coord_job_list_tasks(job_id, tasks, 4) == 2);
+   assert(strcmp(tasks[0].status, "pending") == 0);
+   assert(tasks[0].preempt_requeues == 1);
+   assert(strcmp(tasks[1].status, "claimed") == 0);
+   assert(strcmp(tasks[1].claimed_by, "coord-live-boot") == 0);
+
+   assert(db1_coord_job_claim_next(job_id, "coord-new-boot", &task) == recover_id);
+   /* A late result from the dead attempt is fenced out; the current owner wins. */
+   assert(db1_coord_job_complete_task_owned(recover_id, "coord-old-boot", "stale") == -1);
+   assert(db1_coord_job_complete_task_owned(recover_id, "coord-new-boot", "fresh") == 0);
+
+   /* A second crash exceeds the configured recovery cap and fails explicitly. */
+   assert(db1_coord_job_recover_owner("coord-live-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 1 && failed == 0);
+   assert(db1_coord_job_claim_next(job_id, "coord-next-boot", &task) == live_id);
+   assert(db1_coord_job_recover_owner("coord-next-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 0 && failed == 1);
+
+   assert(db1_coord_job_list_tasks(job_id, tasks, 4) == 2);
+   assert(strcmp(tasks[1].status, "failed") == 0);
+   assert(strstr(tasks[1].error, "crash retry cap exhausted") != NULL);
+
+   teardown(db);
+   printf("  PASS: test_previous_boot_recovery_and_fencing\n");
+}
+
 /* --- Test: cancel job --- */
 
 static void test_cancel_job(void)
@@ -368,8 +452,8 @@ static void test_cancel_job(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 3);
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/bar.c\"]", "", "", "", "engineer");
 
    /* Claim one task */
    db1_coord_task_t task;
@@ -402,9 +486,9 @@ static void test_max_concurrent(void)
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 2); /* max 2 concurrent */
 
-   db1_coord_job_add_task(job_id, 0, "[\"src/a.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/b.c\"]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[\"src/c.c\"]", "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[\"src/a.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/b.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[\"src/c.c\"]", "", "", "", "engineer");
 
    /* Claim two tasks (at max) */
    db1_coord_task_t t1, t2;
@@ -448,9 +532,12 @@ static void test_invalid_ops(void)
 {
    sqlite3 *db = setup();
 
-   /* Invalid IDs */
-   assert(db1_coord_job_create(-1, 3) == -1);
-   assert(db1_coord_job_add_task(-1, 0, "[]", "", "", "") == -1);
+   /* Invalid IDs. plan_id 0 and other negatives are rejected; -1 is the
+    * WFE_COORD_PLAN_ID sentinel (a valid ad-hoc job) and is covered by
+    * test_adhoc_job_create, not here. */
+   assert(db1_coord_job_create(0, 3) == -1);
+   assert(db1_coord_job_create(-5, 3) == -1);
+   assert(db1_coord_job_add_task(-1, 0, "[]", "", "", "", "engineer") == -1);
 
    db1_coord_task_t t;
    assert(db1_coord_job_claim_next(-1, "x", &t) == -1);
@@ -479,9 +566,9 @@ static void test_empty_files(void)
    int job_id = db1_coord_job_create(plan_id, 3);
 
    /* Tasks with empty file lists should never conflict */
-   db1_coord_job_add_task(job_id, 0, "[]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, "[]", "", "", "");
-   db1_coord_job_add_task(job_id, 0, NULL, "", "", "");
+   db1_coord_job_add_task(job_id, 0, "[]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, "[]", "", "", "", "engineer");
+   db1_coord_job_add_task(job_id, 0, NULL, "", "", "", "engineer");
 
    db1_coord_task_t t1, t2, t3;
    assert(db1_coord_job_claim_next(job_id, "d1", &t1) > 0);
@@ -500,8 +587,8 @@ static void test_delegate_economics_report_from_coord_job(void)
 
    int plan_id = create_test_plan(db);
    int job_id = db1_coord_job_create(plan_id, 2);
-   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/free_a.c\"]", "", "", "");
-   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/free_b.c\"]", "", "", "");
+   int t1 = db1_coord_job_add_task(job_id, 0, "[\"src/free_a.c\"]", "", "", "", "engineer");
+   int t2 = db1_coord_job_add_task(job_id, 0, "[\"src/free_b.c\"]", "", "", "", "engineer");
    assert(t1 > 0 && t2 > 0);
 
    db1_coord_task_t task;
@@ -544,6 +631,7 @@ int main(void)
 {
    printf("test_coord_jobs:\n");
    test_job_create();
+   test_adhoc_job_create();
    test_add_and_list_tasks();
    test_claim_no_conflict();
    test_file_conflict();
@@ -552,6 +640,7 @@ int main(void)
    test_fail_task();
    test_release_claim();
    test_bounded_preempt_release();
+   test_previous_boot_recovery_and_fencing();
    test_cancel_job();
    test_max_concurrent();
    test_default_parallel();

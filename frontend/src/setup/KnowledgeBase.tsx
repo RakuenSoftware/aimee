@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useToast } from '@rakuensoftware/smoothgui';
+import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from './configApi';
 import { isRestartKey } from './wizardSteps';
 import { buildDesiredConfig, type KbMode } from './deployTopology';
@@ -152,9 +152,9 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
       )}
 
       <div>
-        <button style={primaryBtn} disabled={saving} onClick={save}>
+        <Button variant="primary" disabled={saving} onClick={save}>
           {saving ? 'Saving…' : 'Save & continue'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -164,10 +164,6 @@ const radioRow: React.CSSProperties = { display: 'flex', alignItems: 'center', g
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
   border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
-};
-const primaryBtn: React.CSSProperties = {
-  padding: '7px 16px', borderRadius: 7, border: '1px solid #2c6', background: '#2c8f56',
-  color: '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

@@ -17,6 +17,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    if (!b)
       return;
    free_str(b->text);
+   free_str(b->thinking_signature);
    free_str(b->tool_id);
    free_str(b->tool_name);
    cJSON_Delete(b->tool_input);
@@ -71,6 +72,9 @@ void aimee_request_free(aimee_request_t *r)
       free(r->tools);
    }
    cJSON_Delete(r->tool_choice);
+   cJSON_Delete(r->metadata);
+   free_str(r->service_tier);
+   cJSON_Delete(r->thinking);
    if (r->stop_sequences)
    {
       for (int i = 0; i < r->n_stop; i++)
@@ -125,18 +129,6 @@ size_t aimee_ir_last_user_text(const aimee_request_t *r, char *buf, size_t n)
    return used;
 }
 
-aimee_route_t aimee_ir_route_decide(aimee_wire_t frontend, aimee_wire_t backend,
-                                    int stage_will_mutate)
-{
-   if (frontend == AIMEE_WIRE_UNKNOWN || backend == AIMEE_WIRE_UNKNOWN)
-      return AIMEE_ROUTE_IR; /* unknown protocol: don't risk a raw passthrough */
-   if (frontend != backend)
-      return AIMEE_ROUTE_IR; /* cross-protocol always needs the IR pivot */
-   if (stage_will_mutate)
-      return AIMEE_ROUTE_IR; /* mutation already breaks byte-parity -> IR is free */
-   return AIMEE_ROUTE_PASSTHROUGH;
-}
-
 const char *aimee_stop_reason_name(aimee_stop_reason_t s)
 {
    switch (s)
@@ -186,8 +178,9 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    switch (a->type)
    {
    case AIMEE_BLK_TEXT:
-   case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text);
+   case AIMEE_BLK_THINKING:
+      return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
    case AIMEE_BLK_TOOL_USE:
       return str_eq(a->tool_id, b->tool_id) && str_eq(a->tool_name, b->tool_name) &&
              json_eq(a->tool_input, b->tool_input);
@@ -250,6 +243,16 @@ int aimee_ir_request_equal(const aimee_request_t *a, const aimee_request_t *b)
    if (a->has_temperature != b->has_temperature ||
        (a->has_temperature && a->temperature != b->temperature))
       return 0;
+   if (a->has_top_p != b->has_top_p || (a->has_top_p && a->top_p != b->top_p))
+      return 0;
+   if (a->has_top_k != b->has_top_k || (a->has_top_k && a->top_k != b->top_k))
+      return 0;
+   if (!json_eq(a->metadata, b->metadata))
+      return 0;
+   if (!str_eq(a->service_tier, b->service_tier))
+      return 0;
+   if (!json_eq(a->thinking, b->thinking))
+      return 0;
    if (a->stream != b->stream || a->n_stop != b->n_stop)
       return 0;
    for (int i = 0; i < a->n_stop; i++)
@@ -276,4 +279,102 @@ aimee_stop_reason_t aimee_stop_reason_parse(const char *name)
    if (strcmp(name, "error") == 0)
       return AIMEE_STOP_ERROR;
    return AIMEE_STOP_UNKNOWN;
+}
+
+/* --- response-side accessors (see aimee_ir.h) --- */
+
+/* Shared block-text concatenator: appends every block of `want` type, truncating
+ * at n-1. Factored because text/reasoning differ only in the type they select --
+ * and keeping one copy means the truncation rule cannot drift between them. */
+static size_t ir_concat_blocks(const aimee_block_t *blocks, int n_blocks, aimee_block_type_t want,
+                               char *buf, size_t n)
+{
+   size_t used = 0;
+   for (int i = 0; i < n_blocks && used + 1 < n; i++)
+   {
+      const aimee_block_t *b = &blocks[i];
+      if (b->type != want || !b->text)
+         continue;
+      size_t l = strlen(b->text);
+      if (l > n - 1 - used)
+         l = n - 1 - used;
+      memcpy(buf + used, b->text, l);
+      used += l;
+   }
+   buf[used] = '\0';
+   return used;
+}
+
+int aimee_ir_response_from_text(aimee_response_t *out, const char *text, const char *model)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof *out);
+   aimee_block_t *blk = calloc(1, sizeof *blk);
+   out->role = strdup("assistant");
+   out->raw_stop_reason = strdup("end_turn");
+   if (!blk || !out->role || !out->raw_stop_reason)
+   {
+      free(blk);
+      aimee_response_free(out);
+      return -1;
+   }
+   blk->type = AIMEE_BLK_TEXT;
+   blk->text = strdup(text ? text : "");
+   if (!blk->text)
+   {
+      free(blk);
+      aimee_response_free(out);
+      return -1;
+   }
+   out->content = blk; /* owned single-element array; freed by aimee_response_free */
+   out->n_content = 1;
+   out->stop_reason = AIMEE_STOP_END_TURN;
+   if (model && model[0])
+      out->model = strdup(model); /* best-effort; NULL is fine */
+   return 0;
+}
+
+size_t aimee_ir_response_text(const aimee_response_t *r, char *buf, size_t n)
+{
+   if (buf && n)
+      buf[0] = '\0';
+   if (!r || !buf || !n)
+      return 0;
+   /* TEXT only. A response whose blocks are all TOOL_USE yields empty, which is
+    * correct -- it said nothing, it asked to call something. */
+   return ir_concat_blocks(r->content, r->n_content, AIMEE_BLK_TEXT, buf, n);
+}
+
+size_t aimee_ir_response_reasoning(const aimee_response_t *r, char *buf, size_t n)
+{
+   if (buf && n)
+      buf[0] = '\0';
+   if (!r || !buf || !n)
+      return 0;
+   return ir_concat_blocks(r->content, r->n_content, AIMEE_BLK_THINKING, buf, n);
+}
+
+int aimee_ir_response_has_tool_use(const aimee_response_t *r)
+{
+   if (!r)
+      return 0;
+   for (int i = 0; i < r->n_content; i++)
+      if (r->content[i].type == AIMEE_BLK_TOOL_USE)
+         return 1;
+   return 0;
+}
+
+void aimee_ir_run_transforms(aimee_request_t *ir, const aimee_ir_transform_t *stages, size_t n)
+{
+   if (!ir || !stages)
+      return;
+   for (size_t i = 0; i < n; i++)
+   {
+      const aimee_ir_transform_t *s = &stages[i];
+      if (!s->enabled || !s->fn || !s->name || !s->name[0])
+         continue;
+      if (s->fn(ir, s->ud))
+         ir->mutated = 1; /* a change means the raw sidecar is stale -> backend rebuilds */
+   }
 }

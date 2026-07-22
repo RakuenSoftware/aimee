@@ -193,6 +193,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/workflow/blocks/", s.requireAuth(s.handleWorkflowBlockItem))
 	mux.HandleFunc("/api/workflow/defs", s.requireAuth(s.handleWorkflowDefs))
 	mux.HandleFunc("/api/workflow/defs/", s.requireAuth(s.handleWorkflowDefs))
+	mux.HandleFunc("/api/workflow/triggers", s.requireAuth(s.handleWorkflowTriggers))
+	mux.HandleFunc("/api/workflow/config", s.requireAuth(s.handleWorkflowConfig))
+	mux.HandleFunc("/api/workflow/config/set", s.requireAuth(s.handleWorkflowConfigSet))
 	mux.HandleFunc("/api/workflow/validate", s.requireAuth(s.handleWorkflowValidate))
 	mux.HandleFunc("/api/workflow/save", s.requireAuth(s.handleWorkflowSave))
 	mux.HandleFunc("/api/workflow/items", s.requireAuth(s.handleWorkflowItems))
@@ -210,6 +213,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Git projects (webchat-git WP-F): clone + per-project ops + listing,
 	// forwarded to /v1/workspace/* with the user's webuser: assertion.
 	mux.HandleFunc("/api/git/projects", s.requireAuth(s.handleGitProjects))
+	mux.HandleFunc("/api/git/projects/delete", s.requireAuth(s.handleGitProjectDelete))
 	mux.HandleFunc("/api/git/clone", s.requireAuth(s.handleGitClone))
 	mux.HandleFunc("/api/git/org-repos", s.requireAuth(s.handleGitOrgRepos))
 	mux.HandleFunc("/api/git/clone-org", s.requireAuth(s.handleGitCloneOrg))

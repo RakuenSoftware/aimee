@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -468,6 +469,126 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
    buf[copy_len] = '\0';
 }
 
+/* --------------------------------------------- pre-boundary signature capture */
+
+/* Tools whose repetition after a compaction boundary can ONLY mean the agent
+ * lost context and is recovering it. Deliberately NOT derived from toolset.c's
+ * `readonly` set, for two reasons:
+ *
+ *  1. `readonly` is wrong here: it bundles `verify`, `test` and `env_get`. An
+ *     agent re-running `test` after an edit is making progress, not
+ *     re-deriving — counting it would be a false positive.
+ *  2. `readonly`/`core`/`git` are product surfaces. If someone adds a tool to
+ *     `core` to fix a UX gap, this metric would silently change meaning and
+ *     move a committed baseline with no reviewer ever seeing a metric change.
+ *
+ * The overlap with `core`+`git` is incidental, not shared knowledge. Editing
+ * this list is a deliberate, reviewable change to what the metric means. */
+static int compact_tool_is_readonly(const char *name)
+{
+   static const char *const k_readonly[] = {"read_file",     "list_files",  "grep",
+                                            "code_search",   "find_symbol", "git_status",
+                                            "git_log",       "git_diff",    "tool_output_get",
+                                            "search_memory", NULL};
+   if (!name || !name[0])
+      return 0;
+   for (int i = 0; k_readonly[i]; i++)
+      if (strcmp(name, k_readonly[i]) == 0)
+         return 1;
+   return 0;
+}
+
+static uint64_t compact_fnv1a(const char *data)
+{
+   uint64_t h = 1469598103934665603ULL;
+   for (const unsigned char *p = (const unsigned char *)(data ? data : ""); *p; p++)
+   {
+      h ^= (uint64_t)*p;
+      h *= 1099511628211ULL;
+   }
+   return h;
+}
+
+int session_compact_tool_sig(const char *name, const char *args, char *out, size_t out_len)
+{
+   if (!out || out_len == 0 || !compact_tool_is_readonly(name))
+      return 0;
+   snprintf(out, out_len, "%.40s:%016llx", name, (unsigned long long)compact_fnv1a(args));
+   return 1;
+}
+
+/* Record "<name>:<16-hex hash of args>" if read-only and not already present.
+ * Deduplicates: the same lookup made twice pre-boundary is one fact, and would
+ * otherwise inflate the count. */
+static void add_readonly_sig(session_compact_result_t *out, const char *name, const char *args)
+{
+   char sig[SESSION_COMPACT_SIG_LEN];
+   if (!session_compact_tool_sig(name, args, sig, sizeof(sig)))
+      return;
+
+   for (int i = 0; i < out->readonly_sig_count; i++)
+      if (strcmp(out->readonly_sigs[i], sig) == 0)
+         return; /* already recorded */
+
+   if (out->readonly_sig_count >= SESSION_COMPACT_MAX_SIGS)
+   {
+      out->readonly_sigs_dropped++; /* never silently truncate */
+      return;
+   }
+   snprintf(out->readonly_sigs[out->readonly_sig_count], SESSION_COMPACT_SIG_LEN, "%s", sig);
+   out->readonly_sig_count++;
+}
+
+/* Walk messages[start, end) — the range about to be discarded — and record the
+ * read-only tool calls found there. Handles both wire shapes:
+ *   OpenAI:    {role:"assistant", tool_calls:[{function:{name, arguments}}]}
+ *   Anthropic: {role:"assistant", content:[{type:"tool_use", name, input}]} */
+static void capture_readonly_sigs(cJSON *messages, int start, int end,
+                                  session_compact_result_t *out)
+{
+   for (int i = start; i < end; i++)
+   {
+      cJSON *msg = cJSON_GetArrayItem(messages, i);
+      if (!msg || !cJSON_IsObject(msg))
+         continue;
+
+      /* OpenAI chat shape */
+      cJSON *tool_calls = cJSON_GetObjectItem(msg, "tool_calls");
+      if (cJSON_IsArray(tool_calls))
+      {
+         cJSON *call = NULL;
+         cJSON_ArrayForEach(call, tool_calls)
+         {
+            cJSON *fn = cJSON_GetObjectItem(call, "function");
+            if (!fn)
+               continue;
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
+            const char *args = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
+            add_readonly_sig(out, name, args ? args : "");
+         }
+      }
+
+      /* Anthropic content-block shape */
+      cJSON *content = cJSON_GetObjectItem(msg, "content");
+      if (cJSON_IsArray(content))
+      {
+         cJSON *block = NULL;
+         cJSON_ArrayForEach(block, content)
+         {
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(block, "type"));
+            if (!type || strcmp(type, "tool_use") != 0)
+               continue;
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(block, "name"));
+            cJSON *input = cJSON_GetObjectItem(block, "input");
+            char *args = input ? cJSON_PrintUnformatted(input) : NULL;
+            add_readonly_sig(out, name, args ? args : "");
+            if (args)
+               free(args);
+         }
+      }
+   }
+}
+
 /* ------------------------------------------------------------------ public API */
 
 int session_compact(cJSON *messages, const session_compact_config_t *cfg,
@@ -519,6 +640,11 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
          *out = local_out;
       return 0;
    }
+
+   /* Step 2a: capture the read-only tool signatures about to be destroyed.
+    * Must run before Step 2b/Step 5 touch the range: this is the only moment
+    * the pre-boundary tool history exists. Pure — it only fills `local_out`. */
+   capture_readonly_sigs(messages, summary_start, summary_end, &local_out);
 
    /* Step 2b: prune large tool-result blobs before summarisation.
     * The pruned messages are about to be deleted (Step 5), so in-place

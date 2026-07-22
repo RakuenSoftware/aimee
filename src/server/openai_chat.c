@@ -20,21 +20,22 @@
 #include "ingress_preinject.h"
 #include "gateway_pipeline.h"         /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"      /* response seam Slice 2: togglable governance */
 #include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
 #include "learning_implicit.h"        /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_responses_store.h"   /* previous_response_id continuation store */
 #include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
-#include "aimee.h"  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "context_reduce.h"
-#include "gateway_mutate_wire.h"
-#include "server_http_identity.h"
 #include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
 #include "delegate_driver.h" /* single provider step for the Codex proxy */
 #include "http_retry.h"
+#include "economizer_wire_snapshot.h"
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
@@ -171,7 +172,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    {
       free(pi_env);
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configuration available");
+      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
    agent_t *ag = NULL;
@@ -190,14 +192,13 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       }
    }
    if (!ag)
-      ag = agent_find(&acfg, acfg.default_agent);
-   if (!ag && acfg.agent_count > 0)
-      ag = &acfg.agents[0];
+      ag = agent_default_primary(&acfg);
    if (!ag)
    {
       free(pi_env);
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
@@ -587,7 +588,8 @@ static int responses_handler(const char *body, char *resp, int cap)
    if (agent_load_config(&acfg) != 0)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configuration available");
+      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
    agent_t *ag = NULL;
@@ -603,13 +605,12 @@ static int responses_handler(const char *body, char *resp, int cap)
       }
    }
    if (!ag)
-      ag = agent_find(&acfg, acfg.default_agent);
-   if (!ag && acfg.agent_count > 0)
-      ag = &acfg.agents[0];
+      ag = agent_default_primary(&acfg);
    if (!ag)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
@@ -711,10 +712,7 @@ static agent_t *stream_pick_agent(agent_config_t *acfg, const char *model)
     * silently streaming a different model than the client asked for. */
    if (model[0] && strcmp(model, "aimee") != 0)
       return agent_find(acfg, model);
-   agent_t *ag = agent_find(acfg, acfg->default_agent);
-   if (!ag && acfg->agent_count > 0)
-      ag = &acfg->agents[0];
-   return ag;
+   return agent_default_primary(acfg);
 }
 
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
@@ -917,33 +915,6 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    if (!agent || !messages)
       return -1;
 
-   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
-    * is on, measure this inbound /v1/responses request's baseline + foldable
-    * opportunity and record a forecast ledger row. measure_only is forced on, so the
-    * client request — the `messages` (input) array + `system_prompt` (instructions)
-    * — is NEVER mutated (we ignore res.messages, NULL in measure-only) and is
-    * forwarded byte-identical. Done at ingress, before the gateway pipeline, so the
-    * baseline reflects the pristine client request. Fully guarded; context_reduce
-    * hard-bypasses on any internal error, so this can never perturb the response.
-    * Cheap mtime-cached config load keeps it dark by default. */
-   {
-      config_t ecfg;
-      if (config_load(&ecfg) == 0 && ecfg.reduce_gateway_seam && cJSON_IsArray(messages))
-      {
-         reduce_config_t rcfg;
-         memset(&rcfg, 0, sizeof(rcfg));
-         rcfg.gateway_seam = 1;
-         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
-         rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
-         reduce_result_t gw_res;
-         memset(&gw_res, 0, sizeof(gw_res));
-         if (context_reduce(messages, system_prompt, agent->model, NULL, REDUCE_SEAM_GATEWAY, &rcfg,
-                            NULL, &gw_res) == 0)
-            agent_record_reduce_ledger(&gw_res, agent->model, "gateway", NULL);
-         context_reduce_result_free(&gw_res);
-      }
-   }
-
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
    if (!driver || !driver->build_request || !driver->parse_response)
@@ -980,12 +951,24 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        .parity = 1, /* client OpenAI == serving OpenAI; informational for these stages */
        .stream = 0,
    };
-   const gw_stage_t stages[] = {
-       {gw_stage_memory, messages, "memory"},
-       {gw_stage_openai_tool_policing, NULL, "tool_policing"},
-       {gw_stage_router, NULL, "router"}, /* S1/S2: the unified request->workflow seam */
+   /* Memory PORTED to the IR transform seam (aimee_ir_apply_request_stages): it now
+    * fires once on the typed IR inside openai_build_body's IR path, so it is no longer
+    * a pre-IR wire-anchored stage here. This catalog keeps the stages that still act on
+    * the raw /v1/responses request (tool policing, routing). */
+   const gw_stage_slot_t slots[] = {
+       {"tool_policing", gw_stage_openai_tool_policing, NULL, 1},
+       {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
    };
-   gw_pipeline_run_request(&gr, stages, sizeof(stages) / sizeof(stages[0]));
+   gw_stage_t stages[6];
+   int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 6);
+   if (nstages < 0)
+   {
+      /* Misconfigured stage catalog: fail closed (like the anthropic ingress) rather
+       * than run a partial/empty pipeline that skips tool policing + routing. */
+      cJSON_Delete(gw_raw);
+      return -1;
+   }
+   gw_pipeline_run_request(&gr, stages, (size_t)nstages);
 
    cJSON *rawi = cJSON_GetObjectItemCaseSensitive(gw_raw, "instructions");
    const char *eff_system = rawi && rawi->valuestring ? rawi->valuestring : system_prompt;
@@ -993,34 +976,26 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   /* Economizer gateway MUTATION (primary-agent reduction, /v1/responses buffered).
-    * Default-OFF. Box the `input` messages by REFERENCE so the pristine array is never
-    * mutated/freed, run the shared buffered orchestration, and build the body from the
-    * effective (reduced or pristine) array. On a bad reduction the upstream 4xx is
-    * caught below (restore-resend from pristine); 5xx disables the session. */
-   gw_mutate_ctx_t gwmc;
-   gw_mutate_ctx_init(&gwmc);
-   cJSON *mbox = NULL;
-   cJSON *eff_messages = messages;
-   if (gw_mutate_is_enabled())
-   {
-      mbox = cJSON_CreateObject();
-      cJSON_AddItemReferenceToObject(mbox, "input", messages); /* reference: messages stays owned */
-      gw_buffered_mutate(mbox, "input", agent->model, eff_system,
-                         server_http_identity_session_hdr(), server_http_identity_bearer(),
-                         server_http_identity_principal(), &gwmc);
-      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
-      if (bi)
-         eff_messages = bi;
-   }
-
-   char *body =
-       openai_build_body(agent, driver, eff_messages, eff_tools, eff_system, tok, temperature);
+   char *body = openai_build_body(agent, driver, messages, eff_tools, eff_system, tok, temperature);
    if (!body)
    {
-      cJSON_Delete(mbox);
       cJSON_Delete(gw_raw);
-      gw_mutate_ctx_free(&gwmc);
+      return -1;
+   }
+
+   config_t econ_cfg;
+   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+   econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
+                                                              : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_snapshot_t *wire_snapshot = NULL;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(proof_gated, wire_route, body, strlen(body), &wire_snapshot, &wire_body) !=
+       0)
+   {
+      free(body);
+      cJSON_Delete(gw_raw);
       return -1;
    }
 
@@ -1031,37 +1006,13 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
    int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
-   /* This IS the "gateway_retry_post_with_reduction" path: it wraps
-    * http_retry_post_context (whose no-4xx-retry contract is unchanged) with a SINGLE
-    * restore-from-pristine resend on a reduction 4xx. */
-   int http_status =
-       http_retry_post_context(url, auth_header, body, &response_body, agent->timeout_ms,
-                               extra_headers, ra, rb, rm, agent->provider, agent->model, NULL);
+   int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
+                                                   &response_body, agent->timeout_ms, extra_headers,
+                                                   ra, rb, rm, agent->provider, agent->model, NULL);
    free(body);
+   econ_wire_snapshot_destroy(wire_snapshot);
 
-   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
-   {
-      /* Restored pristine into mbox["input"]; rebuild the body from it and resend once. */
-      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
-      char *rbody = openai_build_body(agent, driver, bi ? bi : messages, eff_tools, eff_system, tok,
-                                      temperature);
-      if (rbody)
-      {
-         free(response_body);
-         response_body = NULL;
-         http_status = http_retry_post_context(url, auth_header, rbody, &response_body,
-                                               agent->timeout_ms, extra_headers, ra, rb, rm,
-                                               agent->provider, agent->model, NULL);
-         free(rbody);
-      }
-      /* If the resend body could not be rebuilt (rare OOM), fall through with the
-       * original reduction 4xx already in response_body -> the caller sees the failure
-       * (fail-safe: the session is already disabled for subsequent turns). */
-   }
-
-   cJSON_Delete(mbox); /* frees the reduced/restored array + the reference wrapper, NOT messages */
-   cJSON_Delete(gw_raw); /* kept alive so eff_system survived a resend */
-   gw_mutate_ctx_free(&gwmc);
+   cJSON_Delete(gw_raw);
 
    if (http_status != 200 || !response_body)
    {
@@ -1086,6 +1037,15 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * executes locally and feeds back as function_call_output next turn. The Codex
  * parser requires output_item.added before any delta, so every turn is framed
  * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
+/* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
+ * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
+static int openai_governance_enabled(void)
+{
+   config_t c;
+   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   return config_module_enabled(tri, gw_response_governance_enabled());
+}
+
 static int responses_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    char model[64] = "";
@@ -1221,18 +1181,11 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       /* Cost accounting: streaming /v1/responses runs the provider call directly.
        * agent_execute_messages returns a parsed_response_t (no model/agent name),
        * so synthesize the fields the audit needs from the served agent. */
-      agent_result_t ar;
-      memset(&ar, 0, sizeof(ar));
-      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model);
-      ar.prompt_tokens = parsed.prompt_tokens;
-      ar.completion_tokens = parsed.completion_tokens;
-      ar.cache_write_tokens = parsed.cache_write_tokens;
-      ar.cache_read_tokens = parsed.cache_read_tokens;
-      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
       if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&ar, "", "openai-ingress");
+         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                   parsed.prompt_tokens, parsed.completion_tokens,
+                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                   "openai-ingress", NULL);
    }
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
@@ -1246,7 +1199,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
        * (streaming Anthropic). */
       int police_drops = 0;
       if (gateway_prevent_subagents_enabled())
-         police_drops = gateway_policy_police_parsed_response(&parsed);
+         police_drops = gw_response_run_governance(&parsed, openai_governance_enabled());
       (void)police_drops; /* drop count plumbed through the pipeline total
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */
@@ -1531,7 +1484,8 @@ static int runs_handler(const char *body, char *resp, int cap)
    if (!ag)
    {
       free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
+      openai_format_error_code(resp, cap, "server_error", "no agent configured",
+                               AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 

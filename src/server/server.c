@@ -12,11 +12,20 @@
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "primary_cli_ingestor.h"
 #include "server.h"
+#include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
+
+#include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
+#include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
+#include "mcp_git.h"         /* mcp_git_run_tool — the native surface's git-write impl */
+#include "wfe_native_gate.h" /* wfe_shell_invokes_git — the shell-git classifier */
 #include "turn_registry.h"
 #include "server_http.h"
 #include "server_tls.h" /* server_http_api_status_report */
-#include "config.h"     /* config_t / config_load for api.status, api.enable */
+#include "server_mgmt_status.h"
+#include "config.h" /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
+#include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
+#include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
 #include "delegate_backend_local.h"
 #include "delegate_backend_ssh.h"
 #include "server_delegate_monitor.h"
@@ -25,8 +34,6 @@
 #include "server_compute_impl.h"
 #include "skill_review.h"
 #include "trigger_scheduler.h"
-#include "wfe_live_delegate.h"
-#include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
@@ -37,6 +44,7 @@
 #include "agent_config.h"
 #include "provider_catalog.h"
 #include "delegate_credentials.h"
+#include "delegate_sandbox_image.h"
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
@@ -45,6 +53,8 @@
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
+#include "workspace_scope.h" /* ws_scope_openat2_available — webuser surface gate */
+#include "ws_registry.h"     /* ws_reg_rebuild at startup */
 #include "hud.h"
 #include "platform_event.h"
 #include "platform_ipc.h"
@@ -77,7 +87,8 @@ typedef struct
    const char *method;
    server_method_handler_t handler;
 } server_method_dispatch_t;
-#define SERVER_REQUEST_POOL_MAX_THREADS 4
+#define SERVER_REQUEST_POOL_MAX_THREADS   4
+#define SERVER_ORCHESTRATION_POOL_THREADS 16
 static const server_method_dispatch_t server_dispatch_table[];
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -101,6 +112,21 @@ static void server_request_pool_shutdown(server_ctx_t *ctx)
    compute_pool_unregister_secondary(&ctx->request_pool);
    compute_pool_shutdown(&ctx->request_pool);
    ctx->request_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_shutdown(server_ctx_t *ctx)
+{
+   if (!ctx || !ctx->orchestration_pool_initialized)
+      return;
+   compute_pool_unregister_secondary(&ctx->orchestration_pool);
+   compute_pool_shutdown(&ctx->orchestration_pool);
+   ctx->orchestration_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_close(server_ctx_t *ctx)
+{
+   if (ctx && ctx->orchestration_pool_initialized)
+      compute_pool_close(&ctx->orchestration_pool);
 }
 
 int server_compute_budget_acquire(server_ctx_t *ctx)
@@ -428,6 +454,58 @@ static int handle_delegate_backend_list(server_ctx_t *ctx, server_conn_t *conn, 
    return server_send_ok(conn, resp);
 }
 
+/* delegate.sandbox_list: enumerate build-from-spec images (tag prefix aimee-sbx:)
+ * with created-time and in-use flags. Server-side because the docker daemon is
+ * server-side; the CLI just renders the array. */
+static int handle_delegate_sandbox_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   char *json = delegate_sandbox_images_json();
+   if (!json)
+      return server_send_error(conn, "delegate.sandbox_list: docker daemon unreachable", NULL);
+   cJSON *arr = cJSON_Parse(json);
+   free(json);
+   if (!arr)
+      arr = cJSON_CreateArray(); /* never embed NULL */
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddItemToObject(resp, "images", arr);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
+/* delegate.sandbox_gc: prune build-from-spec images that are not referenced by any
+ * container and older than max_age_days (default 7), always keeping the `keep` most
+ * recent (default 3). dry_run reports what would go without removing. */
+static int handle_delegate_sandbox_gc(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   long max_age_days = 7;
+   cJSON *jdays = cJSON_GetObjectItemCaseSensitive(req, "max_age_days");
+   if (cJSON_IsNumber(jdays) && jdays->valuedouble >= 0)
+      max_age_days = (long)jdays->valuedouble;
+   int keep = 3;
+   cJSON *jkeep = cJSON_GetObjectItemCaseSensitive(req, "keep");
+   if (cJSON_IsNumber(jkeep) && jkeep->valuedouble >= 0)
+      keep = (int)jkeep->valuedouble;
+   int dry_run = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "dry_run")) ? 1 : 0;
+
+   char *report = NULL;
+   if (delegate_sandbox_gc(max_age_days * 86400L, keep, dry_run, &report) != 0)
+   {
+      free(report);
+      return server_send_error(conn, "delegate.sandbox_gc: docker daemon unreachable", NULL);
+   }
+   cJSON *resp = report ? cJSON_Parse(report) : NULL;
+   free(report);
+   if (!resp)
+      resp = cJSON_CreateObject(); /* report carries removed/kept/dry_run/images */
+   cJSON_AddNumberToObject(resp, "max_age_days", (double)max_age_days);
+   cJSON_AddNumberToObject(resp, "keep", keep);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
 /* Drive one backend through acquire/exec/release. Operator-facing —
  * useful for smoke-testing the registry end-to-end without touching
  * the legacy delegate flow. Request fields:
@@ -435,6 +513,9 @@ static int handle_delegate_backend_list(server_ctx_t *ctx, server_conn_t *conn, 
  *   task_id       (required) — workspace identifier
  *   command       (required) — bash command line for exec()
  *   image         (optional) — docker image hint
+ *   workspace     (optional) — host dir to expose AS the workspace (a checkout or
+ *                              a linked worktree); default = the backend's scratch
+ *   workspace_read_only (optional bool) — mount `workspace` :ro
  *   host          (optional) — ssh target
  *   no_hibernate  (optional bool) — release with hibernate=0 if true
  * Response fields:
@@ -462,6 +543,29 @@ static int handle_delegate_backend_exec(server_ctx_t *ctx, server_conn_t *conn, 
    cJSON *jhost = cJSON_GetObjectItemCaseSensitive(req, "host");
    if (cJSON_IsString(jhost))
       cfg.host = jhost->valuestring;
+   /* The workspace to expose to the container, and whether it is the delegate's to
+    * change. This RPC exists to smoke-test the registry end-to-end without the
+    * legacy delegate flow, and the mount is the part that most needs a real daemon
+    * to believe: a linked worktree's gitlink only resolves if the repo is mounted
+    * at its own absolute path, which no unit test can prove. */
+   cJSON *jws = cJSON_GetObjectItemCaseSensitive(req, "workspace");
+   char ws_authorized[MAX_PATH_LEN] = "";
+   if (cJSON_IsString(jws) && jws->valuestring[0])
+   {
+      /* Through the SAME bound the delegate turn uses. This RPC takes a path from a
+       * request, so without it any caller who can reach the registry could name any
+       * host directory and have it bind-mounted into a container. The seam having
+       * the check is not enough — a second entrance needs the same lock, and the
+       * helper exists precisely so there is one lock rather than two copies. */
+      if (!workspace_turn_workspace_authorized(jws->valuestring, ws_authorized,
+                                               sizeof(ws_authorized)))
+         return server_send_error(conn, "workspace not inside a registered workspace root",
+                                  jws->valuestring);
+      cfg.workspace = ws_authorized;
+   }
+   cJSON *jro = cJSON_GetObjectItemCaseSensitive(req, "workspace_read_only");
+   if (cJSON_IsBool(jro) && cJSON_IsTrue(jro))
+      cfg.workspace_read_only = 1;
    cJSON *jnh = cJSON_GetObjectItemCaseSensitive(req, "no_hibernate");
    if (cJSON_IsBool(jnh) && cJSON_IsTrue(jnh))
       cfg.hibernate_on_exit = 0;
@@ -1300,8 +1404,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"worktree.gc", handle_worktree_gc},
     {"delegate.backend_list", handle_delegate_backend_list},
     {"delegate.backend_exec", handle_delegate_backend_exec},
-    {"provider.slot_acquire", handle_provider_slot_acquire},
-    {"provider.slot_release", handle_provider_slot_release},
+    {"delegate.sandbox_list", handle_delegate_sandbox_list},
+    {"delegate.sandbox_gc", handle_delegate_sandbox_gc},
     {"provider.list", handle_provider_list},
     {"provider.show", handle_provider_show},
     {"provider.models", handle_provider_models},
@@ -1427,24 +1531,12 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
     /* Work queue */
-    {"work.add", handle_work_add},
-    {"work.add_batch", handle_work_add_batch},
-    {"work.claim", handle_work_claim},
-    {"work.complete", handle_work_complete},
-    {"work.fail", handle_work_fail},
-    {"work.list", handle_work_list},
-    {"work.board", handle_work_board},
-    {"work.cancel", handle_work_cancel},
-    {"work.release", handle_work_release},
-    {"work.clear", handle_work_clear},
-    {"work.gc", handle_work_gc},
-    {"work.sync_proposals", handle_work_sync_proposals},
-    {"work.stats", handle_work_stats},
     /* Attempt log */
     {"attempt.record", handle_attempt_record},
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
     {"dashboard.metrics", handle_dashboard_metrics},
+    {"economizer.stats", handle_economizer_stats},
     {"dashboard.delegations", handle_dashboard_delegations},
     {"dashboard.traces", handle_dashboard_traces},
     {"dashboard.plans", handle_dashboard_plans},
@@ -1499,6 +1591,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"vault.delete", handle_vault_delete},
     {"vault.lock", handle_vault_lock},
     {"cert.issue", handle_cert_issue},
+    {"cert.sign", handle_cert_sign},
     {"cert.list", handle_cert_list},
     {"cert.revoke", handle_cert_revoke},
     {"jobs.list", handle_jobs_list},
@@ -1836,35 +1929,33 @@ static int server_agent_route_is_down(const char *agent_name)
 }
 
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
- * 1) the primary passthrough — the agent named after config.provider — is
- *    never a delegation target: the primary must not delegate back to itself
- *    (observed in the wild as a streak of failed 'code' delegations to the
- *    operator's own OAuth claude entry). Matched by NAME only, deliberately:
- *    other agents that merely share the provider tag (e.g. gateway-routed
- *    anthropic models) are legitimate delegates.
- * 2) a claude-CLI agent (tmux/provider-cli claude — the interactive-login
- *    ToS-sensitive class) is a delegate ONLY behind the explicit operator
- *    opt-in claude_cli_delegate_enabled — previously enforced on one dispatch
- *    path and on panel seats, now at every routing decision.
- * A config_load failure fails closed for the gated class (a claude-CLI agent
- * is excluded, everything else routes) rather than voiding the opt-in. */
+ * a per-agent "Primary Agent Only" choice (agents.json `primary_only`) excludes
+ * the agent from ALL delegation. This is the SOLE per-agent gate: it replaced the
+ * former global claude_cli_delegate_enabled opt-in AND the older unconditional
+ * "the provider-named agent is never a delegation target" name match. That name
+ * match made the operator's choice unreachable for the common claude-oauth-as-
+ * primary setup — the OAuth flow always names the agent "claude", so an agent
+ * named after config.provider could never be a delegate even with Primary Agent
+ * Only unchecked. Now the flag alone decides: a claude-oauth subscription is
+ * pre-flagged primary-only at add time (driving a personal Claude plan as an
+ * automated delegate may breach Anthropic's terms), and unchecking it is an
+ * explicit operator opt-in to self-delegation. Roundtable panels use this same
+ * explicit agent policy plus review-role membership; they do not invent a
+ * second hidden exclusion based on the configured primary provider.
+ * The gate is config-independent (it reads the agent record), so it holds even
+ * when config_load would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
       return 1;
    /* A PRIMARY chat turn routes the provider-named agent through the same
-    * machinery as delegation; both rules below are delegation policy, so they
-    * must not exclude the primary from its own turn (they otherwise break
-    * every server-side chat whose provider is a configured agent — the
-    * webchat's default). The marker is thread-local to the chat worker. */
+    * machinery as delegation; the gate below is delegation policy, so it must
+    * not exclude the primary from its own turn (it otherwise breaks every
+    * server-side chat whose provider is a primary-only agent — the webchat's
+    * default). The marker is thread-local to the chat worker. */
    if (agent_routing_primary_turn())
       return 0;
-   config_t cfg;
-   if (config_load(&cfg) != 0)
-      return agent_is_claude_cli(ag);
-   if (cfg.provider[0] && ag->name[0] && strcasecmp(ag->name, cfg.provider) == 0)
-      return 1;
-   if (agent_is_claude_cli(ag) && !cfg.claude_cli_delegate_enabled)
+   if (ag->primary_only)
       return 1;
    return 0;
 }
@@ -1882,6 +1973,162 @@ static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t 
       return 0;
    snprintf(canon, cap, "%s", a->name);
    return 1;
+}
+
+/* The shell-git gate (agent_tools.h): 1 = refuse this shell command, git belongs to
+ * aimee. Lives here because the decision needs three things from three tiers that
+ * the agent tool surface must not link — the config dial, the command classifier,
+ * and the forge credential.
+ *
+ * Both extra conditions exist to keep the rule from becoming breakage:
+ *  - a forge credential must EXIST, or aimee's own git cannot work either and this
+ *    would take away the delegate's only route rather than redirect it;
+ *  - the caller only reaches here when the git_* tools are registered (server.c
+ *    wires this gate immediately after the provider), so we never forbid the shell
+ *    while the alternative is absent.
+ * An unreadable config reads as ON: a guard that fails open is not a guard. */
+static int server_shell_git_blocked(const char *command, const char *cwd)
+{
+   if (!command || !command[0] || !wfe_shell_invokes_git("bash", command))
+      return 0; /* not a git command — the overwhelmingly common case, stays silent */
+   /* The gate exists to keep raw shell git off aimee-server's OWN filesystem and
+    * push it through the credential-holding git_* tools. A delegate bound to its
+    * own container runs its shell — including git — INSIDE that sandbox, against
+    * the container's mounted worktree, not the host: the delegate is meant to
+    * commit there and aimee collects the diff (push/PR still go through aimee at
+    * the deliver stage). Blocking its local git is the "limitation on a container
+    * delegate" this seam must not impose; allow it. */
+   if (workspace_turn_container_bound())
+   {
+      aimee_log(LOG_DEBUG, "shell-git-gate",
+                "allow: delegate is container-bound — git runs in its sandbox worktree, not on "
+                "the host");
+      return 0;
+   }
+   config_t cfg;
+   if (config_load(&cfg) == 0 && !cfg.require_aimee_git)
+   {
+      aimee_log(LOG_DEBUG, "shell-git-gate", "allow: require_aimee_git is off (operator opt-out)");
+      return 0;
+   }
+   /* "Has aimee-server got git configured?" is a property of the SERVER, not of the
+    * directory this thread happens to sit in. Asking it per-repo made the SAME
+    * command allowed from one cwd and refused from another — observed live on .254:
+    * DENY inside a wfe worktree, then allow from the daemon's cwd twelve seconds
+    * later, because the per-host rung only resolves where a checkout has an origin. */
+   if (!git_cred_forge_configured())
+   {
+      /* The agent reached for git, the rule is ON, and we allowed it anyway because
+       * aimee-server has no credential to offer instead. Deliberate — no aimee route,
+       * no restriction — but never silent: a gate that has quietly stopped working
+       * looks exactly like a gate nobody is testing, which is how two guards shipped
+       * inert today. Server-level now, so it is the same answer every time. */
+      aimee_log(LOG_INFO, "shell-git-gate",
+                "allow: agent ran git in '%s' but aimee-server has NO forge credential "
+                "configured — nothing to redirect to (no aimee route, no restriction)",
+                (cwd && cwd[0]) ? cwd : "(no cwd)");
+      return 0;
+   }
+   audit_log("shell-git-gate", "DENY cwd=%s cmd=%.120s", (cwd && cwd[0]) ? cwd : "-", command);
+   return 1;
+}
+
+/* Boot-time posture, mirroring primary_cli_ingestor_log_posture: make "the rule is
+ * on but nothing enforces it" visible at startup instead of leaving it to be
+ * discovered on a box months later. Every condition is now a server-level fact, so
+ * this states the real answer rather than a hopeful one. */
+/* Say at boot whether the delegate sandbox can actually bite.
+ *
+ * Two guards shipped earlier today read correctly and were inert on the deployed
+ * box, and neither said so — the whole reason this idiom exists. This one has a
+ * worse failure than inertness: a sandbox believed-on but not binding means every
+ * delegate runs its shell on the HOST, which is precisely what it was enabled to
+ * prevent. An operator must not have to read the code to learn that. */
+static void delegate_sandbox_log_posture(void)
+{
+   config_t cfg;
+   int dial_on = (config_load(&cfg) == 0) && cfg.delegate_sandbox;
+   if (!dial_on)
+   {
+      aimee_log(LOG_INFO, "delegate-sandbox",
+                "OFF: delegate_sandbox=false — a delegate's shell and file ops run IN-PROCESS "
+                "inside aimee-server, with the server's filesystem and environment");
+      return;
+   }
+   delegate_backend_t *b = delegate_backend_lookup("docker");
+   if (!b || !b->acquire)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "INERT: delegate_sandbox is ON but the docker backend is not registered — every "
+                "delegate will run on the HOST while appearing sandboxed");
+      return;
+   }
+
+   /* The backend being REGISTERED proves nothing: delegate_backend_register_docker()
+    * only installs a vtable, so the lookup above succeeds on a box with no docker at
+    * all. Reporting ARMED on that box would be the exact bug this whole idiom exists
+    * to catch — a guard that reads correctly and cannot fire, saying nothing. So
+    * probe the daemon the backend would actually use (honouring AIMEE_DOCKER_BIN,
+    * which the tests' fake-docker fixture sets). */
+   const char *bin = getenv("AIMEE_DOCKER_BIN");
+   if (!bin || !bin[0])
+      bin = "docker";
+   const char *probe[] = {bin, "version", "--format", "{{.Server.Version}}", NULL};
+   char *ver = NULL;
+   const workspace_provider_t *sh = workspace_provider_shared();
+   int rc = sh->exec(sh, probe, &ver, 256);
+   if (rc != 0)
+   {
+      aimee_log(LOG_ERROR, "delegate-sandbox",
+                "INERT: delegate_sandbox is ON and the docker backend is registered, but `%s "
+                "version` failed (rc=%d) — no daemon reachable, so every delegate will run on "
+                "the HOST while appearing sandboxed",
+                bin, rc);
+      free(ver);
+      return;
+   }
+   if (ver)
+   {
+      char *nl = strchr(ver, '\n');
+      if (nl)
+         *nl = '\0';
+   }
+   aimee_log(LOG_INFO, "delegate-sandbox",
+             "ARMED: delegate file/exec binds to a per-delegate container (docker server %s), "
+             "created with --network none — no IP egress; its only outward channel is the "
+             "bind-mounted aimee-server UDS (aimee_home/aimee-http.sock). The shell-git gate and "
+             "credential strip remain complementary boundaries within that container.",
+             (ver && ver[0]) ? ver : "?");
+   free(ver);
+}
+
+static void server_shell_git_gate_log_posture(void)
+{
+   config_t cfg;
+   int dial_on = (config_load(&cfg) != 0) || cfg.require_aimee_git;
+   if (!dial_on)
+   {
+      aimee_log(LOG_INFO, "shell-git-gate",
+                "OFF: require_aimee_git=false — delegates may run git/gh in a shell");
+      return;
+   }
+   if (!agent_tools_git_write_provider())
+   {
+      aimee_log(LOG_WARN, "shell-git-gate",
+                "INERT: require_aimee_git is on but the git_* tools are not registered — the "
+                "rule would forbid the shell with nothing to redirect to, so it will not fire");
+      return;
+   }
+   if (!git_cred_forge_configured())
+   {
+      aimee_log(LOG_WARN, "shell-git-gate",
+                "INERT: require_aimee_git is on but aimee-server has NO forge credential "
+                "configured — aimee's own git cannot work either, so the shell is not refused "
+                "(no aimee route, no restriction)");
+      return;
+   }
+   aimee_log(LOG_INFO, "shell-git-gate",
+             "ARMED: git/gh in a delegate shell is refused; delegates use the git_* tools");
 }
 
 int server_init(server_ctx_t *ctx, const char *socket_path)
@@ -1940,7 +2187,24 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
                cfg.db1_path);
    else
+   {
       db1_apply_server_pragmas();
+      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+      if (orphaned < 0)
+         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+      else if (orphaned > 0)
+         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+      if (server_mgmt_status_init() != 0)
+         LOG_WARN("server", "management status nonce initialization failed");
+   }
+   /* Container cleanup is independent of DB availability. No worker pool exists
+    * yet, so a matching container cannot belong to this server generation. */
+   int orphan_containers = delegate_backend_docker_remove_orphans();
+   if (orphan_containers < 0)
+      LOG_WARN("server", "could not reconcile delegate containers from the prior process");
+   else if (orphan_containers > 0)
+      LOG_INFO("server", "removed %d delegate containers orphaned by the prior process",
+               orphan_containers);
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
@@ -1951,7 +2215,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Mutex for ctx->conns array (accept inserts; conn_close swap-shrinks). */
    pthread_mutex_init(&ctx->conns_mutex, NULL);
    /* Provider concurrency slots: global active count per agent. */
-   pthread_mutex_init(&ctx->provider_slots_mutex, NULL);
    /* Initialize the in-server compute thread pool. Long-running server-side
     * work (delegates, ingest) runs here; chat streams and tool callbacks use
     * bounded async lanes so callbacks can still get workers. */
@@ -1990,9 +2253,27 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    }
    ctx->request_pool_initialized = 1;
    compute_pool_register_secondary(&ctx->request_pool, "requests");
+   /* Provider-backed orchestration is mostly blocked on remote I/O. Give it a
+    * dedicated bounded lane so generic background work cannot consume its
+    * coordinators; per-agent admission still owns actual provider concurrency. */
+   if (compute_pool_init(&ctx->orchestration_pool, SERVER_ORCHESTRATION_POOL_THREADS) != 0)
+   {
+      LOG_ERROR("server", "failed to initialize orchestration pool");
+      server_request_pool_shutdown(ctx);
+      server_session_pools_shutdown(ctx);
+      compute_pool_shutdown(&ctx->pool);
+      pthread_mutex_destroy(&ctx->conns_mutex);
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      unlink(socket_path);
+      return -1;
+   }
+   ctx->orchestration_pool_initialized = 1;
+   compute_pool_register_secondary(&ctx->orchestration_pool, "orchestration");
    if (pthread_mutex_init(&ctx->compute_budget_mutex, NULL) != 0)
    {
       LOG_ERROR("server", "failed to initialize compute budget mutex");
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2006,6 +2287,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    {
       LOG_ERROR("server", "failed to initialize compute budget condition");
       pthread_mutex_destroy(&ctx->compute_budget_mutex);
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2051,8 +2333,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
    /* Delegate-policy invariants at every routing decision: the primary never
-    * delegates to itself, and a claude-CLI agent is only a delegate behind the
-    * explicit claude_cli_delegate_enabled opt-in. */
+    * delegates to itself, and an agent flagged "Primary Agent Only"
+    * (agents.json `primary_only`) is never a delegation target. */
    agent_set_route_policy_filter(server_agent_route_policy_excluded);
    LOG_INFO("server",
             "initialized (v%s, protocol %d, background=%d session=%d threads); /v1 HTTP "
@@ -2061,15 +2343,35 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
-   /* Autonomous development is core functionality (default-on): register the
-    * workflow engine's live providers + executors so submitted proposals can run
-    * end-to-end server-side. Registration runs nothing on its own — a run begins
-    * only when intake creates a work item and the autonomy driver advances it. */
-   wfe_autonomy_register();
+   /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
+    * to the Go control plane but never registers a C workflow executor. */
+   /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
+    * precede any toolset_registry_init() / build_tools_array(), which snapshot the
+    * registrations. aimee's agents and an external MCP client now reach the SAME
+    * handler, so the two surfaces cannot drift apart: the drift is what left review
+    * panelists unable to ask "is this still called?" while Claude Code could. */
+   mcp_tool_register_native_surface();
+   /* Hand the native agent surface aimee's git-write tools. Without this the
+    * builtin set is read-only git, so a delegate's ONLY way to land work is to
+    * shell out to `git` — the thing we then tell it not to do. The tools are
+    * neither advertised nor dispatchable until this runs, which is deliberate:
+    * only aimee-server can honour them (it owns the credential and the MCP git
+    * rails), so a thin client or a unit test is never offered a tool that would
+    * fail on it. */
+   agent_tools_set_git_write_provider(mcp_git_run_tool);
+   /* ...and only THEN forbid the shell route. Registered after the provider, and
+    * only when refusing is honest: the tools we redirect to are now available, and
+    * server_shell_git_blocked additionally requires a forge credential to exist.
+    * A rule whose alternative is missing is breakage, so the alternative is wired
+    * first and the rule hangs off it. */
+   agent_tools_set_shell_git_gate(server_shell_git_blocked);
+   /* Say at boot whether the rule can actually bite. Two guards shipped today read
+    * correctly and were inert on the deployed box; neither said so. */
+   server_shell_git_gate_log_posture();
+   delegate_sandbox_log_posture();
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
@@ -2083,6 +2385,18 @@ int server_run(server_ctx_t *ctx)
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
    server_install_gateway_delegate_policy();
+
+   /* Warm the webuser project-key registry (rebuild from published clones;
+    * crash-window drift self-heals) and probe openat2 once, so the surface's
+    * fail-closed gates are decided — and logged — before the first request.
+    * ws_reg_ready() keeps the surface disabled on a failed rebuild and
+    * retries lazily per request. */
+   if (!ws_scope_openat2_available())
+      aimee_log(LOG_WARN, "server",
+                "openat2 unavailable on this kernel: the webuser project clone surface is "
+                "disabled (fail closed)");
+   else
+      (void)ws_reg_ready();
 
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
@@ -2106,6 +2420,16 @@ int server_run(server_ctx_t *ctx)
           * is picked up on SIGHUP without dropping the listener (live-config-reload). */
          (void)server_tls_reload();
       }
+      /* Live-config-reload P4: also pick up an OUT-OF-BAND file change (a CLI local
+       * `config set`, a manual edit, or the autonomous config_save) — not just SIGHUP — so
+       * the "operator toggle applies without a restart" contract holds however the file was
+       * written. No-op tick when the file is unchanged. */
+      int cfg_rc = config_reload_if_changed();
+      if (cfg_rc != 0)
+      {
+         aimee_log(cfg_rc < 0 ? LOG_WARN : LOG_INFO, "config", "config file change: %s",
+                   cfg_rc > 0 ? "reloaded" : "rejected (kept running config)");
+      }
    }
    return 0;
 }
@@ -2115,19 +2439,25 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
-   wfe_scheduler_shutdown();
    /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
    webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
+   /* Close orchestration admission first, but do not join coordinators until the
+    * provider turns on which they may be waiting have been cancelled. */
+   server_orchestration_pool_close(ctx);
    /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
     * connections (server-owned turn lifecycle), so a long detached turn would
     * otherwise block the drain indefinitely. The atomic cancel flags are
     * observed by the workers within one poll tick; the drain then completes
     * bounded. Presence is torn down after the drain, so a still-running worker
     * never emits onto a closed ring. */
-   turn_registry_cancel_all();
+   turn_registry_begin_shutdown();
+   /* Every queued/running async operation is now bounded by a pool worker and
+    * every provider turn has observed cancellation. Drain before shared stores
+    * and provider state are torn down. */
+   server_orchestration_pool_shutdown(ctx);
    /* Let async chat/tool workers finish while the compute pool is still
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();

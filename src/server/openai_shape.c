@@ -1359,6 +1359,12 @@ int openai_format_responses_completed_items(const char *id, const char *model, l
 
 int openai_format_error(char *resp, int cap, const char *type, const char *message)
 {
+   return openai_format_error_code(resp, cap, type, message, 0);
+}
+
+int openai_format_error_code(char *resp, int cap, const char *type, const char *message,
+                             int aimee_code)
+{
    if (!resp || cap <= 0)
       return -1;
 
@@ -1375,6 +1381,10 @@ int openai_format_error(char *resp, int cap, const char *type, const char *messa
    cJSON_AddItemToObject(root, "error", err);
    cJSON_AddStringToObject(err, "message", message ? message : "");
    cJSON_AddStringToObject(err, "type", type ? type : "");
+   /* aimee-internal faults stamp their code (>=1000) into the body; the caller
+    * logs it (this formatter stays a pure, dependency-light shape helper). */
+   if (aimee_code > 0)
+      cJSON_AddNumberToObject(err, "code", aimee_code);
 
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);

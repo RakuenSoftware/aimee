@@ -14,9 +14,26 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
-#include "../headers/delegate_driver.h"
+#include "../modules/delegates/delegate_driver.h"
+#include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
+
+/* anthropic_http.c's write_error now logs aimee-internal error codes; this
+ * minimal link stubs the logger like the other production deps below. */
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
+
+/* write_error's route-unresolved branch reads the per-turn auth-error channel;
+ * stub returns "no explicit reason" for this minimal link. */
+const char *agent_request_auth_error(void)
+{
+   return NULL;
+}
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
@@ -73,6 +90,11 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
 }
 
+agent_t *agent_default_primary(agent_config_t *cfg)
+{
+   return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
 void delegate_drivers_init(void)
 {
 }
@@ -98,9 +120,13 @@ void delegate_get_caps(const delegate_driver_t *driver, const agent_t *agent, dr
 int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, char *url,
                        size_t url_len)
 {
-   (void)driver;
    (void)agent;
-   snprintf(url, url_len, "https://example.invalid/v1/messages");
+   /* Mirror the real chatgpt driver: a codex/Responses agent resolves to a
+    * /responses URL, which drives the buffered responses-wire (raw-SSE) path. */
+   if (driver && driver->name && strcmp(driver->name, "chatgpt") == 0)
+      snprintf(url, url_len, "https://example.invalid/backend-api/codex/responses");
+   else
+      snprintf(url, url_len, "https://example.invalid/v1/messages");
    return 0;
 }
 
@@ -170,10 +196,16 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    return g_stream_status;
 }
 
-void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
+int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
+                                 parsed_response_t *out)
 {
    (void)root;
+   (void)anthropic;
+   (void)rescue_mode;
+   if (n_rescued)
+      *n_rescued = 0;
    memset(out, 0, sizeof(*out));
+   return 0;
 }
 
 void agent_free_parsed_response(parsed_response_t *p)
@@ -224,7 +256,7 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
  * shadow-mode hook in messages_run_request_pipeline references these three, so stub
  * them as no-ops to keep the minimal P2c link from pulling the economizer + its
  * db1/token_tracker dependency chain. */
-#include "../headers/context_reduce.h"
+#include "context_reduce.h"
 int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
                    const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
                    reduce_state_t *st, reduce_result_t *out)
@@ -251,6 +283,22 @@ void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *mod
    (void)model;
    (void)agent_name;
    (void)role;
+}
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind)
+{
+   (void)agent_name;
+   (void)agent_model;
+   (void)requested_model;
+   (void)stop_reason;
+   (void)prompt_tokens;
+   (void)completion_tokens;
+   (void)cache_write_tokens;
+   (void)cache_read_tokens;
+   (void)source;
+   (void)kind;
 }
 /* Enable accounting in this unit so the tap/record path is exercised. */
 int agent_ingress_accounting_enabled(void)
@@ -295,6 +343,10 @@ int config_load(config_t *cfg)
    {
       memset(cfg, 0, sizeof(*cfg));
       cfg->gateway_prevent_subagents = g_prevent;
+      /* module toggles are -1 (unspecified) in production; memset-0 would read as disabled and
+       * wrongly gate the governance/memory modules this test exercises. */
+      cfg->module_memory = cfg->module_governance = -1;
+      cfg->module_delegates = cfg->module_workflows = -1;
    }
    return 0;
 }
@@ -462,8 +514,58 @@ static void test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use(
    PASS("messages_buffered_anthropic_police_keeps_non_subagent_tool_use");
 }
 
+/* parse_response stub for the codex/Responses buffered path: invoked with
+ * (NULL, raw_sse_body) — the same contract the chatgpt driver honors — and
+ * renders a text reply. Asserts it received the RAW body, not a cJSON tree. */
+static void parsed_text_pong(cJSON *root, const char *body, parsed_response_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   assert(root == NULL);
+   assert(body != NULL && strstr(body, "response.completed") != NULL);
+   out->content = strdup("PONG");
+   snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", "end_turn");
+}
+
+/* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch, so
+ * the ingress must parse it via the driver. Regression guard: before the fix,
+ * messages_buffered cJSON_Parse'd the SSE (failed) and returned an EMPTY reply. */
+static void test_messages_buffered_responses_wire_parses_sse(void)
+{
+   const delegate_driver_t driver = {.name = "chatgpt", .parse_response = parsed_text_pong};
+   char resp[8192];
+   cJSON *sent;
+   const cJSON *content;
+   const cJSON *blk;
+   const cJSON *text;
+
+   reset_capture();
+   g_driver = &driver;
+   /* Raw SSE — invalid JSON on purpose, so the old cJSON_Parse path yields empty. */
+   g_response_body = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+
+   assert(messages_buffered("{\"model\":\"ignored\",\"max_tokens\":16,"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+
+   /* Send-side half of the fix: the buffered Responses fetch must ask for
+    * stream=true (codex requires it), even though the ingress reads it buffered. */
+   assert(g_last_body != NULL && strstr(g_last_body, "\"stream\":true") != NULL);
+
+   sent = parse(resp);
+   assert(sent != NULL);
+   content = obj(sent, "content");
+   assert(cJSON_IsArray(content) && cJSON_GetArraySize(content) >= 1);
+   blk = cJSON_GetArrayItem(content, 0);
+   text = obj(blk, "text");
+   assert(cJSON_IsString(text) && strcmp(text->valuestring, "PONG") == 0);
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("messages_buffered_responses_wire_parses_sse");
+}
+
 int main(void)
 {
+   test_messages_buffered_responses_wire_parses_sse();
    test_messages_buffered_anthropic_police_drops_subagent_tool_use();
    test_messages_buffered_anthropic_police_keeps_non_subagent_tool_use();
    printf("anthropic_http_p2c: OK\n");

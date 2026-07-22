@@ -60,13 +60,6 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
 void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, int cache_marking,
                                 int min_chars);
 
-/* Build a Gemini generateContent request.
- * cache_name: "cachedContents/..." from gemini_prompt_cache_create(), or "" for uncached. */
-struct cJSON *agent_build_request_gemini(const agent_t *agent, struct cJSON *messages,
-                                         struct cJSON *tools, const char *system_prompt,
-                                         int max_tokens, double temperature,
-                                         const char *cache_name);
-
 /* Resolve the output-token cap for an outbound request: an explicit caller
  * `requested` (>0) wins, else the agent's pinned max_tokens (>0), else the
  * model's registry ceiling (model_max_output). Never returns 0 — request
@@ -75,11 +68,35 @@ int agent_request_max_tokens(const agent_t *agent, int requested);
 
 /* --- Response parsers --- */
 
-void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
-void agent_parse_response_responses(const char *body, parsed_response_t *out);
-void agent_parse_response_anthropic(struct cJSON *root, parsed_response_t *out);
+/* Extract the Responses (codex) response object (the one with the `output` array)
+ * from an SSE body, so the IR responses_backend_parse can consume it. Returns a new
+ * cJSON the caller owns, or NULL. */
+struct cJSON *agent_responses_sse_response_object(const char *body);
+
+/* Parse a provider JSON response through the canonical IR and bridge it into a
+ * parsed_response_t (the sole response parser for the JSON wires).
+ * `anthropic` selects the anthropic vs openai backend parser. `rescue_mode` gates the
+ * XML tool-call rescue the parser owns: <0 skips it, 0 rescues dialect calls but not
+ * bare prose JSON, 1 also rescues bare JSON. `*n_rescued` (if non-NULL) receives how
+ * many calls the rescue recovered. Returns 0 on success, -1 if the IR could not parse
+ * (the caller yields an empty response -- the legacy translators are gone). */
+int agent_ir_parse_json_response(struct cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
+                                 parsed_response_t *out);
+
+/* Parse a Responses/SSE (codex) reply through the canonical IR and bridge it into a
+ * parsed_response_t. Extracts the response object from the SSE `body` (via
+ * agent_responses_sse_response_object), parses it with responses_backend_parse, and
+ * owns the XML rescue (rescue_mode: <0 skips; 0 dialect calls; 1 also bare JSON;
+ * *n_rescued receives the count). assistant_message for multi-turn replay is the
+ * response's output-item array (function_call items carry call_id). Returns 0 on
+ * success, -1 if the IR could not parse. */
+int agent_ir_parse_responses(const char *body, int rescue_mode, int *n_rescued,
+                             parsed_response_t *out);
+
+/* Build an OpenAI assistant message ({role, content:null, tool_calls}) from parsed
+ * calls -- used to make a replayable turn after an XML tool-call rescue. */
+struct cJSON *agent_build_openai_assistant_message_from_calls(parsed_response_t *parsed);
 /* Parse a Gemini generateContent response. Tracks cachedContentTokenCount as cache_read_tokens. */
-void agent_parse_response_gemini(struct cJSON *root, parsed_response_t *out);
 void agent_free_parsed_response(parsed_response_t *p);
 
 /* --- Message utilities --- */

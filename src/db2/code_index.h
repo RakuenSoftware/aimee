@@ -100,6 +100,14 @@ extern "C"
     * a no-op once the index is clean. */
    int db2_code_index_purge_hidden_pollution(void);
 
+   /* Delete one project's entire canonical-index tree by project NAME:
+    * the projects row plus (via ON DELETE CASCADE) files, file_exports,
+    * file_imports, terms, code_calls and file_contents. Part of the
+    * /v1/maintenance/purge-project fan-out (webchat-project-lifecycle
+    * slice 2). Returns projects rows deleted (0 when the name is unknown —
+    * idempotent), or -1 on DB / connection error. */
+   int db2_code_index_project_delete(const char *name);
+
    /* Bundle of per-file derived data passed to db2_code_index_file_replace. */
    typedef struct
    {

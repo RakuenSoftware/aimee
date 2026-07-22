@@ -52,6 +52,13 @@ nodes:
     block: pr.open
     in:
       src: freeze.out
+    params:
+      # A slice sub-PR merges INTO the parent's durable feature branch
+      # (aimee/feat/<parent>), NEVER the integration branch. Without this the base
+      # falls through to the autonomous default (testing) and the slice would
+      # merge straight into the integration branch — the merge seam now hard-gates
+      # that, so this keeps the slice mergeable at all.
+      base: feature
     next: ci
     # forge push/open can fail transiently; retry rather than dead-end.
     on_fail: pr

@@ -74,6 +74,138 @@ static void db_ensure_tables(void)
                    NULL, NULL, NULL);
 }
 
+static int ramp_tables_ensure(sqlite3 *db)
+{
+   if (!db)
+      return -1;
+   db_ensure_tables();
+   int have_presented = 0;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "PRAGMA table_info(pki_certs)", -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   while (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const char *name = (const char *)sqlite3_column_text(st, 1);
+      if (name && strcmp(name, "last_presented_at") == 0)
+         have_presented = 1;
+   }
+   sqlite3_finalize(st);
+   if (!have_presented &&
+       sqlite3_exec(db,
+                    "ALTER TABLE pki_certs ADD COLUMN last_presented_at INTEGER NOT NULL DEFAULT 0",
+                    NULL, NULL, NULL) != SQLITE_OK)
+      return -1;
+   return sqlite3_exec(db,
+                       "CREATE TABLE IF NOT EXISTS pki_mtls_ramp("
+                       "id INTEGER PRIMARY KEY CHECK(id=1),"
+                       "ramp_state INTEGER NOT NULL CHECK(ramp_state IN (1,2)),"
+                       "roster_hash TEXT NOT NULL,"
+                       "last_advance_ts INTEGER NOT NULL DEFAULT 0)",
+                       NULL, NULL, NULL) == SQLITE_OK
+              ? 0
+              : -1;
+}
+
+static int ramp_roster_snapshot(sqlite3 *db, long now, char hash_out[65], int *count_out,
+                                int *ready_out)
+{
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db,
+                          "SELECT serial,cn,issued_at,expires_at,last_presented_at FROM pki_certs "
+                          "WHERE revoked=0 AND (expires_at=0 OR expires_at>?) ORDER BY serial,cn",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int64(st, 1, now);
+   EVP_MD_CTX *md = EVP_MD_CTX_new();
+   if (!md || EVP_DigestInit_ex(md, EVP_sha256(), NULL) != 1)
+   {
+      EVP_MD_CTX_free(md);
+      sqlite3_finalize(st);
+      return -1;
+   }
+   int count = 0, ready = 1, rc;
+   while ((rc = sqlite3_step(st)) == SQLITE_ROW)
+   {
+      const char *serial = (const char *)sqlite3_column_text(st, 0);
+      const char *cn = (const char *)sqlite3_column_text(st, 1);
+      long issued = (long)sqlite3_column_int64(st, 2);
+      long expires = (long)sqlite3_column_int64(st, 3);
+      long presented = (long)sqlite3_column_int64(st, 4);
+      char times[96];
+      int n = snprintf(times, sizeof(times), "%ld:%ld", issued, expires);
+      unsigned char zero = 0;
+      if (!serial || !cn || n < 0 || n >= (int)sizeof(times) ||
+          EVP_DigestUpdate(md, serial, strlen(serial)) != 1 ||
+          EVP_DigestUpdate(md, &zero, 1) != 1 || EVP_DigestUpdate(md, cn, strlen(cn)) != 1 ||
+          EVP_DigestUpdate(md, &zero, 1) != 1 || EVP_DigestUpdate(md, times, (size_t)n) != 1 ||
+          EVP_DigestUpdate(md, &zero, 1) != 1)
+      {
+         rc = SQLITE_ERROR;
+         break;
+      }
+      if (presented <= 0 || presented < issued)
+         ready = 0;
+      count++;
+   }
+   unsigned char digest[EVP_MAX_MD_SIZE];
+   unsigned int digest_len = 0;
+   int ok =
+       rc == SQLITE_DONE && EVP_DigestFinal_ex(md, digest, &digest_len) == 1 && digest_len == 32;
+   EVP_MD_CTX_free(md);
+   sqlite3_finalize(st);
+   if (!ok)
+      return -1;
+   for (unsigned int i = 0; i < digest_len; i++)
+      snprintf(hash_out + i * 2, 3, "%02x", digest[i]);
+   hash_out[64] = '\0';
+   if (count_out)
+      *count_out = count;
+   if (ready_out)
+      *ready_out = count > 0 && ready;
+   return 0;
+}
+
+static int ramp_refresh_hash(sqlite3 *db, long now)
+{
+   char hash[65];
+   if (ramp_roster_snapshot(db, now, hash, NULL, NULL) != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "UPDATE pki_mtls_ramp SET roster_hash=? WHERE id=1", -1, &st, NULL) !=
+       SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, hash, -1, SQLITE_TRANSIENT);
+   int ok = sqlite3_step(st) == SQLITE_DONE;
+   sqlite3_finalize(st);
+   return ok ? 0 : -1;
+}
+
+static int persist_cert_row(const char *serial, const char *cn, long issued_at, long expires_at)
+{
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db,
+                          "INSERT INTO pki_certs(serial,cn,issued_at,expires_at,revoked,"
+                          "last_presented_at) VALUES(?,?,?,?,0,0)",
+                          -1, &st, NULL) != SQLITE_OK)
+      goto done;
+   sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, cn, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(st, 3, issued_at);
+   sqlite3_bind_int64(st, 4, expires_at);
+   int step = sqlite3_step(st);
+   sqlite3_finalize(st);
+   st = NULL;
+   if (step != SQLITE_DONE || ramp_refresh_hash(db, issued_at) != 0)
+      goto done;
+   return db1_txn_end(db, "COMMIT");
+done:
+   db1_txn_end(db, "ROLLBACK");
+   return -1;
+}
+
 /* Add a serial to the in-memory snapshot (caller holds g_mu). */
 static void snapshot_add(const char *serial)
 {
@@ -633,30 +765,14 @@ int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len
       char *cp = pem_cert(cert), *kp = pem_private_key(key);
       if (cp && kp && strlen(cp) < cert_len && strlen(kp) < key_len)
       {
-         snprintf(cert_pem, cert_len, "%s", cp);
-         snprintf(key_pem, key_len, "%s", kp);
-         snprintf(serial_out, serial_len, "%s", serial);
-         sqlite3 *db = db1_conn();
-         if (db)
+         long now = (long)time(NULL);
+         if (persist_cert_row(serial, san, now, now + (long)validity_days * 24 * 3600) == 0)
          {
-            sqlite3_stmt *stm = NULL;
-            /* Plain INSERT (not REPLACE): a (2^-128, impossible) serial collision
-             * must never overwrite/reset an existing cert's revocation row. */
-            if (sqlite3_prepare_v2(db,
-                                   "INSERT INTO pki_certs(serial,cn,issued_at,"
-                                   "expires_at,revoked) VALUES(?,?,?,?,0)",
-                                   -1, &stm, NULL) == SQLITE_OK)
-            {
-               long now = (long)time(NULL);
-               sqlite3_bind_text(stm, 1, serial, -1, SQLITE_TRANSIENT);
-               sqlite3_bind_text(stm, 2, san, -1, SQLITE_TRANSIENT);
-               sqlite3_bind_int64(stm, 3, now);
-               sqlite3_bind_int64(stm, 4, now + (long)validity_days * 24 * 3600);
-               sqlite3_step(stm);
-               sqlite3_finalize(stm);
-            }
+            snprintf(cert_pem, cert_len, "%s", cp);
+            snprintf(key_pem, key_len, "%s", kp);
+            snprintf(serial_out, serial_len, "%s", serial);
+            rc = 0;
          }
-         rc = 0;
       }
       if (kp)
          OPENSSL_cleanse(kp, strlen(kp));
@@ -675,27 +791,99 @@ done:
    return rc;
 }
 
+int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *cert_pem,
+                 size_t cert_len, char *serial_out, size_t serial_len)
+{
+   char san[VAULT_CERT_CN_MAX + 1];
+   if (!cn || !vault_principal_cert_sanitize(cn, san, sizeof(san)) || !csr_pem || !cert_pem ||
+       !serial_out || cert_len == 0 || serial_len == 0)
+      return -1;
+   if (validity_days <= 0)
+      validity_days = 90;
+   cert_pem[0] = serial_out[0] = '\0';
+   BIO *bio = BIO_new_mem_buf(csr_pem, -1);
+   X509_REQ *req = bio ? PEM_read_bio_X509_REQ(bio, NULL, NULL, NULL) : NULL;
+   if (bio)
+      BIO_free(bio);
+   EVP_PKEY *pub = req ? X509_REQ_get_pubkey(req) : NULL;
+   if (!req || !pub || X509_REQ_verify(req, pub) != 1 || pki_ca_ensure() != 0)
+   {
+      EVP_PKEY_free(pub);
+      X509_REQ_free(req);
+      return -1;
+   }
+
+   pthread_mutex_lock(&g_mu);
+   int rc = -1;
+   X509 *cert = X509_new();
+   char serial[64] = "";
+   if (!cert || X509_set_version(cert, 2) != 1 ||
+       set_random_serial(cert, serial, sizeof(serial)) != 0 ||
+       set_name_cn(X509_get_subject_name(cert), san) != 0 ||
+       X509_set_issuer_name(cert, X509_get_subject_name(g_ca_cert)) != 1 ||
+       !X509_gmtime_adj(X509_getm_notBefore(cert), 0) ||
+       !X509_gmtime_adj(X509_getm_notAfter(cert), (long)validity_days * 24 * 3600) ||
+       X509_set_pubkey(cert, pub) != 1 ||
+       add_ext(cert, g_ca_cert, NID_basic_constraints, "critical,CA:FALSE") != 0 ||
+       add_ext(cert, g_ca_cert, NID_key_usage, "critical,digitalSignature") != 0 ||
+       add_ext(cert, g_ca_cert, NID_ext_key_usage, "clientAuth") != 0 ||
+       X509_sign(cert, g_ca_key, EVP_sha256()) == 0)
+      goto done_csr;
+
+   char *cp = pem_cert(cert);
+   if (!cp || strlen(cp) >= cert_len)
+   {
+      free(cp);
+      goto done_csr;
+   }
+   long now = (long)time(NULL);
+   if (persist_cert_row(serial, san, now, now + (long)validity_days * 24 * 3600) == 0)
+   {
+      snprintf(cert_pem, cert_len, "%s", cp);
+      snprintf(serial_out, serial_len, "%s", serial);
+      rc = 0;
+   }
+   free(cp);
+done_csr:
+   X509_free(cert);
+   pthread_mutex_unlock(&g_mu);
+   EVP_PKEY_free(pub);
+   X509_REQ_free(req);
+   if (rc == 0)
+      aimee_log(LOG_INFO, "pki.audit", "signed client CSR cn=%s serial=%s days=%d", san, serial,
+                validity_days);
+   return rc;
+}
+
 int pki_revoke(const char *serial)
 {
    if (!serial || !serial[0])
       return -1;
    sqlite3 *db = db1_conn();
-   if (db)
-   {
-      sqlite3_stmt *st = NULL;
-      if (sqlite3_prepare_v2(db, "UPDATE pki_certs SET revoked=1 WHERE serial=?", -1, &st, NULL) ==
-          SQLITE_OK)
-      {
-         sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT);
-         sqlite3_step(st);
-         sqlite3_finalize(st);
-      }
-   }
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "UPDATE pki_certs SET revoked=1 WHERE serial=?", -1, &st, NULL) !=
+       SQLITE_OK)
+      goto revoke_fail;
+   sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT);
+   int step = sqlite3_step(st);
+   sqlite3_finalize(st);
+   st = NULL;
+   if (step != SQLITE_DONE || ramp_refresh_hash(db, (long)time(NULL)) != 0)
+      goto revoke_fail;
+   if (db1_txn_end(db, "COMMIT") != 0)
+      return -1;
    pthread_mutex_lock(&g_mu);
    snapshot_add(serial);
    pthread_mutex_unlock(&g_mu);
    aimee_log(LOG_INFO, "pki.audit", "revoked client cert serial=%s", serial);
    return 0;
+revoke_fail:
+   if (st)
+      sqlite3_finalize(st);
+   db1_txn_end(db, "ROLLBACK");
+   return -1;
 }
 
 int pki_is_revoked(const char *serial)
@@ -712,6 +900,269 @@ int pki_is_revoked(const char *serial)
       }
    pthread_mutex_unlock(&g_mu);
    return revoked;
+}
+
+const char *pki_cert_status_str(pki_cert_status_t s)
+{
+   switch (s)
+   {
+   case PKI_CERT_VALID:
+      return "VALID";
+   case PKI_CERT_REVOKED:
+      return "REVOKED";
+   case PKI_CERT_EXPIRED:
+      return "EXPIRED";
+   case PKI_CERT_UNKNOWN:
+      return "UNKNOWN";
+   case PKI_CERT_ERROR:
+      return "ERROR";
+   }
+   return "ERROR";
+}
+
+/* Per-request DURABLE revocation/expiry re-check — see pki.h. A FRESH prepared
+ * SELECT against DB1 on every call (never the g_revoked snapshot), mirroring
+ * pki_list's DB access pattern. Precedence: a prepare/bind/step failure ->
+ * PKI_CERT_ERROR (an unavailable authority must never fail open, and must be
+ * distinguishable from UNKNOWN); no matching row -> PKI_CERT_UNKNOWN; a row with
+ * revoked!=0 -> PKI_CERT_REVOKED; a row with expires_at>0 AND expires_at<=now ->
+ * PKI_CERT_EXPIRED; else PKI_CERT_VALID. SQLite is serialized, so (as with
+ * pki_list) no g_mu is held around the query. */
+pki_cert_status_t pki_cert_check(const char *serial, long now)
+{
+   if (!serial || !serial[0])
+      return PKI_CERT_UNKNOWN; /* no serial to look up -> fail closed at caller */
+   db_ensure_tables();
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return PKI_CERT_ERROR; /* revocation store unavailable -> fail closed */
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT revoked, expires_at FROM pki_certs WHERE serial = ?", -1, &st,
+                          NULL) != SQLITE_OK)
+      return PKI_CERT_ERROR;
+   if (sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT) != SQLITE_OK)
+   {
+      sqlite3_finalize(st);
+      return PKI_CERT_ERROR;
+   }
+   int rc = sqlite3_step(st);
+   pki_cert_status_t status;
+   if (rc == SQLITE_ROW)
+   {
+      int revoked = sqlite3_column_int(st, 0);
+      long expires_at = (long)sqlite3_column_int64(st, 1);
+      if (revoked != 0)
+         status = PKI_CERT_REVOKED;
+      else if (expires_at > 0 && expires_at <= now)
+         status = PKI_CERT_EXPIRED;
+      else
+         status = PKI_CERT_VALID;
+   }
+   else if (rc == SQLITE_DONE)
+      status = PKI_CERT_UNKNOWN; /* no such serial on this server's roster */
+   else
+      status = PKI_CERT_ERROR; /* step failure (lock/IO) -> fail closed */
+   sqlite3_finalize(st);
+   return status;
+}
+
+int pki_mtls_ramp_init(int configured_mode)
+{
+   if (configured_mode <= 0)
+      return configured_mode;
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   char hash[65];
+   int rc = -1, persisted = configured_mode, txn_open = 1;
+   if (ramp_roster_snapshot(db, (long)time(NULL), hash, NULL, NULL) != 0)
+      goto done;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db,
+                          "INSERT INTO pki_mtls_ramp(id,ramp_state,roster_hash,last_advance_ts) "
+                          "VALUES(1,?,?,?) ON CONFLICT(id) DO NOTHING",
+                          -1, &st, NULL) != SQLITE_OK)
+      goto done;
+   sqlite3_bind_int(st, 1, configured_mode >= 2 ? 2 : 1);
+   sqlite3_bind_text(st, 2, hash, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(st, 3, configured_mode >= 2 ? (long)time(NULL) : 0);
+   int step = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (step != SQLITE_DONE)
+      goto done;
+   if (sqlite3_prepare_v2(db, "SELECT ramp_state,roster_hash FROM pki_mtls_ramp WHERE id=1", -1,
+                          &st, NULL) != SQLITE_OK)
+      goto done;
+   step = sqlite3_step(st);
+   if (step == SQLITE_ROW)
+   {
+      persisted = sqlite3_column_int(st, 0);
+      const char *stored = (const char *)sqlite3_column_text(st, 1);
+      if ((persisted != 1 && persisted != 2) || !stored || strlen(stored) != 64)
+         persisted = -1;
+   }
+   sqlite3_finalize(st);
+   if (persisted < 0)
+      goto done;
+   if (configured_mode >= 2 && persisted < 2)
+   {
+      if (sqlite3_prepare_v2(db,
+                             "UPDATE pki_mtls_ramp SET ramp_state=2,roster_hash=?,"
+                             "last_advance_ts=? WHERE id=1 AND ramp_state=1",
+                             -1, &st, NULL) != SQLITE_OK)
+         goto done;
+      sqlite3_bind_text(st, 1, hash, -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(st, 2, (long)time(NULL));
+      step = sqlite3_step(st);
+      sqlite3_finalize(st);
+      if (step != SQLITE_DONE)
+         goto done;
+      persisted = 2;
+   }
+   else if (persisted == 1 && ramp_refresh_hash(db, (long)time(NULL)) != 0)
+      goto done;
+   rc = db1_txn_end(db, "COMMIT");
+   txn_open = 0;
+done:
+   if (rc != 0)
+   {
+      if (txn_open)
+         db1_txn_end(db, "ROLLBACK");
+      aimee_log(LOG_WARN, "pki.ramp", "mTLS ramp startup self-test failed; refusing mTLS startup");
+      return -1;
+   }
+   return persisted > configured_mode ? persisted : configured_mode;
+}
+
+int pki_mtls_note_presentation(const char *serial, long now)
+{
+   if (!serial || !serial[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   int rc = -1, txn_open = 1;
+   if (sqlite3_prepare_v2(
+           db,
+           "UPDATE pki_certs SET last_presented_at=CASE WHEN last_presented_at>? THEN "
+           "last_presented_at ELSE ? END WHERE serial=? AND revoked=0 AND "
+           "(expires_at=0 OR expires_at>?)",
+           -1, &st, NULL) != SQLITE_OK)
+      goto done_note;
+   sqlite3_bind_int64(st, 1, now);
+   sqlite3_bind_int64(st, 2, now);
+   sqlite3_bind_text(st, 3, serial, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int64(st, 4, now);
+   int step = sqlite3_step(st);
+   int changed = sqlite3_changes(db);
+   sqlite3_finalize(st);
+   if (step != SQLITE_DONE || changed != 1)
+      goto done_note;
+   rc = db1_txn_end(db, "COMMIT");
+   txn_open = 0;
+done_note:
+   if (rc != 0 && txn_open)
+      db1_txn_end(db, "ROLLBACK");
+   return rc;
+}
+
+static int ramp_readiness(sqlite3 *db, long now, int advance)
+{
+   char current[65];
+   int count = 0, ready = 0;
+   if (ramp_roster_snapshot(db, now, current, &count, &ready) != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT ramp_state,roster_hash FROM pki_mtls_ramp WHERE id=1", -1,
+                          &st, NULL) != SQLITE_OK)
+      return -1;
+   int step = sqlite3_step(st), state = 0, matches = 0;
+   if (step == SQLITE_ROW)
+   {
+      state = sqlite3_column_int(st, 0);
+      const char *stored = (const char *)sqlite3_column_text(st, 1);
+      matches = stored && strcmp(stored, current) == 0;
+   }
+   sqlite3_finalize(st);
+   if (step != SQLITE_ROW || (state != 1 && state != 2))
+      return -1;
+   if (state == 2)
+      return 0;
+   if (!ready || count == 0 || !matches)
+      return 0;
+   if (!advance)
+      return 1;
+   if (sqlite3_prepare_v2(db,
+                          "UPDATE pki_mtls_ramp SET ramp_state=2,last_advance_ts=? "
+                          "WHERE id=1 AND ramp_state=1 AND roster_hash=?",
+                          -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int64(st, 1, now);
+   sqlite3_bind_text(st, 2, current, -1, SQLITE_TRANSIENT);
+   step = sqlite3_step(st);
+   int changed = sqlite3_changes(db);
+   sqlite3_finalize(st);
+   return step == SQLITE_DONE && changed == 1 ? 1 : (step == SQLITE_DONE ? 0 : -1);
+}
+
+int pki_mtls_ramp_ready(long now)
+{
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   if (ramp_refresh_hash(db, now) != 0)
+   {
+      db1_txn_end(db, "ROLLBACK");
+      return -1;
+   }
+   int rc = ramp_readiness(db, now, 0);
+   int end = db1_txn_end(db, rc >= 0 ? "COMMIT" : "ROLLBACK");
+   return end == 0 ? rc : -1;
+}
+
+int pki_mtls_ramp_advance(long now)
+{
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0 || db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+   if (ramp_refresh_hash(db, now) != 0)
+   {
+      db1_txn_end(db, "ROLLBACK");
+      return -1;
+   }
+   int rc = ramp_readiness(db, now, 1);
+   int end = db1_txn_end(db, rc >= 0 ? "COMMIT" : "ROLLBACK");
+   return end == 0 ? rc : -1;
+}
+
+int pki_mtls_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out)
+{
+   sqlite3 *db = db1_conn();
+   if (ramp_tables_ensure(db) != 0)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(
+           db, "SELECT ramp_state,roster_hash,last_advance_ts FROM pki_mtls_ramp WHERE id=1", -1,
+           &st, NULL) != SQLITE_OK)
+      return -1;
+   int rc = -1;
+   if (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const char *hash = (const char *)sqlite3_column_text(st, 1);
+      if (hash && strlen(hash) == 64)
+      {
+         if (state_out)
+            *state_out = sqlite3_column_int(st, 0);
+         if (hash_out && hash_len)
+            snprintf(hash_out, hash_len, "%s", hash);
+         if (advanced_at_out)
+            *advanced_at_out = (long)sqlite3_column_int64(st, 2);
+         rc = 0;
+      }
+   }
+   sqlite3_finalize(st);
+   return rc;
 }
 
 int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,

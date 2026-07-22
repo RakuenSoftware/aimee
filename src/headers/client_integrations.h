@@ -3,6 +3,13 @@
 
 void ensure_client_integrations(void);
 
+/* Register a probe the client-setup path calls once to decide whether the
+ * sub-agent ban should be materialized: returns 1 if usable delegates exist, 0
+ * if none, or -1 if unknown (server unreachable). CORE cannot make a /v1 call
+ * (it links into DB-free clients AND the server), so the CLI injects the real
+ * probe (agent.list -> any_delegate_available). Unset -> treated as unknown. */
+void client_integrations_set_delegate_probe(int (*probe)(void));
+
 /* Enable (enable=1) or disable (enable=0) routing Claude Code through aimee's
  * Anthropic Messages ingress, by writing/removing ANTHROPIC_BASE_URL +
  * ANTHROPIC_AUTH_TOKEN in ~/.claude/settings.json. Opt-in only — enabling

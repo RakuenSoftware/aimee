@@ -20,6 +20,7 @@
 #include "config.h" /* defines MAX_PATH_LEN used by agent_types.h */
 #include "agent_config.h"
 #include "cJSON.h"
+#include "git_pr_api.h" /* git_pr_ci_t for the CI-gate stub */
 #include "mcp_git.h"
 #include "roundtable_pipeline.h"
 #include "server.h"
@@ -76,6 +77,22 @@ char *mcp_git_run(const char *cmd, int *exit_code)
    if (exit_code)
       *exit_code = 0;
    return strdup("");
+}
+/* validate_pr_for_merge's CI gate. Stubbed like mcp_git_run above: the real one
+ * lives in git_pr_api.o, which drags in the whole HTTP + credential stack. The
+ * exercised paths never reach it — the stubbed mcp_git_run returns "" for the
+ * `gh pr view`, so validation stops at the unparseable-PR branch first — but the
+ * link still needs the symbol. The PURE half of the gate (git_pr_ci_permits_merge,
+ * which encodes the merge ruling) is linked for real from git_pr_ci_grade.o. */
+git_pr_ci_t git_pr_ci_via_api(const char *principal, const char *repo_dir, int number, char *err,
+                              size_t errlen)
+{
+   (void)principal;
+   (void)repo_dir;
+   (void)number;
+   if (err && errlen)
+      err[0] = '\0';
+   return GIT_PR_CI_ERROR;
 }
 int agent_load_config(agent_config_t *cfg)
 {

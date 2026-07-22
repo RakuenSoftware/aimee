@@ -1,0 +1,215 @@
+#include "kb/http/kb_http_servers.h"
+#include "kb_reqctx.h"
+
+#include <assert.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+
+static kb_management_health_result_t next_result;
+static unsigned int calls;
+static int64_t got_team;
+static char got_server[128];
+static char got_subject[128];
+static int64_t got_list_team;
+static pthread_mutex_t block_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t block_cv = PTHREAD_COND_INITIALIZER;
+static int callback_entered;
+static int callback_release;
+
+int db2_server_registry_list(int64_t team, db2_server_row_t *rows, int max)
+{
+   got_list_team = team;
+   if (!rows || max < 1)
+      return -1;
+   memset(rows, 0, sizeof(*rows));
+   snprintf(rows[0].server_id, sizeof(rows[0].server_id), "stale-row");
+   snprintf(rows[0].endpoint, sizeof(rows[0].endpoint), "https://server.example:443");
+   return 1;
+}
+
+int kb_mgmt_endpoint_validate(const char *endpoint)
+{
+   return endpoint && endpoint[0] ? 0 : -1;
+}
+
+static kb_management_health_result_t handler(void *ctx, const kb_principal_t *actor, int64_t team,
+                                             const char *server)
+{
+   assert(ctx == (void *)0x1234);
+   assert(actor && actor->authenticated);
+   calls++;
+   got_team = team;
+   snprintf(got_server, sizeof(got_server), "%s", server);
+   snprintf(got_subject, sizeof(got_subject), "%s", actor->subject);
+   return next_result;
+}
+
+static kb_management_health_result_t blocking_handler(void *ctx, const kb_principal_t *actor,
+                                                      int64_t team, const char *server)
+{
+   (void)ctx;
+   (void)actor;
+   (void)team;
+   (void)server;
+   pthread_mutex_lock(&block_mu);
+   callback_entered = 1;
+   pthread_cond_broadcast(&block_cv);
+   while (!callback_release)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   return KB_MANAGEMENT_HEALTH_OK;
+}
+
+static int route(const char *method, const char *path, const char *query, char *out, int cap)
+{
+   memset(out, 0, (size_t)cap);
+   return kb_http_servers_route(method, path, query, out, cap);
+}
+
+static void set_actor(void)
+{
+   kb_principal_t actor;
+   memset(&actor, 0, sizeof(actor));
+   actor.authenticated = 1;
+   snprintf(actor.subject, sizeof(actor.subject), "operator@example.test");
+   kb_reqctx_set_actor(&actor);
+}
+
+static void test_route_mapping(void)
+{
+   char out[512];
+   static const struct
+   {
+      kb_management_health_result_t result;
+      int status;
+   } cases[] = {{KB_MANAGEMENT_HEALTH_OK, 200},          {KB_MANAGEMENT_HEALTH_NOT_FOUND, 404},
+                {KB_MANAGEMENT_HEALTH_DENIED, 403},      {KB_MANAGEMENT_HEALTH_CONFLICT, 409},
+                {KB_MANAGEMENT_HEALTH_UNAVAILABLE, 503}, {KB_MANAGEMENT_HEALTH_INTEGRITY, 502},
+                {KB_MANAGEMENT_HEALTH_INVALID, 400}};
+
+   assert(kb_http_servers_health_register(handler, (void *)0x1234) == 0);
+   assert(kb_http_servers_health_register(handler, (void *)0x1234) == -1);
+   set_actor();
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      next_result = cases[i].result;
+      assert(route("GET", "/v1/servers/server-a/health", "x=1&team=42", out, sizeof(out)) ==
+             cases[i].status);
+   }
+   assert(calls == sizeof(cases) / sizeof(cases[0]));
+   assert(got_team == 42);
+   assert(strcmp(got_server, "server-a") == 0);
+   assert(strcmp(got_subject, "operator@example.test") == 0);
+   assert(strstr(out, "invalid server health request"));
+   next_result = KB_MANAGEMENT_HEALTH_OK;
+   assert(route("GET", "/v1/servers/server-a/health", "team=9223372036854775807", out,
+                sizeof(out)) == 200);
+   assert(got_team == INT64_MAX);
+   assert(kb_http_servers_health_unregister(handler, (void *)0x9999) == -1);
+   assert(kb_http_servers_health_unregister(handler, (void *)0x1234) == 0);
+}
+
+static void test_rejections_and_list_isolation(void)
+{
+   char out[512];
+   unsigned int before = calls;
+
+   set_actor();
+   assert(route("POST", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 405);
+   assert(route("GET", "/v1/servers/server-a/health", NULL, out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health", "team=0", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health",
+                "team=9999999999999999999999999999999999999999", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health", "team=9223372036854775808", out,
+                sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health", "team=01", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health", "team=+1", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health", "team=1&team=2", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server%2fa/health", "team=1", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server?a/health", "team=1", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server#a/health", "team=1", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/health/extra", "team=1", out, sizeof(out)) == -1);
+   assert(route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 503);
+   assert(route("GET", "/v1/servers", "team=1", out, sizeof(out)) == 200);
+   assert(strstr(out, "stale-row"));
+   assert(calls == before);
+   assert(route("GET", "/v1/servers", "team=+01&team=2", out, sizeof(out)) == 200);
+   assert(got_list_team == 1);
+   assert(calls == before);
+
+   kb_reqctx_clear();
+   assert(route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 401);
+}
+
+typedef struct
+{
+   int status;
+   atomic_int done;
+} thread_result_t;
+
+static void *route_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   char out[256];
+   set_actor();
+   r->status = route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out));
+   kb_reqctx_clear();
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
+static void *unregister_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   r->status = kb_http_servers_health_unregister(blocking_handler, (void *)0x5678);
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
+static void test_unregister_waits_for_borrow(void)
+{
+   pthread_t request_tid, unregister_tid;
+   thread_result_t request = {0}, unreg = {0};
+   char out[256];
+
+   callback_entered = 0;
+   callback_release = 0;
+   assert(kb_http_servers_health_register(blocking_handler, (void *)0x5678) == 0);
+   assert(pthread_create(&request_tid, NULL, route_thread, &request) == 0);
+   pthread_mutex_lock(&block_mu);
+   while (!callback_entered)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_create(&unregister_tid, NULL, unregister_thread, &unreg) == 0);
+
+   usleep(20000);
+   assert(!atomic_load(&unreg.done));
+   set_actor();
+   assert(route("GET", "/v1/servers/server-b/health", "team=1", out, sizeof(out)) == 503);
+   assert(kb_http_servers_health_register(handler, (void *)0x1234) == -1);
+   kb_reqctx_clear();
+
+   pthread_mutex_lock(&block_mu);
+   callback_release = 1;
+   pthread_cond_broadcast(&block_cv);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_join(request_tid, NULL) == 0);
+   assert(pthread_join(unregister_tid, NULL) == 0);
+   assert(atomic_load(&request.done) && request.status == 200);
+   assert(atomic_load(&unreg.done) && unreg.status == 0);
+   assert(kb_http_servers_health_register(handler, (void *)0x1234) == 0);
+   assert(kb_http_servers_health_unregister(handler, (void *)0x1234) == 0);
+}
+
+int main(void)
+{
+   test_route_mapping();
+   test_rejections_and_list_isolation();
+   test_unregister_waits_for_borrow();
+   kb_reqctx_clear();
+   puts("kb_http_servers_health: all tests passed");
+   return 0;
+}

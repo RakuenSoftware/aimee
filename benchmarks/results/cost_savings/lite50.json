@@ -1,0 +1,191 @@
+{
+  "provenance": {
+    "aimee_commit": "4b46f973a5a6c2b21c95ce4db9b4465fdfc92b47",
+    "primary_agent": "codex",
+    "primary_model": "gpt-5.6-sol",
+    "pool": [
+      "MiniMax-M3",
+      "mimo-v2.5-pro",
+      "kimi-k2.7-code"
+    ],
+    "n": 3,
+    "instances": [
+      "astropy__astropy-12907",
+      "astropy__astropy-14182",
+      "astropy__astropy-14365",
+      "astropy__astropy-14995",
+      "astropy__astropy-6938",
+      "django__django-10914",
+      "django__django-10924",
+      "django__django-11001",
+      "django__django-11019",
+      "django__django-11039",
+      "matplotlib__matplotlib-18869",
+      "matplotlib__matplotlib-22711",
+      "matplotlib__matplotlib-22835",
+      "matplotlib__matplotlib-23299",
+      "matplotlib__matplotlib-23314",
+      "mwaskom__seaborn-2848",
+      "mwaskom__seaborn-3010",
+      "mwaskom__seaborn-3190",
+      "mwaskom__seaborn-3407",
+      "pallets__flask-4045",
+      "pallets__flask-4992",
+      "pallets__flask-5063",
+      "psf__requests-1963",
+      "psf__requests-2148",
+      "psf__requests-2317",
+      "psf__requests-2674",
+      "pydata__xarray-3364",
+      "pydata__xarray-4094",
+      "pydata__xarray-4248",
+      "pydata__xarray-4493",
+      "pylint-dev__pylint-5859",
+      "pylint-dev__pylint-6506",
+      "pylint-dev__pylint-7080",
+      "pylint-dev__pylint-7114",
+      "pytest-dev__pytest-11143",
+      "pytest-dev__pytest-11148",
+      "pytest-dev__pytest-5103",
+      "pytest-dev__pytest-5221",
+      "scikit-learn__scikit-learn-10297",
+      "scikit-learn__scikit-learn-10508",
+      "scikit-learn__scikit-learn-10949",
+      "scikit-learn__scikit-learn-11040",
+      "sphinx-doc__sphinx-10325",
+      "sphinx-doc__sphinx-10451",
+      "sphinx-doc__sphinx-11445",
+      "sphinx-doc__sphinx-7686",
+      "sympy__sympy-11400",
+      "sympy__sympy-11870",
+      "sympy__sympy-11897",
+      "sympy__sympy-12171"
+    ],
+    "single_shot": true,
+    "fleet_ssh": "admin@192.168.1.254",
+    "fleet_db": "/mnt/media/.plugins/aimee-server/home/aimee.db",
+    "ledger_windows": {
+      "primary": [
+        31182,
+        31237
+      ],
+      "supervised": [
+        31237,
+        31287
+      ]
+    }
+  },
+  "raw_tokens": {
+    "primary": {
+      "realized_prompt": 417494,
+      "realized_completion": 46758,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    },
+    "supervised": {
+      "realized_prompt": 158548,
+      "realized_completion": 33858,
+      "avoided_prompt": 0,
+      "avoided_completion": 0
+    }
+  },
+  "candidate_counts": {
+    "astropy__astropy-12907": 3,
+    "astropy__astropy-14182": 3,
+    "astropy__astropy-14365": 3,
+    "astropy__astropy-14995": 1,
+    "astropy__astropy-6938": 3,
+    "django__django-10914": 1,
+    "django__django-10924": 1,
+    "django__django-11001": 1,
+    "django__django-11019": 3,
+    "django__django-11039": 3,
+    "matplotlib__matplotlib-18869": 1,
+    "matplotlib__matplotlib-22711": 1,
+    "matplotlib__matplotlib-22835": 3,
+    "matplotlib__matplotlib-23299": 1,
+    "matplotlib__matplotlib-23314": 1,
+    "mwaskom__seaborn-2848": 1,
+    "mwaskom__seaborn-3010": 3,
+    "mwaskom__seaborn-3190": 1,
+    "mwaskom__seaborn-3407": 1,
+    "pallets__flask-4045": 1,
+    "pallets__flask-4992": 3,
+    "pallets__flask-5063": 3,
+    "psf__requests-1963": 1,
+    "psf__requests-2148": 3,
+    "psf__requests-2317": 3,
+    "psf__requests-2674": 3,
+    "pydata__xarray-3364": 1,
+    "pydata__xarray-4094": 1,
+    "pydata__xarray-4248": 1,
+    "pydata__xarray-4493": 1,
+    "pylint-dev__pylint-5859": 3,
+    "pylint-dev__pylint-6506": 3,
+    "pylint-dev__pylint-7080": 1,
+    "pylint-dev__pylint-7114": 3,
+    "pytest-dev__pytest-11143": 1,
+    "pytest-dev__pytest-11148": 1,
+    "pytest-dev__pytest-5103": 1,
+    "pytest-dev__pytest-5221": 3,
+    "scikit-learn__scikit-learn-10297": 1,
+    "scikit-learn__scikit-learn-10508": 3,
+    "scikit-learn__scikit-learn-10949": 1,
+    "scikit-learn__scikit-learn-11040": 1,
+    "sphinx-doc__sphinx-10325": 3,
+    "sphinx-doc__sphinx-10451": 3,
+    "sphinx-doc__sphinx-11445": 3,
+    "sphinx-doc__sphinx-7686": 3,
+    "sympy__sympy-11400": 3,
+    "sympy__sympy-11870": 3,
+    "sympy__sympy-11897": 1,
+    "sympy__sympy-12171": 3
+  },
+  "summary": {
+    "price_per_mtok": {
+      "input_per_mtok": 1.25,
+      "output_per_mtok": 10.0
+    },
+    "levels": {
+      "default": {
+        "tokens": 464252,
+        "input": 417494,
+        "output": 46758,
+        "usd": 0.9894
+      },
+      "aimee_economized": {
+        "tokens": 464252,
+        "input": 417494,
+        "output": 46758,
+        "usd": 0.9894
+      },
+      "aimee_delegates": {
+        "tokens": 192406,
+        "input": 158548,
+        "output": 33858,
+        "usd": 0.5368
+      }
+    },
+    "savings": {
+      "economizer": {
+        "tokens": 0,
+        "usd": 0.0,
+        "pct_of_default": 0.0
+      },
+      "delegates": {
+        "tokens": 271846,
+        "usd": 0.4526,
+        "pct_of_economized": 58.6
+      },
+      "total": {
+        "tokens": 271846,
+        "usd": 0.4526,
+        "pct_of_default": 58.6
+      }
+    },
+    "wall_seconds": {
+      "default": 345.0,
+      "aimee_delegates": 264.3
+    }
+  }
+}

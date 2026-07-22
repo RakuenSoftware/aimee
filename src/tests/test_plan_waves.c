@@ -322,7 +322,7 @@ static void test_execute_waves_creates_coord_jobs(void)
    assert(job0 > 0);
    for (int i = 0; i < p.step_count; i++)
       if (p.steps[i].wave == 0)
-         assert(db1_coord_job_add_task(job0, p.steps[i].id, "[]", "", "", "") > 0);
+         assert(db1_coord_job_add_task(job0, p.steps[i].id, "[]", "", "", "", "engineer") > 0);
 
    db1_coord_job_t status0;
    db1_coord_job_get(job0, &status0);
@@ -333,7 +333,7 @@ static void test_execute_waves_creates_coord_jobs(void)
    assert(job1 > 0);
    for (int i = 0; i < p.step_count; i++)
       if (p.steps[i].wave == 1)
-         assert(db1_coord_job_add_task(job1, p.steps[i].id, "[]", "", "", "") > 0);
+         assert(db1_coord_job_add_task(job1, p.steps[i].id, "[]", "", "", "", "engineer") > 0);
 
    db1_coord_job_t status1;
    db1_coord_job_get(job1, &status1);
@@ -377,7 +377,7 @@ static void test_execute_waves_gating(void)
    assert(job0 > 0);
    for (int i = 0; i < p.step_count; i++)
       if (p.steps[i].wave == 0)
-         db1_coord_job_add_task(job0, p.steps[i].id, "[]", "", "", "");
+         db1_coord_job_add_task(job0, p.steps[i].id, "[]", "", "", "", "engineer");
 
    db1_coord_task_t tasks[8];
    int count = db1_coord_job_list_tasks(job0, tasks, 8);
@@ -399,7 +399,7 @@ static void test_execute_waves_gating(void)
    assert(job1 > 0);
    for (int i = 0; i < p.step_count; i++)
       if (p.steps[i].wave == 1)
-         db1_coord_job_add_task(job1, p.steps[i].id, "[]", "", "", "");
+         db1_coord_job_add_task(job1, p.steps[i].id, "[]", "", "", "", "engineer");
 
    int count1 = db1_coord_job_list_tasks(job1, tasks, 8);
    assert(count1 == 1);
@@ -434,8 +434,8 @@ static void test_wave_file_conflict_detection(void)
 
    int job = db1_coord_job_create(plan_id, 2);
    assert(job > 0);
-   db1_coord_job_add_task(job, p.steps[0].id, "[\"src/foo.c\"]", "", "", "");
-   db1_coord_job_add_task(job, p.steps[1].id, "[\"src/foo.c\"]", "", "", "");
+   db1_coord_job_add_task(job, p.steps[0].id, "[\"src/foo.c\"]", "", "", "", "engineer");
+   db1_coord_job_add_task(job, p.steps[1].id, "[\"src/foo.c\"]", "", "", "", "engineer");
 
    /* Claim the first task */
    db1_coord_task_t t1;

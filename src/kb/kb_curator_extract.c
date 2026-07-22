@@ -7,6 +7,7 @@
 #endif
 
 #include "kb_curator_extract.h"
+#include "kb_curator_sidecar.h"
 #include "kb_curator_llm.h"
 #include "aimee.h"
 #include "config.h" /* config_current_mode, aimee_mode_t, config_load */
@@ -18,6 +19,7 @@
 #include "db2/feature_rows.h"
 #include "kb_mdl.h"
 
+#include <pthread.h> /* reclaim throttle is shared across the doc workers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +29,13 @@
 #define CE_ERRBUF 256
 #define CE_DOCBUF 65536
 #define CE_OUTBUF (256 * 1024)
+
+/* A job left in 'running' longer than this lease was orphaned (worker crash/
+ * restart or a wedged sidecar). Mirrors the code-unit stage's lease; both sit
+ * comfortably above that stage's sidecar wall-clock cap. */
+#define CE_STALE_LEASE "-15 minutes"
+/* Reclaim runs at most this often (throttled; the drain calls the entry per job). */
+#define CE_RECLAIM_EVERY_S 60
 
 /* System prompt for the extract stage (Tier-A) when routed through a configured
  * provider (§2b). The legacy python sidecar carried its own prompt; the in-process
@@ -118,6 +127,9 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
+                            /* Skip jobs still serving their retry backoff. '' is
+                             * "never failed" and must always be claimable. */
+                            "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
                             " RETURNING id, document_id, project, attempts";
@@ -126,6 +138,9 @@ static int ce_claim_job(ce_job_t *out)
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
+   char now_text[32];
+   kb_curator_now_text(now_text, sizeof(now_text));
+   aimee_pg_bind_text(st, "?1", now_text);
 
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -166,9 +181,17 @@ static int ce_fetch_document(ce_job_t *job)
       const char *fp = aimee_pg_column_text(st, 0);
       const char *hp = aimee_pg_column_text(st, 1);
       const char *ct = aimee_pg_column_text(st, 2);
+      /* These cuts are byte-wise, so a doc chunk longer than the buffer has its
+       * final multi-byte character split. The partial bytes flow into the request
+       * JSON and then the artifact payload, where postgres rejects the INSERT
+       * with "invalid byte sequence for encoding UTF8" — the job dies for one
+       * stray em-dash at the cut point. Trim back to a character boundary. */
       snprintf(job->file_path, sizeof(job->file_path), "%s", fp ? fp : "");
+      text_trim_partial_utf8(job->file_path);
       snprintf(job->heading_path, sizeof(job->heading_path), "%s", hp ? hp : "");
+      text_trim_partial_utf8(job->heading_path);
       snprintf(job->content, sizeof(job->content), "%s", ct ? ct : "");
+      text_trim_partial_utf8(job->content);
       found = 1;
    }
    aimee_pg_finalize(st);
@@ -200,14 +223,19 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
 
    const char *new_status = (attempts >= max_attempts) ? "failed" : "pending";
    char err[CE_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "UPDATE kb_async_jobs"
-                        " SET status = ?1, last_error = ?2, updated_at = pg_now_text()"
-                        " WHERE id = ?3",
-                        err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "UPDATE kb_async_jobs"
+                                          " SET status = ?1, last_error = ?2, next_attempt_at = ?4,"
+                                          "     updated_at = pg_now_text()"
+                                          " WHERE id = ?3",
+                                          err, sizeof(err));
    if (!st)
       return;
+   /* Back the retry off. A terminal 'failed' still gets a stamp — harmless, and
+    * it keeps the column meaningful if the job is ever re-queued by hand. */
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?4", next_at);
    aimee_pg_bind_text(st, "?1", new_status);
    char errbuf[512];
    snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "unknown error");
@@ -215,6 +243,82 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
    aimee_pg_bind_int64(st, "?3", job_id);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+}
+
+/* Reclaim extract_doc jobs orphaned in 'running'. ce_claim_job only ever selects
+ * status='pending', so a job whose worker crashed/restarted or whose sidecar
+ * wedged stays 'running' forever: the document is never extracted, and the row
+ * pins a db2 pool member well past its 300s ceiling ("missed lease_end?"). The
+ * code-unit stage has had this guard since it shipped; kb_async_jobs never got
+ * one, which stranded a job for 15h in production. Reset rows older than the
+ * lease to 'pending' so they retry, or to 'failed' once attempts are exhausted
+ * so a poison job cannot loop. attempts is preserved (incremented at claim).
+ *
+ * Scoped to kind='extract_doc': kb_async_jobs is shared with other kinds that
+ * own their own claim/lease lifecycle, and reclaiming those from here would
+ * yank jobs out from under their stage. Throttled — the drain calls the entry
+ * point once per job.
+ *
+ * The throttle is mutex-guarded because kb_curator_extract_one runs on the main
+ * LLM lane AND on every kb_curator_extract_docs_workers thread, so the state is
+ * genuinely shared. The lock is held across the UPDATE, which is free in
+ * practice: it is taken once per CE_RECLAIM_EVERY_S, and workers that lose the
+ * race just observe the throttle and return. */
+static void ce_reclaim_stale_running(int max_attempts)
+{
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+   static time_t last_run = 0;
+
+   if (max_attempts < 1)
+      max_attempts = 1;
+
+   pthread_mutex_lock(&lock);
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CE_RECLAIM_EVERY_S)
+   {
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+
+   void *conn = db2_conn();
+   if (!conn)
+   {
+      /* Deliberately do NOT arm the throttle here, nor on the failures below: a
+       * reclaim that never ran must not suppress the next attempt for a minute.
+       * Only a completed UPDATE counts as "ran recently". */
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+   char err[CE_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "UPDATE kb_async_jobs"
+       " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
+       "     claimed_by = '', claimed_at = '',"
+       /* Only fill last_error when the worker left none: an existing message is
+        * the diagnostic from the attempt that died, and 'reclaimed after max
+        * attempts' only says we gave up — overwriting would destroy the reason. */
+       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
+       "                       THEN 'stale running lease reclaimed after max attempts'"
+       "                       ELSE last_error END,"
+       "     updated_at = pg_now_text()"
+       " WHERE kind = 'extract_doc' AND status = 'running'"
+       "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       err, sizeof(err));
+   if (!st)
+   {
+      aimee_log(LOG_WARN, "kb.curator.extract", "stale-lease reclaim could not prepare: %s", err);
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+   aimee_pg_bind_int(st, "?1", max_attempts);
+   aimee_pg_bind_text(st, "?2", CE_STALE_LEASE);
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      last_run = now; /* only a completed UPDATE arms the throttle */
+   else
+      aimee_log(LOG_WARN, "kb.curator.extract", "stale-lease reclaim failed: %s", err);
+   aimee_pg_finalize(st);
+   pthread_mutex_unlock(&lock);
 }
 
 /* Pick the curator-extract sidecar command from a candidate list. Shared by the
@@ -365,6 +469,10 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
 {
    ce_job_t job;
    memset(&job, 0, sizeof(job));
+
+   /* Recover jobs orphaned in 'running' before claiming fresh work, so a crash/
+    * restart or a previously-wedged sidecar cannot permanently strand them. */
+   ce_reclaim_stale_running(opts ? opts->max_attempts : 1);
 
    if (!ce_claim_job(&job))
       return 0; /* queue empty */

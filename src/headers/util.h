@@ -152,6 +152,36 @@ char *normalize_key(const char *key, char *buf, size_t buf_len);
 /* Trigram Jaccard similarity between two strings. Returns 0.0-1.0. */
 double trigram_similarity(const char *a, const char *b);
 
+/* Split a reasoning PREAMBLE off the front of a model response.
+ *
+ * Reasoning models PREPEND <think>...</think> when the server is not configured
+ * to separate it into `reasoning_content`. Returns a pointer INTO `text` at the
+ * first byte of the answer, and (when non-NULL) writes the preamble's span to
+ * *reasoning / *reasoning_len — the reasoning is HANDED BACK, never destroyed.
+ *
+ * Only a block at the very START is a preamble. An occurrence anywhere else is
+ * CONTENT and is left untouched: a model summarising a function about stripping
+ * think blocks legitimately quotes the tag, and cutting there corrupts the
+ * answer. That is not hypothetical — it killed curator jobs on .254, where the
+ * python sidecar split on the last "</think>" anywhere and cut the JSON
+ * mid-string. This is the C counterpart of llm-chat.py's split_reasoning().
+ *
+ * Returns `text` unchanged (and *reasoning_len = 0) when there is no preamble.
+ * Does not allocate; the returned pointer aliases `text`. */
+const char *text_split_reasoning_prefix(const char *text, const char **reasoning,
+                                        size_t *reasoning_len);
+
+/* Drop a trailing PARTIAL UTF-8 character, in place.
+ *
+ * Copying text into a fixed buffer (snprintf/memcpy) cuts at a byte offset, which
+ * splits any multi-byte character straddling the limit and leaves a byte sequence
+ * that is not valid UTF-8. That matters the moment the value reaches something
+ * that validates encoding: postgres rejects the whole INSERT with "invalid byte
+ * sequence for encoding UTF8", so a single em-dash at the cut point can fail an
+ * entire row. Call this after any byte-wise truncation of text that may be
+ * non-ASCII. A string that ends on a complete character is left untouched. */
+void text_trim_partial_utf8(char *s);
+
 /* Basic Porter-like stemming. Result written to buf. Returns buf. */
 char *stem_word(const char *word, char *buf, size_t buf_len);
 
@@ -313,6 +343,16 @@ int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *c
  * connect. */
 #define GIT_SAFE_SSH_COMMAND "ssh -o BatchMode=yes -o ConnectTimeout=5"
 #define GIT_SAFE_ENV         "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='" GIT_SAFE_SSH_COMMAND "' "
+
+/* SSH command for a git op that authenticates with a webuser's vaulted SSH key
+ * (via the in-memory ssh-agent). Same non-interactive/timeout policy as above,
+ * plus StrictHostKeyChecking=accept-new: a non-interactive server has no seeded
+ * known_hosts, so a first-time host (e.g. bitbucket.org) would otherwise die on
+ * "Host key verification failed". accept-new is trust-on-first-use — it records
+ * the host key on first contact and verifies it strictly thereafter (unlike
+ * StrictHostKeyChecking=no, which never verifies). */
+#define GIT_AGENT_SSH_COMMAND                                                                      \
+   "ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new"
 
 /* Wall-clock cap (ms) for an internal git network op. Generous enough not to
  * kill a slow-but-working fetch, short enough that a stalled remote can never

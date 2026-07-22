@@ -29,7 +29,27 @@ int agent_error_is_retryable(const char *error)
            * a retry / fallback usually gets a real completion. Treating it as
            * retryable stops one blank response from degrading a provider or
            * failing a pinned roundtable seat. */
-          strstr(error, "no content in response") != NULL;
+          strstr(error, "no content in response") != NULL ||
+          strstr(error, "no content in final response") != NULL;
+}
+
+/* Hard provider failures that should retire the attempted agent for health
+ * purposes but allow an unpinned route to continue with another eligible peer.
+ * Match explicit credential/subscription diagnostics, not bare 401/403 status:
+ * those statuses can also come from proxies, WAFs, or route authorization. */
+static int agent_error_allows_peer_substitution(const char *error)
+{
+   if (!error || !error[0])
+      return 0;
+   return strstr(error, "authentication failed") != NULL ||
+          strstr(error, "invalid_api_key") != NULL || strstr(error, "invalid API key") != NULL ||
+          strstr(error, "incorrect API key") != NULL ||
+          strstr(error, "reached your usage limit") != NULL ||
+          strstr(error, "usage limit for this billing cycle") != NULL ||
+          strstr(error, "insufficient_quota") != NULL || strstr(error, "quota exhausted") != NULL ||
+          strstr(error, "exceeded your current quota") != NULL ||
+          strstr(error, "subscription has lapsed") != NULL ||
+          strstr(error, "payment required") != NULL;
 }
 
 /* Should a fallback/retry caller try a DIFFERENT agent for this result? Yes for a
@@ -43,7 +63,20 @@ int agent_rc_should_try_another(int rc, const char *error)
 {
    if (rc == 0)
       return 0;
-   return rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error);
+   if (rc == AGENT_RC_AT_LIMIT)
+      return 1;
+   /* agent_dispatch_one currently has exactly one provider-failure rc. Do not
+    * silently reinterpret a future control/result code as peer-substitutable. */
+   if (rc != -1)
+      return 0;
+   if (agent_error_is_retryable(error))
+      return 1;
+
+   /* This helper is consulted only by generic routing. Explicit --via pinning
+    * disables every other agent before dispatch, so it has no substitutable
+    * peer. agent_dispatch_one records this class as a hard health error because
+    * agent_error_is_retryable deliberately remains false for it. */
+   return agent_error_allows_peer_substitution(error);
 }
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)
@@ -70,12 +103,15 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
    agent_t *ag = current ? *current : NULL;
    /* Proceed for a retryable failure OR a saturation refusal (AGENT_RC_AT_LIMIT):
     * a same-tier peer may be free even if the primary was momentarily at its cap. */
-   if (!cfg || !ag || !out || !agent_rc_should_try_another(rc, out->error))
+   if (!cfg || cfg->route_pinned || !ag || !out || !agent_rc_should_try_another(rc, out->error))
       return rc;
 
    /* Cost-tier fallback: a tier is a pool. Even when fallback_chain is stale
     * or names only one primary, retry any same-cost peer before failing. */
    int tier = ag->cost_tier;
+   /* Fail fast at a peer's limit so we move to the next free peer instead of queueing on
+    * a busy one; the caller's own turn already queued at its admission point. */
+   agent_dispatch_set_fail_fast(1);
    for (int i = 0; i < cfg->agent_count && rc != 0; i++)
    {
       agent_t *peer = &cfg->agents[i];
@@ -108,6 +144,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
             *current = peer;
       }
    }
+   agent_dispatch_set_fail_fast(0);
 
    return rc;
 }

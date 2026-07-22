@@ -9,6 +9,7 @@
 
 #include "kb_curator_extract.h"
 #include "kb_curator_grounding.h"
+#include "kb_curator_sidecar.h" /* kb_curator_describe_wait_status */
 #include "aimee.h"
 #include "cJSON.h"
 #include "log.h"
@@ -16,6 +17,8 @@
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 
+#include <errno.h>
+#include <pthread.h> /* reclaim throttle is shared across the code workers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,6 +71,8 @@ static int ccu_claim_job(ccu_job_t *out)
                             " WHERE id=("
                             "   SELECT id FROM kb_code_unit_jobs"
                             "   WHERE status='pending'"
+                            /* Skip jobs still serving their retry backoff. */
+                            "     AND (next_attempt_at='' OR next_attempt_at<=?1)"
                             "   ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
                             " )"
                             " RETURNING id, project, file_path, symbol, kind, line, attempts";
@@ -76,6 +81,9 @@ static int ccu_claim_job(ccu_job_t *out)
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
+   char now_text[32];
+   kb_curator_now_text(now_text, sizeof(now_text));
+   aimee_pg_bind_text(st, "?1", now_text);
 
    int found = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
@@ -124,11 +132,15 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
                                           "UPDATE kb_code_unit_jobs"
-                                          " SET status=?1, last_error=?2, updated_at=pg_now_text()"
+                                          " SET status=?1, last_error=?2, next_attempt_at=?4,"
+                                          " updated_at=pg_now_text()"
                                           " WHERE id=?3",
                                           err, sizeof(err));
    if (!st)
       return;
+   char next_at[32];
+   kb_curator_next_attempt_at(attempts, next_at, sizeof(next_at));
+   aimee_pg_bind_text(st, "?4", next_at);
    aimee_pg_bind_text(st, "?1", new_status);
    char errbuf[512];
    snprintf(errbuf, sizeof(errbuf), "%s", error_msg ? error_msg : "unknown error");
@@ -145,39 +157,68 @@ static void ccu_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempt
  * so they retry, or to 'failed' once attempts are exhausted so a poison job
  * cannot loop. attempts is preserved (it was incremented at claim time).
  * Throttled to at most once per CCU_RECLAIM_EVERY_S since the drain calls the
- * entry point once per job. */
+ * entry point once per job.
+ *
+ * The throttle is mutex-guarded because kb_curator_extract_code_unit_one runs on
+ * the main LLM lane AND on every kb_curator_extract_code_workers thread, so the
+ * state is genuinely shared (this box runs 4). The lock is held across the
+ * UPDATE, which is free in practice: it is taken once per CCU_RECLAIM_EVERY_S,
+ * and workers that lose the race just observe the throttle and return. */
 static void ccu_reclaim_stale_running(int max_attempts)
 {
+   static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
    static time_t last_run = 0;
-   time_t now = time(NULL);
-   if (last_run != 0 && now - last_run < CCU_RECLAIM_EVERY_S)
-      return;
-   last_run = now;
 
    if (max_attempts < 1)
       max_attempts = 1;
 
+   pthread_mutex_lock(&lock);
+   time_t now = time(NULL);
+   if (last_run != 0 && now - last_run < CCU_RECLAIM_EVERY_S)
+   {
+      pthread_mutex_unlock(&lock);
+      return;
+   }
+
    void *conn = db2_conn();
    if (!conn)
+   {
+      /* Deliberately do NOT arm the throttle here, nor on the failures below: a
+       * reclaim that never ran must not suppress the next attempt for a minute.
+       * Only a completed UPDATE counts as "ran recently". */
+      pthread_mutex_unlock(&lock);
       return;
+   }
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "UPDATE kb_code_unit_jobs"
        " SET status = CASE WHEN attempts >= ?1 THEN 'failed' ELSE 'pending' END,"
        "     claimed_by = '', claimed_at = '',"
-       "     last_error = CASE WHEN attempts >= ?1"
+       /* Only fill last_error when the worker left none: an existing message is
+        * the diagnostic from the attempt that died, and 'reclaimed after max
+        * attempts' only says we gave up — overwriting would destroy the reason. */
+       "     last_error = CASE WHEN attempts >= ?1 AND last_error = ''"
        "                       THEN 'stale running lease reclaimed after max attempts'"
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
        " WHERE status = 'running' AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
        err, sizeof(err));
    if (!st)
+   {
+      aimee_log(LOG_WARN, "kb.curator.extract_code", "stale-lease reclaim could not prepare: %s",
+                err);
+      pthread_mutex_unlock(&lock);
       return;
+   }
    aimee_pg_bind_int(st, "?1", max_attempts);
    aimee_pg_bind_text(st, "?2", CCU_STALE_LEASE);
-   (void)aimee_pg_step(st, err, sizeof(err));
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE)
+      last_run = now; /* only a completed UPDATE arms the throttle */
+   else
+      aimee_log(LOG_WARN, "kb.curator.extract_code", "stale-lease reclaim failed: %s", err);
    aimee_pg_finalize(st);
+   pthread_mutex_unlock(&lock);
 }
 
 /* ── Body extraction ─────────────────────────────────────────────────────── */
@@ -349,12 +390,21 @@ static char *ccu_read_body(const char *file_path, int line, char *errbuf, size_t
 static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *errbuf,
                                 size_t errlen)
 {
+   /* Honour TMPDIR like the rest of the tree (see code_collect.c): a hardcoded
+    * /tmp gives an operator no way to move the spool off a full or slow
+    * filesystem. */
+   const char *tmpdir = getenv("TMPDIR");
+   if (!tmpdir || !tmpdir[0])
+      tmpdir = "/tmp";
    char tmppath[256];
-   snprintf(tmppath, sizeof(tmppath), "/tmp/aimee_ccu_XXXXXX");
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_ccu_XXXXXX", tmpdir);
    int fd = mkstemp(tmppath);
    if (fd < 0)
    {
-      snprintf(errbuf, errlen, "mkstemp failed");
+      /* Carry errno: ENOSPC (full spool), EMFILE (fd exhaustion) and EACCES are
+       * different incidents with different fixes, and last_error is the only
+       * forensic record a failed job leaves behind. */
+      snprintf(errbuf, errlen, "mkstemp failed for %s: %s", tmppath, strerror(errno));
       return NULL;
    }
 
@@ -368,7 +418,6 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
    }
    close(fd);
 
-   char full_cmd[1024];
    /* Bound the sidecar with coreutils `timeout` (present on the kb image):
     * SIGTERM at the ceiling, SIGKILL 10s later if it ignores TERM. Without this
     * a hung sidecar wedges the drain thread forever via pclose(); on timeout
@@ -376,9 +425,33 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
     * Run the configured command under `sh -c` INSIDE timeout so it keeps the
     * shell semantics popen() gave it (env-var prefixes like `FOO=bar python …`,
     * builtins, operators) — passing it as timeout's own argv would break those
-    * and let compound commands escape the bound. `cmd` is trusted config. */
-   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c \"%s\" < %s", CCU_SIDECAR_TIMEOUT_S,
-            cmd, tmppath);
+    * and let compound commands escape the bound.
+    *
+    * The script is shell-QUOTED, the redirection stays inside the command's own
+    * parse context, and the path is embedded as a quoted LITERAL — see
+    * kb_curator_sidecar_run for the full reasoning. */
+   char qtmp[1040]; /* worst case: every byte of a 256-char path is a quote */
+   if (kb_curator_shell_quote(tmppath, qtmp, sizeof(qtmp)) != 0)
+   {
+      unlink(tmppath);
+      snprintf(errbuf, errlen, "sidecar temp path too long to quote safely");
+      return NULL;
+   }
+
+   char script[1600];
+   int sn = snprintf(script, sizeof(script), "%s < %s", cmd, qtmp);
+   char qscript[6464]; /* worst case: every byte of the script is a quote */
+   if (sn < 0 || (size_t)sn >= sizeof(script) ||
+       kb_curator_shell_quote(script, qscript, sizeof(qscript)) != 0)
+   {
+      unlink(tmppath);
+      snprintf(errbuf, errlen, "sidecar command too long to quote safely");
+      return NULL;
+   }
+
+   char full_cmd[6528];
+   snprintf(full_cmd, sizeof(full_cmd), "timeout -k 10 %d sh -c %s", CCU_SIDECAR_TIMEOUT_S,
+            qscript);
 
    FILE *fp = popen(full_cmd, "r");
    if (!fp)
@@ -411,7 +484,10 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
 
    if (rc != 0)
    {
-      snprintf(errbuf, errlen, "sidecar exited %d", rc);
+      kb_curator_describe_wait_status(rc, CCU_SIDECAR_TIMEOUT_S, errbuf, errlen);
+      /* Before discarding the output: the sidecar may have explained itself in
+       * it. Keep the reason, not just the exit code. */
+      kb_curator_append_sidecar_error(out, errbuf, errlen);
       free(out);
       return NULL;
    }
@@ -534,6 +610,15 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
 
       if (wrc != 0)
       {
+         /* db2_artifact_write swallows the backend's message, so the only record
+          * of WHY was postgres' own log — which is how ~5,300 jobs died as a bare
+          * "artifact write failed" while the server had been saying "invalid byte
+          * sequence for encoding UTF8" all along. Name the artifact so the next
+          * one is findable without cross-referencing container logs by timestamp. */
+         aimee_log(LOG_WARN, "kb.curator.extract_code",
+                   "artifact write rejected for symbol '%s' (job %lld, kind=%s); see the db2 log "
+                   "for the backend reason",
+                   job->symbol, (long long)job->job_id, kind_j->valuestring);
          aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }
@@ -617,7 +702,13 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
    cJSON_AddNumberToObject(inp, "line", job.line);
    cJSON_AddStringToObject(inp, "body", body);
    /* Stash a bounded signature (first non-blank line) + body excerpt for the
-    * code_unit artifact payload before the body buffer is released. */
+    * code_unit artifact payload before the body buffer is released.
+    *
+    * Both cuts are byte-wise, so both can split a multi-byte character — source
+    * comments in this tree are full of em-dashes. The partial bytes end up in the
+    * artifact payload's JSON, and postgres then rejects the entire INSERT with
+    * "invalid byte sequence for encoding UTF8", failing the job. Trim back to a
+    * character boundary. */
    {
       const char *p = body;
       while (*p == '\n' || *p == '\r' || *p == ' ' || *p == '\t')
@@ -627,7 +718,9 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
          siglen++;
       memcpy(job.signature, p, siglen);
       job.signature[siglen] = '\0';
+      text_trim_partial_utf8(job.signature);
       snprintf(job.body_excerpt, sizeof(job.body_excerpt), "%s", body);
+      text_trim_partial_utf8(job.body_excerpt);
    }
    free(body);
    cJSON *conf = cJSON_AddObjectToObject(req, "config");

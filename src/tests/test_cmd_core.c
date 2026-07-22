@@ -222,11 +222,27 @@ static void test_handle_git_commit_in_repo(void)
    system(cmd);
 }
 
+/* A local fixture rather than a real command's table. These two cases test the
+ * generic dispatcher, not any particular command — they used to borrow
+ * get_work_subcmds(), which quietly coupled them to the work queue and broke
+ * when it was removed. A fixture keeps them honest and linkable. */
+static void fixture_subcmd_noop(app_ctx_t *ctx, int argc, char **argv)
+{
+   (void)ctx;
+   (void)argc;
+   (void)argv;
+}
+
+static const subcmd_t fixture_subcmds[] = {
+    {"alpha", "First fixture subcommand", fixture_subcmd_noop},
+    {"beta", "Second fixture subcommand", fixture_subcmd_noop},
+    {NULL, NULL, NULL}};
+
 /* --- Test subcmd_dispatch returns -1 for unknown subcommand --- */
 
 static void test_subcmd_dispatch_unknown(void)
 {
-   const subcmd_t *table = get_work_subcmds();
+   const subcmd_t *table = fixture_subcmds;
    assert(table != NULL);
 
    app_ctx_t ctx;
@@ -240,7 +256,7 @@ static void test_subcmd_dispatch_unknown(void)
 
 static void test_subcmd_usage_no_crash(void)
 {
-   const subcmd_t *table = get_work_subcmds();
+   const subcmd_t *table = fixture_subcmds;
 
    /* Redirect stdout to /dev/null */
    fflush(stdout);
@@ -252,7 +268,7 @@ static void test_subcmd_usage_no_crash(void)
       close(dev_null);
    }
 
-   subcmd_usage("work", table);
+   subcmd_usage("fixture", table);
 
    dup2(saved, STDOUT_FILENO);
    close(saved);

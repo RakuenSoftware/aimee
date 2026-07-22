@@ -1,0 +1,254 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/JBailes/aimee/server-go/internal/api"
+	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/engine"
+	"github.com/JBailes/aimee/server-go/internal/roundtable"
+	"github.com/JBailes/aimee/server-go/internal/wfe"
+)
+
+func main() {
+	homeDefault := os.Getenv("AIMEE_HOME")
+	if homeDefault == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			log.Fatal(err)
+		}
+		homeDefault = filepath.Join(userHome, ".config", "aimee")
+	}
+	home := flag.String("home", homeDefault, "aimee state directory")
+	socket := flag.String("socket", "", "Unix socket path")
+	listen := flag.String("listen", "", "optional TCP listen address")
+	dbPath := flag.String("db", "", "DB1 SQLite path")
+	runnerURL := flag.String("runner-url", os.Getenv("AIMEE_WFE_RUNNER_URL"),
+		"typed WFE runner endpoint; empty keeps execution disabled")
+	runnerSocket := flag.String("runner-socket", os.Getenv("AIMEE_WFE_RUNNER_SOCKET"),
+		"optional Unix socket for the typed WFE runner")
+	agentURL := flag.String("agent-service-url", os.Getenv("AIMEE_AGENT_SERVICE_URL"),
+		"agent resource-plane base URL used by the native Go WFE runner")
+	agentSocket := flag.String("agent-service-socket", os.Getenv("AIMEE_AGENT_SERVICE_SOCKET"),
+		"agent resource-plane Unix socket used by the native Go WFE runner")
+	agentBearer := flag.String("agent-service-bearer", os.Getenv("AIMEE_AGENT_SERVICE_BEARER"),
+		"optional bearer for the agent resource plane")
+	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
+	configPath := flag.String("config", "", "aimee.yaml path")
+	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 2),
+		"maximum concurrent workflows")
+	bearerToken := flag.String("bearer-token", os.Getenv("AIMEE_API_BEARER_TOKEN"),
+		"bearer required by TCP and optional on Unix sockets")
+	flag.Parse()
+	if *dbPath == "" {
+		*dbPath = filepath.Join(*home, "aimee.db")
+	}
+	if *socket == "" && *listen == "" {
+		*socket = filepath.Join(*home, "aimee-server.sock")
+	}
+	if *workflowDir == "" {
+		*workflowDir = filepath.Join(*home, "workflows")
+	}
+	if *configPath == "" {
+		*configPath = filepath.Join(*home, "aimee.yaml")
+	}
+	if *listen != "" && *bearerToken == "" {
+		log.Fatal("TCP listening requires --bearer-token or AIMEE_API_BEARER_TOKEN")
+	}
+	if err := os.MkdirAll(*home, 0o700); err != nil {
+		log.Fatalf("create aimee home: %v", err)
+	}
+
+	store, err := db1.Open(*dbPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(*home, "wfe-artifacts"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	handler, err := api.New(store, artifacts, *workflowDir)
+	if err != nil {
+		log.Fatal(err)
+	}
+	configStore, err := appconfig.NewStore(*configPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	handler.SetConfigStore(configStore)
+	server := &http.Server{Handler: api.RequireBearer(handler, *bearerToken), ReadHeaderTimeout: 15 * time.Second}
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+	var runner engine.Runner
+	var worktreeManager *engine.WorktreeManager
+	if *runnerURL != "" {
+		runner, err = engine.NewHTTPRunner(engine.HTTPRunnerConfig{
+			Endpoint: *runnerURL, UnixSocket: *runnerSocket,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else if *agentURL != "" || *agentSocket != "" {
+		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
+			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer, Store: store,
+			PendingTimeoutSource: func() time.Duration {
+				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
+			},
+			CancelUnassigned: store.CancelUnassignedDelegateJob,
+		})
+		if clientErr != nil {
+			log.Fatal(clientErr)
+		}
+		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
+		if worktreeErr != nil {
+			log.Fatal(worktreeErr)
+		}
+		worktreeManager = worktrees
+		workflowRegistry, registryErr := wfe.NewRegistry(*workflowDir)
+		if registryErr != nil {
+			log.Fatal(registryErr)
+		}
+		forge, forgeErr := engine.NewHTTPForge(engine.HTTPForgeConfig{
+			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer,
+		})
+		if forgeErr != nil {
+			log.Fatal(forgeErr)
+		}
+		nativeRunner, runnerErr := engine.NewNativeRunner(store, worktrees, agents, nil, artifacts, workflowRegistry, forge)
+		if runnerErr != nil {
+			log.Fatal(runnerErr)
+		}
+		roundtables, roundtableErr := roundtable.NewStore(filepath.Join(*home, "roundtables"), func() (string, error) {
+			name, _, err := configStore.StringValue("roundtable.default")
+			return name, err
+		})
+		if roundtableErr != nil {
+			log.Fatal(roundtableErr)
+		}
+		nativeRunner.SetRoundtableStore(roundtables)
+		runner = nativeRunner
+	}
+	if runner != nil {
+		workflowEngine, err := engine.New(store, artifacts, *workflowDir, runner)
+		if err != nil {
+			log.Fatal(err)
+		}
+		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
+		var liveMu sync.Mutex
+		lastConcurrency := *concurrency
+		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}
+		readInt := func(key string, fallback int) int {
+			value, ok, err := configStore.IntValue(key)
+			if err != nil {
+				log.Printf("invalid live config %s: %v", key, err)
+				return fallback
+			}
+			if !ok {
+				return fallback
+			}
+			return value
+		}
+		scheduler.SetConcurrencySource(func() int {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastConcurrency = readInt("autonomy.concurrency", lastConcurrency)
+			return lastConcurrency
+		})
+		scheduler.SetPolicySource(func() engine.RunPolicy {
+			liveMu.Lock()
+			defer liveMu.Unlock()
+			lastPolicy.MaxTurns = readInt("autonomy.max_turns", lastPolicy.MaxTurns)
+			lastPolicy.MaxWall = time.Duration(readInt("autonomy.max_wall_secs", int(lastPolicy.MaxWall/time.Second))) * time.Second
+			lastPolicy.MaxResumes = readInt("autonomy.max_resumes", lastPolicy.MaxResumes)
+			lastPolicy.StaleAbandon = time.Duration(readInt("autonomy.stale_abandon_secs", int(lastPolicy.StaleAbandon/time.Second))) * time.Second
+			if value, ok, err := configStore.BoolValue("autonomy.auto_resume_cap_parks"); err != nil {
+				log.Printf("invalid live config autonomy.auto_resume_cap_parks: %v", err)
+			} else if ok {
+				lastPolicy.AutoResumeWall = value
+			}
+			return lastPolicy
+		})
+		handler.SetSchedulerNotify(scheduler.Notify)
+		handler.SetSchedulerCancel(scheduler.Cancel)
+		if worktreeManager != nil {
+			handler.SetWorktreeCleanup(worktreeManager.Cleanup)
+		}
+		go scheduler.Run(rootCtx)
+		// Trigger definitions are live UI/config state. Re-read them every scan so
+		// a saved workflow or run-policy change takes effect without a restart.
+		go func() {
+			for {
+				handler.ScanTriggers(rootCtx)
+				interval := configStore.Int("trigger.scan_interval_secs", 5)
+				if interval < 1 {
+					interval = 1
+				}
+				timer := time.NewTimer(time.Duration(interval) * time.Second)
+				select {
+				case <-rootCtx.Done():
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+		}()
+	}
+
+	var listener net.Listener
+	if *socket != "" {
+		if err := os.MkdirAll(filepath.Dir(*socket), 0o700); err != nil {
+			log.Fatal(err)
+		}
+		_ = os.Remove(*socket)
+		listener, err = net.Listen("unix", *socket)
+		if err == nil {
+			err = os.Chmod(*socket, 0o600)
+		}
+	} else {
+		listener, err = net.Listen("tcp", *listen)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer listener.Close()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-stop
+		rootCancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}()
+	log.Printf("Go aimee-server listening on %s", listener.Addr())
+	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		log.Fatal(fmt.Errorf("serve: %w", err))
+	}
+}
+
+func envInt(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
+}

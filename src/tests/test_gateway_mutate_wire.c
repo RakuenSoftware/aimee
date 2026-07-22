@@ -131,7 +131,7 @@ static void test_dark_default_and_identityless(void)
    cJSON *c = container_with("orig");
    gw_mutate_ctx_t ctx;
 
-   /* default config -> reduce_gateway_mutate off -> dark no-op */
+   /* default config -> economizer tier safe -> gateway mutation off -> dark no-op */
    gw_buffered_mutate(c, "messages", "some-model", NULL, NULL, NULL, NULL, &ctx);
    assert(ctx.mutated == 0);
    assert(ctx.mutate_on == 0); /* flag off */
@@ -233,8 +233,8 @@ static void test_token_delta_sampling(void)
 
 static void test_no_behavior_change_when_off(void)
 {
-   /* With reduce_gateway_mutate off (default config in this test's HOME), the buffered
-    * mutate short-circuits at the flag gate BEFORE inspecting the payload, so the
+   /* With gateway mutation off (economizer tier safe, the default in this test's HOME), the
+    * buffered mutate short-circuits at the flag gate BEFORE inspecting the payload, so the
     * container is a byte-identical no-op for ANY input regardless of size/shape. */
    cJSON *c = container_with("payload");
    char *before = cJSON_PrintUnformatted(c);
@@ -250,10 +250,48 @@ static void test_no_behavior_change_when_off(void)
    cJSON_Delete(c);
 }
 
+static void test_upstream_provider_gate(void)
+{
+   /* Policy: gateway wire-mutation is OpenAI-only. An Anthropic upstream is ALWAYS excluded,
+    * regardless of the enable state, so its prompt-cached verbatim passthrough is never
+    * mutated. For a non-Anthropic upstream the helper simply mirrors the base enable gate
+    * (off under this test's default config HOME). */
+   assert(gw_mutate_upstream_ok(1) == 0);                      /* Anthropic: never mutate */
+   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: base gate */
+   assert(gw_mutate_is_enabled() == 0);                        /* default config -> dark */
+   assert(gw_mutate_upstream_ok(0) == 0);                      /* so both are off here */
+}
+
+/* gw_stat_to_json: the JSON the /v1/economizer/stats endpoint serves reflects the
+ * live counters — flat counters, the sampled token_delta (+ derived pct_reduced), and
+ * the {group:{reason:count}} breakdown. */
+static void test_stat_json(void)
+{
+   gw_stat_reset();
+   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
+   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
+   gw_stat_inc_reason("session_disabled_set", "4xx");
+   gw_stat_record_token_delta(1000, 600); /* n=0 is sampled */
+
+   cJSON *o = cJSON_CreateObject();
+   gw_stat_to_json(o);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_attempted")) == 1);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_applied")) == 1);
+   cJSON *td = cJSON_GetObjectItem(o, "token_delta");
+   assert(td);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "baseline_sum")) == 1000);
+   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "reduced_sum")) == 600);
+   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(td, "pct_reduced")) == 40.0);
+   cJSON *sds = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "reasons"), "session_disabled_set");
+   assert(sds && (int)cJSON_GetNumberValue(cJSON_GetObjectItem(sds, "4xx")) == 1);
+   cJSON_Delete(o);
+}
+
 int main(void)
 {
    printf("gateway_mutate_wire: ");
-   /* Deterministic defaults for config_load (no aimee.yaml -> reduce_gateway_mutate off). */
+   /* Deterministic defaults for config_load (no aimee.yaml -> economizer safe -> gateway mutation
+    * off). */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gwwire-XXXXXX", platform_tmpdir());
    if (platform_mkdtemp(tmpdir))
@@ -270,6 +308,8 @@ int main(void)
    test_stream_error_classify();
    test_token_delta_sampling();
    test_no_behavior_change_when_off();
+   test_upstream_provider_gate();
+   test_stat_json();
    printf("ok\n");
    return 0;
 }

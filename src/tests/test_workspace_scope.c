@@ -62,9 +62,9 @@ int main(void)
    char proj[PATH_MAX];
    assert(ws_scope_project_path("webuser:alice", "myrepo", 0, proj, sizeof(proj)) == 0);
    assert(strncmp(proj, rootA, strlen(rootA)) == 0 && strstr(proj, "/myrepo"));
-   /* bad project names rejected */
+   /* bad project names rejected ("a/b" is now a VALID org/repo ref — the
+    * two-component cases are exercised in the ref sections below) */
    assert(ws_scope_project_path("webuser:alice", "..", 0, proj, sizeof(proj)) == -1);
-   assert(ws_scope_project_path("webuser:alice", "a/b", 0, proj, sizeof(proj)) == -1);
    assert(ws_scope_project_path("webuser:alice", "../bob", 0, proj, sizeof(proj)) == -1);
 
    /* materialize the project, then must_exist resolution must succeed + stay in root */
@@ -112,6 +112,94 @@ int main(void)
    /* O_NOFOLLOW rejects opening through the planted escape symlink */
    assert(ws_scope_open_project("webuser:alice", "evil", 0) == -1);
    assert(ws_scope_open_project("webuser:alice", "..", 0) == -1);
+
+   /* --- ws_scope_project_ref_valid: the only '/'-accepting validator --- */
+   {
+      /* accepted: flat and exactly org/repo */
+      assert(ws_scope_project_ref_valid("foo", 3));
+      assert(ws_scope_project_ref_valid("acme/foo", 8));
+      assert(ws_scope_project_ref_valid("a-b.c_d/e.f", 11));
+      /* rejected: traversal, nesting, hidden, absolute, empty segments */
+      assert(!ws_scope_project_ref_valid("../x", 4));
+      assert(!ws_scope_project_ref_valid("a/../b", 6));
+      assert(!ws_scope_project_ref_valid("a//b", 4));
+      assert(!ws_scope_project_ref_valid(".hidden/x", 9));
+      assert(!ws_scope_project_ref_valid("a/.hidden", 9));
+      assert(!ws_scope_project_ref_valid("/abs", 4));
+      assert(!ws_scope_project_ref_valid("a/b/c", 5));
+      assert(!ws_scope_project_ref_valid("a/", 2));
+      assert(!ws_scope_project_ref_valid("/a", 2));
+      assert(!ws_scope_project_ref_valid("", 0));
+      assert(!ws_scope_project_ref_valid(NULL, 0));
+      /* embedded NUL by byte-scan (buffer not NUL-terminated at len) */
+      assert(!ws_scope_project_ref_valid("a\0b", 3));
+      assert(!ws_scope_project_ref_valid("acme/f\0o", 8));
+      /* control bytes + non-ASCII rejected via ws_scope_name_valid, both
+       * component positions */
+      assert(!ws_scope_project_ref_valid("a\x01"
+                                         "b/c",
+                                         5));
+      assert(!ws_scope_project_ref_valid("a/b\x7f"
+                                         "c",
+                                         5));
+      assert(!ws_scope_project_ref_valid("caf\xc3\xa9/x", 7));
+      /* length caps: >129 total, >64 per component */
+      char big[200];
+      memset(big, 'a', sizeof(big));
+      assert(!ws_scope_project_ref_valid(big, 130));
+      char comp65[70];
+      memset(comp65, 'a', 65);
+      comp65[65] = '/';
+      comp65[66] = 'x';
+      assert(!ws_scope_project_ref_valid(comp65, 67));
+      /* 64/64 with '/' = 129 total is the maximum accepted shape */
+      char maxref[130];
+      memset(maxref, 'a', 64);
+      maxref[64] = '/';
+      memset(maxref + 65, 'b', 64);
+      assert(ws_scope_project_ref_valid(maxref, 129));
+   }
+
+   /* --- ws_scope_ref_split --- */
+   {
+      char org[65], repo[65];
+      assert(ws_scope_ref_split("foo", org, sizeof(org), repo, sizeof(repo)) == 1);
+      assert(org[0] == '\0' && strcmp(repo, "foo") == 0);
+      assert(ws_scope_ref_split("acme/foo", org, sizeof(org), repo, sizeof(repo)) == 2);
+      assert(strcmp(org, "acme") == 0 && strcmp(repo, "foo") == 0);
+      assert(ws_scope_ref_split("a/../b", org, sizeof(org), repo, sizeof(repo)) == -1);
+   }
+
+   /* --- two-component refs through project_path / open_project --- */
+   {
+      char orgdir[PATH_MAX], nested[PATH_MAX];
+      snprintf(orgdir, sizeof(orgdir), "%s/acme", rootA);
+      assert(mkdir(orgdir, 0700) == 0);
+      snprintf(nested, sizeof(nested), "%s/acme/app", rootA);
+      assert(mkdir(nested, 0700) == 0);
+
+      char got[PATH_MAX];
+      assert(ws_scope_project_path("webuser:alice", "acme/app", 1, got, sizeof(got)) == 0);
+      assert(strstr(got, "/acme/app") != NULL);
+      /* clone-target mode: nested ref that exists is refused */
+      assert(ws_scope_project_path("webuser:alice", "acme/app", 0, got, sizeof(got)) == -1);
+      /* traversal shapes rejected before any resolution */
+      assert(ws_scope_project_path("webuser:alice", "acme/../app", 1, got, sizeof(got)) == -1);
+
+      int nfd = ws_scope_open_project("webuser:alice", "acme/app", 0);
+      assert(nfd >= 0);
+      close(nfd);
+      assert(ws_scope_open_project("webuser:alice", "acme/../app", 0) == -1);
+      /* symlink planted as the org component is rejected (O_NOFOLLOW) */
+      char orglink[PATH_MAX];
+      snprintf(orglink, sizeof(orglink), "%s/evilorg", rootA);
+      assert(symlink("/", orglink) == 0);
+      assert(ws_scope_open_project("webuser:alice", "evilorg/etc", 0) == -1);
+      unlink(orglink);
+
+      rmdir(nested);
+      rmdir(orgdir);
+   }
 
    /* cleanup */
    rmdir(real_proj);

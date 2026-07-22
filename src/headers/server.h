@@ -80,8 +80,14 @@ typedef struct cJSON cJSON;
  * authenticated/delegate bearer cannot drive a human gate. */
 #define CAP_WORKFLOW_ADMIN (1u << 16)
 
+/* Operator-level: register/unregister shadow-traffic subscribers (a subscriber
+ * receives a copy of every completion request, i.e. all prompt/response content).
+ * Deliberately OUTSIDE CAPS_AUTHENTICATED (full-trust / UDS / remote_writes=full
+ * only), so a mere authenticated bearer cannot tap live traffic. */
+#define CAP_SHADOW_ADMIN (1u << 17)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x1FFFFu
+#define CAPS_ALL 0x3FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
@@ -187,6 +193,8 @@ typedef struct
    compute_pool_t pool;
    compute_pool_t request_pool;
    int request_pool_initialized;
+   compute_pool_t orchestration_pool;
+   int orchestration_pool_initialized;
    pthread_mutex_t session_pools_mutex;
    int session_pools_initialized;
    int session_threads;
@@ -201,15 +209,6 @@ typedef struct
    time_t
        last_session_end; /* when active_sessions last hit 0; 0 = sessions active or fresh start */
 
-   /* Provider concurrency slots: global active count per agent, shared across
-    * all CLI delegate processes that contact this server. Acquire/release via
-    * the provider.slot_acquire / provider.slot_release RPCs. The mutex is
-    * separate from conns_mutex to avoid contention with connection management.
-    * Resets to zero on every server start — no stale slots survive a restart. */
-   pthread_mutex_t provider_slots_mutex;
-   char provider_slot_names[CATALOG_MAX_ENTRIES][64];
-   int provider_slot_active[CATALOG_MAX_ENTRIES];
-   int provider_slot_count;
 } server_ctx_t;
 
 /* Lifecycle */
@@ -346,22 +345,10 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_hosts_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_primary_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_add_batch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_claim(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_complete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_fail(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_board(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_release(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_clear(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_gc(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_sync_proposals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_work_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_attempt_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_delegations(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_traces(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_plans(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -425,6 +412,7 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_lock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* mTLS client-cert lifecycle (server_cert.c) */
 int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_cert_sign(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_cert_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -23,6 +23,24 @@ extern "C"
     * .c files call this at the top of every public function. */
    sqlite3 *db1_conn(void);
 
+   /* Cross-thread transaction gate for the SHARED connection. sqlite allows one
+    * open transaction per connection; two threads issuing BEGIN IMMEDIATE on the
+    * same handle collide ("cannot start a transaction within a transaction") and
+    * a COMMIT from the wrong thread would commit the other's half-done writes.
+    * Every explicit-transaction site must open via db1_txn_begin (locks the gate,
+    * then execs the BEGIN; unlocks on exec failure) and close via db1_txn_end
+    * (execs COMMIT/ROLLBACK, then unlocks). Single-statement writes need no gate
+    * (FULLMUTEX serializes them). Both return 0 on success, -1 on exec failure. */
+   int db1_txn_begin(sqlite3 *db, const char *begin_sql);
+   int db1_txn_end(sqlite3 *db, const char *end_sql);
+
+   /* Security-sensitive sibling: attempt BEGIN exactly once without invoking DB1's retrying busy
+    * handler. The connection mutex makes the temporary handler swap race-free. */
+   int db1_txn_begin_nowait(sqlite3 *db, const char *begin_sql);
+
+   /* Attempt COMMIT and, on any failure/ambiguity, issue ROLLBACK before releasing the gate. */
+   int db1_txn_commit_or_rollback(sqlite3 *db);
+
    /* Copy a TEXT column into a fixed-size buffer with NULL-safety — the
     * `snprintf(dst, cap, "%s", sqlite3_column_text(...) ?: "")` shape that
     * ~19 db1 row-mapper .c files each open-coded as a private static. */

@@ -15,7 +15,7 @@
 #ifndef DEC_DB2_FACT_LIFECYCLE_H
 #define DEC_DB2_FACT_LIFECYCLE_H 1
 
-#include "../headers/memory_fact_gate.h" /* fact_gate_verdict_t */
+#include "memory_fact_gate.h" /* fact_gate_verdict_t */
 
 #ifdef __cplusplus
 extern "C"

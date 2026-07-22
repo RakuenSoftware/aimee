@@ -42,6 +42,19 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
    CLAUDE_ADD_ARG("stream-json");
    CLAUDE_ADD_ARG("--verbose");
    CLAUDE_ADD_ARG("--include-partial-messages");
+   /* Hand the delegate aimee. `aimee mcp serve` is the stdio MCP proxy that
+    * forwards tool calls to this server over /v1, so a spawned CLI delegate reaches
+    * the same tools a native agent does — git_commit / git_push / git_pr, memory,
+    * the code index — instead of the nothing it had before. Without this a delegate
+    * has no aimee tools at all, and its only route to git is a raw shell with
+    * whatever credentials it inherits: exactly backwards.
+    *
+    * The binary ships in the server image (Dockerfile.server) and resolves its
+    * endpoint + bearer from AIMEE_API_ENDPOINT and AIMEE_HOME's aimee.yaml, both of
+    * which the spawn exports (provider_cli_adapter). */
+   CLAUDE_ADD_ARG("--mcp-config");
+   CLAUDE_ADD_ARG(
+       "{\"mcpServers\":{\"aimee\":{\"command\":\"aimee\",\"args\":[\"mcp\",\"serve\"]}}}");
    CLAUDE_ADD_ARG("--allowedTools");
    CLAUDE_ADD_ARG("Bash(*)");
    CLAUDE_ADD_ARG("Edit");
@@ -52,6 +65,7 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
    CLAUDE_ADD_ARG("WebFetch");
    CLAUDE_ADD_ARG("WebSearch");
    CLAUDE_ADD_ARG("NotebookEdit");
+   CLAUDE_ADD_ARG("mcp__aimee"); /* the aimee MCP server's tools */
    CLAUDE_ADD_ARG("--disallowedTools");
    /* Enforce delegate-only: block Claude Code's CLIENT-SIDE subagent tools so the
     * primary must use aimee delegates. `Task` is Claude Code's real sub-agent

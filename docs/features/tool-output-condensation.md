@@ -1,4 +1,10 @@
-# Tool-output condensation (deterministic command-aware)
+# Tool-output condensation (retired from live requests)
+
+> **Current status:** the helper remains as isolated deterministic code, but every production
+> request caller is removed. Neither `off` nor `proof_gated` enables it. A retrieval pointer is not
+> mechanically equivalent to presenting the original bytes to the model, and page-back cost cannot
+> be bounded before dispatch. Re-enablement requires a separately reviewed transform contract and
+> signed registry entry.
 
 Tool output (test-runner logs, compiler/linter dumps, build progress) is the largest and
 most signal-sparse contributor to a coding agent's context. Most of that volume is not
@@ -10,20 +16,20 @@ LLM, so it is ~free). It knows that a test runner's value is its *failures*, a c
 its *diagnostics*, and drops the rest, **losslessly**: the full raw output is spilled to
 disk and a recovery pointer is left in the condensed result, so nothing is destroyed.
 
-It is **default-ON** (unified-economizer P1c, a safe-tier lever: lossless-on-demand,
-fail-open, no-over-reduction) and complements (does not replace) the size-based
-`reduce.compress`, which stays the fallback for unrecognized output. Set
-`reduce.command_filter=false` to opt out.
+The remainder of this page describes the retired implementation for historical and test context. It
+is not the current runtime behavior.
 
 ## Configuration
 
+There is no configuration that activates condensation. The current economizer surface is:
+
 ```yaml
-reduce:
-  command_filter: true    # DEFAULT ON. Set false to opt out.
+economizer:
+  mode: off             # off | proof_gated
 ```
 
-Turn it on from the web UI (**⚙️ Settings → `reduce.command_filter`**, see
-[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today**: the seam falls through to the size-based `reduce.compress`.
+Both modes leave tool output pristine in production. See [SETTINGS.md](../SETTINGS.md) and
+[the economizer overview](economizer.md).
 
 ## What it does
 
@@ -50,14 +56,15 @@ before the size-based compression:
 
 ## Safety contract
 
-- `reduce.command_filter: false` ⇒ tool output is **byte-identical** to today.
+- Production request paths do not call this helper in any economizer mode.
 - **Lossless-on-demand.** A condensed body is only ever produced when the full raw output
   was **durably spilled** first; a failed spill, no spill dir, or a would-be-truncated
   recovery pointer all fall through to passthrough. Nothing is dropped without a backstop.
 - **Never hide a failure.** A test runner or build with a **non-zero exit and no recognized
   failure line** passes through verbatim rather than risk eliding the cause.
 - **Fail-open everywhere.** An unrecognized command, an over-ceiling body (> 2 MB), or any
-  filter error degrades to the size-based `reduce.compress`, never a crash or a dropped
+  filter error degrades to passthrough (or, on the aggressive tier, the size-based body
+  compression), never a crash or a dropped
   result.
 - **No masquerade.** A path-prefixed command whose basename matches a known tool (`./git`)
   never inherits that tool's family filter.
@@ -69,7 +76,7 @@ before the size-based compression:
 ## Observability + recovery cost (P4)
 
 Process-wide counters accumulate realized savings **and recovery cost** on live traffic
-([`tool_condense_stats_snapshot`](../../src/tool_condense.c)): `recognized`, `applied`,
+([`tool_condense_stats_snapshot`](../../src/modules/economizer/tool_condense.c)): `recognized`, `applied`,
 `applied_raw` vs `applied_final` bytes, per-family (`test`, `diag`) counts, and the
 **recovery-cost** side: `recovered` (successful `tool_output_get` page-backs) and
 `recovered_bytes` (bytes re-injected). Two derived fields make the promotion-gate metric
@@ -86,12 +93,12 @@ two sides are greppable together. (This precise per-call channel exists because
 `tool_output_get` is the single dedicated recovery handle from P2; `history_fold`/`compress`
 recovery via fold-recall remains best-effort, not byte-exact.)
 
-## Scope & rollout
+## Historical scope
 
-Shipped as the **delegate surface**, **default-ON** (the safe-tier lever): when on, the
+It previously shipped as the **delegate surface**, **default-ON** (the safe-tier lever): when on, the
 delegate bash seam captures the full output (up to a 2 MB ceiling) so the lever sees all of
-it, condenses recognized families losslessly, and spills the raw for recovery. Opt out with
-`reduce.command_filter=false`; roll back the default by the same flag.
+it, condenses recognized families losslessly, and spills the raw for recovery. Set
+the live caller has since been removed.
 
 The **default-ON** flip landed in unified-economizer **P1c**, justified by the deterministic
 gate (lossless-on-demand + fail-open + a no-over-reduction audit); it replaces the old lossy

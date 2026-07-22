@@ -638,6 +638,7 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
    if (!acfg || !provider || !provider[0])
       return 0;
 
+   /* Prefer an ENABLED agent, by name then by provider. */
    int by_name = -1;
    for (int i = 0; i < acfg->agent_count; i++)
       if (acfg->agents[i].enabled && strcmp(acfg->agents[i].name, provider) == 0)
@@ -658,6 +659,33 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
    }
 
    int match = by_name >= 0 ? by_name : by_provider;
+
+   /* Auto-use the configured primary even if the operator left it DISABLED. This
+    * selector drives the PRIMARY chat path (`provider` is the configured primary
+    * — cfg.provider or a session-pinned primary), so a disabled agent that IS the
+    * configured primary must still serve the turn. Otherwise a disabled `claude`
+    * both suppressed the built-in fallback (agent_find sees it regardless of
+    * `enabled`) AND failed the enabled-only match above, surfacing the misleading
+    * "provider '…' is not configured as an aimee agent" error for an agent that
+    * is plainly present. Delegate routing is unaffected — it runs through
+    * agent_route_*, which still honours `enabled`. */
+   if (match < 0)
+   {
+      for (int i = 0; i < acfg->agent_count; i++)
+         if (strcmp(acfg->agents[i].name, provider) == 0)
+         {
+            by_name = i;
+            break;
+         }
+      if (by_name < 0)
+         for (int i = 0; i < acfg->agent_count; i++)
+            if (strcmp(acfg->agents[i].provider, provider) == 0)
+            {
+               by_provider = i;
+               break;
+            }
+      match = by_name >= 0 ? by_name : by_provider;
+   }
    if (match < 0)
       return -1;
 
@@ -665,6 +693,9 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
       acfg->agents[i].enabled = acfg->agents[i].enabled &&
                                 (by_name >= 0 ? strcmp(acfg->agents[i].name, provider) == 0
                                               : strcmp(acfg->agents[i].provider, provider) == 0);
+   /* Force the chosen primary enabled for this turn even if it was disabled on
+    * disk — the operator is actively chatting with it as the primary. */
+   acfg->agents[match].enabled = 1;
 
    snprintf(acfg->default_agent, sizeof(acfg->default_agent), "%s", acfg->agents[match].name);
    acfg->fallback_count = 0;

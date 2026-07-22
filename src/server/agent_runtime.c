@@ -1,6 +1,9 @@
 #include "aimee.h"
+#include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
+#include "aimee_errors.h"
 #include "db1.h"
+#include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include "delegate_role.h"
 #include "skill_curator.h"
 #include "skill_review.h"
@@ -14,6 +17,7 @@
 #include "agent.h"
 #include "agent_protocol.h"
 #include "agent_request_shaping.h"
+#include "agent_request_build.h" /* agent_build_request + provider predicates */
 #include "agent_tools.h"
 #include "agent_tunnel.h"
 #include "config.h"
@@ -130,11 +134,79 @@ static void record_outcome(const char *agent_name, const char *role, const agent
                                         outcome->tokens_used, outcome->tool_error_pattern);
 }
 
+extern const char *delegation_active_id(void);
+
+/* Apply config -> the admission controller, re-applying only when the config file changes
+ * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
+ * controller is configured before the first acquire, and picks up hot-reloaded limits. */
+static void admission_ensure_configured(void)
+{
+   static long long applied_mtime = -1;
+   static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+   const char *path = config_default_path();
+   struct stat st;
+   long long mtime = (path && stat(path, &st) == 0)
+                         ? (long long)st.st_mtime * 1000000000LL + (long long)st.st_mtim.tv_nsec
+                         : 0;
+   pthread_mutex_lock(&mu);
+   if (mtime != applied_mtime)
+   {
+      config_t cfg;
+      config_load(&cfg); /* mtime-cached */
+      int global_max = cfg.maximum_total_concurrent_agent_sessions > 0
+                           ? cfg.maximum_total_concurrent_agent_sessions
+                           : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
+      int default_model = cfg.concurrency_default > 0 ? cfg.concurrency_default : 5;
+      agent_admission_model_limit_t overrides[CONFIG_CONCURRENCY_MAX_ENTRIES];
+      int n = 0;
+      for (int i = 0; i < cfg.concurrency_per_model_count && n < CONFIG_CONCURRENCY_MAX_ENTRIES;
+           i++)
+      {
+         snprintf(overrides[n].model, sizeof(overrides[n].model), "%s",
+                  cfg.concurrency_per_model[i].key);
+         overrides[n].limit = cfg.concurrency_per_model[i].limit;
+         n++;
+      }
+      agent_admission_configure(global_max, default_model, overrides, n);
+      applied_mtime = mtime;
+   }
+   pthread_mutex_unlock(&mu);
+}
+
+/* Fan-out / fallback callers must try a DIFFERENT agent when one is at its limit rather
+ * than block; they set this thread-local so the admission acquire fails fast. Default (0)
+ * blocks and queues — the right behaviour for a pinned turn (e.g. `delegate --via <agent>`,
+ * or a single-agent chat/panel turn). Thread-local so the ~15 callers stay untouched. */
+static __thread int tl_admission_fail_fast = 0;
+void agent_dispatch_set_fail_fast(int on)
+{
+   tl_admission_fail_fast = on ? 1 : 0;
+}
+
+/* Abandon a queued turn if its delegation was stopped (cancel_ctx is the delegation id). */
+static int admission_cancel_poll(const char *deleg_id)
+{
+   return (deleg_id && deleg_id[0]) ? db1_delegation_spawn_is_stopped(deleg_id) : 0;
+}
+
+/* The admission execution-context handle. A delegation is its own context (stable across
+ * the delegate's turns, distinct per fan-out sibling); otherwise the session+agent binding
+ * (a persistent CLI pane / repeated same-agent turns in a session reuse the one slot). */
+static const char *admission_ctx(const agent_t *ag, char *buf, size_t n)
+{
+   const char *deleg = delegation_active_id();
+   if (deleg && deleg[0])
+      return deleg;
+   const char *sid = session_id();
+   snprintf(buf, n, "%s:%s", (sid && sid[0]) ? sid : "local", ag->name);
+   return buf;
+}
+
 /* THE single per-agent turn executor — see agent_exec.h. Every model turn (panel
  * lens, ensemble reference, delegate, fallback peer, chat/responses passthrough,
- * aux) routes through here so the per-agent max_parallel cap and provider-health
- * recording are enforced in ONE place instead of being re-implemented (and
- * forgotten) per dispatch path.
+ * aux) routes through here so admission control (global + per-agent + per-model caps)
+ * and provider-health recording are enforced in ONE place instead of being
+ * re-implemented (and forgotten) per dispatch path.
  *
  * Health-domain note: this deliberately WIDENS provider-health accounting to the
  * OpenAI-compatible ingress and the aux router, which previously bypassed it — a
@@ -164,22 +236,51 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       snprintf(out->error, sizeof(out->error), "agent_dispatch_one: use_tools requires network");
       return -1;
    }
-   /* Concurrency choke point: acquire the agent's max_parallel slot. At the limit,
-    * report a DISTINCT at-limit signal (so a fan-out/retry caller picks a different
-    * agent) and return BEFORE any health recording — saturation is a load signal,
-    * not a provider fault. acquire() returns "unlimited" for max_parallel<=0 /
-    * unknown agents, so single-dispatch callers are unaffected. */
-   if (!provider_catalog_concurrent_acquire(ag->name, ag->max_parallel))
+   admission_ensure_configured();
+
+   /* Admission choke point: acquire a slot subject to the global, per-agent and
+    * per-model caps (fail-closed — an unconfigured/invalid agent is rejected, never
+    * waved through). A pinned turn blocks and queues; a fan-out/fallback caller
+    * (tl_admission_fail_fast) gets a DISTINCT at-limit signal instead so it can pick a
+    * different agent. Return BEFORE any health recording — saturation is a load signal,
+    * not a provider fault. */
+   char admit_ctxbuf[192];
+   const char *admit_deleg = delegation_active_id();
+   agent_admit_req_t admit_req = {
+       .ctx_handle = admission_ctx(ag, admit_ctxbuf, sizeof(admit_ctxbuf)),
+       .agent = ag->name,
+       .model = ag->model,
+       .per_agent_max = ag->max_parallel,
+       .priority = (admit_deleg && admit_deleg[0]) ? AGENT_ADMIT_PRIORITY_BACKGROUND
+                                                   : AGENT_ADMIT_PRIORITY_INTERACTIVE,
+       .flags = tl_admission_fail_fast ? AGENT_ADMIT_NONBLOCKING : 0u,
+       .cancel_fn = admission_cancel_poll,
+       .cancel_ctx = (admit_deleg && admit_deleg[0]) ? admit_deleg : NULL,
+   };
+   agent_slot_t *admit_slot = agent_admission_acquire(&admit_req, NULL);
+   if (!admit_slot)
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", ag->name);
-      snprintf(out->error, sizeof(out->error), "agent '%s' at concurrency limit (max_parallel=%d)",
-               ag->name, ag->max_parallel);
+      /* Aimee-internal back-pressure, not a provider fault: tag it with the aimee
+       * error SLUG (not the numeric code) so it's identifiable wherever out->error
+       * surfaces. The slug carries no digits, so it can't collide with
+       * agent_error_is_retryable's "502"/"503"/... substring scan the way a numeric
+       * code could; the "at concurrency limit" substring stays intact too. */
+      snprintf(out->error, sizeof(out->error),
+               "agent '%s' at concurrency limit (max_parallel=%d) [aimee_err=%s]", ag->name,
+               ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
       return AGENT_RC_AT_LIMIT;
    }
+   /* The durable id is thread-local (agent_tasks.c), so overlapping workers
+    * cannot cross-attribute jobs. Persist only after admission: this agent is
+    * now actually being attempted, rather than merely considered or saturated. */
+   int durable_job_id = agent_get_durable_job_id();
+   if (durable_job_id > 0)
+      db1_agent_job_set_agent(durable_job_id, ag->name);
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                           max_tokens, temperature, out)
                       : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
-   provider_catalog_concurrent_release(ag->name);
+   agent_admission_release(admit_slot);
    if (rc == 0)
       provider_catalog_record_success(ag->name);
    else
@@ -188,6 +289,19 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
       provider_catalog_record_failure(ag->name, ec);
    }
    return rc;
+}
+
+/* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
+static __thread int tl_force_no_tools = 0;
+static __thread int tl_require_initial_tool_call = 0;
+void agent_run_force_no_tools(int on)
+{
+   tl_force_no_tools = on ? 1 : 0;
+}
+
+void agent_run_require_initial_tool_call(int on)
+{
+   tl_require_initial_tool_call = on ? 1 : 0;
 }
 
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
@@ -231,8 +345,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          break;       /* no viable agent remains */
       }
 
-      int use_tools =
-          agent_uses_provider_cli(ag) || (ag->tools_enabled && agent_is_exec_role(ag, role));
+      /* tl_force_no_tools: the delegate no-tools path (CLI --no-tools ->
+       * force_tools=0) sets this so a tools-capable agent on an exec role does
+       * not silently re-enable tools here and ignore the caller's decision. */
+      int use_tools = tl_force_no_tools ? 0
+                                        : (agent_uses_provider_cli(ag) ||
+                                           (ag->tools_enabled && agent_is_exec_role(ag, role)));
       agent_apply_runtime_config(ag);
       ag->ablation = cfg->ablation;
       ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
@@ -273,6 +391,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          if (cache_enabled && out->response)
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
+      }
+      if (cfg->route_pinned)
+      {
+         free(out->response);
+         out->response = NULL;
+         break;
       }
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
@@ -411,6 +535,41 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    return rc;
 }
 
+int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out)
+{
+   memset(out, 0, sizeof(*out));
+
+   agent_t *src = agent_find(cfg, name);
+   if (!src || !src->enabled)
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", name ? name : "");
+      snprintf(out->error, sizeof(out->error), "named participant '%s' not found or disabled",
+               name ? name : "(null)");
+      return -1;
+   }
+
+   agent_t local = *src; /* clone before mutating — see agent_run_named */
+   agent_apply_runtime_config(&local);
+   local.require_initial_tool_call = tl_require_initial_tool_call;
+   local.ablation = cfg->ablation;
+   /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
+    * the code it is judging is not a reviewer — the tree that passed the gate would
+    * no longer be the tree that was judged. The role's toolset (review -> the
+    * index-only `review_indexed`) is what actually decides which tools appear. */
+   local.write_capable = 0;
+
+   int rc = agent_dispatch_one(&local, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                               temperature, 1 /* use_tools */, out);
+   {
+      agent_outcome_t oc;
+      classify_outcome(out, local.max_turns, &oc);
+      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
+   }
+   return rc;
+}
+
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                          const char *system_prompt, const char *user_prompt,
                                          int max_tokens, int enforce_writes, agent_result_t *out)
@@ -461,7 +620,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
+   if (!cfg->route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
@@ -493,8 +652,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       }
    }
 
-   rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                     enforce_writes, out, rc);
+   if (!cfg->route_pinned)
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
+                                        enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
@@ -607,115 +767,6 @@ void agent_store_feedback(const agent_result_t *result, const char *role,
 
 /* --- Request/response (simple, non-tool path) --- */
 
-static int is_chatgpt_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "chatgpt") == 0;
-}
-
-static int is_anthropic_provider(const agent_t *agent)
-{
-   return strcmp(agent->provider, "anthropic") == 0;
-}
-
-static cJSON *build_request_openai(const agent_t *agent, const char *system_prompt,
-                                   const char *user_prompt, int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   cJSON *messages = cJSON_CreateArray();
-   if (system_prompt && system_prompt[0])
-   {
-      cJSON *sys = cJSON_CreateObject();
-      cJSON_AddStringToObject(sys, "role", "system");
-      cJSON_AddStringToObject(sys, "content", system_prompt);
-      cJSON_AddItemToArray(messages, sys);
-   }
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   char *shaped_prompt = agent_request_shape_user_prompt(agent, user_prompt);
-   cJSON_AddStringToObject(user, "content", shaped_prompt ? shaped_prompt : user_prompt);
-   free(shaped_prompt);
-   cJSON_AddItemToArray(messages, user);
-
-   cJSON_AddItemToObject(req, "messages", messages);
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-   model_sampling_apply_openai(agent, req, temperature);
-
-   return req;
-}
-
-static cJSON *build_request_responses(const agent_t *agent, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature)
-{
-   (void)max_tokens;
-   (void)temperature;
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   /* ChatGPT Codex backend requires instructions, store=false, stream=true */
-   if (system_prompt && system_prompt[0])
-      cJSON_AddStringToObject(req, "instructions", system_prompt);
-   else
-      cJSON_AddStringToObject(req, "instructions", "You are a helpful assistant.");
-
-   cJSON_AddBoolToObject(req, "store", 0);
-   cJSON_AddBoolToObject(req, "stream", 1);
-
-   /* Responses API uses "input" as an array of messages */
-   cJSON *input = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", user_prompt);
-   cJSON_AddItemToArray(input, user);
-
-   cJSON_AddItemToObject(req, "input", input);
-
-   return req;
-}
-
-static cJSON *build_request_anthropic(const agent_t *agent, const char *system_prompt,
-                                      const char *user_prompt, int max_tokens, double temperature)
-{
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "model", agent->model);
-
-   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
-
-   /* §3 cache-aware shaping: mark the stable system prefix cacheable (cache_control)
-    * only when the flag is on, matching the tool-bearing builder. Default-off so
-    * this request-mutating optimization lands dark behind the flag (config load is
-    * cheap/mtime-cached). The min-size floor is applied to the stable prefix inside
-    * the helper, not the whole prompt. */
-   config_t cs_cfg;
-   int cs_marking = (config_load(&cs_cfg) == 0 && cs_cfg.cache_shaping_enabled) ? 1 : 0;
-   agent_anthropic_set_system(req, system_prompt, cs_marking,
-                              cs_marking ? cs_cfg.cache_min_chars : 0);
-
-   cJSON *messages = cJSON_CreateArray();
-   cJSON *user = cJSON_CreateObject();
-   cJSON_AddStringToObject(user, "role", "user");
-   cJSON_AddStringToObject(user, "content", user_prompt);
-   cJSON_AddItemToArray(messages, user);
-   cJSON_AddItemToObject(req, "messages", messages);
-
-   model_sampling_apply_anthropic(agent, req, temperature);
-
-   return req;
-}
-
-static cJSON *build_request(const agent_t *agent, const char *system_prompt,
-                            const char *user_prompt, int max_tokens, double temperature)
-{
-   if (is_chatgpt_provider(agent))
-      return build_request_responses(agent, system_prompt, user_prompt, max_tokens, temperature);
-   if (is_anthropic_provider(agent))
-      return build_request_anthropic(agent, system_prompt, user_prompt, max_tokens, temperature);
-   return build_request_openai(agent, system_prompt, user_prompt, max_tokens, temperature);
-}
-
 static int text_prompt_token_estimate(const char *system_prompt, const char *user_prompt)
 {
    size_t len = 0;
@@ -765,7 +816,9 @@ static int parse_error(cJSON *root, agent_result_t *out)
 static void parse_response_openai(cJSON *root, agent_result_t *out)
 {
    parsed_response_t parsed;
-   agent_parse_response_openai(root, &parsed);
+   /* IR is the sole parser for the openai wire (zeroed *parsed on failure). This
+    * simple-completion runtime has no tool loop, so no XML rescue (rescue_mode < 0). */
+   agent_ir_parse_json_response(root, 0 /*openai*/, -1, NULL, &parsed);
 
    out->prompt_tokens = parsed.prompt_tokens;
    out->completion_tokens = parsed.completion_tokens;
@@ -1094,7 +1147,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    int tok = agent_request_max_tokens(agent, max_tokens);
    if (is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
-   cJSON *req = build_request(agent, system_prompt, effective_user, tok, temperature);
+   cJSON *req = agent_build_request(agent, system_prompt, effective_user, tok, temperature);
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    free(augmented_prompt);
@@ -1144,7 +1197,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 
       if (is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);
-      cJSON *fb_req = build_request(&fb_agent, system_prompt, user_prompt, tok, temperature);
+      cJSON *fb_req = agent_build_request(&fb_agent, system_prompt, user_prompt, tok, temperature);
       char *fb_body = cJSON_PrintUnformatted(fb_req);
       cJSON_Delete(fb_req);
       if (fb_body)
@@ -1182,14 +1235,28 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       char snippet[256] = {0};
       if (response_body)
          snprintf(snippet, sizeof(snippet), "%.200s", response_body);
-      snprintf(out->error, sizeof(out->error), "HTTP %d: %s", http_status, snippet);
-      /* Try to parse error body */
+      /* Try to extract a STRUCTURED provider error ({"error":{"message":...}}).
+       * If the body is not JSON, parse_response() sets the generic "invalid JSON
+       * response" — which previously CLOBBERED the informative HTTP status here,
+       * making every upstream 4xx/5xx (rate limits, gateway errors, HTML error
+       * pages) undiagnosable in the field. Keep the HTTP status + body snippet
+       * unless a real structured message was extracted. */
+      out->error[0] = '\0';
       parse_response(response_body, agent, out);
+      if (!out->error[0] || strcmp(out->error, "invalid JSON response") == 0)
+         snprintf(out->error, sizeof(out->error), "HTTP %d (non-JSON body): %s", http_status,
+                  snippet);
       free(response_body);
       return -1;
    }
 
    parse_response(response_body, agent, out);
+   /* A 200 whose body is not JSON (e.g. an SSE stream leaking through, or a
+    * truncated reply) is also masked by the bare "invalid JSON response"; make it
+    * say so and show a snippet, so the cause is visible. */
+   if (out->error[0] && strcmp(out->error, "invalid JSON response") == 0)
+      snprintf(out->error, sizeof(out->error), "provider returned 200 with a non-JSON body: %.180s",
+               response_body ? response_body : "");
    free(response_body);
 
    agent_reject_degenerate_plain_response(out, agent->name);

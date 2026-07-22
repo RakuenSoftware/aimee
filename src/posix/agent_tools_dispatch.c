@@ -7,8 +7,9 @@
 #include "aimee_home.h"
 #include "delegate_ephemeral_ws.h"
 #include "log.h"
-#include "tool_condense.h"
+#include "economizer.h"
 #include "tool_args_coerce.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 
 /* delegation_active_id is provided by server_compute.c at link time;
@@ -69,6 +70,13 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "workspace.h"
 #include "diff.h"
 #include "dstr.h"
+#include "anchor_snapshot.h"
+#include "edit_anchored.h"
+#include "guardrails_blast_radius.h"
+
+/* At/above this many lines, a single anchored replace_range/delete_range rewrite
+ * is advised to use edit_symbol instead (roundtable P5-completion guardrail). */
+#define EDIT_LARGE_SPAN_LINES 8
 #include "lsp.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -321,6 +329,172 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
    return result;
 }
 
+/* Anchored, transactional edit: verify each cited anchor against its read
+ * snapshot, apply the whole batch atomically (bottom-first, server owns
+ * offsets), and write back preserving unchanged bytes. On drift returns a
+ * structured stale_anchor payload carrying a fresh snapshot + re-anchored
+ * context; the model retries without a blind re-read. dry_run previews the
+ * unified diff + structural blast radius without writing. */
+char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *edits, int dry_run)
+{
+   if (!path || !path[0])
+      return safe_strdup("error: missing 'path' parameter");
+   if (!snapshot_id || !snapshot_id[0])
+      return safe_strdup("error: missing 'snapshot_id'; read the file first to obtain one");
+
+   char cwd_path[MAX_PATH_LEN];
+   const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
+
+   const workspace_provider_t *ws = workspace_provider_active();
+   ws_stat_t st;
+   ws->stat(ws, actual_path, &st);
+   if (!st.exists)
+   {
+      char errbuf[512];
+      snprintf(errbuf, sizeof(errbuf), "error: cannot open %s", actual_path);
+      return safe_strdup(errbuf);
+   }
+   if (st.size >= 8 * 1024 * 1024)
+      return safe_strdup("error: file too large to edit (limit 8MB); use write_file instead");
+
+   char *content = NULL;
+   size_t rd = 0;
+   if (ws->read_all(ws, actual_path, &content, &rd) != 0)
+   {
+      char errbuf[512];
+      snprintf(errbuf, sizeof(errbuf), "error: cannot open %s", actual_path);
+      return safe_strdup(errbuf);
+   }
+
+   anchor_snapshot_t snap;
+   if (!anchor_snapshot_get_copy(snapshot_id, &snap))
+   {
+      free(content);
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddStringToObject(o, "status", "snapshot_expired");
+      cJSON_AddStringToObject(o, "path", actual_path);
+      cJSON_AddStringToObject(o, "hint",
+                              "snapshot_id unknown or evicted; re-read the file to mint a fresh "
+                              "snapshot, then retry the edits against it");
+      char *out = cJSON_PrintUnformatted(o);
+      cJSON_Delete(o);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   edit_anchored_result_t res;
+   int rc = edit_anchored_plan(content, rd, &snap, edits, &res);
+   anchor_snapshot_dispose(&snap);
+
+   if (rc != 0)
+   {
+      /* rejection: mint a fresh snapshot over the current bytes so the model can
+       * retry immediately against valid anchors */
+      char fresh[ANCHOR_SNAPSHOT_ID_MAX];
+      char resolved[MAX_PATH_LEN];
+      const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+      if (!verr && anchor_snapshot_create(resolved, content, rd, fresh) == 0)
+         cJSON_AddStringToObject(res.reject, "snapshot_id", fresh);
+      cJSON_AddStringToObject(res.reject, "path", actual_path);
+      char *out = cJSON_PrintUnformatted(res.reject);
+      cJSON_Delete(res.reject);
+      free(content);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   if (dry_run)
+   {
+      cJSON *payload = cJSON_CreateObject();
+      cJSON_AddStringToObject(payload, "status", "dry_run");
+      cJSON_AddStringToObject(payload, "path", actual_path);
+      diff_result_t dr;
+      if (diff_compute(content, res.new_text, &dr) == 0)
+      {
+         char *summary = diff_format_summary(&dr);
+         char *unified = diff_format_unified(content, res.new_text, &dr);
+         cJSON_AddStringToObject(payload, "summary", summary ? summary : "no change");
+         cJSON_AddItemToObject(payload, "diff", diff_result_to_json(&dr));
+         if (unified && unified[0])
+            cJSON_AddStringToObject(payload, "unified_diff", unified);
+         free(summary);
+         free(unified);
+      }
+      /* structural blast radius (fail-open: skipped when the code index/sidecar
+       * is unavailable) */
+      char abs_path[MAX_PATH_LEN];
+      normalize_path(path, cwd_path, abs_path, sizeof(abs_path));
+      blast_radius_t br;
+      char blast[1024];
+      if (guardrails_blast_radius_for_abs_path(abs_path, &br) == 0 &&
+          blast_radius_advisory_format(&br, abs_path, BR_ADVISORY_HUB_THRESHOLD, blast,
+                                       sizeof(blast)))
+         cJSON_AddStringToObject(payload, "blast_radius", blast);
+      char *out = cJSON_PrintUnformatted(payload);
+      cJSON_Delete(payload);
+      free(content);
+      free(res.new_text);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   /* commit: route write-back through the guarded tool_write_file (read-only /
+    * parent-worktree guards + structured diff payload) */
+   char *result = tool_write_file(path, res.new_text);
+   free(content);
+   free(res.new_text);
+
+   /* Deterministic steering guardrail (roundtable, P5 completion): a large
+    * single-span rewrite via a hand-built replace_range is exactly where small
+    * models fumble the multi-line anchors (the MiniMax whole-func regression).
+    * When any op rewrites >= EDIT_LARGE_SPAN_LINES lines, advise edit_symbol,
+    * which resolves the whole span server-side. Advisory only — never blocks. */
+   if (result && strncmp(result, "error:", 6) != 0 &&
+       !strstr(result, "\"status\":\"stale_anchor\""))
+   {
+      int max_span = 0;
+      int ne = cJSON_IsArray(edits) ? cJSON_GetArraySize(edits) : 0;
+      for (int i = 0; i < ne; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(edits, i);
+         cJSON *op = cJSON_GetObjectItem(e, "op");
+         if (!op || !cJSON_IsString(op) ||
+             (strcmp(op->valuestring, "replace_range") != 0 &&
+              strcmp(op->valuestring, "delete_range") != 0))
+            continue;
+         cJSON *from = cJSON_GetObjectItem(e, "from");
+         cJSON *to = cJSON_GetObjectItem(e, "to");
+         int fo = 0, to_ord = 0;
+         unsigned tag = 0;
+         if (from && cJSON_IsString(from) && to && cJSON_IsString(to) &&
+             anchor_parse(from->valuestring, &fo, &tag) == 0 &&
+             anchor_parse(to->valuestring, &to_ord, &tag) == 0)
+         {
+            int span = to_ord - fo + 1;
+            if (span > max_span)
+               max_span = span;
+         }
+      }
+      if (max_span >= EDIT_LARGE_SPAN_LINES)
+      {
+         cJSON *rj = cJSON_Parse(result);
+         if (rj)
+         {
+            cJSON_AddStringToObject(
+                rj, "advisory",
+                "large multi-line rewrite: for a whole function/type prefer edit_symbol "
+                "(the server resolves the span from the symbol name) over a hand-built "
+                "replace_range — small models anchor multi-line ranges unreliably.");
+            char *aug = cJSON_PrintUnformatted(rj);
+            cJSON_Delete(rj);
+            if (aug)
+            {
+               free(result);
+               result = aug;
+            }
+         }
+      }
+   }
+   return result;
+}
+
 /* Delegation conversation: request input from parent agent.
  * delegation_request_input is provided by server_compute.c when running as delegate.
  * Default stub returns NULL; the server overrides this at link time. */
@@ -376,8 +550,63 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    if (!lang || !cJSON_IsString(lang) || !body || !cJSON_IsString(body))
    {
       result = safe_strdup("error: missing 'language' or 'body' parameter");
+      free(env_json);
+      return result;
    }
-   else
+
+   /* Sandboxed (CONTAINER) delegate: run the script INSIDE the container via the
+    * provider's exec_shell, NOT as tool_execute_script's local fork on the
+    * aimee-server host — the host fork would run the model's arbitrary script on the
+    * host (its filesystem, its network), escaping the `--network none` sandbox that
+    * the file tools already respect. We deliberately forgo the host script-RPC stub
+    * bridge here: a sandboxed script must not reach back into the aimee-server
+    * process, and the delegate already has aimee's tools at the agent-loop layer. The
+    * body is fed over a quoted heredoc so its contents need no escaping; the
+    * container cwd is the bind-mounted (path-identical) worktree. */
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
+   {
+      dstr_t c;
+      dstr_init(&c);
+      const char *cwd =
+          (wd && cJSON_IsString(wd) && wd->valuestring[0]) ? wd->valuestring : run_cmd_get_cwd();
+      if (cwd && cwd[0])
+      {
+         dstr_append_str(&c, "cd '");
+         for (const char *p = cwd; *p; p++)
+         {
+            if (*p == '\'')
+               dstr_append_str(&c, "'\\''");
+            else
+               dstr_append_char(&c, *p);
+         }
+         dstr_append_str(&c, "' && ");
+      }
+      dstr_append_str(&c, strcmp(lang->valuestring, "python") == 0
+                              ? "python3 - <<'AIMEE_SCRIPT_EOF'\n"
+                              : "bash -s <<'AIMEE_SCRIPT_EOF'\n");
+      dstr_append_str(&c, body->valuestring);
+      dstr_append_str(&c, "\nAIMEE_SCRIPT_EOF\n");
+      int exit_code = -1;
+      char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
+      dstr_free(&c);
+      /* Learned toolchain: record apt-install intent only after a successful run. */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, body->valuestring);
+      free(env_json);
+      if (exit_code == -1 && !out)
+         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run the "
+                            "script in the delegate container\",\"exit_code\":-1}");
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *res = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return res ? res : safe_strdup("{}");
+   }
+
    {
       int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
       const char *dir = (wd && cJSON_IsString(wd)) ? wd->valuestring : NULL;
@@ -434,9 +663,15 @@ static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cw
    {
       cJSON *off = cJSON_GetObjectItem(args, "offset");
       cJSON *lim = cJSON_GetObjectItem(args, "limit");
+      cJSON *rawj = cJSON_GetObjectItem(args, "raw");
+      cJSON *modej = cJSON_GetObjectItem(args, "mode");
       int offset = (off && cJSON_IsNumber(off)) ? off->valueint : 0;
       int limit = (lim && cJSON_IsNumber(lim)) ? lim->valueint : 0;
-      result = tool_read_file(p->valuestring, offset, limit);
+      int raw = (rawj && cJSON_IsBool(rawj)) ? cJSON_IsTrue(rawj) : 0;
+      if (modej && cJSON_IsString(modej) && strcmp(modej->valuestring, "outline") == 0)
+         result = tool_read_outline(p->valuestring);
+      else
+         result = tool_read_file(p->valuestring, offset, limit, raw);
 
       /* Record the read in the session state for read-before-write tracking. */
       if (result && strncmp(result, "error:", 6) != 0)
@@ -461,10 +696,50 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
    cJSON *o = cJSON_GetObjectItem(args, "old_string");
    cJSON *nw = cJSON_GetObjectItem(args, "new_string");
    cJSON *ra = cJSON_GetObjectItem(args, "replace_all");
+   cJSON *snap = cJSON_GetObjectItem(args, "snapshot_id");
+   cJSON *edits = cJSON_GetObjectItem(args, "edits");
    if (!p || !cJSON_IsString(p))
+   {
       result = safe_strdup("error: missing 'path' parameter");
+   }
+   /* Anchored path (primary): snapshot_id + edits[]. Guards are enforced here up
+    * front and again in tool_write_file's write-back. */
+   else if ((snap && cJSON_IsString(snap)) || (edits && cJSON_IsArray(edits)))
+   {
+      cJSON *drj = cJSON_GetObjectItem(args, "dry_run");
+      int dry_run = (drj && cJSON_IsBool(drj)) ? cJSON_IsTrue(drj) : 0;
+      if (!dry_run && agent_tools_readonly_delegate_blocks())
+         result = safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+      else if (!dry_run && agent_tools_parent_write_guard_blocks(p->valuestring, dispatch_cwd))
+         result = safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+      else if (!dry_run && agent_tools_session_isolation_blocks(p->valuestring, dispatch_cwd))
+         result = safe_strdup("error: write blocked: require_session_worktree is enabled and this "
+                              "target is outside an aimee-managed worktree (.aimee/worktrees/...)");
+      else
+      {
+         if (!dry_run)
+            auto_snapshot_record(p->valuestring);
+         const char *snap_id = (snap && cJSON_IsString(snap)) ? snap->valuestring : NULL;
+         result = tool_edit_file_anchored(p->valuestring, snap_id, edits, dry_run);
+      }
+      /* record the write for stale-read tracking on a successful, non-dry commit */
+      if (!dry_run && result && strncmp(result, "error:", 6) != 0 &&
+          !strstr(result, "\"status\":\"stale_anchor\"") &&
+          !strstr(result, "\"status\":\"snapshot_expired\"") &&
+          !strstr(result, "\"status\":\"invalid_edit\"") &&
+          !strstr(result, "\"status\":\"conflicting_edits\""))
+      {
+         char abs_path[MAX_PATH_LEN];
+         normalize_path(p->valuestring, dispatch_cwd, abs_path, sizeof(abs_path));
+         const char *write_key = delegation_active_id();
+         (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
+      }
+      return result;
+   }
    else if (!o || !cJSON_IsString(o))
-      result = safe_strdup("error: missing 'old_string' parameter");
+   {
+      result = safe_strdup("error: missing 'old_string' parameter (or use snapshot_id + edits[])");
+   }
    else
    {
       const char *new_str = (nw && cJSON_IsString(nw)) ? nw->valuestring : "";
@@ -484,6 +759,14 @@ static char *td_edit_file(cJSON *args, const char *name, const char *dispatch_cw
       }
       else
       {
+         /* Deprecation telemetry (roundtable P5-completion): the old_string
+          * str_replace path is retained as a fallback but slated for removal.
+          * Log each use so the removal decision is driven by measured usage,
+          * not a calendar. */
+         aimee_log(LOG_INFO, "edit_deprecated",
+                   "old_string edit path used on %s; migrate to anchored edits (snapshot_id + "
+                   "edits[]) — this fallback is deprecated and slated for removal",
+                   p->valuestring);
          /* Auto-snapshot: record pre-edit state in the persistent rewind DB */
          auto_snapshot_record(p->valuestring);
          result = tool_edit_file(p->valuestring, o->valuestring, new_str, replace_all);
@@ -677,10 +960,16 @@ static char *td_git_log(cJSON *args, const char *name, const char *dispatch_cwd,
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *n = cJSON_GetObjectItem(args, "count");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default the repo to the delegate's session worktree (dispatch_cwd) when the
+    * caller omits 'path' — a delegate does not know its own worktree path, so a
+    * required 'path' forced it to fall back to a raw `git` shell (which the
+    * require_aimee_git gate then denies). Defaulting keeps the aimee git tool
+    * always usable. */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_log(p->valuestring, (n && cJSON_IsNumber(n)) ? n->valueint : 10);
+      result = tool_git_log(path, (n && cJSON_IsNumber(n)) ? n->valueint : 10);
 
    return result;
 }
@@ -692,12 +981,74 @@ static char *td_grep(cJSON *args, const char *name, const char *dispatch_cwd,
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *pat = cJSON_GetObjectItem(args, "pattern");
    cJSON *mx = cJSON_GetObjectItem(args, "max_results");
+   cJSON *anc = cJSON_GetObjectItem(args, "anchored");
+   int anchored = (anc && cJSON_IsBool(anc)) ? cJSON_IsTrue(anc) : 0;
    if (!p || !cJSON_IsString(p) || !pat || !cJSON_IsString(pat))
       result = safe_strdup("error: missing 'path' or 'pattern' parameter");
+   else if (anchored)
+      result = tool_grep_anchored(p->valuestring, pat->valuestring,
+                                  (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50);
    else
       result = tool_grep(p->valuestring, pat->valuestring,
                          (mx && cJSON_IsNumber(mx)) ? mx->valueint : 50);
 
+   return result;
+}
+
+static char *td_read_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
+                            const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   (void)timeout_ms;
+   cJSON *sym = cJSON_GetObjectItem(args, "symbol");
+   cJSON *pth = cJSON_GetObjectItem(args, "path");
+   if (!sym || !cJSON_IsString(sym))
+      return safe_strdup("error: missing 'symbol' parameter");
+   return tool_read_symbol(sym->valuestring,
+                           (pth && cJSON_IsString(pth)) ? pth->valuestring : NULL);
+}
+
+static char *td_run_tests(cJSON *args, const char *name, const char *dispatch_cwd,
+                          const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   cJSON *cmd = cJSON_GetObjectItem(args, "command");
+   if (!cmd || !cJSON_IsString(cmd))
+      return safe_strdup("error: missing 'command' parameter");
+   return tool_run_tests(cmd->valuestring, timeout_ms);
+}
+
+static char *td_edit_symbol(cJSON *args, const char *name, const char *dispatch_cwd,
+                            const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)timeout_ms;
+   cJSON *sym = cJSON_GetObjectItem(args, "symbol");
+   cJSON *pth = cJSON_GetObjectItem(args, "path");
+   cJSON *op = cJSON_GetObjectItem(args, "op");
+   cJSON *txt = cJSON_GetObjectItem(args, "text");
+   if (!sym || !cJSON_IsString(sym))
+      return safe_strdup("error: missing 'symbol' parameter");
+   const char *pth_s = (pth && cJSON_IsString(pth)) ? pth->valuestring : NULL;
+   /* guards mirror td_edit_file's anchored path; write-back also re-checks */
+   if (agent_tools_readonly_delegate_blocks())
+      return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
+   if (pth_s && agent_tools_parent_write_guard_blocks(pth_s, dispatch_cwd))
+      return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   char *result = tool_edit_symbol(sym->valuestring, pth_s,
+                                   (op && cJSON_IsString(op)) ? op->valuestring : NULL,
+                                   (txt && cJSON_IsString(txt)) ? txt->valuestring : NULL);
+   if (result && strncmp(result, "error:", 6) != 0 && pth_s)
+   {
+      char abs_path[MAX_PATH_LEN];
+      normalize_path(pth_s, dispatch_cwd, abs_path, sizeof(abs_path));
+      const char *write_key = delegation_active_id();
+      (void)db1_session_write_path_record(write_key ? write_key : dispatch_sid, abs_path);
+   }
    return result;
 }
 
@@ -707,10 +1058,12 @@ static char *td_git_diff(cJSON *args, const char *name, const char *dispatch_cwd
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
    cJSON *r = cJSON_GetObjectItem(args, "ref");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default 'path' to the session worktree (see td_git_log). */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_diff(p->valuestring, (r && cJSON_IsString(r)) ? r->valuestring : NULL);
+      result = tool_git_diff(path, (r && cJSON_IsString(r)) ? r->valuestring : NULL);
 
    return result;
 }
@@ -720,12 +1073,101 @@ static char *td_git_status(cJSON *args, const char *name, const char *dispatch_c
 {
    char *result = NULL;
    cJSON *p = cJSON_GetObjectItem(args, "path");
-   if (!p || !cJSON_IsString(p))
-      result = safe_strdup("error: missing 'path' parameter");
+   /* Default 'path' to the session worktree (see td_git_log). */
+   const char *path = (p && cJSON_IsString(p) && p->valuestring[0]) ? p->valuestring : dispatch_cwd;
+   if (!path || !path[0])
+      result = safe_strdup("error: git tool requires a session worktree (no 'path' given)");
    else
-      result = tool_git_status(p->valuestring);
+      result = tool_git_status(path);
 
    return result;
+}
+
+/* The git WRITE tools (commit / push / branch / pr). Rather than reimplement them
+ * for this surface, hand off through the git-write seam to the server's MCP git
+ * dispatch — the same path an external MCP client goes through — so the worktree
+ * refusal, mutating-context guard, branch-ownership check and attribution strip
+ * cannot drift between the two surfaces. The seam (rather than a direct call) keeps
+ * the agent tier from linking the server tier; see agent_tools.h.
+ *
+ * `cwd` is injected from the dispatcher's cwd when the caller did not name a path,
+ * because mcp_chdir_git_root resolves the repo from that arg; without it the
+ * handler would resolve against the daemon's cwd — the bug #1318 fixed on the
+ * verify gate. The handler returns MCP content blocks; the native surface wants a
+ * plain string, so flatten the text blocks. */
+static char *mcp_content_flatten(cJSON *content);
+
+static char *td_git_write(cJSON *args, const char *name, const char *dispatch_cwd,
+                          const char *dispatch_sid, int timeout_ms)
+{
+   (void)timeout_ms;
+   agent_git_write_fn fn = agent_tools_git_write_provider();
+   if (!fn) /* not advertised without a provider, so this is a caller inventing a name */
+      return safe_strdup("error: git tools are not available on this surface");
+
+   cJSON *call = cJSON_Duplicate(args, 1);
+   if (!call)
+      return safe_strdup("error: out of memory");
+   /* Fall back to the dispatcher's cwd when the caller named no repo. It must be
+    * `path`, not `cwd`: mcp_chdir_git_root takes args["path"] as its priority-1
+    * candidate and never reads a cwd key, so injecting cwd resolved nothing and the
+    * handler ran wherever the thread happened to be — "fatal: not a git repository"
+    * from a delegate whose worktree was three directories away. */
+   cJSON *jpath = cJSON_GetObjectItemCaseSensitive(call, "path");
+   if (!jpath && dispatch_cwd && dispatch_cwd[0])
+      cJSON_AddStringToObject(call, "path", dispatch_cwd);
+
+   cJSON *content = fn(name, call, dispatch_sid);
+   cJSON_Delete(call);
+   if (!content)
+      return safe_strdup("error: git tool unavailable on this surface");
+   return mcp_content_flatten(content);
+}
+
+/* MCP content blocks -> the plain string the native tool surface returns. Consumes
+ * `content`. Shared by every tool that reaches an MCP handler across a provider
+ * seam. */
+static char *mcp_content_flatten(cJSON *content)
+{
+   dstr_t out;
+   dstr_init(&out);
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, content)
+   {
+      cJSON *text = cJSON_GetObjectItemCaseSensitive(item, "text");
+      if (cJSON_IsString(text) && text->valuestring)
+      {
+         if (out.len)
+            dstr_append_char(&out, '\n');
+         dstr_append_str(&out, text->valuestring);
+      }
+   }
+   cJSON_Delete(content);
+   char *result = safe_strdup(out.len && out.data ? out.data : "(no output)");
+   dstr_free(&out);
+   return result;
+}
+
+/* Tools declared native in the server's MCP table (see agent_tools.h). The handler
+ * is the same one external MCP clients reach, so aimee's agents and Claude Code run
+ * identical code — which is the point of the merge: there is no second
+ * implementation to drift.
+ *
+ * No arg injection here: that is the git tools' own need (mcp_chdir_git_root reads
+ * args["path"]), not a property of MCP tools in general. When the git-write seam is
+ * folded into this path, its path fallback has to come with it. */
+static char *td_mcp_tool(cJSON *args, const char *name, const char *dispatch_cwd,
+                         const char *dispatch_sid, int timeout_ms)
+{
+   (void)dispatch_cwd;
+   (void)timeout_ms;
+   agent_mcp_call_fn fn = agent_tools_mcp_call_provider();
+   if (!fn) /* never advertised without a provider: a caller invented the name */
+      return safe_strdup("error: tool is not available on this surface");
+   cJSON *content = fn(name, args, dispatch_sid);
+   if (!content)
+      return safe_strdup("error: tool unavailable on this surface");
+   return mcp_content_flatten(content);
 }
 
 static char *td_env_get(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -840,9 +1282,33 @@ static char *td_web_search(cJSON *args, const char *name, const char *dispatch_c
    if (!q || !cJSON_IsString(q))
       result = safe_strdup("error: missing 'query' parameter");
    else
+   {
       result = web_search(q->valuestring, (mx && cJSON_IsNumber(mx)) ? mx->valueint : 5);
+      /* register the result URLs as rN handles so web_read can take "r2" */
+      if (result && strncmp(result, "error:", 6) != 0)
+         web_handle_register_from_search(result);
+   }
 
    return result;
+}
+
+static char *td_web_read(cJSON *args, const char *name, const char *dispatch_cwd,
+                         const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   (void)timeout_ms;
+   cJSON *ref = cJSON_GetObjectItem(args, "ref");
+   cJSON *query = cJSON_GetObjectItem(args, "query");
+   cJSON *span = cJSON_GetObjectItem(args, "span");
+   cJSON *mode = cJSON_GetObjectItem(args, "mode");
+   if (!ref || !cJSON_IsString(ref))
+      return safe_strdup("error: missing 'ref' parameter (a search handle or raw URL)");
+   return tool_web_read(ref->valuestring,
+                        (query && cJSON_IsString(query)) ? query->valuestring : NULL,
+                        (span && cJSON_IsNumber(span)) ? span->valueint : 0,
+                        (mode && cJSON_IsString(mode)) ? mode->valuestring : NULL);
 }
 
 static char *td_create_note(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1536,6 +2002,45 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          dispatch_cwd[0] = '\0';
    }
 
+   /* --- No git/gh in a delegate's shell (require_aimee_git) --- */
+   /* The native agent IS the wfe `implement` delegate, so this is the path that
+    * decides whether the rule means anything at all. The DECISION lives server-side
+    * behind a seam (see agent_tools.h): it needs the config dial, the forge
+    * credential and the command classifier, none of which the agent tier may link.
+    * Unregistered — thin client, unit tests — there is no gate and nothing changes.
+    *
+    * Sits AFTER dispatch_cwd on purpose: the credential half of the decision asks
+    * whether aimee can do git FOR THIS REPO, and the per-host vault rung resolves
+    * that from the checkout's origin. Asked without a directory it can only see the
+    * server's own identity, which most deployments do not set — the gate then reads
+    * "aimee has no git" and silently never fires. */
+   {
+      const char *shell_cmd = NULL;
+      if (strcmp(name, "bash") == 0)
+      {
+         cJSON *c = cJSON_GetObjectItem(args, "command");
+         if (cJSON_IsString(c))
+            shell_cmd = c->valuestring;
+      }
+      else if (strcmp(name, "execute_script") == 0)
+      {
+         cJSON *b = cJSON_GetObjectItem(args, "body");
+         if (cJSON_IsString(b))
+            shell_cmd = b->valuestring;
+      }
+      agent_shell_git_gate_fn gate = agent_tools_shell_git_gate();
+      if (shell_cmd && gate && gate(shell_cmd, dispatch_cwd))
+      {
+         cJSON_Delete(args);
+         return safe_strdup(
+             "error: run git through aimee, not a shell — use git_status, git_log, "
+             "git_diff, git_branch, git_commit, git_push or git_pr. They execute on "
+             "aimee-server, which holds the forge credential; this shell has none, so a "
+             "raw git/gh command cannot authenticate anyway. (Operator: "
+             "require_aimee_git: false in aimee.yaml opts out.)");
+      }
+   }
+
    {
       config_t cfg;
       config_load(&cfg);
@@ -1607,6 +2112,9 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_git_diff(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "git_status") == 0)
       result = td_git_status(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "git_commit") == 0 || strcmp(name, "git_push") == 0 ||
+            strcmp(name, "git_branch") == 0 || strcmp(name, "git_pr") == 0)
+      result = td_git_write(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "env_get") == 0)
       result = td_env_get(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "test") == 0)
@@ -1617,10 +2125,18 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_code_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "find_symbol") == 0)
       result = td_find_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "read_symbol") == 0)
+      result = td_read_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "run_tests") == 0)
+      result = td_run_tests(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "edit_symbol") == 0)
+      result = td_edit_symbol(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "search_memory") == 0)
       result = td_search_memory(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "web_search") == 0)
       result = td_web_search(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "web_read") == 0)
+      result = td_web_read(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "create_note") == 0)
       result = td_create_note(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "list_notes") == 0)
@@ -1677,6 +2193,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          cJSON_Delete(remote_result);
       }
    }
+   /* Last, so a hand-written native tool always wins over the MCP handler of the
+    * same name — this only ever adds tools, it never silently reroutes one. */
+   else if (agent_tools_is_mcp_derived(name))
+      result = td_mcp_tool(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else
    {
       char err[256];
@@ -1690,16 +2210,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    }
 
    cJSON_Delete(args);
-
-   /* Apply compaction to all non-bash tool results. The bash tool already
-    * compacts stdout and stderr individually before building its JSON result,
-    * so applying compaction again here would double-compact it. */
-   if (result && strcmp(name, "bash") != 0)
-   {
-      char *compacted = agent_compress_tool_result(result, strlen(result), name);
-      free(result);
-      result = compacted;
-   }
 
    return result;
 }

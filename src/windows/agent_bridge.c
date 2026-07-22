@@ -75,9 +75,13 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
       return -1;
    }
 
-   /* Add headers */
-   const char *ct =
+   /* Add headers. Accept a full header line or a bare media type: WinHttp needs a
+    * complete "Field: value" line, so prefix "Content-Type: " when the caller
+    * passed only the media type (mirrors the POSIX path). */
+   const char *ct_in =
        content_type && content_type[0] ? content_type : "Content-Type: application/json";
+   char ct[256];
+   snprintf(ct, sizeof ct, "%s%s", strchr(ct_in, ':') ? "" : "Content-Type: ", ct_in);
    wchar_t wct[512];
    MultiByteToWideChar(CP_UTF8, 0, ct, -1, wct, 512);
    WinHttpAddRequestHeaders(req, wct, -1, WINHTTP_ADDREQ_FLAG_ADD);

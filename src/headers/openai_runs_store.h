@@ -42,6 +42,23 @@ extern "C"
    /* True (non-zero) if status is terminal (completed / cancelled / failed). */
    int openai_run_status_terminal(openai_run_status_t status);
 
+   /* Stable, process-lifetime generation token embedded in newly-created op-run
+    * ids. It lets a replacement server distinguish an interrupted run from an
+    * arbitrary unknown id without retaining the old process's live store. */
+   const char *openai_runs_store_generation(void);
+
+   typedef enum
+   {
+      OPENAI_RUNS_MISSING_UNKNOWN = 0,
+      OPENAI_RUNS_MISSING_INTERRUPTED,
+      OPENAI_RUNS_MISSING_EVICTED,
+   } openai_runs_missing_t;
+
+   /* Classify a missing op-run id. A prior generation is interrupted; a valid
+    * current-generation id was evicted from the bounded live store. Legacy
+    * timestamp-based op-run ids are treated as interrupted after upgrade. */
+   openai_runs_missing_t openai_runs_store_classify_missing(const char *run_id);
+
    /* Create a new live record for run_id in OPENAI_RUN_QUEUED with run_json as
     * the initial GET snapshot. Returns 1 on success, 0 if run_id/run_json is
     * empty or a record with run_id already exists. */

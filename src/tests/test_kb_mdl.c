@@ -1,6 +1,6 @@
 #include "../kb_mdl.h"
-#include "../headers/config.h"
-#include "../headers/config_learning.h"
+#include "config.h"
+#include "config_learning.h"
 
 #include <assert.h>
 #include <math.h>

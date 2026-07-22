@@ -6,6 +6,7 @@
  * temp files are involved. TLS 1.2+ only. */
 #include "kb_tls.h"
 
+#include <openssl/bn.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include "cJSON.h"
@@ -17,6 +18,7 @@
 
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 /* Trust `ca` as the verify anchor, and — when both cert_pem and key_pem are
@@ -82,6 +84,14 @@ SSL_CTX *kb_tls_server_ctx(const char *ca_cert_pem, const char *server_cert_pem,
     * cert-less handshake so a not-yet-enrolled client can reach /v1/enroll/redeem
     * to bootstrap. kb_tls_serve_conn gates everything else on cert presence. */
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   static const unsigned char session_id_context[] = "aimee-kb-mtls";
+   if (SSL_CTX_set_session_id_context(ctx, session_id_context,
+                                      (unsigned int)(sizeof(session_id_context) - 1)) != 1)
+   {
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_SERVER);
    return ctx;
 }
 
@@ -98,6 +108,7 @@ SSL_CTX *kb_tls_client_ctx(const char *ca_cert_pem, const char *client_cert_pem,
       return NULL;
    }
    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_CLIENT);
    return ctx;
 }
 
@@ -136,26 +147,235 @@ int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap)
    return rc;
 }
 
+/* Peer certificate issuer DN (RFC2253-ish oneline) — the immutable revocation key
+ * pairs (issuer, serial), CN being only a policy label (P1 I5). */
+int kb_tls_peer_issuer(SSL *ssl, char *out, size_t cap)
+{
+   if (!ssl || !out || cap == 0)
+      return -1;
+   X509 *peer = SSL_get1_peer_certificate(ssl);
+   if (!peer)
+      return -1;
+   char *dn = X509_NAME_oneline(X509_get_issuer_name(peer), NULL, 0);
+   int rc = -1;
+   if (dn)
+   {
+      snprintf(out, cap, "%s", dn);
+      OPENSSL_free(dn);
+      rc = 0;
+   }
+   X509_free(peer);
+   return rc;
+}
+
+/* Peer certificate serial as uppercase hex (no separators). Normalized downstream
+ * by kb_cert_serial_normalize into the stable revocation key. */
+int kb_tls_peer_serial(SSL *ssl, char *out, size_t cap)
+{
+   if (!ssl || !out || cap == 0)
+      return -1;
+   X509 *peer = SSL_get1_peer_certificate(ssl);
+   if (!peer)
+      return -1;
+   int rc = -1;
+   ASN1_INTEGER *ser = X509_get_serialNumber(peer);
+   BIGNUM *bn = ser ? ASN1_INTEGER_to_BN(ser, NULL) : NULL;
+   if (bn)
+   {
+      char *hex = BN_bn2hex(bn);
+      if (hex)
+      {
+         snprintf(out, cap, "%s", hex);
+         OPENSSL_free(hex);
+         rc = 0;
+      }
+      BN_free(bn);
+   }
+   X509_free(peer);
+   return rc;
+}
+
 /* --- the mTLS client dialer --- */
 
 #include <netdb.h>
 
-int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
-                          const char *client_cert_pem, const char *client_key_pem,
-                          const char *method, const char *path, const char *body, char *resp_out,
-                          size_t resp_cap, int *status_out)
+#define KB_TLS_CLIENT_HEAD_MAX (64 * 1024)
+
+struct kb_tls_client_conn
 {
-   /* client_cert_pem/client_key_pem may be NULL for a cert-less server-auth
-    * request (the enrollment bootstrap reaching /v1/enroll/redeem). */
-   if (!host || !host[0] || port <= 0 || port > 65535 || !ca_cert_pem || !method || !path ||
-       !resp_out || resp_cap == 0)
-      return -1;
+   SSL_CTX *ctx;
+   SSL *ssl;
+   int fd;
+   char host[256];
+};
 
-   SSL_CTX *ctx = kb_tls_client_ctx(ca_cert_pem, client_cert_pem, client_key_pem);
-   if (!ctx)
-      return -1;
+static int ssl_write_all(SSL *ssl, const char *buf, size_t len)
+{
+   size_t sent = 0;
+   while (sent < len)
+   {
+      int n = SSL_write(ssl, buf + sent, (int)(len - sent));
+      if (n <= 0)
+         return -1;
+      sent += (size_t)n;
+   }
+   return 0;
+}
 
-   /* Resolve + connect. */
+static int response_token(const char *start, const char *end, const char *token)
+{
+   size_t token_len = strlen(token);
+   while (start < end)
+   {
+      while (start < end && (*start == ' ' || *start == '\t' || *start == ','))
+         start++;
+      const char *item_end = start;
+      while (item_end < end && *item_end != ',')
+         item_end++;
+      const char *trimmed_end = item_end;
+      while (trimmed_end > start && (trimmed_end[-1] == ' ' || trimmed_end[-1] == '\t'))
+         trimmed_end--;
+      if ((size_t)(trimmed_end - start) == token_len && !strncasecmp(start, token, token_len))
+         return 1;
+      start = item_end < end ? item_end + 1 : end;
+   }
+   return 0;
+}
+
+static int response_header_name_char(unsigned char c)
+{
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+          strchr("!#$%&'*+-.^_`|~", c) != NULL;
+}
+
+static int read_content_length_response(SSL *ssl, char *resp_out, size_t resp_cap, int *status_out,
+                                        int *reusable_out)
+{
+   if (resp_cap == 0 || resp_cap > SIZE_MAX - KB_TLS_CLIENT_HEAD_MAX - 1)
+      return -1;
+   size_t raw_cap = KB_TLS_CLIENT_HEAD_MAX + resp_cap + 1;
+   char *raw = malloc(raw_cap);
+   if (!raw)
+      return -1;
+   int rc = -1, status = 0, have_length = 0, connection_close = 0;
+   size_t total = 0, head_len = 0, content_len = 0;
+   while (total < KB_TLS_CLIENT_HEAD_MAX)
+   {
+      int n = SSL_read(ssl, raw + total, (int)(KB_TLS_CLIENT_HEAD_MAX - total));
+      if (n <= 0)
+         goto done;
+      total += (size_t)n;
+      raw[total] = '\0';
+      char *end = strstr(raw, "\r\n\r\n");
+      if (end)
+      {
+         head_len = (size_t)(end + 4 - raw);
+         break;
+      }
+   }
+   if (!head_len || head_len > KB_TLS_CLIENT_HEAD_MAX)
+      goto done;
+   for (size_t i = 0; i < head_len; i++)
+      if (raw[i] == '\0' || (raw[i] == '\r' && (i + 1 >= head_len || raw[i + 1] != '\n')) ||
+          (raw[i] == '\n' && (i == 0 || raw[i - 1] != '\r')))
+         goto done;
+
+   char *line_end = strstr(raw, "\r\n");
+   char extra;
+   if (!line_end)
+      goto done;
+   *line_end = '\0';
+   int fields = sscanf(raw, "HTTP/1.1 %d %c", &status, &extra);
+   *line_end = '\r';
+   if (fields < 1 || status < 100 || status > 599)
+      goto done;
+
+   char *p = line_end + 2;
+   char *headers_end = raw + head_len - 2;
+   int header_count = 0;
+   while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
+   {
+      if (++header_count > 64)
+         goto done;
+      char *e = strstr(p, "\r\n");
+      char *colon = e ? memchr(p, ':', (size_t)(e - p)) : NULL;
+      if (!e || e > headers_end || !colon || colon == p || p[0] == ' ' || p[0] == '\t')
+         goto done;
+      for (char *q = p; q < colon; q++)
+         if (!response_header_name_char((unsigned char)*q))
+            goto done;
+      for (char *q = colon + 1; q < e; q++)
+         if (((unsigned char)*q < 0x20 && *q != '\t') || (unsigned char)*q == 0x7f)
+            goto done;
+      size_t name_len = (size_t)(colon - p);
+      if (name_len == 17 && !strncasecmp(p, "Transfer-Encoding", 17))
+         goto done;
+      if (name_len == 14 && !strncasecmp(p, "Content-Length", 14))
+      {
+         if (have_length)
+            goto done;
+         have_length = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         if (v == ve || (ve - v > 1 && *v == '0'))
+            goto done;
+         size_t value = 0;
+         for (char *q = v; q < ve; q++)
+         {
+            if (*q < '0' || *q > '9' || value > (resp_cap - 1) / 10)
+               goto done;
+            value = value * 10 + (size_t)(*q - '0');
+         }
+         content_len = value;
+      }
+      if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
+          response_token(colon + 1, e, "close"))
+         connection_close = 1;
+      p = e + 2;
+   }
+   if (!have_length || content_len >= resp_cap || total > head_len + content_len)
+      goto done;
+   while (total < head_len + content_len)
+   {
+      int n = SSL_read(ssl, raw + total, (int)(head_len + content_len - total));
+      if (n <= 0)
+         goto done;
+      total += (size_t)n;
+   }
+   memcpy(resp_out, raw + head_len, content_len);
+   resp_out[content_len] = '\0';
+   if (status_out)
+      *status_out = status;
+   if (reusable_out)
+      *reusable_out = !connection_close;
+   rc = 0;
+
+done:
+   free(raw);
+   return rc;
+}
+
+static kb_tls_client_conn_t *client_conn_open_owned_ctx(const char *host, int port, SSL_CTX *ctx,
+                                                        SSL_SESSION *session)
+{
+   if (!host || !host[0] || strlen(host) >= 256 || port <= 0 || port > 65535 || !ctx)
+   {
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   kb_tls_client_conn_t *conn = calloc(1, sizeof(*conn));
+   if (!conn)
+   {
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   conn->fd = -1;
+   conn->ctx = ctx;
+
    char portstr[16];
    snprintf(portstr, sizeof(portstr), "%d", port);
    struct addrinfo hints, *res = NULL;
@@ -163,94 +383,155 @@ int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
    hints.ai_family = AF_UNSPEC;
    hints.ai_socktype = SOCK_STREAM;
    if (getaddrinfo(host, portstr, &hints, &res) != 0)
-   {
-      SSL_CTX_free(ctx);
-      return -1;
-   }
-   int fd = -1;
+      goto fail;
    for (struct addrinfo *a = res; a; a = a->ai_next)
    {
-      fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-      if (fd < 0)
+      conn->fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+      if (conn->fd < 0)
          continue;
-      if (connect(fd, a->ai_addr, a->ai_addrlen) == 0)
+      if (connect(conn->fd, a->ai_addr, a->ai_addrlen) == 0)
          break;
-      close(fd);
-      fd = -1;
+      close(conn->fd);
+      conn->fd = -1;
    }
    freeaddrinfo(res);
-   if (fd < 0)
-   {
-      SSL_CTX_free(ctx);
+   if (conn->fd < 0)
+      goto fail;
+   struct timeval timeout = {.tv_sec = 30, .tv_usec = 0};
+   setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+   setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+   conn->ssl = SSL_new(conn->ctx);
+   if (!conn->ssl)
+      goto fail;
+   if (session && SSL_set_session(conn->ssl, session) != 1)
+      goto fail;
+   SSL_set_fd(conn->ssl, conn->fd);
+   SSL_set_tlsext_host_name(conn->ssl, host);
+   SSL_set1_host(conn->ssl, host);
+   if (SSL_connect(conn->ssl) != 1)
+      goto fail;
+   snprintf(conn->host, sizeof(conn->host), "%s", host);
+   return conn;
+
+fail:
+   kb_tls_client_conn_close(conn);
+   return NULL;
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port, const char *ca_cert_pem,
+                                              const char *client_cert_pem,
+                                              const char *client_key_pem)
+{
+   SSL_CTX *ctx = kb_tls_client_ctx(ca_cert_pem, client_cert_pem, client_key_pem);
+   return client_conn_open_owned_ctx(host, port, ctx, NULL);
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open_ctx(const char *host, int port, SSL_CTX *ctx)
+{
+   if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+      return NULL;
+   return client_conn_open_owned_ctx(host, port, ctx, NULL);
+}
+
+kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port, SSL_CTX *ctx,
+                                                      SSL_SESSION *session)
+{
+   if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+      return NULL;
+   return client_conn_open_owned_ctx(host, port, ctx, session);
+}
+
+int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn)
+{
+   return conn && conn->ssl ? SSL_session_reused(conn->ssl) : 0;
+}
+
+SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn)
+{
+   return conn && conn->ssl ? SSL_get1_session(conn->ssl) : NULL;
+}
+
+int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
+                               const char *body, const char *authorization, int close_after,
+                               char *resp_out, size_t resp_cap, int *status_out, int *reusable_out)
+{
+   if (reusable_out)
+      *reusable_out = 0;
+   if (!conn || !conn->ssl || !method || !path || !resp_out || resp_cap == 0)
       return -1;
-   }
-
-   int rc = -1;
-   char *raw = NULL;
-   SSL *ssl = SSL_new(ctx);
-   if (!ssl)
-      goto done;
-   SSL_set_fd(ssl, fd);
-   SSL_set_tlsext_host_name(ssl, host); /* SNI */
-   SSL_set1_host(ssl, host);            /* verify the server cert's hostname */
-   if (SSL_connect(ssl) != 1)
-      goto done;
-
-   /* Send the request. */
-   {
-      const char *b = body ? body : "";
-      size_t blen = strlen(b);
-      size_t cap = strlen(method) + strlen(path) + strlen(host) + blen + 128;
-      char *req = malloc(cap);
-      if (!req)
-         goto done;
-      int rn = snprintf(req, cap,
-                        "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
-                        "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                        method, path, host, blen, b);
-      int wr = (rn > 0 && (size_t)rn < cap) ? SSL_write(ssl, req, rn) : -1;
-      free(req);
-      if (wr <= 0)
-         goto done;
-   }
-
-   /* Read the full response. */
-   {
-      size_t rawcap = resp_cap + 8192;
-      raw = malloc(rawcap);
-      if (!raw)
-         goto done;
-      size_t total = 0;
-      while (total < rawcap - 1)
-      {
-         int n = SSL_read(ssl, raw + total, (int)(rawcap - 1 - total));
-         if (n <= 0)
-            break;
-         total += (size_t)n;
-      }
-      raw[total] = '\0';
-
-      int status = 0;
-      if (sscanf(raw, "HTTP/%*s %d", &status) != 1)
-         goto done;
-      const char *be = strstr(raw, "\r\n\r\n");
-      const char *bp = be ? be + 4 : "";
-      snprintf(resp_out, resp_cap, "%s", bp);
-      if (status_out)
-         *status_out = status;
-      rc = 0;
-   }
-
-done:
-   free(raw);
-   if (ssl)
-   {
-      SSL_shutdown(ssl);
-      SSL_free(ssl);
-   }
-   close(fd);
-   SSL_CTX_free(ctx);
+   const char *b = body ? body : "";
+   size_t blen = strlen(b);
+   int bodyless = strcmp(method, "GET") == 0 || strcmp(method, "HEAD") == 0;
+   if (bodyless && blen != 0)
+      return -1;
+   size_t cap = strlen(method) + strlen(path) + strlen(conn->host) + blen +
+                (authorization ? strlen(authorization) : 0) + 192;
+   char *req = malloc(cap);
+   if (!req)
+      return -1;
+   int rn = bodyless ? snprintf(req, cap, "%s %s HTTP/1.1\r\nHost: %s\r\n%sConnection: %s\r\n\r\n",
+                                method, path, conn->host, authorization ? authorization : "",
+                                close_after ? "close" : "keep-alive")
+                     : snprintf(req, cap,
+                                "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
+                                "Content-Length: %zu\r\nConnection: %s\r\n\r\n%s",
+                                method, path, conn->host, authorization ? authorization : "", blen,
+                                close_after ? "close" : "keep-alive", b);
+   int rc =
+       (rn > 0 && (size_t)rn < cap && ssl_write_all(conn->ssl, req, (size_t)rn) == 0)
+           ? read_content_length_response(conn->ssl, resp_out, resp_cap, status_out, reusable_out)
+           : -1;
+   free(req);
+   if (close_after && reusable_out)
+      *reusable_out = 0;
    return rc;
+}
+
+void kb_tls_client_conn_close(kb_tls_client_conn_t *conn)
+{
+   if (!conn)
+      return;
+   if (conn->ssl)
+   {
+      SSL_shutdown(conn->ssl);
+      SSL_free(conn->ssl);
+   }
+   if (conn->fd >= 0)
+      close(conn->fd);
+   SSL_CTX_free(conn->ctx);
+   free(conn);
+}
+
+int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
+                               const char *client_cert_pem, const char *client_key_pem,
+                               const char *method, const char *path, const char *body,
+                               const char *authorization, char *resp_out, size_t resp_cap,
+                               int *status_out)
+{
+   /* client_cert_pem/client_key_pem may be NULL for a cert-less server-auth
+    * request (the enrollment bootstrap reaching /v1/enroll/redeem). */
+   if (!host || !host[0] || port <= 0 || port > 65535 || !ca_cert_pem || !method || !path ||
+       !resp_out || resp_cap == 0)
+      return -1;
+
+   kb_tls_client_conn_t *conn =
+       kb_tls_client_conn_open(host, port, ca_cert_pem, client_cert_pem, client_key_pem);
+   if (!conn)
+      return -1;
+   int reusable = 0;
+   int rc = kb_tls_client_conn_request(conn, method, path, body, authorization, 1, resp_out,
+                                       resp_cap, status_out, &reusable);
+   kb_tls_client_conn_close(conn);
+   return rc;
+}
+
+int kb_tls_client_request(const char *host, int port, const char *ca_cert_pem,
+                          const char *client_cert_pem, const char *client_key_pem,
+                          const char *method, const char *path, const char *body, char *resp_out,
+                          size_t resp_cap, int *status_out)
+{
+   return kb_tls_client_request_auth(host, port, ca_cert_pem, client_cert_pem, client_key_pem,
+                                     method, path, body, NULL, resp_out, resp_cap, status_out);
 }
 
 /* --- TOFU CA fetch (client bootstrap) --- */

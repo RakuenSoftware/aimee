@@ -5,6 +5,20 @@
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
 #include "kb_auth_oidc.h"
+#include "kb_oidc_jwks_fleet.h"
+#include "kb_identity.h"
+#include "db2_tenant.h"
+#include "team.h"
+#include "membership.h"
+#include "kb_insights_util.h"
+#include "org_budget.h"
+#include "org_rate.h"
+#include "org_egress.h"
+#include "org_telemetry.h"
+#include "org_model_catalog.h"
+#include "org_vault_key_use.h"
+#include "org_spend.h"
+#include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
 #include "kb_tls.h"
@@ -20,6 +34,11 @@
 #include "memory_graph_fusion.h"
 #include "db2/memory_vectors.h"
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
+#include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
+#include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "kb/kb_management_runtime.h"
+#include "db2/kb_audit_worm.h"
+#include "vault_server_key.h" /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -465,11 +484,739 @@ static int kb_run_fusion_probe(const char *query)
    return 0;
 }
 
+/* Operator-facing tenancy CLI on the kb host (P1 slice 4):
+ *   aimee-kb team create <name>
+ *   aimee-kb team list
+ *   aimee-kb team add-member <team_id> <identity_key> [--default]
+ *   aimee-kb team remove-member <team_id> <identity_key>
+ *   aimee-kb project create <team_id> <name> [team-open|restricted]
+ *   aimee-kb project list [team_id]
+ * Runs in-process against DB2 as the 'owner' (bootstrap) principal, so an operator
+ * with the kb DB credential can manage tenancy without a running listener. (The
+ * remote thin-client `aimee team` needs human-actor forwarding to kb — P5.) */
+static int kb_cmd_tenancy_init_db2(void)
+{
+   config_t cfg;
+   config_load(&cfg);
+   config_apply_db2_url_env_override(&cfg);
+   if (!cfg.db2_url[0])
+   {
+      fprintf(stderr, "aimee-kb: db2_url not configured (set AIMEE_DB2_URL or run `aimee init`)\n");
+      return -1;
+   }
+   db2_set_embedding_dim(cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024);
+   if (db2_init(cfg.db2_url) != 0)
+   {
+      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", cfg.db2_url);
+      return -1;
+   }
+   return 0;
+}
+
+/* Operator-facing spend reporting CLI (P3b):
+ *   aimee-kb spend --team X [--project Y] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_spend_query()'s admin gate passes and --team may be omitted for
+ * the org-wide report). Read-only. cost_usd is a NUMERIC string, never a float. */
+static int kb_cmd_spend(int argc, char **argv)
+{
+   int has_team = 0, has_project = 0, want_json = 0;
+   int64_t team = 0, project = 0;
+   const char *since = NULL, *until = NULL;
+   for (int i = 1; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--team") == 0 && i + 1 < argc)
+      {
+         team = strtoll(argv[++i], NULL, 10);
+         has_team = 1;
+      }
+      else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
+      {
+         project = strtoll(argv[++i], NULL, 10);
+         has_project = 1;
+      }
+      else if (strcmp(argv[i], "--since") == 0 && i + 1 < argc)
+         since = argv[++i];
+      else if (strcmp(argv[i], "--until") == 0 && i + 1 < argc)
+         until = argv[++i];
+      else if (strcmp(argv[i], "--json") == 0)
+         want_json = 1;
+   }
+   /* Default to a wide bounded window when unspecified (finance callers usually pass a
+    * range; the reporting surface stays usable without one). */
+   if (!since)
+      since = "0001-01-01";
+   if (!until)
+      until = "9999-12-31";
+   if (!kb_insights_date_valid(since) || !kb_insights_date_valid(until))
+   {
+      fprintf(stderr, "aimee-kb: --since/--until must be valid YYYY-MM-DD dates\n");
+      return 1;
+   }
+   if (strcmp(since, until) > 0)
+   {
+      fprintf(stderr, "aimee-kb: --since must be <= --until\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   db2_org_spend_row_t rows[DB2_SPEND_MAX_ROWS];
+   int n = db2_org_spend_query(has_team, team, has_project, project, since, until, rows,
+                               (int)(sizeof(rows) / sizeof(rows[0])));
+   if (n < 0)
+      db2_tenant_scope_rollback(); /* the definer RAISEd (or a client-side TOOBIG) */
+   else
+      db2_tenant_scope_commit();
+
+   int rc = 0;
+   if (n < 0)
+   {
+      if (n == DB2_SPEND_ERR_DENIED)
+         fprintf(stderr, "aimee-kb: not authorized (org-admin or team-lead required)\n");
+      else if (n == DB2_SPEND_ERR_BADDATE)
+         fprintf(stderr, "aimee-kb: invalid date range\n");
+      else if (n == DB2_SPEND_ERR_TOOBIG)
+         fprintf(stderr,
+                 "aimee-kb: report too large (>%d rows); narrow --team/--project/"
+                 "--since/--until\n",
+                 DB2_SPEND_MAX_ROWS);
+      else
+         fprintf(stderr, "aimee-kb: spend query failed\n");
+      rc = 1;
+   }
+   else if (want_json)
+   {
+      char *json = kb_insights_spend_json(has_team, (long long)team, has_project,
+                                          (long long)project, since, until, rows, n);
+      if (json)
+      {
+         printf("%s\n", json);
+         free(json);
+      }
+      else
+      {
+         fprintf(stderr, "aimee-kb: response build failed\n");
+         rc = 1;
+      }
+   }
+   else
+   {
+      printf(
+          "team\tproject\tmodel\tprompt\tcompletion\tcache_read\tcache_write\tcost_usd\tcalls\n");
+      for (int i = 0; i < n; i++)
+      {
+         printf("%lld\t", (long long)rows[i].team_id);
+         if (rows[i].has_project)
+            printf("%lld", (long long)rows[i].project_id);
+         else
+            printf("-");
+         printf("\t%s\t%lld\t%lld\t%lld\t%lld\t%s\t%lld\n", rows[i].billable_model,
+                (long long)rows[i].prompt_tokens, (long long)rows[i].completion_tokens,
+                (long long)rows[i].cache_read_tokens, (long long)rows[i].cache_write_tokens,
+                rows[i].cost_usd, (long long)rows[i].calls);
+      }
+   }
+   db2_shutdown();
+   return rc;
+}
+
+/* Operator-facing budget admin CLI (P4a):
+ *   aimee-kb budget set --team X [--project Y] --period day|month --limit USD [--soft USD]
+ *   aimee-kb budget show --team X [--project Y]
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_budget_set/show admin gate passes). Money is a NUMERIC string,
+ * never a float. BUDGET ONLY (the rate limiter is P4b; the egress wiring is P2b). */
+static int kb_cmd_budget(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   int has_project = 0;
+   int64_t team = 0, project = 0;
+   const char *period = NULL, *limit = NULL, *soft = NULL;
+   int has_team = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--team") == 0 && i + 1 < argc)
+      {
+         team = strtoll(argv[++i], NULL, 10);
+         has_team = 1;
+      }
+      else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
+      {
+         project = strtoll(argv[++i], NULL, 10);
+         has_project = 1;
+      }
+      else if (strcmp(argv[i], "--period") == 0 && i + 1 < argc)
+         period = argv[++i];
+      else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc)
+         limit = argv[++i];
+      else if (strcmp(argv[i], "--soft") == 0 && i + 1 < argc)
+         soft = argv[++i];
+   }
+   if (strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0)
+   {
+      fprintf(stderr, "Usage: aimee-kb budget set --team X [--project Y] --period day|month "
+                      "--limit USD [--soft USD]\n"
+                      "       aimee-kb budget show --team X [--project Y]\n");
+      return 1;
+   }
+   if (!has_team || team <= 0)
+   {
+      fprintf(stderr, "aimee-kb: --team (positive integer) is required\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "set") == 0)
+   {
+      if (!period || (strcmp(period, "day") != 0 && strcmp(period, "month") != 0) || !limit)
+      {
+         fprintf(stderr, "aimee-kb: budget set needs --period day|month and --limit USD\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      int64_t id = 0;
+      int r = db2_org_budget_set(team, has_project, project, period, limit, soft, &id);
+      if (r == 0)
+      {
+         printf("{\"id\":%lld,\"team\":%lld,", (long long)id, (long long)team);
+         if (has_project)
+            printf("\"project\":%lld,", (long long)project);
+         printf("\"period\":\"%s\",\"limit_usd\":\"%s\"}\n", period, limit);
+         rc = 0;
+      }
+      else if (r == DB2_BUDGET_ERR_DENIED)
+         fprintf(stderr, "budget set failed (not authorized — org-admin required)\n");
+      else if (r == DB2_BUDGET_ERR_RETRO)
+         fprintf(stderr,
+                 "budget set failed (retroactive reduction below committed spend+reserved)\n");
+      else
+         fprintf(stderr, "budget set failed\n");
+   }
+   else /* show */
+   {
+      db2_org_budget_row_t rows[DB2_BUDGET_MAX_ROWS];
+      int n = db2_org_budget_show(team, has_project, project, rows, DB2_BUDGET_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("team\tproject\tperiod\tperiod_id\tlimit_usd\tsoft_usd\tspend_usd\treserved_"
+                "usd\tremaining_usd\n");
+         for (int i = 0; i < n; i++)
+         {
+            printf("%lld\t", (long long)rows[i].team_id);
+            if (rows[i].has_project)
+               printf("%lld", (long long)rows[i].project_id);
+            else
+               printf("-");
+            printf("\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].period, rows[i].period_id,
+                   rows[i].limit_usd, rows[i].soft_limit_usd[0] ? rows[i].soft_limit_usd : "-",
+                   rows[i].spend_usd, rows[i].reserved_usd, rows[i].remaining_usd);
+         }
+         rc = 0;
+      }
+      else if (n == DB2_BUDGET_ERR_DENIED)
+         fprintf(stderr, "budget show failed (not authorized — org-admin or team-lead required)\n");
+      else
+         fprintf(stderr, "budget show failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
+/* Operator-facing rate-policy admin CLI (P4b):
+ *   aimee-kb rate set --dim D --scope S --window SECS --max N
+ *   aimee-kb rate show --dim D --scope S
+ * Runs in-process against DB2 as the install owner principal (an org-admin, so the
+ * SECURITY DEFINER org_rate_policy_set/show admin gate passes). RATE ONLY (the budget
+ * core is P4a; the org_rate_check egress enforcement is P2b). */
+static int kb_cmd_rate(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   const char *dim = NULL, *scope = NULL;
+   int64_t window = 0, maxc = -1;
+   int has_window = 0, has_max = 0;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--dim") == 0 && i + 1 < argc)
+         dim = argv[++i];
+      else if (strcmp(argv[i], "--scope") == 0 && i + 1 < argc)
+         scope = argv[++i];
+      else if (strcmp(argv[i], "--window") == 0 && i + 1 < argc)
+      {
+         window = strtoll(argv[++i], NULL, 10);
+         has_window = 1;
+      }
+      else if (strcmp(argv[i], "--max") == 0 && i + 1 < argc)
+      {
+         maxc = strtoll(argv[++i], NULL, 10);
+         has_max = 1;
+      }
+   }
+   if ((strcmp(sub, "set") != 0 && strcmp(sub, "show") != 0) || !dim || !scope)
+   {
+      fprintf(stderr, "Usage: aimee-kb rate set --dim team|project|cert|model|cred_slot --scope S "
+                      "--window SECS --max N\n"
+                      "       aimee-kb rate show --dim D --scope S\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "set") == 0)
+   {
+      if (!has_window || window <= 0 || !has_max || maxc < 0)
+      {
+         fprintf(stderr, "aimee-kb: rate set needs --window >0 and --max >=0\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      int64_t id = 0;
+      int r = db2_org_rate_policy_set(dim, scope, window, maxc, &id);
+      if (r == 0)
+      {
+         printf("{\"id\":%lld,\"dim\":\"%s\",\"scope\":\"%s\",\"window_seconds\":%lld,\"max_"
+                "count\":%lld}\n",
+                (long long)id, dim, scope, (long long)window, (long long)maxc);
+         rc = 0;
+      }
+      else if (r == DB2_RATE_ERR_DENIED)
+         fprintf(stderr, "rate set failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "rate set failed\n");
+   }
+   else /* show */
+   {
+      db2_org_rate_policy_t rows[DB2_RATE_MAX_ROWS];
+      int n = db2_org_rate_policy_show(dim, scope, rows, DB2_RATE_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("id\tdim\tscope\twindow_seconds\tmax_count\n");
+         for (int i = 0; i < n; i++)
+            printf("%lld\t%s\t%s\t%lld\t%lld\n", (long long)rows[i].id, rows[i].dim,
+                   rows[i].scope_key, (long long)rows[i].window_seconds,
+                   (long long)rows[i].max_count);
+         rc = 0;
+      }
+      else if (n == DB2_RATE_ERR_DENIED)
+         fprintf(stderr, "rate show failed (not authorized — org-admin or team-lead required)\n");
+      else
+         fprintf(stderr, "rate show failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
+/* aimee-kb telemetry {show, allow} — the P9a operator surface. `show` prints the
+ * ingest allowlist + a Prometheus dump of the authoritative-state metrics; `allow`
+ * upserts an allowlist entry (admin, WORM-audited). Acts as the install owner
+ * (bootstrap admin), mirroring `aimee-kb rate`. */
+static int kb_cmd_telemetry(int argc, char **argv)
+{
+   const char *sub = argc > 2 ? argv[2] : "";
+   const char *schema = NULL, *metrics = NULL;
+   int enabled = 1;
+   for (int i = 3; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--schema") == 0 && i + 1 < argc)
+         schema = argv[++i];
+      else if (strcmp(argv[i], "--metrics") == 0 && i + 1 < argc)
+         metrics = argv[++i];
+      else if (strcmp(argv[i], "--disabled") == 0)
+         enabled = 0;
+   }
+   if (strcmp(sub, "show") != 0 && strcmp(sub, "allow") != 0)
+   {
+      fprintf(stderr, "Usage: aimee-kb telemetry show\n"
+                      "       aimee-kb telemetry allow --schema S --metrics a,b,c [--disabled]\n");
+      return 1;
+   }
+
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+   {
+      db2_shutdown();
+      return 1;
+   }
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   int rc = 1;
+   if (strcmp(sub, "show") == 0)
+   {
+      db2_telemetry_allow_row_t rows[DB2_TELEMETRY_ALLOW_MAX_ROWS];
+      int n = db2_telemetry_allow_show(rows, DB2_TELEMETRY_ALLOW_MAX_ROWS);
+      if (n >= 0)
+      {
+         printf("event_schema\tenabled\tmetric_names\tupdated_at\n");
+         for (int i = 0; i < n; i++)
+            printf("%s\t%d\t%s\t%s\n", rows[i].event_schema, rows[i].enabled, rows[i].metric_names,
+                   rows[i].updated_at);
+         static org_metric_row_t mrows[DB2_TELEMETRY_MAX_ROWS];
+         int m = db2_metrics_snapshot(mrows, DB2_TELEMETRY_MAX_ROWS);
+         if (m >= 0)
+         {
+            static char buf[256 * 1024];
+            if (org_telemetry_render_prom(mrows, m, buf, sizeof(buf)) >= 0)
+            {
+               printf("\n# --- /v1/metrics (Prometheus) ---\n");
+               fputs(buf, stdout);
+            }
+            rc = 0;
+         }
+         else if (m == DB2_TELEMETRY_ERR_DENIED)
+            fprintf(stderr, "telemetry metrics failed (not authorized — org-admin required)\n");
+         else
+            fprintf(stderr, "telemetry metrics snapshot failed\n");
+      }
+      else if (n == DB2_TELEMETRY_ERR_DENIED)
+         fprintf(stderr, "telemetry show failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "telemetry show failed\n");
+   }
+   else /* allow */
+   {
+      if (!schema || !metrics)
+      {
+         fprintf(stderr, "aimee-kb: telemetry allow needs --schema S --metrics a,b,c\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      /* Build the Postgres array literal '{a,b,c}' from the comma list. Each name
+       * must be a bounded [a-zA-Z0-9_:] identifier (no quoting/escaping needed). */
+      char arr[1024];
+      size_t o = 0;
+      arr[o++] = '{';
+      arr[o] = '\0';
+      int first = 1, bad = 0;
+      char tmp[1024];
+      snprintf(tmp, sizeof(tmp), "%s", metrics);
+      for (char *tok = strtok(tmp, ","); tok; tok = strtok(NULL, ","))
+      {
+         if (!org_telemetry_metric_name_valid(tok))
+         {
+            bad = 1;
+            break;
+         }
+         size_t nl = strlen(tok);
+         if (o + nl + 2 >= sizeof(arr))
+         {
+            bad = 1;
+            break;
+         }
+         if (!first)
+            arr[o++] = ',';
+         memcpy(arr + o, tok, nl);
+         o += nl;
+         arr[o] = '\0';
+         first = 0;
+      }
+      if (bad || first)
+      {
+         fprintf(stderr, "aimee-kb: each --metrics name must match [a-zA-Z0-9_:]{1,128}\n");
+         db2_tenant_scope_rollback();
+         db2_shutdown();
+         return 1;
+      }
+      arr[o++] = '}';
+      arr[o] = '\0';
+      int r = db2_telemetry_allow(schema, arr, enabled);
+      if (r == 0)
+      {
+         printf("{\"event_schema\":\"%s\",\"metric_names\":\"%s\",\"enabled\":%s}\n", schema, arr,
+                enabled ? "true" : "false");
+         rc = 0;
+      }
+      else if (r == DB2_TELEMETRY_ERR_DENIED)
+         fprintf(stderr, "telemetry allow failed (not authorized — org-admin required)\n");
+      else
+         fprintf(stderr, "telemetry allow failed\n");
+   }
+
+   if (rc == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc;
+}
+
+static int kb_cmd_tenancy(int argc, char **argv)
+{
+   const char *group = argv[1]; /* "team" | "project" */
+   const char *sub = argc > 2 ? argv[2] : "";
+   if (kb_cmd_tenancy_init_db2() != 0)
+      return 1;
+
+   /* Act as the install owner (bootstrap admin). */
+   kb_principal_t owner;
+   kb_verify_result_t ovr;
+   memset(&ovr, 0, sizeof(ovr));
+   if (kb_principal_from_verify(&ovr, "", &owner) != 0)
+      return 1;
+
+   int rc_http = 1;
+   if (db2_tenant_scope_begin(&owner, 0) != 0)
+   {
+      fprintf(stderr, "aimee-kb: tenant scope failed (is this a hardened tier? run migrations)\n");
+      db2_shutdown();
+      return 1;
+   }
+
+   if (strcmp(group, "team") == 0 && strcmp(sub, "create") == 0 && argc >= 4)
+   {
+      int64_t id = 0;
+      if (db2_team_create(argv[3], "cli", &id) == 0)
+      {
+         printf("{\"id\":%lld,\"name\":\"%s\"}\n", (long long)id, argv[3]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "create failed (not authorized or duplicate)\n");
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "list") == 0)
+   {
+      db2_team_row_t rows[256];
+      int n = db2_team_list(rows, 256);
+      for (int i = 0; i < n; i++)
+         printf("%lld\t%s\n", (long long)rows[i].id, rows[i].name);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "add-member") == 0 && argc >= 5)
+   {
+      int is_default = (argc >= 6 && strcmp(argv[5], "--default") == 0) ? 1 : 0;
+      int64_t id = 0;
+      rc_http =
+          db2_membership_add(argv[4], strtoll(argv[3], NULL, 10), is_default, &id) == 0 ? 0 : 1;
+      if (rc_http == 0)
+         printf("ok\n");
+      else
+         fprintf(stderr, "add-member failed (not authorized)\n");
+   }
+   else if (strcmp(group, "team") == 0 && strcmp(sub, "remove-member") == 0 && argc >= 5)
+   {
+      rc_http = db2_membership_remove(argv[4], strtoll(argv[3], NULL, 10)) == 0 ? 0 : 1;
+      if (rc_http == 0)
+         printf("ok\n");
+      else
+         fprintf(stderr, "remove-member failed (not authorized)\n");
+   }
+   else if (strcmp(group, "project") == 0 && strcmp(sub, "create") == 0 && argc >= 5)
+   {
+      const char *mode = argc >= 6 ? argv[5] : "team-open";
+      int64_t id = 0;
+      if (db2_project_create(strtoll(argv[3], NULL, 10), argv[4], mode, "cli", &id) == 0)
+      {
+         printf("{\"id\":%lld,\"parent\":%s,\"name\":\"%s\"}\n", (long long)id, argv[3], argv[4]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "project create failed (not authorized or bad access_mode)\n");
+   }
+   else if (strcmp(group, "project") == 0 && strcmp(sub, "list") == 0)
+   {
+      int64_t parent = argc >= 4 ? strtoll(argv[3], NULL, 10) : 0;
+      db2_project_row_t rows[256];
+      int n = db2_project_list(parent, rows, 256);
+      for (int i = 0; i < n; i++)
+         printf("%lld\t%lld\t%s\t%s\n", (long long)rows[i].id, (long long)rows[i].parent,
+                rows[i].name, rows[i].access_mode);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "list") == 0)
+   {
+      db2_model_catalog_row_t rows[512];
+      int n = db2_model_catalog_list(rows, 512);
+      for (int i = 0; i < n; i++)
+         printf("%s\t%s\t%s\t%s\t%s\t%s\n", rows[i].model_id,
+                rows[i].enabled ? "enabled" : "disabled", rows[i].provider, rows[i].wire,
+                rows[i].endpoint, rows[i].display_name);
+      rc_http = (n < 0) ? 1 : 0;
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 4 &&
+            (strcmp(argv[3], "add") == 0 || strcmp(argv[3], "set") == 0) && argc >= 7)
+   {
+      /* models org add|set <model_id> <provider> <wire> [display_name] [endpoint] [--disabled] */
+      int enabled = 1;
+      for (int i = 4; i < argc; i++)
+         if (strcmp(argv[i], "--disabled") == 0)
+            enabled = 0;
+      const char *display_name = (argc >= 8 && strncmp(argv[7], "--", 2) != 0) ? argv[7] : "";
+      const char *endpoint = (argc >= 9 && strncmp(argv[8], "--", 2) != 0) ? argv[8] : "";
+      int64_t id = 0;
+      if (db2_model_catalog_upsert(argv[4], display_name, argv[5], argv[6], endpoint, enabled,
+                                   &id) == 0)
+      {
+         printf("{\"id\":%lld,\"model_id\":\"%s\"}\n", (long long)id, argv[4]);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org add failed (not authorized or invalid wire)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 5 &&
+            strcmp(argv[3], "remove") == 0)
+   {
+      int64_t removed = 0;
+      if (db2_model_catalog_remove(argv[4], &removed) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"removed\":%lld}\n", argv[4], (long long)removed);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org remove failed (not authorized)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 6 &&
+            strcmp(argv[3], "entitle") == 0)
+   {
+      int64_t id = 0;
+      if (db2_model_entitle(argv[4], strtoll(argv[5], NULL, 10), &id) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"team\":%s,\"id\":%lld}\n", argv[4], argv[5], (long long)id);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org entitle failed (not authorized or unknown model/team)\n");
+   }
+   else if (strcmp(group, "models") == 0 && strcmp(sub, "org") == 0 && argc >= 6 &&
+            strcmp(argv[3], "unentitle") == 0)
+   {
+      int64_t removed = 0;
+      if (db2_model_unentitle(argv[4], strtoll(argv[5], NULL, 10), &removed) == 0)
+      {
+         printf("{\"model_id\":\"%s\",\"team\":%s,\"removed\":%lld}\n", argv[4], argv[5],
+                (long long)removed);
+         rc_http = 0;
+      }
+      else
+         fprintf(stderr, "models org unentitle failed (not authorized)\n");
+   }
+   else
+   {
+      fprintf(stderr, "Usage: aimee-kb team create|list|add-member|remove-member ...\n"
+                      "       aimee-kb project create|list ...\n"
+                      "       aimee-kb models list\n"
+                      "       aimee-kb models org add|set <model_id> <provider> "
+                      "<anthropic|openai|responses|gemini> [display_name] [endpoint] [--disabled]\n"
+                      "       aimee-kb models org remove <model_id>\n"
+                      "       aimee-kb models org entitle|unentitle <model_id> <team_id>\n");
+   }
+
+   if (rc_http == 0)
+   {
+      if (db2_tenant_scope_commit() != 0)
+      {
+         fprintf(stderr, "aimee-kb: commit failed — the change was NOT persisted\n");
+         rc_http = 1;
+      }
+   }
+   else
+      db2_tenant_scope_rollback();
+   db2_shutdown();
+   return rc_http;
+}
+
 int main(int argc, char **argv)
 {
    /* Subcommands (must precede the daemon flag loop). */
    if (argc > 1 && strcmp(argv[1], "enroll") == 0)
       return kb_cmd_enroll(argc, argv);
+   if (argc > 1 && (strcmp(argv[1], "team") == 0 || strcmp(argv[1], "project") == 0 ||
+                    strcmp(argv[1], "models") == 0))
+      return kb_cmd_tenancy(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "spend") == 0)
+      return kb_cmd_spend(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "budget") == 0)
+      return kb_cmd_budget(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "rate") == 0)
+      return kb_cmd_rate(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "telemetry") == 0)
+      return kb_cmd_telemetry(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;
@@ -631,6 +1378,29 @@ int main(int argc, char **argv)
       fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
                       "commits will DEFER until the seed lands on a later start\n");
 
+   /* Bind the Postgres credential-vault backend (P10 slice 2) now that DB2 is up.
+    * The kb org vault stores ciphertext in org_vault_secret via the SECURITY DEFINER
+    * vault functions; the KEK stays behind file custody (the default provider). This
+    * is the kb bind — file custody stays default; later slices add external-anchor
+    * custody + seal/unseal before any key-holding activation on a hardened tier. */
+   vault_store_set_backend(&vault_pg_backend);
+
+   /* Select the custody provider for the vault's server KEK (P10/P7 slice 3b).
+    * `file` (default) keeps today's self-unsealing behavior; `mock` binds the
+    * test/dev seal-barrier anchor; tpm2/pkcs11/kms are declared but unimplemented
+    * and FAIL CLOSED here (never a silent fallback to a plaintext root). An unknown
+    * vault.custody value is likewise rejected. */
+   {
+      char custody_err[160] = "";
+      if (kb_vault_policy_select(kb_cfg.vault_custody, custody_err, sizeof(custody_err)) != 0)
+      {
+         fprintf(stderr, "aimee-kb: %s\n", custody_err);
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
     * starting the service. */
    if (fusion_probe_query)
@@ -640,6 +1410,60 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return rc;
    }
+
+   /* Synchronize the in-process use barrier with durable primary control before
+    * any service or worker can admit a key use. PKCS#11/KMS selection may have
+    * already logged in and unsealed its provider; durable `sealed=true` always
+    * wins and is forced into the provider before the epoch is installed. Any
+    * read, seal, or initialization failure is terminal and gets one final
+    * fail-closed seal attempt before process teardown. */
+   {
+      int64_t primary_epoch = 0;
+      int primary_sealed = 0;
+      int startup_tx = db2_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
+      int startup_ok =
+          startup_tx && primary_epoch > 0 && (primary_sealed == 0 || primary_sealed == 1);
+      const char *startup_error = "vault control startup status invalid";
+      if (startup_ok && primary_sealed && vault_seal() != 0)
+      {
+         startup_ok = 0;
+         startup_error = "durable vault is sealed but custody seal failed";
+      }
+      if (startup_ok &&
+          vault_primary_epoch_initialize((uint64_t)primary_epoch) != VAULT_MAINTENANCE_OK)
+      {
+         startup_ok = 0;
+         startup_error = "vault primary seal epoch initialization failed";
+      }
+      if (startup_tx && db2_vault_control_startup_end(startup_ok) != 0)
+      {
+         startup_ok = 0;
+         startup_error = "vault control startup transaction failed";
+      }
+      if (!startup_ok)
+      {
+         (void)vault_seal();
+         fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
+#if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)
+   if (kb_egress_release_allowed())
+   {
+      LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
+                              "integration-only build flag active") != 0)
+      {
+         fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+#endif
 
    /* Hidden directories (`.git`, `.aimee`, `.worktrees`, etc.) hold
     * dotfile state, not source code, so they are never indexed. The
@@ -679,6 +1503,21 @@ int main(int argc, char **argv)
     * Additive: the owner kb-token verifier stays active regardless. */
    if (kb_oidc_register_from_env() != 0)
       LOG_WARN("kb_http", "OIDC verifier config present but invalid; OIDC auth disabled");
+   /* Fleet-wide JWKS (I10): prefer the shared Postgres key set over the per-instance
+    * file so all stateless kb instances agree on trusted keys and IdP rotation
+    * converges within the bounded refresh. Falls back to the file when no PG rows. */
+   kb_oidc_jwks_fleet_enable();
+   /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
+    * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
+   kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
+   if (kb_management_runtime_start() != 0)
+   {
+      fprintf(stderr, "aimee-kb: invalid management runtime configuration; refusing to start\n");
+      kb_service_shutdown(&g_ctx);
+      db2_shutdown();
+      agent_http_cleanup();
+      return 1;
+   }
    if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
@@ -686,6 +1525,8 @@ int main(int argc, char **argv)
       LOG_WARN("kb_http",
                "failed to start HTTP listener on port %d; another instance likely owns it",
                http_port);
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
       db2_shutdown();
       agent_http_cleanup();
       return 0;
@@ -721,16 +1562,35 @@ int main(int argc, char **argv)
 
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
+   /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
+    * periodic work predictable while the SQL advisory lock makes it singleton. */
+   {
+      int64_t recovered = 0;
+      do
+      {
+         recovered = 0;
+      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+   }
+   time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
    while (g_ctx.running)
    {
+      time_t now = time(NULL);
+      if (now >= next_egress_recovery)
+      {
+         int64_t recovered = 0;
+         (void)db2_org_egress_recover(100, &recovered);
+         next_egress_recovery = now + 5;
+      }
+      kb_management_runtime_tick((int64_t)now);
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
    int rc = 0;
    kb_mtls_stop();
    kb_http_stop();
+   kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */

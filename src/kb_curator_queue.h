@@ -21,6 +21,11 @@ int kb_curator_queue_code_unit(const char *project, const char *file_path, const
 /* Bulk-enqueue extract_code_unit jobs for indexed terms in a project. */
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
 
+/* Purge fan-out (webchat-project-lifecycle slice 2): delete every queued
+ * kb_code_unit_jobs row for `project`, regardless of status. Returns rows
+ * deleted (>=0) or -1 on DB / connection error. */
+int kb_curator_code_unit_jobs_delete_project(const char *project);
+
 /* Curator queue depth, for the /v1/health curator block (§4 observability). */
 typedef struct
 {

@@ -5,6 +5,7 @@
 #include "server_pipeline.h"
 #include "cJSON.h"
 #include "config.h"
+#include "git_pr_api.h" /* in-process GitHub REST: the CI verdict for the merge gate */
 #include "json_fluent.h"
 #include "log.h"
 #include "mcp_git.h"
@@ -75,6 +76,25 @@ int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *
        * attempting a merge against an unknown state. */
       why = "PR mergeability not yet known (UNKNOWN); verdict preserved, re-check shortly";
    cJSON_Delete(j);
+
+   /* CI must be fully green before a merge (operator ruling 2026-07-15). Read the
+    * verdict in-process from the Checks API rather than shelling `gh pr checks`, so
+    * the forge token stays in aimee-server's memory. A PR with zero reported checks
+    * merges (nothing to fail); PENDING and an undetermined verdict both park —
+    * "unknown" is never "pass", consistent with the UNKNOWN-mergeability rule above. */
+   if (!why)
+   {
+      char cierr[160];
+      git_pr_ci_t ci =
+          git_pr_ci_via_api(NULL, rtp_git_cwd(run), gate->pr_number, cierr, sizeof(cierr));
+      if (!git_pr_ci_permits_merge(ci))
+         why = ci == GIT_PR_CI_PENDING
+                   ? "CI has not finished; verdict preserved, re-check once checks settle"
+                   : (ci == GIT_PR_CI_FAILURE
+                          ? "CI is not green; a merge requires fully green CI"
+                          : "CI status could not be determined; verdict preserved, retry later");
+   }
+
    if (why)
    {
       cJSON_AddBoolToObject(resp, "merged", 0);
@@ -266,9 +286,12 @@ void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, c
 
    /* Policy-aware merge executor (#50), pinned to the recorded checkout (#3) and
     * keyed by the approved head SHA (--match-head-commit) so a drift between the
-    * pre-check and the merge still refuses (idempotent for #55). */
-   const char *admin =
-       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "admin")) ? " --admin" : "";
+    * pre-check and the merge still refuses (idempotent for #55).
+    *
+    * No admin/bypass path exists: a merge that requires an admin override of
+    * branch protection is HUMAN-ONLY (operator ruling 2026-07-15). When
+    * protection refuses, the merge fails and the verdict is preserved in
+    * *_merge_pending for a human — never forced through. */
    char match[160] = {0};
    if (gate->expected_head_sha[0])
    {
@@ -278,8 +301,7 @@ void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, c
    }
    char cmd[RTP_PATH_LEN + 256];
    size_t pfx = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + pfx, sizeof(cmd) - pfx, "gh pr merge %d --merge%s%s 2>&1", gate->pr_number, admin,
-            match);
+   snprintf(cmd + pfx, sizeof(cmd) - pfx, "gh pr merge %d --merge%s 2>&1", gate->pr_number, match);
    int exit_code = 0;
    char *out = mcp_git_run(cmd, &exit_code);
    int merged = (exit_code == 0);
@@ -307,8 +329,8 @@ void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, c
       }
    }
    snprintf(gate->merge_executor, sizeof(gate->merge_executor), "gh pr merge");
-   snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d --merge%s%s",
-            gate->pr_number, admin, match);
+   snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d --merge%s",
+            gate->pr_number, match);
    gate->merge_exit_code = exit_code;
    rtp_gate_update(gate);
 

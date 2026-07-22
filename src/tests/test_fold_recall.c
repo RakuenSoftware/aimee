@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../headers/dstr.h"
-#include "../headers/fold_recall.h"
+#include "fold_recall.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 

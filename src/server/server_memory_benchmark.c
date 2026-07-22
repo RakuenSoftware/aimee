@@ -292,6 +292,22 @@ int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(suite, "memory") == 0 || strcmp(suite, "corpus") == 0 ||
        strcmp(suite, "memory-retrieval") == 0 || strcmp(suite, "live") == 0)
    {
+      /* These suites evaluate the LIVE stored memory (per query through the real
+       * retrieval path); they do NOT ingest a labelled corpus FILE. The `corpus`
+       * request field is honored only by the code-graph-fusion suite. Historically
+       * `--corpus` was accepted here and silently dropped, which is a footgun: the
+       * caller thinks they benchmarked their file when they benchmarked live memory.
+       * Fail loudly instead, and point at the harness that does read a corpus file. */
+      const char *corpus_file = jo_str(req, "corpus", NULL);
+      if (corpus_file && corpus_file[0])
+         return server_send_error(
+             conn,
+             "the memory/corpus/memory-retrieval/live benchmark suites evaluate the LIVE stored "
+             "memory and do not accept a --corpus file (only the code-graph-fusion suite does). "
+             "To evaluate a labelled corpus FILE, use the retrieval-eval harness: "
+             "`make memory-retrieval-eval-check` or "
+             "`unit-test-memory-retrieval-eval --corpus <path> --baseline <path>`.",
+             NULL);
       const char *fstate = jo_str(req, "fusion_state", NULL);
       int max_cases = jo_int(req, "max_cases", jo_int(req, "limit", 100));
       return bench_live_eval_corpus(conn, suite, fstate, max_cases);

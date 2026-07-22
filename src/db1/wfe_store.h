@@ -18,7 +18,7 @@ typedef struct
    char pause_reason[32]; /* "" | pending_human | panel_degraded | budget_exceeded |
                              panel_unreachable | ci_pending | merge_pending |
                              turn_cap_exceeded | wall_cap_exceeded | stuck |
-                             operator_paused */
+                             slices_running | operator_paused */
    char paused_state[64];
    char content_hash[72];
    /* The forge ref returned by g_forge->open (PR number/url), opaque to the
@@ -79,6 +79,11 @@ int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
 int db1_work_item_set_submitter(const char *work_item_id, const char *submitter);
 /* Record the parent work item of a foreach.workflow child ("slice") run. */
 int db1_work_item_set_parent(const char *work_item_id, const char *parent_id);
+/* Cascade-abandon a parent's non-terminal foreach.workflow child slices when the
+ * parent is stopped/deleted, so orphaned slices stop being scheduled (which would
+ * otherwise loop and re-dispatch delegates forever). Returns the number of children
+ * marked 'abandoned', or -1 on error. */
+int db1_work_item_abandon_children(const char *parent_id);
 /* Aggregate the terminal state of a parent's children (foreach.workflow fan-in).
  * Fills the counts (any may be NULL): total children, those in state 'accepted',
  * and those that reached a terminal state OTHER than accepted -- i.e. 'rejected' or
@@ -144,8 +149,26 @@ int db1_work_item_inc_override(const char *work_item_id); /* returns new count, 
  * worktree). */
 int db1_work_item_delete(const char *work_item_id);
 
+/* Backstop reaper: abandon (make terminal) any autonomous run parked in a
+ * runaway/failure backstop (stuck / turn_cap_exceeded / wall_cap_exceeded /
+ * budget_exceeded) whose last update is older than grace_secs, so a dead run does
+ * not linger 'active' forever. Human-review parks (pending_human) and
+ * operator_paused are legitimate waits and are NOT reaped. grace_secs <= 0
+ * disables. Returns the number of runs reaped. The scheduler's terminal walk then
+ * tears down each reaped run's worktree on the next sweep. */
+int db1_work_item_reap_stale_parks(long grace_secs);
+
 /* List work items (newest first). Caller frees *out. Returns count or -1. */
 int db1_work_item_list(db1_work_item_t **out);
+
+/* List work items LEAST-RECENTLY-UPDATED first — the scheduler's fairness
+ * order. A newest-first sweep starves older siblings: the sequential autonomy
+ * pass gives each item up to its wall-clock cap, so whichever items sort first
+ * eat every sweep (observed live: 2 of 13 fan-out slices monopolized 3.5h
+ * while the rest never advanced). Staleness-first makes starvation
+ * self-correcting: whoever was skipped longest goes first next sweep.
+ * Caller frees *out. Returns count or -1. */
+int db1_work_item_list_lru(db1_work_item_t **out);
 
 /* Append an audit event. */
 int db1_lifecycle_event_add(const char *work_item_id, const char *stage, const char *kind,

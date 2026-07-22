@@ -20,6 +20,11 @@ int subcmd_dispatch(const subcmd_t *table, const char *name, app_ctx_t *ctx, int
 /* Print subcommand usage for a parent command. */
 void subcmd_usage(const char *parent, const subcmd_t *table);
 
+/* Load config and open DB1, aborting with `errmsg` on failure. Replaces the
+ * repeated config_t + config_load + db1_init + fatal prolog in command handlers
+ * that only need DB1 (not other config fields). */
+void cmd_require_db1(const char *errmsg);
+
 /* cmd_core.c */
 void ensure_mcp_json(const char *dir);
 void ensure_client_integrations(void);
@@ -183,24 +188,8 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv);
 void cmd_plans(app_ctx_t *ctx, int argc, char **argv);
 void cmd_eval(app_ctx_t *ctx, int argc, char **argv);
 
-/* cmd_work.c */
-void cmd_work(app_ctx_t *ctx, int argc, char **argv);
-
 /* cmd_sweep.c — `aimee sweep [project]`: server-side deepening sweep (analysis-only) */
 void cmd_sweep(app_ctx_t *ctx, int argc, char **argv);
-const subcmd_t *get_work_subcmds(void);
-int work_queue_summary(char *buf, size_t cap);
-
-/* Sync pending/claimed work items against the filesystem state of their source
- * proposals. If a proposal has moved from pending/ into done/ or accepted/, the
- * item is marked 'done'. If it moved into deferred/ or rejected/, the item is
- * 'cancelled'. Items whose source file is still present or whose source is not
- * a proposal are left alone.
- *
- * proposals_base is the directory containing pending/, done/, etc. (e.g.
- * "docs/proposals"). Pass NULL to resolve from cwd.
- * Returns 0 on success. out_closed/out_cancelled receive counts (may be NULL). */
-int work_sync_proposals(const char *proposals_base, int *out_closed, int *out_cancelled);
 
 /* cmd_job.c */
 void cmd_job(app_ctx_t *ctx, int argc, char **argv);

@@ -22,7 +22,7 @@ ARG AIMEE_VERSION=""
 # build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
 # method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
 RUN sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-kb AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 FROM debian:bookworm-slim
 
@@ -59,6 +59,7 @@ ENV AIMEE_KB_HTTP_BIND=1
 
 RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # Sidecar clients (the LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \

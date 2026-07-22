@@ -12,8 +12,8 @@
 #include <string.h>
 #include "db2_test_shim.h"
 #include "../kb_reasoning.h"
-#include "../headers/config.h"
-#include "../headers/config_learning.h"
+#include "config.h"
+#include "config_learning.h"
 
 static void open_db(void)
 {

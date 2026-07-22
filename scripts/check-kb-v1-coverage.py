@@ -130,19 +130,19 @@ INTERNAL_CLIENT_SYMBOLS = {
 }
 
 ALLOWED_INTERNAL_CLIENT_HEADER_USERS = {
-    "server/kb_client.c",
-    "server/kb_client_docs.c",
-    "server/kb_client_index.c",
-    "server/kb_client_pdf.c",
-    "server/kb_client_code_graph.c",
-    "server/kb_client_ws.c",
+    "modules/kb_client/kb_client.c",
+    "modules/kb_client/kb_client_docs.c",
+    "modules/kb_client/kb_client_index.c",
+    "modules/kb_client/kb_client_pdf.c",
+    "modules/kb_client/kb_client_code_graph.c",
+    "modules/kb_client/kb_client_ws.c",
     "tests/test_kb_client_docs.c",
     "tests/test_kb_client_search.c",
 }
 
 ROOT_PATH_SCAN_RE = re.compile(r"\bkb_client_canonical_index_scan\s*\(")
 ALLOWED_ROOT_PATH_SCAN_USERS = {
-    "server/kb_client.c",
+    "modules/kb_client/kb_client.c",
 }
 
 LEGACY_DIRECTIVE_CALL_RE = re.compile(
@@ -156,7 +156,7 @@ ALLOWED_LEGACY_DIRECTIVE_CALL_USERS: set[str] = set()
 
 def client_files(src_dir: pathlib.Path) -> Iterable[pathlib.Path]:
     files = set(src_dir.glob("kb_client*.c"))
-    server_dir = src_dir / "server"
+    server_dir = src_dir / "modules" / "kb_client"
     if server_dir.is_dir():
         files.update(server_dir.rglob("kb_client*.c"))
     return sorted(files)
@@ -256,7 +256,7 @@ def check_openapi(openapi_path: pathlib.Path) -> int:
 
 
 def check_public_client_header(src_dir: pathlib.Path) -> int:
-    header = src_dir / "headers" / "kb_client.h"
+    header = src_dir / "modules" / "kb_client" / "kb_client.h"
     if not header.exists():
         print(f"kb-v1-coverage: public client header not found: {header}", file=sys.stderr)
         return 1
@@ -270,7 +270,7 @@ def check_public_client_header(src_dir: pathlib.Path) -> int:
 
 
 def public_client_header_exposed_symbols(src_dir: pathlib.Path) -> list[str]:
-    header = src_dir / "headers" / "kb_client.h"
+    header = src_dir / "modules" / "kb_client" / "kb_client.h"
     if not header.exists():
         return []
     text = read_text(header)
@@ -282,7 +282,7 @@ def scan_internal_client_header_includes(src_dir: pathlib.Path) -> list[str]:
     include_re = re.compile(r'^\s*#\s*include\s+"kb_client_internal\.h"', re.MULTILINE)
     for path in source_files(src_dir):
         rel = path.relative_to(src_dir).as_posix()
-        if rel == "headers/kb_client_internal.h":
+        if rel == "modules/kb_client/kb_client_internal.h":
             continue
         if include_re.search(read_text(path)) and rel not in ALLOWED_INTERNAL_CLIENT_HEADER_USERS:
             offenders.append(rel)
@@ -304,16 +304,17 @@ def check_internal_client_header_includes(src_dir: pathlib.Path) -> int:
 
 def scan_root_path_scan_users(src_dir: pathlib.Path) -> list[str]:
     offenders: list[str] = []
-    server_dir = src_dir / "server"
-    if not server_dir.is_dir():
-        return offenders
-    for path in sorted(server_dir.rglob("*.c")):
-        rel = path.relative_to(src_dir).as_posix()
-        if rel in ALLOWED_ROOT_PATH_SCAN_USERS:
+    scan_dirs = (src_dir / "server", src_dir / "modules" / "kb_client")
+    for scan_dir in scan_dirs:
+        if not scan_dir.is_dir():
             continue
-        if ROOT_PATH_SCAN_RE.search(read_text(path)):
-            offenders.append(rel)
-    return offenders
+        for path in sorted(scan_dir.rglob("*.c")):
+            rel = path.relative_to(src_dir).as_posix()
+            if rel in ALLOWED_ROOT_PATH_SCAN_USERS:
+                continue
+            if ROOT_PATH_SCAN_RE.search(read_text(path)):
+                offenders.append(rel)
+    return sorted(offenders)
 
 
 def scan_retired_service_rpc_dispatch(src_dir: pathlib.Path) -> list[str]:
@@ -402,16 +403,18 @@ def plant_test() -> int:
         root = pathlib.Path(tmp)
         server_dir = root / "server"
         headers_dir = root / "headers"
+        module_dir = root / "modules" / "kb_client"
         kb_http_dir = root / "kb" / "http"
         server_dir.mkdir(parents=True)
         headers_dir.mkdir(parents=True)
+        module_dir.mkdir(parents=True)
         kb_http_dir.mkdir(parents=True)
-        (server_dir / "kb_client_extra.c").write_text(
+        (module_dir / "kb_client_extra.c").write_text(
             'const char *method = "kb.new_backdoor";\n'
             'const char *retired = "kb.chunks.store";\n',
             encoding="utf-8",
         )
-        (server_dir / "kb_client_memory.c").write_text(
+        (module_dir / "kb_client_memory.c").write_text(
             'char *a = kb_directive_request("memory.new_backdoor", req);\n'
             'cJSON_AddStringToObject(req, "method", "index.new_backdoor");\n'
             'cJSON_AddStringToObject(req, "method", "v1.http");\n',
@@ -427,7 +430,7 @@ def plant_test() -> int:
             'if (strcmp(method->valuestring, "server.info") == 0) return info(req);\n',
             encoding="utf-8",
         )
-        (server_dir / "kb_client.c").write_text(
+        (module_dir / "kb_client.c").write_text(
             '#include "kb_client_internal.h"\n',
             encoding="utf-8",
         )
@@ -443,7 +446,7 @@ def plant_test() -> int:
             'void bad(void) { char *r = kb_directive_request("kb.export", req); }\n',
             encoding="utf-8",
         )
-        (headers_dir / "kb_client.h").write_text(
+        (module_dir / "kb_client.h").write_text(
             "char *kb_client_v1_post_json(const char *path, void *body, int timeout_ms, "
             "int *status_out);\n",
             encoding="utf-8",

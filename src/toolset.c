@@ -17,10 +17,29 @@ typedef struct
 } builtin_toolset_t;
 
 static const builtin_toolset_t BUILTINS[] = {
+    /* The code-intelligence tools (index_find_callers, index_blast_radius, ...) are
+     * NOT listed here: they are declared native in the server's MCP table and land in
+     * `core` and `review_indexed` by registration. One declaration, one schema, one
+     * handler shared with external MCP clients. */
     {"core",
      {NULL},
-     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory", NULL}},
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
+      /* aimee condenses long tool output and leaves a '[... ref "tc-..."]' pointer.
+       * The tool that expands it was advertised to every agent (TSURF_ALL) and named
+       * by no toolset, so agent_tools_filter_for_role stripped it from every role
+       * that has one: agents were handed a ref they had no tool to redeem. It
+       * belongs in core because the condensation applies to every tool. */
+      "tool_output_get", NULL}},
     {"git", {NULL}, {"git_status", "git_log", "git_diff", NULL}},
+    /* Git WRITES, deliberately split from the read-only `git` set above: `git` is
+     * inherited by `readonly` (and thence review), which must never gain the power
+     * to commit or push. Only `code` pulls this in.
+     *
+     * Without it a delegate has no way to land work but `bash git` — the very thing
+     * require_aimee_git forbids. Adding the tools to the builtin registry is not
+     * enough on its own: agent_tools_filter_for_role strips anything the role's
+     * toolset does not name, so the rule would point at tools the filter hides. */
+    {"git_write", {NULL}, {"git_commit", "git_push", "git_branch", "git_pr", NULL}},
     {"web", {NULL}, {"web_search", NULL}},
     {"readonly", {"core", "git", NULL}, {"verify", "env_get", "test", NULL}},
     {"validate", {"readonly", NULL}, {"bash", "execute_script", NULL}},
@@ -29,17 +48,23 @@ static const builtin_toolset_t BUILTINS[] = {
      {"bash", "execute_script", "read_file", "write_file", "edit_file", "list_files", "verify",
       "grep", "env_get", "test", NULL}},
     {"code",
-     {"core", "git", "web", NULL},
+     {"core", "git", "git_write", "web", NULL},
      {"bash", "execute_script", "write_file", "edit_file", "verify", "env_get", "test",
       "run_background_process", "get_background_output", "kill_background_process",
       "list_background_processes", NULL}},
     {"review", {"readonly", NULL}, {"record_attempt", NULL}},
     /* Index-only review: the reviewer works from the caller-provided diff (in the
-     * prompt) plus aimee's branch-indexed capabilities — NO filesystem/git tools,
-     * which point at a worktree a remote delegate cannot reach. */
+     * prompt) plus aimee's branch-indexed capabilities. It also carries the
+     * read-only worktree tools (read_file/list_files/grep) so a panelist can open
+     * the file a diff is in — but those are REACHABILITY-GATED in
+     * agent_tools_tool_allowed_for_role: granted only when the active workspace
+     * provider can see the review worktree (SHARED/CONTAINER/MIRROR), and withheld
+     * on a DETACHED remote seat whose read would hit the client's fs instead. It
+     * never gains write_file/edit_file/bash: a reviewer must not edit what it judges. */
     {"review_indexed",
      {NULL},
-     {"code_search", "find_symbol", "search_memory", "search_docs", "record_attempt", NULL}},
+     {"read_file", "list_files", "grep", "code_search", "find_symbol", "search_memory",
+      "search_docs", "record_attempt", NULL}},
     {"script_rpc",
      {NULL},
      {"read_file", "list_files", "grep", "git_status", "git_log", "git_diff", "code_search",
@@ -60,10 +85,21 @@ static const char *const KNOWN_TOOLS[] = {
     "grep",
     "git_diff",
     "git_status",
+    /* Git writes. This list is a NAME ALLOWLIST, checked independently of the
+     * builtin tool registry — a toolset naming a tool that is not here is pruned
+     * with a warning, which is exactly how git_write silently lost all four and a
+     * live delegate reported "there is no git_commit tool in my available toolset".
+     * Adding a tool means agreeing in three places: the builtin registry, a
+     * toolset, and here. */
+    "git_commit",
+    "git_push",
+    "git_branch",
+    "git_pr",
     "env_get",
     "test",
     "request_input",
     "code_search",
+    "tool_output_get",
     "web_search",
     "create_note",
     "list_notes",
@@ -74,6 +110,10 @@ static const char *const KNOWN_TOOLS[] = {
     "list_background_processes",
     "search_docs",
     "find_symbol",
+    "read_symbol",
+    "edit_symbol",
+    "run_tests",
+    "web_read",
     "search_memory",
     "record_attempt",
     "respond",
@@ -102,6 +142,41 @@ static int name_valid(const char *name)
    return 1;
 }
 
+/* Tools registered from the MCP table at startup (see toolset_register_native_tool).
+ * Sized to hold every MCP tool: the intended end state is that most of them are
+ * native, so the table growing must never silently truncate. */
+typedef struct
+{
+   char name[TOOLSET_TOOL_MAX];
+   char toolset[TOOLSET_NAME_MAX];
+} registered_tool_t;
+
+static registered_tool_t g_registered[256];
+static int g_registered_count;
+
+void toolset_register_native_tool(const char *name, const char *toolset)
+{
+   if (!name || !name[0] || !toolset || !toolset[0])
+      return;
+   /* Dedup on the (tool, set) PAIR, not the name: one tool legitimately belongs to
+    * several sets — the code-intelligence tools go to coding roles and to review
+    * panelists both, and those sets do not include one another. */
+   for (int i = 0; i < g_registered_count; i++)
+      if (strcmp(g_registered[i].name, name) == 0 && strcmp(g_registered[i].toolset, toolset) == 0)
+         return; /* idempotent: re-registration is not an error */
+   if (g_registered_count >= (int)(sizeof(g_registered) / sizeof(g_registered[0])))
+   {
+      /* Loud: a dropped tool is exactly the silent-uncallable failure this
+       * registry exists to end. */
+      LOG_ERROR("toolset", "native tool registry full (%d); '%s' DROPPED and uncallable",
+                g_registered_count, name);
+      return;
+   }
+   registered_tool_t *r = &g_registered[g_registered_count++];
+   snprintf(r->name, sizeof(r->name), "%s", name);
+   snprintf(r->toolset, sizeof(r->toolset), "%s", toolset);
+}
+
 int toolset_tool_known(const char *name)
 {
    if (!name || !name[0])
@@ -110,6 +185,9 @@ int toolset_tool_known(const char *name)
       return 1;
    for (int i = 0; KNOWN_TOOLS[i]; i++)
       if (strcmp(KNOWN_TOOLS[i], name) == 0)
+         return 1;
+   for (int i = 0; i < g_registered_count; i++)
+      if (strcmp(g_registered[i].name, name) == 0)
          return 1;
    return 0;
 }
@@ -175,6 +253,21 @@ void toolset_registry_init(toolset_registry_t *registry)
          toolset_add_include(def, BUILTINS[i].include[j]);
       for (int j = 0; BUILTINS[i].tools[j]; j++)
          toolset_add_tool(def, BUILTINS[i].tools[j]);
+   }
+   /* Fold in the tools the server registered from the MCP table. A registration
+    * naming a set that does not exist is a typo in the MCP table, not a reason to
+    * invent a set: say so rather than create an orphan nothing includes. */
+   for (int i = 0; i < g_registered_count; i++)
+   {
+      if (!toolset_registry_find(registry, g_registered[i].toolset))
+      {
+         LOG_ERROR("toolset", "native tool '%s' names unknown toolset '%s'; not callable",
+                   g_registered[i].name, g_registered[i].toolset);
+         continue;
+      }
+      toolset_def_t *def = toolset_registry_upsert(registry, g_registered[i].toolset);
+      if (def)
+         toolset_add_tool(def, g_registered[i].name);
    }
 }
 

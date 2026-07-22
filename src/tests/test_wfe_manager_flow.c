@@ -69,12 +69,11 @@ static const char *WF = "name: mc\n"
 
 /* mock delegate provider: writes a schema-valid artifact keyed on the node in
  * the artifact path (understand -> intent, split -> packets, review -> verdict). */
-static int mock_delegate(const char *wd, const char *role, const char *delegate, const char *prompt,
+static int mock_delegate(const char *wd, const char *role, const char *prompt,
                          const char *artifact_path, char out_sha[64], char *err, size_t errlen)
 {
    (void)wd;
    (void)role;
-   (void)delegate;
    (void)prompt;
    (void)err;
    (void)errlen;
@@ -105,16 +104,15 @@ static int mock_delegate(const char *wd, const char *role, const char *delegate,
 }
 static const wfe_delegate_provider_t MOCK = {mock_delegate};
 
-/* ---- TDD implement (two agents): a recording mock that captures the (role,
- * delegate) of every dispatch + whether the prompt is the RED/GREEN step, and
+/* ---- TDD implement (two agents): a recording mock that captures the role
+ * (persona) of every dispatch + whether the prompt is the RED/GREEN step, and
  * still writes a valid intent so understand advances into implement. ---- */
 #define REC_MAX 32
 static char g_rec_role[REC_MAX][32];
-static char g_rec_deleg[REC_MAX][32];
 static int g_rec_red[REC_MAX];   /* prompt carried the RED (test-author) step */
 static int g_rec_green[REC_MAX]; /* prompt carried the GREEN (implementer) step */
 static int g_rec_n;
-static int rec_delegate(const char *wd, const char *role, const char *delegate, const char *prompt,
+static int rec_delegate(const char *wd, const char *role, const char *prompt,
                         const char *artifact_path, char out_sha[64], char *err, size_t errlen)
 {
    (void)wd;
@@ -124,7 +122,6 @@ static int rec_delegate(const char *wd, const char *role, const char *delegate, 
    if (g_rec_n < REC_MAX)
    {
       snprintf(g_rec_role[g_rec_n], 32, "%s", role ? role : "");
-      snprintf(g_rec_deleg[g_rec_n], 32, "%s", delegate ? delegate : "");
       g_rec_red[g_rec_n] = prompt && strstr(prompt, "RED") != NULL;
       g_rec_green[g_rec_n] = prompt && strstr(prompt, "GREEN") != NULL;
       g_rec_n++;
@@ -161,9 +158,7 @@ static const char *WF_TDD = "name: tddwf\n"
                             "    params:\n"
                             "      tdd: true\n"
                             "      persona: builder\n"
-                            "      delegate: coder\n"
-                            "      test_persona: sdet\n"
-                            "      test_delegate: tester\n";
+                            "      test_persona: sdet\n";
 
 /* the same shape with TDD OFF: a single implementer dispatch, no test author. */
 static const char *WF_PLAIN = "name: plainwf\n"
@@ -175,9 +170,7 @@ static const char *WF_PLAIN = "name: plainwf\n"
                               "  - id: impl\n"
                               "    block: implement\n"
                               "    in:\n"
-                              "      intent: understand.out\n"
-                              "    params:\n"
-                              "      delegate: coder\n";
+                              "      intent: understand.out\n";
 
 /* stub-advance: stand in for implement/freeze/roundtable so the test avoids git
  * and the live panel; the engine still logs an "advance" for the node (which
@@ -287,14 +280,15 @@ int main(void)
       assert(rc2 == 0);
       (void)wfe_engine_run(id2, e2, sizeof e2);
       /* the persona is carried in the dispatch role slot: test author = the
-       * specified `test_persona` (sdet) on `test_delegate` (tester); implementer =
-       * the node's `persona` (builder) on `delegate` (coder). */
+       * specified `test_persona` (sdet); implementer = the node's `persona`
+       * (builder). Agent selection is the delegate system's routing decision, so
+       * no per-step delegate name is threaded through the seam. */
       int i_test = -1, i_code = -1;
       for (int i = 0; i < g_rec_n; i++)
       {
-         if (strcmp(g_rec_role[i], "sdet") == 0 && strcmp(g_rec_deleg[i], "tester") == 0)
+         if (strcmp(g_rec_role[i], "sdet") == 0)
             i_test = i;
-         if (strcmp(g_rec_role[i], "builder") == 0 && strcmp(g_rec_deleg[i], "coder") == 0)
+         if (strcmp(g_rec_role[i], "builder") == 0)
             i_code = i;
       }
       assert(i_test >= 0);         /* the test author ran with its specified persona */

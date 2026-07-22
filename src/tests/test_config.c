@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,72 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
+void config_kb_curator_defaults(config_t *cfg);
+int config_parse_kb_curator(config_t *cfg, const cJSON *root);
+
+/* kb_curator preset: the tier drives the 12 stage gates, an explicit per-stage
+ * gate still overrides, and "off" disables everything. Pure (no file I/O). */
+static void test_kb_curator_tier(void)
+{
+   /* default -> "full": every stage on (the historical all-on default). */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   config_kb_curator_defaults(&cfg);
+   assert(strcmp(cfg.kb_curator_tier, "full") == 0);
+   assert(cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_synthesize_enabled &&
+          cfg.kb_curator_cross_repo_graph_enabled && cfg.kb_curator_detect_contradictions_enabled);
+
+   /* "lite" -> core extract+index on, heavy stages off. */
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite");
+      assert(config_parse_kb_curator(&cfg, root) == 0);
+      assert(strcmp(cfg.kb_curator_tier, "lite") == 0);
+      assert(cfg.kb_curator_extract_docs_enabled && cfg.kb_curator_extract_code_enabled &&
+             cfg.kb_curator_resolve_entities_enabled && cfg.kb_curator_index_narrative_enabled &&
+             cfg.kb_curator_index_claims_enabled);
+      assert(!cfg.kb_curator_synthesize_enabled && !cfg.kb_curator_detect_contradictions_enabled &&
+             !cfg.kb_curator_cross_repo_graph_enabled && !cfg.kb_curator_projection_graph_enabled &&
+             !cfg.kb_curator_link_artifacts_enabled && !cfg.kb_curator_promote_entity_enabled &&
+             !cfg.kb_curator_index_code_unit_enabled);
+      cJSON_Delete(root);
+   }
+
+   /* "off" -> every stage off. */
+   {
+      config_t c2;
+      memset(&c2, 0, sizeof(c2));
+      config_kb_curator_defaults(&c2);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "off");
+      assert(config_parse_kb_curator(&c2, root) == 0);
+      assert(!c2.kb_curator_extract_docs_enabled && !c2.kb_curator_synthesize_enabled &&
+             !c2.kb_curator_resolve_entities_enabled);
+      cJSON_Delete(root);
+   }
+
+   /* explicit per-stage gate overrides the tier (applied after it). */
+   {
+      config_t c3;
+      memset(&c3, 0, sizeof(c3));
+      config_kb_curator_defaults(&c3);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite");
+      cJSON *syn = cJSON_AddObjectToObject(cur, "synthesize");
+      cJSON_AddBoolToObject(syn, "enabled", 1);
+      assert(config_parse_kb_curator(&c3, root) == 0);
+      assert(c3.kb_curator_synthesize_enabled == 1);   /* override wins over lite */
+      assert(!c3.kb_curator_cross_repo_graph_enabled); /* rest still lite */
+      cJSON_Delete(root);
+   }
+}
+
 static void assert_disposition(const config_t *cfg, int index, const char *name, double value,
                                config_disposition_source_t source)
 {
@@ -29,6 +96,7 @@ static void assert_disposition(const config_t *cfg, int index, const char *name,
 int main(void)
 {
    printf("config: ");
+   test_kb_curator_tier();
 
    /* Use isolated temp HOME */
    char tmpdir[512];
@@ -53,24 +121,27 @@ int main(void)
       /* Typed-fact extraction is offline, so it defaults ON on every backend. */
       assert(cfg.typed_facts_enabled == 1);
       assert(strcmp(cfg.guardrail_mode, "approve") == 0);
+      /* Sub-agent ban is an enforcement dial: defaults ON so a fresh install bans
+       * the primary agent's own sub-agents (when delegates exist). */
+      assert(cfg.subagent_ban_enabled == 1);
       /* §5 hybrid RRF weights + rank constant default to equal weights / k=60,
        * and the §7 blast-radius advisory is opt-in (off). */
       assert(fabs(cfg.code_hybrid_weight_code - 1.0) < 1e-9);
       assert(fabs(cfg.code_hybrid_weight_graph - 1.0) < 1e-9);
       assert(fabs(cfg.code_hybrid_rrf_k - 60.0) < 1e-9);
       assert(cfg.guardrails_blast_radius_advisory_enabled == 0);
-      /* The autonomous live forge (F4) defaults ON (operator ruling 2026-07-13);
-       * the merge-target rail still bounds every op, and wfe_live_forge_enabled:
-       * false opts out. */
-      assert(cfg.wfe_live_forge_enabled == 1);
+      /* The autonomous live forge (F4) defaults OFF (2026-07-17): it does real
+       * git push + PR + merge, so it stays opt-in while the autonomous pipeline is
+       * under test. Set wfe_live_forge_enabled true to opt in. The proposals auto-scan
+       * likewise defaults off, so pending proposals are filed one at a time by a human. */
+      assert(cfg.wfe_live_forge_enabled == 0);
+      assert(cfg.wfe_proposals_autoscan_enabled == 0);
       assert(cfg.db1_path[0] != '\0');
-      assert(cfg.guardrails_semantic_advisory_only == 1);
+      assert(strcmp(cfg.guardrails_semantic_mode, "off") == 0); /* default */
       assert(cfg.skills_review_nudge_interval == 10);
       assert(cfg.skills_curator_interval_hours == 168);
       assert(cfg.skills_stale_after_days == 30);
       assert(cfg.skills_archive_after_days == 90);
-      assert(cfg.skills_min_idle_minutes == 30);
-      assert(cfg.skills_manage_enabled == 0);
       assert(cfg.skills_dispatch_enabled == 1);
       assert(cfg.skills_dispatch_max_index == 24);
       assert(cfg.skills_dispatch_advisory == 0);
@@ -95,6 +166,13 @@ int main(void)
       /* CSS style graph now defaults on so the read-only css signals/report work
        * out of the box (the indexer populates css_rules/css_declarations). */
       assert(cfg.css_style_graph_enabled == 1);
+      /* git co-change backfill defaults on: index scan seeds co_edited edges that
+       * blast radius already reads (incremental/idempotent). */
+      assert(cfg.code_cochange_git_enabled == 1);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      assert(cfg.transport_thinclient_gzip_enabled == 0);
+      assert(cfg.transport_kb_gzip_enabled == 0);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -139,6 +217,10 @@ int main(void)
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
       cfg.server_api_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      cfg.transport_kb_pool_enabled = 1;
+      cfg.transport_server_keepalive_enabled = 1;
+      cfg.transport_thinclient_gzip_enabled = 1;
+      cfg.transport_kb_gzip_enabled = 1;
       cfg.ingress_preinject_assembly_budget = 8192;
       cfg.ingress_max_raw_scans = 2;
       /* Per-workspace provider: a detached entry round-trips as {path,provider};
@@ -170,21 +252,16 @@ int main(void)
       cfg.cache_aware_rewrite_enabled = 1;
       cfg.cache_aware_rewrite_min_savings_tokens = 321;
       cfg.cache_aware_rewrite_hard_context_threshold = 0.72;
-      cfg.guardrails_semantic_enabled = 1;
-      cfg.guardrails_semantic_dry_run = 0;
-      cfg.guardrails_semantic_advisory_only = 0;
+      snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "enforce");
       snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
                "semantic-sidecar --json");
       cfg.guardrails_semantic_warn_threshold = 0.35;
       cfg.guardrails_semantic_prompt_threshold = 0.65;
       cfg.guardrails_semantic_block_threshold = 0.95;
-      cfg.guardrails_semantic_allow_ml_only_block = 1;
       cfg.skills_review_nudge_interval = 12;
       cfg.skills_curator_interval_hours = 240;
       cfg.skills_stale_after_days = 45;
       cfg.skills_archive_after_days = 120;
-      cfg.skills_min_idle_minutes = 20;
-      cfg.skills_manage_enabled = 1;
       cfg.skills_dispatch_enabled = 0;
       cfg.skills_dispatch_max_index = 7;
       cfg.skills_dispatch_advisory = 1;
@@ -261,6 +338,9 @@ int main(void)
       /* css_style_graph now defaults on; set off to prove the opt-out round-trips
        * (default-on save-guard regression class). */
       cfg.css_style_graph_enabled = 0;
+      /* code_cochange_git defaults on; set off to prove the opt-out round-trips
+       * (default-on save-guard regression class). */
+      cfg.code_cochange_git_enabled = 0;
       /* audit_worm_enabled defaults off; set on to prove the opt-in persists
        * (regression: it was allowlist-settable but had no config_save/load path,
        * so an enabled deployment silently reverted to off on restart). */
@@ -362,11 +442,12 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
-      /* economizer freeze guardrail: default-on bool + default-1 horizon. Flip the
-       * bool OFF and the horizon to a non-default so both must round-trip (regression
-       * class: a default-on save-guard that emits only the non-default state). */
-      cfg.reduce_freeze_guard_enabled = 0;
-      cfg.reduce_freeze_guard_horizon = 3;
+      /* require_aimee_git (default ON) + delegate_sandbox (default OFF): both are
+       * enforcement dials, so a value that does not survive save+reload is a guard
+       * silently in the wrong state after every restart. */
+      cfg.require_aimee_git = 0;
+      cfg.delegate_sandbox = 1;
+      cfg.subagent_ban_enabled = 0; /* default-ON dial: opt-out must survive save+reload */
       config_save(&cfg);
 
       static config_t cfg2;
@@ -393,11 +474,24 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
-      assert(cfg2.reduce_freeze_guard_enabled == 0); /* default-on bool persisted off */
-      assert(cfg2.reduce_freeze_guard_horizon == 3); /* non-default horizon persisted */
+      assert(cfg2.transport_kb_pool_enabled == 1);
+      assert(cfg2.transport_server_keepalive_enabled == 1);
+      assert(cfg2.transport_thinclient_gzip_enabled == 1);
+      assert(cfg2.transport_kb_gzip_enabled == 1);
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
+      /* regression, the MIRROR of the remote_writes bug above: require_aimee_git was
+       * WRITTEN by config_save and never PARSED back, so `require_aimee_git: false`
+       * in aimee.yaml did nothing and the dial silently reverted to ON at every
+       * restart — while cmd_hooks.c told operators that exact line was the way to
+       * turn it off. Save-without-parse and parse-without-save are the same bug from
+       * opposite ends; a round-trip is the only thing that catches either. */
+      assert(cfg2.require_aimee_git == 0);
+      assert(cfg2.delegate_sandbox == 1);
+      /* Same save-without-parse / parse-without-save class as require_aimee_git:
+       * subagent_ban_enabled is written only as the opt-out and must parse back. */
+      assert(cfg2.subagent_ban_enabled == 0);
       assert(cfg2.ingress_preinject_assembly_budget == 8192);
       assert(cfg2.ingress_max_raw_scans == 2);
       assert(cfg2.workspace_count == 3);
@@ -429,20 +523,15 @@ int main(void)
       assert(cfg2.cache_aware_rewrite_enabled == 1);
       assert(cfg2.cache_aware_rewrite_min_savings_tokens == 321);
       assert(fabs(cfg2.cache_aware_rewrite_hard_context_threshold - 0.72) < 0.0001);
-      assert(cfg2.guardrails_semantic_enabled == 1);
-      assert(cfg2.guardrails_semantic_dry_run == 0);
-      assert(cfg2.guardrails_semantic_advisory_only == 0);
+      assert(strcmp(cfg2.guardrails_semantic_mode, "enforce") == 0);
       assert(strcmp(cfg2.guardrails_semantic_command, "semantic-sidecar --json") == 0);
       assert(fabs(cfg2.guardrails_semantic_warn_threshold - 0.35) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_prompt_threshold - 0.65) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_block_threshold - 0.95) < 0.0001);
-      assert(cfg2.guardrails_semantic_allow_ml_only_block == 1);
       assert(cfg2.skills_review_nudge_interval == 12);
       assert(cfg2.skills_curator_interval_hours == 240);
       assert(cfg2.skills_stale_after_days == 45);
       assert(cfg2.skills_archive_after_days == 120);
-      assert(cfg2.skills_min_idle_minutes == 20);
-      assert(cfg2.skills_manage_enabled == 1);
       assert(cfg2.skills_dispatch_enabled == 0);
       assert(cfg2.skills_dispatch_max_index == 7);
       assert(cfg2.skills_dispatch_advisory == 1);
@@ -488,9 +577,10 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
-      assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
-      assert(cfg2.audit_worm_enabled == 1);       /* opt-in survives save/reload */
-      assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
+      assert(cfg2.css_style_graph_enabled == 0);   /* opt-out survives save/reload */
+      assert(cfg2.code_cochange_git_enabled == 0); /* opt-out survives save/reload */
+      assert(cfg2.audit_worm_enabled == 1);        /* opt-in survives save/reload */
+      assert(cfg2.css_render_command[0] == '\0');  /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
@@ -558,6 +648,52 @@ int main(void)
              strcmp(cfg2.lsp_servers[0].args[0], "--background-index") == 0);
       assert(cfg2.lsp_servers[0].extension_count == 1 &&
              strcmp(cfg2.lsp_servers[0].extensions[0], "c") == 0);
+   }
+
+   /* --- kb_curator preset round-trip: a non-"full" tier persists and re-derives
+    *     the 12 stage gates on reload (the persistence subtlety: save records the
+    *     tier, parse applies it before any per-stage override). --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      cJSON *root = cJSON_CreateObject();
+      cJSON *kb = cJSON_AddObjectToObject(root, "kb");
+      cJSON *cur = cJSON_AddObjectToObject(kb, "curator");
+      cJSON_AddStringToObject(cur, "tier", "lite"); /* drive stages via the parser */
+      config_parse_kb_curator(&cfg, root);
+      cJSON_Delete(root);
+      assert(config_save(&cfg) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(strcmp(cfg2.kb_curator_tier, "lite") == 0);
+      assert(cfg2.kb_curator_extract_docs_enabled && cfg2.kb_curator_index_claims_enabled);
+      assert(!cfg2.kb_curator_synthesize_enabled && !cfg2.kb_curator_cross_repo_graph_enabled);
+   }
+
+   /* --- kb_pdf preset: default "off" (all gates off), and a non-default tier
+    *     persists + re-derives the 5 gates on reload. --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      /* default: structured-PDF off (plain pdftotext). */
+      assert(strcmp(cfg.kb_pdf_tier, "off") == 0);
+      assert(!cfg.kb_pdf_ingest_enabled && !cfg.kb_pdf_vector_enabled && !cfg.kb_pdf_tsr_enabled &&
+             !cfg.kb_pdf_assets_enabled && !cfg.kb_pdf_ocr_enabled);
+
+      /* set the tier (as an operator would in aimee.yaml), save, reload. */
+      snprintf(cfg.kb_pdf_tier, sizeof(cfg.kb_pdf_tier), "basic");
+      assert(config_save(&cfg) == 0);
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(strcmp(cfg2.kb_pdf_tier, "basic") == 0);
+      assert(cfg2.kb_pdf_ingest_enabled && cfg2.kb_pdf_vector_enabled); /* basic core */
+      assert(!cfg2.kb_pdf_tsr_enabled && !cfg2.kb_pdf_assets_enabled &&
+             !cfg2.kb_pdf_ocr_enabled); /* heavy stages stay off */
    }
 
    /* --- install.sh persists provider/openai/kb_client_* as plain top-level
@@ -851,23 +987,35 @@ int main(void)
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
       FILE *f = fopen(cpath, "w");
       assert(f);
-      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    advisory_only: false\n");
+      /* legacy quad (enabled + dry_run:false + advisory_only:false + allow_ml_only_block:true)
+       * maps onto the "enforce" mode. */
+      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    enabled: true\n    dry_run: "
+                 "false\n    advisory_only: false\n    allow_ml_only_block: true\n");
       fclose(f);
 
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       platform_setenv("AIMEE_NO_CACHE", "1");
       assert(config_load(&cfg) == 0);
-      assert(cfg.guardrails_semantic_advisory_only == 0);
+      assert(strcmp(cfg.guardrails_semantic_mode, "enforce") == 0);
 
+      /* legacy `enabled: true` alone -> dry_run (dry_run defaults on when enabled). */
       f = fopen(cpath, "w");
       assert(f);
       fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    enabled: true\n");
       fclose(f);
       memset(&cfg, 0, sizeof(cfg));
       assert(config_load(&cfg) == 0);
-      assert(cfg.guardrails_semantic_enabled == 1);
-      assert(cfg.guardrails_semantic_advisory_only == 1);
+      assert(strcmp(cfg.guardrails_semantic_mode, "dry_run") == 0);
+
+      /* canonical string form wins. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\nguardrails:\n  semantic:\n    mode: advisory\n");
+      fclose(f);
+      memset(&cfg, 0, sizeof(cfg));
+      assert(config_load(&cfg) == 0);
+      assert(strcmp(cfg.guardrails_semantic_mode, "advisory") == 0);
       platform_unsetenv("AIMEE_NO_CACHE");
    }
 
@@ -1865,6 +2013,112 @@ int main(void)
       unlink(cpath);
    }
 
+   /* --- cache identity: a same-mtime in-place rewrite must NOT serve stale ---
+    * The load cache used to key on path+mtime alone, so an in-place rewrite that
+    * landed with an equal (or clock-skewed) mtime kept serving the pre-rewrite
+    * snapshot forever. This is exactly the shape of `aimee workspace add` on the
+    * tiered appliance filesystem: the file grows a `workspaces:` block but the
+    * stale empty-workspaces cache is served and a later config_save re-serialises
+    * it back to nothing. Size + inode in the cache key make it detectable. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+
+      /* First state: short body. Load with caching on to populate the cache. */
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: db2://a\n");
+      fclose(f);
+      platform_unsetenv("AIMEE_NO_CACHE");
+
+      static config_t cfg1;
+      memset(&cfg1, 0, sizeof(cfg1));
+      assert(config_load(&cfg1) == 0);
+      assert(strcmp(cfg1.db2_url, "db2://a") == 0);
+
+      /* Capture the exact mtime the cache just recorded. */
+      struct stat st0;
+      assert(stat(cpath, &st0) == 0);
+
+      /* Rewrite in place with a longer, different body (a size change, like an
+       * appended workspaces block), then force the mtime back to the cached one
+       * so path+mtime alone would still count as a hit. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "db2_url: db2://a-much-longer-different-value\n");
+      fclose(f);
+      struct timespec mt0;
+#if defined(__APPLE__)
+      mt0 = st0.st_mtimespec;
+#else
+      mt0 = st0.st_mtim;
+#endif
+      struct timespec times[2];
+      times[0] = mt0; /* atime — value irrelevant */
+      times[1] = mt0; /* mtime — force the collision */
+      assert(utimensat(AT_FDCWD, cpath, times, 0) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      assert(config_load(&cfg2) == 0);
+      /* With the mtime-only cache this returned the stale "db2://a". */
+      assert(strcmp(cfg2.db2_url, "db2://a-much-longer-different-value") == 0);
+
+      platform_setenv("AIMEE_NO_CACHE", "1");
+      unlink(cpath);
+   }
+
+   /* --- delegate_sandbox_package_access: default proxy, round-trip, validation --- */
+   {
+      assert(config_sandbox_package_access_valid("proxy"));
+      assert(config_sandbox_package_access_valid("off"));
+      assert(config_sandbox_package_access_valid("gated"));
+      assert(config_sandbox_package_access_valid("governance"));
+      assert(!config_sandbox_package_access_valid("bogus"));
+      assert(!config_sandbox_package_access_valid(NULL));
+
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      unlink(cpath);
+      platform_setenv("AIMEE_NO_CACHE", "1");
+
+      static config_t def;
+      memset(&def, 0, sizeof(def));
+      assert(config_load(&def) == 0);
+      assert(strcmp(def.delegate_sandbox_package_access, "proxy") == 0); /* default */
+
+      /* Round-trip a non-default value. */
+      snprintf(def.delegate_sandbox_package_access, sizeof(def.delegate_sandbox_package_access),
+               "gated");
+      assert(config_save(&def) == 0);
+      static config_t got;
+      memset(&got, 0, sizeof(got));
+      assert(config_load(&got) == 0);
+      assert(strcmp(got.delegate_sandbox_package_access, "gated") == 0);
+
+      /* An unknown value in the file is ignored — the default stands. (The stderr
+       * warning itself is not captured here; only the default-preserving behavior.) */
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fputs("delegate_sandbox_package_access: nonsense\n", f);
+      fclose(f);
+      static config_t bad;
+      memset(&bad, 0, sizeof(bad));
+      assert(config_load(&bad) == 0);
+      assert(strcmp(bad.delegate_sandbox_package_access, "proxy") == 0);
+
+      /* An explicitly empty value is also invalid -> keep the default. */
+      f = fopen(cpath, "w");
+      assert(f);
+      fputs("delegate_sandbox_package_access: \"\"\n", f);
+      fclose(f);
+      static config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(config_load(&empty) == 0);
+      assert(strcmp(empty.delegate_sandbox_package_access, "proxy") == 0);
+      unlink(cpath);
+   }
+
    if (old_home)
    {
       platform_setenv("HOME", old_home);
@@ -2204,6 +2458,26 @@ int main(void)
       assert(strstr(env, "AIMEE_LLM_SYNTH_URL=https://api.x/v1\n") != NULL);
       assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
       assert(strstr(env, "AIMEE_EMBEDDING_DIM") == NULL); /* local embed => unpinned/derived */
+
+      /* Local kb; all roles local at the CPU tier => the pre-baked llm-cpu profile
+       * (aimee-llm-cpu image), NOT the download "llm" profile. Same aimee-llm URL. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_embed_backend, sizeof(cfg.llm_embed_backend), "local");
+      snprintf(cfg.llm_embed_tier, sizeof(cfg.llm_embed_tier), "cpu");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
+      snprintf(cfg.llm_synth_tier, sizeof(cfg.llm_synth_tier), "cpu");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm\n") == NULL); /* not the GPU profile */
+      assert(strstr(env, "AIMEE_LLM_URL=http://aimee-llm:8742\n") != NULL);
+
+      /* A local role with an unset tier resolves to cpu, so it also takes llm-cpu. */
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.kb_mode, sizeof(cfg.kb_mode), "local");
+      snprintf(cfg.llm_synth_backend, sizeof(cfg.llm_synth_backend), "local");
+      config_emit_deploy_env(&cfg, env, sizeof(env));
+      assert(strstr(env, "COMPOSE_PROFILES=kb,llm-cpu\n") != NULL);
 
       /* Remote kb: connect out, deploy nothing (no profiles, no llm env). */
       memset(&cfg, 0, sizeof(cfg));

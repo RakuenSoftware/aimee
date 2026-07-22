@@ -15,11 +15,11 @@
 #include "agent.h"
 #include "agent_coord.h"
 #include "cmd_agent_delegate_impl.h"
-#include "compute_concurrency.h"
 #include "config.h"
 #include "token_tracker.h"
 #include "delegate_credential_retry.h"
 #include "delegate_launch.h"
+#include "delegate_sandbox_image.h"
 #include "delegate_source_authority.h"
 #include "agent_source_authority.h" /* TLS source-authority context (race-free in-process) */
 #include "server_coord_dispatcher.h"
@@ -44,6 +44,7 @@
 #include "platform_process.h"
 #include "prompts.h"
 #include "persona.h"
+#include "roundtable_preset.h"
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
@@ -212,26 +213,28 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    if (strcmp(status_text, "ok") == 0)
    {
       cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "response");
-      db1_coord_job_complete_task(cctx->coord_task_id, cJSON_IsString(r) ? r->valuestring : "");
+      db1_coord_job_complete_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                        cJSON_IsString(r) ? r->valuestring : "");
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
       config_t cfg;
       config_load(&cfg);
-      if (db1_coord_job_release_task_bounded(cctx->coord_task_id,
-                                             cfg.concurrency_preempt_requeue_max) == 0)
+      if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                                   cfg.concurrency_preempt_requeue_max) == 0)
       {
          server_coord_dispatcher_notify();
          return;
       }
-      db1_coord_job_fail_task(cctx->coord_task_id, "preempt requeue cap exhausted");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    "preempt requeue cap exhausted");
    }
    else
    {
       cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      db1_coord_job_fail_task(cctx->coord_task_id, (cJSON_IsString(m) && m->valuestring[0])
-                                                       ? m->valuestring
-                                                       : "delegate failed");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    (cJSON_IsString(m) && m->valuestring[0]) ? m->valuestring
+                                                                             : "delegate failed");
    }
    server_coord_dispatcher_notify();
 }
@@ -434,19 +437,6 @@ static void delegate_request_parent_context(cJSON *jdepth, cJSON *jparent, int *
       depth = 0;
    *depth_out = depth;
    *parent_out = parent;
-}
-
-static int delegate_request_priority(const compute_ctx_t *cctx, cJSON *jpriority)
-{
-   int priority = cctx && cctx->background_job_id > 0 ? CONCURRENCY_PRIORITY_BACKGROUND
-                                                      : CONCURRENCY_PRIORITY_INTERACTIVE;
-   if (cJSON_IsNumber(jpriority))
-      priority = (int)jpriority->valuedouble;
-   if (priority < -1000)
-      priority = -1000;
-   if (priority > 1000)
-      priority = 1000;
-   return priority;
 }
 
 /* The caller-context a delegate run mutates and must restore exactly: the
@@ -666,12 +656,12 @@ void delegate_worker(void *arg)
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+   cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
-   cJSON *jpriority = cJSON_GetObjectItemCaseSensitive(req, "priority");
    cJSON *jreq_caps = cJSON_GetObjectItemCaseSensitive(req, "required_caps");
    cJSON *jmin_ctx = cJSON_GetObjectItemCaseSensitive(req, "min_context");
    const char *role =
@@ -686,6 +676,9 @@ void delegate_worker(void *arg)
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
    int handoff_json = cJSON_IsTrue(jhandoff);
+   /* Only the JSON boolean literal true opts out; absent, false, and malformed
+    * values preserve automatic evidence grounding. */
+   int caller_provided_target = cJSON_IsTrue(jprovided_target);
    const char *toolset_override =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
@@ -715,7 +708,6 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   int delegate_priority = delegate_request_priority(cctx, jpriority);
    int explicit_tools = cJSON_IsTrue(jtools),
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
@@ -773,7 +765,7 @@ void delegate_worker(void *arg)
     * driver marshals its commands over the reverse channel) against the client's
     * tree, doing its own edits — so it bypasses the server-side worktree
     * isolation / write-guard machinery below (which assumes a local fs), exactly
-    * as the primary chat path does. Gated by claude_cli_delegate_enabled. */
+    * as the primary chat path does. Gated by the agent's `primary_only` flag. */
    if (via_name && via_name[0])
    {
       agent_t *cag = agent_find(&acfg, via_name);
@@ -783,15 +775,13 @@ void delegate_worker(void *arg)
          const workspace_provider_t *wsp = workspace_provider_active();
          if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
          {
-            config_t gate_cfg;
-            config_load(&gate_cfg);
-            if (!gate_cfg.claude_cli_delegate_enabled)
+            if (cag->primary_only)
             {
                workspace_turn_unbind_active();
                char m[320];
                snprintf(m, sizeof(m),
-                        "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
-                        "set claude_cli_delegate_enabled=true to allow it as a delegate "
+                        "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
+                        "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
                         "(see DELEGATES.md for the Anthropic account-risk warning)",
                         cag->name);
                delegation_compute_error(cctx, m);
@@ -897,17 +887,16 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   /* Claude run via the `claude` CLI/tmux login (not an API key) is primary-only
-    * by default: driving a personal Claude subscription as an automated delegate
-    * may breach Anthropic's terms. Opt in with `claude_cli_delegate_enabled`.
-    * (Concise here — the risk warning is shown once at setup when the flag is
-    * enabled, and in DELEGATES.md.) */
-   if (agent_is_claude_cli(target_agent) && !route_cfg.claude_cli_delegate_enabled)
+   /* An agent flagged "Primary Agent Only" (agents.json `primary_only`) is never
+    * a delegation target. A claude-oauth subscription is pre-flagged this way at
+    * add time: driving a personal Claude plan as an automated delegate may breach
+    * Anthropic's terms. (Concise here — the risk warning is in DELEGATES.md.) */
+   if (target_agent->primary_only)
    {
       char errmsg[320];
       snprintf(errmsg, sizeof(errmsg),
-               "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
-               "set claude_cli_delegate_enabled=true to allow it as a delegate "
+               "agent '%s' is marked Primary Agent Only and cannot run as a delegate; "
+               "uncheck 'Primary Agent Only' for it in the Agents tab to allow delegation "
                "(see DELEGATES.md for the Anthropic account-risk warning)",
                target_agent->name);
       delegation_compute_error(cctx, errmsg);
@@ -1044,6 +1033,7 @@ void delegate_worker(void *arg)
     * (worktree path/git_root/work_name are hoisted for delegate_fail: cleanup.) */
    int delegate_worktree_attempted = 0;
    int delegate_shared_worktree = 0;
+   int delegate_dedicated_worktree = 0;
    {
       delegate_worktree_t wt;
       delegate_resolve_worktree(cwd, deleg_id, branch, delegate_allows_writes,
@@ -1053,6 +1043,7 @@ void delegate_worker(void *arg)
       snprintf(delegate_work_name, sizeof(delegate_work_name), "%s", wt.work_name);
       delegate_worktree_attempted = wt.attempted;
       delegate_shared_worktree = wt.shared;
+      delegate_dedicated_worktree = wt.dedicated;
    }
 
    if (delegate_allows_writes && delegate_worktree_attempted && !delegate_worktree_path[0])
@@ -1103,7 +1094,12 @@ void delegate_worker(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   /* Ground read-only inspection roles in parent diff evidence. */
+   /* This is delegate_worker's sole parent-diff evidence injection point.
+    * Ground read-only inspection roles in parent diff evidence unless the
+    * caller supplied the complete review target inline. In that case an
+    * unrelated current-worktree diff is competing evidence and can make a
+    * plan reviewer incorrectly demand implementation. */
+   if (!caller_provided_target)
    {
       char *evidence = delegate_prepend_parent_diff_evidence(prompt, role, delegate_allows_writes,
                                                              cwd, deleg_id);
@@ -1192,8 +1188,9 @@ void delegate_worker(void *arg)
       char drift_err[512];
       const char *drift_root =
           delegate_worktree_path[0] ? delegate_worktree_path : (cwd[0] ? cwd : NULL);
-      int drift_rc = delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL,
-                                                     drift_root, drift_err, sizeof(drift_err));
+      int drift_rc =
+          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, NULL, drift_root,
+                                          is_write_role, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift guard (pre-flight): %s", drift_err);
@@ -1212,38 +1209,9 @@ void delegate_worker(void *arg)
    (void)db1_delegation_spawn_record(deleg_id, effective_parent, effective_sid, current_depth,
                                      role);
 
-   /* Free-routed delegates use a shared tier pool; explicit --via stays per-model. */
-   concurrency_ensure_current();
-   char conc_tier_key[16] = "";
-   concurrency_route_key_t conc =
-       concurrency_key(via_name, target_agent, conc_tier_key, sizeof(conc_tier_key));
-   concurrency_maybe_preempt_delegate(conc.model, conc.provider, delegate_priority, deleg_id);
-   if (cctx->background_job_id > 0 && conc.model[0])
-      db1_agent_job_heartbeat_ext(cctx->background_job_id, "concurrency_slot", 0);
-   concurrency_acquire_status_t conc_status = CONCURRENCY_ACQUIRE_BYPASS;
-   concurrency_slot_t *conc_slot = concurrency_acquire_priority_owner_cancellable_status(
-       &g_concurrency_mgr, conc.model, conc.provider, delegate_priority, deleg_id,
-       db1_delegation_spawn_is_stopped, deleg_id, &conc_status);
-   if (!conc_slot && conc.model[0] && conc_status != CONCURRENCY_ACQUIRE_BYPASS)
-   {
-      const int queue_full = conc_status == CONCURRENCY_ACQUIRE_QUEUE_FULL;
-      aimee_log(queue_full ? LOG_WARN : LOG_INFO, "delegate",
-                queue_full ? "delegation %s rejected: concurrency queue full for %s"
-                           : "delegation %s cancelled while queued for concurrency slot",
-                deleg_id, conc.model);
-      delegate_run_ctx_restore(&run_ctx);
-      cJSON *cresp = cJSON_CreateObject();
-      cJSON_AddStringToObject(cresp, "delegation_id", deleg_id);
-      cJSON_AddStringToObject(cresp, "status", queue_full ? "error" : "cancelled");
-      cJSON_AddStringToObject(cresp, "message",
-                              queue_full
-                                  ? "delegate concurrency queue full"
-                                  : "delegation cancelled while waiting for concurrency slot");
-      compute_respond(cctx, cresp);
-      goto delegate_fail;
-   }
-   if (cctx->background_job_id > 0 && conc.model[0])
-      db1_agent_job_heartbeat_ext(cctx->background_job_id, "", 0);
+   /* Concurrency (global + per-agent + per-model caps) is enforced downstream by the single
+    * agent_admission controller inside agent_dispatch_one — there is no separate per-model
+    * gate here. A pinned turn blocks+queues there; fan-out/fallback fail fast. */
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    char *handoff_prompt = NULL;
@@ -1281,11 +1249,13 @@ void delegate_worker(void *arg)
    }
 
    int rc;
-   const char *saved_toolset_env = getenv("AIMEE_ACTIVE_TOOLSET");
-   char saved_toolset_buf[128] = "";
-   if (saved_toolset_env && saved_toolset_env[0])
-      snprintf(saved_toolset_buf, sizeof(saved_toolset_buf), "%s", saved_toolset_env);
-   platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
+   /* Thread-local, not the process env: delegate turns run on POOLED worker threads
+    * and overlap by design (session_threads defaults above 1; panels fan out through
+    * agent_run_parallel). The old save/restore around a process-wide setenv looked
+    * scoped but was not — a concurrent delegate's value decided what this one could
+    * call, so a reviewer could resolve a coder's toolset. That is the boundary
+    * agent_tools_filter_for_role exists to enforce. */
+   agent_tools_set_active_toolset(toolset_override);
    /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
    int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
    /* A background/durable delegate has no live client connection to serve a
@@ -1323,15 +1293,135 @@ void delegate_worker(void *arg)
                    deleg_id);
       }
    }
-   server_delegate_heartbeat_begin(cctx->background_job_id);
-   rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
-                                           max_tokens, force_tools, delegate_allows_writes,
-                                           leased_cred_name, sizeof(leased_cred_name),
-                                           credential_state_path, &result);
-   server_delegate_heartbeat_end();
-   concurrency_release_owner(conc_slot, deleg_id);
+   /* Delegate sandbox (default OFF): run this delegate's shell and file ops INSIDE
+    * its own container rather than in-process here.
+    *
+    * Mutually exclusive with the detached binding above, and that is not a policy
+    * choice — a DETACHED workspace's files live on the CLIENT, served over the
+    * reverse channel, so a server-side container cannot see them. Binding both
+    * would silently replace the client's tree with an unrelated empty one. So the
+    * sandbox only applies where the files are already server-side: a shared
+    * workspace, or the ephemeral fallback above (whose client has disconnected).
+    *
+    * Bound AFTER the write guards and the detached/ephemeral resolution: those
+    * decide policy and WHICH tree, identical for every provider; this only changes
+    * WHERE the already-resolved I/O runs. Off — or if no container can be acquired
+    * — it returns 0 and the turn runs in-process exactly as today; the failure
+    * paths log at ERROR rather than falling back silently.
+    *
+    * Keyed by deleg_id, so each delegation gets its own container. */
+   /* Mount the tree the delegate already has server-side, so the container gets
+    * the ENTIRE CURRENT SOURCE TREE — by bind-mount, so it IS that tree rather
+    * than a copy that can drift from it. Without it the backend mints an empty
+    * scratch dir, and the delegate opens the file named in its task to find
+    * nothing.
+    *
+    * A DELEGATE'S CHANGES MUST NOT LEAVE ITS CONTAINER. That is what decides the
+    * mode here, and aimee already draws the line this needs: write-capable
+    * delegates get their OWN sibling worktree, read-only delegates share the
+    * parent workspace (delegate_resolve_worktree). So:
+    *
+    *   its own worktree  -> read-write. Isolated by construction: nothing else is
+    *                        looking at that tree, and git shares the object store
+    *                        rather than copying it.
+    *   the shared parent -> READ-ONLY. Not because the delegate is untrusted, but
+    *                        because the tree is not its own; two delegates on one
+    *                        tree would write over each other with no way to tell.
+    *                        Read-only at the mount is a property, not a rule the
+    *                        way the write guard above is.
+    *
+    * The write guard still applies above this; the two agree, and neither is load-
+    * bearing alone. */
+   const char *container_ws = NULL;
+   int container_ws_ro = 1;
+   if (delegate_worktree_path[0] && (delegate_dedicated_worktree || !delegate_shared_worktree))
+   {
+      /* This delegate's own tree — a sibling worktree, or a WFE per-slice tree it
+       * owns exclusively (dedicated). Either way nothing else looks at it, so mount
+       * it read-WRITE: the delegate's edits land in the tree the engine then diffs
+       * and commits. */
+      container_ws = delegate_worktree_path;
+      container_ws_ro = 0;
+   }
+   else if (cwd[0] == '/' && !delegate_allows_writes)
+   {
+      container_ws = cwd; /* shared: readable, never writable */
+      container_ws_ro = 1;
+   }
+   /* A WRITE-capable delegate with no tree of its own is deliberately left
+    * unsandboxed rather than handed a read-only mount. Isolation is the constraint,
+    * so its writes must not reach a shared tree — but a writer fighting a :ro mount
+    * fails in a way that reads as a broken repo, not as a policy. Better to run it
+    * where it works, under the write guard, and say so. Its own worktree is what
+    * makes it sandboxable; without one there is nothing safe to give it. */
+   else if (cwd[0] == '/' && delegate_allows_writes)
+   {
+      aimee_log(LOG_WARN, "delegate-sandbox",
+                "delegate %s: write-capable but has no worktree of its own (shared=%d); NOT "
+                "sandboxing it — a shared tree must stay read-only, and a writer cannot use a "
+                "read-only tree. Running in-process under the write guard",
+                deleg_id, delegate_shared_worktree);
+   }
+   /* Resolve the per-project/-workspace/-global sandbox image (pre-baked `image:`
+    * form); NULL falls back to the backend default. Keyed on the mounted worktree,
+    * which is under the delegate's repo/workspace. */
+   char sbx_image[256];
+   const char *sbx_image_arg =
+       (container_ws &&
+        delegate_sandbox_resolve_image(container_ws, sbx_image, sizeof(sbx_image)) == 0)
+           ? sbx_image
+           : NULL;
+   /* container_ws == NULL is the write-capable-but-no-own-worktree case resolved
+    * above: the intent there is to run IN-PROCESS under the write guard, NOT to hand
+    * the delegate a scratch sandbox. Binding with a NULL workspace mints an EMPTY
+    * scratch tree and mounts THAT, so the delegate edits files the engine never sees
+    * ("write role reported success but produced no diff"). A WFE implement slice is
+    * NOT this case: its cwd already IS a dedicated per-slice worktree it owns, so
+    * delegate_resolve_worktree marks it dedicated and container_ws points at that
+    * tree read-write (above). Only bind a container when there is a real tree to
+    * mount; otherwise run in-process in cwd so writes land where the engine diffs. */
+   int container_bound =
+       (detached_bound || !container_ws || !container_ws[0])
+           ? 0
+           : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
+
+   if (container_bound < 0)
+   {
+      /* HARD isolation refusal (delegate_sandbox_require_isolation): the runtime would
+       * not provide a network-isolated sandbox. Refuse the delegation rather than fall
+       * back to the in-process host path, which has NO isolation at all. */
+      memset(&result, 0, sizeof(result));
+      snprintf(result.error, sizeof(result.error),
+               "delegate sandbox isolation required but unavailable: the container runtime did "
+               "not honour --network none; refusing to run the delegate un-isolated");
+      rc = -1;
+   }
+   else
+   {
+      /* Inside a container the mount IS the isolation boundary: the delegate's
+       * writes go through the provider into its own RW-mounted tree, which nothing
+       * else on the host can see. The host-side parent-write guard exists only for
+       * the in-process (same-host) path; here it is redundant and would only risk
+       * blocking a legitimate write, so drop it once a container is actually bound. */
+      if (container_bound > 0)
+      {
+         agent_tools_parent_write_guard_clear();
+         parent_write_guard_active = 0;
+      }
+      server_delegate_heartbeat_begin(cctx->background_job_id);
+      rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
+                                              max_tokens, force_tools, delegate_allows_writes,
+                                              leased_cred_name, sizeof(leased_cred_name),
+                                              credential_state_path, &result);
+      server_delegate_heartbeat_end();
+   }
    delegate_run_ctx_restore(&run_ctx);
    if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
+      workspace_turn_unbind_active();
+   /* Same call, and never both (see the bind): it clears the active pointer AND
+    * releases the container. Only when a container was actually bound (>0); a hard
+    * isolation refusal (<0) already tore the container down and set no active binding. */
+   if (container_bound > 0)
       workspace_turn_unbind_active();
    if (ephemeral_ws[0])
    {
@@ -1350,9 +1440,10 @@ void delegate_worker(void *arg)
       for (int i = 0; i < named_path_count; i++)
          path_ptrs[i] = named_paths[i];
       char drift_err[512];
-      int drift_rc = delegate_check_named_file_drift(
-          path_ptrs, named_path_count, prompt, result.response,
-          delegate_worktree_path[0] ? delegate_worktree_path : NULL, drift_err, sizeof(drift_err));
+      int drift_rc =
+          delegate_check_named_file_drift(path_ptrs, named_path_count, prompt, result.response,
+                                          delegate_worktree_path[0] ? delegate_worktree_path : NULL,
+                                          is_write_role, drift_err, sizeof(drift_err));
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift (post-run): %s", drift_err);
@@ -1422,12 +1513,15 @@ void delegate_worker(void *arg)
                   handoff_validation.error[0] ? handoff_validation.error : "validation failed");
       }
    }
-   platform_setenv("AIMEE_ACTIVE_TOOLSET", saved_toolset_buf);
+   /* Clear unconditionally: this thread is going back to the pool, and a leftover
+    * override would silently re-scope the NEXT delegate's tools. */
+   agent_tools_set_active_toolset(NULL);
    /* Reset the read-only gate unconditionally so the next user of this pooled
     * worker thread is not left in a prior delegate's (possibly read-only) state. */
    agent_tools_write_capable_set(1);
    if (parent_write_guard_active)
       agent_tools_parent_write_guard_clear();
+
    /* Server-initiated delegates review their own worktree (target is not
     * caller-supplied), so cwd-grounding applies. Threading a request-level
     * caller-provided-target signal here is a follow-up. */
@@ -1817,6 +1911,22 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* Resolve the one runtime panel contract shared by aggregate and roundtable.
+ * A saved preset contributes its exact seats. Only the no-preset fallback is
+ * synthesized, and that helper has a structural two-seat maximum. */
+static int prepare_roundtable_panel(cJSON *req, config_t *cfg, agent_config_t *acfg, char *err,
+                                    size_t err_n)
+{
+   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+   {
+      snprintf(err, err_n, "roundtable must name a saved preset");
+      return -1;
+   }
+   const char *requested = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
+   return ensemble_prepare_runtime_panel(requested, cfg, acfg, err, err_n);
+}
+
 /* Convene the ensemble panel from enabled registry agents when no explicit
  * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
@@ -1847,13 +1957,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
+   char pin_err[256] = "no enabled review agent is currently available";
+   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
+      return server_send_error(conn, pin_err, NULL);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -1992,13 +2098,22 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
    config_t cfg;
    config_load(&cfg);
+   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+      return server_send_error(conn, "roundtable must name a saved preset", NULL);
+   const char *requested_roundtable = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
+   char preset_err[256];
+   int acquired = roundtable_preset_resolve_runtime(requested_roundtable, &cfg, NULL, 0, preset_err,
+                                                    sizeof preset_err);
+   if (acquired < 0)
+      return server_send_error(conn, preset_err, NULL);
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
-   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                : ROUNDTABLE_PARALLEL;
-   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 1;
-   opts.converge_threshold = cfg.roundtable_converge_threshold;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   /* A roundtable has one independent analysis phase. Discussion cycles are a
+    * separate, issue-driven phase and must never be expressed as panel rounds. */
+   opts.max_rounds = 1;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
    opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
    cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
@@ -2019,18 +2134,6 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
       opts.mode = ROUNDTABLE_REVIEW;
-   cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
-   if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
-      opts.turns = ROUNDTABLE_SEQUENTIAL;
-   else if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "parallel") == 0)
-      opts.turns = ROUNDTABLE_PARALLEL;
-   cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
-   if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
-   {
-      opts.max_rounds = (int)jrounds->valuedouble;
-      if (opts.max_rounds > ROUNDTABLE_MAX_ROUNDS_REQUEST)
-         opts.max_rounds = ROUNDTABLE_MAX_ROUNDS_REQUEST;
-   }
    cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
    if (cJSON_IsBool(japply))
       opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
@@ -2042,17 +2145,16 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
-    * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
+   char pin_err[256] = "no enabled review agent is currently available";
+   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
+   {
+      free(brief.rendered);
+      return server_send_error(conn, pin_err, NULL);
+   }
    bind_request_session_creds(req);
 
-   /* Give the tool-less panelists read-only access to aimee memory + the code
-    * graph by pre-loading it into their prompt (best-effort; NULL = none). */
+   /* Seed the read-only panel with aimee memory + code-graph context. Evidence-
+    * gated reviews also force each seat to make an actual read-only tool call. */
    char *rt_context = roundtable_build_aimee_context(prompt);
    opts.context = rt_context;
 
@@ -2068,18 +2170,21 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
-   cJSON_AddNumberToObject(resp, "rounds_run", result.rounds_run);
-   cJSON_AddBoolToObject(resp, "converged", result.converged ? 1 : 0);
    cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
    cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
    cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "best_round", result.best_round);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
-   cJSON_AddNumberToObject(resp, "items_round", result.items_round);
-   cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
+   cJSON_AddNumberToObject(resp, "participants_required_failed",
+                           result.participants_required_failed);
+   cJSON_AddNumberToObject(resp, "participants_tool_used", result.participants_tool_used);
+   cJSON_AddNumberToObject(resp, "participant_tool_calls", result.participant_tool_calls);
+   cJSON_AddNumberToObject(resp, "participant_successful_tool_calls",
+                           result.participant_successful_tool_calls);
+   cJSON_AddBoolToObject(resp, "evidence_coverage_incomplete",
+                         result.evidence_coverage_incomplete ? 1 : 0);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    add_roundtable_arrays(resp, &result);
    delegate_roundtable_result_free(&result);

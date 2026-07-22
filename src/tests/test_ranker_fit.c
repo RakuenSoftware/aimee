@@ -34,7 +34,7 @@
 #include "feature_rows.h"
 #include "../kb_ranker.h"
 #include "../kb_ranker_fit.h"
-#include "../headers/config.h"
+#include "config.h"
 #include <cJSON.h>
 
 static void open_db(void)

@@ -1,5 +1,5 @@
 /* test_mcp_gateway_tools.c: unit tests for send_message and ask_user MCP tools. */
-#include "headers/mcp_tools_gateway.h"
+#include "mcp_tools_gateway.h"
 #include "headers/server_mcp_gateway.h"
 #include <assert.h>
 #include <cJSON.h>

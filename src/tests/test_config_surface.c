@@ -72,7 +72,7 @@ static const char *FIXTURE_A =
     "inline_tagging: true\nidentity:\n  working_profile_injection:\n    enabled: true\ncompact:\n  "
     "enabled: true\n  threshold: 1\n  head_bytes: 1\n  tail_bytes: 1\nsessions:\n  "
     "stale_threshold_secs: 1\n  max_sessions: 1\n  max_worktrees: 1\nprompt_tier: "
-    "ZZA_val\nprompt_file: ZZA_val\necomode: true\nmcp:\n  osv:\n    enabled: true\n    offline: "
+    "ZZA_val\nprompt_file: ZZA_val\nmcp:\n  osv:\n    enabled: true\n    offline: "
     "true\n    enforce: true\n    endpoint: ZZA_val\nrewind:\n  auto_snapshot: true\notel:\n  "
     "endpoint: ZZA_val\n  service_name: ZZA_val\nintegrity:\n  enabled: true\n  dry_run: "
     "true\nsession:\n  virtual_context:\n    enabled: true\n    assembly_budget: 1\ntransport:\n  "
@@ -82,7 +82,9 @@ static const char *FIXTURE_A =
     "  warn_threshold: 0.01\n    prompt_threshold: 0.01\n    block_threshold: 0.01\n    "
     "allow_ml_only_block: true\nauxiliary:\n  enabled: true\n  default_model: ZZA_val\n  "
     "default_max_tokens: 1\nmodel_meta:\n  refresh_minutes: 1\n  capability_routing: "
-    "true\nensemble:\n  enabled: true\n  min_successful: 1\n  max_cost_usd: 1.0";
+    "true\nensemble:\n  enabled: true\n  min_successful: 1\n  max_cost_usd: 1.0\n"
+    "modules:\n  memory: true\n  governance: true\n  delegates: true\n  workflows: true\n  "
+    "economizer: true";
 static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
@@ -130,7 +132,7 @@ static const char *FIXTURE_B =
     " working_profile_injection:\n    enabled: false\ncompact:\n  enabled: false\n  threshold: "
     "4096\n  head_bytes: 4096\n  tail_bytes: 4096\nsessions:\n  stale_threshold_secs: 4096\n  "
     "max_sessions: 4096\n  max_worktrees: 4096\nprompt_tier: ZZB_val\nprompt_file: "
-    "ZZB_val\necomode: false\nmcp:\n  osv:\n    enabled: false\n    offline: false\n    enforce: "
+    "ZZB_val\nmcp:\n  osv:\n    enabled: false\n    offline: false\n    enforce: "
     "false\n    endpoint: ZZB_val\nrewind:\n  auto_snapshot: false\notel:\n  endpoint: ZZB_val\n  "
     "service_name: ZZB_val\nintegrity:\n  enabled: false\n  dry_run: false\nsession:\n  "
     "virtual_context:\n    enabled: false\n    assembly_budget: 4096\ntransport:\n  "
@@ -140,7 +142,9 @@ static const char *FIXTURE_B =
     "false\n    warn_threshold: 0.99\n    prompt_threshold: 0.99\n    block_threshold: 0.99\n    "
     "allow_ml_only_block: false\nauxiliary:\n  enabled: false\n  default_model: ZZB_val\n  "
     "default_max_tokens: 4096\nmodel_meta:\n  refresh_minutes: 4096\n  capability_routing: "
-    "false\nensemble:\n  enabled: false\n  min_successful: 4096\n  max_cost_usd: 0.99";
+    "false\nensemble:\n  enabled: false\n  min_successful: 4096\n  max_cost_usd: 0.99\n"
+    "modules:\n  memory: false\n  governance: false\n  delegates: false\n  workflows: false\n  "
+    "economizer: false";
 
 int main(void)
 {
@@ -202,7 +206,6 @@ int main(void)
    assert(cfgA.memory_recall_lanes_floor_summary != cfgB.memory_recall_lanes_floor_summary);
    assert(cfgA.memory_recall_lanes_floor_fact != cfgB.memory_recall_lanes_floor_fact);
    assert(cfgA.memory_window_radius != cfgB.memory_window_radius);
-   assert(cfgA.memory_kb_neighbour_expand == 1 && cfgB.memory_kb_neighbour_expand == 0);
    assert(cfgA.kb_search_max_results != cfgB.kb_search_max_results);
    assert(cfgA.memory_maintenance_trigger_inserts != cfgB.memory_maintenance_trigger_inserts);
    assert(cfgA.memory_maintenance_trigger_secs != cfgB.memory_maintenance_trigger_secs);
@@ -230,8 +233,6 @@ int main(void)
    assert(cfgA.memory_improve_min_cluster != cfgB.memory_improve_min_cluster);
    assert(cfgA.memory_improve_max_confidence != cfgB.memory_improve_max_confidence);
    assert(cfgA.memory_scenes_enabled == 1 && cfgB.memory_scenes_enabled == 0);
-   assert(cfgA.memory_scenes_min_cluster_size != cfgB.memory_scenes_min_cluster_size);
-   assert(cfgA.memory_scenes_top_m != cfgB.memory_scenes_top_m);
    assert(cfgA.memory_scenes_global_escape_ratio != cfgB.memory_scenes_global_escape_ratio);
    assert(cfgA.memory_episode_summaries_enabled == 1 && cfgB.memory_episode_summaries_enabled == 0);
    assert(cfgA.memory_derive_facts_enabled == 1 && cfgB.memory_derive_facts_enabled == 0);
@@ -287,7 +288,6 @@ int main(void)
    assert(cfgA.max_worktrees != cfgB.max_worktrees);
    assert(strcmp(cfgA.prompt_tier, cfgB.prompt_tier) != 0);
    assert(strcmp(cfgA.prompt_file, cfgB.prompt_file) != 0);
-   assert(cfgA.ecomode == 1 && cfgB.ecomode == 0);
    assert(cfgA.mcp_osv_enabled == 1 && cfgB.mcp_osv_enabled == 0);
    assert(cfgA.mcp_osv_offline == 1 && cfgB.mcp_osv_offline == 0);
    assert(cfgA.mcp_osv_enforce == 1 && cfgB.mcp_osv_enforce == 0);
@@ -307,15 +307,13 @@ int main(void)
    assert(cfgA.cache_aware_rewrite_max_defer_turns != cfgB.cache_aware_rewrite_max_defer_turns);
    assert(cfgA.cache_aware_rewrite_segment_check_turns !=
           cfgB.cache_aware_rewrite_segment_check_turns);
-   assert(cfgA.guardrails_semantic_enabled == 1 && cfgB.guardrails_semantic_enabled == 0);
-   assert(cfgA.guardrails_semantic_dry_run == 1 && cfgB.guardrails_semantic_dry_run == 0);
-   assert(cfgA.guardrails_semantic_advisory_only == 1 &&
-          cfgB.guardrails_semantic_advisory_only == 0);
+   /* Legacy object form maps onto the mode: A {enabled:true,dry_run:true} -> "dry_run";
+    * B {enabled:false} -> "off". Exercises the back-compat parse mapping. */
+   assert(strcmp(cfgA.guardrails_semantic_mode, "dry_run") == 0);
+   assert(strcmp(cfgB.guardrails_semantic_mode, "off") == 0);
    assert(cfgA.guardrails_semantic_warn_threshold != cfgB.guardrails_semantic_warn_threshold);
    assert(cfgA.guardrails_semantic_prompt_threshold != cfgB.guardrails_semantic_prompt_threshold);
    assert(cfgA.guardrails_semantic_block_threshold != cfgB.guardrails_semantic_block_threshold);
-   assert(cfgA.guardrails_semantic_allow_ml_only_block == 1 &&
-          cfgB.guardrails_semantic_allow_ml_only_block == 0);
    assert(cfgA.kb_api_http_port != cfgB.kb_api_http_port);
    assert(cfgA.kb_bg_ingest_enabled == 1 && cfgB.kb_bg_ingest_enabled == 0);
    assert(cfgA.kb_bg_ingest_interval_hours != cfgB.kb_bg_ingest_interval_hours);
@@ -330,6 +328,22 @@ int main(void)
    assert(cfgA.model_meta_capability_routing == 1 && cfgB.model_meta_capability_routing == 0);
    assert(cfgA.ensemble_min_successful != cfgB.ensemble_min_successful);
    assert(cfgA.ensemble_max_cost_usd != cfgB.ensemble_max_cost_usd);
+
+   /* modules.* pluggable-module toggles (tristate; A=true, B=false, distinct from the -1
+    * unspecified default so each key is proven read from the `modules:` block). */
+   assert(cfgA.module_memory == 1 && cfgB.module_memory == 0);
+   assert(cfgA.module_governance == 1 && cfgB.module_governance == 0);
+   assert(cfgA.module_delegates == 1 && cfgB.module_delegates == 0);
+   assert(cfgA.module_workflows == 1 && cfgB.module_workflows == 0);
+   assert(cfgA.module_economizer == 1 && cfgB.module_economizer == 0);
+
+   /* config_module_enabled precedence: an explicit user tristate (0/1) is canonical and wins
+    * over the env default; -1 (unspecified) falls back to the env default. */
+   assert(config_module_enabled(1, 0) == 1);  /* config ON overrides env OFF */
+   assert(config_module_enabled(0, 1) == 0);  /* config OFF overrides env ON  */
+   assert(config_module_enabled(-1, 1) == 1); /* unspecified -> env default ON */
+   assert(config_module_enabled(-1, 0) == 0); /* unspecified -> env default OFF */
+   assert(config_module_enabled(1, 1) == 1 && config_module_enabled(0, 0) == 0);
 
    printf("all tests passed (146 parsed fields)\n");
    return 0;

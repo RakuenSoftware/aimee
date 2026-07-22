@@ -4,6 +4,7 @@
 #define DEC_SERVER_COMPUTE_IMPL_H 1
 
 #include "aimee.h"
+#include "coord_jobs.h"
 #include "server.h"
 #include "cJSON.h"
 #include <pthread.h>
@@ -21,6 +22,7 @@ typedef struct
    int compute_executor_threads;
    int background_job_id;
    int coord_task_id; /* non-zero when this worker is executing a coord task */
+   char coord_claim_owner[DB1_COORD_DELEGATE_LEN]; /* fences stale coord-task completion */
    int async_slot;
    pthread_mutex_t *write_mutex;
    /* The originating connection's capability set, captured at ctx creation.
@@ -96,7 +98,9 @@ void compute_ctx_free(compute_ctx_t *cctx);
 int tool_execute_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
 /* Dispatch a coord task as a background delegate worker. Returns 0 on success, -1 on failure. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
-                                       const char *prompt, const char *files_json, const char *cwd);
+                                       const char *prompt, const char *files_json, const char *cwd,
+                                       const char *persona, const char *claim_owner,
+                                       int require_handoff);
 /* Delegate worker thread entry point — non-static so skill_jobs.c can reference it. */
 void delegate_worker(void *arg);
 
@@ -111,8 +115,7 @@ void delegate_worker(void *arg);
 int delegate_spawn_ondemand(compute_ctx_t *cctx);
 /* Set the max concurrent on-demand delegates (<=0 keeps the current value). */
 void delegate_ondemand_set_ceiling(int ceiling);
-/* Current count of in-flight on-demand delegates (for `aimee workers`). */
-int delegate_ondemand_inflight(void);
+
 /* Block until in-flight on-demand delegates drain to zero or timeout_ms elapses
  * (used at shutdown so detached workers don't touch a freed server_ctx). */
 void delegate_ondemand_drain(int timeout_ms);

@@ -40,6 +40,22 @@ export const SECTION_HELP: Record<string, string> = {
 
 // One line per config key. Plain language, states the default.
 export const FIELD_HELP: Record<string, string> = {
+  // Workflow trigger admission (live)
+  "trigger.max_concurrent":
+    "Maximum active runs admitted across all configured triggers. When the cap is reached, new proposals stay pending and are reconsidered on a later scheduler pass. Default 2. 0 or less means uncapped.",
+  // Autonomous workflow — run safety caps + auto-resume (live; env override wins)
+  "autonomy.max_turns":
+    "Cumulative per-run turn cap (persisted audit events) before a run is parked as a runaway backstop. Default 300. Raise for long multi-slice runs; this is the ultimate bound on total run length (auto-resume does NOT reset it).",
+  "autonomy.max_wall_secs":
+    "Per-resume wall-clock cap in seconds. A run that hits it is parked 'wall_cap_exceeded'; with auto-resume on it gets a fresh window. Default 1800 (30 min).",
+  "autonomy.stale_abandon_secs":
+    "Grace period before a run parked in a cap/stuck backstop is reaped → abandoned. Default 3600 (1 h). 0 disables the reaper.",
+  "autonomy.concurrency":
+    "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
+  "autonomy.auto_resume_cap_parks":
+    "When on (default), the scheduler auto-resumes a wall-cap park to give a long run a fresh wall window instead of leaving it to be reaped — so autonomous runs drive to completion unattended. Bounded by max_resumes. Turn-cap parks are never auto-resumed (raise max_turns instead).",
+  "autonomy.max_resumes":
+    "Max auto-resumes per run before the reaper is allowed to abandon it. Default 50. Bounds a genuinely-wedged run so auto-resume can't loop forever. 0 = never auto-resume.",
   // Knowledge curation — curator pipeline stage gates (see the Pipeline tab)
   kb_curator_extract_docs_enabled:
     "Curator: extract structured claims and entities from ingested documents (LLM). The entry stage for document knowledge; feeds claim indexing and contradiction detection.",
@@ -109,9 +125,6 @@ export const FIELD_HELP: Record<string, string> = {
   llm_synth_endpoint: "Endpoint URL for an external synthesizer.",
   llm_synth_model: "Model name the synthesizer serves.",
 
-  ecomode: "Always route to the cheapest capable agent instead of the default one. Off by default.",
-  claude_cli_delegate_enabled:
-    "Allow the subscription-logged-in Claude CLI to be used as a delegate, not just the primary. Off by default — driving a personal Claude subscription as an automated delegate may breach Anthropic's terms.",
   delegate_graph_context_enabled:
     "Prepend the callers and dependencies of the files a delegate task mentions to its prompt. Advisory, off by default.",
 
@@ -171,14 +184,10 @@ export const FIELD_HELP: Record<string, string> = {
   memory_rewrite_max_subqueries: "Cap on sub-questions when decomposing. Default 4.",
   memory_window_radius:
     "When a stored conversation turn matches, also pull this many turns before and after it for context. 0 is off; 1–3 is typical.",
-  memory_kb_neighbour_expand:
-    "When a knowledge-base chunk matches, also pull the chunks next to it. Off by default.",
   memory_negation_enabled:
     "Track explicit absences ('X is not Y') so negative facts are searchable. Off by default.",
   memory_scenes_enabled:
     "Cluster conversation turns into scenes and use them to focus retrieval. Off by default.",
-  memory_scenes_min_cluster_size: "Fewest turns that count as a scene. Default 3.",
-  memory_scenes_top_m: "How many scenes to boost during retrieval. Default 3.",
   memory_bm25_weight: "How much keyword (BM25) matching counts in the blended score. 0 uses the profile default.",
   memory_semantic_weight:
     "How much semantic (embedding) matching counts in the blended score. 0 uses the profile default.",

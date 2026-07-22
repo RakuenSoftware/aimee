@@ -128,6 +128,13 @@ static void test_config_fields_helpers(void)
    assert(config_field_lookup("autonomous") != NULL);
    assert(config_field_lookup("no_such_key") == NULL);
 
+   /* Regression guard: the kb_curator_* / kb_evidence_embed_enabled gates are the LAST
+    * entries in config_fields[]. They were once stranded behind a stray {NULL} terminator
+    * placed mid-array, which made config_field_lookup (and config.show/get/set) stop before
+    * reaching them. Assert the tail of the table is reachable so that bug cannot return. */
+   assert(config_field_lookup("kb_curator_synthesize_enabled") != NULL);
+   assert(config_field_lookup("kb_evidence_embed_enabled") != NULL);
+
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
 
@@ -155,6 +162,13 @@ static void test_config_fields_helpers(void)
    assert(iters && config_field_set_value(&cfg, iters, "42") == 0);
    v = config_field_value_json(&cfg, iters);
    assert(cJSON_IsNumber(v) && v->valueint == 42);
+   cJSON_Delete(v);
+
+   /* nested trigger admission policy is GUI/config.set writable */
+   const config_field_t *trigger_cap = config_field_lookup("trigger.max_concurrent");
+   assert(trigger_cap && config_field_set_value(&cfg, trigger_cap, "7") == 0);
+   v = config_field_value_json(&cfg, trigger_cap);
+   assert(cJSON_IsNumber(v) && v->valueint == 7);
    cJSON_Delete(v);
 
    /* float — including a threshold field that used to be mistyped CFG_STRING */

@@ -2,15 +2,69 @@
  * CA), revocation snapshot, and CN-spoofing refusal (mtls-client-identity slice 2). */
 #include "pki.h"
 #include "vault_principal.h"
-#include "config.h" /* config_default_dir */
-#include "db1.h"    /* db1_init */
+#include "config.h"       /* config_default_dir */
+#include "db1.h"          /* db1_init / db1_shutdown */
+#include "db1_internal.h" /* db1_conn — direct durable UPDATE for the P8a tests */
+#include <sqlite3.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+static char *make_csr(const char *subject_cn, int forge)
+{
+   EVP_PKEY_CTX *kctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+   EVP_PKEY *key = NULL;
+   X509_REQ *req = NULL;
+   BIO *bio = NULL;
+   char *out = NULL;
+   if (!kctx || EVP_PKEY_keygen_init(kctx) != 1 ||
+       EVP_PKEY_CTX_set_ec_paramgen_curve_nid(kctx, NID_X9_62_prime256v1) != 1 ||
+       EVP_PKEY_keygen(kctx, &key) != 1 || !(req = X509_REQ_new()) ||
+       X509_REQ_set_version(req, 0) != 1)
+      goto done;
+   X509_NAME *name = X509_REQ_get_subject_name(req);
+   if (!name ||
+       X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_ASC,
+                                  (const unsigned char *)subject_cn, -1, -1, 0) != 1 ||
+       X509_REQ_set_pubkey(req, key) != 1 || X509_REQ_sign(req, key, EVP_sha256()) <= 0)
+      goto done;
+   if (forge)
+   {
+      EVP_PKEY_CTX *other_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+      EVP_PKEY *other = NULL;
+      int ok = other_ctx && EVP_PKEY_keygen_init(other_ctx) == 1 &&
+               EVP_PKEY_CTX_set_ec_paramgen_curve_nid(other_ctx, NID_X9_62_prime256v1) == 1 &&
+               EVP_PKEY_keygen(other_ctx, &other) == 1 && X509_REQ_set_pubkey(req, other) == 1;
+      EVP_PKEY_free(other);
+      EVP_PKEY_CTX_free(other_ctx);
+      if (!ok)
+         goto done;
+   }
+   if (!(bio = BIO_new(BIO_s_mem())) || PEM_write_bio_X509_REQ(bio, req) != 1)
+      goto done;
+   BUF_MEM *mem = NULL;
+   BIO_get_mem_ptr(bio, &mem);
+   if (mem)
+   {
+      out = malloc(mem->length + 1);
+      if (out)
+      {
+         memcpy(out, mem->data, mem->length);
+         out[mem->length] = '\0';
+      }
+   }
+done:
+   BIO_free(bio);
+   X509_REQ_free(req);
+   EVP_PKEY_free(key);
+   EVP_PKEY_CTX_free(kctx);
+   return out;
+}
 
 static int verify_chains_to_ca(const char *cert_pem, const char *ca_path)
 {
@@ -53,6 +107,42 @@ static long slurp(const char *path, char *buf, size_t cap)
    return (long)n;
 }
 
+/* Rewrite a cert's DURABLE expires_at directly in DB1, bypassing pki.c — lets the
+ * P8a tests drive the expiry boundary without waiting on wall-clock. */
+static int pki_test_set_expires(const char *serial, long expires_at)
+{
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "UPDATE pki_certs SET expires_at=? WHERE serial=?", -1, &st, NULL) !=
+       SQLITE_OK)
+      return -1;
+   sqlite3_bind_int64(st, 1, expires_at);
+   sqlite3_bind_text(st, 2, serial, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
+/* Revoke a cert DURABLY (the DB row) but bypass pki_revoke's snapshot_add, so the
+ * in-memory g_revoked snapshot stays STALE — the setup for the load-bearing (e)
+ * property: pki_is_revoked misses it, pki_cert_check (durable) catches it. */
+static int pki_test_revoke_db_only(const char *serial)
+{
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, "UPDATE pki_certs SET revoked=1 WHERE serial=?", -1, &st, NULL) !=
+       SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, serial, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
 int main(void)
 {
    char home[256];
@@ -79,6 +169,45 @@ int main(void)
    assert(serial[0] != '\0');
    assert(verify_chains_to_ca(cert, ca_path) == 1);
 
+   /* P8b: the client owns the key and sends only a signed CSR. The CSR subject is
+    * ignored; the server-selected CN is authoritative and the roster is durable. */
+   char *csr = make_csr("attacker-chosen-cn", 0);
+   char csr_cert[8192] = "", csr_serial[64] = "";
+   assert(csr != NULL);
+   assert(pki_sign_csr("thin-client-1", 30, csr, csr_cert, sizeof(csr_cert), csr_serial,
+                       sizeof(csr_serial)) == 0);
+   assert(verify_chains_to_ca(csr_cert, ca_path) == 1);
+   assert(pki_cert_check(csr_serial, (long)time(NULL)) == PKI_CERT_VALID);
+   BIO *signed_bio = BIO_new_mem_buf(csr_cert, -1);
+   X509 *signed_cert = signed_bio ? PEM_read_bio_X509(signed_bio, NULL, NULL, NULL) : NULL;
+   char signed_cn[128] = "";
+   assert(signed_cert != NULL);
+   X509_NAME_get_text_by_NID(X509_get_subject_name(signed_cert), NID_commonName, signed_cn,
+                             sizeof(signed_cn));
+   assert(strcmp(signed_cn, "thin-client-1") == 0);
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(signed_cert, NID_ext_key_usage, NULL, NULL);
+   int have_client = 0, have_server = 0;
+   assert(eku != NULL);
+   for (int i = 0; i < sk_ASN1_OBJECT_num(eku); i++)
+   {
+      int nid = OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, i));
+      have_client |= nid == NID_client_auth;
+      have_server |= nid == NID_server_auth;
+   }
+   assert(have_client && !have_server);
+   EXTENDED_KEY_USAGE_free(eku);
+   X509_free(signed_cert);
+   BIO_free(signed_bio);
+   char bad_cert[8192], bad_serial[64];
+   assert(pki_sign_csr("thin-client-bad", 30, "not a csr", bad_cert, sizeof(bad_cert), bad_serial,
+                       sizeof(bad_serial)) == -1);
+   char *forged_csr = make_csr("forged", 1);
+   assert(forged_csr != NULL);
+   assert(pki_sign_csr("thin-client-forged", 30, forged_csr, bad_cert, sizeof(bad_cert), bad_serial,
+                       sizeof(bad_serial)) == -1);
+   free(forged_csr);
+   free(csr);
+
    /* Revocation: not revoked, then revoked, reflected in the snapshot. */
    assert(pki_is_revoked(serial) == 0);
    assert(pki_revoke(serial) == 0);
@@ -102,6 +231,59 @@ int main(void)
    pki_reset_for_test();
    assert(pki_ca_ensure() == 0);
    assert(pki_is_revoked(serial2) == 1); /* persisted across reload */
+
+   /* === P8a: per-request DURABLE revocation/expiry re-check (invariant #5). The
+    * durable read (pki_cert_check) is the per-request authority; the g_revoked
+    * snapshot (pki_is_revoked) is the fast handshake-path check. === */
+   long p8_now = (long)time(NULL);
+
+   /* (a) A freshly issued cert is durably VALID. */
+   char pc[8192] = "", pk[4096] = "", ps[64] = "";
+   assert(pki_issue("p8a-fresh", 30, pc, sizeof(pc), pk, sizeof(pk), ps, sizeof(ps)) == 0);
+   assert(pki_cert_check(ps, p8_now) == PKI_CERT_VALID);
+
+   /* (b) After pki_revoke -> durably REVOKED. */
+   assert(pki_revoke(ps) == 0);
+   assert(pki_cert_check(ps, p8_now) == PKI_CERT_REVOKED);
+
+   /* (d) A serial this server's CA never issued -> UNKNOWN (fail-closed at the
+    * caller), and DISTINCT from ERROR (an unavailable authority). */
+   assert(pki_cert_check("deadbeef-not-issued", p8_now) == PKI_CERT_UNKNOWN);
+   assert(strcmp(pki_cert_status_str(PKI_CERT_VALID), "VALID") == 0);
+   assert(strcmp(pki_cert_status_str(PKI_CERT_REVOKED), "REVOKED") == 0);
+   assert(strcmp(pki_cert_status_str(PKI_CERT_EXPIRED), "EXPIRED") == 0);
+   assert(strcmp(pki_cert_status_str(PKI_CERT_UNKNOWN), "UNKNOWN") == 0);
+   assert(strcmp(pki_cert_status_str(PKI_CERT_ERROR), "ERROR") == 0);
+
+   /* (c)+(f) Expiry boundary: expires_at>0 AND expires_at<=now -> EXPIRED. Issue a
+    * fresh (VALID) cert, then rewrite expires_at durably to walk the boundary. */
+   char ec[8192] = "", ek[4096] = "", es[64] = "";
+   assert(pki_issue("p8a-expiring", 30, ec, sizeof(ec), ek, sizeof(ek), es, sizeof(es)) == 0);
+   assert(pki_cert_check(es, p8_now) == PKI_CERT_VALID);
+   assert(pki_test_set_expires(es, p8_now - 1) == 0); /* (c) past */
+   assert(pki_cert_check(es, p8_now) == PKI_CERT_EXPIRED);
+   assert(pki_test_set_expires(es, p8_now) == 0); /* (f) boundary: == now is EXPIRED */
+   assert(pki_cert_check(es, p8_now) == PKI_CERT_EXPIRED);
+   assert(pki_test_set_expires(es, p8_now + 1) == 0); /* strictly future -> VALID */
+   assert(pki_cert_check(es, p8_now) == PKI_CERT_VALID);
+   assert(pki_test_set_expires(es, 0) == 0); /* unset (0) is NOT treated as expired */
+   assert(pki_cert_check(es, p8_now) == PKI_CERT_VALID);
+
+   /* (e) THE LOAD-BEARING PROPERTY: the durable read beats a STALE snapshot. Issue
+    * a fresh cert (so the snapshot has no entry for it), then revoke the row
+    * DIRECTLY in the DB WITHOUT snapshot_add. pki_is_revoked reads the snapshot and
+    * misses it (0); pki_cert_check re-reads the durable row and catches it
+    * (REVOKED) — proving a cert revoked AFTER its handshake stops authorizing on
+    * the very next request even though the in-memory snapshot never learned of it. */
+   char sc[8192] = "", sk[4096] = "", ss[64] = "";
+   assert(pki_issue("p8a-stale", 30, sc, sizeof(sc), sk, sizeof(sk), ss, sizeof(ss)) == 0);
+   assert(pki_is_revoked(ss) == 0);
+   assert(pki_cert_check(ss, p8_now) == PKI_CERT_VALID);
+   assert(pki_test_revoke_db_only(ss) == 0);               /* durable revoke; snapshot untouched */
+   assert(pki_is_revoked(ss) == 0);                        /* snapshot is STALE — misses it */
+   assert(pki_cert_check(ss, p8_now) == PKI_CERT_REVOKED); /* durable read is authoritative */
+   printf("pki: P8a durable per-request revocation/expiry re-check ok "
+          "(durable beats stale snapshot)\n");
 
    /* Server-cert SAN builder: base set always present; AIMEE_TLS_EXTRA_SAN entries
     * appended with auto-typing (IP vs DNS) and pass-through of pre-typed entries. */
@@ -184,6 +366,57 @@ int main(void)
    unsetenv("AIMEE_TLS_CN");
    printf("pki: existing server cert authoritative (kept across identity change; minted only when "
           "absent) ok\n");
+
+   /* P8c durable optional->required ramp. Isolate the authoritative roster by
+    * retiring all earlier test certs before initializing the singleton. */
+   sqlite3 *rdb = db1_conn();
+   assert(rdb);
+   assert(sqlite3_exec(rdb, "UPDATE pki_certs SET revoked=1", NULL, NULL, NULL) == SQLITE_OK);
+   assert(pki_mtls_ramp_init(1) == 1);
+   int ramp_state = 0;
+   char roster_hash[65] = "";
+   long advanced_at = -1;
+   assert(pki_mtls_ramp_get(&ramp_state, roster_hash, sizeof(roster_hash), &advanced_at) == 0);
+   assert(ramp_state == 1 && strlen(roster_hash) == 64 && advanced_at == 0);
+   assert(pki_mtls_ramp_ready(p8_now) == 0); /* empty rosters never advance */
+
+   char r1c[8192] = "", r1k[4096] = "", r1s[64] = "";
+   char r2c[8192] = "", r2k[4096] = "", r2s[64] = "";
+   assert(pki_issue("ramp-client-1", 30, r1c, sizeof(r1c), r1k, sizeof(r1k), r1s, sizeof(r1s)) ==
+          0);
+   assert(pki_issue("ramp-client-2", 30, r2c, sizeof(r2c), r2k, sizeof(r2k), r2s, sizeof(r2s)) ==
+          0);
+   long ramp_now = (long)time(NULL);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0);
+   assert(pki_mtls_note_presentation(r1s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0); /* partial roster holds */
+   assert(pki_mtls_note_presentation(r2s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 1);
+
+   /* A new enrollment after preflight changes the transactional roster hash and
+    * invalidates the stale readiness result until that client presents. */
+   char r3c[8192] = "", r3k[4096] = "", r3s[64] = "";
+   assert(pki_issue("ramp-client-3", 30, r3c, sizeof(r3c), r3k, sizeof(r3k), r3s, sizeof(r3s)) ==
+          0);
+   ramp_now = (long)time(NULL);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0);
+   assert(pki_mtls_note_presentation(r3s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 1);
+   assert(pki_mtls_ramp_advance(ramp_now) == 1);
+   assert(pki_mtls_ramp_advance(ramp_now + 1) == 0); /* idempotent + monotonic */
+   assert(pki_mtls_ramp_get(&ramp_state, roster_hash, sizeof(roster_hash), &advanced_at) == 0);
+   assert(ramp_state == 2 && advanced_at == ramp_now);
+   assert(pki_mtls_ramp_init(1) == 2); /* restart preserves required posture */
+   printf("pki: P8c durable mTLS ramp + stale-roster race gate ok\n");
+
+   /* (g) Authority-down path: with DB1 shut down, db1_conn() is NULL, so the
+    * durable read cannot answer -> PKI_CERT_ERROR (fail-closed, NOT a misleading
+    * UNKNOWN). Done last, as it tears down the shared :memory: DB. The caller
+    * (handle_conn) refuses 403 on ERROR just as on REVOKED/EXPIRED/UNKNOWN. */
+   db1_shutdown();
+   assert(pki_cert_check("any-serial", (long)time(NULL)) == PKI_CERT_ERROR);
+   assert(pki_mtls_ramp_init(1) == -1); /* never fall back to optional on DB failure */
+   printf("pki: P8a authority-down -> ERROR (fail-closed) ok\n");
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);

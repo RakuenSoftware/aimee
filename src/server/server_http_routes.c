@@ -6,6 +6,7 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http.h"
+#include "shadow_mirror.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -14,7 +15,8 @@
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
-#include "util.h" /* safe_strdup, aimee_base64_* */
+#include "agent_config.h" /* clear request-local agent credentials between pooled op runs */
+#include "util.h"         /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
@@ -29,7 +31,8 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
-#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "server_mgmt_status.h"
+#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -58,18 +61,20 @@
 #include "workspace_scope.h" /* ws_scope_user_root — project workspace root */
 #include "webchat_live.h"    /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"           /* index_scan_project after a webuser clone (WP-D) */
+#include "kb_client.h"       /* kb_client_index_scan — push webuser clones into aimee-kb */
 #include "aimee_home.h"      /* aimee_home — proposal artifact dir for /v1/dev/submit */
 #include <math.h>            /* isfinite — validate the /v1/dev/submit budget cap */
 #include <errno.h>           /* strtol overflow detection for /v1/dev/submit caps */
 #include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
 #include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
-#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
-#include <time.h>            /* unique proposal artifact filename */
+#include <openssl/evp.h>
+#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
+#include <time.h>          /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -103,6 +108,131 @@ static int rh_health(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
    return route_health(resp, cap);
+}
+
+static int rh_ready(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_ready(resp, cap);
+}
+
+static int rh_management_action(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   /* P5-A deliberately leaves mutation unreachable.  P5-C replaces this
+    * handler only after revocation staples, durable jti consumption, actor
+    * propagation, and primary WORM intent/outcome are composed end to end. */
+   return err_json(resp, cap, 503, "management control plane is not enabled");
+}
+
+static int mgmt_b64url(const unsigned char *in, size_t n, char *out, size_t cap)
+{
+   size_t need = 4 * ((n + 2) / 3);
+   if (!in || !out || cap <= need)
+      return -1;
+   int got = EVP_EncodeBlock((unsigned char *)out, in, (int)n);
+   if (got <= 0)
+      return -1;
+   for (int i = 0; i < got; i++)
+      out[i] = out[i] == '+' ? '-' : (out[i] == '/' ? '_' : out[i]);
+   while (got > 0 && out[got - 1] == '=')
+      got--;
+   out[got] = '\0';
+   return 0;
+}
+
+static int mgmt_hex_key(const char *hex, unsigned char key[32])
+{
+   if (!hex || strlen(hex) != 64)
+      return -1;
+   for (int i = 0; i < 32; i++)
+   {
+      unsigned a = (unsigned char)hex[i * 2], b = (unsigned char)hex[i * 2 + 1];
+      a = a >= '0' && a <= '9' ? a - '0' : (a >= 'a' && a <= 'f' ? a - 'a' + 10 : 99);
+      b = b >= '0' && b <= '9' ? b - '0' : (b >= 'a' && b <= 'f' ? b - 'a' + 10 : 99);
+      if (a > 15 || b > 15)
+         return -1;
+      key[i] = (unsigned char)((a << 4) | b);
+   }
+   return 0;
+}
+
+static int rh_management_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   unsigned char nonce[32];
+   uint64_t expiry = 0, now = (uint64_t)time(NULL);
+   int rc = server_mgmt_nonce_issue(peer, target, now, nonce, &expiry);
+   if (rc != SERVER_MGMT_NONCE_OK)
+      return err_json(resp, cap, rc == SERVER_MGMT_NONCE_SATURATED ? 429 : 503,
+                      rc == SERVER_MGMT_NONCE_SATURATED ? "management challenge capacity reached"
+                                                        : "management challenge unavailable");
+   char enc[48];
+   if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
+      return err_json(resp, cap, 503, "management challenge unavailable");
+   snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
+            (unsigned long long)expiry);
+   server_http_keepalive_set(1);
+   return 200;
+}
+
+static int rh_management_health(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
+   const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
+   const char *local_fp = server_http_identity_local_fingerprint();
+   const char *wire = server_http_identity_status_staple();
+   unsigned char pub[32];
+   kb_mgmt_status_t st;
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0] || !key_id || !key_id[0] || mgmt_hex_key(key_hex, pub) != 0 ||
+       !local_fp[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   if (!wire[0] || kb_mgmt_status_from_json(wire, &st) != 0)
+   {
+      memset(&st, 0, sizeof(st));
+      if (wire[0] && kb_mgmt_status_nonce_from_json(wire, st.nonce) == 0)
+      {
+         server_mgmt_nonce_result_t consumed =
+             server_mgmt_nonce_consume(&st, peer, target, (uint64_t)time(NULL), 0);
+         if (consumed == SERVER_MGMT_NONCE_STORAGE)
+            return err_json(resp, cap, 503, "management status unavailable");
+      }
+      return err_json(resp, cap, 401, "invalid management status staple");
+   }
+   uint64_t hwm = 0, now = (uint64_t)time(NULL);
+   int shape =
+       server_mgmt_status_hwm(&hwm) == 0 && kb_mgmt_status_validate(&st, now, hwm) == 0 &&
+       kb_mgmt_status_verify_signature(&st, pub) == 0 && strcmp(st.key_id, key_id) == 0 &&
+       memcmp(st.caller_issuer, peer->issuer, sizeof(st.caller_issuer)) == 0 &&
+       memcmp(st.caller_serial_norm, peer->serial_norm, sizeof(st.caller_serial_norm)) == 0 &&
+       memcmp(st.caller_fingerprint, peer->fingerprint, sizeof(st.caller_fingerprint)) == 0 &&
+       strcmp(st.target_server_id, target) == 0 &&
+       strcmp(st.target_mgmt_fingerprint, local_fp) == 0 &&
+       strcmp(st.purpose, "management.health.v1") == 0;
+   server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume(&st, peer, target, now, shape);
+   if (rc != SERVER_MGMT_NONCE_OK)
+   {
+      int status = rc == SERVER_MGMT_NONCE_STORAGE    ? 503
+                   : rc == SERVER_MGMT_NONCE_MISMATCH ? 403
+                   : rc == SERVER_MGMT_NONCE_NOT_FOUND || rc == SERVER_MGMT_NONCE_EXPIRED ||
+                           rc == SERVER_MGMT_NONCE_ROLLBACK
+                       ? 409
+                       : 401;
+      return err_json(resp, cap, status, "management status denied");
+   }
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\",\"server_id\":\"%s\"}", target);
+   return 200;
 }
 static int rh_version(const route_req_t *rq, char *resp, int cap)
 {
@@ -231,13 +361,7 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
       return 200;
    }
    cJSON_Delete(out);
-   cJSON *e = cJSON_CreateObject();
-   cJSON_AddStringToObject(e, "error", err[0] ? err : "submit failed");
-   char *s = cJSON_PrintUnformatted(e);
-   snprintf(resp, cap, "%s", s ? s : "{\"error\":\"submit failed\"}");
-   free(s);
-   cJSON_Delete(e);
-   return st;
+   return err_json(resp, cap, st, err[0] ? err : "submit failed");
 }
 
 /* Loop-back retry cap for operator rejects on a `retry_on_reject` gate: bounds an
@@ -287,14 +411,12 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    const char *id = rq->id;
    if (!id || !id[0])
    {
-      snprintf(resp, cap, "{\"error\":\"missing work item id\"}");
-      return 400;
+      return err_json(resp, cap, 400, "missing work item id");
    }
    db1_work_item_t wi;
    if (db1_work_item_get(id, &wi) != 1)
    {
-      snprintf(resp, cap, "{\"error\":\"no such work item\"}");
-      return 404;
+      return err_json(resp, cap, 404, "no such work item");
    }
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
    cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
@@ -319,16 +441,15 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    if (jgate && cJSON_IsString(jgate) && jgate->valuestring[0] &&
        strcmp(jgate->valuestring, gate) != 0)
    {
+      char msg[192];
+      snprintf(msg, sizeof msg, "run is parked at gate '%s', not '%s'", gate, jgate->valuestring);
       cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"run is parked at gate '%s', not '%s'\"}", gate,
-               jgate->valuestring);
-      return 409;
+      return err_json(resp, cap, 409, msg);
    }
    if (strcmp(decision, "approve") != 0 && strcmp(decision, "reject") != 0)
    {
       cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"decision must be 'approve' or 'reject'\"}");
-      return 400;
+      return err_json(resp, cap, 400, "decision must be 'approve' or 'reject'");
    }
    /* Approving a ROUNDTABLE gate is refused, mirroring wfe_gate_override's rail
     * (a human must not force-pass a panel): previously this endpoint recorded a
@@ -347,12 +468,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
          wfe_def_free(gdef);
       if (is_rt)
       {
-         cJSON_Delete(body);
-         snprintf(resp, cap,
-                  "{\"error\":\"'%s' is a roundtable gate — a human cannot force-pass a panel. "
-                  "Resume re-runs the panel; reject terminates.\"}",
+         char msg[256];
+         snprintf(msg, sizeof msg,
+                  "'%s' is a roundtable gate — a human cannot force-pass a panel. "
+                  "Resume re-runs the panel; reject terminates.",
                   wi.current_stage);
-         return 409;
+         cJSON_Delete(body);
+         return err_json(resp, cap, 409, msg);
       }
    }
 
@@ -368,15 +490,13 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
       if (!present && wfe_approval_record(id, gate, wi.content_hash, actor) != 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"could not record approval\"}");
-         return 500;
+         return err_json(resp, cap, 500, "could not record approval");
       }
       int g = db1_work_item_gate_apply(id, wi.current_stage, wi.content_hash, NULL, NULL);
       if (g < 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
-         return 500;
+         return err_json(resp, cap, 500, "gate apply failed");
       }
       if (g == 0)
       {
@@ -390,8 +510,7 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
                      gate);
             return 200;
          }
-         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
-         return 409;
+         return err_json(resp, cap, 409, "run not parked at this gate (state changed)");
       }
       /* No detail: the audit row's gate column already carries the stage. */
    }
@@ -433,14 +552,12 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
       if (g < 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
-         return 500;
+         return err_json(resp, cap, 500, "gate apply failed");
       }
       if (g == 0)
       {
          cJSON_Delete(body);
-         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
-         return 409;
+         return err_json(resp, cap, 409, "run not parked at this gate (state changed)");
       }
       if (new_stage)
          snprintf(detail, sizeof detail, "from=%s to=%s", gate, new_stage);
@@ -488,6 +605,66 @@ static int rh_messages(const route_req_t *rq, char *resp, int cap)
 static int rh_count_tokens(const route_req_t *rq, char *resp, int cap)
 {
    return route_completion(g_count_tokens_handler, rq->body, resp, cap);
+}
+
+/* POST /v1/shadow/enable -- arm shadow publishing at RUNTIME. Always boots
+ * disarmed and this never persists, so it cannot survive a restart: a reboot
+ * always comes up with shadow publishing OFF. CAP_SHADOW_ADMIN (full-trust). */
+static int rh_shadow_enable(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   shadow_mirror_set_armed(1);
+   snprintf(resp, cap,
+            "{\"status\":\"armed\",\"note\":\"runtime-only; resets to off on restart\"}");
+   return 200;
+}
+
+/* POST /v1/shadow/disable -- disarm and forget all subscribers. */
+static int rh_shadow_disable(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   shadow_mirror_set_armed(0);
+   snprintf(resp, cap, "{\"status\":\"disarmed\"}");
+   return 200;
+}
+
+/* POST /v1/shadow/subscribe {"url":"<base>","bearer":"<tok>"} -- register this
+ * caller's REAL ingress to receive a copy of every completion request. Gated by
+ * CAP_SHADOW_ADMIN (full-trust only) AND the shadow_publish_enabled master switch;
+ * a subscriber sees all prompt/response content, so both gates must be open. */
+static int rh_shadow_subscribe(const route_req_t *rq, char *resp, int cap)
+{
+   if (!shadow_mirror_publish_enabled())
+   {
+      return err_json(resp, cap, 403, "shadow publishing disabled");
+   }
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *ju = body ? cJSON_GetObjectItemCaseSensitive(body, "url") : NULL;
+   const cJSON *jb = body ? cJSON_GetObjectItemCaseSensitive(body, "bearer") : NULL;
+   const char *url = (ju && cJSON_IsString(ju)) ? ju->valuestring : NULL;
+   const char *bearer = (jb && cJSON_IsString(jb)) ? jb->valuestring : NULL;
+   int rc = shadow_mirror_subscribe(url, bearer);
+   cJSON_Delete(body);
+   if (rc != 0)
+   {
+      return err_json(resp, cap, 400, "subscribe failed (missing url or table full)");
+   }
+   snprintf(resp, cap, "{\"status\":\"subscribed\",\"subscribers\":%d}",
+            shadow_mirror_subscriber_count());
+   return 200;
+}
+
+/* POST /v1/shadow/unsubscribe {"url":"<base>"} -- remove a subscriber. */
+static int rh_shadow_unsubscribe(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   const cJSON *ju = body ? cJSON_GetObjectItemCaseSensitive(body, "url") : NULL;
+   const char *url = (ju && cJSON_IsString(ju)) ? ju->valuestring : NULL;
+   int rc = shadow_mirror_unsubscribe(url);
+   cJSON_Delete(body);
+   snprintf(resp, cap, "{\"status\":\"%s\",\"subscribers\":%d}",
+            rc == 0 ? "unsubscribed" : "absent", shadow_mirror_subscriber_count());
+   return 200;
 }
 
 /* ── server-hosted Claude PTY session (terminal forwarding) ────────────────
@@ -715,6 +892,11 @@ static int rh_wf_list(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return wf_api_list(resp, cap);
 }
+static int rh_wf_triggers(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return wf_api_triggers(resp, cap);
+}
 static int rh_wf_get(const route_req_t *rq, char *resp, int cap)
 {
    return wf_api_get(rq->id, resp, cap);
@@ -783,6 +965,22 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "invalid JSON body");
    }
+   /* config.set is normally a generic dispatch-backed route, but roundtable
+    * policy needs an HTTP-level 403 before entering the legacy NDJSON bridge.
+    * Keep the matching guard in handle_config_set as defense in depth for
+    * direct RPC callers, whose transport cannot express an HTTP status. */
+   if (strcmp(rq->op, "config.set") == 0)
+   {
+      cJSON *jkey = cJSON_GetObjectItemCaseSensitive(req, "key");
+      const char *key = cJSON_IsString(jkey) ? jkey->valuestring : NULL;
+      if (roundtable_policy_config_key(key) &&
+          !route_roundtable_mutation_authorized(server_http_identity_principal()))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403,
+                         "roundtable changes require the authenticated appliance administrator");
+      }
+   }
    /* method is server-set from the matched row, never the client body. */
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
    cJSON_AddStringToObject(req, "method", rq->op);
@@ -806,7 +1004,7 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
  * row's op-derived cap, gated before we enqueue. */
 typedef struct
 {
-   char run_id[64];
+   char run_id[128];
    char op[64];
    char *line;         /* dispatch body with method injected; owned by worker */
    uint32_t conn_caps; /* caps captured at enqueue time */
@@ -836,9 +1034,26 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
    return s;
 }
 
+/* Orchestration workers are pooled. Every field below is thread-local, but that
+ * only prevents cross-thread races: without an explicit turn boundary, the next
+ * op scheduled on the same worker inherits the previous op's checkout and
+ * credential context. In particular, an interactive roundtable could make a
+ * server-hosted Codex seat `cd` into another client's nonexistent checkout and
+ * return no content. Clear on both sides of every op dispatch so request-local
+ * panel/preset/artifact state cannot bleed through worker reuse. */
+static void op_run_clear_thread_context(void)
+{
+   run_cmd_set_cwd(NULL);
+   agent_set_request_session(NULL);
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_set_request_vault_principal(NULL);
+   agent_set_request_cancel(NULL);
+}
+
 static void op_run_worker_run(void *arg)
 {
    op_run_job_t *j = (op_run_job_t *)arg;
+   op_run_clear_thread_context();
    compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
    char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
@@ -862,6 +1077,7 @@ static void op_run_worker_run(void *arg)
    }
 
    int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
+   op_run_clear_thread_context();
    /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
     * failed run; anything else is the completed result payload. */
    int ok = (rc >= 200 && rc < 300);
@@ -895,12 +1111,6 @@ static void op_run_worker_run(void *arg)
    compute_pool_clear_job();
 }
 
-static void *op_run_worker_thread(void *arg)
-{
-   op_run_worker_run(arg);
-   return NULL;
-}
-
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
                                   int preflight_caps, char *resp, int cap)
 {
@@ -920,9 +1130,9 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
 
    long created = (long)time(NULL);
    static atomic_ulong g_op_run_seq = 0;
-   char id[64];
+   char id[128];
    unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
-   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, seq);
+   snprintf(id, sizeof(id), "oprun_%s_%ld_%lu", openai_runs_store_generation(), created, seq);
 
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
    cJSON_AddStringToObject(req, "__run_id", id);
@@ -972,35 +1182,37 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    j->created = created;
 
    server_ctx_t *ctx = server_active_ctx();
-   if (ctx)
+   /* Every async operation has the same server-owned lifecycle. Keeping them in
+    * one dedicated pool prevents a newly registered coordinator from silently
+    * falling back to the generic compute lane, and makes shutdown authoritative. */
+   if (ctx && ctx->orchestration_pool_initialized)
    {
-      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
+      int submit_rc = compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j);
+      if (submit_rc != COMPUTE_POOL_SUBMIT_OK)
       {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"compute queue full\"}");
+         const char *message = submit_rc == COMPUTE_POOL_SUBMIT_CLOSED ? "orchestration unavailable"
+                                                                       : "orchestration queue full";
+         char detail[96];
+         snprintf(detail, sizeof(detail), "{\"error\":\"%s\"}", message);
+         char *failed = op_run_snapshot(id, op_method, "failed", created, detail);
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
          free(j);
          free(queued);
-         return err_json(resp, cap, 503, "compute queue full");
+         return err_json(resp, cap, 503, message);
       }
    }
    else
    {
-      pthread_t th;
-      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
-      {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"could not start run\"}");
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 500, "could not start run");
-      }
-      pthread_detach(th);
+      char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                     "{\"error\":\"orchestration unavailable\"}");
+      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+      free(failed);
+      free(j->line);
+      free(j);
+      free(queued);
+      return err_json(resp, cap, 503, "orchestration unavailable");
    }
 
    int n = snprintf(resp, (size_t)cap, "%s", queued);
@@ -1139,23 +1351,6 @@ static int rh_workspace_remove(const route_req_t *rq, char *resp, int cap)
    return ws_dispatch_args("workspace.remove", path, NULL, 0, resp, cap);
 }
 
-/* AIMEE_WEBCHAT_GIT=0 disables the whole webchat git surface — forge-token,
- * clone, ops, per-host credentials, ssh-key, projects, session-dir, OAuth —
- * without affecting the editor (which has its own AIMEE_WEBCHAT_EDITOR gate;
- * session-dir is git-panel-only and not on the editor path, so gating it here is
- * safe). On by default; only the exact value "0" disables it, so a blank/other
- * value leaves git enabled. Read per call (immediate single-byte compare, like
- * webuser_editor's AIMEE_WEBCHAT_EDITOR gate) — aimee never setenv()s at request
- * time, so there is no concurrent-mutation window. Each git route checks this
- * first and returns 503 when off — ahead of the 403 webuser check, which is
- * intentional: the disabled state is not a secret, and an operator can ship the
- * image with the editor but no git intake. */
-static int git_surface_enabled(void)
-{
-   const char *v = getenv("AIMEE_WEBCHAT_GIT");
-   return !(v && v[0] == '0' && v[1] == '\0');
-}
-
 static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
 {
    if (!git_surface_enabled())
@@ -1188,249 +1383,6 @@ static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 400, "invalid token / scope / ttl, or registry full");
    snprintf(resp, (size_t)cap, "{\"ok\":true}");
    return 200;
-}
-
-/* POST /v1/workspace/clone {url, name?} — clone a repo as a project under the
- * calling webchat user's scoped workspace (webchat-git WP-D). The caller
- * principal comes from the attested identity (server.token-gated X-Aimee-Webuser),
- * NOT the body — a user can only clone into their own tree. Credentials are
- * injected from the user's sealed vault (WP-C); never accepted in the body. */
-static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(body, "url");
-   const cJSON *jname = cJSON_GetObjectItemCaseSensitive(body, "name");
-   const cJSON *jtoken = cJSON_GetObjectItemCaseSensitive(body, "token");
-   const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
-   const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
-   const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
-
-   char dest[MAX_PATH_LEN], pname[128], err[256];
-   int rc = git_project_clone(principal, url, name, token, dest, sizeof(dest), pname, sizeof(pname),
-                              err, sizeof(err));
-   cJSON_Delete(body);
-   if (rc != 0)
-      return err_json(resp, cap, 400, err);
-
-   /* Best-effort index so the new project is searchable by the agent + listed. */
-   index_scan_project(pname, dest, 0);
-
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "ok", 1);
-   cJSON_AddStringToObject(out, "name", pname);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* GET /v1/workspace/org-repos?host=&owner= — list the repositories under an owner
- * on a git host (provider-agnostic: GitHub/GitLab/Gitea/Bitbucket), so the wizard
- * can bulk-clone a workspace. Auth is the attested webuser principal; enumeration
- * uses the per-host token from the sealed vault (or unauthenticated for a public
- * org). Nothing is cloned here. */
-static int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   char host[256], owner[192];
-   rh_query_str("host", host, sizeof(host));
-   rh_query_str("owner", owner, sizeof(owner));
-
-   cJSON *repos = NULL;
-   char provider[32], err[256];
-   int st = git_org_repos_list(host, owner, &repos, provider, sizeof(provider), err, sizeof(err));
-   if (st != 0)
-      return err_json(resp, cap, st, err);
-
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddStringToObject(out, "provider", provider);
-   cJSON_AddItemToObject(out, "repos", repos); /* transfers ownership */
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* POST /v1/workspace/clone-org {host, owner, repos:[{name, clone_url}]} — bulk
- * clone a selection of a workspace's repos into the calling webuser's scoped tree.
- * Each repo is cloned via git_project_clone (identity + credential handling as
- * /v1/workspace/clone); individual failures do not abort the batch. Returns a
- * per-repo result list. */
-static int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jrepos = cJSON_GetObjectItemCaseSensitive(body, "repos");
-   if (!cJSON_IsArray(jrepos) || cJSON_GetArraySize(jrepos) == 0)
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "repos[] required");
-   }
-   if (cJSON_GetArraySize(jrepos) > 100)
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "too many repos (max 100 per request)");
-   }
-
-   cJSON *out = cJSON_CreateObject();
-   cJSON *results = cJSON_AddArrayToObject(out, "results");
-   const cJSON *jrepo = NULL;
-   cJSON_ArrayForEach(jrepo, jrepos)
-   {
-      const cJSON *jname = cJSON_GetObjectItemCaseSensitive(jrepo, "name");
-      const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(jrepo, "clone_url");
-      const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
-      const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
-
-      cJSON *r = cJSON_CreateObject();
-      cJSON_AddStringToObject(r, "name", name ? name : "");
-      char dest[MAX_PATH_LEN], pname[128], err[256];
-      /* token=NULL → the host's stored credential (or server identity) is used. */
-      int rc = url ? git_project_clone(principal, url, name, NULL, dest, sizeof(dest), pname,
-                                       sizeof(pname), err, sizeof(err))
-                   : -1;
-      if (rc == 0)
-      {
-         index_scan_project(pname, dest, 0); /* best-effort: make it searchable */
-         cJSON_AddBoolToObject(r, "ok", 1);
-         cJSON_AddStringToObject(r, "project", pname);
-         cJSON_AddNullToObject(r, "error");
-      }
-      else
-      {
-         cJSON_AddBoolToObject(r, "ok", 0);
-         cJSON_AddNullToObject(r, "project");
-         cJSON_AddStringToObject(r, "error", url ? err : "missing clone_url");
-      }
-      cJSON_AddItemToArray(results, r);
-   }
-   cJSON_Delete(body);
-
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* POST /v1/workspace/git {project, op, message?, branch?, n?} — run a git
- * operation on the calling webchat user's project (webchat-git WP-E). Identity
- * is the attested X-Aimee-Webuser principal; the project + op are scoped +
- * allowlisted by git_ops, and remote ops use the user's vaulted creds. */
-static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jproj = cJSON_GetObjectItemCaseSensitive(body, "project");
-   const cJSON *jop = cJSON_GetObjectItemCaseSensitive(body, "op");
-   const cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(body, "message");
-   const cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(body, "branch");
-   const cJSON *jn = cJSON_GetObjectItemCaseSensitive(body, "n");
-   const cJSON *jsid = cJSON_GetObjectItemCaseSensitive(body, "session_id");
-   const char *project = (cJSON_IsString(jproj) && jproj->valuestring) ? jproj->valuestring : NULL;
-   const char *op = (cJSON_IsString(jop) && jop->valuestring) ? jop->valuestring : NULL;
-   /* Optional: run in the calling session's isolated worktree (same tree its
-    * agent edits) rather than the shared project checkout. */
-   const char *session_id = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
-   /* text_arg is the commit message (commit), target branch (checkout), or the
-    * PR title (pr; optional — empty → gh --fill from the branch's commits). */
-   const char *text = NULL;
-   if (op && (strcmp(op, "commit") == 0 || strcmp(op, "pr") == 0))
-      text = (cJSON_IsString(jmsg) && jmsg->valuestring) ? jmsg->valuestring : NULL;
-   else if (op && strcmp(op, "checkout") == 0)
-      text = (cJSON_IsString(jbranch) && jbranch->valuestring) ? jbranch->valuestring : NULL;
-   int num = (cJSON_IsNumber(jn)) ? (int)jn->valuedouble : 0;
-
-   char *git_out = NULL, err[256];
-   int rc = git_ops_run_session(principal, project, session_id, op, text, num, &git_out, err,
-                                sizeof(err));
-   cJSON_Delete(body);
-   if (rc != 0)
-   {
-      free(git_out);
-      return err_json(resp, cap, 400, err);
-   }
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "ok", 1);
-   cJSON_AddStringToObject(out, "output", git_out ? git_out : "");
-   free(git_out);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "git output too large");
-}
-
-/* GET /v1/workspace/projects — list the calling webchat user's projects (the
- * repos cloned under their scoped workspace). Identity is the attested
- * X-Aimee-Webuser principal, so a user only ever sees their own. */
-static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   char names[256][GIT_PROJECT_NAME_MAX];
-   int count = git_project_list(principal, names, 256);
-   if (count < 0)
-      count = 0;
-   cJSON *out = cJSON_CreateObject();
-   cJSON *arr = cJSON_AddArrayToObject(out, "projects");
-   for (int i = 0; i < count; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(names[i]));
-   /* The user's scoped workspace root — used by the editor to open a project
-    * folder (root/<project>) and by chat to set its working directory. It is the
-    * caller's own workspace path, returned only to them. */
-   char root[MAX_PATH_LEN];
-   if (ws_scope_user_root(principal, 0, root, sizeof(root)) == 0)
-      cJSON_AddStringToObject(out, "root", root);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
@@ -1480,250 +1432,6 @@ static int rh_chat_live(const route_req_t *rq, char *resp, int cap)
    free(s);
    cJSON_Delete(out);
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "live response too large");
-}
-
-/* POST /v1/workspace/session-dir {project, session_id} — resolve the absolute
- * directory the given session acts in for `project`: that session's isolated
- * sibling worktree (off the default branch, created on demand) when session_id is
- * present, else the project checkout. Lets the editor open the same tree the
- * session's agent edits. Identity is the attested webuser principal. */
-static int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git projects require a webchat user");
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jproj = cJSON_GetObjectItemCaseSensitive(body, "project");
-   const cJSON *jsid = cJSON_GetObjectItemCaseSensitive(body, "session_id");
-   const char *project = (cJSON_IsString(jproj) && jproj->valuestring) ? jproj->valuestring : NULL;
-   const char *session_id = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
-
-   char dir[MAX_PATH_LEN], err[256];
-   int rc = git_ops_session_dir(principal, project, session_id, dir, sizeof(dir), err, sizeof(err));
-   cJSON_Delete(body);
-   if (rc != 0)
-      return err_json(resp, cap, 400, err);
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddStringToObject(out, "dir", dir);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* POST /v1/workspace/editor — ensure the calling webchat user's code-server is
- * running and return its loopback port (webchat-git WP-I). Identity is the
- * attested X-Aimee-Webuser principal, so a user only ever drives their own
- * editor, rooted at their scoped workspace and launched with their vault-backed
- * git env. The port reaches only webchat (the trusted reverse-proxy, WP-J),
- * never the browser. 503 when the feature is disabled / code-server absent. */
-static int rh_workspace_editor(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "the editor requires a webchat user");
-
-   int port = 0;
-   char err[256];
-   int rc = webuser_editor_ensure(principal, &port, err, sizeof(err));
-   if (rc == 0)
-      return err_json(resp, cap, 503, "editor not available");
-   if (rc < 0)
-      return err_json(resp, cap, 500, err[0] ? err : "failed to start editor");
-
-   cJSON *out = cJSON_CreateObject();
-   cJSON_AddBoolToObject(out, "ok", 1);
-   cJSON_AddNumberToObject(out, "port", port);
-   char *s = cJSON_PrintUnformatted(out);
-   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-   free(s);
-   cJSON_Delete(out);
-   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-}
-
-/* Per-host git credentials (single-user server, many providers). The calling
- * webchat user manages aimee-server's OWN stored tokens (one per host); the
- * secret is write-only over the API — listing returns host names only, never
- * tokens. Identity is the attested X-Aimee-Webuser principal. */
-static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "git credentials require a webchat user");
-
-   /* GET → list configured hosts (no tokens). */
-   if (strcmp(rq->method, "GET") == 0)
-   {
-      char hosts[64][GIT_HOST_MAX];
-      int count = git_host_cred_list(hosts, 64);
-      if (count < 0)
-         count = 0;
-      cJSON *out = cJSON_CreateObject();
-      cJSON *arr = cJSON_AddArrayToObject(out, "hosts");
-      for (int i = 0; i < count; i++)
-         cJSON_AddItemToArray(arr, cJSON_CreateString(hosts[i]));
-      char *s = cJSON_PrintUnformatted(out);
-      int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
-      free(s);
-      cJSON_Delete(out);
-      return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
-   }
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jhost = cJSON_GetObjectItemCaseSensitive(body, "host");
-   const cJSON *jtoken = cJSON_GetObjectItemCaseSensitive(body, "token");
-   const char *host = (cJSON_IsString(jhost) && jhost->valuestring) ? jhost->valuestring : NULL;
-   const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
-   /* Accept a full URL in `host` too (convenience) → reduce to its host. */
-   char hostbuf[GIT_HOST_MAX];
-   if (host && strstr(host, "://") && git_host_from_url(host, hostbuf, sizeof(hostbuf)))
-      host = hostbuf;
-   if (!host || !host[0])
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "host required");
-   }
-
-   int rc;
-   if (strcmp(rq->method, "DELETE") == 0)
-   {
-      rc = git_host_cred_delete(host);
-      /* Revocation must leave no live credential handle behind (G5): the user's
-       * running code-server baked the now-removed token into its env at spawn,
-       * and the ssh-agent may hold a key loaded from the vault. Drop both AFTER
-       * the vault entry is gone — order matters: deleting first means a /vscode
-       * request that respawns the editor between these two steps re-reads an
-       * already-empty vault, so it cannot pick the token back up. Both stop
-       * functions are void + idempotent (no-op if nothing is running) so a
-       * concurrent double-revoke is safe; webuser_editor_stop reaps the child
-       * synchronously (bounded ~500ms), git_ssh_agent_stop only signals+unlinks.
-       * Recycling is cheap — the editor respawns lazily on the next /vscode
-       * request with a freshly-built (credential-free) env. */
-      if (rc == 0)
-      {
-         webuser_editor_stop(principal);
-         git_ssh_agent_stop(principal);
-      }
-   }
-   else /* POST → set */
-   {
-      if (!token || !token[0])
-      {
-         cJSON_Delete(body);
-         return err_json(resp, cap, 400, "token required");
-      }
-      rc = git_host_cred_set(host, token);
-   }
-   cJSON_Delete(body);
-   if (rc != 0)
-      return err_json(resp, cap, 500, "credential store failed");
-   return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
-              ? 200
-              : err_json(resp, cap, 500, "too large");
-}
-
-/* Per-webuser SSH private key for git over SSH. Stored under the caller's OWN
- * principal (webuser:<name>, "git", "ssh_key") but sealed with the SERVER master
- * KEK (a server-only wrap), so the server can load it into the user's in-memory
- * ssh-agent autonomously (git_ssh_agent_ensure → git_forge_vault_sshkey) AND
- * storing it needs NO vault unlock — parity with per-host git tokens and delegate
- * keys. The key never reaches the browser (write-only) and never lands on disk.
- * The secret is never logged. */
-static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   const char *principal = server_http_identity_principal();
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return err_json(resp, cap, 403, "ssh keys require a webchat user");
-
-   if (strcmp(rq->method, "DELETE") == 0)
-   {
-      /* Remove the stored key and drop any live agent handle (mirrors revoke). A
-       * missing entry is success — DELETE is idempotent. git_ssh_agent_stop runs
-       * only on a clean delete: on a real vault error the persisted key still
-       * exists, so tearing the agent down would just force a reload — leaving it
-       * is the less-inconsistent state. */
-      vault_status_t st =
-          vault_service_delete(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED);
-      if (st != VAULT_OK && st != VAULT_NO_ENTRY)
-         return err_json(resp, cap, 500, "vault delete failed");
-      git_ssh_agent_stop(principal);
-      return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
-                 ? 200
-                 : err_json(resp, cap, 500, "too large");
-   }
-   if (strcmp(rq->method, "POST") != 0)
-      return err_json(resp, cap, 405, "method not allowed");
-
-   /* Bound the body before parsing: a private key is a few KB, so anything past
-    * 64 KiB is abuse — fail fast rather than parse + re-wrap a huge blob. */
-   if (rq->body_len > 65536)
-      return err_json(resp, cap, 413, "ssh key too large");
-
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jkey = cJSON_GetObjectItemCaseSensitive(body, "ssh_key");
-   const char *key = (cJSON_IsString(jkey) && jkey->valuestring) ? jkey->valuestring : NULL;
-   /* Cheap shape check so an obviously-wrong paste fails fast with a clear
-    * message; ssh-add is still the authority at load time. Anchor on the PEM/
-    * OpenSSH armor ("-----BEGIN … PRIVATE KEY-----") rather than a loose
-    * substring so arbitrary text containing the words can't slip through. We do
-    * NOT accept a passphrase-encrypted key — the agent loads non-interactively. */
-   if (!key || strncmp(key, "-----BEGIN", 10) != 0 || !strstr(key, "PRIVATE KEY-----"))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "an unencrypted OpenSSH/PEM private key is required");
-   }
-   if (strstr(key, "ENCRYPTED") || strstr(key, "Proc-Type:"))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400,
-                      "passphrase-encrypted keys are not supported; provide an unencrypted key");
-   }
-
-   /* Seal the key under the SERVER master KEK (not the caller's per-user KEK) so
-    * storing needs NO vault unlock — parity with per-host git tokens and delegate
-    * keys. It is read back the same way (git_forge_vault_sshkey ->
-    * vault_service_get_server_wrap), so there is never a VAULT_ERR_LOCKED here. */
-   vault_status_t st =
-       vault_service_set_server_wrap(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, key);
-   /* Zero our parsed copy of the secret before freeing the JSON tree. */
-   if (jkey && jkey->valuestring)
-   {
-      volatile char *p = (volatile char *)jkey->valuestring;
-      for (size_t i = 0; p[i]; i++)
-         p[i] = 0;
-   }
-   cJSON_Delete(body);
-   if (st != VAULT_OK)
-      return err_json(resp, cap, 500, "vault store failed");
-   /* A freshly stored key supersedes any agent already running with the old one. */
-   git_ssh_agent_stop(principal);
-   return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
-              ? 200
-              : err_json(resp, cap, 500, "too large");
 }
 
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
@@ -1801,6 +1509,10 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 static const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
+    {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},
+    {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
+    {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
+    {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},
@@ -1839,10 +1551,6 @@ static const http_route_t g_v1_routes[] = {
      * remote_writes=off and allows them only at remote_writes=data/full after
      * capability checks. caps still derive from the op. */
     {"POST", "/v1/memory/store", NULL, RM_EXACT, "memory.store", 0, rh_dispatch_op},
-    {"POST", "/v1/work/add", NULL, RM_EXACT, "work.add", 0, rh_dispatch_op},
-    {"POST", "/v1/work/claim", NULL, RM_EXACT, "work.claim", 0, rh_dispatch_op},
-    {"POST", "/v1/work/complete", NULL, RM_EXACT, "work.complete", 0, rh_dispatch_op},
-    {"POST", "/v1/work/fail", NULL, RM_EXACT, "work.fail", 0, rh_dispatch_op},
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
@@ -1872,8 +1580,6 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/skills", NULL, RM_EXACT, "skill.list", 0, rh_dispatch_op},
     {"POST", "/v1/skills/show", NULL, RM_EXACT, "skill.show", 0, rh_dispatch_op},
     {"GET", "/v1/hosts", NULL, RM_EXACT, "hosts.list", 0, rh_dispatch_op},
-    {"GET", "/v1/work", NULL, RM_EXACT, "work.list", 0, rh_dispatch_op},
-    {"GET", "/v1/work/stats", NULL, RM_EXACT, "work.stats", 0, rh_dispatch_op},
 
     /* HUD status + trajectory export read families (hub-migration P1),
      * dispatch-backed; caps derived from the op (both CAP_SESSION_READ). */
@@ -1933,6 +1639,9 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/delegate/backend_list", NULL, RM_EXACT, "delegate.backend_list", 0,
      rh_dispatch_op},
     {"POST", "/v1/delegate/status", NULL, RM_EXACT, "delegate.status", 0, rh_dispatch_op},
+    {"GET", "/v1/delegate/sandbox/images", NULL, RM_EXACT, "delegate.sandbox_list", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/delegate/sandbox/gc", NULL, RM_EXACT, "delegate.sandbox_gc", 0, rh_dispatch_op},
     /* Credential vault (WP-C.1): the vault gates on the attested UDS principal
      * (a TCP caller gets no principal and the service refuses the root-key push),
      * so these are dispatched through the same inline bridge as the delegate
@@ -1946,6 +1655,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},
     {"POST", "/v1/vault/lock", NULL, RM_EXACT, "vault.lock", 0, rh_dispatch_op},
     {"POST", "/v1/cert/issue", NULL, RM_EXACT, "cert.issue", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/sign", NULL, RM_EXACT, "cert.sign", 0, rh_dispatch_op},
     {"POST", "/v1/cert/list", NULL, RM_EXACT, "cert.list", 0, rh_dispatch_op},
     {"POST", "/v1/cert/revoke", NULL, RM_EXACT, "cert.revoke", 0, rh_dispatch_op},
     /* Background-only over /v1: the thin client forces `background` (returns a
@@ -1993,10 +1703,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/provider/set", NULL, RM_EXACT, "provider.set", 0, rh_dispatch_op},
     {"POST", "/v1/provider/quota", NULL, RM_EXACT, "provider.quota", 0, rh_dispatch_op},
     {"POST", "/v1/provider/test", NULL, RM_EXACT, "provider.test", 0, rh_dispatch_op},
-    {"POST", "/v1/provider/slot_acquire", NULL, RM_EXACT, "provider.slot_acquire", 0,
-     rh_dispatch_op},
-    {"POST", "/v1/provider/slot_release", NULL, RM_EXACT, "provider.slot_release", 0,
-     rh_dispatch_op},
     {"GET", "/v1/model/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
     {"GET", "/v1/model/show", NULL, RM_EXACT, "model.show", 0, rh_dispatch_op},
     {"POST", "/v1/model/refresh", NULL, RM_EXACT, "model.refresh", 0, rh_dispatch_op},
@@ -2017,6 +1723,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/memory_stats", NULL, RM_EXACT, "dashboard.memory_stats", 0,
      rh_dispatch_op},
     {"GET", "/v1/dashboard/metrics", NULL, RM_EXACT, "dashboard.metrics", 0, rh_dispatch_op},
+    {"GET", "/v1/economizer/stats", NULL, RM_EXACT, "economizer.stats", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/onboard", NULL, RM_EXACT, "dashboard.onboard", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/plans", NULL, RM_EXACT, "dashboard.plans", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/plugins", NULL, RM_EXACT, "dashboard.plugins", 0, rh_dispatch_op},
@@ -2070,13 +1777,6 @@ static const http_route_t g_v1_routes[] = {
      * exact paths do not collide with the suffixed {id} prefix routes.
      * rules.generate and eval.run are deliberately excluded (LLM/long-running —
      * see docs/v1-op-parity-buildout.md). */
-    {"POST", "/v1/work/add_batch", NULL, RM_EXACT, "work.add_batch", 0, rh_dispatch_op},
-    {"GET", "/v1/work/board", NULL, RM_EXACT, "work.board", 0, rh_dispatch_op},
-    {"POST", "/v1/work/cancel", NULL, RM_EXACT, "work.cancel", 0, rh_dispatch_op},
-    {"POST", "/v1/work/clear", NULL, RM_EXACT, "work.clear", 0, rh_dispatch_op},
-    {"POST", "/v1/work/gc", NULL, RM_EXACT, "work.gc", 0, rh_dispatch_op},
-    {"POST", "/v1/work/release", NULL, RM_EXACT, "work.release", 0, rh_dispatch_op},
-    {"POST", "/v1/work/sync_proposals", NULL, RM_EXACT, "work.sync_proposals", 0, rh_dispatch_op},
     {"POST", "/v1/wm/context", NULL, RM_EXACT, "wm.context", 0, rh_dispatch_op},
     {"POST", "/v1/wm/get", NULL, RM_EXACT, "wm.get", 0, rh_dispatch_op},
     {"POST", "/v1/skills/autostub", NULL, RM_EXACT, "skill.autostub", 0, rh_dispatch_op},
@@ -2117,6 +1817,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/kb/build", NULL, RM_EXACT, "kb.build", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/ingest", NULL, RM_EXACT, "kb.ingest", 0, rh_dispatch_op_async},
     {"POST", "/v1/kb/update", NULL, RM_EXACT, "kb.update", 0, rh_dispatch_op_async},
+    {"POST", "/v1/kb/docs/push", NULL, RM_EXACT, "kb.docs.push", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/ingest", NULL, RM_EXACT, "index.ingest", 0, rh_dispatch_op_async},
@@ -2141,6 +1842,13 @@ static const http_route_t g_v1_routes[] = {
      * still drives the capability gate + conformance scan for it). */
     {"POST", "/v1/messages", NULL, RM_EXACT, "chat.send_stream", 0, rh_messages},
     {"POST", "/v1/messages/count_tokens", NULL, RM_EXACT, NULL, CAP_CHAT, rh_count_tokens},
+    /* Shadow-traffic control (operator-only; CAP_SHADOW_ADMIN = full-trust). Arming
+     * is runtime-only and never persists -- a reboot always boots disarmed. */
+    {"POST", "/v1/shadow/enable", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_enable},
+    {"POST", "/v1/shadow/disable", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_disable},
+    {"POST", "/v1/shadow/subscribe", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN, rh_shadow_subscribe},
+    {"POST", "/v1/shadow/unsubscribe", NULL, RM_EXACT, NULL, CAP_SHADOW_ADMIN,
+     rh_shadow_unsubscribe},
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
@@ -2213,6 +1921,7 @@ static const http_route_t g_v1_routes[] = {
     {"DELETE", "/v1/workflow/blocks/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_wf_block_delete},
     {"GET", "/v1/workflow/defs", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_list},
+    {"GET", "/v1/workflow/triggers", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_triggers},
     {"GET", "/v1/workflow/defs/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_get},
     {"POST", "/v1/workflow/validate", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_validate},
     {"POST", "/v1/workflow/save", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_wf_save},
@@ -2273,9 +1982,15 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
+     * requires a kernel-attested uid: principal, making this route UDS-only. */
+    {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_internal_forge_execute},
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
+    {"POST", "/v1/workspace/projects/delete", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_workspace_projects_delete},
     {"GET", "/v1/workspace/org-repos", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_org_repos},
     {"POST", "/v1/workspace/clone-org", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
@@ -2308,6 +2023,7 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_device_config},
     {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
     {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
+    {"GET", "/v1/server/forensics", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_server_forensics},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},
@@ -2430,6 +2146,9 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
 {
    if (!method || !path || !resp || resp_cap <= 0)
       return err_json(resp, resp_cap, 400, "bad request");
+   if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
+       strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
+      return err_json(resp, resp_cap, 410, "Go WFE control plane owns this endpoint");
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

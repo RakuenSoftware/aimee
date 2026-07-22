@@ -88,6 +88,7 @@ nodes:
     params:
       workflow: slice
     next: accept_freeze
+    on_fail: split
   - id: accept_freeze
     block: freeze
     in:

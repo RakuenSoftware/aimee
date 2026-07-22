@@ -22,12 +22,17 @@
 
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "agent_tools.h"
 #include "agent_types.h"
 #include "cJSON.h"
+#include "coord_jobs.h"
+#include "delegate_backend.h" /* run verify steps inside the delegate sandbox */
 #include "delegate_role.h"
+#include "delegate_sandbox_image.h" /* resolve the work item's sandbox image */
+#include "sandbox_learned.h"        /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
-#include "headers/git_verify.h"
+#include "git_verify.h"
 #include "log.h"
 #include "util.h"
 #include "wfe_approval.h"
@@ -42,115 +47,117 @@
 #include <string.h>
 #include <time.h>
 
-static void chomp(char *s)
+/* Block (busy-poll) until a single-task coord job reaches a terminal state, then
+ * hand back the delegate's result text. WFE runs on the autonomy scheduler
+ * thread; the coord DISPATCHER runs the task on its own thread through the shared
+ * delegate path, so this only waits — it never executes the delegate. Returns 0
+ * and fills result_out on 'done'; -1 (+err) on 'failed'/'cancelled'/timeout. */
+static int wfe_coord_task_wait(int job_id, int task_id, char *result_out, size_t result_cap,
+                               char *err, size_t errlen)
 {
-   if (!s)
-      return;
-   size_t n = strlen(s);
-   while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == ' ' || s[n - 1] == '\t'))
-      s[--n] = '\0';
+   (void)task_id;              /* the job holds exactly one task */
+   const int max_polls = 1600; /* 1600 * 750ms ~= 20 min, matching the delegate timeout ceiling */
+   for (int i = 0; i < max_polls; i++)
+   {
+      db1_coord_task_t task;
+      memset(&task, 0, sizeof task);
+      if (db1_coord_job_list_tasks(job_id, &task, 1) >= 1)
+      {
+         if (strcmp(task.status, "done") == 0)
+         {
+            if (result_out && result_cap)
+               snprintf(result_out, result_cap, "%s", task.result);
+            return 0;
+         }
+         if (strcmp(task.status, "failed") == 0 || strcmp(task.status, "cancelled") == 0)
+         {
+            if (err && errlen)
+               snprintf(err, errlen, "wfe delegate task %s: %s", task.status,
+                        task.error[0] ? task.error : "no detail");
+            return -1;
+         }
+      }
+      struct timespec ts = {0, 750L * 1000L * 1000L};
+      nanosleep(&ts, NULL);
+   }
+   if (err && errlen)
+      snprintf(err, errlen, "wfe delegate task timed out");
+   return -1;
 }
 
-/* Run `git -C workdir <args...>`, discard output. Returns the exec rc. */
-static int git_run(const char *workdir, const char *const extra[], int extra_n)
-{
-   const char *argv[16];
-   int argc = 0;
-   argv[argc++] = "git";
-   argv[argc++] = "-C";
-   argv[argc++] = workdir;
-   for (int i = 0; i < extra_n && argc < 15; i++)
-      argv[argc++] = extra[i];
-   argv[argc] = NULL;
-   char *out = NULL;
-   int rc = safe_exec_capture(argv, &out, 1 << 16);
-   free(out);
-   return rc;
-}
+/* The live delegate run. Contract per wfe_delegate_provider_t.
+ *
+ * WFE ORCHESTRATES delegates; it does not run them. This enqueues ONE delegate
+ * task onto the coord queue — aimee's single delegate-dispatch queue — and waits
+ * for the coord dispatcher to run it through the shared delegate path. That path
+ * owns everything WFE must not: agent routing, the per-model/provider concurrency
+ * limit (registered max_parallel), credential leasing/retry, the parent-write
+ * guard, and the isolated worktree whose diff it applies back into `workdir`
+ * (container-ready — WFE never assumes a local process or a shared checkout).
+ * WFE holds no server_ctx, spawns no delegate, and runs no git: `freeze` owns the
+ * commit, so out_commit_sha is left empty here. The block's `role` arg is the
+ * delegate PERSONA (architect/engineer/...); the delegate ROLE (read vs write) is
+ * derived from whether the block named a captured artifact_path — see below. */
+static void wfe_commit_worktree_changes(const char *workdir);
 
-/* wfe_resolve_delegate + the $random selector live in wfe_delegate_resolve.c
- * (self-contained, unit-tested). */
-
-/* The live delegate run. Contract per wfe_delegate_provider_t. */
-static int wfe_live_delegate_run(const char *workdir, const char *role, const char *delegate,
-                                 const char *prompt, const char *artifact_path,
-                                 char out_commit_sha[64], char *err, size_t errlen)
+static int wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt,
+                                 const char *artifact_path, char out_commit_sha[64], char *err,
+                                 size_t errlen)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
-   if (!workdir || !workdir[0] || !prompt || !prompt[0] ||
-       ((!role || !role[0]) && (!delegate || !delegate[0])))
+   if (!workdir || !workdir[0] || !prompt || !prompt[0])
    {
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: missing workdir/prompt and role+delegate");
+         snprintf(err, errlen, "wfe live delegate: missing workdir/prompt");
       return -1;
    }
 
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-   {
-      if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: agent config load failed");
-      return -1;
-   }
-
-   /* Resolve the step's delegate: a specific name -> itself; "" and "$random"
-    * -> a uniformly random ENABLED roster agent (an unnamed delegate means "any
-    * agent", so successive dispatches assort across the roster instead of
-    * pinning to one). Fail fast rather than leak the sentinel downstream. */
-   char agent_name[MAX_AGENT_NAME] = "";
-   if (wfe_resolve_delegate(delegate, &acfg, agent_name, sizeof agent_name) != 0)
-   {
-      if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: no enabled agent in the roster");
-      return -1;
-   }
-
-   /* The producing blocks pass a PERSONA (engineer / architect / ...) — the
-    * delegate's IDENTITY — in this slot, NOT an agent routing role. (It was
-    * historically misused as a role, so no agent matched — author/implement
-    * looped forever.) Compose the persona's identity + principles as the system
-    * prompt, and route by a ROLE the persona is allowed to use that an eligible
-    * agent can serve. */
    const char *persona = (role && role[0]) ? role : "engineer";
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-
-   /* Run WITH TOOLS, pinned to the work-item worktree, so file edits land there.
-    * The resolve above always yields a concrete agent name, so dispatch is
-    * uniformly by name; an unroutable pick fails here and the block's retry
-    * loop re-rolls a different agent. */
-   run_cmd_set_cwd(workdir);
-   agent_result_t res;
-   memset(&res, 0, sizeof(res));
-   int rc;
-   agent_t *ag = agent_find(&acfg, agent_name);
-   if (!ag)
+   /* Produce-via-reply vs worktree-mutating, keyed on whether the block named a
+    * captured artifact_path:
+    *   - artifact_path set (author/understand/split/review): the delegate's OUTPUT
+    *     is its reply, which WFE persists below. A READ role ("review"): it
+    *     modifies no files, so the shared path's named-file drift guard never
+    *     hard-fails it on a repo-relative path quoted in the reference content
+    *     threaded into its prompt.
+    *   - artifact_path NULL (implement/decompose/tdd/document): the delegate
+    *     MUTATES the worktree. A WRITE role ("code") so the delegate system
+    *     isolates its checkout and applies the diff back into `workdir`.
+    * cwd = the work-item worktree; persona names the delegate identity. */
+   int produce_via_reply = (artifact_path && artifact_path[0]);
+   const char *delegate_role = produce_via_reply ? "review" : "code";
+   int job_id = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
+   if (job_id <= 0)
    {
-      run_cmd_set_cwd(NULL);
-      free(sys_prompt);
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
+         snprintf(err, errlen, "wfe live delegate: could not create coord job");
       return -1;
    }
-   rc = agent_execute_with_tools(ag, &acfg.network, sys_prompt ? sys_prompt : "", prompt,
-                                 AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-
-   if (rc != 0)
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", delegate_role, prompt, workdir, persona);
+   if (task_id <= 0)
    {
+      db1_coord_job_cancel(job_id);
       if (err && errlen)
-         snprintf(err, errlen, "%s", res.error[0] ? res.error : "delegate run failed");
-      free(res.response);
+         snprintf(err, errlen, "wfe live delegate: could not enqueue coord task");
       return -1;
    }
 
-   /* Text-artifact blocks (e.g. author.proposal/plan): if the agent produced a
-    * response and did not itself write the artifact file, persist the response so
-    * the following gate has content to act on. Code blocks edit files via tools
-    * and usually leave artifact_path NULL. */
-   if (artifact_path && artifact_path[0] && res.response && res.response[0])
+   char result[DB1_COORD_RESULT_LEN] = "";
+   if (wfe_coord_task_wait(job_id, task_id, result, sizeof result, err, errlen) != 0)
+      return -1;
+
+   /* A worktree-mutating (implement/decompose/tdd/document) delegate edits the
+    * dedicated per-slice worktree in place; stage + commit its work here so the
+    * verify gate records a diff and the PR carries it. Produce-via-reply (read)
+    * blocks touch no files, so this is skipped for them. */
+   if (!produce_via_reply)
+      wfe_commit_worktree_changes(workdir);
+
+   /* Text-artifact blocks (author.proposal/plan): persist the delegate's reply as
+    * the artifact if it did not itself write the file, so the next gate has
+    * content. Pure orchestration glue — not delegate execution. */
+   if (artifact_path && artifact_path[0] && result[0])
    {
       long existing = -1;
       FILE *rf = fopen(artifact_path, "rb");
@@ -165,41 +172,166 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
          FILE *wf = fopen(artifact_path, "wb");
          if (wf)
          {
-            fwrite(res.response, 1, strlen(res.response), wf);
+            fwrite(result, 1, strlen(result), wf);
             fclose(wf);
          }
       }
    }
-   free(res.response);
-
-   /* Stage + commit whatever the delegate changed in the worktree. A commit with
-    * nothing staged is a harmless no-op (rc ignored); out_commit_sha is then just
-    * the unchanged HEAD. Commit with the host's CONFIGURED git identity (the same
-    * creds aimee pushes with) rather than a synthetic bot identity: a bot author
-    * makes a downstream squash-merge inject a `Co-authored-by:` trailer, which the
-    * standing directive forbids. No `-c user.name/user.email` override, and no
-    * co-authorship trailer. */
-   {
-      const char *add[] = {"add", "-A"};
-      (void)git_run(workdir, add, 2);
-      const char *commit[] = {"commit", "--no-verify", "-m", "aimee: autonomous delegate change"};
-      (void)git_run(workdir, commit, 4);
-   }
-   {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         chomp(o);
-         if (out_commit_sha)
-            snprintf(out_commit_sha, 64, "%s", o);
-      }
-      free(o);
-   }
    return 0;
 }
 
+/* Stage and commit whatever an implement-style delegate wrote directly into the
+ * work-item worktree, on its current (work-item) branch. A WFE per-slice tree is
+ * DEDICATED: the delegate edits `workdir` in place, so unlike a sibling-worktree
+ * delegate there is no isolated checkout whose diff the delegate system applies
+ * back (and commits) for us — the change would otherwise sit untracked, the
+ * verify gate would see no recorded diff, the implement block would loop to its
+ * cap, and the eventual PR would carry nothing. Commit runs server-side (host):
+ * the repo object store is writable here even though the delegate's container
+ * mounts it read-only. A true no-op (clean tree, or a delegate that committed
+ * itself) stages nothing and this is skipped. The author is a fixed WFE identity
+ * with no AI attribution, per repo policy. */
+static void wfe_commit_worktree_changes(const char *workdir)
+{
+   if (!workdir || !workdir[0])
+      return;
+   char cmd[MAX_PATH_LEN + 256];
+   int rc = 0;
+   snprintf(cmd, sizeof cmd, "git -C '%s' add -A 2>&1", workdir);
+   free(run_cmd(cmd, &rc));
+   if (rc != 0)
+   {
+      aimee_log(LOG_WARN, "wfe-delegate", "implement commit: git add failed in %s", workdir);
+      return;
+   }
+   /* `git diff --cached --quiet` exits 0 when nothing is staged, 1 when there is
+    * a staged change to commit. Skip the commit (and its noisy "nothing to
+    * commit" failure) on a clean tree. */
+   snprintf(cmd, sizeof cmd, "git -C '%s' diff --cached --quiet", workdir);
+   free(run_cmd(cmd, &rc));
+   if (rc == 0)
+      return; /* nothing staged: a genuine no-op or an already-committing delegate */
+   snprintf(cmd, sizeof cmd,
+            "git -C '%s' -c user.name='aimee-wfe' -c user.email='wfe@aimee.local' commit -q "
+            "-m 'wfe: apply implement changes' 2>&1",
+            workdir);
+   char *out = run_cmd(cmd, &rc);
+   if (rc != 0)
+      aimee_log(LOG_WARN, "wfe-delegate", "implement commit failed in %s: %s", workdir,
+                out ? out : "");
+   else
+      aimee_log(LOG_INFO, "wfe-delegate", "committed implement changes in %s", workdir);
+   free(out);
+}
+
 static const wfe_delegate_provider_t WFE_LIVE_DELEGATE = {wfe_live_delegate_run};
+
+/* Mechanical-verify default step timeout — mirrors git_verify_step.c's default so
+ * a step run in the sandbox gets the same wall budget as in-process. */
+#define WFE_VERIFY_STEP_TIMEOUT_MS (30 * 60 * 1000)
+
+/* Run the resolved verify steps INSIDE the work item's delegate sandbox — the
+ * `--network none`, toolchain-baked image the engineer delegate builds against —
+ * instead of in the aimee-server process (the slim runtime container ships no
+ * gcc/make, so an in-process `aimee git verify` there can never pass and the
+ * implement block loops to its wall-cap; see docs/DELEGATE_SANDBOX_VERIFY.md).
+ *
+ * Reuses the docker delegate backend so verify inherits the SAME sandbox the
+ * delegate used: the resolved per-project image (custom `sandbox:` spec honored
+ * via delegate_sandbox_resolve_image) and the egress package proxy for first-time
+ * dependency installs — and each step is fed to sandbox_learned_observe so those
+ * apt installs are captured and pre-baked into the next image build (egress →
+ * offline over time).
+ *
+ * Returns 0 and writes a {verdict, steps:[{name,rc}]} JSON to out_verdict when the
+ * sandbox path ran; -1 when it is unavailable (no docker backend, no resolvable
+ * verify steps, or the sandbox could not start) so the caller falls back to the
+ * in-process gate — preserving CLI and non-sandboxed behavior unchanged. */
+static int wfe_verify_in_sandbox(const char *workdir, char *out_verdict, size_t n)
+{
+   if (!workdir || !workdir[0])
+      return -1;
+   verify_config_t cfg;
+   if (verify_load_config(workdir, &cfg) != 0 || cfg.count <= 0)
+      return -1; /* no steps resolvable here -> let the caller fall back */
+
+   delegate_backend_t *be = delegate_backend_lookup("docker");
+   if (!be || !be->acquire || !be->exec || !be->release)
+      return -1; /* no sandbox backend -> fall back to in-process verify */
+
+   char image[256] = "";
+   (void)delegate_sandbox_resolve_image(workdir, image, sizeof image); /* "" -> backend default */
+
+   delegate_backend_config_t bc = {0};
+   bc.image = image[0] ? image : NULL;
+   bc.workspace = workdir;
+   bc.pkg_proxy = 1;         /* egress proxy for first-time dep installs (learned pre-bake) */
+   bc.require_isolation = 1; /* --network none; refuse to run un-isolated */
+   bc.hibernate_on_exit = 1; /* keep the container + learned materials for reuse */
+
+   /* Stable per-worktree task id so the sandbox (and its learned toolchain) is
+    * reused across an implement unit's retries rather than rebuilt each round. */
+   char task_id[80];
+   const char *slash = strrchr(workdir, '/');
+   snprintf(task_id, sizeof task_id, "wfe-verify-%s", (slash && slash[1]) ? slash + 1 : workdir);
+
+   void *state = NULL;
+   if (be->acquire(be, task_id, &bc, &state) != 0)
+      return -1; /* sandbox could not start -> fall back */
+
+   cJSON *verdict = cJSON_CreateObject();
+   cJSON *steps = verdict ? cJSON_AddArrayToObject(verdict, "steps") : NULL;
+   char *obuf = malloc(1 << 18), *ebuf = malloc(1 << 15);
+   int failed = 0, ran = 0;
+   if (verdict && steps && obuf && ebuf)
+   {
+      for (int i = 0; i < cfg.count; i++)
+      {
+         const verify_step_t *s = &cfg.steps[i];
+         if (!s->run[0])
+            continue;
+         /* Capture any apt installs this step performs so they pre-bake into the
+          * next sandbox image build (B -> A: egress-installed becomes baked-in). */
+         sandbox_learned_observe(workdir, s->run);
+         delegate_exec_result_t res = {0};
+         res.stdout_buf = obuf;
+         res.stdout_cap = 1 << 18;
+         res.stderr_buf = ebuf;
+         res.stderr_cap = 1 << 15;
+         obuf[0] = ebuf[0] = '\0';
+         int trc = be->exec(be, state, s->run, WFE_VERIFY_STEP_TIMEOUT_MS, &res);
+         int step_rc = (trc != 0) ? -1 : res.exit_code; /* transport failure = step failure */
+         if (step_rc != 0)
+            failed++;
+         ran++;
+         cJSON *js = cJSON_CreateObject();
+         if (js)
+         {
+            cJSON_AddStringToObject(js, "name", s->name);
+            cJSON_AddNumberToObject(js, "rc", step_rc);
+            cJSON_AddItemToArray(steps, js);
+         }
+      }
+   }
+   be->release(be, state, 1 /* hibernate: keep the sandbox for the next retry */);
+
+   int rc = -1;
+   if (verdict && steps && ran > 0)
+   {
+      cJSON_AddStringToObject(verdict, "verdict", failed ? "failed" : "passed");
+      char *sv = cJSON_PrintUnformatted(verdict);
+      if (sv)
+      {
+         snprintf(out_verdict, n, "%s", sv);
+         free(sv);
+         rc = 0;
+      }
+   }
+   free(obuf);
+   free(ebuf);
+   cJSON_Delete(verdict);
+   return rc;
+}
 
 /* Live verify provider (WP-1b): run the mechanical verify gate synchronously on
  * `workdir` and return the structured format=json verdict. The implement block
@@ -209,12 +341,26 @@ static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
 {
    if (out_verdict && n)
       out_verdict[0] = '\0';
+   /* Prefer the sandbox: the in-process gate below runs in the toolchain-less
+    * server container and can never build a real project. Falls through to
+    * in-process only when no sandbox is available (CLI / non-sandboxed setups). */
+   if (wfe_verify_in_sandbox(workdir, out_verdict, n) == 0)
+      return 0;
    cJSON *args = cJSON_CreateObject();
    if (!args)
       return -1;
    cJSON_AddStringToObject(args, "action", "run");
    cJSON_AddBoolToObject(args, "async", 0); /* synchronous: we need the verdict now */
    cJSON_AddStringToObject(args, "format", "json");
+   /* Assert authority over the target: this provider verifies a SPECIFIC work-item
+    * worktree (we pin the run_cmd CWD to it below), so it is the authoritative
+    * in-process caller force_in_scope exists for. Without this, handle_git_verify
+    * falls to verify_project_in_scope(), which reports the WFE repo out-of-scope
+    * whenever it is not the daemon's "current project" -> an "unavailable" verdict
+    * that loops the implement block to its cap. Forcing in-scope here decouples the
+    * WFE verify from the global verify_cross_project flag (a deployment knob that
+    * should not gate whether a slice's own committed tree can be verified). */
+   cJSON_AddBoolToObject(args, "force_in_scope", 1);
    /* handle_git_verify never reads a "path" arg itself — on the MCP route the
     * dispatch layer chdirs the run_cmd thread before the handler runs, and
     * resolve_verify_root() picks the root up from that CWD. Calling the handler
@@ -282,83 +428,36 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
           "false} if the change is sound, or {\"refuted\": true, \"reason\": \"<why>\"} if it "
           "is flawed.");
 
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-      return -1;
-   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
-   persona_t pinfo;
-   memset(&pinfo, 0, sizeof pinfo);
-   persona_load(NULL, persona, &pinfo);
-
-   /* Read-only enforcement (defense in depth): capture the pre-judge HEAD so we can
-    * hard-reset the worktree afterwards — the judge is instructed not to edit, but we
-    * do not rely on instruction-following; any edit it makes is discarded. */
-   char pre_head[64] = "";
+   /* Enqueue a READ-ONLY delegate task on the coord queue. role "review" is not a
+    * write role, so the shared path's write-capable gate blocks any file edit at
+    * the tool layer — the read-only property is enforced by the delegate system,
+    * not by a WFE-side hard-reset. WFE just reads the verdict. */
+   int job_id = db1_coord_job_create(WFE_COORD_PLAN_ID, 1);
+   if (job_id <= 0)
    {
-      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
-      char *o = NULL;
-      if (safe_exec_capture(argv, &o, 256) == 0 && o)
-      {
-         chomp(o);
-         snprintf(pre_head, sizeof pre_head, "%s", o);
-      }
-      free(o);
+      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not create coord job\"}");
+      return 0; /* fail-closed verdict */
+   }
+   int task_id = db1_coord_job_add_task(job_id, 0, "[]", "review", prompt, workdir, persona);
+   if (task_id <= 0)
+   {
+      db1_coord_job_cancel(job_id);
+      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"could not enqueue coord task\"}");
+      return 0;
    }
 
-   run_cmd_set_cwd(workdir);
-   agent_result_t res;
-   memset(&res, 0, sizeof(res));
-   agent_t *chosen = NULL;
-   const char *chosen_role = NULL;
-   int best_tier = 0;
-   for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
-   {
-      const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-      for (int ai = 0; ai < acfg.agent_count; ai++)
-      {
-         agent_t *ag = &acfg.agents[ai];
-         if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
-             !agent_is_available_for_routing(ag))
-            continue;
-         if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
-            continue;
-         if (!chosen || ag->cost_tier < best_tier)
-         {
-            chosen = ag;
-            chosen_role = r;
-            best_tier = ag->cost_tier;
-         }
-      }
-   }
-   int rc = -1;
-   if (chosen)
-      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
-                                             sys_prompt ? sys_prompt : "", prompt,
-                                             AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
-   run_cmd_set_cwd(NULL);
-   free(sys_prompt);
-   persona_free(&pinfo);
-
-   /* Discard anything the judge changed: hard-reset to the pre-judge HEAD + clean
-    * untracked. This makes the read-only property enforced, not merely requested. */
-   if (pre_head[0])
-   {
-      const char *reset[] = {"reset", "--hard", pre_head};
-      (void)git_run(workdir, reset, 3);
-      const char *clean[] = {"clean", "-fd"};
-      (void)git_run(workdir, clean, 2);
-   }
+   char result[DB1_COORD_RESULT_LEN] = "";
+   int ok = wfe_coord_task_wait(job_id, task_id, result, sizeof result, NULL, 0);
 
    int refuted = 1; /* fail-closed default */
-   if (rc == 0 && res.response && res.response[0])
+   if (ok == 0 && result[0])
    {
       /* Parse ONLY the LAST non-empty line as the verdict JSON (the delegate is told
        * to emit exactly one JSON line at the end). A substring scan of the whole
        * response would false-ACCEPT on a skeptic's reasoning that quotes
        * {"refuted": false}. Accept only on an explicit boolean refuted:false; anything
        * that doesn't parse to that is REFUTED (fail closed). */
-      const char *r = res.response;
+      const char *r = result;
       size_t len = strlen(r);
       while (len > 0 &&
              (r[len - 1] == '\n' || r[len - 1] == '\r' || r[len - 1] == ' ' || r[len - 1] == '\t'))
@@ -382,53 +481,11 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
          }
       }
    }
-   free(res.response);
-   if (rc != 0 && !chosen)
-      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"no judge agent available\"}");
-   else
-      snprintf(out_verdict, n, "{\"refuted\":%s}", refuted ? "true" : "false");
+   snprintf(out_verdict, n, "{\"refuted\":%s}", refuted ? "true" : "false");
    return 0; /* a verdict was produced (even a fail-closed one) */
 }
 
 static const wfe_judge_provider_t WFE_LIVE_JUDGE = {wfe_live_judge_run};
-
-/* --- live mechanical-verify provider (the implement gate) ---------------------
- * Runs the git_verify gate synchronously in the work-item worktree and hands
- * its format=json verdict document to wfe_implement_verify_ok. Without a
- * registered provider the gate fails closed, which meant implement could NEVER
- * advance on a real deployment (the provider only ever existed in tests —
- * observed live as instant impl loops to the cap on every slice child). */
-static int live_verify_run(const char *workdir, char *out, size_t n)
-{
-   if (!out || n == 0)
-      return -1;
-   out[0] = '\0';
-   cJSON *args = cJSON_CreateObject();
-   if (!args)
-      return -1;
-   cJSON_AddStringToObject(args, "action", "run");
-   cJSON_AddStringToObject(args, "format", "json");
-   cJSON_AddBoolToObject(args, "async", 0);
-   run_cmd_set_cwd(workdir);
-   cJSON *res = handle_git_verify(server_active_ctx(), args, NULL);
-   run_cmd_set_cwd(NULL);
-   cJSON_Delete(args);
-   if (!res)
-      return -1;
-   /* mcp_text shape: [ {type:"text", text:"<verdict json>"} ] */
-   const cJSON *item = cJSON_GetArrayItem(res, 0);
-   const cJSON *txt = item ? cJSON_GetObjectItemCaseSensitive(item, "text") : NULL;
-   int rc = -1;
-   if (txt && cJSON_IsString(txt) && txt->valuestring)
-   {
-      snprintf(out, n, "%s", txt->valuestring);
-      rc = 0;
-   }
-   cJSON_Delete(res);
-   return rc;
-}
-
-static const wfe_verify_provider_t LIVE_VERIFY = {live_verify_run};
 
 void wfe_autonomy_register(void)
 {
@@ -457,6 +514,5 @@ void wfe_autonomy_register(void)
     * foreach node after its plan is authored + roundtabled); without it the foreach
     * node fails closed (parks). */
    wfe_live_foreach_register();
-   wfe_set_verify_provider(&LIVE_VERIFY);
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }

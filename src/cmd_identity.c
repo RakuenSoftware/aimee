@@ -597,6 +597,21 @@ static void identity_diff(app_ctx_t *ctx, int argc, char **argv)
 
 /* --- dispatch --- */
 
+static void identity_show_cmd(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc > 0)
+      fatal("identity show takes no arguments");
+   identity_show(ctx);
+}
+
+static const subcmd_t cmd_identity_subs[] = {
+    {"show", "show the current identity", identity_show_cmd},
+    {"working-profile", "manage the working profile", identity_working_profile},
+    {"snapshot", "capture an identity snapshot", identity_snapshot},
+    {"diff", "diff identity snapshots", identity_diff},
+    {NULL, NULL, NULL},
+};
+
 void cmd_identity(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
@@ -604,18 +619,6 @@ void cmd_identity(app_ctx_t *ctx, int argc, char **argv)
    const char *sub = argv[0];
    argc--;
    argv++;
-   if (strcmp(sub, "show") == 0)
-   {
-      if (argc > 0)
-         fatal("identity show takes no arguments");
-      identity_show(ctx);
-   }
-   else if (strcmp(sub, "working-profile") == 0)
-      identity_working_profile(ctx, argc, argv);
-   else if (strcmp(sub, "snapshot") == 0)
-      identity_snapshot(ctx, argc, argv);
-   else if (strcmp(sub, "diff") == 0)
-      identity_diff(ctx, argc, argv);
-   else
+   if (subcmd_dispatch(cmd_identity_subs, sub, ctx, argc, argv) != 0)
       fatal("unknown identity subcommand: %s", sub);
 }

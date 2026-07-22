@@ -42,7 +42,9 @@ extern "C"
    } reduced_record_t;
 
    /* Index backend — defaults wrap the real index_*; tests inject a fake.
-    * Each find_* returns count >= 0, or -1 on DB/connection error.
+    * Each find_* returns the total count >= 0, or -1 on DB/connection error.
+    * A backend may return more than `max`, but writes at most the first `max`
+    * rows into `out`; replay preserves the total while hashing that bounded set.
     * project_count returns the number of indexed projects (0 => index empty). */
    typedef struct
    {

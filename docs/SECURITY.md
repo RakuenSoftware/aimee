@@ -277,7 +277,8 @@ client runs them locally, with `claude` authenticating via the client's own logi
   that network, use TLS / a trusted network for the server endpoint.
 - Claude run via the `claude` CLI login (not an API key) is **primary-only by
   default**, see [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default)
-  for the account-risk rationale and the `claude_cli_delegate_enabled` opt-in.
+  for the account-risk rationale and the per-agent **Primary Agent Only**
+  (`primary_only`) flag that governs it.
 
 ## Explicit Non-Goals
 

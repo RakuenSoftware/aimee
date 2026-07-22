@@ -167,6 +167,21 @@ except Exception:
     fi
 }
 
+# Client-integrations opt-out. AIMEE_NO_CLIENT_INTEGRATIONS mirrors the
+# client_integrations_enabled config the aimee binary honors at runtime, so an
+# install/update run also stays out of every global AI-tool config. Any
+# non-empty value other than "0"/"false" opts out.
+CLIENT_INTEGRATIONS_SKIPPED=0
+if [ -n "${AIMEE_NO_CLIENT_INTEGRATIONS:-}" ] && \
+   [ "${AIMEE_NO_CLIENT_INTEGRATIONS}" != "0" ] && \
+   [ "${AIMEE_NO_CLIENT_INTEGRATIONS}" != "false" ]; then
+    CLIENT_INTEGRATIONS_SKIPPED=1
+    warn "Skipping AI-tool hook/MCP registration (AIMEE_NO_CLIENT_INTEGRATIONS set)."
+    # Sourced by install.sh -> return; run directly -> exit. Both leave
+    # CONFIGURED/REFRESHED at 0 so the summaries below stay accurate.
+    return 0 2>/dev/null || exit 0
+fi
+
 # --- Detect and configure AI coding tools ---
 
 # Claude Code

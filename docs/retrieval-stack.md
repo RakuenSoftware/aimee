@@ -14,8 +14,8 @@ keyword gap or a repo boundary that plain vector search would miss.
 
 ## The embedder
 
-Embedding and reranking are baked into the `aimee-kb-*` tier images (Qwen3-Embedding + an
-Ettin cross-encoder reranker) and served over HTTP (`/embed`, `/embed_batch`, `/rerank` on
+Embedding and reranking are served by the `aimee-llm` container (Qwen3-Embedding + an
+Ettin cross-encoder reranker) over HTTP (`/embed`, `/embed_batch`, `/rerank` on
 the gateway `:8742`). The KB calls them; it runs no model. See
 [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md) for the tiers and
 [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md) for pointing the KB at one. (The reranker emits a

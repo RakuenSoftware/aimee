@@ -312,6 +312,10 @@ Code's `/v1/messages`) is fixed and **live-proven on `.254`** with real streamed
   *sanctioned rollout state*, not incompleteness. Enablement of `AIMEE_IR_STREAM_RELAY` and the eventual
   deletion are a rollout decision, data-gated on the shadow **divergence metrics**
   (`ir_rebuild_mismatch_bytes` etc., already emitted since Slice 0/3) staying clean on live traffic.
+  **Update (2026-07-16): the RESPONSE-parser half of this is now DONE** — the canonical IR is the sole
+  response parser on every wire and the legacy `agent_parse_response_*` translators are deleted, after
+  the parity gate was met on live `.254` traffic. See
+  [`docs/features/ir-only-response-parsing.md`](../../features/ir-only-response-parsing.md).
 - **`turn_record_v1` + routing every KB/memory read through the IR (Slice 7).** Q5 **explicitly
   DEFERRED** the richer versioned turn record to a fast-follow; the immediate KB primitive
   (`aimee_ir_last_user_text`, typed-block extraction) is shipped. The legacy preinject extractor

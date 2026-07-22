@@ -31,6 +31,9 @@ extern "C"
    int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len, char *key_pem,
                  size_t key_len, char *serial_out, size_t serial_len);
 
+   int pki_sign_csr(const char *cn, int validity_days, const char *csr_pem, char *cert_pem,
+                    size_t cert_len, char *serial_out, size_t serial_len);
+
    /* Revoke by hex serial (adds to the DB1 denylist + the in-memory snapshot).
     * Returns 0 on success (including already-revoked), -1 on error. */
    int pki_revoke(const char *serial);
@@ -38,6 +41,45 @@ extern "C"
    /* 1 if `serial` (hex) is revoked, else 0. Reads the in-memory snapshot only —
     * safe to call from the TLS verify callback. */
    int pki_is_revoked(const char *serial);
+
+   /* Per-request durable cert status (P8a, invariant #5). Distinct from
+    * pki_is_revoked: ERROR (an unavailable authority) is never conflated with
+    * UNKNOWN (a cert this server's CA never issued) — both fail closed at the
+    * caller, but are logged distinctly. */
+   typedef enum
+   {
+      PKI_CERT_VALID = 0,
+      PKI_CERT_REVOKED,
+      PKI_CERT_EXPIRED,
+      PKI_CERT_UNKNOWN,
+      PKI_CERT_ERROR
+   } pki_cert_status_t;
+
+   /* Fresh, DURABLE per-request status for `serial` (BN_bn2hex form, as
+    * pki_certs.serial stores it) at wall-clock `now`. Runs a single prepared
+    * `SELECT revoked, expires_at FROM pki_certs WHERE serial=?` against DB1 on
+    * every call — NOT the in-memory g_revoked snapshot — so a revocation written
+    * to pki_certs is authoritative on the very next request, with no snapshot
+    * staleness. This is the load-bearing check that closes the keep-alive-after-
+    * revoke gap: mtls_verify_cb runs only at handshake and cannot be re-run on an
+    * open connection. Precedence: a SQLite prepare/bind/step failure -> ERROR
+    * (dominates); no matching row -> UNKNOWN; row with revoked!=0 -> REVOKED; row
+    * with expires_at>0 AND expires_at<=now -> EXPIRED; else VALID. */
+   pki_cert_status_t pki_cert_check(const char *serial, long now);
+
+   /* Human-readable label for a pki_cert_status_t, for distinct-cause logging. */
+   const char *pki_cert_status_str(pki_cert_status_t s);
+
+   /* Durable optional->required mTLS ramp. Startup returns the effective mode
+    * (never weaker than configured_mode). A valid per-request certificate check
+    * may then record presentation; ready is a read-only preflight, and advance
+    * repeats the same roster/hash test under BEGIN IMMEDIATE before committing
+    * the monotonic state transition. */
+   int pki_mtls_ramp_init(int configured_mode);
+   int pki_mtls_note_presentation(const char *serial, long now);
+   int pki_mtls_ramp_ready(long now);
+   int pki_mtls_ramp_advance(long now);
+   int pki_mtls_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out);
 
    /* Enumerate issued certs (newest first), invoking cb per row. Returns the row
     * count, or -1 on error. Keeps pki.c free of the JSON layer. */

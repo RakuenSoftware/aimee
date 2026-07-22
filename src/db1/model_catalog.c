@@ -104,18 +104,14 @@ int db1_model_catalog_replace(const char *provider, char **models, int n)
    if (!db)
       return -1;
 
-   char *err = NULL;
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, &err) != SQLITE_OK)
-   {
-      sqlite3_free(err);
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
-   }
 
    sqlite3_stmt *del = NULL;
    static const char *delete_sql = "DELETE FROM model_catalog WHERE provider = ?";
    if (sqlite3_prepare_v2(db, delete_sql, -1, &del, NULL) != SQLITE_OK)
    {
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_text(del, 1, provider, -1, SQLITE_TRANSIENT);
@@ -123,7 +119,7 @@ int db1_model_catalog_replace(const char *provider, char **models, int n)
    sqlite3_finalize(del);
    if (!ok)
    {
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      db1_txn_end(db, "ROLLBACK");
       return -1;
    }
 
@@ -135,7 +131,7 @@ int db1_model_catalog_replace(const char *provider, char **models, int n)
        " VALUES (?, ?, 0, 0, 0, 0, datetime('now'), '{}')";
    if (sqlite3_prepare_v2(db, insert_sql, -1, &ins, NULL) != SQLITE_OK)
    {
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    for (int i = 0; i < n; i++)
@@ -147,7 +143,7 @@ int db1_model_catalog_replace(const char *provider, char **models, int n)
       if (sqlite3_step(ins) != SQLITE_DONE)
       {
          sqlite3_finalize(ins);
-         sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+         db1_txn_end(db, "ROLLBACK");
          return -1;
       }
       sqlite3_reset(ins);
@@ -155,10 +151,9 @@ int db1_model_catalog_replace(const char *provider, char **models, int n)
    }
    sqlite3_finalize(ins);
 
-   if (sqlite3_exec(db, "COMMIT", NULL, NULL, &err) != SQLITE_OK)
+   if (db1_txn_end(db, "COMMIT") != 0)
    {
-      sqlite3_free(err);
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      /* gate already released; a failed COMMIT auto-rolls-back in sqlite */
       return -1;
    }
    return 0;

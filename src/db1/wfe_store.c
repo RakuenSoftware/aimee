@@ -418,6 +418,31 @@ int db1_work_item_set_terminal(const char *wi, const char *state)
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
+int db1_work_item_abandon_children(const char *parent_id)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !parent_id || !parent_id[0])
+      return -1;
+   /* Terminating a parent build run must terminate its foreach.workflow child
+    * slices too: an orphaned non-terminal child keeps being scheduled and
+    * re-dispatches delegates forever (observed live — an abandoned parent whose
+    * `.s0` slice looped to no end, leaking a container per round). Mark every
+    * child not already terminal as 'abandoned'. Slices are leaf runs, so one
+    * level suffices. */
+   static const char *sql =
+       "UPDATE lifecycle_work_item SET state='abandoned', pause_reason='', paused_state='', "
+       "updated_at=datetime('now') "
+       "WHERE parent_id=? AND state NOT IN ('accepted','rejected','abandoned')";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, parent_id, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(st);
+   return changed;
+}
+
 int db1_work_item_gate_apply(const char *wi, const char *expect_stage, const char *expect_hash,
                              const char *new_stage, const char *terminal_state)
 {
@@ -511,6 +536,34 @@ int db1_work_item_clear_pause_if(const char *wi, const char *expect_reason,
    return sqlite3_changes(db) > 0 ? 1 : 0; /* 1 = won the clear, 0 = row no longer matched */
 }
 
+int db1_work_item_reap_stale_parks(long grace_secs)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || grace_secs <= 0)
+      return 0;
+   /* Backstop reaper: make TERMINAL any autonomous run parked in a runaway/failure
+    * backstop (stuck / turn-|wall-cap / budget) older than grace_secs, so a dead run
+    * cannot linger 'active' forever holding a worktree + agent-scheduling weight.
+    * Human-review parks (pending_human) and operator_paused are LEGITIMATE waits —
+    * a person is expected to act — and are NEVER reaped here; only self-clearing
+    * parks (ci_pending / merge_pending / panel_*) are likewise left to the sweep. */
+   static const char *sql =
+       "UPDATE lifecycle_work_item SET state='abandoned', updated_at=datetime('now') "
+       "WHERE state='active' AND mode='autonomous' "
+       "AND pause_reason IN ('stuck','wall_cap_exceeded','turn_cap_exceeded','budget_exceeded') "
+       "AND updated_at < datetime('now', ?)";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return 0;
+   char window[48];
+   snprintf(window, sizeof window, "-%ld seconds", grace_secs);
+   sqlite3_bind_text(st, 1, window, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   int reaped = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
+   sqlite3_finalize(st);
+   return reaped;
+}
+
 int db1_work_item_delete(const char *wi)
 {
    if (!wi || !wi[0])
@@ -582,14 +635,13 @@ int db1_work_item_inc_override(const char *wi)
    return -1;
 }
 
-int db1_work_item_list(db1_work_item_t **out)
+static int work_item_list_ordered(db1_work_item_t **out, const char *sql)
 {
    if (out)
       *out = NULL;
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   static const char *sql = "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC";
    sqlite3_stmt *st = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
@@ -618,6 +670,21 @@ int db1_work_item_list(db1_work_item_t **out)
    else
       free(arr);
    return n;
+}
+
+int db1_work_item_list(db1_work_item_t **out)
+{
+   return work_item_list_ordered(out,
+                                 "SELECT " WI_COLS " FROM lifecycle_work_item ORDER BY id DESC");
+}
+
+int db1_work_item_list_lru(db1_work_item_t **out)
+{
+   /* Staleness-first (see wfe_store.h). id ASC tie-break keeps the order total
+    * and deterministic for same-second updates (a fresh fan-out stamps every
+    * child in one batch). */
+   return work_item_list_ordered(out, "SELECT " WI_COLS
+                                      " FROM lifecycle_work_item ORDER BY updated_at ASC, id ASC");
 }
 
 int db1_lifecycle_event_add(const char *wi, const char *stage, const char *kind, const char *actor,
@@ -749,22 +816,18 @@ int db1_stage_attempt_get(const char *wi, const char *stage)
    return v;
 }
 
-static int txn_exec(const char *cmd)
-{
-   sqlite3 *db = db1_conn();
-   if (!db)
-      return -1;
-   return sqlite3_exec(db, cmd, NULL, NULL, NULL) == SQLITE_OK ? 0 : -1;
-}
+/* All three route through the db1 transaction gate (db1_internal.h): begin
+ * holds the cross-thread mutex until the matching commit/rollback, so parallel
+ * engine advances can't interleave transactions on the shared connection. */
 int db1_lifecycle_txn_begin(void)
 {
-   return txn_exec("BEGIN IMMEDIATE");
+   return db1_txn_begin(db1_conn(), "BEGIN IMMEDIATE");
 }
 int db1_lifecycle_txn_commit(void)
 {
-   return txn_exec("COMMIT");
+   return db1_txn_end(db1_conn(), "COMMIT");
 }
 int db1_lifecycle_txn_rollback(void)
 {
-   return txn_exec("ROLLBACK");
+   return db1_txn_end(db1_conn(), "ROLLBACK");
 }

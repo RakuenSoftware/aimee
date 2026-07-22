@@ -15,7 +15,7 @@
 #include "cJSON.h"
 #include "code_collect.h" /* code_collect_files_cb */
 #include "config.h"
-#include "delegate_ensemble.h" /* ensemble_default_panel_from_agents */
+#include "delegate_ensemble.h" /* named/default exact panel or two-seat fallback */
 #include "dstr.h"
 #include "wfe_autonomous_route.h" /* wfe_sweep_workflow_floor -- S4 human-gate floor */
 #include "aimee_home.h"
@@ -371,10 +371,13 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   ensemble_filter_panel_availability(&cfg, &acfg); /* drop unkeyed/unhealthy proposers */
-   if (cfg.ensemble_reference_count <= 0)
-      return server_send_error(conn, "no enabled agent to propose with", NULL);
+   const cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
+   if (jrt && !cJSON_IsString(jrt))
+      return server_send_error(conn, "roundtable must name a saved preset", NULL);
+   char panel_err[256];
+   if (ensemble_prepare_runtime_panel(cJSON_IsString(jrt) ? jrt->valuestring : NULL, &cfg, &acfg,
+                                      panel_err, sizeof panel_err) != 0)
+      return server_send_error(conn, panel_err, NULL);
    const char *proposer = cfg.ensemble_reference_models[0];
 
    sweep_caps_t caps;

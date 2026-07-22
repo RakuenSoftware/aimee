@@ -20,7 +20,7 @@
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
 #include "delegate_plan.h"
-#include "cli_tui.h"
+#include "cli_chat_stream.h"
 #include "platform.h"
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
@@ -653,6 +653,78 @@ static int client_failopen_subagent_deny(const char *phase, const char *tool_nam
    return 2;
 }
 
+/* `aimee subagent-guard`: a dedicated PreToolUse hook that blocks the primary
+ * agent's OWN sub-agent tools (Task/Agent/spawn_agent/RemoteTrigger) and points
+ * the model at `aimee delegate`, so delegation stays inside aimee's guardrail +
+ * memory + KB model. Unlike the generic `permissions.deny` backstop installed
+ * alongside it, this carries the actionable redirect message.
+ *
+ * The config + delegates GATE is evaluated ONCE at client setup
+ * (ensure_claude_code_hooks: `subagent_ban_enabled` AND a one-shot server
+ * `agent.list` probe reporting usable delegates). This hook is installed only
+ * when the gate holds, so its mere presence IS the enforcement — no per-call
+ * config read or server round-trip. Config/delegate changes re-materialize the
+ * hook (and the deny list) at the next client setup / session-start. Allow =
+ * exit 0 with no output; deny = permissionDecision:deny (JSON clients) or exit 2. */
+static int handle_subagent_guard(void)
+{
+   char *stdin_data = read_stdin();
+   cJSON *json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
+   const char *tool_name = "";
+   if (json)
+   {
+      cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
+      if (cJSON_IsString(tn))
+         tool_name = tn->valuestring;
+   }
+
+   int rc = 0;
+   if (client_tool_is_subagent(tool_name))
+   {
+      const char *reason =
+          "BLOCKED: the primary agent must not spawn its own sub-agents (Task/Agent/"
+          "spawn_agent) — they escape this session's guardrails. Delegate instead so the child "
+          "inherits the session's guardrails, memory, and KB: `aimee delegate <role> \"<task>\" "
+          "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` for a "
+          "multi-model panel.";
+      if (cli_hook_client_uses_pretool_json())
+      {
+         emit_pretool_deny_json(reason);
+      }
+      else
+      {
+         fprintf(stderr, "aimee: %s\n", reason);
+         rc = 2;
+      }
+   }
+
+   free(stdin_data);
+   cJSON_Delete(json);
+   return rc;
+}
+
+/* Delegate probe for the sub-agent-ban gate (registered into client_integrations
+ * so CORE can decide whether to materialize the ban without linking a /v1 call).
+ * One round-trip to agent.list; returns 1 if usable delegates exist, 0 if none,
+ * or -1 when the server is unreachable so setup leaves the ban settings untouched. */
+static int cli_delegate_probe(void)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "agent.list");
+   cJSON *resp = cli_v1_dispatch_local(req, 3000);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1; /* server unreachable / no route -> unknown */
+   int avail = -1;
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(resp, "any_delegate_available");
+   if (cJSON_IsBool(a))
+      avail = cJSON_IsTrue(a) ? 1 : 0;
+   cJSON_Delete(resp);
+   return avail;
+}
+
 /* Worktree isolation (client-side, server-independent — mirrors the sub-agent
  * guard above). aimee isolates its OWN work in worktrees, but the primary
  * session's harness Edit/Write never reach aimee's gateway, so the shared main
@@ -990,165 +1062,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
  * soft failure (exit 0) so claude is never aborted by the hook. */
 /* Minimal growing string buffer for assembling the session-start context
  * without depending on open_memstream's feature-test macros. */
-
-/* No-arg `aimee` launch path.
- *
- * Calls the launch.run /v1 call to mint a fresh session_id, materialize any
- * sibling worktrees, and resolve the provider/model/worktree_cwd. The
- * client then writes the session-ppid file (so MCP children spawned by
- * the agent can find their session), chdirs into the worktree, and
- * starts aimee's built-in primary-agent chat. */
-static int launch_session_with_input(int json_output, int debug, int default_launch, int chat_argc,
-                                     char **chat_argv)
-{
-   /* A remote aimee-server runs the agent + tools on the server; serve THIS
-    * client's working tree over the reverse-channel so those tools act here (the
-    * client never absorbs the engine or a DB). A co-located server uses the local
-    * socket as before. */
-   int remote = cli_v1_remote_endpoint_is_network();
-   const char *sock = NULL;
-   if (remote)
-   {
-      cli_workspace_reverse_channel_start();
-   }
-   else
-   {
-      sock = cli_ensure_server_for_method("launch.run");
-      if (!sock)
-      {
-         fprintf(stderr, "aimee: cannot launch session; server unavailable\n");
-         return 1;
-      }
-   }
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "launch.run");
-
-   char cwd[4096];
-   if (getcwd(cwd, sizeof(cwd)))
-      cJSON_AddStringToObject(req, "cwd", cwd);
-
-   cJSON *resp;
-   if (remote)
-   {
-      char *endpoint = cli_v1_client_endpoint();
-      char *bearer = cli_v1_client_bearer();
-      char *body = cJSON_PrintUnformatted(req);
-      int status = 0;
-      resp = (endpoint && body) ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer,
-                                                   30000, &status)
-                                : NULL;
-      free(endpoint);
-      free(bearer);
-      free(body);
-   }
-   else
-   {
-      resp = cli_v1_dispatch_local(req, 30000);
-   }
-   cJSON_Delete(req);
-
-   if (!resp)
-   {
-      fprintf(stderr, "aimee: cannot launch session; server request failed\n");
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 1;
-   }
-
-   cJSON *jstatus = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(jstatus) || strcmp(jstatus->valuestring, "ok") != 0)
-   {
-      cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      fprintf(stderr, "aimee: launch failed: %s\n",
-              cJSON_IsString(jmsg) ? jmsg->valuestring : "server returned error");
-      cJSON_Delete(resp);
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 1;
-   }
-
-   cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(resp, "provider");
-   cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(resp, "model");
-   cJSON *jauto = cJSON_GetObjectItemCaseSensitive(resp, "autonomous");
-   cJSON *jwt = cJSON_GetObjectItemCaseSensitive(resp, "worktree_cwd");
-   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(resp, "session_id");
-
-   const char *provider = cJSON_IsString(jprovider) ? jprovider->valuestring : "claude";
-   const char *model = cJSON_IsString(jmodel) ? jmodel->valuestring : "";
-   int autonomous = cJSON_IsTrue(jauto);
-   const char *worktree_cwd = cJSON_IsString(jwt) ? jwt->valuestring : NULL;
-   const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
-
-   if (json_output)
-   {
-      char *s = cJSON_PrintUnformatted(resp);
-      if (s)
-      {
-         puts(s);
-         free(s);
-      }
-      cJSON_Delete(resp);
-      if (remote)
-         cli_workspace_reverse_channel_stop();
-      return 0;
-   }
-
-   if (debug)
-      fprintf(stderr, "aimee: starting %s chat (session %s)%s\n", provider, sid ? sid : "?",
-              worktree_cwd ? "" : "");
-
-   if (autonomous)
-      fprintf(stderr,
-              "aimee: warning: autonomous mode is active -- aimee guardrails are the sole safety "
-              "boundary\n");
-
-   /* Persist session-ppid so MCP children spawned by the agent (whose
-    * PPID will be this process post-exec) can recover the session id. */
-   if (sid && sid[0])
-   {
-      const char *base = aimee_home();
-      if (base && base[0])
-      {
-         char ppid_path[512];
-         snprintf(ppid_path, sizeof(ppid_path), "%s/session-ppid-%d", base, (int)getpid());
-         FILE *fp = fopen(ppid_path, "w");
-         if (fp)
-         {
-            fputs(sid, fp);
-            fclose(fp);
-         }
-      }
-   }
-
-   /* Co-located only: chdir into the server-resolved worktree (it lives on this
-    * host). For a remote server the worktree is the client's own cwd (a detached
-    * workspace served over the reverse-channel), so there is nothing to chdir. */
-   if (!remote && worktree_cwd && worktree_cwd[0])
-   {
-      if (chdir(worktree_cwd) != 0)
-         fprintf(stderr, "aimee: warning: could not chdir to worktree: %s\n", worktree_cwd);
-      else if (debug)
-         fprintf(stderr, "aimee: session cwd: %s\n", worktree_cwd);
-   }
-
-   /* Make sure hooks/MCP children inherit the active socket (co-located only;
-    * a remote session reaches the server over the configured /v1 endpoint). */
-   if (!remote && sock)
-      platform_setenv("AIMEE_SOCK", sock);
-
-   int rc = builtin_chat_loop(sock, provider, model, sid, autonomous, debug, default_launch,
-                              chat_argc, chat_argv);
-   if (remote)
-      cli_workspace_reverse_channel_stop();
-   cJSON_Delete(resp);
-   return rc;
-}
-
-static int launch_session(int json_output, int debug)
-{
-   return launch_session_with_input(json_output, debug, 1, 0, NULL);
-}
 
 /* --- aimee clean [--force] --- */
 
@@ -1518,11 +1431,29 @@ static void acp_stream_delta(const char *delta, void *ud)
 }
 
 /* Per-tool callback: emit a standard ACP session/update tool_call notification
- * as each tool starts/completes during the turn. `ud` carries the session id. */
+ * as each tool starts/completes during the turn. `ud` carries the session id.
+ *
+ * The toolCallId must be unique within the session — a client keys the
+ * tool_call_update off it to find the tool_call it updates. It used to be the tool
+ * name, so an agent that read three files emitted three calls under one id and the
+ * client had no way to tell them apart. Number them instead.
+ *
+ * A plain counter is enough: this runs on the one thread draining the server's
+ * event stream, and the server emits each tool's started before its completed, so
+ * "the current value" always names the call in flight. It lives as long as the
+ * process, which for `aimee acp` is exactly one ACP session — the scope the id
+ * must be unique over. */
+static unsigned g_acp_tool_seq;
+
 static void acp_stream_tool(const char *phase, const char *name, void *ud)
 {
    char out[1024];
-   if (acp_build_tool_update((const char *)ud, phase, name, out, sizeof(out)) == 1 && out[0])
+   char call_id[128];
+   if (!phase || strcmp(phase, "completed") != 0)
+      g_acp_tool_seq++;
+   snprintf(call_id, sizeof(call_id), "%s-%u", name ? name : "tool", g_acp_tool_seq);
+   if (acp_build_tool_update((const char *)ud, call_id, phase, name, out, sizeof(out)) == 1 &&
+       out[0])
    {
       fputs(out, stdout);
       fputc('\n', stdout);
@@ -1729,7 +1660,21 @@ int main(int argc, char **argv)
     * long-lived server process. */
    if (cmd_start < argc && strcmp(argv[cmd_start], "mcp-serve") != 0 &&
        strcmp(argv[cmd_start], "acp-serve") != 0)
+   {
+      /* Supply the real delegate probe so the sub-agent-ban gate can consult the
+       * server once (agent.list) during client-integration setup — but NOT on the
+       * high-frequency hook callbacks (attention-guard fires on every tool use),
+       * where the probe would add a per-tool server round-trip. Those invocations
+       * run with no probe (the gate treats "unknown" as leave-as-is); the ban is
+       * (re)materialized at session-start and on ordinary user commands. */
+      const char *c = argv[cmd_start];
+      int hook_callback = strcmp(c, "attention-guard") == 0 || strcmp(c, "subagent-guard") == 0 ||
+                          strcmp(c, "hooks") == 0 || strcmp(c, "user-prompt-submit") == 0 ||
+                          strcmp(c, "pre-compact") == 0;
+      if (!hook_callback)
+         client_integrations_set_delegate_probe(cli_delegate_probe);
       ensure_client_integrations();
+   }
 
    if (cmd_start >= argc)
    {
@@ -1742,8 +1687,14 @@ int main(int argc, char **argv)
          (void)response_profile;
          return client_help_command(1, all_arg);
       }
-      /* No subcommand: forward "launch" to server, parse metadata, exec provider */
-      return launch_session(json_output, debug);
+      /* No subcommand: print usage. `aimee` used to forward a "launch" to the
+       * server and exec a provider TUI, which is not a sensible default for a
+       * CLI — it made the bare command do the single heaviest thing available,
+       * and off a TTY it exited 0 having printed nothing at all. `aimee chat`
+       * still launches a session; the bare command now says what it can do. */
+      (void)debug;
+      usage();
+      return 0;
    }
 
    const char *cmd = argv[cmd_start];
@@ -1833,9 +1784,6 @@ int main(int argc, char **argv)
       return cmd_roles_client_run(sub_argc, sub_argv, json_output);
 #endif
 
-   if (strcmp(cmd, "chat") == 0)
-      return launch_session_with_input(json_output, debug, 0, sub_argc, sub_argv);
-
    if (strcmp(cmd, "session") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "brief") == 0)
       return client_session_brief(sub_argc - 1, sub_argv + 1);
 
@@ -1902,6 +1850,10 @@ int main(int argc, char **argv)
    /* Hooks: use dedicated server methods */
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
+
+   /* Sub-agent ban PreToolUse hook (delegate-only enforcement). */
+   if (strcmp(cmd, "subagent-guard") == 0)
+      return handle_subagent_guard();
 
    /* Code audit (P4): local file-health scan plus kb graph checks when available. */
    if (strcmp(cmd, "code") == 0)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Button, InlineStatus, Switch } from "@rakuensoftware/smoothgui";
 import { FIELD_HELP } from "./settingsHelp";
 
 /* Pipeline page: the curator pipeline as an ordered, resource-lane-grouped view.
@@ -344,20 +345,14 @@ export default function Pipeline() {
         {gated ? (
           <span style={{ fontSize: 12, color: "#7d7", whiteSpace: "nowrap" }}>● active</span>
         ) : (
-          <button
-            disabled={busy === s.config_key}
-            onClick={() => toggle(s.config_key as string, !on)}
-            title={on ? "Disable stage" : "Enable stage"}
-            style={{
-              width: 52, height: 26, borderRadius: 13, border: "1px solid #ccc", cursor: "pointer",
-              background: on ? "#7d7" : "#ddd", position: "relative", transition: "background .15s",
-            }}
-          >
-            <span style={{
-              position: "absolute", top: 2, left: on ? 28 : 2, width: 20, height: 20,
-              borderRadius: "50%", background: "#fff", transition: "left .15s",
-            }} />
-          </button>
+          <span title={on ? "Disable stage" : "Enable stage"} style={{ display: "inline-flex" }}>
+            <Switch
+              checked={on}
+              onChange={(next) => toggle(s.config_key as string, next)}
+              disabled={busy === s.config_key}
+              ariaLabel={on ? "Disable stage" : "Enable stage"}
+            />
+          </span>
         )}
       </div>
     );
@@ -476,31 +471,24 @@ export default function Pipeline() {
                       </div>
                       <div style={{ fontSize: 12, color: "#777" }}>Recomposes {s.base_op} on the {s.lane} lane.</div>
                     </div>
-                    <button
-                      disabled={busy === "custom-stages"}
-                      onClick={() => toggleCustomStage(s.name, !on)}
-                      title={on ? "Disable stage" : "Enable stage"}
-                      style={{
-                        width: 52, height: 26, borderRadius: 13, border: "1px solid #ccc", cursor: "pointer",
-                        background: on ? "#7d7" : "#ddd", position: "relative", transition: "background .15s",
-                      }}
-                    >
-                      <span style={{
-                        position: "absolute", top: 2, left: on ? 28 : 2, width: 20, height: 20,
-                        borderRadius: "50%", background: "#fff", transition: "left .15s",
-                      }} />
-                    </button>
-                    <button
+                    <span title={on ? "Disable stage" : "Enable stage"} style={{ display: "inline-flex" }}>
+                      <Switch
+                        checked={on}
+                        onChange={(next) => toggleCustomStage(s.name, next)}
+                        disabled={busy === "custom-stages"}
+                        ariaLabel={on ? "Disable stage" : "Enable stage"}
+                      />
+                    </span>
+                    <Button
+                      variant="danger"
+                      size="md"
                       disabled={busy === "custom-stages"}
                       onClick={() => deleteCustomStage(s.name)}
                       title={`Delete custom stage "${s.name}"`}
-                      style={{
-                        padding: "5px 8px", fontSize: 13, borderRadius: 6, cursor: "pointer",
-                        border: "1px solid #cbd5e1", background: "#fff", color: "#b00",
-                      }}
+                      style={{ padding: "5px 8px" }}
                     >
                       ×
-                    </button>
+                    </Button>
                   </div>
                 );
               })
@@ -512,7 +500,9 @@ export default function Pipeline() {
         <div style={{ color: "#888" }}>No stages reported (aimee-server unreachable, or the KB has no curator registry).</div>
       )}
       {status && (
-        <div style={{ fontSize: 13, color: status.kind === "ok" ? "#2a2" : "#c33", marginTop: 8 }}>{status.msg}</div>
+        <div style={{ marginTop: 8 }}>
+          <InlineStatus status={status} />
+        </div>
       )}
     </div>
   );

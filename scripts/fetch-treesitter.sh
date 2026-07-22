@@ -4,11 +4,21 @@
 #
 # These are multi-MB GENERATED parsers, so they are fetched here rather than committed
 # (see .gitignore). Pinned to specific commits for reproducibility. Idempotent: skips a
-# grammar that is already present. Add a language by appending a `fetch <repo> <sha>`
-# line and registering it in code_treesitter.c.
+# grammar that is already present. Independent repositories are fetched concurrently
+# in bounded batches because cloning the full histories serially dominates the Docker
+# E2E jobs. Add a language by appending a `fetch_async <repo> <sha>` line and
+# registering it in code_treesitter.c.
 set -e
 
 VENDOR="$(cd "$(dirname "$0")/../src/vendor" && pwd)"
+FETCH_JOBS="${TREESITTER_FETCH_JOBS:-6}"
+
+case "$FETCH_JOBS" in
+    ''|*[!0-9]*|0)
+        echo "fetch-treesitter: TREESITTER_FETCH_JOBS must be a positive integer" >&2
+        exit 2
+        ;;
+esac
 
 fetch() {
     name="$1"; url="$2"; sha="$3"; dest="$VENDOR/$name"
@@ -21,40 +31,72 @@ fetch() {
     # Never block on an interactive credential prompt in an automated build; the
     # exact commit SHA is checked out (content-addressed) and re-verified by sha256
     # at the end, so a moved ref cannot ship a changed parser.
-    GIT_TERMINAL_PROMPT=0 git clone -q "$url" "$dest"
-    git -C "$dest" checkout -q "$sha"
+    # Fetch only the pinned commit instead of cloning the repository's entire
+    # history. Every configured upstream is public and the pinned commits remain
+    # reachable; the source files are independently verified below.
+    mkdir -p "$dest"
+    git -C "$dest" init -q
+    git -C "$dest" remote add origin "$url"
+    GIT_TERMINAL_PROMPT=0 git -C "$dest" fetch -q --depth=1 origin "$sha"
+    git -C "$dest" checkout --detach -q FETCH_HEAD
     rm -rf "$dest/.git"
     touch "$dest/.fetched"
 }
 
+FETCH_PIDS=""
+FETCH_ACTIVE=0
+
+wait_fetches() {
+    failed=0
+    for pid in $FETCH_PIDS; do
+        if ! wait "$pid"; then
+            failed=1
+        fi
+    done
+    FETCH_PIDS=""
+    FETCH_ACTIVE=0
+    [ "$failed" -eq 0 ]
+}
+
+fetch_async() {
+    fetch "$@" &
+    FETCH_PIDS="$FETCH_PIDS $!"
+    FETCH_ACTIVE=$((FETCH_ACTIVE + 1))
+    if [ "$FETCH_ACTIVE" -ge "$FETCH_JOBS" ]; then
+        wait_fetches
+    fi
+}
+
 # Runtime (one amalgamated compilation unit via lib/src/lib.c).
-fetch tree-sitter   https://github.com/tree-sitter/tree-sitter   cbee4672665173d1702d836353ef7648dc2b2fac
+fetch_async tree-sitter   https://github.com/tree-sitter/tree-sitter   cbee4672665173d1702d836353ef7648dc2b2fac
 # Grammars — one parser.c each (TypeScript and PHP ship two: a base + a JSX/embedded
 # variant), plus a src/scanner.c for those with an external scanner. The set mirrors the
 # hand-rolled supported languages (src/extractors.c). C first — aimee dogfoods its source.
-fetch tree-sitter-c          https://github.com/tree-sitter/tree-sitter-c          b780e47fc780ddc8da13afa35a3f4ed5c157823d
-fetch tree-sitter-cpp        https://github.com/tree-sitter/tree-sitter-cpp        8b5b49eb196bec7040441bee33b2c9a4838d6967
-fetch tree-sitter-c-sharp    https://github.com/tree-sitter/tree-sitter-c-sharp    af29416d729b7a6603101b513604392d8f675e3b
-fetch tree-sitter-python     https://github.com/tree-sitter/tree-sitter-python     26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64
-fetch tree-sitter-go         https://github.com/tree-sitter/tree-sitter-go         2346a3ab1bb3857b48b29d779a1ef9799a248cd7
-fetch tree-sitter-javascript https://github.com/tree-sitter/tree-sitter-javascript 58404d8cf191d69f2674a8fd507bd5776f46cb11
-fetch tree-sitter-typescript https://github.com/tree-sitter/tree-sitter-typescript 75b3874edb2dc714fb1fd77a32013d0f8699989f
-fetch tree-sitter-rust       https://github.com/tree-sitter/tree-sitter-rust       77a3747266f4d621d0757825e6b11edcbf991ca5
-fetch tree-sitter-java       https://github.com/tree-sitter/tree-sitter-java       e10607b45ff745f5f876bfa3e94fbcc6b44bdc11
-fetch tree-sitter-ruby       https://github.com/tree-sitter/tree-sitter-ruby       ad907a69da0c8a4f7a943a7fe012712208da6dee
-fetch tree-sitter-php        https://github.com/tree-sitter/tree-sitter-php        38216983c07bf9e1b56e16acde53b25adaeab61c
-fetch tree-sitter-lua        https://github.com/tree-sitter-grammars/tree-sitter-lua 10fe0054734eec83049514ea2e718b2a56acd0c9
-fetch tree-sitter-bash       https://github.com/tree-sitter/tree-sitter-bash       a06c2e4415e9bc0346c6b86d401879ffb44058f7
+fetch_async tree-sitter-c          https://github.com/tree-sitter/tree-sitter-c          b780e47fc780ddc8da13afa35a3f4ed5c157823d
+fetch_async tree-sitter-cpp        https://github.com/tree-sitter/tree-sitter-cpp        8b5b49eb196bec7040441bee33b2c9a4838d6967
+fetch_async tree-sitter-c-sharp    https://github.com/tree-sitter/tree-sitter-c-sharp    af29416d729b7a6603101b513604392d8f675e3b
+fetch_async tree-sitter-python     https://github.com/tree-sitter/tree-sitter-python     26855eabccb19c6abf499fbc5b8dc7cc9ab8bc64
+fetch_async tree-sitter-go         https://github.com/tree-sitter/tree-sitter-go         2346a3ab1bb3857b48b29d779a1ef9799a248cd7
+fetch_async tree-sitter-javascript https://github.com/tree-sitter/tree-sitter-javascript 58404d8cf191d69f2674a8fd507bd5776f46cb11
+fetch_async tree-sitter-typescript https://github.com/tree-sitter/tree-sitter-typescript 75b3874edb2dc714fb1fd77a32013d0f8699989f
+fetch_async tree-sitter-rust       https://github.com/tree-sitter/tree-sitter-rust       77a3747266f4d621d0757825e6b11edcbf991ca5
+fetch_async tree-sitter-java       https://github.com/tree-sitter/tree-sitter-java       e10607b45ff745f5f876bfa3e94fbcc6b44bdc11
+fetch_async tree-sitter-ruby       https://github.com/tree-sitter/tree-sitter-ruby       ad907a69da0c8a4f7a943a7fe012712208da6dee
+fetch_async tree-sitter-php        https://github.com/tree-sitter/tree-sitter-php        38216983c07bf9e1b56e16acde53b25adaeab61c
+fetch_async tree-sitter-lua        https://github.com/tree-sitter-grammars/tree-sitter-lua 10fe0054734eec83049514ea2e718b2a56acd0c9
+fetch_async tree-sitter-bash       https://github.com/tree-sitter/tree-sitter-bash       a06c2e4415e9bc0346c6b86d401879ffb44058f7
 # Swift's generated parser.c is not on the default branch; use the *-with-generated-files tag.
-fetch tree-sitter-swift      https://github.com/alex-pinkus/tree-sitter-swift      caa99d7d3c14aac03b5f16fc86fedf8755570760
-fetch tree-sitter-kotlin     https://github.com/fwcd/tree-sitter-kotlin           c8ac3d2627240160b999a2c100de3babbdb8f419
-fetch tree-sitter-dart       https://github.com/UserNobody14/tree-sitter-dart      a9bdfa3db2fbc9b9f12c93450d04a671f33a5102
-fetch tree-sitter-css        https://github.com/tree-sitter/tree-sitter-css        dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f
-fetch tree-sitter-scala      https://github.com/tree-sitter/tree-sitter-scala      4d081d98670ff6e98ca42c085294fc75eec15e1d
-fetch tree-sitter-groovy     https://github.com/murtaza64/tree-sitter-groovy       deb0dcf8c4544f07564060f6e9b9f6e4b0bfc27d
-fetch tree-sitter-objc       https://github.com/tree-sitter-grammars/tree-sitter-objc 181a81b8f23a2d593e7ab4259981f50122909fda
-fetch tree-sitter-elixir     https://github.com/elixir-lang/tree-sitter-elixir      c4f9f5a15ddad8635ba59a5b99c2e9124e74ad91
-fetch tree-sitter-powershell https://github.com/airbus-cert/tree-sitter-powershell d398441825243b00e317e87e1829b9d6a3e54ce0
+fetch_async tree-sitter-swift      https://github.com/alex-pinkus/tree-sitter-swift      caa99d7d3c14aac03b5f16fc86fedf8755570760
+fetch_async tree-sitter-kotlin     https://github.com/fwcd/tree-sitter-kotlin           c8ac3d2627240160b999a2c100de3babbdb8f419
+fetch_async tree-sitter-dart       https://github.com/UserNobody14/tree-sitter-dart      a9bdfa3db2fbc9b9f12c93450d04a671f33a5102
+fetch_async tree-sitter-css        https://github.com/tree-sitter/tree-sitter-css        dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f
+fetch_async tree-sitter-scala      https://github.com/tree-sitter/tree-sitter-scala      4d081d98670ff6e98ca42c085294fc75eec15e1d
+fetch_async tree-sitter-groovy     https://github.com/murtaza64/tree-sitter-groovy       deb0dcf8c4544f07564060f6e9b9f6e4b0bfc27d
+fetch_async tree-sitter-objc       https://github.com/tree-sitter-grammars/tree-sitter-objc 181a81b8f23a2d593e7ab4259981f50122909fda
+fetch_async tree-sitter-elixir     https://github.com/elixir-lang/tree-sitter-elixir      c4f9f5a15ddad8635ba59a5b99c2e9124e74ad91
+fetch_async tree-sitter-powershell https://github.com/airbus-cert/tree-sitter-powershell d398441825243b00e317e87e1829b9d6a3e54ce0
+
+wait_fetches
 
 echo "fetch-treesitter: done -> $VENDOR/tree-sitter*"
 

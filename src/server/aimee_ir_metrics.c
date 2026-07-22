@@ -1,7 +1,10 @@
 /* aimee_ir_metrics.c -- see aimee_ir_metrics.h. Atomic counters, [metric][wire]. */
 #include "aimee_ir_metrics.h"
 
-#define N_WIRE (AIMEE_WIRE_GEMINI + 1)
+/* Sized off the LAST wire value, so adding a protocol widens the table
+ * automatically. (Was AIMEE_WIRE_GEMINI + 1 until the Gemini wire was removed —
+ * Gemini speaks the OpenAI shape, so it needs no protocol of its own.) */
+#define N_WIRE (AIMEE_WIRE_RESPONSES + 1)
 
 static long g_counts[AIMEE_IR_M__COUNT][N_WIRE];
 
@@ -47,6 +50,8 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_backend_build_failures";
    case AIMEE_IR_M_BACKEND_PARSE_FAIL:
       return "ir_backend_parse_failures";
+   case AIMEE_IR_M_REBUILD_MATCH:
+      return "ir_rebuild_match_bytes";
    case AIMEE_IR_M_REBUILD_MISMATCH:
       return "ir_rebuild_mismatch_bytes";
    case AIMEE_IR_M_STAGE_MUTATION:
@@ -57,6 +62,18 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_passthrough";
    case AIMEE_IR_M_IR_PATH:
       return "ir_path";
+   case AIMEE_IR_M_LEGACY_FALLBACK:
+      return "ir_legacy_fallback";
+   case AIMEE_IR_M_BODY_MISMATCH:
+      return "ir_body_mismatch";
+   case AIMEE_IR_M_BODY_MATCH:
+      return "ir_body_match";
+   case AIMEE_IR_M_RESCUE_RECOVERIES:
+      return "ir_rescue_recoveries";
+   case AIMEE_IR_M_RESP_MISMATCH:
+      return "ir_resp_mismatch";
+   case AIMEE_IR_M_RESP_MATCH:
+      return "ir_resp_match";
    case AIMEE_IR_M__COUNT:
    default:
       return "unknown";

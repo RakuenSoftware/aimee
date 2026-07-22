@@ -33,28 +33,23 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer: two-tier switches (`economizer.*`) + levers (`reduce.*`)
+### Context economizer: `economizer.mode`
 
-The economizer has two **tier switches** that gate the individual `reduce.*` levers, plus the
-levers themselves. All are booleans except the two numeric tuning knobs. Defaults in
-parentheses.
+The economizer has one fail-closed mode control:
 
-| Setting | Default | What it does |
-| --- | --- | --- |
-| **`economizer.enabled`** | **on** | **Master switch.** Off = one kill-switch: every reducer is forced off (measurement keeps running and reports zero, proving the kill). The safe tier stays on under it by the levers' own defaults. |
-| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself; the aggressive flag alone never turns on a live-traffic mutator. |
-| **`reduce.command_filter`** | **on** | **Tool-output condensation**: deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
-| `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
-| `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |
-| `reduce.history_fold` | on | Fold old turn history into a rolling skeleton. |
-| `reduce.delegate_seam` | on | Run the economizer at the delegate turn loop. |
-| `reduce.measure` | on | Collect the baseline/opportunity token ledger. |
-| `reduce.freeze_guard` | on | Pin the fold boundary only when the cache-read savings beat the cache-write cost. |
-| `reduce.gateway_session_disable_ttl_ms` | 3600000 | Gateway-mutation circuit-breaker window (ms). Must be > 0. |
-| `reduce.freeze_guard_horizon` | 1 | Expected reuse turns for the freeze break-even estimate. |
+```yaml
+economizer:
+  mode: off             # off | proof_gated (default: off)
+```
 
-`reduce.gateway_seam` is intentionally **not** on the page. It is synthesized from
-`gateway_mutate` and its persistence is explicit-gated; toggle `gateway_mutate` instead.
+| Mode | What it does |
+| --- | --- |
+| `off` (default) | Sends the completed provider body without economizer registry work. |
+| `proof_gated` | Validates the signed transform registry and freezes the selected body behind an immutable exact-length wire snapshot. The current registry is empty, so only pristine bytes can be selected. |
+
+`modules.economizer: false` is an authoritative hard-kill that forces the effective mode to
+`off`. Legacy folding, condensation, compression, gateway mutation, and restore/resend are
+disconnected from production request paths. See [The aimee Economizer](features/economizer.md).
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -75,31 +70,43 @@ per-turn toggles). Values are clamped to sane bounds.
 
 ---
 
-## Turning on tool-output condensation
+### Sub-agent ban: `subagent_ban_enabled`
 
-The most common new toggle. In the web UI:
+| Key | Default | Effect |
+|-----|---------|--------|
+| `subagent_ban_enabled` | `true` | When on **and** usable delegates are configured, blocks the primary agent's own sub-agent tools (`Task`/`Agent`/`spawn_agent`/`RemoteTrigger`) and redirects to `aimee delegate`, so delegation stays inside aimee's guardrail + memory + KB model. Set `false` to allow provider-native sub-agents. |
 
-1. Open **⚙️ Settings** (left nav) and filter for `command_filter` (or scroll to the
-   **`reduce`** group).
-2. Flip **`reduce.command_filter`** **on** and **Save**.
+What this key gates: the **server guardrail block** (honors `subagent_ban_enabled: false`
+as an opt-out) and the **Claude Code harness enforcement** — a `subagent-guard` PreToolUse
+hook plus a `permissions.deny [Task, Agent]` backstop that aimee's client setup
+auto-installs. The harness gate is evaluated once per client setup / session-start (config
+opt-out is read locally; a one-shot `agent.list` probe decides whether usable delegates
+exist), so changing this key — or adding/removing delegates — re-materializes the hook and
+deny list at the next setup. Independently, the `/v1` **gateway tool-strip** removes
+sub-agent tools from what aimee hands its *own* delegate agents; that strip is always-on
+and is not affected by this key.
 
-Or from the CLI / config file:
+---
+
+## Choosing an economizer mode
+
+The economizer defaults to `off`. To enable its proof fence, set `economizer.mode`:
 
 ```yaml
-reduce:
-  command_filter: true
+economizer:
+  mode: proof_gated
 ```
 
-When on, a delegate's recognized command output is condensed before it enters context, with
-the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer in the
-condensed result. When off, output is byte-identical to today (it falls through to the
-size-based `reduce.compress`). See
-[features/tool-output-condensation.md](features/tool-output-condensation.md) for the full
-behavior, safety contract, and observability.
+```sh
+aimee config set economizer.mode proof_gated
+```
+
+Explicit legacy `safe` and `aggressive` values are rejected rather than mapped. See
+[features/economizer.md](features/economizer.md) for the migration and safety contract.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the economizer `reduce.*` levers and most other fields. The
+- **Immediately (next turn):** `economizer.mode` and most other fields. The
   server reloads config per request.
 - **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module

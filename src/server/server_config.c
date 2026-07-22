@@ -9,6 +9,8 @@
 #include "config_fields.h"
 #include "json_fluent.h" /* jo_ok */
 #include "server.h"
+#include "server_http.h"
+#include "server_http_identity.h"
 #include <string.h>
 
 /* config.show: return every allowlisted field and its current value. */
@@ -22,12 +24,23 @@ int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    cJSON *obj = cJSON_CreateObject();
+   /* Advertise the surface group of every non-runtime key so the Settings GUI can
+    * hide deploy/advanced/dev keys by default. Additive + non-breaking: the flat
+    * `config` map still carries EVERY key's value, so `aimee config show` and any
+    * existing consumer are unchanged; a client that ignores `groups` sees all. */
+   cJSON *groups = cJSON_CreateObject();
    for (int i = 0; config_fields[i].key; i++)
+   {
       cJSON_AddItemToObject(obj, config_fields[i].key,
                             config_field_value_json(&cfg, &config_fields[i]));
+      if (config_fields[i].group != FGROUP_RUNTIME)
+         cJSON_AddStringToObject(groups, config_fields[i].key,
+                                 config_field_group_name(&config_fields[i]));
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "config", obj);
+   cJSON_AddItemToObject(resp, "groups", groups);
    return server_send_ok(conn, resp);
 }
 
@@ -62,6 +75,15 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *key = jo_str(req, "key", "");
    if (!key || !key[0])
       return server_send_error(conn, "usage: aimee config set <key> <value>", NULL);
+
+   /* Do not let the generic config surface bypass the roundtable preset API's
+    * operator boundary (notably through roundtable.default). Local UDS callers
+    * have full generic capabilities, but remain uid: principals; only the
+    * server.token-attested appliance administrator may alter this policy. */
+   if (roundtable_policy_config_key(key) &&
+       !route_roundtable_mutation_authorized(server_http_identity_principal()))
+      return server_send_error(
+          conn, "roundtable changes require the authenticated appliance administrator", NULL);
 
    /* Accept any JSON scalar for value; coerce to string for the field parser. */
    cJSON *jval = cJSON_GetObjectItemCaseSensitive(req, "value");
@@ -110,16 +132,5 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * effect now or needs a restart, instead of leaving them to guess. */
    cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
    cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
-   /* One-time setup warning: enabling delegate use of Claude-via-CLI carries an
-    * Anthropic account-action risk. Surfaced here (not on every delegate call)
-    * and in DELEGATES.md. */
-   if (strcmp(key, "claude_cli_delegate_enabled") == 0 && cfg.claude_cli_delegate_enabled)
-      cJSON_AddStringToObject(
-          resp, "notice",
-          "WARNING: Claude run via the `claude` CLI / tmux login (not an API key) can now be used "
-          "as a delegate. Driving a personal Anthropic Claude subscription through "
-          "automated/headless delegation may violate Anthropic's terms of service and risk "
-          "suspension or termination of your account. Use an Anthropic API key (billed per token) "
-          "for automated/delegated workloads. See DELEGATES.md.");
    return server_send_ok(conn, resp);
 }

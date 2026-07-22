@@ -15,11 +15,40 @@ typedef enum
    AIMEE_IR_M_RENDER_FAIL,        /* frontend.render(IR) failed */
    AIMEE_IR_M_BACKEND_BUILD_FAIL, /* backend.build(IR) failed */
    AIMEE_IR_M_BACKEND_PARSE_FAIL, /* backend.parse(provider resp) failed */
-   AIMEE_IR_M_REBUILD_MISMATCH,   /* same-protocol round-trip != original bytes (BUG) */
+   /* Same-protocol round-trip serialize(backend_build(parse(req))) vs serialize(req),
+    * BYTE-exact. This is the CACHING gate: Claude Code's prompt cache keys on exact
+    * bytes, so the verbatim Anthropic passthrough cannot be retired until MISMATCH
+    * reads 0 over real traffic. Distinct from BODY_MATCH (semantic / key-order
+    * insensitive). MATCH is the denominator so a parity RATE is computable; a mismatch
+    * that is still semantically equal is harmless key-order/formatting drift, one that
+    * is semantically UNEQUAL is real field loss (logged with a semantic_equal flag). */
+   AIMEE_IR_M_REBUILD_MATCH,
+   AIMEE_IR_M_REBUILD_MISMATCH,
    AIMEE_IR_M_STAGE_MUTATION,     /* a core stage mutated the request (forces IR path) */
    AIMEE_IR_M_CACHE_CONTROL_LOST, /* a cache_control marker was dropped in round-trip (BUG) */
    AIMEE_IR_M_PASSTHROUGH,        /* same-protocol raw-passthrough fast-path taken */
    AIMEE_IR_M_IR_PATH,            /* full parse->IR->build path taken */
+   /* The IR build returned NULL and the caller USED the legacy translator. This is
+    * the rollout gate: the legacy translators cannot be deleted until this reads 0
+    * over a real observation window. The *_FAIL counters say a stage failed;
+    * this says a request was actually SERVED BY LEGACY. */
+   AIMEE_IR_M_LEGACY_FALLBACK,
+   /* Shadow: the IR-built provider body differed from what the legacy translator
+    * would have sent for the SAME request. This is the direct evidence for
+    * retiring the translators: 0 mismatches over real traffic means the IR is a
+    * faithful replacement, not merely "it worked". */
+   AIMEE_IR_M_BODY_MISMATCH,
+   /* Shadow: IR and legacy produced byte-identical provider bodies. */
+   AIMEE_IR_M_BODY_MATCH,
+   AIMEE_IR_M_RESCUE_RECOVERIES,
+   /* Shadow (response side): the IR backend parser and the legacy translator
+    * disagreed about the SAME provider response -- different text, or a different
+    * set of tool calls. This is the response-side twin of BODY_MISMATCH and the
+    * gate for retiring the response translators: the request-side shadow proves the
+    * IR sends the same bytes, this proves it reads the reply the same way. */
+   AIMEE_IR_M_RESP_MISMATCH,
+   /* Shadow (response side): IR and legacy parsed the response identically. */
+   AIMEE_IR_M_RESP_MATCH,
    AIMEE_IR_M__COUNT
 } aimee_ir_metric_t;
 

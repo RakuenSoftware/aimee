@@ -26,8 +26,8 @@
 #include "../kb_features.h"
 #include "../kb_ranker.h"
 #include "../kb_detect.h"
-#include "../headers/config.h"
-#include "../headers/config_learning.h"
+#include "config.h"
+#include "config_learning.h"
 
 static void open_db(void)
 {

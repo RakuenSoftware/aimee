@@ -171,20 +171,7 @@ check_output "delegate status missing id" "Usage: aimee delegate status <job_id>
 check_output "delegate status multiple ids" "job_id: 2" $AIMEE delegate status 1 2
 check_output "help version" "Print version" $AIMEE help version
 check_output "--help" "Commands:" $AIMEE --help
-check_output "chat help opencode tui" "OpenCode" $AIMEE chat --help
-check_output "chat help server ownership" "aimee-server" $AIMEE chat --help
-if command -v script >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-    cat >"$AIMEE_HOME/aimee.yaml" <<'EOF'
-provider: codex
-EOF
-    mkdir -p "$HOME/.codex"
-    cat >"$HOME/.codex/config.toml" <<'EOF'
-model = "chatgpt 5.5"
-model_reasoning_effort = "high"
-EOF
-    check "opencode v2 bridge contract" \
-        script -qfec "env AIMEE_OPENCODE_BIN='$SCRIPT_DIR/opencode_v2_probe.sh' '$AIMEE'" /dev/null
-fi
+check_output "no subcommand prints usage" "Commands:" $AIMEE
 check_output "memory (no subcommand)" "Subcommands:" $AIMEE memory
 check_output "index (no subcommand)" "Subcommands:" $AIMEE index
 

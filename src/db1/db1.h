@@ -54,7 +54,6 @@ extern "C"
 #include "agent_log.h"
 #include "agent_jobs.h"
 #include "coord_jobs.h"
-#include "work_queue.h"
 #include "execution_plans.h"
 #include "pipelines.h"
 #include "secrets.h"
@@ -72,6 +71,7 @@ extern "C"
 #include "guardrail_events.h"
 #include "db1_trigger.h"
 #include "mcp_osv_cache.h"
+#include "server_management_jti.h"
 
 #ifdef __cplusplus
 }

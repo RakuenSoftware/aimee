@@ -155,10 +155,13 @@ int delegate_prompt_allows_writes(const char *prompt);
  *   When wt_path is NULL, falls back to response-text matching:
  *     full-path match → ok; basename-only → soft drift (rc=1);
  *     absent from response → hard drift (rc=-1).
- *   Returns -1 on hard drift, 1 on soft drift, 0 when all paths are ok. */
+ *   Returns -1 on hard drift, 1 on soft drift, 0 when all paths are ok.
+ *   role_is_write is the authoritative write-intent gate: a read/analysis role
+ *   (0) can never hard-drift on a missing named file (it produces no files), so a
+ *   path scraped from reference content in its prompt never fails it. */
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, char *errbuf,
-                                    size_t errbuf_size);
+                                    const char *response, const char *wt_path, int role_is_write,
+                                    char *errbuf, size_t errbuf_size);
 
 /* Build a compact validation evidence bundle for validate/review delegates.
  * The bundle includes HEAD ref, diff --stat, and changed files.

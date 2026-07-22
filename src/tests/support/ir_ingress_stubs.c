@@ -6,7 +6,44 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "config.h"              /* config_t + econ_preset_t (for the econ_preset stub) */
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
+#include "agent_exec.h"
+
+/* The minimal ingress links do not carry config.o. Mirror the production hard-kill
+ * resolver so the real immutable wire-snapshot fence can be exercised. */
+__attribute__((weak)) int econ_mode(const config_t *cfg)
+{
+   if (!cfg || cfg->module_economizer == 0)
+      return ECON_MODE_OFF;
+   return cfg->economizer_mode;
+}
+
+/* Exact-length transport adapters for ingress tests whose capture doubles expose
+ * the historical string API. Production links the real byte-counted transport. */
+__attribute__((weak)) int agent_http_post_bytes(const char *url, const char *auth_header,
+                                                const void *body, size_t body_len,
+                                                char **response_buf, int timeout_ms,
+                                                const char *extra_headers)
+{
+   const char *s = (const char *)body;
+   if (!s || strlen(s) != body_len)
+      return -1;
+   return agent_http_post(url, auth_header, s, response_buf, timeout_ms, extra_headers);
+}
+
+__attribute__((weak)) int agent_http_post_stream_bytes(const char *url, const char *auth_header,
+                                                       const void *body, size_t body_len,
+                                                       agent_http_stream_cb callback,
+                                                       void *userdata, int timeout_ms,
+                                                       const char *extra_headers)
+{
+   const char *s = (const char *)body;
+   if (!s || strlen(s) != body_len)
+      return -1;
+   return agent_http_post_stream(url, auth_header, s, callback, userdata, timeout_ms,
+                                 extra_headers);
+}
 
 /* Gateway-mutation hooks wired into anthropic_http.c / openai_chat.c (§ economizer
  * gateway mutation). The minimal-link ingress tests exercise the non-mutation shape
@@ -25,6 +62,11 @@ __attribute__((weak)) void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx)
 __attribute__((weak)) int gw_mutate_is_enabled(void)
 {
    return 0;
+}
+__attribute__((weak)) int gw_mutate_upstream_ok(int upstream_is_anthropic)
+{
+   (void)upstream_is_anthropic;
+   return 0; /* mutation inert on the shape-test path; real object wins when linked */
 }
 __attribute__((weak)) void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
                                               const char *system_prompt, const char *session_hdr,
@@ -92,6 +134,18 @@ __attribute__((weak)) void aimee_ir_shadow_observe_request(const void *req, int 
    (void)frontend;
 }
 
+/* Slice 2-wire: the response-side shadow. anthropic_http.o now calls this on the
+ * live buffered paths; the minimal shape/p2c test links do not pull the real
+ * aimee_ir_shadow.o (+ backend parsers), so a weak inert stub resolves the link.
+ * Real aimee_ir_shadow.o wins when linked. */
+__attribute__((weak)) void aimee_ir_shadow_compare_response(const void *legacy,
+                                                            const void *resp_json, int wire)
+{
+   (void)legacy;
+   (void)resp_json;
+   (void)wire;
+}
+
 __attribute__((weak)) int aimee_ir_path_enabled(void)
 {
    return 0;
@@ -134,13 +188,23 @@ __attribute__((weak)) int anthropic_delta_emit(const void *d, void *st, const ch
 
 __attribute__((weak)) char *aimee_ir_build_provider_body(const void *req, const char *driver_name,
                                                          const char *agent_model,
-                                                         int max_tokens_override)
+                                                         int max_tokens_override, int want_stream)
 {
    (void)req;
    (void)driver_name;
    (void)agent_model;
    (void)max_tokens_override;
+   (void)want_stream;
    return NULL;
+}
+
+/* IR observability counters. The ingress increments these on the legacy-fallback and
+ * shadow-compare paths; the minimal-link tests don't link the metrics table, so the
+ * counter is inert here. Real aimee_ir_metrics.o wins when linked. */
+__attribute__((weak)) void aimee_ir_metric_inc(int metric, int frontend)
+{
+   (void)metric;
+   (void)frontend;
 }
 
 __attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *model, size_t model_n,
@@ -167,4 +231,122 @@ __attribute__((weak)) void *aimee_ir_build_from_chat(const char *agent_model, co
    (void)system;
    (void)driver_name;
    return NULL;
+}
+
+/* Slice 3: the OPENAI-WIRE IR response path. The anthropic_http shape/p2c tests
+ * #include anthropic_http.c and link minimally; these inert weak stubs resolve the
+ * link. aimee_ir_resp_path_enabled()->0 keeps the legacy parse on the test path, so
+ * the other three are never actually called. Real objects win when linked. */
+__attribute__((weak)) int aimee_ir_resp_path_enabled(void)
+{
+   return 0;
+}
+__attribute__((weak)) void aimee_ir_response_to_parsed(const void *r, void *out)
+{
+   (void)r;
+   (void)out;
+}
+__attribute__((weak)) int openai_backend_parse(const void *resp, void *out, char *err,
+                                               unsigned long errn)
+{
+   (void)resp;
+   (void)out;
+   (void)err;
+   (void)errn;
+   return -1;
+}
+__attribute__((weak)) void aimee_response_free(void *r)
+{
+   (void)r;
+}
+
+/* Response seam Slice 2: the plain anthropic_http shape test #includes anthropic_http.c
+ * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
+ * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
+ * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
+__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled)
+{
+   (void)parsed;
+   (void)enabled;
+   return 0;
+}
+
+/* The ingress governance resolver (anthropic_governance_enabled) reads this env default; the
+ * shape test links no gw_stage_governance.o, so a weak default-ON stub resolves the link. */
+__attribute__((weak)) int gw_response_governance_enabled(void)
+{
+   return 1;
+}
+
+/* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
+ * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so
+ * NEVER entered at runtime). LTO used to dead-code-eliminate the block, but that decision is
+ * fragile (any new read of the loaded cfg in that function can retain it, and it differs across gcc
+ * versions), so resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win
+ * when a test links them. Loose signatures: never called here, matched only by name + ABI (arg
+ * count, pointer/enum-as-int). */
+__attribute__((weak)) int context_reduce(cJSON *messages, const char *system_prompt,
+                                         const char *model, const char *session_id,
+                                         reduce_seam_t seam, const reduce_config_t *cfg,
+                                         reduce_state_t *st, reduce_result_t *out)
+{
+   (void)messages;
+   (void)system_prompt;
+   (void)model;
+   (void)session_id;
+   (void)seam;
+   (void)cfg;
+   (void)st;
+   (void)out;
+   return 1; /* non-zero: "did nothing" (the caller bypasses on != 0) */
+}
+__attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
+{
+   (void)out;
+}
+/* anthropic_http.c / openai_chat.c resolve the economizer gateway-seam gate through
+ * econ_preset(); this inert weak stub returns an all-zero preset (gateway_seam off), so
+ * the shadow-measure block is never entered. The real config.o wins when linked. */
+__attribute__((weak)) void econ_preset(const config_t *cfg, econ_preset_t *out)
+{
+   (void)cfg;
+   if (out)
+      memset(out, 0, sizeof(*out));
+}
+/* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
+ * economizer gateway-seam block (off under the tests' stubbed safe-tier config, so NEVER entered at
+ * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
+ * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
+ * Real gateway_mutate_wire.o wins when a test links it. */
+__attribute__((weak)) int gw_economizer_measure(cJSON *messages, const char *system_prompt,
+                                                const char *model, int retained_msgs,
+                                                reduce_result_t *out)
+{
+   (void)messages;
+   (void)system_prompt;
+   (void)model;
+   (void)retained_msgs;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 1;
+}
+__attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
+                                                      const char *model, const char *agent_name,
+                                                      const char *role)
+{
+   (void)r;
+   (void)model;
+   (void)agent_name;
+   (void)role;
+}
+
+/* Config-surface slice: the ingress now resolves module toggles via config_module_enabled
+ * (memory slot + governance egress). It is a pure resolver; the minimal-link ingress tests
+ * stub config_load (not the whole config.o), so provide the real logic as a weak symbol here
+ * (config.o's strong definition wins when a test links it). */
+__attribute__((weak)) int config_module_enabled(int config_tristate, int env_default)
+{
+   if (config_tristate == 0 || config_tristate == 1)
+      return config_tristate;
+   return env_default ? 1 : 0;
 }

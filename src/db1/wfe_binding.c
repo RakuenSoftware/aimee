@@ -20,7 +20,7 @@ int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *e
 
    /* IMMEDIATE so the single-writer check + upsert are one atomic write txn
     * (two concurrent binds on the same work-item can't both pass the check). */
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
 
    int rc = 0;
@@ -48,7 +48,7 @@ int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *e
    }
    if (rc != 0)
    {
-      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      db1_txn_end(db, "ROLLBACK");
       return rc;
    }
 
@@ -71,7 +71,7 @@ int db1_wfe_bind(const char *session_id, const char *work_item_id, const char *e
          rc = -1;
       sqlite3_finalize(stmt);
    }
-   sqlite3_exec(db, rc == 0 ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
+   db1_txn_end(db, rc == 0 ? "COMMIT" : "ROLLBACK");
    return rc;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, KeyValue, Button } from "@rakuensoftware/smoothgui";
 import ProjectPicker from "../components/ProjectPicker";
 import type { ProjectSelection } from "../components/ProjectPicker";
 import { useSessions } from "../SessionContext";
@@ -107,7 +107,7 @@ function readTddTest(node: GNode): Participant {
 }
 
 // Read the participants a node currently declares, from whichever param shape it
-// uses: a roundtable's panel (required = delegates, personas = the lenses) or a
+// uses: a roundtable's panel (required = personas, pins = positive agent pins) or a
 // single-action step's persona/delegate. Returns [] when none are set.
 function readParticipants(node: GNode): Participant[] {
   const p = (node.params || {}) as Record<string, unknown>;
@@ -115,8 +115,16 @@ function readParticipants(node: GNode): Participant[] {
   const strs = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   if (Array.isArray(panel.required) || Array.isArray(panel.personas)) {
-    const dels = strs(panel.required);
-    const pers = strs(panel.personas);
+    const pins = (panel.pins || {}) as Record<string, unknown>;
+    // Legacy panels stored delegates in required and lenses in personas. Read
+    // that shape until the next edit migrates it to required=lenses + pins.
+    const legacy = Array.isArray(panel.personas) && !panel.pins;
+    const pers = legacy ? strs(panel.personas) : strs(panel.required);
+    const dels = legacy
+      ? strs(panel.required)
+      : pers.map((persona) =>
+          typeof pins[persona] === "string" ? String(pins[persona]) : "",
+        );
     const n = Math.max(dels.length, pers.length);
     const out: Participant[] = [];
     for (let i = 0; i < n; i++)
@@ -672,14 +680,15 @@ export default function EditWorkflows() {
         }}
       >
         <Panel title="Workflows" count={defs.length}>
-          <button onClick={newDef} style={btn}>
+          <Button onClick={newDef} size="md" title="Create a new workflow definition and open it in the editor.">
             + New
-          </button>
+          </Button>
           <div style={{ marginTop: 6 }}>
             {defs.map((d) => (
               <div
                 key={d.name}
                 onClick={() => openDef(d.name)}
+                title="Open this workflow definition for editing."
                 style={{
                   ...row,
                   fontWeight: graph?.name === d.name ? 600 : 400,
@@ -695,9 +704,9 @@ export default function EditWorkflows() {
           </div>
         </Panel>
         <Panel title="Blocks" count={blocks.length}>
-          <button onClick={newBlock} style={btn}>
+          <Button onClick={newBlock} size="md" title="Create a new custom delegate block.">
             + New
-          </button>
+          </Button>
           <div style={{ marginTop: 6 }}>
             {blocks.map((b) => (
               <div
@@ -709,16 +718,17 @@ export default function EditWorkflows() {
                 <span>{b.name}</span>
                 <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   {b.custom && b.executor === "delegate" && (
-                    <button
+                    <Button
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         editExistingBlock(b);
                       }}
-                      style={{ ...btnSmall, padding: "0 6px" }}
+                      style={{ padding: "0 6px" }}
                       title="edit this custom block"
                     >
                       ✎
-                    </button>
+                    </Button>
                   )}
                   <Badge
                     label={b.custom ? "custom" : b.produces}
@@ -732,7 +742,7 @@ export default function EditWorkflows() {
         {editBlock && (
           <Panel title={editBlock.isNew ? "New custom block" : `Edit block: ${editBlock.name}`}>
             <div style={{ display: "grid", gap: 6 }}>
-              <label style={lbl}>
+              <label style={lbl} title="Identifier for this custom block (letters, digits, - _ .); fixed once created.">
                 name
                 <input
                   style={{ ...inp, width: "100%" }}
@@ -741,7 +751,7 @@ export default function EditWorkflows() {
                   onChange={(e) => setEditBlock({ ...editBlock, name: e.target.value })}
                 />
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Artifact type this block takes as input.">
                 consumes
                 <select
                   style={{ ...inp, width: "100%" }}
@@ -755,7 +765,7 @@ export default function EditWorkflows() {
                   ))}
                 </select>
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Artifact type this block emits (branch, or none).">
                 produces
                 <select
                   style={{ ...inp, width: "100%" }}
@@ -766,7 +776,7 @@ export default function EditWorkflows() {
                   <option value="none">none</option>
                 </select>
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Persona the delegate runs as when this block executes.">
                 persona
                 <input
                   style={{ ...inp, width: "100%" }}
@@ -775,7 +785,7 @@ export default function EditWorkflows() {
                   onChange={(e) => setEditBlock({ ...editBlock, persona: e.target.value })}
                 />
               </label>
-              <label style={lbl}>
+              <label style={lbl} title="Instructions given to the delegate each time this block runs.">
                 prompt
                 <textarea
                   style={{ ...inp, width: "100%", minHeight: 80, fontFamily: "ui-monospace, monospace" }}
@@ -784,12 +794,17 @@ export default function EditWorkflows() {
                 />
               </label>
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <button onClick={saveBlock} style={btn}>
+                <Button onClick={saveBlock} size="md" title="Save this custom block definition.">
                   Save
-                </button>
-                <button onClick={deleteBlock} style={{ ...btn, color: "#b00" }}>
+                </Button>
+                <Button
+                  variant="danger"
+                  size="md"
+                  onClick={deleteBlock}
+                  title={editBlock.isNew ? "Discard this new block." : "Delete this custom block."}
+                >
                   {editBlock.isNew ? "Cancel" : "Delete"}
-                </button>
+                </Button>
                 {blockStatus && <span style={{ fontSize: 12, color: "#b00" }}>{blockStatus}</span>}
               </div>
             </div>
@@ -814,31 +829,19 @@ export default function EditWorkflows() {
           {version && (
             <Badge label={`v ${version.slice(0, 8)}`} variant="neutral" />
           )}
-          <button onClick={validate} disabled={!graph} style={btn}>
+          <Button onClick={validate} disabled={!graph} size="md" title="Check the current workflow for errors without saving.">
             Validate
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
+            size="md"
             onClick={save}
             disabled={!graph}
-            style={{ ...btn, background: "#2563eb", color: "#fff" }}
+            title="Save the workflow definition (fails if the on-disk version changed)."
           >
             Save
-          </button>
-          {status && (
-            <span
-              style={{
-                color:
-                  status.kind === "err"
-                    ? "#c00"
-                    : status.kind === "ok"
-                      ? "#070"
-                      : "#666",
-                fontSize: 13,
-              }}
-            >
-              {status.msg}
-            </span>
-          )}
+          </Button>
+          <InlineStatus status={status} />
           <Spinner loading={loading} text="loading…" />
         </div>
         <div
@@ -1009,21 +1012,6 @@ export default function EditWorkflows() {
   );
 }
 
-function Field({ k, v }: { k: string; v: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 13,
-        padding: "2px 0",
-      }}
-    >
-      <span style={{ color: "#888" }}>{k}</span>
-      <span style={{ fontFamily: "monospace" }}>{v}</span>
-    </div>
-  );
-}
 
 function NodeInspector({
   node,
@@ -1088,8 +1076,8 @@ function NodeInspector({
 
   // Serialize the structured fields back into the node's params, preserving any
   // params the form doesn't manage (e.g. freeze base_branch, gate.human policy).
-  //   roundtable -> panel.required = delegates (engine-consumed, validator needs
-  //                 >=2), panel.personas = the lenses, quorum
+  //   roundtable -> panel.required = personas and panel.pins contains only
+  //                 explicit positive persona->agent requirements.
   //   single     -> persona + delegate (forward params; honored once the
   //                 author/implement executors read them)
   const commitStep = (next: {
@@ -1133,14 +1121,17 @@ function NodeInspector({
         const panel: Record<string, unknown> = {
           ...((params.panel as Record<string, unknown>) || {}),
         };
-        const required = cleaned
-          .map((x) => x.delegate || x.persona)
-          .filter(Boolean);
         const lenses = cleaned.map((x) => x.persona).filter(Boolean);
-        if (required.length) panel.required = required;
+        if (lenses.length) panel.required = lenses;
         else delete panel.required;
-        if (lenses.length) panel.personas = lenses;
-        else delete panel.personas;
+        delete panel.personas;
+        const pins = Object.fromEntries(
+          cleaned
+            .filter((x) => x.persona && x.delegate)
+            .map((x) => [x.persona, x.delegate]),
+        );
+        if (Object.keys(pins).length) panel.pins = pins;
+        else delete panel.pins;
         if (Object.keys(panel).length) params.panel = panel;
         else delete params.panel;
         if (q > 0) params.quorum = q;
@@ -1282,29 +1273,31 @@ function NodeInspector({
             list="wf-persona-opts"
             value={p.persona}
             placeholder="persona"
+            title="Persona this step's agent runs as."
             onChange={(e) => setPart(i, "persona", e.target.value)}
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />
           <input
             list="wf-delegate-opts"
             value={p.delegate}
-            placeholder="delegate"
+            placeholder="specific agent (optional)"
+            title="Optional positive pin: require this specific agent. Blank allows any enabled, role-eligible delegate."
             onChange={(e) => setPart(i, "delegate", e.target.value)}
             style={{ ...inp, flex: 1, minWidth: 0 }}
           />
           {(isMulti || parts.length > 1) && (
-            <button onClick={() => delPart(i)} style={btnSmall} title="remove">
+            <Button onClick={() => delPart(i)} size="sm" title="remove">
               ×
-            </button>
+            </Button>
           )}
         </div>
       ))}
       {isMulti && (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={addPart} style={btnSmall}>
+          <Button onClick={addPart} size="sm" title="Add another persona/delegate to the review panel.">
             + participant
-          </button>
-          <label style={{ ...lbl, margin: 0 }}>
+          </Button>
+          <label style={{ ...lbl, margin: 0 }} title="How many panelists must pass; blank means all.">
             quorum&nbsp;
             <input
               type="number"
@@ -1405,6 +1398,7 @@ function NodeInspector({
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <select
               value={childWorkflowName(node)}
+              title="Workflow each fan-out packet runs."
               onChange={(e) => {
                 const v = e.target.value;
                 mutate((g) => ({
@@ -1427,41 +1421,44 @@ function NodeInspector({
                   </option>
                 ))}
             </select>
-            <button
+            <Button
+              size="sm"
               onClick={() => onOpenWorkflow(childWorkflowName(node))}
               disabled={!childWorkflowName(node)}
-              style={btnSmall}
               title="open the child workflow in this editor"
             >
               open ↗
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       <div style={{ borderTop: "1px solid #eee", margin: "10px 0 6px" }} />
-      <Field k="block" v={node.block + (node.custom ? " (custom)" : "")} />
-      <Field k="produces" v={node.produces} />
+      <KeyValue label="block" value={node.block + (node.custom ? " (custom)" : "")} mono />
+      <KeyValue label="produces" value={node.produces} mono />
       <div style={{ margin: "6px 0" }}>
-        <button
+        <Button
+          size="md"
           onClick={setStart}
           disabled={graph.start === node.id}
-          style={btn}
+          title="Make this node the workflow's start node."
         >
           {graph.start === node.id ? "start node ✓" : "set as start"}
-        </button>
+        </Button>
       </div>
 
-      <label style={lbl}>Inputs</label>
+      <label style={lbl} title="Named outputs from other nodes fed into this step.">Inputs</label>
       {node.in.map((b, i) => (
         <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
           <input
             value={b.input}
+            title="Name this step refers to the input by."
             onChange={(e) => setBinding(i, "input", e.target.value)}
             style={{ ...inp, width: 60 }}
           />
           <select
             value={b.producer}
+            title="Which upstream node supplies this input."
             onChange={(e) => setBinding(i, "producer", e.target.value)}
             style={inp}
           >
@@ -1472,20 +1469,21 @@ function NodeInspector({
               </option>
             ))}
           </select>
-          <button onClick={() => delBinding(i)} style={btnSmall}>
+          <Button onClick={() => delBinding(i)} size="sm" title="Remove this input binding.">
             ×
-          </button>
+          </Button>
         </div>
       ))}
-      <button onClick={addBinding} style={btnSmall}>
+      <Button onClick={addBinding} size="sm" title="Add an input binding from another node's output.">
         + input
-      </button>
+      </Button>
 
       {(["next", "on_pass", "on_fail"] as const).map((edge) => (
         <div key={edge} style={{ marginTop: 6 }}>
           <label style={lbl}>{edge}</label>
           <select
             value={node[edge] || ""}
+            title="Node to go to on this transition."
             onChange={(e) => setEdge(edge, e.target.value)}
             style={{ ...inp, width: "100%" }}
           >
@@ -1500,7 +1498,8 @@ function NodeInspector({
       ))}
 
       <div style={{ marginTop: 10 }}>
-        <button
+        <Button
+          size="sm"
           onClick={() => {
             const nv = !showAdv;
             setShowAdv(nv);
@@ -1509,10 +1508,10 @@ function NodeInspector({
               setParamsErr("");
             }
           }}
-          style={btnSmall}
+          title="Show/hide the raw params JSON editor."
         >
           {showAdv ? "▾ Advanced (raw params)" : "▸ Advanced (raw params)"}
-        </button>
+        </Button>
       </div>
       {showAdv && (
         <>
@@ -1537,30 +1536,20 @@ function NodeInspector({
         </>
       )}
 
-      <button
+      <Button
+        variant="danger"
+        size="md"
         onClick={onDelete}
-        style={{ ...btn, marginTop: 10, color: "#c00", borderColor: "#e0a0a0" }}
+        style={{ marginTop: 10 }}
+        title="Remove this node from the workflow."
       >
         Delete node
-      </button>
+      </Button>
     </div>
   );
 }
 
 /* ---- inline styles ---- */
-const btn: React.CSSProperties = {
-  fontSize: 13,
-  padding: "4px 10px",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  background: "#fff",
-  cursor: "pointer",
-};
-const btnSmall: React.CSSProperties = {
-  ...btn,
-  padding: "2px 6px",
-  fontSize: 12,
-};
 const row: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",

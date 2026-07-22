@@ -17,10 +17,96 @@
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
+#include "kb_identity.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+
+extern int g_test_registry_heartbeat_allow;
+extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
+    g_test_registry_serial[129], g_test_registry_fingerprint[65];
+
+#include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
+
+/* db2 accessor stubs: this test links the kb router but not the DB2 stack. The
+ * tenancy routes hard-fail on the shim (aimee_pg_is_shim()=1) inside
+ * db2_tenant_require_pg BEFORE any accessor runs, so these are unreachable at
+ * runtime and exist only to satisfy the linker (proves the auth->actor->handler->
+ * tenant-guard chain reaches 503; real RLS is proven by the Postgres gate). */
+int aimee_pg_is_shim(void)
+{
+   return 1;
+}
+void *db2_conn(void)
+{
+   return NULL;
+}
+void db2_lease_begin(void)
+{
+}
+void db2_lease_end(void)
+{
+}
+int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
+{
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return 0;
+}
+aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
+{
+   (void)c;
+   (void)s;
+   (void)e;
+   (void)n;
+   return NULL;
+}
+void aimee_pg_finalize(aimee_pg_stmt_t *s)
+{
+   (void)s;
+}
+aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *s, char *e, size_t n)
+{
+   (void)s;
+   (void)e;
+   (void)n;
+   return AIMEE_PG_ERR;
+}
+int aimee_pg_bind_text(aimee_pg_stmt_t *s, const char *k, const char *v)
+{
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
+}
+int aimee_pg_bind_int64(aimee_pg_stmt_t *s, const char *k, int64_t v)
+{
+   (void)s;
+   (void)k;
+   (void)v;
+   return 0;
+}
+int64_t aimee_pg_column_int64(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+int aimee_pg_column_int(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return 0;
+}
+const char *aimee_pg_column_text(aimee_pg_stmt_t *s, int c)
+{
+   (void)s;
+   (void)c;
+   return "";
+}
 
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -1187,6 +1273,133 @@ int db2_kb_file_index_delete_project(const char *project)
    return 0;
 }
 
+/* ── slice-2 purge-route stubs: fence store + fan-out delete primitives ── */
+
+static int g_fence_present = 0;
+static int g_fence_live = 0;
+static int g_fence_write_rc = 0;
+static char g_fence_gen[128] = "";
+static char g_fence_pid[128] = "";
+static char g_fence_project[256] = "";
+static int g_fence_heartbeats = 0;
+
+int db2_kb_purge_fence_write(const char *project, const char *generation, const char *purge_id)
+{
+   if (g_fence_write_rc)
+      return -1;
+   snprintf(g_fence_project, sizeof(g_fence_project), "%s", project ? project : "");
+   snprintf(g_fence_gen, sizeof(g_fence_gen), "%s", generation ? generation : "");
+   snprintf(g_fence_pid, sizeof(g_fence_pid), "%s", purge_id ? purge_id : "");
+   g_fence_present = 1;
+   g_fence_live = 1;
+   return 0;
+}
+
+/* Mirrors the real acquire's atomic read-decide-write against the in-memory
+ * fence: refuse a live foreign fence without takeover, else publish. */
+int db2_kb_purge_fence_acquire(const char *project, const char *generation, const char *purge_id,
+                               int takeover, char *cur_gen, size_t gen_cap, char *cur_pid,
+                               size_t pid_cap, int *replaced_out)
+{
+   if (cur_gen && gen_cap)
+      snprintf(cur_gen, gen_cap, "%s", g_fence_gen);
+   if (cur_pid && pid_cap)
+      snprintf(cur_pid, pid_cap, "%s", g_fence_pid);
+   if (replaced_out)
+      *replaced_out = 0;
+   if (g_fence_write_rc)
+      return -1;
+   int same = g_fence_present && strcmp(g_fence_gen, generation) == 0 &&
+              strcmp(g_fence_pid, purge_id) == 0;
+   if (g_fence_present && g_fence_live && !same && !takeover)
+      return 0;
+   if (replaced_out)
+      *replaced_out = (g_fence_present && !same);
+   (void)db2_kb_purge_fence_write(project, generation, purge_id);
+   return 1;
+}
+
+int db2_kb_purge_fence_read(const char *project, char *gen_out, size_t gen_cap, char *pid_out,
+                            size_t pid_cap, int *live_out)
+{
+   (void)project;
+   if (live_out)
+      *live_out = 0;
+   if (!g_fence_present)
+      return 0;
+   if (gen_out && gen_cap)
+      snprintf(gen_out, gen_cap, "%s", g_fence_gen);
+   if (pid_out && pid_cap)
+      snprintf(pid_out, pid_cap, "%s", g_fence_pid);
+   if (live_out)
+      *live_out = g_fence_live;
+   return 1;
+}
+
+int db2_kb_purge_fence_heartbeat(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
+       strcmp(g_fence_pid, purge_id) != 0)
+      return 0;
+   g_fence_heartbeats++;
+   return 1;
+}
+
+int db2_kb_purge_fence_clear(const char *project, const char *generation, const char *purge_id)
+{
+   (void)project;
+   if (!g_fence_present || !generation || !purge_id || strcmp(g_fence_gen, generation) != 0 ||
+       strcmp(g_fence_pid, purge_id) != 0)
+      return 0;
+   g_fence_present = 0;
+   g_fence_gen[0] = g_fence_pid[0] = '\0';
+   return 1;
+}
+
+static int g_purge_code_embeddings_rc = 7;
+static int g_purge_curator_vectors_rc = 3;
+static int g_purge_canonical_rc = 1;
+static int g_purge_code_unit_jobs_rc = 4;
+static int g_purge_pdf_rc = 0;
+static int g_purge_minhash_rc = 0;
+
+int pgvec_code_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_code_embeddings_rc;
+}
+
+int pgvec_curator_code_unit_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_curator_vectors_rc;
+}
+
+int db2_code_index_project_delete(const char *name)
+{
+   (void)name;
+   return g_purge_canonical_rc;
+}
+
+int kb_curator_code_unit_jobs_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_code_unit_jobs_rc;
+}
+
+int pgvec_kbpdf_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_pdf_rc;
+}
+
+int db2_sketch_minhash_signature_delete_project(const char *project)
+{
+   (void)project;
+   return g_purge_minhash_rc;
+}
+
 void kb_worker_notify(kb_service_ctx_t *ctx)
 {
    (void)ctx;
@@ -1318,17 +1531,49 @@ static void test_capabilities(void)
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
 #include "db2/enrollments.h"
+#include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id)
+int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
+                         const kb_principal_t *transport, const char *fingerprint, char *out,
+                         int out_cap)
+{
+   (void)method;
+   (void)path;
+   (void)body;
+   (void)body_len;
+   (void)transport;
+   (void)fingerprint;
+   snprintf(out, (size_t)out_cap, "{\"error\":\"egress unavailable\"}");
+   return 503;
+}
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
 {
    (void)scope;
    (void)fingerprint;
-   (void)serial;
+   (void)cert_issuer;
+   (void)cert_serial_norm;
    (void)expires_at;
    (void)legacy;
    if (out_id)
       *out_id = 1;
+   return 0;
+}
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id)
+{
+   (void)old_fingerprint;
+   (void)old_issuer;
+   (void)old_serial_norm;
+   (void)scope;
+   (void)new_fingerprint;
+   (void)new_issuer;
+   (void)new_serial_norm;
+   if (out_id)
+      *out_id = 2;
    return 0;
 }
 static void fill_stub_row(db2_enrollment_row_t *r)
@@ -1526,6 +1771,40 @@ static void test_mint_scope_restriction(void)
       assert(s == cases[i].want);
    }
    printf("  PASS: console-admin mint scope restriction (owner/privileged -> 403)\n");
+}
+
+/* P1 slice 4: the /v1/team HTTP glue — auth -> actor construction -> tenant scope.
+ * On the SQLite test shim tenant ops hard-fail (503), so this proves the router
+ * builds the actor and reaches the DB tenant guard; the real RLS gating is proven
+ * by the Postgres RLS gate. */
+static void test_team_routes(void)
+{
+   char buf[4096];
+   int s;
+   /* No auth configured -> open mode manufactures NO actor -> a tenancy mutation
+    * requires a real principal -> 401 (never an anonymous admin write). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, NULL, NULL, "{\"name\":\"t\"}", 12, buf,
+                        sizeof(buf));
+   assert(s == 401);
+   /* Unscoped owner bearer -> owner actor built -> team handler -> tenant scope ->
+    * shim hard-fail -> 503 (the chain reached the DB tenant guard). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret",
+                        "{\"name\":\"t\"}", 12, buf, sizeof(buf));
+   assert(s == 503);
+   /* A SCOPED kb-token is not a tenancy actor -> no actor -> 401. */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer scope:project:x:secret",
+                        "scope:project:x:secret", "{\"name\":\"t\"}", 12, buf, sizeof(buf));
+   assert(s == 401);
+   /* Missing name -> 400 before any DB work (owner bearer). */
+   s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret", "{}", 2,
+                        buf, sizeof(buf));
+   assert(s == 400);
+   /* An X-Aimee-* identity header never reaches route_ex (stripped at the ingress
+    * seam) — verified by the kb_ingress unit test; here we confirm a normal team
+    * path is not our concern for headers. Non-tenancy path falls through: */
+   s = kb_http_route_ex("GET", "/v1/team", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 401); /* open mode, no actor */
+   printf("  PASS: /v1/team HTTP glue (auth -> actor -> tenant scope; 401/503/400)\n");
 }
 
 static void test_governance_routes(void)
@@ -1788,6 +2067,8 @@ static void test_enroll_route(void)
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", tmp);
    remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", tmp);
+   remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", tmp);
    rmdir(p);
    snprintf(p, sizeof(p), "%s/kb-enroll-tokens", tmp);
@@ -1882,6 +2163,8 @@ static void test_enroll_redeem_route(void)
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", cfg);
    remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", cfg);
+   remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", cfg);
    rmdir(p);
    snprintf(p, sizeof(p), "%s/kb-enroll-tokens", cfg);
@@ -1936,8 +2219,69 @@ static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *r
    close(sv[1]);
 }
 
+/* Read one Content-Length-framed response without waiting for connection close. */
+static int mtls_read_response(SSL *ssl, char *resp, size_t cap)
+{
+   size_t total = 0, expected = 0;
+   while (total + 1 < cap)
+   {
+      int n = SSL_read(ssl, resp + total, (int)(cap - total - 1));
+      if (n <= 0)
+         return -1;
+      total += (size_t)n;
+      resp[total] = '\0';
+      char *head_end = strstr(resp, "\r\n\r\n");
+      if (head_end && !expected)
+      {
+         char *length = strstr(resp, "Content-Length: ");
+         if (!length || length > head_end)
+            return -1;
+         expected = (size_t)(head_end + 4 - resp) + strtoul(length + 16, NULL, 10);
+         if (expected >= cap)
+            return -1;
+      }
+      if (expected && total >= expected)
+      {
+         resp[expected] = '\0';
+         return (int)expected;
+      }
+   }
+   return -1;
+}
+
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t cv;
+   int ready;
+   int go;
+} mtls_pool_gate_t;
+
+typedef struct
+{
+   mtls_pool_gate_t *gate;
+   int ok;
+} mtls_pool_request_arg_t;
+
+static void *mtls_pool_request_thread(void *opaque)
+{
+   mtls_pool_request_arg_t *arg = opaque;
+   pthread_mutex_lock(&arg->gate->lock);
+   arg->gate->ready++;
+   pthread_cond_broadcast(&arg->gate->cv);
+   while (!arg->gate->go)
+      pthread_cond_wait(&arg->gate->cv, &arg->gate->lock);
+   pthread_mutex_unlock(&arg->gate->lock);
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/health", NULL, &status);
+   arg->ok = status == 200 && response && strstr(response, "\"status\":\"ok\"");
+   free(response);
+   return NULL;
+}
+
 static void test_mtls_serve(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
    assert(kb_pki_ca_generate(&ca) == 0);
    char scert[KB_PKI_CERT_PEM_MAX], skey[KB_PKI_KEY_PEM_MAX];
@@ -1957,6 +2301,98 @@ static void test_mtls_serve(void)
                 resp, sizeof(resp));
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
+   assert(strstr(resp, "Connection: close"));
+
+   /* HTTP/1.1 stays reusable by default. The certificate authority is checked
+    * again for request N+1, so revocation takes effect before its route runs. */
+   {
+      int sv[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+      mtls_serve_arg_t sa = {sctx, sv[0]};
+      pthread_t th;
+      assert(pthread_create(&th, NULL, mtls_serve_thread, &sa) == 0);
+      SSL *c = SSL_new(cctx);
+      assert(c);
+      SSL_set_fd(c, sv[1]);
+      assert(SSL_connect(c) == 1);
+      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "200 OK") && strstr(resp, "Connection: keep-alive"));
+
+      test_kb_enrollment_authority_set(0);
+      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, second, (int)strlen(second)) == (int)strlen(second));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "403 Forbidden") && strstr(resp, "Connection: close"));
+      assert(!strstr(resp, "\"status\":\"ok\""));
+      test_kb_enrollment_authority_set(1);
+      SSL_shutdown(c);
+      SSL_free(c);
+      pthread_join(th, NULL);
+      close(sv[0]);
+      close(sv[1]);
+   }
+
+   /* Pipelining remains fail-closed: callers must wait for each response. */
+   mtls_request(sctx, cctx,
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n"
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request(sctx, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\rX-Test: no\r\n\r\n", resp,
+                sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
+    * request target, and 64 KiB total request head+body. */
+   char oversized_headers[8192];
+   size_t oversized_len = (size_t)snprintf(oversized_headers, sizeof(oversized_headers),
+                                           "GET /v1/health HTTP/1.1\r\nHost: kb\r\n");
+   for (int i = 0; i < 65; i++)
+      oversized_len +=
+          (size_t)snprintf(oversized_headers + oversized_len,
+                           sizeof(oversized_headers) - oversized_len, "X-Test-%d: a\r\n", i);
+   snprintf(oversized_headers + oversized_len, sizeof(oversized_headers) - oversized_len, "\r\n");
+   mtls_request(sctx, cctx, oversized_headers, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   char oversized_uri[4200];
+   const char oversized_uri_suffix[] = " HTTP/1.1\r\nHost: kb\r\n\r\n";
+   memcpy(oversized_uri, "GET /", 5);
+   memset(oversized_uri + 5, 'a', 4096);
+   memcpy(oversized_uri + 5 + 4096, oversized_uri_suffix, sizeof(oversized_uri_suffix));
+   mtls_request(sctx, cctx, oversized_uri, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   mtls_request(sctx, cctx, "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 65536\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "413 Payload Too Large"));
+
+   /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
+    * authority function; none of it is accepted from JSON or the CN label. */
+   {
+      const char *hb = "{\"server_id\":\"srv-a\",\"health\":\"ok\",\"version\":\"1.0\"}";
+      char req[512], want_issuer[601], raw_serial[129], want_serial[129], want_fp[65];
+      assert(kb_pki_cert_metadata(ccert, want_issuer, sizeof(want_issuer), raw_serial,
+                                  sizeof(raw_serial)) == 0);
+      assert(kb_cert_serial_normalize(raw_serial, want_serial, sizeof(want_serial)) == 0);
+      assert(kb_pki_ca_fingerprint(ccert, want_fp, sizeof(want_fp)) == 0);
+      snprintf(req, sizeof(req),
+               "POST /v1/server/heartbeat HTTP/1.1\r\nContent-Length: %zu\r\nConnection: "
+               "close\r\n\r\n%s",
+               strlen(hb), hb);
+      g_test_registry_heartbeat_allow = 1;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "200 OK"));
+      assert(strcmp(g_test_registry_server_id, "srv-a") == 0);
+      assert(strcmp(g_test_registry_issuer, want_issuer) == 0);
+      assert(strcmp(g_test_registry_serial, want_serial) == 0);
+      assert(strcmp(g_test_registry_fingerprint, want_fp) == 0);
+      g_test_registry_heartbeat_allow = 0;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "403 Forbidden"));
+   }
 
    /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
     * from the client certificate (project:alpha), not the request. */
@@ -2002,9 +2438,9 @@ static void test_mtls_serve(void)
       SSL_CTX_free(nocert);
    }
 
-   /* Rotation: the authenticated client renews its cert for its CURRENT scope
-    * (project:alpha) by signing a fresh CSR — no token, no operator action. The
-    * renew handler signs with the persisted CA, so save this test's CA there. */
+   /* Rotation without its authoritative PostgreSQL enrollment transaction must
+    * fail closed even though TLS and CA signing are available.  The real-PG P2b
+    * gate covers the successful lineage-preserving renewal path. */
    {
       char cadir[320];
       snprintf(cadir, sizeof(cadir), "%s/kb-ca", kb_default_config_dir());
@@ -2020,10 +2456,8 @@ static void test_mtls_serve(void)
                "close\r\n\r\n%s",
                strlen(rb), rb);
       mtls_request(sctx, cctx, req, resp, sizeof(resp));
-      assert(strstr(resp, "200 OK"));
-      assert(strstr(resp, "client_cert"));
-      assert(strstr(resp, "project:alpha")); /* renewed for the same scope */
-      assert(strstr(resp, "BEGIN CERTIFICATE"));
+      assert(strstr(resp, "503 Service Unavailable"));
+      assert(strstr(resp, "renew persistence unavailable"));
       free(rb);
       cJSON_Delete(rj);
       free(rcsr);
@@ -2032,6 +2466,8 @@ static void test_mtls_serve(void)
       snprintf(p, sizeof(p), "%s/ca.pem", cadir);
       remove(p);
       snprintf(p, sizeof(p), "%s/ca-key.pem", cadir);
+      remove(p);
+      snprintf(p, sizeof(p), "%s/ca-key.vault", cadir);
       remove(p);
       rmdir(cadir);
    }
@@ -2078,6 +2514,7 @@ static void mtls_tcp_request(int port, SSL_CTX *client_ctx, const char *req, cha
  * and serves /v1 with the scope taken from the client cert. */
 static void test_mtls_listener(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    /* Production passes kb_default_config_dir() as the listener data_dir, and the
     * bootstrap endpoints (/v1/enroll/ca, /renew) read the CA from there — so use
     * the same dir here. Clean any leftover CA so the listener makes a fresh one. */
@@ -2087,10 +2524,20 @@ static void test_mtls_listener(void)
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
    remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
+   remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
 
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
+   assert(kb_mtls_start(0, cfg, "localhost") == -1);
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == 0);
+   int connection_limit = 0, connections_live = -1, connections_queued = -1;
+   kb_mtls_connection_stats(&connection_limit, &connections_live, &connections_queued);
+   assert(connection_limit == 8);
+   assert(connections_live == 0);
+   assert(connections_queued == 0);
    int port = kb_mtls_bound_port();
    assert(port > 0);
 
@@ -2129,8 +2576,71 @@ static void test_mtls_listener(void)
    char rbody[4096];
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
                                 NULL, rbody, sizeof(rbody), &st) == 0);
+   if (st != 200)
+      fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
+
+   /* The reusable client primitive reads Content-Length exactly instead of
+    * waiting for EOF, then safely carries a second request on the same TLS
+    * connection. */
+   kb_tls_client_conn_t *persistent =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(persistent);
+   int reusable = 0;
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
+   kb_tls_client_conn_close(persistent);
+
+   kb_tls_client_conn_t *bounded =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(bounded);
+   char tiny_response[4];
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
+                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(reusable == 0);
+   kb_tls_client_conn_close(bounded);
+
+   /* A long-lived identity context can explicitly carry the negotiated session
+    * into a replacement connection. */
+   SSL_CTX *shared_client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
+   assert(shared_client_ctx);
+   kb_tls_client_conn_t *session_one =
+       kb_tls_client_conn_open_ctx("localhost", port, shared_client_ctx);
+   assert(session_one);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(reusable == 1);
+   SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
+   assert(saved_session);
+   kb_tls_client_conn_close(session_one);
+   kb_tls_client_conn_t *session_two =
+       kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
+   assert(session_two);
+   assert(kb_tls_client_conn_session_reused(session_two) == 1);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   kb_tls_client_conn_close(session_two);
+   SSL_SESSION_free(saved_session);
+   SSL_CTX_free(shared_client_ctx);
+
+   /* Primary authority is consulted before dispatch. Unknown/revoked peers are
+    * forbidden and an authority outage is retryable but never fail-open. */
+   test_kb_enrollment_authority_set(0);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(-1);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "503 Service Unavailable"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(1);
    /* the dialer's request carries the client cert's scope (project:beta): a
     * cross-scope request is denied. */
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET",
@@ -2176,12 +2686,75 @@ static void test_mtls_listener(void)
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       setenv("AIMEE_KB_CONN", conn2, 1);
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
+      unsigned long pool_exhausted = 1;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0 && pool_busy == 0 && pool_waiters == 0);
+
+      /* The hot rollout flag opts this identity into reuse without a restart. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "1", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
+      assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
+      g_test_registry_heartbeat_allow = 0;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_exhausted == 0);
+
+      enum
+      {
+         POOL_TEST_CLIENTS = 16
+      };
+      mtls_pool_gate_t gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0};
+      pthread_t pool_threads[POOL_TEST_CLIENTS];
+      mtls_pool_request_arg_t pool_args[POOL_TEST_CLIENTS];
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pool_args[i] = (mtls_pool_request_arg_t){.gate = &gate, .ok = 0};
+         assert(pthread_create(&pool_threads[i], NULL, mtls_pool_request_thread, &pool_args[i]) ==
+                0);
+      }
+      pthread_mutex_lock(&gate.lock);
+      while (gate.ready != POOL_TEST_CLIENTS)
+         pthread_cond_wait(&gate.cv, &gate.lock);
+      gate.go = 1;
+      pthread_cond_broadcast(&gate.cv);
+      pthread_mutex_unlock(&gate.lock);
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pthread_join(pool_threads[i], NULL);
+         assert(pool_args[i].ok);
+      }
+      pthread_cond_destroy(&gate.cv);
+      pthread_mutex_destroy(&gate.lock);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total >= 1 && pool_total <= 2 && pool_total == pool_idle && pool_busy == 0 &&
+             pool_waiters == 0);
+      unsigned long pool_handshakes = 0, pool_resumed = 0;
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+      /* Disabling live restores one-shot requests and drains every idle socket. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0);
+      unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);
@@ -2198,25 +2771,23 @@ static void test_mtls_listener(void)
       assert(kb_tls_cert_expires_within(sc, 1) == 0);
       assert(kb_tls_cert_expires_within(ca.cert_pem, 60L * 60 * 24 * 14) == 0);
 
-      /* rotate the project:beta identity -> a genuinely new cert, same scope,
-       * chaining to the CA, and usable to dial. */
+      /* With no authoritative enrollment DB in this unit fixture, renewal is
+       * refused before a new certificate can escape. */
       char nc[KB_PKI_CERT_PEM_MAX], nk[KB_PKI_KEY_PEM_MAX];
       assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, nc, sizeof(nc), nk,
-                          sizeof(nk)) == 0);
-      assert(kb_pki_verify_client_cert(ca.cert_pem, nc) == 1);
-      assert(strcmp(nc, ccert) != 0);
-      assert(kb_tls_client_request("localhost", port, ca.cert_pem, nc, nk, "GET", "/v1/health",
-                                   NULL, rbody, sizeof(rbody), &st) == 0);
-      assert(st == 200);
+                          sizeof(nk)) != 0);
    }
 
    SSL_CTX_free(cctx);
    kb_mtls_stop();
+   unsetenv("AIMEE_KB_MTLS_MAX_CONNECTIONS");
    assert(kb_mtls_bound_port() == 0);
 
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca.pem", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
+   remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
@@ -3669,6 +4240,208 @@ static void test_maintenance_clear_error(void)
    g_clear_deleted = 12;
 }
 
+/* ── slice-2 purge routes: fence lifecycle + fan-out map shape ─────────── */
+
+static void purge_fence_reset(void)
+{
+   g_fence_present = 0;
+   g_fence_live = 0;
+   g_fence_write_rc = 0;
+   g_fence_gen[0] = g_fence_pid[0] = g_fence_project[0] = '\0';
+   g_fence_heartbeats = 0;
+}
+
+static void test_purge_project_writes_fence(void)
+{
+   purge_fence_reset();
+   g_clear_deleted = 12;
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   /* Fence written for the project and NOT cleared by the purge route. */
+   assert(g_fence_present == 1);
+   assert(strcmp(g_fence_project, "proj-alpha") == 0);
+   assert(strcmp(g_fence_gen, "g1") == 0);
+   assert(strcmp(g_fence_pid, "p1") == 0);
+   assert(strstr(buf, "\"status\":\"ok\"") != NULL);
+   assert(strstr(buf, "\"ok\":true") != NULL);
+   assert(strstr(buf, "\"fence_replaced\":false") != NULL);
+   /* Per-store map, in fan-out order, counts from the stubs (0 for the
+    * no-count primitives pdf_vectors/minhash/vectors). */
+   assert(strstr(buf, "\"stores\":{") != NULL);
+   assert(strstr(buf, "\"chunks\":12") != NULL);
+   assert(strstr(buf, "\"file_index\":0") != NULL);
+   assert(strstr(buf, "\"vectors\":0") != NULL);
+   assert(strstr(buf, "\"code_embeddings\":7") != NULL);
+   assert(strstr(buf, "\"curator_code_unit_vectors\":3") != NULL);
+   assert(strstr(buf, "\"canonical_index\":1") != NULL);
+   assert(strstr(buf, "\"code_unit_jobs\":4") != NULL);
+   assert(strstr(buf, "\"pdf_vectors\":0") != NULL);
+   assert(strstr(buf, "\"minhash\":0") != NULL);
+   assert(strcmp(g_clear_project, "proj-alpha") == 0);
+}
+
+static void test_purge_project_live_fence_409(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 1;
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 409);
+   assert(strstr(buf, "purge fence held") != NULL);
+   assert(strstr(buf, "\"generation\":\"g0\"") != NULL);
+   assert(strstr(buf, "\"purge_id\":\"p0\"") != NULL);
+   /* Refused: the original owner's fence is untouched. */
+   assert(strcmp(g_fence_gen, "g0") == 0);
+   assert(strcmp(g_fence_pid, "p0") == 0);
+}
+
+static void test_purge_project_takeover_displaces(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 1;
+   char buf[2048];
+   int s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                            "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":"
+                            "\"p1\",\"takeover\":true}",
+                            -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"fence_replaced\":true") != NULL);
+   assert(strstr(buf, "\"displaced\":{\"generation\":\"g0\",\"purge_id\":\"p0\"}") != NULL);
+   /* New owner holds the fence now. */
+   assert(strcmp(g_fence_gen, "g1") == 0);
+   assert(strcmp(g_fence_pid, "p1") == 0);
+}
+
+static void test_purge_project_stale_fence_replaced(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g0", "p0") == 0);
+   g_fence_live = 0; /* stale heartbeat: no takeover needed */
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"fence_replaced\":true") != NULL);
+   assert(strcmp(g_fence_gen, "g1") == 0);
+}
+
+static void test_purge_project_store_error_continues(void)
+{
+   purge_fence_reset();
+   g_purge_canonical_rc = -1; /* one store fails: fan-out continues, ok:false */
+   char buf[2048];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"ok\":false") != NULL);
+   assert(strstr(buf, "\"canonical_index\":{\"error\":\"delete failed\"}") != NULL);
+   /* Stores after the failing one still ran and report counts. */
+   assert(strstr(buf, "\"code_unit_jobs\":4") != NULL);
+   assert(strstr(buf, "\"minhash\":0") != NULL);
+   g_purge_canonical_rc = 1;
+}
+
+static void test_purge_project_bad_request(void)
+{
+   purge_fence_reset();
+   char buf[512];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"purge_id\":\"p1\"}", -1, buf, sizeof(buf));
+   assert(s == 400);
+   assert(strstr(buf, "generation") != NULL);
+   /* Space-carrying tokens would corrupt the space-separated fence value. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-project", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g 1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 400);
+   assert(g_fence_present == 0);
+}
+
+static void test_purge_heartbeat_match_and_mismatch(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"refreshed\":true") != NULL);
+   assert(g_fence_heartbeats == 1);
+   /* Displaced owner: mismatch no-ops and echoes the current fence. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-heartbeat", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p0\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"refreshed\":false") != NULL);
+   assert(strstr(buf, "\"fence\":\"g1 p1\"") != NULL);
+   assert(g_fence_heartbeats == 1);
+}
+
+static void test_purge_finalize_mismatch_noop(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g0\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":false") != NULL);
+   assert(strstr(buf, "\"fence\":\"g1 p1\"") != NULL);
+   assert(g_fence_present == 1); /* displaced owner cannot clear the fence */
+}
+
+static void test_purge_finalize_match_clears(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-finalize", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":true") != NULL);
+   assert(g_fence_present == 0);
+}
+
+static void test_purge_cancel_match_clears(void)
+{
+   purge_fence_reset();
+   assert(db2_kb_purge_fence_write("proj-alpha", "g1", "p1") == 0);
+   char buf[1024];
+   int s =
+       kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":true") != NULL);
+   assert(g_fence_present == 0);
+   /* Idempotent: a second cancel is a mismatch/absent no-op. */
+   s = kb_http_route_ex("POST", "/v1/maintenance/purge-cancel", NULL, NULL, NULL,
+                        "{\"project\":\"proj-alpha\",\"generation\":\"g1\",\"purge_id\":\"p1\"}",
+                        -1, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"cleared\":false") != NULL);
+}
+
 static void test_job_not_found(void)
 {
    char buf[256];
@@ -4208,6 +4981,43 @@ static void test_code_structure_missing_params(void)
    assert(s == 400);
    assert(strstr(buf, "missing project") != NULL);
 }
+/* handle_connection (plain-HTTP listener): a Content-Length over
+ * KB_HTTP_BODY_MAX must be rejected up front with 413 — never silently
+ * truncated (truncation turned every large /v1/code/scan push into an opaque
+ * 400 "invalid json"). */
+extern void handle_connection(int fd);
+
+static void *conn_serve_thread(void *a)
+{
+   handle_connection(*(int *)a);
+   return NULL;
+}
+
+static void test_http_body_too_large_413(void)
+{
+   int sv[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+   pthread_t th;
+   assert(pthread_create(&th, NULL, conn_serve_thread, &sv[0]) == 0);
+
+   const char *req = "POST /v1/code/scan HTTP/1.1\r\n"
+                     "Content-Length: 999999999999\r\n"
+                     "\r\n";
+   assert(write(sv[1], req, strlen(req)) == (ssize_t)strlen(req));
+   pthread_join(th, NULL); /* handler replies before reading any body */
+   close(sv[0]);           /* EOF for the reader below */
+
+   char resp[2048];
+   int total = 0, n;
+   while ((n = (int)read(sv[1], resp + total, sizeof(resp) - 1 - (size_t)total)) > 0)
+      total += n;
+   resp[total] = '\0';
+   close(sv[1]);
+
+   assert(strstr(resp, "413"));
+   assert(strstr(resp, "request body too large"));
+}
+
 int main(void)
 {
    printf("kb_http_routes: ");
@@ -4220,6 +5030,7 @@ int main(void)
    test_console_overview();
    test_accounts_routes();
    test_mint_scope_restriction();
+   test_team_routes();
    test_governance_routes();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();
@@ -4229,6 +5040,7 @@ int main(void)
    test_enroll_redeem_route();
    test_mtls_serve();
    test_mtls_listener();
+   test_http_body_too_large_413();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();
@@ -4312,6 +5124,16 @@ int main(void)
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();
    test_maintenance_clear_error();
+   test_purge_project_writes_fence();
+   test_purge_project_live_fence_409();
+   test_purge_project_takeover_displaces();
+   test_purge_project_stale_fence_replaced();
+   test_purge_project_store_error_continues();
+   test_purge_project_bad_request();
+   test_purge_heartbeat_match_and_mismatch();
+   test_purge_finalize_mismatch_noop();
+   test_purge_finalize_match_clears();
+   test_purge_cancel_match_clears();
    test_job_not_found();
    test_job_status_ok();
    test_job_status_error();

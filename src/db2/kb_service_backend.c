@@ -24,6 +24,18 @@
 
 #define KBS_ERRBUF 256
 
+/* The job kinds this drain handles — the single source of truth for BOTH the
+ * claim's IN-list and the dispatch in db2_kb_service_async_queue_drain. They
+ * must agree, and the failure mode when they drift is silent and destructive:
+ * kb_async_jobs is shared with the curator stages (extract_doc, memory_facts),
+ * which own their own claim lifecycle, and the dispatch marks every kind it
+ * does not recognize 'failed'. An unfiltered claim therefore takes the
+ * lowest-id pending row of ANY kind, so a single call to the drain endpoint
+ * would destroy the curator's queued work. Adding a kind here without adding a
+ * dispatch branch fails those jobs; adding a dispatch branch without adding it
+ * here leaves them unclaimed forever. */
+#define KBS_ASYNC_DRAIN_KINDS_SQL "('embed_raw', 'embed_pdf')"
+
 static const char *DB2_KB_DIRECTIVE_SELECT_COLS =
     "id, question, topic, anchor_entity, anchor_file, cause, priority, state,"
     " memory_a_id, memory_b_id, resolution_memory_id, evidence, source_session,"
@@ -305,12 +317,13 @@ static int db2_kb_service_async_queue_claim_next(int64_t *job_id, int64_t *docum
     * id=?2 AND status='pending' guard plus the changes!=1 check below: if
     * two workers race on the same row, only one UPDATE will see status =
     * 'pending' and report changes==1; the loser ROLLBACKs and retries. */
-   aimee_pg_stmt_t *sel = aimee_pg_prepare(conn,
-                                           "SELECT id, document_id, kind"
-                                           " FROM kb_async_jobs"
-                                           " WHERE status = 'pending'"
-                                           " ORDER BY id ASC LIMIT 1",
-                                           err, sizeof(err));
+   aimee_pg_stmt_t *sel =
+       aimee_pg_prepare(conn,
+                        "SELECT id, document_id, kind"
+                        " FROM kb_async_jobs"
+                        " WHERE status = 'pending'"
+                        "   AND kind IN " KBS_ASYNC_DRAIN_KINDS_SQL " ORDER BY id ASC LIMIT 1",
+                        err, sizeof(err));
    if (!sel)
    {
       (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
@@ -485,10 +498,11 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    }
 
    char err[KBS_ERRBUF] = "";
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
-       conn,
-       "SELECT heading_path, content, doc_kind, quarantine_state FROM kb_documents WHERE id = ?1",
-       err, sizeof(err));
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(conn,
+                        "SELECT heading_path, content, doc_kind, quarantine_state, project"
+                        " FROM kb_documents WHERE id = ?1",
+                        err, sizeof(err));
    if (!stmt)
    {
       snprintf(errbuf, errbuf_size, "prepare failed");
@@ -506,10 +520,12 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    char content_buf[3072];
    char doc_kind[32];
    char quarantine[32];
+   char project_buf[256];
    db2_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
    db2_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
    db2_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
    db2_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
+   db2_copy_text(project_buf, sizeof(project_buf), aimee_pg_column_text(stmt, 4));
    aimee_pg_finalize(stmt);
 
    /* Defense-in-depth: never write a PDF vector for a non-PDF row or for ANY quarantined
@@ -540,7 +556,32 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
       snprintf(errbuf, errbuf_size, "payload build failed");
       return -1;
    }
+   /* Guarded transaction around the PDF vector write with the generation-
+    * fence check inside it (webchat-project-lifecycle slice 2): a job
+    * claimed pre-purge must not land a vector for a project being purged,
+    * and the advisory guard serializes this check+commit against the fence
+    * publish. Failing the job is safe — on retry after the purge the chunk
+    * row is gone (benign skip above). */
+   if (db2_kb_txn_begin() != 0)
+   {
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "pdf vector txn begin failed");
+      return -1;
+   }
+   if (project_buf[0] &&
+       (db2_kb_purge_txn_guard(project_buf) != 0 || db2_kb_purge_fence_active(project_buf)))
+   {
+      db2_kb_txn_rollback();
+      free(payload_json);
+      snprintf(errbuf, errbuf_size, "purge fence active for project '%s'", project_buf);
+      return -1;
+   }
    int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);
+   if (db2_kb_txn_commit() != 0)
+   {
+      db2_kb_txn_rollback();
+      upsert_rc = -1;
+   }
    free(payload_json);
    db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
                               upsert_rc ? "pdf upsert failed" : NULL);
@@ -596,7 +637,14 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
          rc = db2_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
                                                      sizeof(errbuf));
       else
-         snprintf(errbuf, sizeof(errbuf), "unknown job kind: %s", kind);
+         /* Unreachable unless KBS_ASYNC_DRAIN_KINDS_SQL and this chain have
+          * drifted apart — the claim cannot hand us a kind not in that list. If
+          * it ever happens the job is about to be marked 'failed', so say so
+          * loudly rather than discarding another stage's work in silence. */
+         snprintf(errbuf, sizeof(errbuf),
+                  "unknown job kind: %s (claimed but not dispatchable — "
+                  "KBS_ASYNC_DRAIN_KINDS_SQL is out of sync with the dispatch)",
+                  kind);
 
       if (rc == 0)
          (void)db2_kb_service_async_queue_mark_job(job_id, "done", "");

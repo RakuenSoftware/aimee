@@ -10,9 +10,24 @@
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
+# Preserve the container runtime's command-override contract.  The image has no
+# default CMD, so arguments here are an operator-supplied command (for example,
+# `aimee-server --version`) and must replace the managed server lifecycle below.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
+wfe_pid=""
+export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
+case "$AIMEE_WFE_ENGINE" in
+    go) ;;
+    *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
+esac
+export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
+WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 
 # The server's worker threads need a 64 MB stack; the 8 MB container default
 # overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
@@ -94,6 +109,14 @@ log() { printf '[server-entrypoint] %s\n' "$*"; }
 
 shutdown() {
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+    [ -n "$wfe_pid" ] && kill "$wfe_pid" 2>/dev/null || true
+	_wait=0
+	while { [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; } || { [ -n "$wfe_pid" ] && kill -0 "$wfe_pid" 2>/dev/null; }; do
+		[ "$_wait" -ge 50 ] && break
+		_wait=$((_wait + 1)); sleep 0.1
+	done
+	[ -n "$server_pid" ] && kill -KILL "$server_pid" 2>/dev/null || true
+	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
     webchat_stop
 }
 trap 'shutdown' TERM INT
@@ -120,15 +143,88 @@ webchat_start
 # or fails the server start, and runs as the same 'aimee' user that owns the
 # install prefix ($AIMEE_HOME/.npm-global). The lazy install on first setup still
 # covers it if this hasn't finished yet.
+# Delegate sandbox: when the host Docker socket is bind-mounted in (so aimee-server
+# can spawn per-delegate containers), grant the unprivileged 'aimee' user the
+# socket's group. runuser re-initialises supplementary groups from /etc/group via
+# initgroups(), so a container `--group-add <gid>` is dropped for the server child
+# unless 'aimee' is actually a member in /etc/group. Without this the docker backend
+# is INERT and delegates silently run on the HOST (see the delegate-sandbox posture
+# log). Root here; the runuser calls below then pick the group up.
+for _dsock in /var/run/docker.sock /run/docker.sock; do
+    [ -S "$_dsock" ] || continue
+    _dgid=$(stat -c %g "$_dsock" 2>/dev/null) || continue
+    { [ -n "$_dgid" ] && [ "$_dgid" != 0 ]; } || continue
+    _dgrp=$(getent group "$_dgid" | cut -d: -f1)
+    if [ -z "$_dgrp" ]; then
+        _dgrp=dockerhost
+        groupadd -g "$_dgid" "$_dgrp" 2>/dev/null || true
+    fi
+    if ! id -nG aimee 2>/dev/null | tr ' ' '\n' | grep -qx "$_dgrp"; then
+        usermod -aG "$_dgrp" aimee 2>/dev/null || true
+    fi
+    log "delegate sandbox: granted 'aimee' the docker socket group ($_dgrp/$_dgid)"
+    break
+done
+
 log "pre-warming server-hosted OAuth CLIs (background)"
 runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
+rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
 server_pid=$!
 
-wait "$server_pid"
-status=$?
+if [ "$AIMEE_WFE_ENGINE" = go ]; then
+    if [ ! -x /usr/local/bin/aimee-wfe ]; then
+        log "fatal: AIMEE_WFE_ENGINE=go but /usr/local/bin/aimee-wfe is unavailable"
+        shutdown
+        exit 1
+    fi
+    # The C process is a temporary stateless agent resource plane. Wait for its
+    # HTTP socket, then put all WFE state/admission/execution on the Go socket.
+    _wait=0
+    while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
+        kill -0 "$server_pid" 2>/dev/null || break
+        _wait=$((_wait + 1))
+        sleep 0.1
+    done
+    if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
+        log "fatal: C agent resource plane did not become ready"
+        shutdown
+        exit 1
+    fi
+    log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
+    runuser -u aimee -- aimee-wfe \
+        --home "$AIMEE_HOME" \
+        --socket "$AIMEE_WFE_HTTP_SOCKET" \
+        --config "$AIMEE_HOME/aimee.yaml" \
+        --workflow-dir "$AIMEE_HOME/workflows" \
+        --agent-service-socket "$AIMEE_HOME/aimee-http.sock" &
+    wfe_pid=$!
+fi
+
+if [ -n "$wfe_pid" ]; then
+    # POSIX sh has no portable wait -n. GNU tail's PID watcher gives us the same
+    # first-exit notification without a shell polling loop.
+    watch_dir=$(mktemp -d /tmp/aimee-plane-watch.XXXXXX)
+    watch_fifo="$watch_dir/first"
+    mkfifo "$watch_fifo"
+    ( tail -s 0.1 --pid="$server_pid" -f /dev/null; printf '%s\n' server > "$watch_fifo" ) & server_watch=$!
+    ( tail -s 0.1 --pid="$wfe_pid" -f /dev/null; printf '%s\n' wfe > "$watch_fifo" ) & wfe_watch=$!
+    IFS= read -r first < "$watch_fifo"
+    kill "$server_watch" "$wfe_watch" 2>/dev/null || true
+    wait "$server_watch" 2>/dev/null || true
+    wait "$wfe_watch" 2>/dev/null || true
+    rm -f "$watch_fifo"
+    rmdir "$watch_dir"
+    log "$first plane exited; terminating its peer so the container restarts as one unit"
+    shutdown
+    wait "$server_pid" 2>/dev/null || true
+    wait "$wfe_pid" 2>/dev/null || true
+    status=1
+else
+    if wait "$server_pid"; then status=0; else status=$?; fi
+fi
 log "aimee-server exited (status $status); shutting down webchat"
 shutdown
 exit "$status"

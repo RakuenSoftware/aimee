@@ -7,7 +7,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "../headers/skill.h"
+#include "skill.h"
 
 /* --- Helpers --- */
 

@@ -29,7 +29,7 @@ typedef enum
  * provider falls through to FUNCTION_NESTED only if it is neither anthropic, chatgpt
  * (responses), nor gemini — callers that add a provider with a novel tool shape must
  * extend this. */
-gw_tool_shape_t gateway_delegate_tool_shape(int anthropic, int chatgpt, int gemini);
+gw_tool_shape_t gateway_delegate_tool_shape(int anthropic, int chatgpt);
 
 /* Run the outbound request pipeline (tool-policing only) over a freshly-built provider
  * request `req`, mutating it in place. `is_delegate` (role != NULL) gates the strip:

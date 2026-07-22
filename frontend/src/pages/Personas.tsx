@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Panel, Badge } from "@rakuensoftware/smoothgui";
+import { Button, Panel, Badge, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Personas page: edit the PERSONA definitions (identity + the roles each persona
  * may use). Roles themselves — their bodies and per-role turn caps — live on the
@@ -47,14 +47,6 @@ interface PersonaDef {
   builtin?: boolean;
 }
 
-const btn: React.CSSProperties = {
-  padding: "4px 10px",
-  fontSize: 13,
-  borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  cursor: "pointer",
-};
 const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
 const ta: React.CSSProperties = {
   width: "100%",
@@ -162,9 +154,7 @@ export default function Personas() {
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Personas</strong>
-        {status && (
-          <span style={{ fontSize: 13, color: status.kind === "err" ? "#b00" : "#080" }}>{status.msg}</span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 720 }}>
@@ -175,24 +165,30 @@ export default function Personas() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {personas.map((p) => (
-              <button
+              <Button
                 key={p.name}
+                size="md"
                 onClick={() => openPersona(p.name)}
-                style={{ ...btn, background: form?.name === p.name ? "#e8eef9" : "#fff" }}
+                style={{ background: form?.name === p.name ? "#e8eef9" : "#fff" }}
                 title={p.description || ""}
               >
                 {p.name}
                 {p.builtin ? " ·" : ""}
-              </button>
+              </Button>
             ))}
-            <button onClick={newPersona} style={{ ...btn, borderStyle: "dashed" }}>
+            <Button
+              size="md"
+              onClick={newPersona}
+              style={{ borderStyle: "dashed" }}
+              title="Create a new persona from scratch"
+            >
               + New
-            </button>
+            </Button>
           </div>
 
           {form && (
             <div style={{ display: "grid", gap: 8 }}>
-              <div>
+              <div title="The persona’s identifier (alphanumeric, - or _). Built-in personas can’t be renamed.">
                 <label style={lbl}>name</label>
                 <input
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -201,7 +197,7 @@ export default function Personas() {
                   onChange={(e) => upd({ name: e.target.value })}
                 />
               </div>
-              <div>
+              <div title="Short summary shown when picking this persona in Chat and the roundtable.">
                 <label style={lbl}>description</label>
                 <input
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -209,30 +205,29 @@ export default function Personas() {
                   onChange={(e) => upd({ description: e.target.value })}
                 />
               </div>
-              <div>
+              <div title="Which roles (routing keys) this persona may delegate to. “all” matches any role. Roles are edited on the Roles tab.">
                 <label style={lbl}>roles (routing key — click to toggle; edit roles on the Roles tab)</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {roleOptions.map((r) => {
                     const on = (form.roles || []).includes(r);
                     return (
-                      <button
+                      <Button
                         key={r}
+                        size="sm"
                         onClick={() => toggleRole(r)}
                         style={{
-                          ...btn,
-                          padding: "2px 8px",
                           background: on ? "#1f7a3d" : "#fff",
                           color: on ? "#fff" : r === "all" ? "#a15" : "#333",
                           fontWeight: r === "all" ? 600 : 400,
                         }}
                       >
                         {r}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
               </div>
-              <div>
+              <div title="How much delegates may do on this persona’s behalf: full = read + write tools, readonly = read-only tools, none = no delegates.">
                 <label style={lbl}>delegate policy</label>
                 <select
                   style={{ ...ta, fontFamily: "system-ui" }}
@@ -244,25 +239,30 @@ export default function Personas() {
                   <option value="none">none</option>
                 </select>
               </div>
-              <div>
+              <div title="The system prompt that defines this identity — injected at the top of the persona’s context.">
                 <label style={lbl}>persona (system prompt)</label>
                 <textarea rows={5} style={ta} value={form.persona || ""} onChange={(e) => upd({ persona: e.target.value })} />
               </div>
-              <div>
+              <div title="Engineering principles appended to the persona’s guidance for every turn.">
                 <label style={lbl}>principles</label>
                 <textarea rows={4} style={ta} value={form.principles || ""} onChange={(e) => upd({ principles: e.target.value })} />
               </div>
-              <div>
+              <div title="Short session hints added when a session starts under this persona.">
                 <label style={lbl}>brief (session hints)</label>
                 <textarea rows={3} style={ta} value={form.brief || ""} onChange={(e) => upd({ brief: e.target.value })} />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={savePersona} style={btn}>
+                <Button size="md" onClick={savePersona} title="Write this persona to config.">
                   Save persona
-                </button>
-                <button onClick={deletePersona} style={{ ...btn, color: "#b00" }}>
+                </Button>
+                <Button
+                  variant="danger"
+                  size="md"
+                  onClick={deletePersona}
+                  title="Delete this persona. Built-ins reset to their default instead of disappearing."
+                >
                   Delete
-                </button>
+                </Button>
                 {form.builtin && <Badge label="built-in" variant="neutral" />}
               </div>
             </div>

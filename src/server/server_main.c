@@ -12,11 +12,13 @@
 #include "guardrails.h"
 #include "workspace.h"
 #include "kb_client_cache.h"
+#include "kb_client_mtls.h"
 #include "kb_client_ws.h"
 #include "db1.h"
 #include "mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_kb_heartbeat.h"
 #include "cli_session_pty.h"
 #include "presence.h"
 #include "turn_registry.h"
@@ -176,40 +178,25 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
    config_t cfg;
    memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
-   config_load(&cfg);
+   if (config_load(&cfg) != 0)
+   {
+      startup_notify(notify_fd, "error: invalid configuration\n");
+      aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
+      audit_log_close();
+      return 1;
+   }
    /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
    config_snapshot_init(&cfg);
+   kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
     * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a
     * restart and without an unsafe cross-thread setenv. */
 
-   /* Startup-fatal validation for the live gateway-mutation path: an invalid
-    * session-disable TTL (<=0) must refuse to bring up the /v1 server rather than
-    * pin/disable the breaker on live client traffic. Scoped to server startup so
-    * unrelated CLI callers of config_load are unaffected. */
-   {
-      char cfg_err[256];
-      if (config_reduce_validate(&cfg, cfg_err, sizeof(cfg_err)) != 0)
-      {
-         fprintf(stderr, "aimee: fatal config error: %s\n", cfg_err);
-         return 1;
-      }
-   }
-
-   /* P3: surface suppressed intent — an explicit lever the two-tier switches override, so an
-    * operator is never silently ignored (per the two-tier design's startup-WARN ruling). */
-   if (!cfg.economizer_enabled &&
-       (cfg.reduce_history_fold || cfg.reduce_compress || cfg.reduce_command_filter))
-      aimee_log(LOG_WARN, "economizer",
-                "economizer.enabled=false MASTER-KILL: all reduction is off (measure still "
-                "runs); individual reduce.* levers are suppressed");
-   if (cfg.reduce_gateway_mutate && !econ_gateway_mutate_on(&cfg))
-      aimee_log(LOG_WARN, "economizer",
-                "reduce.gateway_mutate=true is SUPPRESSED: the live-primary mutator needs "
-                "economizer.enabled && economizer.aggressive (both) to activate");
+   /* Surface the active fail-closed economizer mode at startup. */
+   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode(&cfg)));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the
@@ -302,20 +289,39 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
    cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
-   if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_tls_port,
-                         cfg.server_api_bearer_token, cfg.server_api_rate_limit_per_min,
-                         cfg.server_api_remote_writes) != 0)
+   int http_start = server_http_start(
+       NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,
+       cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes);
+   if (http_start == SERVER_HTTP_START_MGMT_FATAL)
+   {
+      char management_error[256];
+      snprintf(management_error, sizeof(management_error),
+               "error: dedicated management listener failed at %s\n",
+               server_http_management_last_error());
+      startup_notify(notify_fd, management_error);
+      server_http_stop();
+      server_shutdown(&g_ctx);
+      agent_http_cleanup();
+      mcp_client_registry_shutdown();
+      audit_log_close();
+      return 1;
+   }
+   if (http_start != 0)
       LOG_WARN("server.http", "failed to start inbound /v1 HTTP listener");
 
    /* Install signal handlers */
    install_signal_handlers();
 
    g_ctx.running = 1;
+   const char *server_id = getenv("AIMEE_SERVER_ID");
+   if (server_kb_heartbeat_start(server_id) != 0)
+      LOG_WARN("server.kb", "AIMEE_SERVER_ID is required and must be valid for remote kb mTLS");
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("server", g_ctx.start_time);
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   server_kb_heartbeat_stop();
    server_http_stop();
    server_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("server", getpid());

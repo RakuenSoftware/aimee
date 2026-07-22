@@ -107,7 +107,7 @@ extern "C"
    int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs,
                                     char *out_state, size_t out_state_cap);
 
-   /* Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
+   /* Read-only. Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
     * out->result are heap-allocated (never NULL) and must be released with
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
@@ -117,11 +117,6 @@ extern "C"
     * tolerates a zero-initialized struct (a failed get) and double calls. */
    void db1_agent_job_free(db1_agent_job_t *job);
 
-   /* Repair finished job rows created before routed agent metadata was
-    * persisted. Matches blank agent_name rows to nearby agent_log rows with
-    * the same role. Returns rows changed, or -1 on DB error. */
-   int db1_agent_job_backfill_agent_names_from_log(void);
-
    /* Check if a heartbeat_at timestamp is older than `stale_minutes`
     * ago. Returns 1 if stale, 0 if fresh or unparseable. */
    int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes);
@@ -130,7 +125,7 @@ extern "C"
     * Returns 0 on success, -1 on error. */
    int db1_agent_job_take_lease(int job_id, const char *owner);
 
-   /* List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
+   /* Read-only. List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
     * returned row owns heap prompt/result; free every returned row with
     * db1_agent_job_free. When include_heavy == 0, the (potentially large)
     * prompt/result are returned as empty strings (not loaded) so list callers
@@ -143,6 +138,11 @@ extern "C"
 
    /* Cancel one job by id with a reason. Returns rows changed (0/1). */
    int db1_agent_job_cancel_by_id(int job_id, const char *reason);
+
+   /* Cancel every pending/running delegate row left by an earlier server
+    * process. Call once during server startup, before any worker can exist.
+    * Empty results receive the cancellation reason; existing results remain. */
+   int db1_agent_job_cancel_nonterminal_on_restart(const char *reason);
 
    /* Cancel all 'running' jobs older than `threshold_seconds`, with a
     * fixed reason. Returns rows changed. */

@@ -1,5 +1,6 @@
 /* agent_config.c: config loading/saving, agent routing, role checking, auth resolution */
 #include "aimee.h"
+#include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME (appliance has no HOME) */
 #include "util.h"
 #include "agent_config.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
@@ -11,10 +12,13 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <time.h>
+#include "log.h"
+#include <fcntl.h>
 #include <unistd.h>
 
 int agent_name_valid(const char *name)
@@ -444,9 +448,26 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
 
 /* --- Load/Save config (with mtime cache) --- */
 
+/* The cache is read/written from many threads at once — every delegate
+ * dispatch calls agent_load_config, and the parallel autonomy scheduler plus
+ * the panel seats dispatch concurrently. An unguarded memcpy of this
+ * multi-KB struct while a reloading thread rewrites it is a torn read (and
+ * TSan-class UB), so all cache access holds g_agent_config_cache_lock. The
+ * lock is NOT held across file I/O parsing — a reloader parses into the
+ * caller's buffer first and only then publishes under the lock. */
 static agent_config_t g_agent_config_cache;
 static struct timespec g_agent_config_mtime;
+/* mtime alone is not a safe cache key. It is not monotonic and not always
+ * distinct: a rewritten agents.json can land with a timestamp equal to (or
+ * older than) the cached one, and the cache then serves stale content forever.
+ * Observed live on the tiered appliance filesystem, where a freshly installed
+ * agents.json arrived with an mtime ~9h in the past and /v1/agents kept failing
+ * until the file was touched. Size and inode are free from the same stat() and
+ * make an in-place rewrite detectable. */
+static off_t g_agent_config_size;
+static ino_t g_agent_config_ino;
 static int g_agent_config_cached;
+static pthread_mutex_t g_agent_config_cache_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct timespec agent_config_stat_mtime(const struct stat *st)
 {
@@ -470,6 +491,24 @@ static int agent_config_mtime_eq(const struct timespec *a, const struct timespec
    return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;
 }
 
+/* A cache hit requires the file to look identical on every cheap axis stat()
+ * gives us: same mtime, same size, same inode. mtime alone is spoofable by a
+ * same-timestamp rewrite (see g_agent_config_size). */
+static int agent_config_stat_eq(const struct stat *st)
+{
+   struct timespec mt = agent_config_stat_mtime(st);
+   return agent_config_mtime_eq(&mt, &g_agent_config_mtime) && st->st_size == g_agent_config_size &&
+          st->st_ino == g_agent_config_ino;
+}
+
+/* Record the identity of the file whose parsed contents are now cached. */
+static void agent_config_stat_remember(const struct stat *st)
+{
+   g_agent_config_mtime = agent_config_stat_mtime(st);
+   g_agent_config_size = st->st_size;
+   g_agent_config_ino = st->st_ino;
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -480,14 +519,15 @@ int agent_load_config(agent_config_t *cfg)
    if (!getenv("AIMEE_NO_CACHE"))
    {
       struct stat st;
-      if (stat(path, &st) == 0 && g_agent_config_cached)
+      if (stat(path, &st) == 0)
       {
-         struct timespec mt = agent_config_stat_mtime(&st);
-         if (agent_config_mtime_eq(&mt, &g_agent_config_mtime))
-         {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
+         int hit = g_agent_config_cached && agent_config_stat_eq(&st);
+         if (hit)
             memcpy(cfg, &g_agent_config_cache, sizeof(*cfg));
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
+         if (hit)
             return 0;
-         }
       }
    }
 
@@ -829,9 +869,32 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);
+         /* An explicit primary_only wins; remember whether the key was present so
+          * an ABSENT key (a legacy agents.json written before this field existed)
+          * can be migrated below rather than defaulting everything to
+          * delegate-eligible. */
+         v = cJSON_GetObjectItem(a, "primary_only");
+         int primary_only_present = (v && cJSON_IsBool(v));
+         if (primary_only_present)
+            ag->primary_only = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
+
+         /* Migration for a legacy file: default an ABSENT primary_only to the
+          * pre-change semantics. Before this field, a claude-CLI subscription was
+          * primary-only by default (gated behind the removed global
+          * claude_cli_delegate_enabled, default off) and every other agent was
+          * delegate-eligible. The removed gate tested agent_is_claude_cli on the
+          * loaded+NORMALIZED agent, so evaluating the SAME predicate here — AFTER
+          * agent_normalize_legacy_claude_cli — reproduces exactly the set that was
+          * primary-only before, with no behavior change on upgrade. An explicit
+          * value always wins, and agent_save_config always writes the key, so this
+          * only fires for a genuinely legacy file; once resaved the stored value
+          * (including an explicit false) is authoritative and unchecking Primary
+          * Agent Only persists. */
+         if (!primary_only_present)
+            ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
          cfg->agent_count++;
       }
    }
@@ -956,13 +1019,54 @@ int agent_load_config(agent_config_t *cfg)
       struct stat st;
       if (stat(path, &st) == 0)
       {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         g_agent_config_mtime = agent_config_stat_mtime(&st);
+         agent_config_stat_remember(&st);
          g_agent_config_cached = 1;
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
       }
    }
 
    return 0;
+}
+
+/* Count the agents in the on-disk agents.json WITHOUT the cache — the cache can be
+ * stale or empty, and this guards against destroying the real file. Returns the
+ * count, or -1 if the file is absent or unparseable (i.e. "nothing to protect"). */
+static int agent_config_existing_agent_count(void)
+{
+   FILE *f = fopen(agent_config_path(), "r");
+   if (!f)
+      return -1;
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return -1;
+   }
+   long sz = ftell(f);
+   if (sz <= 0 || sz > 8 * 1024 * 1024)
+   {
+      fclose(f);
+      return -1;
+   }
+   rewind(f);
+   char *buf = malloc((size_t)sz + 1);
+   if (!buf)
+   {
+      fclose(f);
+      return -1;
+   }
+   size_t rd = fread(buf, 1, (size_t)sz, f);
+   fclose(f);
+   buf[rd] = '\0';
+   cJSON *root = cJSON_Parse(buf);
+   free(buf);
+   if (!root)
+      return -1;
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "agents");
+   int n = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : -1;
+   cJSON_Delete(root);
+   return n;
 }
 
 int agent_save_config(const agent_config_t *cfg)
@@ -1057,6 +1161,11 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "cli_kind", ag->cli_kind);
       if (ag->is_server_hosted)
          cJSON_AddBoolToObject(a, "is_server_hosted", 1);
+      /* Always written (both true AND false), unlike is_server_hosted: an absent
+       * key triggers the legacy migration on load (see agent_load_config), so
+       * persisting false explicitly is what makes unchecking Primary Agent Only
+       * on a claude-CLI agent stick instead of re-defaulting to true. */
+      cJSON_AddBoolToObject(a, "primary_only", ag->primary_only);
 
       /* Middleware config: only write if any non-zero field is set */
       {
@@ -1161,29 +1270,78 @@ int agent_save_config(const agent_config_t *cfg)
    if (!json)
       return -1;
 
+   /* Never overwrite a populated agents.json with an empty registry. A zero-agent
+    * save is legitimate ONLY on a fresh install (no existing file, or an existing
+    * file that already has none) — never as a silent wipe of configured agents.
+    * This is the agents.json-deletion guard: whatever the trigger (a load that
+    * came back empty, a caller with a zeroed cfg), the destruction stops here, and
+    * it stops LOUDLY so the next occurrence is diagnosable rather than invisible. */
+   if (cfg->agent_count == 0)
+   {
+      int existing = agent_config_existing_agent_count();
+      if (existing > 0)
+      {
+         aimee_log(LOG_ERROR, "agent-config",
+                   "REFUSING to overwrite %d configured agent(s) in %s with an empty registry. "
+                   "An empty save is only valid on a fresh install; this is the deletion guard. "
+                   "If a wipe is truly intended, remove the file first.",
+                   existing, agent_config_path());
+         free(json);
+         return -1;
+      }
+   }
+
    /* Ensure directory exists */
    char dir[MAX_PATH_LEN];
    snprintf(dir, sizeof(dir), "%s", config_default_dir());
    platform_mkdir_p(dir, 0700);
 
-   FILE *f = fopen(agent_config_path(), "w");
-   if (!f)
+   /* Write atomically: a temp file, fsync, then rename over the target. rename(2)
+    * is atomic on a POSIX filesystem, so an interrupted or failed write can NEVER
+    * leave a truncated or empty agents.json — the previous file survives untouched.
+    * The old fopen(path, "w") truncated the real file to zero the instant it
+    * opened, before a single byte was written; any hiccup then destroyed it, which
+    * on a tiered/networked home is exactly how it went missing. */
+   char tmp[MAX_PATH_LEN];
+   if ((size_t)snprintf(tmp, sizeof(tmp), "%s.tmp.%d", agent_config_path(), (int)getpid()) >=
+       sizeof(tmp))
    {
       free(json);
       return -1;
    }
-   fputs(json, f);
-   fputc('\n', f);
-   fclose(f);
-   /* Restrict permissions (contains API keys and auth tokens) */
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   if (fd < 0)
+   {
+      free(json);
+      return -1;
+   }
+   size_t jlen = strlen(json);
+   int ok = (write(fd, json, jlen) == (ssize_t)jlen) && (write(fd, "\n", 1) == 1);
+   /* fsync before rename: a rename can otherwise be durable while the data it
+    * points at is not, leaving an empty file after a crash — the very failure this
+    * guards against. */
+   if (ok && fsync(fd) != 0)
+      ok = 0;
+   if (close(fd) != 0)
+      ok = 0;
+   if (!ok || rename(tmp, agent_config_path()) != 0)
+   {
+      unlink(tmp); /* leave the existing agents.json intact */
+      aimee_log(LOG_ERROR, "agent-config", "atomic write of %s failed; existing file left intact",
+                agent_config_path());
+      free(json);
+      return -1;
+   }
    chmod(agent_config_path(), 0600);
    {
       struct stat st;
       if (stat(agent_config_path(), &st) == 0)
       {
+         pthread_mutex_lock(&g_agent_config_cache_lock);
          memcpy(&g_agent_config_cache, cfg, sizeof(g_agent_config_cache));
-         g_agent_config_mtime = agent_config_stat_mtime(&st);
+         agent_config_stat_remember(&st);
          g_agent_config_cached = 1;
+         pthread_mutex_unlock(&g_agent_config_cache_lock);
       }
    }
    free(json);
@@ -1319,44 +1477,74 @@ int agent_routing_primary_turn(void)
    return g_routing_primary_turn;
 }
 
-int agent_is_available_for_routing(const agent_t *agent)
+agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detail, size_t detail_sz)
 {
+   if (detail && detail_sz)
+      detail[0] = '\0';
    if (!agent)
-      return 0;
+      return AGENT_ROUTE_NULL;
    /* A provider the health catalog has marked unavailable (e.g. DOWN after a
     * failure streak) must not receive new routed work, or delegates wedge on
     * a dead endpoint. Treat it like a disabled agent so callers fall back to a
     * healthy peer; routing returns NULL (clean "no agent" error) only when
     * every candidate is filtered out. */
    if (g_route_health_filter && agent->name[0] && g_route_health_filter(agent->name))
-      return 0;
+      return AGENT_ROUTE_HEALTH_DOWN;
    /* A claude-CLI agent can only ever execute as a delegate SERVER-SIDE (a
     * client-only claude has no server session to drive — dispatch would just
     * fail). Structural, so it is enforced even with no policy filter
-    * registered; the config-dependent rules (the claude_cli_delegate_enabled
-    * ToS opt-in, primary self-delegation) live in the registered policy
-    * filter, which sees the live config. */
+    * registered; the per-agent rules (the `primary_only` opt-out, primary
+    * self-delegation) live in the registered policy filter. */
    if (agent_is_claude_cli(agent) && !agent->is_server_hosted)
-      return 0;
+      return AGENT_ROUTE_CLIENT_ONLY_CLAUDE;
    if (g_route_policy_filter && g_route_policy_filter(agent))
-      return 0;
+   {
+      /* The filter is opaque here, but the agent record names the common case:
+       * a Primary-Agent-Only opt-out. Anything else is a generic policy block. */
+      if (detail && detail_sz && agent->primary_only)
+         snprintf(detail, detail_sz, "it is flagged \"Primary Agent Only\"");
+      return AGENT_ROUTE_POLICY_EXCLUDED;
+   }
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
    {
       const char *cmd =
           agent->cli_cmd[0] ? agent->cli_cmd : (agent->cli_kind[0] ? agent->cli_kind : "claude");
-      return agent_command_on_path("tmux") && agent_command_on_path(cmd);
+      if (!agent_command_on_path("tmux"))
+      {
+         if (detail && detail_sz)
+            snprintf(detail, detail_sz, "tmux");
+         return AGENT_ROUTE_MISSING_COMMAND;
+      }
+      if (!agent_command_on_path(cmd))
+      {
+         if (detail && detail_sz)
+            snprintf(detail, detail_sz, "%s", cmd);
+         return AGENT_ROUTE_MISSING_COMMAND;
+      }
+      return AGENT_ROUTE_OK;
    }
 
    if (strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) != 0 &&
        strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) != 0)
-      return agent_has_resolvable_credentials(agent);
+      return agent_has_resolvable_credentials(agent) ? AGENT_ROUTE_OK : AGENT_ROUTE_NO_CREDENTIALS;
 
    const provider_cli_adapter_t *adapter = provider_cli_adapter_get(agent->cli_kind);
    if (adapter && adapter->native_provider && adapter->native_provider[0])
-      return 1;
+      return AGENT_ROUTE_OK;
 
    const char *cmd = agent->cli_cmd[0] ? agent->cli_cmd : agent->cli_kind;
-   return agent_command_on_path(cmd);
+   if (!agent_command_on_path(cmd))
+   {
+      if (detail && detail_sz)
+         snprintf(detail, detail_sz, "%s", cmd);
+      return AGENT_ROUTE_MISSING_COMMAND;
+   }
+   return AGENT_ROUTE_OK;
+}
+
+int agent_is_available_for_routing(const agent_t *agent)
+{
+   return agent_routing_block_reason(agent, NULL, 0) == AGENT_ROUTE_OK;
 }
 
 int agent_any_delegate_available(void)
@@ -1380,18 +1568,39 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return NULL;
 }
 
-/* Pick randomly from an array of candidates using monotonic-clock nanoseconds.
- * Thread-safe: no shared mutable state. */
-static agent_t *agent_pick_random(agent_t **candidates, int count)
+agent_t *agent_default_primary(agent_config_t *cfg)
 {
+   /* An explicitly configured default wins — but only when it is actually
+    * usable. Routing to a disabled default (or, historically, a disabled
+    * agents[0]) makes every ingress request that doesn't name a model fast-fail
+    * as "failed to reach the primary provider" even though enabled agents
+    * exist, so the fallback deliberately skips disabled seats. */
+   if (cfg->default_agent[0])
+   {
+      agent_t *ag = agent_find(cfg, cfg->default_agent);
+      if (ag && ag->enabled)
+         return ag;
+   }
+   for (int i = 0; i < cfg->agent_count; i++)
+      if (cfg->agents[i].enabled)
+         return &cfg->agents[i];
+   return NULL;
+}
+
+/* Pick fairly from an array of equally eligible candidates.  `default_agent` is
+ * the primary-session default, not a hidden delegate pin: letting it win every
+ * unpinned delegation starves every peer at the same tier.  A process-wide
+ * atomic cursor gives those peers round-robin opportunities while explicit
+ * --via pins continue to be handled before this function is reached. */
+static agent_t *agent_pick_balanced(agent_t **candidates, int count)
+{
+   static unsigned cursor;
    if (count <= 0)
       return NULL;
    if (count == 1)
       return candidates[0];
-   struct timespec _ts;
-   clock_gettime(CLOCK_MONOTONIC, &_ts);
-   unsigned int seed = (unsigned int)_ts.tv_nsec ^ (unsigned int)_ts.tv_sec;
-   return candidates[seed % (unsigned int)count];
+   unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
+   return candidates[pick % (unsigned int)count];
 }
 
 int agent_is_claude_cli(const agent_t *agent)
@@ -1485,9 +1694,9 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
 
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
+   agent_t *primary_default = NULL;
+   if (agent_routing_primary_turn() && cfg->default_agent[0])
+      primary_default = agent_find(cfg, cfg->default_agent);
 
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
@@ -1521,21 +1730,17 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
          continue;
       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
-      if (ag == def)
+      if (ag == primary_default)
          return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
-/* Route to a randomly selected enabled agent at exactly the given cost_tier. */
+/* Route fairly among enabled agents at exactly the given cost_tier. */
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
 {
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
-
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -1545,12 +1750,10 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
          continue;
       if (role && !agent_supports_role(ag, role))
          continue;
-      if (ag == def)
-         return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
 static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_caps, int min_context)
@@ -1632,9 +1835,9 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    if (min_tier < 0)
       return NULL;
 
-   agent_t *def = NULL;
-   if (cfg->default_agent[0])
-      def = agent_find(cfg, cfg->default_agent);
+   agent_t *primary_default = NULL;
+   if (agent_routing_primary_turn() && cfg->default_agent[0])
+      primary_default = agent_find(cfg, cfg->default_agent);
 
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
@@ -1654,12 +1857,12 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
             continue;
       }
 
-      if (ag == def)
+      if (ag == primary_default)
          return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   return agent_pick_random(candidates, count);
+   return agent_pick_balanced(candidates, count);
 }
 
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
@@ -1852,6 +2055,22 @@ static int codex_oauth_vault_token(char *buf, size_t len)
       snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
       if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
          got = 1;
+      /* aimee's canonical home (honors AIMEE_HOME) — on an appliance the process
+       * has AIMEE_HOME set but no HOME, so the on-disk codex auth at
+       * <AIMEE_HOME>/.codex/auth.json is invisible to the HOME-only lookup below.
+       * This server-wide on-disk read (not a per-request vault principal) is
+       * deliberate: the /v1 ingress resolves creds here for BOTH the buffered and
+       * streaming paths, and the streaming ingress has no captured per-request
+       * identity, so a vault-principal approach could not cover streaming codex.
+       * The raw HOME branch below is kept for AIMEE_PROFILE setups, where
+       * aimee_home() points at the profile dir rather than the real ~/.codex. */
+      const char *ahome = aimee_home();
+      if (!got && ahome && ahome[0])
+      {
+         snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
+            got = 1;
+      }
       const char *home = getenv("HOME");
       if (!got && home && home[0])
       {
@@ -1934,6 +2153,16 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
    snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
    if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
       return 0;
+
+   /* aimee's canonical home (honors AIMEE_HOME) — see codex_oauth_vault_token:
+    * an appliance sets AIMEE_HOME but not HOME, hiding <AIMEE_HOME>/.codex. */
+   const char *ahome = aimee_home();
+   if (ahome && ahome[0])
+   {
+      snprintf(path, sizeof(path), "%s/.codex/auth.json", ahome);
+      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
+         return 0;
+   }
 
    const char *home = getenv("HOME");
    if (home && home[0])

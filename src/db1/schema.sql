@@ -37,6 +37,63 @@ CREATE TABLE IF NOT EXISTS session_state_file_hashes ( session_id TEXT NOT NULL 
 CREATE TABLE IF NOT EXISTS decisions ( id INTEGER PRIMARY KEY AUTOINCREMENT, window_id INTEGER NOT NULL, description TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS eval_results ( id INTEGER PRIMARY KEY AUTOINCREMENT, suite TEXT NOT NULL, task_name TEXT NOT NULL DEFAULT '', agent_name TEXT NOT NULL DEFAULT '', ablation TEXT NOT NULL DEFAULT 'full', success INTEGER NOT NULL DEFAULT 0, turns INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, tool_call_failures INTEGER NOT NULL DEFAULT 0, rescue_recoveries INTEGER NOT NULL DEFAULT 0, prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, latency_ms INTEGER NOT NULL DEFAULT 0, response TEXT NOT NULL DEFAULT '', error TEXT, dataset_hash TEXT NOT NULL DEFAULT '', target_hash TEXT NOT NULL DEFAULT '', harness_version TEXT NOT NULL DEFAULT '1', hardware_profile TEXT NOT NULL DEFAULT '', seed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory_runtime_state ( state_key TEXT PRIMARY KEY, state_value TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS server_mgmt_nonce (
+  nonce BLOB PRIMARY KEY CHECK(length(nonce)=32),
+  peer_issuer TEXT NOT NULL,
+  peer_serial_norm TEXT NOT NULL,
+  peer_fingerprint TEXT NOT NULL,
+  channel_binding TEXT NOT NULL,
+  target_server_id TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_server_mgmt_nonce_expiry ON server_mgmt_nonce(expires_at);
+CREATE TABLE IF NOT EXISTS server_mgmt_status_hwm (
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  generation INTEGER NOT NULL CHECK(generation>=0)
+);
+INSERT OR IGNORE INTO server_mgmt_status_hwm(singleton,generation) VALUES(1,0);
+CREATE TABLE IF NOT EXISTS server_management_jti (
+  jti TEXT PRIMARY KEY NOT NULL CHECK(
+    typeof(jti)='text' AND length(jti) BETWEEN 16 AND 128 AND instr(jti,char(0))=0 AND
+    jti NOT GLOB '*[^A-Za-z0-9._-]*'),
+  issuer TEXT NOT NULL CHECK(
+    typeof(issuer)='text' AND length(issuer) BETWEEN 1 AND 255 AND instr(issuer,char(0))=0 AND
+    issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  kid TEXT NOT NULL CHECK(
+    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND instr(kid,char(0))=0 AND
+    kid NOT GLOB '*[^A-Za-z0-9._-]*'),
+  audience TEXT NOT NULL CHECK(
+    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND instr(audience,char(0))=0 AND
+    audience NOT GLOB '*[^A-Za-z0-9._-]*'),
+  subject TEXT NOT NULL CHECK(
+    typeof(subject)='text' AND length(subject) BETWEEN 1 AND 576 AND instr(subject,char(0))=0 AND
+    subject NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  team_id INTEGER NOT NULL CHECK(typeof(team_id)='integer' AND team_id > 0),
+  capability TEXT NOT NULL CHECK(
+    typeof(capability)='text' AND length(capability) BETWEEN 1 AND 64 AND instr(capability,char(0))=0 AND
+    capability NOT GLOB '*[^A-Za-z0-9._-]*'),
+  peer_issuer TEXT NOT NULL CHECK(
+    typeof(peer_issuer)='text' AND length(peer_issuer) BETWEEN 1 AND 511 AND instr(peer_issuer,char(0))=0 AND
+    peer_issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
+  peer_serial TEXT NOT NULL CHECK(
+    typeof(peer_serial)='text' AND length(peer_serial) BETWEEN 1 AND 79 AND instr(peer_serial,char(0))=0 AND
+    peer_serial NOT GLOB '*[^0-9a-f]*'),
+  peer_fingerprint TEXT NOT NULL CHECK(
+    typeof(peer_fingerprint)='text' AND length(peer_fingerprint)=64 AND instr(peer_fingerprint,char(0))=0 AND
+    peer_fingerprint NOT GLOB '*[^0-9a-f]*'),
+  request_sha256 TEXT NOT NULL CHECK(
+    typeof(request_sha256)='text' AND length(request_sha256)=64 AND instr(request_sha256,char(0))=0 AND
+    request_sha256 NOT GLOB '*[^0-9a-f]*'),
+  correlation_id TEXT NOT NULL CHECK(
+    typeof(correlation_id)='text' AND length(correlation_id) BETWEEN 1 AND 128 AND instr(correlation_id,char(0))=0 AND
+    correlation_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+  issued_at INTEGER NOT NULL CHECK(typeof(issued_at)='integer' AND issued_at >= 0),
+  expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > issued_at),
+  consumed_at INTEGER NOT NULL CHECK(typeof(consumed_at)='integer' AND consumed_at >= issued_at AND consumed_at < expires_at)
+);
+CREATE INDEX IF NOT EXISTS idx_server_management_jti_expiry
+  ON server_management_jti(expires_at,jti);
 CREATE TABLE IF NOT EXISTS token_audit ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL DEFAULT '', delegation_id TEXT NOT NULL DEFAULT '', project_name TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', requested_model TEXT NOT NULL DEFAULT '', stop_reason TEXT NOT NULL DEFAULT '', usage_kind TEXT NOT NULL DEFAULT 'realized', agent_log_id INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, principal TEXT NOT NULL DEFAULT '', served_model TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost_usd REAL NOT NULL DEFAULT 0.0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS model_catalog ( provider TEXT NOT NULL, model TEXT NOT NULL, context_window INTEGER NOT NULL DEFAULT 0, pricing_tier INTEGER NOT NULL DEFAULT 0, tool_support INTEGER NOT NULL DEFAULT 0, streaming_support INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL DEFAULT (datetime('now')), metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (provider, model));
 CREATE TABLE IF NOT EXISTS model_pricing ( model TEXT PRIMARY KEY, cost_in_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_in_per_mtok >= 0), cost_out_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_out_per_mtok >= 0), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -48,14 +105,8 @@ CREATE TABLE IF NOT EXISTS execution_plans ( id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS plan_steps ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL REFERENCES execution_plans(id) ON DELETE CASCADE, seq INTEGER NOT NULL, action TEXT NOT NULL, precondition TEXT DEFAULT '', success_predicate TEXT DEFAULT '', rollback TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', output TEXT DEFAULT '', checkpoint TEXT DEFAULT '', deps TEXT DEFAULT '[]', started_at TEXT DEFAULT '', finished_at TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS step_evidence ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL, step_id INTEGER NOT NULL, kind TEXT NOT NULL, content TEXT NOT NULL, passed INTEGER NOT NULL DEFAULT 0, strength TEXT NOT NULL DEFAULT 'weak', created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS coord_jobs ( id INTEGER PRIMARY KEY AUTOINCREMENT, plan_id INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', max_concurrent INTEGER NOT NULL DEFAULT 3, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS coord_job_tasks ( id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL REFERENCES coord_jobs(id) ON DELETE CASCADE, step_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'pending', claimed_by TEXT NOT NULL DEFAULT '', claimed_at TEXT NOT NULL DEFAULT '', files TEXT NOT NULL DEFAULT '[]', role TEXT NOT NULL DEFAULT 'execute', prompt TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', preempt_requeues INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS coord_job_tasks ( id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL REFERENCES coord_jobs(id) ON DELETE CASCADE, step_id INTEGER DEFAULT NULL, status TEXT NOT NULL DEFAULT 'pending', claimed_by TEXT NOT NULL DEFAULT '', claimed_at TEXT NOT NULL DEFAULT '', files TEXT NOT NULL DEFAULT '[]', role TEXT NOT NULL DEFAULT 'execute', persona TEXT NOT NULL DEFAULT 'engineer', prompt TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', preempt_requeues INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 -- Inter-session work queue: server coordination state, DB1-owned (moved from DB2).
-CREATE TABLE IF NOT EXISTS work_queue (  id TEXT PRIMARY KEY,  title TEXT NOT NULL,  description TEXT DEFAULT '',  source TEXT DEFAULT '',  priority INTEGER DEFAULT 0,  status TEXT NOT NULL DEFAULT 'pending',  claimed_by TEXT,  claimed_at TEXT,  completed_at TEXT,  result TEXT DEFAULT '',  created_by TEXT,  created_at TEXT NOT NULL,  metadata TEXT DEFAULT '',  effort TEXT DEFAULT '',  tags TEXT DEFAULT '',  lane TEXT DEFAULT '');
-CREATE TABLE IF NOT EXISTS work_queue_log (  id INTEGER PRIMARY KEY AUTOINCREMENT,  item_id TEXT NOT NULL,  old_status TEXT,  new_status TEXT,  session_id TEXT,  detail TEXT,  created_at TEXT);
-CREATE INDEX IF NOT EXISTS idx_work_queue_status ON work_queue(status);
-CREATE INDEX IF NOT EXISTS idx_work_queue_claimed ON work_queue(claimed_by);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_work_queue_lane_active ON work_queue(lane) WHERE status = 'claimed' AND lane <> '';
-CREATE INDEX IF NOT EXISTS idx_work_queue_log_item ON work_queue_log(item_id);
 CREATE TABLE IF NOT EXISTS pipelines ( id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', current_phase TEXT NOT NULL DEFAULT 'plan', phase_attempts INTEGER NOT NULL DEFAULT 0, plan_id INTEGER NOT NULL DEFAULT 0, job_id INTEGER NOT NULL DEFAULT 0, request_classification TEXT NOT NULL DEFAULT 'simple', plan_depth TEXT NOT NULL DEFAULT 'simple', clarify_session_id INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS trigger_runs ( id TEXT PRIMARY KEY, source TEXT NOT NULL, event TEXT NOT NULL DEFAULT '', task TEXT NOT NULL, workspace TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', pipeline_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', queued_at TEXT NOT NULL DEFAULT (datetime('now')), started_at TEXT DEFAULT '', finished_at TEXT DEFAULT '', error TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS idx_trigger_runs_status ON trigger_runs(status);

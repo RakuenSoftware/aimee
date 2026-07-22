@@ -276,6 +276,11 @@ inspection-only tasks. Only write-capable delegates get isolated sibling
 delegate worktrees; branch-specific delegate checkouts are therefore a
 write-delegate feature, not a read-only review mechanism.
 
+A delegate with its own worktree can also be sandboxed: with `delegate_sandbox`
+enabled it runs its file and shell tools inside a network-none container, and
+you control the image it uses per project. See
+[Delegate Sandbox](DELEGATE_SANDBOX.md).
+
 File contents use a stricter authority order. Current source wins over derived
 index snippets: source packets from `--files`, `--context-file`,
 `--context-dir`, preloaded symbol context, and `read_file` from the delegate
@@ -369,15 +374,15 @@ trail (not the host AI's own sub-agent tools, which are blocked).
 > participate. `aimee delegate review --via M` is a *single, exploratory* review
 > that runs tools-on so the reviewer can read the surrounding code, the right
 > tool for "review the auth module", the wrong tool for a panel gate. The panel
-> skips agents that cannot run as a server-side HTTP delegate (e.g. claude-CLI
-> unless `claude_cli_delegate_enabled`) and falls back to another panelist if the
+> skips agents that cannot run as a server-side HTTP delegate and any agent
+> flagged **Primary Agent Only** (`primary_only`), and falls back to another panelist if the
 > aggregator model fails, so one flaky model does not collapse the synthesis.
 
 The panel is configured under `ensemble` in `aimee.yaml`:
 
 | Field | Meaning |
 |-------|---------|
-| `reference_models` | The panel: diverse model/agent names to fan out to |
+| `reference_models` | Positive must-use model/agent pins; runtime fills all other enabled, eligible `max_parallel` seats, provider-diversity first |
 | `aggregator` | Agent that synthesizes the panel's answers |
 | `min_successful` | Minimum panelists that must answer before degrading (default 2) |
 | `max_cost_usd` | Optional per-run cost cap in USD. **Unset/0 means no limit (the default).** Set a positive value to cap a run |
@@ -395,13 +400,17 @@ happened in the result rather than silently dropping the failures:
 |-------|---------|
 | `participants_total` | Reference models fanned out (the panel size) |
 | `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected, the `best_round`) |
+| `participants_required_failed` *(roundtable)* | Failed participants in the adopted best round's caller-authored required prefix; always less than or equal to `participants_failed` |
 | `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
 | `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
 | `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
 
-`participants_failed > 0` with `degraded = 0` means the panel lost some members
-but still had enough to synthesize, the answer is sound but thinner than a full
-panel. `degraded = 1` means the result is a single survivor's answer.
+`participants_failed > 0` with `degraded = 0` means only best-effort capacity
+seats failed while every required participant answered. Their failures remain
+observable but do not turn a complete required panel into a failed gate.
+`degraded` is run-level and sticky across roundtable rounds, so an earlier
+truncation, required-seat failure, or verification degradation cannot be hidden
+by selecting a later artifact.
 
 ## Configuration Reference
 
@@ -471,19 +480,24 @@ Practical notes:
   `agent add --provider claude`.) The thin-client routing is automatic when the
   workspace is `detached`.
 - If no client is currently serving the workspace, the CLI agent cannot run
-  (there is nowhere with the binary), start the client / open `aimee chat` for
+  (there is nowhere with the binary), start the client for
   that root, or use an HTTP provider.
 
 #### Claude via the CLI is primary-only by default
 
 Claude run via the `claude` CLI / tmux login, authenticated by the **interactive
-Claude subscription login, not an API key**, is **primary-only by default**. It
-can be your interactive primary (`aimee chat`), but it is **not** eligible as a
-delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
-use it as a delegate fails with a message pointing you here.
+Claude subscription login, not an API key**, is **primary-only by default**. When
+you add a claude-oauth subscription in the Web GUI, the **Primary Agent Only**
+checkbox is pre-checked, which sets the per-agent `primary_only` flag in
+`agents.json`. A primary-only agent can be your interactive primary (via the web
+chat or `acp-serve`), but it is **not** eligible as a delegate (neither
+auto-routed nor `aimee delegate … --via claude`). Attempting to use it as a
+delegate fails with a message pointing you here.
 
-This gate is **Claude-CLI-specific**. It does not affect any other agent: API-key
-/ HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
+**Primary Agent Only** is a per-agent choice available to any agent (it replaced
+the former global `claude_cli_delegate_enabled` opt-in); it is simply pre-checked
+for a claude-oauth subscription and left off for every other agent, so API-key /
+HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
 `mistral`, …) and other CLI agents (e.g. the Codex CLI) delegate normally.
 
 > ⚠️ **Anthropic account-risk warning.** Using a personal **Claude subscription**
@@ -494,16 +508,12 @@ This gate is **Claude-CLI-specific**. It does not affect any other agent: API-ke
 > automated or delegated Claude workloads, use an **Anthropic API key** (billed
 > per token) instead, add an `anthropic` agent with `--key`.
 
-To opt in anyway, at your own risk:
-
-```bash
-aimee config set claude_cli_delegate_enabled true
-```
-
-This prints the warning once, at the time you enable it. With the flag on,
-Claude-via-CLI may be routed to / selected as a delegate (and, on a thin client,
-runs on the client exactly like the primary path above). Set it back to `false`
-to restore the primary-only default. The default is `false`.
+To allow a claude-oauth agent to act as a delegate anyway, at your own risk,
+**uncheck Primary Agent Only** for it in the Agents tab (or run
+`aimee agent set claude --primary-only off`). With that flag off, Claude-via-CLI
+may be routed to / selected as a delegate (and, on a thin client, runs on the
+client exactly like the primary path above). Re-check it to restore the
+primary-only default.
 
 ### Config format
 

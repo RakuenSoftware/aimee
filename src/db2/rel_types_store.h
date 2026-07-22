@@ -6,8 +6,8 @@
 #ifndef DEC_DB2_REL_TYPES_STORE_H
 #define DEC_DB2_REL_TYPES_STORE_H 1
 
-#include "../headers/memory_ontology.h"
-#include "../headers/memory_fact_gate.h"
+#include "memory_ontology.h"
+#include "memory_fact_gate.h"
 #include "fact_lifecycle.h" /* fact_authority_t, FACT_CLASS_* (§4/§5) */
 
 #ifdef __cplusplus

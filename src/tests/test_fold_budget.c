@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "../headers/fold_budget.h"
+#include "fold_budget.h"
 #include "../headers/model_registry.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)

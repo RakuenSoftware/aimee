@@ -2,9 +2,11 @@
 
 The `aimee-llm` image is the unified Vulkan llama.cpp stack: one runtime serving
 **embeddings** (`/embed`), **reranking** (`/rerank`), and **synthesis**
-(`/v1/chat/completions`). It is a single **model-less** image — the **tier** is
+(`/v1/chat/completions`). It is **model-less** — the **tier** is
 chosen at runtime via `AIMEE_LLM_TIER` and the models are **downloaded on first
-boot** into the `/models` volume. The four tiers differ only in the **synth
+boot** into the `/models` volume. (A pre-baked **`aimee-llm-cpu`** variant ships the
+cpu tier's models in the image for offline CPU-only deploys — see *Package names*
+below.) The four tiers differ only in the **synth
 model** (and its runtime profile); embed + rerank are identical within a CPU/GPU
 class, so a KB stays byte-portable when you switch the GPU synth tier.
 
@@ -48,17 +50,25 @@ config surface: [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
 
 ## Package names
 
-Keep the two `aimee-*` inference-adjacent images straight:
+Keep the `aimee-*` inference-adjacent images straight:
 
 - **`aimee-kb`**: the KB service (DB2 + curator). Runs no model; it calls one
   over HTTP. See [KB_LLM_BACKENDS.md](KB_LLM_BACKENDS.md).
-- **`aimee-llm`**: the single model-less inference image in this doc (embed +
-  rerank + synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS
-  `aimee-llm` plugin. The tier is `AIMEE_LLM_TIER`, not the image name.
+- **`aimee-llm`**: the model-less inference image in this doc (embed + rerank +
+  synth), built from `Dockerfile.aimee-llm`, deployed as the SmoothNAS `aimee-llm`
+  plugin. The tier is `AIMEE_LLM_TIER`, not the image name; the models download on
+  first boot. Use it on GPU hosts.
+- **`aimee-llm-cpu`**: the **pre-baked** CPU variant — the same
+  `Dockerfile.aimee-llm` built with `AIMEE_LLM_BAKE_TIER=cpu`, so the cpu-tier GGUFs
+  ship inside the image and it serves offline with no first-boot download and no
+  `/models` volume. This is the pure-CPU appliance LLM that, with `aimee-server` +
+  `aimee-kb`, replaces the retired all-in-one `aimee-combined`. It answers at
+  `aimee-llm:8742` like the model-less image.
 
-Retired names: `aimee-kb-{cpu,gpu-small,gpu-mid,gpu-large}` (and before them
-`aimee-llm-cpu`/`aimee-llm-gpu`) were the old **baked per-tier** images — replaced
-by the one model-less `aimee-llm` image + `AIMEE_LLM_TIER`. `aimee-embedder`/
+Retired names: `aimee-kb-{cpu,gpu-small,gpu-mid,gpu-large}` and `aimee-llm-gpu`
+were old **baked per-tier** images — replaced by the model-less `aimee-llm` image +
+`AIMEE_LLM_TIER` (the current `aimee-llm-cpu` above is a separate, deliberately
+pre-baked cpu image, not one of that retired per-tier set). `aimee-embedder`/
 `aimee-embedder-4b` were the standalone torch embedder, now served by `aimee-llm`.
 
 ## Deploy: one env knob

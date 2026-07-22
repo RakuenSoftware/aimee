@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Panel } from "@rakuensoftware/smoothgui";
+import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roles page: edit the shared ROLE vocabulary — each role's name, what it does
  * (the delegate system-prompt template), and its per-role turn cap (max_turns,
@@ -30,14 +30,6 @@ async function sendJSON<T>(
   return { status: r.status, data };
 }
 
-const btn: React.CSSProperties = {
-  padding: "4px 10px",
-  fontSize: 13,
-  borderRadius: 6,
-  border: "1px solid #ccc",
-  background: "#fff",
-  cursor: "pointer",
-};
 const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
 const ta: React.CSSProperties = {
   width: "100%",
@@ -135,9 +127,7 @@ export default function Roles() {
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Roles</strong>
-        {status && (
-          <span style={{ fontSize: 13, color: status.kind === "err" ? "#b00" : "#080" }}>{status.msg}</span>
-        )}
+        <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 720 }}>
@@ -149,17 +139,19 @@ export default function Roles() {
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {roles.map((r) => (
-              <button
+              <Button
                 key={r}
+                size="md"
                 onClick={() => openRole(r)}
-                style={{ ...btn, background: roleSel === r ? "#e8eef9" : "#fff" }}
+                style={{ background: roleSel === r ? "#e8eef9" : "#fff" }}
+                title="Open this role to edit its prompt template and turn cap."
               >
                 {r}
-              </button>
+              </Button>
             ))}
-            <button onClick={newRole} style={{ ...btn, borderStyle: "dashed" }}>
+            <Button size="md" onClick={newRole} style={{ borderStyle: "dashed" }} title="Create a new role, prompting for its name.">
               + New
-            </button>
+            </Button>
           </div>
           {roleSel && (
             <div>
@@ -182,12 +174,12 @@ export default function Roles() {
                 }}
               />
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={saveRole} style={btn}>
+                <Button size="md" onClick={saveRole} title="Save this role's template and turn cap.">
                   Save role
-                </button>
-                <button onClick={deleteRole} style={{ ...btn, color: "#b00" }}>
+                </Button>
+                <Button variant="danger" size="md" onClick={deleteRole} title="Delete this role; built-in roles reset to their default.">
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           )}

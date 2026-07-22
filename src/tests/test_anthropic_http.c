@@ -10,9 +10,26 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
-#include "../headers/delegate_driver.h"
+#include "../modules/delegates/delegate_driver.h"
+#include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
+
+/* anthropic_http.c's write_error now logs aimee-internal error codes; this
+ * minimal link stubs the logger like the other production deps below. */
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
+}
+
+/* write_error's route-unresolved branch reads the per-turn auth-error channel;
+ * stub returns "no explicit reason" for this minimal link. */
+const char *agent_request_auth_error(void)
+{
+   return NULL;
+}
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
@@ -51,6 +68,11 @@ int agent_load_config(agent_config_t *cfg)
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
    (void)name;
+   return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
+agent_t *agent_default_primary(agent_config_t *cfg)
+{
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
 }
 
@@ -154,10 +176,16 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
    return g_stream_status;
 }
 
-void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
+int agent_ir_parse_json_response(cJSON *root, int anthropic, int rescue_mode, int *n_rescued,
+                                 parsed_response_t *out)
 {
    (void)root;
+   (void)anthropic;
+   (void)rescue_mode;
+   if (n_rescued)
+      *n_rescued = 0;
    memset(out, 0, sizeof(*out));
+   return 0;
 }
 
 static void parsed_responses(cJSON *root, const char *body, parsed_response_t *out)
@@ -250,6 +278,22 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    (void)source;
    (void)usage_kind;
 }
+void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
+                               const char *requested_model, const char *stop_reason,
+                               int prompt_tokens, int completion_tokens, int cache_write_tokens,
+                               int cache_read_tokens, const char *source, const char *kind)
+{
+   (void)agent_name;
+   (void)agent_model;
+   (void)requested_model;
+   (void)stop_reason;
+   (void)prompt_tokens;
+   (void)completion_tokens;
+   (void)cache_write_tokens;
+   (void)cache_read_tokens;
+   (void)source;
+   (void)kind;
+}
 /* Enable accounting in this unit so the tap/record path is exercised. */
 int agent_ingress_accounting_enabled(void)
 {
@@ -283,7 +327,12 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
 int config_load(config_t *cfg)
 {
    if (cfg)
+   {
       memset(cfg, 0, sizeof(*cfg));
+      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
+      cfg->module_memory = cfg->module_governance = -1;
+      cfg->module_delegates = cfg->module_workflows = -1;
+   }
    return 0;
 }
 

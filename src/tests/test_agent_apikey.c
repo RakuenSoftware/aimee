@@ -234,6 +234,53 @@ static void test_claude_cli_predicate(void)
    assert(agent_is_claude_cli(&a) == 0);
 }
 
+/* primary_only migration + persistence. A legacy agents.json (written before the
+ * field existed) has no `primary_only` key: a claude-CLI agent must migrate to
+ * primary-only (matching the removed global claude_cli_delegate_enabled default),
+ * every other agent to delegate-eligible. An explicit false must then survive a
+ * save->reload (agent_save_config always writes the key), so unchecking Primary
+ * Agent Only on a claude agent sticks instead of re-defaulting to true. */
+static void test_primary_only_migration_and_persist(void)
+{
+   const char *cfg_dir = config_default_dir();
+   assert(platform_mkdir_p(cfg_dir, 0700) == 0 || access(cfg_dir, F_OK) == 0);
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      /* Legacy file: NEITHER agent carries primary_only. */
+      fputs("{\"agents\":["
+            "{\"name\":\"claude\",\"provider\":\"claude\",\"backend\":\"tmux-cli\","
+            "\"cli_kind\":\"claude\",\"roles\":[\"code\"]},"
+            "{\"name\":\"minimax\",\"provider\":\"anthropic\",\"model\":\"MiniMax-M3\","
+            "\"endpoint\":\"https://api.minimax.io/v1/chat/completions\",\"roles\":[\"all\"]}]}\n",
+            f);
+      fclose(f);
+   }
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0);
+   agent_t *claude = agent_find(&cfg, "claude");
+   agent_t *minimax = agent_find(&cfg, "minimax");
+   assert(claude && minimax);
+   /* Migration: absent key -> claude-CLI ON, everything else OFF. */
+   assert(claude->primary_only == 1);
+   assert(minimax->primary_only == 0);
+
+   /* Operator unchecks Primary Agent Only for claude; it must persist. */
+   claude->primary_only = 0;
+   assert(agent_save_config(&cfg) == 0);
+   /* Force a genuine file re-parse (agent_save_config also refreshes the in-memory
+    * cache, which would otherwise mask a parse/migration bug). */
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   agent_config_t reloaded;
+   assert(agent_load_config(&reloaded) == 0);
+   unsetenv("AIMEE_NO_CACHE");
+   agent_t *claude2 = agent_find(&reloaded, "claude");
+   assert(claude2 != NULL);
+   /* Explicit false survived: the key was written and NOT re-migrated to true. */
+   assert(claude2->primary_only == 0);
+   printf("  PASS: test_primary_only_migration_and_persist\n");
+}
+
 /* A reasoning model with no operator timeout gets the higher reasoning default;
  * a non-reasoning model keeps the standard default; an explicit value always wins. */
 static void test_reasoning_timeout_default(void)
@@ -284,6 +331,7 @@ int main(void)
    test_agent_loop_per_call_timeout();
    test_reasoning_timeout_default();
    test_claude_cli_predicate();
+   test_primary_only_migration_and_persist();
    printf("agent_apikey: all tests passed\n");
    return 0;
 }

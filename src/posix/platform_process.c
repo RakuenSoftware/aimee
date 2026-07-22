@@ -257,6 +257,20 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
    close(stdin_pipe[0]);
    close(stdout_pipe[1]);
 
+   /* A child that exits before draining its stdin (e.g. a rerank command that
+    * fails fast with a non-zero status) closes the read end, so our write() to it
+    * raises SIGPIPE. With the default disposition that terminates THIS process --
+    * turning a handled subprocess failure into a hard crash of the caller (seen as
+    * a flaky SIGPIPE kill of unit-test-memory under load, and a latent server
+    * crash in production). Ignore SIGPIPE across the write so the failed write
+    * surfaces as EPIPE and the loop breaks cleanly; restore the prior disposition
+    * after. Save/restore matches workspace_provider.c. */
+   struct sigaction old_pipe, ignore_pipe;
+   memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+   ignore_pipe.sa_handler = SIG_IGN;
+   sigemptyset(&ignore_pipe.sa_mask);
+   int restore_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
    if (input && input_len > 0)
    {
       size_t off = 0;
@@ -269,6 +283,9 @@ int platform_exec_pipe(const char *cmd, const char *input, size_t input_len, cha
       }
    }
    close(stdin_pipe[1]);
+
+   if (restore_pipe)
+      sigaction(SIGPIPE, &old_pipe, NULL);
 
    size_t cap = 4096;
    size_t len = 0;

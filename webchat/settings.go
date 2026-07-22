@@ -25,8 +25,6 @@ var settingsAllow = []settingField{
 		Help: "Agent acts without per-action confirmation."},
 	{Key: "cross_verify", Label: "Cross-verify", Type: "bool",
 		Help: "Double-check work before reporting done."},
-	{Key: "ecomode", Label: "Eco mode", Type: "bool",
-		Help: "Favor cheaper / shorter reasoning."},
 	{Key: "reasoning_cap_enabled", Label: "Cap reasoning by complexity", Type: "bool",
 		Help: "Lower reasoning effort on simple turns."},
 	{Key: "max_iterations", Label: "Max iterations", Type: "int",

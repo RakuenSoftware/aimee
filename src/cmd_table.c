@@ -100,8 +100,6 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
             subs = get_session_subcmds();
          else if (strcmp(target, "ensemble") == 0)
             subs = get_ensemble_subcmds();
-         else if (strcmp(target, "work") == 0)
-            subs = get_work_subcmds();
          else if (strcmp(target, "branch") == 0)
             subs = get_branch_subcmds();
          else if (strcmp(target, "cancel") == 0)
@@ -118,6 +116,8 @@ void cmd_help(app_ctx_t *ctx, int argc, char **argv)
             subs = get_trigger_subcmds();
          else if (strcmp(target, "mcp") == 0)
             subs = get_mcp_subcmds();
+         else if (strcmp(target, "aux") == 0)
+            subs = get_aux_subcmds();
 
          if (subs)
          {
@@ -198,8 +198,6 @@ const command_t commands[] = {
     {"context", "Print assembled execution context", cmd_context, CMD_TIER_ADVANCED},
     {"dispatch", "Run multiple tasks in parallel via agents", cmd_dispatch, CMD_TIER_ADVANCED},
     {"queue", "Deprecated alias for dispatch", cmd_queue, CMD_TIER_ADVANCED},
-    {"work", "Inter-session work queue (distribute tasks across sessions)", cmd_work,
-     CMD_TIER_ADVANCED},
     {"sweep", "Deepening sweep: find duplication-across-call-sites seams (analysis-only)",
      cmd_sweep, CMD_TIER_ADVANCED},
     {"plugin", "Plugin management (install, list, enable, disable, remove)", cmd_plugin,

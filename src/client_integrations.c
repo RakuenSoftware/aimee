@@ -1,5 +1,7 @@
 #include "client_constants.h"
 #include "client_integrations.h"
+#include "aimee_home.h"
+#include "yaml.h"
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -10,6 +12,21 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* Injected by the CLI (client_integrations_set_delegate_probe): reports whether
+ * usable aimee delegates exist (1), none do (0), or the answer is unknown (-1,
+ * server unreachable). CORE must not make a /v1 call directly — it links into
+ * both the DB-free client and the server — so the CLI supplies the real probe. */
+static int (*g_delegate_probe)(void) = NULL;
+
+void client_integrations_set_delegate_probe(int (*probe)(void))
+{
+   g_delegate_probe = probe;
+}
+
+/* Defined further down; forward-declared for ensure_subagent_ban (which sits
+ * beside ensure_claude_code_hooks, above the definition). */
+static int client_config_bool(const char *key, int default_val);
 
 static void ensure_parent_dir(const char *path, mode_t mode)
 {
@@ -926,6 +943,133 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
    }
 }
 
+/* Remove any PreToolUse (or other event) hook entry whose command runs the given
+ * aimee subcommand — the inverse of ensure_aimee_event_hook, for un-installing a
+ * hook when its gate no longer holds. */
+static void remove_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
+                                    int *dirty)
+{
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
+   if (!cJSON_IsArray(arr))
+      return;
+   for (int i = cJSON_GetArraySize(arr) - 1; i >= 0; i--)
+   {
+      cJSON *hlist = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+      if (!cJSON_IsArray(hlist))
+         continue;
+      int match = 0;
+      for (int j = 0; j < cJSON_GetArraySize(hlist); j++)
+      {
+         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hlist, j), "command");
+         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, subcommand))
+         {
+            match = 1;
+            break;
+         }
+      }
+      if (match)
+      {
+         cJSON_DeleteItemFromArray(arr, i);
+         *dirty = 1;
+      }
+   }
+}
+
+/* Ensure root.permissions.deny[] contains `tool` (creating permissions/deny as
+ * needed). Idempotent; sets *dirty on any change. */
+static void ensure_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
+{
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   if (!cJSON_IsObject(perms))
+   {
+      if (perms)
+         cJSON_DeleteItemFromObjectCaseSensitive(root, "permissions");
+      perms = cJSON_AddObjectToObject(root, "permissions");
+      *dirty = 1;
+   }
+   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
+   if (!cJSON_IsArray(deny))
+   {
+      if (deny)
+         cJSON_DeleteItemFromObjectCaseSensitive(perms, "deny");
+      deny = cJSON_AddArrayToObject(perms, "deny");
+      *dirty = 1;
+   }
+   for (int i = 0; i < cJSON_GetArraySize(deny); i++)
+   {
+      cJSON *e = cJSON_GetArrayItem(deny, i);
+      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
+         return; /* already denied */
+   }
+   cJSON_AddItemToArray(deny, cJSON_CreateString(tool));
+   *dirty = 1;
+}
+
+/* Remove `tool` from root.permissions.deny[] if present, leaving other entries
+ * (and other permissions) intact. */
+static void remove_permissions_deny_tool(cJSON *root, const char *tool, int *dirty)
+{
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(root, "permissions");
+   if (!cJSON_IsObject(perms))
+      return;
+   cJSON *deny = cJSON_GetObjectItemCaseSensitive(perms, "deny");
+   if (!cJSON_IsArray(deny))
+      return;
+   for (int i = cJSON_GetArraySize(deny) - 1; i >= 0; i--)
+   {
+      cJSON *e = cJSON_GetArrayItem(deny, i);
+      if (cJSON_IsString(e) && strcmp(e->valuestring, tool) == 0)
+      {
+         cJSON_DeleteItemFromArray(deny, i);
+         *dirty = 1;
+      }
+   }
+}
+
+/* Materialize (or tear down) the sub-agent ban in the Claude Code settings.
+ * The gate is evaluated ONCE here at client setup: config `subagent_ban_enabled`
+ * (default on) AND the injected delegate probe reporting usable delegates. When
+ * the gate holds we install a dedicated `subagent-guard` PreToolUse hook (carries
+ * the actionable "use aimee delegate" message) PLUS a static permissions.deny
+ * [Task, Agent] backstop that blocks the spawn even if the hook fails to run.
+ * When the gate does not hold (config opt-out or no delegates) we remove both, so
+ * a config/delegate change un-installs on the next setup / session-start. A probe
+ * result of "unknown" (server unreachable) leaves settings untouched — we neither
+ * install nor tear down on a transient outage. */
+static void ensure_subagent_ban(cJSON *root, cJSON *hooks, int *dirty)
+{
+   /* Config opt-out is checked FIRST, from local aimee.yaml — no server call. So
+    * `subagent_ban_enabled: false` reliably tears the ban down even when the
+    * server is unreachable, and we never probe when the operator has opted out. */
+   if (!client_config_bool("subagent_ban_enabled", 1))
+   {
+      remove_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", dirty);
+      remove_permissions_deny_tool(root, "Task", dirty);
+      remove_permissions_deny_tool(root, "Agent", dirty);
+      return;
+   }
+
+   int probe = g_delegate_probe ? g_delegate_probe() : -1; /* 1 avail, 0 none, -1 unknown */
+   if (probe < 0)
+      return; /* delegate availability unknown (server down / no probe): leave as-is */
+   if (probe == 1)
+   {
+      /* Matcher covers every tool client_tool_is_subagent recognizes, incl.
+       * RemoteTrigger. permissions.deny lists Task+Agent (the Claude-native
+       * spawns); the hook backstops the rest with the actionable message. */
+      ensure_aimee_event_hook(hooks, "PreToolUse", "subagent-guard",
+                              "Agent|Task|Subagent|spawn_agent|RemoteTrigger", dirty);
+      ensure_permissions_deny_tool(root, "Task", dirty);
+      ensure_permissions_deny_tool(root, "Agent", dirty);
+   }
+   else /* probe == 0: no usable delegate to redirect to -> don't ban */
+   {
+      remove_aimee_event_hook(hooks, "PreToolUse", "subagent-guard", dirty);
+      remove_permissions_deny_tool(root, "Task", dirty);
+      remove_permissions_deny_tool(root, "Agent", dirty);
+   }
+}
+
 /* Ensure PostToolUse hooks include EnterWorktree|ExitWorktree so that
  * aimee's CWD tracking file gets updated when the session enters/exits
  * a worktree. Without this, MCP git tools won't follow worktree changes. */
@@ -1061,11 +1205,16 @@ static void ensure_claude_code_hooks(const char *settings_path)
    ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
    /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
     * accrues per-file attention and blocks hard-destructive ops on files the
-    * session has actively touched. Task|Agent are included so the sub-agent
-    * interceptor fires on provider-native spawns (redirect to aimee delegates). */
+    * session has actively touched. It does NOT gate sub-agent tools — that is the
+    * dedicated `subagent-guard` hook installed by ensure_subagent_ban below (this
+    * matcher deliberately no longer lists Task|Agent). */
    ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
-                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob|Task|Agent",
-                           &dirty);
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob", &dirty);
+
+   /* Sub-agent ban (delegate-only): gated at setup on subagent_ban_enabled AND a
+    * one-shot delegate probe; installs/removes the subagent-guard hook + the
+    * permissions.deny [Task, Agent] backstop accordingly. */
+   ensure_subagent_ban(root, hooks, &dirty);
 
    if (dirty)
    {
@@ -1443,8 +1592,76 @@ static void ensure_copilot_integration(const char *home)
    cJSON_Delete(root);
 }
 
+/* Read a single top-level boolean from aimee.yaml, returning default_val when
+ * the file is absent/unparseable or the key is missing. client_integrations.c
+ * links into the thin, DB-free CLI client, which excludes config.c (and thus
+ * config_load), so we read the key directly with the lightweight yaml + cJSON
+ * primitives the thin client does link, from the same path config_load uses
+ * (aimee_home()/aimee.yaml). */
+static int client_config_bool(const char *key, int default_val)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return default_val;
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return default_val;
+   fseek(fp, 0, SEEK_END);
+   long sz = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+   if (sz < 0 || sz >= (long)(1 << 20))
+   {
+      fclose(fp);
+      return default_val;
+   }
+   char *buf = malloc((size_t)sz + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return default_val;
+   }
+   size_t n = fread(buf, 1, (size_t)sz, fp);
+   fclose(fp);
+   buf[n] = '\0';
+
+   cJSON *root = yaml_parse(buf);
+   free(buf);
+
+   int val = default_val;
+   if (cJSON_IsObject(root))
+   {
+      cJSON *item = cJSON_GetObjectItemCaseSensitive(root, key);
+      if (cJSON_IsBool(item))
+         val = cJSON_IsTrue(item);
+   }
+   if (root)
+      cJSON_Delete(root);
+   return val;
+}
+
+/* Whether aimee is allowed to auto-register itself into external AI-tool user
+ * configs. The env var AIMEE_NO_CLIENT_INTEGRATIONS overrides the persisted
+ * config: any non-empty value other than "0"/"false" forces the integrations
+ * off for this run (useful for CI or a one-off install). Otherwise the
+ * default-ON client_integrations_enabled config key decides. */
+static int client_integrations_allowed(void)
+{
+   const char *env = getenv("AIMEE_NO_CLIENT_INTEGRATIONS");
+   if (env && env[0] && strcmp(env, "0") != 0 && strcmp(env, "false") != 0)
+      return 0;
+
+   return client_config_bool("client_integrations_enabled", 1);
+}
+
 void ensure_client_integrations(void)
 {
+   if (!client_integrations_allowed())
+      return;
+
    const char *home = platform_home_dir();
    if (!home || !home[0])
       return;

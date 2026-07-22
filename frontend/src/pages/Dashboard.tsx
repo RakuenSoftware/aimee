@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Badge, Panel } from '@rakuensoftware/smoothgui';
-import type { BadgeVariant } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Panel, EmptyState, StatusDot, DataTable } from '@rakuensoftware/smoothgui';
+import type { BadgeVariant, Column } from '@rakuensoftware/smoothgui';
 
 /* ---- API types ---- */
 
@@ -266,133 +266,89 @@ export function toDashData(raw: RawDashboard | null | undefined): DashData {
   };
 }
 
-/* ---- Shared table styles ---- */
-
-const tableStyle: React.CSSProperties = {
-  width: '100%', borderCollapse: 'collapse', fontSize: '12px',
-};
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #eee',
-  color: '#888', fontSize: '11px', textTransform: 'uppercase',
-  letterSpacing: '0.3px', position: 'sticky', top: 0, background: '#fafafa',
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '5px 10px', borderBottom: '1px solid #f5f5f5',
-};
-
-const numTd: React.CSSProperties = { ...tdStyle, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
-
-
 /* ---- Panels ---- */
+
+const DELEGATION_COLUMNS: Column<Delegation>[] = [
+  { key: 'agent', label: 'Agent', render: r => e(r.agent) },
+  { key: 'role', label: 'Role', render: r => e(r.role) },
+  {
+    key: 'status', label: 'Status',
+    render: r => <Badge label={r.success ? 'OK' : 'ERR'} variant={r.success ? 'success' : 'error'} />,
+  },
+  { key: 'turns', label: 'Turns', align: 'right', render: r => r.turns },
+  { key: 'tools', label: 'Tools', align: 'right', render: r => r.tool_calls },
+  { key: 'latency', label: 'Latency', align: 'right', render: r => <span title={`${r.latency_ms}ms`}>{fmtDuration(r.latency_ms)}</span> },
+];
 
 function DelegationsPanel({ data }: { data: Delegation[] }) {
   return (
     <Panel title="Delegations" count={data.length}>
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            {['Agent', 'Role', 'Status', 'Turns', 'Tools', 'Latency'].map(h => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((r, i) => (
-            <tr key={i}>
-              <td style={tdStyle}>{e(r.agent)}</td>
-              <td style={tdStyle}>{e(r.role)}</td>
-              <td style={tdStyle}>
-                <Badge label={r.success ? 'OK' : 'ERR'} variant={r.success ? 'success' : 'error'} />
-              </td>
-              <td style={numTd}>{r.turns}</td>
-              <td style={numTd}>{r.tool_calls}</td>
-              <td style={numTd} title={`${r.latency_ms}ms`}>{fmtDuration(r.latency_ms)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable columns={DELEGATION_COLUMNS} rows={data} rowKey={(_r, i) => i} />
     </Panel>
   );
 }
+
+const METRIC_COLUMNS: Column<Metric>[] = [
+  { key: 'role', label: 'Role', render: r => e(r.role) },
+  { key: 'total', label: 'Total', align: 'right', render: r => r.total },
+  { key: 'ok', label: 'OK', align: 'right', render: r => r.successes },
+  { key: 'avglat', label: 'Avg Lat', align: 'right', render: r => <span title={`${r.avg_latency_ms}ms`}>{fmtDuration(r.avg_latency_ms)}</span> },
+  { key: 'tokens', label: 'Tokens', align: 'right', render: r => <span title={`${r.tokens} tokens`}>{fmtCompact(r.tokens)}</span> },
+];
 
 function MetricsPanel({ data }: { data: Metric[] }) {
   return (
     <Panel title="Metrics">
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            {['Role', 'Total', 'OK', 'Avg Lat', 'Tokens'].map(h => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((r, i) => (
-            <tr key={i}>
-              <td style={tdStyle}>{e(r.role)}</td>
-              <td style={numTd}>{r.total}</td>
-              <td style={numTd}>{r.successes}</td>
-              <td style={numTd} title={`${r.avg_latency_ms}ms`}>{fmtDuration(r.avg_latency_ms)}</td>
-              <td style={numTd} title={`${r.tokens} tokens`}>{fmtCompact(r.tokens)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable columns={METRIC_COLUMNS} rows={data} rowKey={(_r, i) => i} />
     </Panel>
   );
 }
+
+const PLAN_COLUMNS: Column<Plan>[] = [
+  { key: 'id', label: 'ID', align: 'right', render: r => r.id },
+  { key: 'agent', label: 'Agent', render: r => e(r.agent) },
+  { key: 'status', label: 'Status', render: r => <Badge label={r.status} variant={planVariant(r.status)} /> },
+  { key: 'steps', label: 'Steps', align: 'right', render: r => `${r.done_steps}/${r.total_steps}` },
+  { key: 'task', label: 'Task', render: r => e(r.task.substring(0, 60)) },
+];
 
 function PlansPanel({ data }: { data: Plan[] }) {
   return (
     <Panel title="Execution Plans">
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            {['ID', 'Agent', 'Status', 'Steps', 'Task'].map(h => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((r, i) => (
-            <tr key={i}>
-              <td style={numTd}>{r.id}</td>
-              <td style={tdStyle}>{e(r.agent)}</td>
-              <td style={tdStyle}><Badge label={r.status} variant={planVariant(r.status)} /></td>
-              <td style={numTd}>{r.done_steps}/{r.total_steps}</td>
-              <td style={tdStyle}>{e(r.task.substring(0, 60))}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable columns={PLAN_COLUMNS} rows={data} rowKey={(_r, i) => i} />
     </Panel>
   );
 }
 
+const TRACE_COLUMNS: Column<Trace>[] = [
+  { key: 'turn', label: 'Turn', align: 'right', render: r => r.turn },
+  { key: 'tool', label: 'Tool', render: r => e(r.tool_name ?? '--') },
+  { key: 'dir', label: 'Dir', render: r => e(r.direction) },
+];
+
 function TracesPanel({ data }: { data: Trace[] }) {
   return (
     <Panel title="Traces">
-      <table style={tableStyle}>
-        <thead>
-          <tr>
-            {['Turn', 'Tool', 'Dir'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((r, i) => (
-            <tr key={i}>
-              <td style={numTd}>{r.turn}</td>
-              <td style={tdStyle}>{e(r.tool_name ?? '--')}</td>
-              <td style={tdStyle}>{e(r.direction)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable columns={TRACE_COLUMNS} rows={data} rowKey={(_r, i) => i} />
     </Panel>
   );
 }
+
+const MEMORY_COLUMNS: Column<MemoryStat>[] = [
+  {
+    key: 'tier', label: 'Tier',
+    render: r => (
+      <>
+        {e(r.tier)}
+        {r.functional_name ? (
+          <span style={{ color: '#aaa', marginLeft: '6px' }}>{e(r.functional_name)}</span>
+        ) : null}
+      </>
+    ),
+  },
+  { key: 'kind', label: 'Kind', render: r => e(r.kind) },
+  { key: 'count', label: 'Count', align: 'right', render: r => r.count },
+];
 
 function MemoryPanel({ data }: { data: MemoryStat[] }) {
   return (
@@ -402,33 +358,15 @@ function MemoryPanel({ data }: { data: MemoryStat[] }) {
           No memories recorded
         </div>
       ) : (
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              {['Tier', 'Kind', 'Count'].map(h => <th key={h} style={thStyle}>{h}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((r, i) => (
-              <tr key={i}>
-                <td style={tdStyle}>
-                  {e(r.tier)}
-                  {r.functional_name ? (
-                    <span style={{ color: '#aaa', marginLeft: '6px' }}>{e(r.functional_name)}</span>
-                  ) : null}
-                </td>
-                <td style={tdStyle}>{e(r.kind)}</td>
-                <td style={numTd}>{r.count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable columns={MEMORY_COLUMNS} rows={data} rowKey={(_r, i) => i} />
       )}
     </Panel>
   );
 }
 
 /* Cost / Token spend — realized spend rolled up per role, plus a headline total. */
+type CostRow = [string, { tokens: number; cost: number; calls: number }];
+
 function CostPanel({ data }: { data: TokenAudit[] }) {
   const totalCost = data.reduce((n, r) => n + (r.estimated_cost_usd || 0), 0);
   const totalTokens = data.reduce(
@@ -444,10 +382,16 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
     byRole.set(key, cur);
   }
   const rows = [...byRole.entries()].sort((a, b) => b[1].tokens - a[1].tokens);
+  const columns: Column<CostRow>[] = [
+    { key: 'role', label: 'Role', render: ([role]) => e(role) },
+    { key: 'calls', label: 'Calls', align: 'right', render: ([, v]) => v.calls },
+    { key: 'tokens', label: 'Tokens', align: 'right', render: ([, v]) => fmtCompact(v.tokens) },
+    { key: 'cost', label: 'Cost', align: 'right', render: ([, v]) => fmtUsd(v.cost) },
+  ];
   return (
     <Panel title="Cost / Tokens" count={rows.length}>
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>No realized spend recorded</div>
+        <EmptyState message="No realized spend recorded" inline />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px 10px' }}>
@@ -461,21 +405,7 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
             </div>
           </div>
           <div style={{ flex: 1, overflow: 'auto' }}>
-            <table style={tableStyle}>
-              <thead>
-                <tr>{['Role', 'Calls', 'Tokens', 'Cost'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {rows.map(([role, v]) => (
-                  <tr key={role}>
-                    <td style={tdStyle}>{e(role)}</td>
-                    <td style={numTd}>{v.calls}</td>
-                    <td style={numTd}>{fmtCompact(v.tokens)}</td>
-                    <td style={numTd}>{fmtUsd(v.cost)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <DataTable columns={columns} rows={rows} rowKey={([role]) => role} />
           </div>
         </div>
       )}
@@ -484,28 +414,29 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
 }
 
 /* Active Sessions — live chat/agent sessions (title, working dir, last activity). */
+const SESSION_COLUMNS: Column<Session>[] = [
+  { key: 'title', label: 'Title', render: s => e(s.title || '(untitled)') },
+  {
+    key: 'cwd', label: 'Working dir', width: 140,
+    render: s => (
+      <span style={{ display: 'block', color: '#999', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.cwd}>
+        {e(shortenPath(s.cwd))}
+      </span>
+    ),
+  },
+  {
+    key: 'last_active', label: 'Last active',
+    render: s => <span style={{ whiteSpace: 'nowrap', color: '#999' }}>{e((s.last_active || '').replace('T', ' ').slice(0, 16))}</span>,
+  },
+];
+
 function SessionsPanel({ data }: { data: Session[] }) {
   return (
     <Panel title="Active Sessions" count={data.length}>
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>No active sessions</div>
+        <EmptyState message="No active sessions" inline />
       ) : (
-        <table style={tableStyle}>
-          <thead>
-            <tr>{['Title', 'Working dir', 'Last active'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {data.map((s, i) => (
-              <tr key={s.id ?? i}>
-                <td style={tdStyle}>{e(s.title || '(untitled)')}</td>
-                <td style={{ ...tdStyle, color: '#999', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.cwd}>
-                  {e(shortenPath(s.cwd))}
-                </td>
-                <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: '#999' }}>{e((s.last_active || '').replace('T', ' ').slice(0, 16))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable columns={SESSION_COLUMNS} rows={data} rowKey={(s, i) => s.id ?? i} />
       )}
     </Panel>
   );
@@ -530,10 +461,7 @@ function LspPanel({ data }: { data: LspStatus }) {
       ) : (
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: '50%', background: statusColor,
-              display: 'inline-block', flexShrink: 0,
-            }} />
+            <StatusDot color={statusColor} />
             <span style={{ fontSize: '12px', color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
           </div>
           <table style={{ fontSize: '12px', width: '100%', borderCollapse: 'collapse' }}>
@@ -566,6 +494,28 @@ function agentEnabledDot(enabled: boolean | undefined): string {
   return enabled ? '#22c55e' : '#9ca3af';
 }
 
+const AGENT_COLUMNS: Column<Agent>[] = [
+  {
+    key: 'enabled', label: '',
+    render: a => (
+      <span title={a.enabled ? 'enabled' : 'disabled'}>
+        <StatusDot color={agentEnabledDot(a.enabled)} />
+      </span>
+    ),
+  },
+  { key: 'name', label: 'Name', render: a => e(a.name) },
+  { key: 'provider', label: 'Provider', render: a => e(a.provider) || '—' },
+  { key: 'model', label: 'Model', render: a => e(a.model) || '—' },
+  {
+    key: 'roles', label: 'Roles',
+    render: a => (
+      <span title={(a.roles ?? []).join(', ')}>
+        {a.roles && a.roles.length > 0 ? e(a.roles.join(', ')) : '—'}
+      </span>
+    ),
+  },
+];
+
 function AgentsPanel({ data }: { data: Agent[] }) {
   return (
     <Panel title="Agents" count={data.length}>
@@ -574,33 +524,7 @@ function AgentsPanel({ data }: { data: Agent[] }) {
           No agents configured
         </div>
       ) : (
-        <table style={tableStyle}>
-          <thead>
-            <tr>
-              {['', 'Name', 'Provider', 'Model', 'Roles'].map(h => (
-                <th key={h} style={thStyle}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((a, i) => (
-              <tr key={i}>
-                <td style={tdStyle} title={a.enabled ? 'enabled' : 'disabled'}>
-                  <span style={{
-                    display: 'inline-block', width: 8, height: 8,
-                    borderRadius: '50%', background: agentEnabledDot(a.enabled),
-                  }} />
-                </td>
-                <td style={tdStyle}>{e(a.name)}</td>
-                <td style={tdStyle}>{e(a.provider) || '—'}</td>
-                <td style={tdStyle}>{e(a.model) || '—'}</td>
-                <td style={tdStyle} title={(a.roles ?? []).join(', ')}>
-                  {a.roles && a.roles.length > 0 ? e(a.roles.join(', ')) : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataTable columns={AGENT_COLUMNS} rows={data} rowKey={(_a, i) => i} />
       )}
     </Panel>
   );
@@ -700,10 +624,6 @@ function BarRow({ label, value, max, right, color }: {
   );
 }
 
-function emptyBody(msg: string) {
-  return <div style={{ padding: 12, color: '#aaa', fontSize: 12 }}>{msg}</div>;
-}
-
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
@@ -721,7 +641,7 @@ function GuardrailPanel({ data }: { data: AuditSummary }) {
   };
   return (
     <Panel title="Guardrail Actions" count={data.total}>
-      {data.total === 0 ? emptyBody('No tool-action audit yet') : (
+      {data.total === 0 ? <EmptyState message="No tool-action audit yet" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {Object.keys(counts).map(v => (
             <BarRow key={v} label={v} value={counts[v]} max={max} right={String(counts[v])} color={colors[v] || '#888'} />
@@ -744,7 +664,7 @@ function SuccessByAgentPanel({ data }: { data: Delegation[] }) {
   const max = Math.max(1, ...rows.map(r => r[1].total));
   return (
     <Panel title="Success by Agent" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No delegations') : (
+      {rows.length === 0 ? <EmptyState message="No delegations" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([agent, c]) => {
             const rate = Math.round((c.ok / c.total) * 100);
@@ -767,22 +687,16 @@ function LatencyByRolePanel({ data }: { data: Delegation[] }) {
     const s = [...lats].sort((a, b) => a - b);
     return { role, p50: percentile(s, 50), p95: percentile(s, 95), max: s[s.length - 1], n: s.length };
   }).sort((a, b) => b.p95 - a.p95);
+  const columns: Column<typeof rows[number]>[] = [
+    { key: 'role', label: 'Role', render: r => e(r.role) },
+    { key: 'p50', label: 'p50', align: 'right', render: r => fmtDuration(r.p50) },
+    { key: 'p95', label: 'p95', align: 'right', render: r => fmtDuration(r.p95) },
+    { key: 'max', label: 'max', align: 'right', render: r => fmtDuration(r.max) },
+  ];
   return (
     <Panel title="Latency by Role" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No delegations') : (
-        <table style={tableStyle}>
-          <thead><tr>{['Role', 'p50', 'p95', 'max'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.role}>
-                <td style={tdStyle}>{e(r.role)}</td>
-                <td style={numTd}>{fmtDuration(r.p50)}</td>
-                <td style={numTd}>{fmtDuration(r.p95)}</td>
-                <td style={numTd}>{fmtDuration(r.max)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {rows.length === 0 ? <EmptyState message="No delegations" inline /> : (
+        <DataTable columns={columns} rows={rows} rowKey={r => r.role} />
       )}
     </Panel>
   );
@@ -796,7 +710,7 @@ function TopToolsPanel({ data }: { data: Trace[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Top Tools" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No tool calls traced') : (
+      {rows.length === 0 ? <EmptyState message="No tool calls traced" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([tool, n]) => <BarRow key={tool} label={tool} value={n} max={max} right={String(n)} color="#6366f1" />)}
         </div>
@@ -816,7 +730,7 @@ function CostByAgentPanel({ data }: { data: TokenAudit[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Tokens by Agent" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No spend recorded') : (
+      {rows.length === 0 ? <EmptyState message="No spend recorded" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([agent, tok]) => <BarRow key={agent} label={agent} value={tok} max={max} right={fmtCompact(tok)} color="#0ea5e9" />)}
         </div>
@@ -853,24 +767,19 @@ function CachePanel({ data }: { data: TokenAudit[] }) {
 }
 
 /* Failures — recent unsuccessful delegations. */
+const FAILURE_COLUMNS: Column<Delegation>[] = [
+  { key: 'agent', label: 'Agent', render: d => e(d.agent) },
+  { key: 'role', label: 'Role', render: d => e(d.role) },
+  { key: 'turns', label: 'Turns', align: 'right', render: d => d.turns },
+  { key: 'latency', label: 'Latency', align: 'right', render: d => fmtDuration(d.latency_ms) },
+];
+
 function FailuresPanel({ data }: { data: Delegation[] }) {
   const fails = data.filter(d => !d.success);
   return (
     <Panel title="Failures" count={fails.length}>
-      {fails.length === 0 ? emptyBody('No failed delegations 🎉') : (
-        <table style={tableStyle}>
-          <thead><tr>{['Agent', 'Role', 'Turns', 'Latency'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-          <tbody>
-            {fails.slice(0, 20).map((d, i) => (
-              <tr key={i}>
-                <td style={tdStyle}>{e(d.agent)}</td>
-                <td style={tdStyle}>{e(d.role)}</td>
-                <td style={numTd}>{d.turns}</td>
-                <td style={numTd}>{fmtDuration(d.latency_ms)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {fails.length === 0 ? <EmptyState message="No failed delegations 🎉" inline /> : (
+        <DataTable columns={FAILURE_COLUMNS} rows={fails.slice(0, 20)} rowKey={(_d, i) => i} />
       )}
     </Panel>
   );
@@ -884,7 +793,7 @@ function ProviderMixPanel({ data }: { data: Agent[] }) {
   const max = Math.max(1, ...rows.map(r => r[1]));
   return (
     <Panel title="Provider Mix" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No agents') : (
+      {rows.length === 0 ? <EmptyState message="No agents" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(([p, n]) => <BarRow key={p} label={p} value={n} max={max} right={String(n)} color="#8b5cf6" />)}
         </div>
@@ -906,7 +815,7 @@ function ConfidenceByRolePanel({ data }: { data: Delegation[] }) {
     .sort((a, b) => b.avg - a.avg);
   return (
     <Panel title="Confidence" count={rows.length}>
-      {rows.length === 0 ? emptyBody('No confidence data') : (
+      {rows.length === 0 ? <EmptyState message="No confidence data" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {rows.map(r => (
             <BarRow key={r.role} label={r.role} value={r.avg} max={100}
@@ -970,11 +879,6 @@ function loadLayout(): string[] {
   }
 }
 
-const ctrlBtn: React.CSSProperties = {
-  padding: '4px 12px', background: '#fff', color: '#666',
-  border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', fontSize: 12,
-};
-
 /* Customize popover: toggle panels on/off and reorder the enabled ones. */
 function CustomizePopover({ layout, setLayout, onClose }: {
   layout: string[]; setLayout: (l: string[]) => void; onClose: () => void;
@@ -1005,21 +909,22 @@ function CustomizePopover({ layout, setLayout, onClose }: {
           const p = PANELS.find(x => x.id === id)!;
           const on = enabled.has(id);
           return (
-            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4 }}>
+            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4 }}
+              title="Show or hide this panel on the dashboard.">
               <input type="checkbox" checked={on} onChange={() => toggle(id)} />
               <span style={{ flex: 1, fontSize: 13, color: on ? '#333' : '#999' }}>{p.title}</span>
               {on && (
                 <>
-                  <button onClick={() => move(id, -1)} title="Move up" style={{ ...ctrlBtn, padding: '0 6px' }}>↑</button>
-                  <button onClick={() => move(id, 1)} title="Move down" style={{ ...ctrlBtn, padding: '0 6px' }}>↓</button>
+                  <Button size="sm" onClick={() => move(id, -1)} title="Move up" style={{ padding: '0 6px' }}>↑</Button>
+                  <Button size="sm" onClick={() => move(id, 1)} title="Move down" style={{ padding: '0 6px' }}>↓</Button>
                 </>
               )}
             </div>
           );
         })}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 6px 2px' }}>
-          <button onClick={() => setLayout(defaultLayout())} style={ctrlBtn}>Reset</button>
-          <button onClick={onClose} style={ctrlBtn}>Done</button>
+          <Button size="sm" onClick={() => setLayout(defaultLayout())} title="Restore the default set and order of panels.">Reset</Button>
+          <Button size="sm" onClick={onClose}>Done</Button>
         </div>
       </div>
     </>
@@ -1068,8 +973,8 @@ export default function Dashboard() {
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
       }}>
         <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Dashboard</span>
-        <button onClick={load} style={ctrlBtn}>Refresh</button>
-        <button onClick={() => setCustomizing(v => !v)} style={{ ...ctrlBtn, marginLeft: 'auto' }}>⚙ Customize</button>
+        <Button size="sm" onClick={load} title="Reload all dashboard data from the server.">Refresh</Button>
+        <Button size="sm" onClick={() => setCustomizing(v => !v)} style={{ marginLeft: 'auto' }} title="Choose which panels are shown and reorder them.">⚙ Customize</Button>
         {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
       </div>
 

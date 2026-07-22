@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../headers/config.h"
+#include "config.h"
 #include "../headers/gateway_policy.h"
 #include "../vendor/headers/cJSON.h"
 

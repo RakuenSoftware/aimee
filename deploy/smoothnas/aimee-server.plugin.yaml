@@ -14,6 +14,13 @@ metadata:
 profiles:
   - default-limits
   - aimee-stack
+  # Bind the host Docker socket so aimee-server can drive the daemon for the
+  # DELEGATE SANDBOX: with delegate_sandbox on (below), server-executed delegates
+  # run their build/test/verify tools in a --network none sibling container that
+  # carries the project toolchain, instead of in aimee-server's toolchain-less
+  # runtime image. SECURITY: this grants the plugin control of the host Docker
+  # daemon — remove it (and delegate_sandbox) if you do not want that.
+  - docker-socket
 services:
   - name: server
     artifact:
@@ -26,6 +33,14 @@ services:
       # gateway (stable host address from inside any plugin container).
       AIMEE_KB_API_URL: http://10.100.0.1:8741
       AIMEE_SERVER_HTTP_BIND: "1"
+      # ---- Delegate sandbox (needs the docker-socket profile above) -----------
+      # Run server-executed delegates' tools in a --network none Docker sandbox.
+      AIMEE_DELEGATE_SANDBOX: "1"
+      # Map aimee-server's CONTAINER paths to the DAEMON's HOST paths so the
+      # sibling sandbox bind-mounts the real worktree (docker-in-docker). These
+      # are the SmoothNAS tier-bound bind sources for this plugin's `home` and
+      # `workspaces` volumes; a future tierd could inject this automatically.
+      AIMEE_SANDBOX_HOST_MOUNTS: "/var/lib/aimee=/mnt/media/.plugins/aimee-server/home,/var/lib/aimee-workspaces=/mnt/media/.plugins/aimee-server/workspaces"
       # ---- Browser webchat (aimee-webchat, HTTPS on :8443) --------------------
       # ON: the UI is a first-class surface and serves on :8443. Provide a PAM
       # login below so an operator can sign in — set USER + a REAL password via

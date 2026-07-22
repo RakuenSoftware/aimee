@@ -28,7 +28,16 @@
 int config_load(config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
+   /* -1 = unspecified (see test_trigger.c): a memset-0 would read as user-DISABLED and gate the
+    * trigger's workflow dispatch, breaking the proposal -> run e2e. */
+   cfg->module_memory = cfg->module_governance = cfg->module_delegates = cfg->module_workflows = -1;
    return 0;
+}
+int config_module_enabled(int config_tristate, int env_default)
+{
+   if (config_tristate == 0 || config_tristate == 1)
+      return config_tristate;
+   return env_default ? 1 : 0;
 }
 
 #include "skill_curator.h"

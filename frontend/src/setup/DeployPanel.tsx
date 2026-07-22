@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from '@rakuensoftware/smoothgui';
 
 /* Setup-wizard summary panel — server-orchestrated deploy.
  *
@@ -174,10 +175,12 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
     <div style={box}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 13 }}>Deploy the knowledge base + LLM</div>
-        <button style={applying || status.running ? btnBusy : btn} disabled={applying || status.running}
+        <Button variant="primary"
+          style={applying || status.running ? { background: '#9aa', borderColor: '#9aa', cursor: 'default' } : undefined}
+          disabled={applying || status.running}
           onClick={deploy}>
           {status.running ? 'Deploying…' : applying ? 'Starting…' : svcs.length ? 'Re-deploy' : 'Deploy'}
-        </button>
+        </Button>
       </div>
       <div style={{ fontSize: 12, color: '#556', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
         aimee-server brings up postgres + aimee-kb + aimee-llm for you via Docker — no extra commands.
@@ -217,8 +220,3 @@ const pre: React.CSSProperties = {
   whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#eef1f6', borderRadius: 6,
   padding: '8px 10px', fontSize: 11.5, margin: '6px 0 0', maxHeight: 220, overflow: 'auto',
 };
-const btn: React.CSSProperties = {
-  padding: '6px 14px', borderRadius: 7, border: '1px solid #2c6', background: '#2c8f56',
-  color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-};
-const btnBusy: React.CSSProperties = { ...btn, background: '#9aa', borderColor: '#9aa', cursor: 'default' };

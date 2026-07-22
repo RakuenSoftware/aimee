@@ -83,7 +83,7 @@ static void test_verify_items(void)
    set_item(&r->items[2], "blocking", "opinion", EV_NONE, NULL, 0);
    r->item_count = 3;
 
-   roundtable_verify_items_with(r, &be);
+   roundtable_verify_items_with(r, &be, 0);
 
    assert(r->item_count == 2); /* the contradicted item is removed */
    assert(r->rejected_count == 1);
@@ -119,7 +119,7 @@ static void test_dedup_by_idkey(void)
    snprintf(r->items[1].sources, sizeof(r->items[1].sources), "mistral");
    r->item_count = 2;
 
-   roundtable_verify_items_with(r, &be);
+   roundtable_verify_items_with(r, &be, 0);
    assert(r->item_count == 1); /* deduped */
    assert(r->verified_count == 1);
    assert(r->rejected_count == 0);
@@ -138,7 +138,7 @@ static void test_degrade_when_index_unavailable(void)
    set_item(&r->items[1], "blocking", "claim b", EV_REFS, "absent", 1);
    r->item_count = 2;
 
-   roundtable_verify_items_with(r, &be);
+   roundtable_verify_items_with(r, &be, 0);
    g_fpc = 1;                      /* restore for other tests */
    assert(r->item_count == 2);     /* both kept */
    assert(r->rejected_count == 0); /* nothing rejected when we cannot verify */
@@ -155,7 +155,7 @@ static void test_render_rejected(void)
    set_item(&r->items[0], "blocking", "bogus", EV_REFS, "absent", 1);
    set_item(&r->items[1], "blocking", "good", EV_REFS, "present", 1);
    r->item_count = 2;
-   roundtable_verify_items_with(r, &be);
+   roundtable_verify_items_with(r, &be, 0);
 
    char *md = roundtable_render_rejected(r);
    assert(md);
@@ -188,6 +188,50 @@ static void test_render_nothing(void)
    free(r);
 }
 
+/* The evidence gate: with require_evidence=1 a no-structured-evidence finding is
+ * REJECTED (not kept-and-capped), so an unfalsifiable opinion never reaches synthesis. */
+static void test_evidence_gate(void)
+{
+   replay_backend_t be = fake();
+
+   /* gate OFF: the EV_NONE opinion is capped and kept (legacy behavior). */
+   roundtable_result_t *r = calloc(1, sizeof(*r));
+   assert(r);
+   set_item(&r->items[0], "blocking", "real refs claim", EV_REFS, "present", 1);
+   set_item(&r->items[1], "suggestion", "opinion", EV_NONE, NULL, 0);
+   r->item_count = 2;
+   roundtable_verify_items_with(r, &be, 0);
+   assert(r->item_count == 2 && r->rejected_count == 0 && r->capped_count == 1);
+   free(r);
+
+   /* gate ON: the same EV_NONE opinion is rejected; the evidence-backed item survives. */
+   r = calloc(1, sizeof(*r));
+   assert(r);
+   set_item(&r->items[0], "blocking", "real refs claim", EV_REFS, "present", 1);
+   set_item(&r->items[1], "suggestion", "opinion", EV_NONE, NULL, 0);
+   r->item_count = 2;
+   roundtable_verify_items_with(r, &be, 1);
+   assert(r->item_count == 1);     /* only the evidence-backed finding remains */
+   assert(r->rejected_count == 1); /* the opinion was rejected by the gate */
+   assert(r->capped_count == 0);
+   assert(strcmp(r->items[0].summary, "real refs claim") == 0);
+   assert(strcmp(r->rejected[0].summary, "opinion") == 0);
+   free(r);
+
+   /* gate ON must NOT reject an evidence-BEARING item merely because the index is
+    * unavailable (that is DEGRADE, not NO_EVIDENCE) — the gate only drops kind=none. */
+   r = calloc(1, sizeof(*r));
+   assert(r);
+   g_fpc = 0; /* index unavailable -> replay yields INDEX_UNAVAILABLE -> DEGRADE */
+   set_item(&r->items[0], "blocking", "refs claim, index down", EV_REFS, "present", 1);
+   r->item_count = 1;
+   roundtable_verify_items_with(r, &be, 1);
+   g_fpc = 1; /* restore */
+   assert(r->item_count == 1 && r->rejected_count == 0 && r->degraded_count == 1);
+   assert(strcmp(r->items[0].severity, "blocking") == 0); /* degrade does not penalize */
+   free(r);
+}
+
 int main(void)
 {
    test_rubric();
@@ -196,6 +240,7 @@ int main(void)
    test_degrade_when_index_unavailable();
    test_render_rejected();
    test_render_nothing();
+   test_evidence_gate();
    printf("roundtable_verify: all tests passed\n");
    return 0;
 }

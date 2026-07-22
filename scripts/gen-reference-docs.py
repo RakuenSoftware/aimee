@@ -5,7 +5,7 @@ Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md   — every `aimee` CLI command + subcommands, from the
                                client help table (src/cli_help_data.h).
   docs/gen/configuration.md  — every config key: the `aimee config get/set`
-                               scalar allowlist (src/config_fields.c) plus the
+                               scalar allowlist (src/modules/config/config_fields.c) plus the
                                config-file (JSON) sections parsed by src/config*.c.
 
 The point is completeness: these are derived from the same tables the binary
@@ -92,19 +92,23 @@ def render_cli(entries):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Config: CLI-settable scalars (src/config_fields.c) ───────────────────────
+# ─── Config: CLI-settable scalars (src/modules/config/config_fields.c) ───────────────────────
 
-CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float"}
+CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
+            "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
 
 # Curated one-line descriptions for the CLI-settable keys (the `aimee config set`
 # surface). A key in the generated table with no entry here renders "—" and is
 # counted as undescribed so the gap is visible (see render_config).
 CFG_KEY_DESC = {
+    "kb_pdf_tier": "Structured-PDF pipeline preset: off (plain pdftotext, default) | basic (ingest+vector) | full (all stages).",
+    "kb_curator_tier": "KB curator pipeline preset: off | lite (core extract+index) | full (all stages, default).",
+
     "autonomous": "Run autonomously (auto-advance machine gates; human gates always park) vs interactive.",
+    "economizer": "Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md.",
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
-    "claude_cli_delegate_enabled": "Allow delegating to the local Claude CLI agent.",
     "delegate_graph_context_enabled": "Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off).",
     "memory_md_retire": "Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors.",
     "claude_model": "Default Claude model (empty = CLI default).",
@@ -113,8 +117,11 @@ CFG_KEY_DESC = {
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
+    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
     "cross_verify": "Enable cross-model verification of outputs.",
+    "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
+    "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
     "css_render_command": "Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar).",
     "db2_url": "DB2 connection URL (aimee's vector / knowledge-base store).",
     "dedup_enabled": "Deduplicate near-identical responses.",
@@ -156,13 +163,50 @@ CFG_KEY_DESC = {
     "tool_output_max_bytes": "Per-result cap (bytes) on the model-visible tool output "
     "(read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is "
     "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
-    "prompt + history; the (default-off) context-economizer compresses older results to keep "
+    "prompt + history; the context-economizer (aggressive tier) compresses older results to keep "
     "history bounded.",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
+    "subagent_ban_enabled": "Prevent provider-native sub-agent tools when an aimee delegate is "
+    "available, and install the matching client guardrails (default on).",
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
     "(~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory "
     "system via `aimee memory store` (default on).",
+    "require_aimee_git": "Block a delegate from running `git` or `gh` in a shell (reads "
+    "included) and redirect git/forge work to aimee's `git_*` tools, which execute on "
+    "aimee-server where the forge credential stays in-process; delegates are also spawned "
+    "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
+    "SSH to any host) and neuters the global/system git config (default on).",
+    "delegate_sandbox": "Run a delegate's shell and file ops INSIDE its own container "
+    "(via the `docker` delegate backend) instead of in-process in aimee-server. Off (the "
+    "default) a delegate's `bash`/read/write/list run with aimee-server's filesystem and "
+    "environment. This is not yet a full sandbox on its own: the container still has a "
+    "network, so `require_aimee_git` and the credential strip remain the live boundary. The "
+    "delegate image must carry whatever the work needs (a toolchain, or `verify` fails). The "
+    "server logs OFF/INERT/ARMED at boot, probing `docker version` — check it, because an "
+    "unreachable daemon means every delegate runs on the host (default off).",
+    "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
+    "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
+    "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "
+    "host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy "
+    "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
+    "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
+    "off-allowlist refused. Only meaningful when `delegate_sandbox` is on.",
+    "delegate_sandbox_require_isolation": "Fail-closed guard for the `--network none` delegate "
+    "sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes "
+    "`--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the "
+    "package-access proxy. After the container starts aimee asks the host daemon whether a network "
+    "with an IP is attached and always logs an error on a breach; when this is set, sandboxing is "
+    "mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated "
+    "in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker "
+    "being unavailable, or a failed acquire.",
+    "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
+    "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
+    "records them per project (git root), and pre-bakes the learned set into that project's next "
+    "sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or "
+    "synthesizing one (FROM the resolved base + the learned packages) when none is declared. "
+    "Best-effort: a learned build that fails falls back to the un-augmented image. The first "
+    "delegate turn after a new package is learned pays a one-time image build.",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress "
     "(memory/code preview envelope on primary ingress turns; default on).",
@@ -291,6 +335,7 @@ SECTION_DESC = {
     "db2": "DB2 / vector store settings.",
     "dedup": "Response deduplication.",
     "dogfood": "Session capture for dogfood data.",
+    "economizer": "Context economizer tier (a single string: `off` | `safe` | `aggressive`). off = verbatim passthrough; safe (default) = Anthropic prompt caching + lossless, freeze-guarded reduction; aggressive = adds lossy tool-body compression + live OpenAI-side gateway mutation. Anthropic context is never mutated at any tier. The `{enabled, aggressive}` object form is deprecated. See docs/features/economizer.md.",
     "ensemble": "Roundtable ensemble panel + aggregator.",
     "guardrails": "Semantic guardrail policy.",
     "identity": "Working-profile identity injection.",
@@ -320,7 +365,7 @@ SECTION_DESC = {
     "script": "Script-tool allowlist.",
     "search": "Web-search backend (Tavily / SearXNG).",
     "session": "Session / worktree limits.",
-    "skills": "Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects).",
+    "skills": "Skill subsystem (capability, curator, dispatch, eval, review; nested objects).",
     "transport": "Transport tweaks (cache-aware rewrite).",
     "trigger": "Trigger listener (auth, concurrency).",
     "trigger_rules": "Trigger rule definitions (array of objects).",
@@ -333,7 +378,7 @@ def parse_config_fields():
     # offsetof/sizeof macros embed commas, so match the key (first string before
     # offsetof) and the type (CFG_* before the closing brace) positionally — they
     # are 1:1 in source order.
-    text = (SRC / "config_fields.c").read_text(encoding="utf-8")
+    text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
     # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
     # unit (split on `},`) so the key and its CFG_* type are paired within one
     # entry — robust to CFG_* uses in helper functions below the table.
@@ -345,7 +390,12 @@ def parse_config_fields():
         tm = re.search(r'(CFG_\w+)', chunk)
         if km and tm and km.group(1) not in seen:  # a key may be registered twice
             seen.add(km.group(1))
-            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1))))
+            # Surface group (config_field_group_t): FGROUP_RUNTIME (default) is the
+            # everyday user surface; FGROUP_DEPLOY/ADVANCED/DEV are settable but filed
+            # off the presented "CLI-settable keys" count into their own subsections.
+            gm = re.search(r'(FGROUP_\w+)', chunk)
+            group = gm.group(1) if gm else "FGROUP_RUNTIME"
+            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1)), group))
     return fields
 
 
@@ -365,7 +415,7 @@ FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 def parse_config_sections():
     sections = {}   # section name -> sorted set of keys
     flat = set()    # top-level scalar keys read straight off root
-    for cfile in sorted(SRC.glob("config*.c")):
+    for cfile in sorted((SRC / "modules" / "config").glob("config*.c")):
         text = cfile.read_text(encoding="utf-8")
         var_to_section = {}
         for m in ASSIGN_RE.finditer(text):
@@ -398,9 +448,9 @@ def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py` — config keys from `src/config_fields.c` + "
+           "`scripts/gen-reference-docs.py` — config keys from `src/modules/config/config_fields.c` + "
            "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
-           "workflow surface from `src/workflow/`. Do not edit by hand; run "
+           "workflow surface from `src/modules/workflows/`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
            "This reference covers every configurable surface:",
@@ -428,18 +478,46 @@ def render_config(fields, sections, flat):
            "sections listed at the end.",
            ""]
 
-    undescribed = sorted(k for k, _ in fields if k not in CFG_KEY_DESC)
-    out.append(f"## CLI-settable keys ({len(fields)})")
+    runtime = [(k, t) for k, t, g in fields if g == "FGROUP_RUNTIME"]
+    deploy = [(k, t) for k, t, g in fields if g == "FGROUP_DEPLOY"]
+    advanced = [(k, t) for k, t, g in fields if g == "FGROUP_ADVANCED"]
+    dev = [(k, t) for k, t, g in fields if g == "FGROUP_DEV"]
+
+    undescribed = sorted(k for k, _ in runtime if k not in CFG_KEY_DESC)
+    out.append(f"## CLI-settable keys ({len(runtime)})")
+    out.append("")
+    out.append("The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only "
+               "keys are still `aimee config set`-able but are filed into their own "
+               "subsections below (and hidden from the Settings surface by default).")
     out.append("")
     out.append("| Key | Type | Description |")
     out.append("|-----|------|-------------|")
-    for key, typ in sorted(fields):
+    for key, typ in sorted(runtime):
         out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
     out.append("")
     if undescribed:
         out.append("> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): "
                    + ", ".join(f"`{k}`" for k in undescribed))
         out.append("")
+
+    for title, blurb, group in (
+        ("Deploy-time keys", "Consumed once by `config_emit_deploy_env` to stand up the "
+         "aimee-llm container (`aimee config deploy-env`); not read at runtime. Set at "
+         "deploy, not tuned day-to-day.", deploy),
+        ("Advanced tuning keys", "Expert scalars with sensible defaults; settable in the "
+         "config file but off the everyday surface.", advanced),
+        ("Dev-only keys", "Internal dogfood/QA knobs; not part of the user surface.", dev),
+    ):
+        if group:
+            out.append(f"### {title} ({len(group)})")
+            out.append("")
+            out.append(blurb)
+            out.append("")
+            out.append("| Key | Type | Description |")
+            out.append("|-----|------|-------------|")
+            for key, typ in sorted(group):
+                out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
+            out.append("")
 
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
@@ -473,7 +551,10 @@ def render_config(fields, sections, flat):
 # ENV_DESC is surfaced under "Undocumented" so a new var can never silently slip
 # the reference — keeping this gate honest is the whole point.
 
-ENV_RE = re.compile(r'getenv\(\s*"(AIMEE_[A-Z0-9_]+)"')
+# Hardened offline binaries copy environment values before clearenv(); treat
+# that local accessor exactly like getenv() so their deployment contract is
+# not silently omitted from generated reference docs.
+ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
 # group order controls section order in the doc
 ENV_GROUP_ORDER = [
@@ -505,6 +586,7 @@ ENV_DESC = {
     "AIMEE_ATTACH_ID": ("Client & session", "Presence attach id used when joining an existing session."),
     "AIMEE_HOOK_CLIENT": ("Client & session", "Identifies the calling hook client (e.g. claude/codex) for hook routing."),
     "AIMEE_NO_AUTOSTART": ("Client & session", "If set, the client does not auto-start a local aimee-server."),
+    "AIMEE_NO_CLIENT_INTEGRATIONS": ("Client & session", "If set (to any value other than 0/false), aimee does not auto-register itself into detected AI-tool user configs (Claude Code, Gemini, Copilot, Codex). Overrides the client_integrations_enabled config; honored by the aimee binary and by install.sh/configure-hooks.sh."),
     "AIMEE_MODEL": ("Client & session", "Override the primary model for the session."),
     "AIMEE_EFFORT": ("Client & session", "Reasoning-effort hint for the session/model."),
     "AIMEE_MODE": ("Client & session", "Operating-mode override (e.g. interactive / autonomous)."),
@@ -542,6 +624,7 @@ ENV_DESC = {
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
     "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
     "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
     "AIMEE_KB_MTLS_PORT": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener port."),
@@ -578,6 +661,16 @@ ENV_DESC = {
     "AIMEE_DELEGATE_SOURCE_PATHS": ("Delegates & backends", "Allowed source paths for delegate edits."),
     "AIMEE_DELEGATE_WORKTREE_ROOT": ("Delegates & backends", "Root directory for delegate worktrees."),
     "AIMEE_DOCKER_BIN": ("Delegates & backends", "Docker delegate-backend binary."),
+    "AIMEE_FORWARDER_PORT": (
+        "Delegates & backends",
+        "Loopback port the in-sandbox aimee-forwarder listens on (default 3129); set by "
+        "aimee when it starts the forwarder in a proxy-mode delegate container.",
+    ),
+    "AIMEE_FORWARDER_SOCK": (
+        "Delegates & backends",
+        "UNIX socket the in-sandbox aimee-forwarder bridges to (default "
+        "/run/aimee/aimee-http.sock, the bound aimee UDS).",
+    ),
     "AIMEE_DOCKER_WORKDIR": ("Delegates & backends", "Docker delegate-backend working directory."),
     "AIMEE_SSH_BIN": ("Delegates & backends", "SSH delegate-backend binary."),
     "AIMEE_OPENCODE_BIN": ("Delegates & backends", "opencode CLI frontend binary."),
@@ -779,7 +872,7 @@ def render_external_env(found):
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Workflow engine config (src/workflow/) ───────────────────────────────────
+# ─── Workflow engine config (src/modules/workflows/) ───────────────────────────────────
 
 ART = {f"WFE_ART_{k.upper()}": k for k in
        ("none", "proposal", "plan", "branch", "frozen_diff", "pr", "verdict", "approval")}
@@ -788,7 +881,7 @@ BLOCK_ENTRY_RE = re.compile(
 
 
 def parse_block_catalog():
-    text = (SRC / "workflow" / "wfe_def.c").read_text(encoding="utf-8")
+    text = (SRC / "modules" / "workflows" / "wfe_def.c").read_text(encoding="utf-8")
     body = text[text.index("CATALOG[] = {"):text.index("\n};", text.index("CATALOG[] = {"))]
     cat = []
     for m in BLOCK_ENTRY_RE.finditer(body):
@@ -800,8 +893,8 @@ def parse_block_catalog():
 
 
 def parse_engine_consts():
-    dfn = (SRC / "workflow" / "wfe_def.h").read_text(encoding="utf-8")
-    auto = (SRC / "workflow" / "wfe_autonomy.h").read_text(encoding="utf-8")
+    dfn = (SRC / "modules" / "workflows" / "wfe_def.h").read_text(encoding="utf-8")
+    auto = (SRC / "modules" / "workflows" / "wfe_autonomy.h").read_text(encoding="utf-8")
     att = re.search(r'#define\s+WFE_DEFAULT_MAX_ITERS\s+(\d+)', dfn)
     ovr = re.search(r'#define\s+WFE_MAX_OVERRIDES\s+(\d+)', auto)
     return (att.group(1) if att else "?"), (ovr.group(1) if ovr else "?")
@@ -1050,7 +1143,7 @@ def main():
     sections, flat = parse_config_sections()
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key — subtract both so nothing is double-listed.
-    flat = flat - {k for k, _ in fields} - set(sections)
+    flat = flat - {k for k, _, _ in fields} - set(sections)
     cfg = render_config(fields, sections, flat)
     cfg = (cfg.rstrip() + "\n\n"
            + render_env(parse_env_vars()).rstrip() + "\n\n"

@@ -8,10 +8,9 @@ static void test_builtin_profiles_registered(void)
 {
    model_provider_t *providers[16];
    int n = model_provider_list(providers, 16);
-   assert(n >= 7);
+   assert(n >= 6); /* was 7; the gemini profile is gone */
    assert(model_provider_get("openai") != NULL);
    assert(model_provider_get("anthropic") != NULL);
-   assert(model_provider_get("gemini") != NULL);
    assert(model_provider_get("openrouter") != NULL);
    assert(model_provider_get("ollama") != NULL);
    assert(model_provider_get("llama_native") != NULL);
@@ -47,20 +46,6 @@ static void test_anthropic_profile_shape(void)
    assert(p->api_mode == API_MODE_ANTHROPIC_MESSAGES);
 }
 
-static void test_gemini_profile_shape(void)
-{
-   model_provider_t *p = model_provider_get("gemini");
-   assert(p != NULL);
-   assert(strcmp(p->display_name, "Google Gemini") == 0);
-   assert(strcmp(p->base_url, "https://generativelanguage.googleapis.com/v1beta") == 0);
-   assert(strcmp(p->models_url, "https://generativelanguage.googleapis.com/v1beta/models") == 0);
-   assert(strcmp(p->auth_type, "api_key") == 0);
-   assert(p->env_vars != NULL);
-   assert(strcmp(p->env_vars[0], "GEMINI_API_KEY") == 0);
-   assert(strcmp(p->default_model, "gemini-2.5-flash") == 0);
-   assert(p->fetch_models != NULL);
-}
-
 static void test_openrouter_profile_headers(void)
 {
    model_provider_t *p = model_provider_get("openrouter");
@@ -89,16 +74,6 @@ static void test_anthropic_profile_headers(void)
    assert(p->default_headers[2] == NULL);
 }
 
-static void test_gemini_profile_accepts_google_api_key_alias(void)
-{
-   model_provider_t *p = model_provider_get("gemini");
-   assert(p != NULL);
-   assert(p->env_vars != NULL);
-   assert(strcmp(p->env_vars[0], "GEMINI_API_KEY") == 0);
-   assert(strcmp(p->env_vars[1], "GOOGLE_API_KEY") == 0);
-   assert(p->env_vars[2] == NULL);
-}
-
 static void test_mistral_fetch_requires_key(void)
 {
    model_provider_t *p = model_provider_get("mistral");
@@ -118,7 +93,6 @@ static void test_fetch_models_requires_provider_keys(void)
       const char *env_vars[3];
    } cases[] = {
        {"openrouter", {"OPENROUTER_API_KEY", NULL}},
-       {"gemini", {"GEMINI_API_KEY", "GOOGLE_API_KEY", NULL}},
    };
 
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
@@ -141,10 +115,8 @@ int main(void)
    test_builtin_profiles_registered();
    test_mistral_profile_shape();
    test_anthropic_profile_shape();
-   test_gemini_profile_shape();
    test_openrouter_profile_headers();
    test_anthropic_profile_headers();
-   test_gemini_profile_accepts_google_api_key_alias();
    test_mistral_fetch_requires_key();
    test_fetch_models_requires_provider_keys();
    printf("model_provider: all tests passed\n");

@@ -21,7 +21,11 @@ import SettingsPanel from './components/SettingsPanel';
 import TabTutorial from './components/TabTutorial';
 import SetupChip from './components/SetupChip';
 import SetupWizard from './components/SetupWizard';
-import SilentBoundary from './components/SilentBoundary';
+// Silent-by-default error boundary for optional chrome (setup chip, tab
+// tutorial, setup wizard): renders NOTHING on error so a broken overlay is
+// dropped instead of unmounting the shell. Shared smoothgui ErrorBoundary,
+// aliased to keep the local call-site name and make the silent contract explicit.
+import { ErrorBoundary as SilentBoundary } from '@rakuensoftware/smoothgui';
 import { OPEN_WIZARD_EVENT } from './setup/setupState';
 import { NAV_ITEMS } from './nav';
 
@@ -228,6 +232,7 @@ export default function App() {
               <NavLink
                 key={it.route}
                 to={it.route}
+                title={it.hint}
                 style={({ isActive }) => ({
                   display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6,
                   fontSize: 14, textDecoration: 'none',

@@ -3,7 +3,7 @@
 #include "agent_tools.h"
 #include "aimee_home.h"
 #include "delegate_ephemeral_ws.h"
-#include "tool_condense.h"
+#include "economizer.h"
 #include "log.h"
 #include "agent_tools_internal.h"
 #include "agent_source_authority.h"
@@ -19,8 +19,10 @@
 #include "kb_client.h"
 #include "mcp_client_registry.h"
 #include "workspace.h"
+#include "sandbox_learned.h"
 #include "workspace_provider.h"
 #include "diff.h"
+#include "anchor_snapshot.h"
 #include "dstr.h"
 #include "lsp.h"
 #include "cJSON.h"
@@ -737,6 +739,58 @@ char *tool_bash(const char *command, int timeout_ms)
       return res ? res : safe_strdup("{}");
    }
 
+   /* Sandboxed (CONTAINER) delegate: run the shell INSIDE the container via the
+    * provider's exec_shell (docker exec), NOT as a local fork on the aimee-server
+    * host. The local fork below would execute the model's arbitrary command on the
+    * host — with the host's filesystem and network — escaping the `--network none`
+    * sandbox entirely (the file tools already route into the container; bash/script
+    * were the hole). Run in the delegate's worktree: it is bind-mounted
+    * path-identically, so the same absolute path is valid inside the container. */
+   if (ws && ws->kind == WS_PROVIDER_CONTAINER && ws->exec_shell)
+   {
+      const char *cwd = run_cmd_get_cwd();
+      char *wrapped = NULL;
+      if (cwd && cwd[0])
+      {
+         dstr_t w;
+         dstr_init(&w);
+         dstr_append_str(&w, "cd '");
+         for (const char *c = cwd; *c; c++)
+         {
+            if (*c == '\'')
+               dstr_append_str(&w, "'\\''");
+            else
+               dstr_append_char(&w, *c);
+         }
+         dstr_append_str(&w, "' && ");
+         dstr_append_str(&w, command);
+         wrapped = w.data ? safe_strdup(w.data) : NULL;
+         dstr_free(&w);
+      }
+      int exit_code = -1;
+      char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      free(wrapped);
+      /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
+       * failed/typo'd/nonexistent install is never recorded (and can't poison later
+       * image builds). Best-effort, cheap pre-filtered inside observe(). */
+      if (exit_code == 0)
+         sandbox_learned_observe(cwd, command);
+      /* exit_code == -1 with no capture means docker exec could not run the command
+       * at all (transport failure) — distinct from a real command that exits 0 with
+       * empty output, which the container provider returns as NULL out / exit 0. */
+      if (exit_code == -1 && !out)
+         return safe_strdup("{\"stdout\":\"\",\"stderr\":\"sandbox exec failed: could not run "
+                            "the command in the delegate container\",\"exit_code\":-1}");
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *res = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return res ? res : safe_strdup("{}");
+   }
+
    int stdout_pipe[2], stderr_pipe[2];
    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
@@ -874,16 +928,9 @@ char *tool_bash(const char *command, int timeout_ms)
       }
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"fork failed\",\"exit_code\":-1}");
    }
-   /* command-aware condensation (P1b): when reduce_command_filter is on, `rawcap` (the
-    * MAXIMUM we'll capture) rises to the 2 MB ceiling so tool_condense sees the FULL output
-    * (the old 32 KB read cap truncated the input before the lever could condense + spill it).
-    * Default-off keeps the 32 KB cap — byte-identical. Per-call config load, reused for both
-    * the cap and the condense step below (previously the load happened after allocation, so
-    * it could not influence the cap). Buffers start SMALL and grow toward rawcap only if the
-    * output actually overflows, so an `echo hi` costs ~32 KB, not 2 MB. */
-   config_t tc_cfg;
-   int tc_on = (config_load(&tc_cfg) == 0 && tool_condense_enabled(&tc_cfg));
-   size_t rawcap = tc_on ? (size_t)TOOL_CONDENSE_CEILING : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
+   /* Capture the established bounded raw result. Economizer-owned condensation and
+    * post-capture compression are deliberately absent from the production path. */
+   size_t rawcap = (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
    size_t out_cap =
        (rawcap < AGENT_TOOL_OUTPUT_RAW_MAX) ? rawcap : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
    size_t err_cap = out_cap;
@@ -1034,47 +1081,17 @@ char *tool_bash(const char *command, int timeout_ms)
    out_buf[out_len] = '\0';
    err_buf[err_len] = '\0';
 
-   /* Command-aware condensation (reduce_command_filter, default off): for a RECOGNIZED
-    * command, deterministically condense the output (test failures kept, passes elided)
-    * and spill the full raw so the delegate can read it back. Fail-open: any miss/decline
-    * returns NULL and we fall through to the size-based agent_compress_tool_result. */
-   char *cond_out = NULL, *cond_err = NULL;
-   if (tc_on) /* reuse the config + gate resolved once at buffer-alloc (P1b) */
-   {
-      char spill_dir[3072];
-      const char *home = aimee_home(); /* captured once; not called again before use */
-      if (home && home[0] &&
-          snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) < (int)sizeof spill_dir)
-      {
-         (void)mkdir(spill_dir, 0700); /* idempotent; 0700 per-user */
-         tc_stats_t st;
-         cond_out = tool_condense_apply(&tc_cfg, command, exit_code, out_buf, spill_dir, &st);
-         if (cond_out)
-            aimee_log(LOG_INFO, "tool_condense", "bash stdout condensed %ld->%ld (%s)",
-                      st.raw_bytes, st.final_bytes, st.family);
-         cond_err = tool_condense_apply(&tc_cfg, command, exit_code, err_buf, spill_dir, NULL);
-      }
-   }
-   /* Compress output to fit token budget (#4) — the command-aware condensed form when we
-    * produced one, else the size-based fallback. */
-   char *compressed_out =
-       cond_out ? cond_out : agent_compress_tool_result(out_buf, out_len, "bash");
-   char *compressed_err =
-       cond_err ? cond_err : agent_compress_tool_result(err_buf, err_len, "bash");
-
    /* Build JSON result */
    cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "stdout", compressed_out);
+   cJSON_AddStringToObject(result, "stdout", out_buf);
    if (cancelled)
       cJSON_AddStringToObject(result, "stderr", "delegate cancelled during bash execution");
    else
-      cJSON_AddStringToObject(result, "stderr", compressed_err);
+      cJSON_AddStringToObject(result, "stderr", err_buf);
    cJSON_AddNumberToObject(result, "exit_code", exit_code);
    char *json = cJSON_PrintUnformatted(result);
    cJSON_Delete(result);
 
-   free(compressed_out);
-   free(compressed_err);
    free(out_buf);
    free(err_buf);
    return json;
@@ -1128,7 +1145,7 @@ static int tool_file_looks_binary(FILE *f)
    return binary;
 }
 
-char *tool_read_file(const char *path, int offset, int limit)
+char *tool_read_file(const char *path, int offset, int limit, int raw)
 {
    char *resolved_proposal = NULL;
    const char *actual_path = path;
@@ -1186,6 +1203,42 @@ char *tool_read_file(const char *path, int offset, int limit)
       free(file_data);
       return safe_strdup(err_msg);
    }
+
+   /* Anchored read (default): mint an immutable snapshot over the WHOLE file so
+    * an edit can verify any ordinal, then format the requested window with
+    * "LINE:HASH| " prefixes. raw==1 falls through to the un-anchored byte loop
+    * below (grep pipelines, round-trips that must not carry anchors). */
+   if (!raw)
+   {
+      fclose(f);
+      size_t cap = agent_tool_output_cap();
+      char snap_id[ANCHOR_SNAPSHOT_ID_MAX];
+      if (anchor_snapshot_create(resolved, file_data, file_len, snap_id) != 0)
+         snap_id[0] = '\0';
+      char *formatted =
+          anchor_format_read(file_data, file_len, offset, limit, snap_id[0] ? snap_id : NULL);
+      free(file_data);
+      if (!formatted)
+         return safe_strdup("error: out of memory");
+      if (strlen(formatted) > cap)
+      {
+         /* keep the leading, whole lines that fit; drop a partial tail */
+         size_t cut = cap;
+         while (cut > 0 && formatted[cut] != '\n')
+            cut--;
+         formatted[cut > 0 ? cut + 1 : cap] = '\0';
+         char *trunc = malloc(strlen(formatted) + 96);
+         if (trunc)
+         {
+            sprintf(trunc, "%s[truncated at %zu bytes; re-read with offset/limit for more]\n",
+                    formatted, cap);
+            free(formatted);
+            formatted = trunc;
+         }
+      }
+      return formatted;
+   }
+
    size_t cap = agent_tool_output_cap();
    char *buf = malloc(cap + 1);
    if (!buf)

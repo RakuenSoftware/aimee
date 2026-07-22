@@ -124,7 +124,7 @@ thin `aimee` and `aimee-webchat` targets do not link database,
 | `server/vault_service.c` | Server-sealed credential vault (agent and delegate keys, Codex OAuth) |
 | `context_fold.c`, `gateway_delegate.c` | Context economizer: deterministic context folding and ingress compression on the delegate and gateway path |
 | `server/agent_tools.c` | Tool execution (bash, read, write), checkpoints |
-| `server/delegate_plan.c` | Delegate packet planning |
+| `modules/delegates/delegate_plan.c` | Delegate packet planning |
 | `agent_eval.c` | Eval harness, task suites |
 | `agent_coord.c` | Multi-delegate coordination, voting, directives |
 | `server/server_compute*.c`, `server/server_jobs_aux.c` | Durable/background delegate jobs and compute dispatch |
@@ -177,8 +177,8 @@ The largest source files are tracked for decomposition in waves (split the bigge
 |------|-------|-------------|
 | `server/server_mcp.c` | ~1999 | Wave 3, split remaining MCP tool families from dispatch |
 | `server/agent_tools.c` | ~1825 | Wave 2, split schema generation from tool execution |
-| `server/kb_client.c` | ~1781 | Wave 4, split remaining KB client families |
-| `server/kb_client_memory.c` | ~1457 | Wave 4, split remaining memory RPC wrappers |
+| `modules/kb_client/kb_client.c` | ~1781 | Wave 4, split remaining KB client families |
+| `modules/kb_client/kb_client_memory.c` | ~1457 | Wave 4, split remaining memory RPC wrappers |
 | `memory_advanced.c` | ~1079 |, (single responsibility, acceptable size) |
 | `posix/cli_client.c` | ~1073 |, (single responsibility, acceptable size) |
 
@@ -762,7 +762,7 @@ at a reverse proxy and use its `http://` address.
 
 **What a remote thin client can and can't do.** The remote transport drives the
 **data/RPC plane**: `memory`, `kb`, `rules`, `index`, `sessions`, `notes`, and so
-on. Interactive **`aimee chat` / `aimee launch` need a *co-located* server**: they
+on. Interactive front ends (**web chat**, `acp-serve`) need a *co-located* server: they
 run the agent and its tools on the client host and chdir into a local worktree, so
 they refuse a remote endpoint. **Writes are off by default over the network**
 (leaked-bearer protection): a remote bearer is read/query only until the server opts
@@ -1079,7 +1079,7 @@ override them. The TCP host may be a DNS name or an IPv4/IPv6 literal
 (`tcp:[::1]:8740`).
 
 This drives the **data/RPC plane** (`memory`, `kb`, `rules`, `index`, `sessions`,
-`notes`, …). Interactive **`aimee chat` / `aimee launch` need a co-located server**:
+`notes`, …). Interactive front ends (web chat, `acp-serve`) need a co-located server**:
 they run the agent and its tools on the client host and chdir into a local worktree,
 so they refuse a remote `tcp:` endpoint with a clear message.
 
@@ -1221,7 +1221,7 @@ methods; the thin CLI maps supported commands to them in `cli_v1_routes.inc`
 | Tools / MCP | `tool.execute`, `mcp.tools_list/audit/recheck/call` |
 | Triggers / cron | `trigger.fire/list/status/cancel`, `cron.list/add/show/history/run/enable/disable/remove` |
 | Providers / models | `provider.list/show/models/test/quota/get/set`, `provider.slot_acquire/release`, `model.list/show/refresh` |
-| Insights / migrate | `insights.overview`, `migrate.v2` |
+| Insights | `insights.overview` |
 
 Request shape: `{"method": "...", "protocol_version": 2, ...params}`. Success:
 `{"status": "ok", ...data}`. Error: `{"status": "error", "error": "...",
@@ -1242,7 +1242,7 @@ reference for the separate KB API (`api/openapi-v1.yaml`). See the
 ## The KB split
 
 `aimee-server` owns no DB2 SQL. It reaches DB2 through the **KB client**
-(`src/server/kb_client*.c`), typed wrappers (memory, index, docs, agent,
+(`src/modules/kb_client/kb_client*.c`), typed wrappers (memory, index, docs, agent,
 dashboard, roadmap, notes, curiosity, status) that call `aimee-kb` over its
 HTTP `/v1` API (`AIMEE_KB_API_URL`, port 8741). The legacy Unix-socket transport
 was retired in #2747; HTTP is now the only KB transport. DB1 remains local to the server;

@@ -3,6 +3,7 @@
  * cognify / episode / assemble / cite / scene / ontology workflows. */
 #include "aimee.h"
 #include "cmd_memory_internal.h"
+#include "commands.h"
 #include "entity_edges.h"
 #include "platform_process.h"
 #include "db2/vector_verify.h"
@@ -1330,246 +1331,257 @@ static cJSON *scene_rpc_unwrap(char *resp_json, const char *what)
    return resp;
 }
 
+static void mem_scene_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   cJSON *resp = scene_rpc_unwrap(kb_client_memory_scene_list_json(), "memory scene list failed");
+   cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "scenes");
+   int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
+
+   if (ctx->json_output)
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON *out = cJSON_AddArrayToObject(root, "scenes");
+      for (int i = 0; i < n; i++)
+         cJSON_AddItemToArray(out, cJSON_Duplicate(cJSON_GetArrayItem(arr_src, i), 1));
+      emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      printf("%-6s  %-20s  %-10s  %s\n", "ID", "workspace", "turns", "created_at");
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *row = cJSON_GetArrayItem(arr_src, i);
+         cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
+         cJSON *ws = cJSON_GetObjectItemCaseSensitive(row, "workspace_id");
+         cJSON *tc = cJSON_GetObjectItemCaseSensitive(row, "turn_count");
+         cJSON *ca = cJSON_GetObjectItemCaseSensitive(row, "created_at");
+         printf("%-6lld  %-20s  %-10d  %s\n", cJSON_IsNumber(id) ? (long long)id->valuedouble : 0LL,
+                cJSON_IsString(ws) ? ws->valuestring : "",
+                cJSON_IsNumber(tc) ? (int)tc->valuedouble : 0,
+                cJSON_IsString(ca) ? ca->valuestring : "");
+      }
+   }
+   cJSON_Delete(resp);
+   return;
+}
+
+static void mem_scene_show(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 2)
+      fatal("memory scene show requires a scene ID");
+   int64_t scene_id = (int64_t)strtoll(argv[1], NULL, 10);
+   if (scene_id <= 0)
+      fatal("memory scene show: invalid scene ID '%s'", argv[1]);
+
+   cJSON *resp =
+       scene_rpc_unwrap(kb_client_memory_scene_show_json(scene_id), "memory scene show failed");
+   cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "members");
+   int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
+
+   if (ctx->json_output)
+   {
+      cJSON *root = cJSON_CreateObject();
+      cJSON_AddNumberToObject(root, "scene_id", (double)scene_id);
+      cJSON *out = cJSON_AddArrayToObject(root, "members");
+      for (int i = 0; i < n; i++)
+         cJSON_AddItemToArray(out, cJSON_Duplicate(cJSON_GetArrayItem(arr_src, i), 1));
+      emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      printf("Scene %lld members:\n", (long long)scene_id);
+      printf("%-8s  %-50s  %s\n", "mem_id", "key", "strength");
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *row = cJSON_GetArrayItem(arr_src, i);
+         cJSON *mid = cJSON_GetObjectItemCaseSensitive(row, "memory_id");
+         cJSON *key = cJSON_GetObjectItemCaseSensitive(row, "key");
+         cJSON *str = cJSON_GetObjectItemCaseSensitive(row, "membership_strength");
+         printf("%-8lld  %-50s  %.4f\n", cJSON_IsNumber(mid) ? (long long)mid->valuedouble : 0LL,
+                cJSON_IsString(key) ? key->valuestring : "",
+                cJSON_IsNumber(str) ? str->valuedouble : 0.0);
+      }
+   }
+   cJSON_Delete(resp);
+   return;
+}
+
+static const subcmd_t mem_scene_subs[] = {
+    {"list", "list scenes", mem_scene_list},
+    {"show", "show a scene's members", mem_scene_show},
+    {NULL, NULL, NULL},
+};
+
 void mem_scene(app_ctx_t *ctx, int argc, char **argv)
 {
    const char *sub = argc > 0 ? argv[0] : "list";
 
-   if (strcmp(sub, "list") == 0)
-   {
-      cJSON *resp =
-          scene_rpc_unwrap(kb_client_memory_scene_list_json(), "memory scene list failed");
-      cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "scenes");
-      int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
-
-      if (ctx->json_output)
-      {
-         cJSON *root = cJSON_CreateObject();
-         cJSON *out = cJSON_AddArrayToObject(root, "scenes");
-         for (int i = 0; i < n; i++)
-            cJSON_AddItemToArray(out, cJSON_Duplicate(cJSON_GetArrayItem(arr_src, i), 1));
-         emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("%-6s  %-20s  %-10s  %s\n", "ID", "workspace", "turns", "created_at");
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *row = cJSON_GetArrayItem(arr_src, i);
-            cJSON *id = cJSON_GetObjectItemCaseSensitive(row, "id");
-            cJSON *ws = cJSON_GetObjectItemCaseSensitive(row, "workspace_id");
-            cJSON *tc = cJSON_GetObjectItemCaseSensitive(row, "turn_count");
-            cJSON *ca = cJSON_GetObjectItemCaseSensitive(row, "created_at");
-            printf("%-6lld  %-20s  %-10d  %s\n",
-                   cJSON_IsNumber(id) ? (long long)id->valuedouble : 0LL,
-                   cJSON_IsString(ws) ? ws->valuestring : "",
-                   cJSON_IsNumber(tc) ? (int)tc->valuedouble : 0,
-                   cJSON_IsString(ca) ? ca->valuestring : "");
-         }
-      }
-      cJSON_Delete(resp);
-      return;
-   }
-
-   if (strcmp(sub, "show") == 0)
-   {
-      if (argc < 2)
-         fatal("memory scene show requires a scene ID");
-      int64_t scene_id = (int64_t)strtoll(argv[1], NULL, 10);
-      if (scene_id <= 0)
-         fatal("memory scene show: invalid scene ID '%s'", argv[1]);
-
-      cJSON *resp =
-          scene_rpc_unwrap(kb_client_memory_scene_show_json(scene_id), "memory scene show failed");
-      cJSON *arr_src = cJSON_GetObjectItemCaseSensitive(resp, "members");
-      int n = cJSON_IsArray(arr_src) ? cJSON_GetArraySize(arr_src) : 0;
-
-      if (ctx->json_output)
-      {
-         cJSON *root = cJSON_CreateObject();
-         cJSON_AddNumberToObject(root, "scene_id", (double)scene_id);
-         cJSON *out = cJSON_AddArrayToObject(root, "members");
-         for (int i = 0; i < n; i++)
-            cJSON_AddItemToArray(out, cJSON_Duplicate(cJSON_GetArrayItem(arr_src, i), 1));
-         emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("Scene %lld members:\n", (long long)scene_id);
-         printf("%-8s  %-50s  %s\n", "mem_id", "key", "strength");
-         for (int i = 0; i < n; i++)
-         {
-            cJSON *row = cJSON_GetArrayItem(arr_src, i);
-            cJSON *mid = cJSON_GetObjectItemCaseSensitive(row, "memory_id");
-            cJSON *key = cJSON_GetObjectItemCaseSensitive(row, "key");
-            cJSON *str = cJSON_GetObjectItemCaseSensitive(row, "membership_strength");
-            printf("%-8lld  %-50s  %.4f\n", cJSON_IsNumber(mid) ? (long long)mid->valuedouble : 0LL,
-                   cJSON_IsString(key) ? key->valuestring : "",
-                   cJSON_IsNumber(str) ? str->valuedouble : 0.0);
-         }
-      }
-      cJSON_Delete(resp);
-      return;
-   }
-
-   fprintf(stderr, "memory scene: unknown subcommand '%s' (list, show <id>)\n", sub);
+   if (subcmd_dispatch(mem_scene_subs, sub, ctx, argc, argv) != 0)
+      fprintf(stderr, "memory scene: unknown subcommand '%s' (list, show <id>)\n", sub);
 }
 
 /* --- ontology: dump schema, or walk typed graph --- */
+
+static void mem_ontology_list(app_ctx_t *ctx, int argc, char **argv)
+{
+   /* Dump node kinds and relation kinds */
+   if (ctx->json_output)
+   {
+      cJSON *root = cJSON_CreateObject();
+
+      cJSON *nodes = cJSON_AddArrayToObject(root, "node_kinds");
+      for (int i = 0; i <= (int)NODE_OTHER; i++)
+      {
+         const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
+         if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
+            continue;
+         cJSON *n = cJSON_CreateObject();
+         cJSON_AddNumberToObject(n, "id", i);
+         cJSON_AddStringToObject(n, "label", label);
+         cJSON_AddItemToArray(nodes, n);
+      }
+
+      cJSON *rels = cJSON_AddArrayToObject(root, "relation_kinds");
+      for (int i = 0; i <= (int)REL_OTHER; i++)
+      {
+         const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
+         if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
+            continue;
+         cJSON *r = cJSON_CreateObject();
+         cJSON_AddNumberToObject(r, "id", i);
+         cJSON_AddStringToObject(r, "label", label);
+         cJSON_AddItemToArray(rels, r);
+      }
+
+      /* Also dump the DB schema table if present (via aimee-kb). */
+      db2_relation_schema_row_t schema_rows[256];
+      int n_schema = kb_client_relations_schema_list(
+          schema_rows, (int)(sizeof(schema_rows) / sizeof(schema_rows[0])));
+      if (n_schema > 0)
+      {
+         cJSON *rules = cJSON_AddArrayToObject(root, "schema_rules");
+         for (int i = 0; i < n_schema; i++)
+         {
+            cJSON *rule = cJSON_CreateObject();
+            int rid = schema_rows[i].relation_id;
+            int sk = schema_rows[i].subject_kind;
+            int ok = schema_rows[i].object_kind;
+            cJSON_AddStringToObject(rule, "relation",
+                                    memory_ontology_relation_to_text((memory_relation_kind_t)rid));
+            cJSON_AddStringToObject(
+                rule, "subject_kind",
+                sk == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)sk));
+            cJSON_AddStringToObject(
+                rule, "object_kind",
+                ok == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)ok));
+            cJSON_AddItemToArray(rules, rule);
+         }
+      }
+
+      emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      printf("Node kinds:\n");
+      for (int i = 0; i <= (int)NODE_OTHER; i++)
+      {
+         const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
+         if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
+            continue;
+         printf("  %3d  %s\n", i, label);
+      }
+      printf("\nRelation kinds:\n");
+      for (int i = 0; i <= (int)REL_OTHER; i++)
+      {
+         const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
+         if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
+            continue;
+         printf("  %3d  %s\n", i, label);
+      }
+   }
+}
+
+static void mem_ontology_walk(app_ctx_t *ctx, int argc, char **argv)
+{
+   /* Walk typed graph from a seed entity */
+   if (argc < 2)
+   {
+      fprintf(stderr, "memory ontology walk <entity> [--hops N] [--rel relation,...]\n");
+      return;
+   }
+   const char *seed = argv[1];
+   int max_hops = 2;
+   unsigned int mask = RELATION_MASK_ALL;
+
+   for (int i = 2; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--hops") == 0 && i + 1 < argc)
+         max_hops = atoi(argv[++i]);
+      else if (strcmp(argv[i], "--rel") == 0 && i + 1 < argc)
+      {
+         /* Comma-separated relation names */
+         mask = 0;
+         char rel_copy[512];
+         snprintf(rel_copy, sizeof(rel_copy), "%s", argv[++i]);
+         char *sv = NULL;
+         char *tok = strtok_r(rel_copy, ",", &sv);
+         while (tok)
+         {
+            memory_relation_kind_t r = memory_ontology_relation_from_text(tok);
+            if ((int)r < 32)
+               mask |= RELATION_MASK(r);
+            tok = strtok_r(NULL, ",", &sv);
+         }
+      }
+   }
+
+#define WALK_MAX 128
+   graph_walk_entry_t entries[WALK_MAX];
+   int count = memory_graph_walk(seed, mask, max_hops, entries, WALK_MAX);
+
+   if (ctx->json_output)
+   {
+      cJSON *arr = cJSON_CreateArray();
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *e = cJSON_CreateObject();
+         cJSON_AddNumberToObject(e, "hop", entries[i].hop);
+         cJSON_AddStringToObject(e, "source", entries[i].source);
+         cJSON_AddStringToObject(e, "relation", entries[i].relation);
+         cJSON_AddStringToObject(e, "target", entries[i].target);
+         cJSON_AddStringToObject(
+             e, "relation_kind",
+             memory_ontology_relation_to_text((memory_relation_kind_t)entries[i].relation_id));
+         cJSON_AddStringToObject(
+             e, "subject_kind",
+             memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].subject_kind));
+         cJSON_AddStringToObject(
+             e, "object_kind",
+             memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].object_kind));
+         cJSON_AddNumberToObject(e, "weight", entries[i].weight);
+         cJSON_AddItemToArray(arr, e);
+      }
+      emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
+   }
+   else
+   {
+      for (int i = 0; i < count; i++)
+         printf("[hop %d] %s -[%s]-> %s (wt=%d)\n", entries[i].hop, entries[i].source,
+                entries[i].relation, entries[i].target, entries[i].weight);
+   }
+#undef WALK_MAX
+}
+
+static const subcmd_t mem_ontology_subs[] = {
+    {"list", "dump node and relation kinds", mem_ontology_list},
+    {"walk", "walk the typed graph from a seed entity", mem_ontology_walk},
+    {NULL, NULL, NULL},
+};
 
 void mem_ontology(app_ctx_t *ctx, int argc, char **argv)
 {
    const char *sub = argc > 0 ? argv[0] : "list";
 
-   if (strcmp(sub, "list") == 0)
-   {
-      /* Dump node kinds and relation kinds */
-      if (ctx->json_output)
-      {
-         cJSON *root = cJSON_CreateObject();
-
-         cJSON *nodes = cJSON_AddArrayToObject(root, "node_kinds");
-         for (int i = 0; i <= (int)NODE_OTHER; i++)
-         {
-            const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
-            if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
-               continue;
-            cJSON *n = cJSON_CreateObject();
-            cJSON_AddNumberToObject(n, "id", i);
-            cJSON_AddStringToObject(n, "label", label);
-            cJSON_AddItemToArray(nodes, n);
-         }
-
-         cJSON *rels = cJSON_AddArrayToObject(root, "relation_kinds");
-         for (int i = 0; i <= (int)REL_OTHER; i++)
-         {
-            const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
-            if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
-               continue;
-            cJSON *r = cJSON_CreateObject();
-            cJSON_AddNumberToObject(r, "id", i);
-            cJSON_AddStringToObject(r, "label", label);
-            cJSON_AddItemToArray(rels, r);
-         }
-
-         /* Also dump the DB schema table if present (via aimee-kb). */
-         db2_relation_schema_row_t schema_rows[256];
-         int n_schema = kb_client_relations_schema_list(
-             schema_rows, (int)(sizeof(schema_rows) / sizeof(schema_rows[0])));
-         if (n_schema > 0)
-         {
-            cJSON *rules = cJSON_AddArrayToObject(root, "schema_rules");
-            for (int i = 0; i < n_schema; i++)
-            {
-               cJSON *rule = cJSON_CreateObject();
-               int rid = schema_rows[i].relation_id;
-               int sk = schema_rows[i].subject_kind;
-               int ok = schema_rows[i].object_kind;
-               cJSON_AddStringToObject(
-                   rule, "relation", memory_ontology_relation_to_text((memory_relation_kind_t)rid));
-               cJSON_AddStringToObject(
-                   rule, "subject_kind",
-                   sk == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)sk));
-               cJSON_AddStringToObject(
-                   rule, "object_kind",
-                   ok == 99 ? "any" : memory_ontology_node_kind_to_text((memory_node_kind_t)ok));
-               cJSON_AddItemToArray(rules, rule);
-            }
-         }
-
-         emit_json_ctx(root, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         printf("Node kinds:\n");
-         for (int i = 0; i <= (int)NODE_OTHER; i++)
-         {
-            const char *label = memory_ontology_node_kind_to_text((memory_node_kind_t)i);
-            if (strcmp(label, "other") == 0 && i != (int)NODE_OTHER)
-               continue;
-            printf("  %3d  %s\n", i, label);
-         }
-         printf("\nRelation kinds:\n");
-         for (int i = 0; i <= (int)REL_OTHER; i++)
-         {
-            const char *label = memory_ontology_relation_to_text((memory_relation_kind_t)i);
-            if (strcmp(label, "other") == 0 && i != (int)REL_OTHER)
-               continue;
-            printf("  %3d  %s\n", i, label);
-         }
-      }
-   }
-   else if (strcmp(sub, "walk") == 0)
-   {
-      /* Walk typed graph from a seed entity */
-      if (argc < 2)
-      {
-         fprintf(stderr, "memory ontology walk <entity> [--hops N] [--rel relation,...]\n");
-         return;
-      }
-      const char *seed = argv[1];
-      int max_hops = 2;
-      unsigned int mask = RELATION_MASK_ALL;
-
-      for (int i = 2; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--hops") == 0 && i + 1 < argc)
-            max_hops = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--rel") == 0 && i + 1 < argc)
-         {
-            /* Comma-separated relation names */
-            mask = 0;
-            char rel_copy[512];
-            snprintf(rel_copy, sizeof(rel_copy), "%s", argv[++i]);
-            char *sv = NULL;
-            char *tok = strtok_r(rel_copy, ",", &sv);
-            while (tok)
-            {
-               memory_relation_kind_t r = memory_ontology_relation_from_text(tok);
-               if ((int)r < 32)
-                  mask |= RELATION_MASK(r);
-               tok = strtok_r(NULL, ",", &sv);
-            }
-         }
-      }
-
-#define WALK_MAX 128
-      graph_walk_entry_t entries[WALK_MAX];
-      int count = memory_graph_walk(seed, mask, max_hops, entries, WALK_MAX);
-
-      if (ctx->json_output)
-      {
-         cJSON *arr = cJSON_CreateArray();
-         for (int i = 0; i < count; i++)
-         {
-            cJSON *e = cJSON_CreateObject();
-            cJSON_AddNumberToObject(e, "hop", entries[i].hop);
-            cJSON_AddStringToObject(e, "source", entries[i].source);
-            cJSON_AddStringToObject(e, "relation", entries[i].relation);
-            cJSON_AddStringToObject(e, "target", entries[i].target);
-            cJSON_AddStringToObject(
-                e, "relation_kind",
-                memory_ontology_relation_to_text((memory_relation_kind_t)entries[i].relation_id));
-            cJSON_AddStringToObject(
-                e, "subject_kind",
-                memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].subject_kind));
-            cJSON_AddStringToObject(
-                e, "object_kind",
-                memory_ontology_node_kind_to_text((memory_node_kind_t)entries[i].object_kind));
-            cJSON_AddNumberToObject(e, "weight", entries[i].weight);
-            cJSON_AddItemToArray(arr, e);
-         }
-         emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);
-      }
-      else
-      {
-         for (int i = 0; i < count; i++)
-            printf("[hop %d] %s -[%s]-> %s (wt=%d)\n", entries[i].hop, entries[i].source,
-                   entries[i].relation, entries[i].target, entries[i].weight);
-      }
-#undef WALK_MAX
-   }
-   else
-   {
+   if (subcmd_dispatch(mem_ontology_subs, sub, ctx, argc, argv) != 0)
       fprintf(stderr, "memory ontology: unknown subcommand '%s' (list, walk <entity>)\n", sub);
-   }
 }

@@ -31,7 +31,6 @@ static const struct
     {"audit.seal", pt_print_audit},
     {"audit.snapshot", pt_print_audit},
     {"init.run", pt_print_init_run},
-    {"migrate.v2", pt_print_migrate_v2},
     {"rules.generate", pt_print_rules_generate},
     {"skill.list", pt_print_skill_list},
     {"skill.show", pt_print_skill_show},
@@ -49,19 +48,6 @@ static const struct
     {"trajectory.batch", pt_print_trajectory_batch},
     {"insights.overview", pt_print_insights_overview},
     {"worktree.gc", pt_print_worktree_gc},
-    {"work.add", pt_print_work_add},
-    {"work.add_batch", pt_print_work_add_batch},
-    {"work.claim", pt_print_work_claim},
-    {"work.complete", pt_print_work_complete},
-    {"work.fail", pt_print_work_fail},
-    {"work.list", pt_print_work_list},
-    {"work.board", pt_print_work_board},
-    {"work.cancel", pt_print_work_cancel},
-    {"work.release", pt_print_work_release},
-    {"work.clear", pt_print_work_clear},
-    {"work.gc", pt_print_work_gc},
-    {"work.sync_proposals", pt_print_work_sync_proposals},
-    {"work.stats", pt_print_work_stats},
     {"rules.delete", pt_print_rules_delete},
     {"memory.search", pt_print_memory_search},
     {"memory.store", pt_print_memory_store},
@@ -599,6 +585,7 @@ static const struct
     {"cert.issue", "POST", "/v1/cert/issue"},
     {"cert.list", "POST", "/v1/cert/list"},
     {"cert.revoke", "POST", "/v1/cert/revoke"},
+    {"cert.sign", "POST", "/v1/cert/sign"},
     {"chat.interrupt", "POST", "/v1/chat/interrupt"},
     {"code.audit", "POST", "/v1/code/audit"},
     {"collab_rules.approve", "POST", "/v1/collab_rules/approve"},
@@ -638,11 +625,14 @@ static const struct
     {"delegate.launch", "POST", "/v1/delegate/launch"},
     {"delegate.log", "GET", "/v1/delegate/log"},
     {"delegate.reply", "POST", "/v1/delegate/reply"},
+    {"delegate.sandbox_gc", "POST", "/v1/delegate/sandbox/gc"},
+    {"delegate.sandbox_list", "GET", "/v1/delegate/sandbox/images"},
     {"delegate.status", "POST", "/v1/delegate/status"},
     {"demotion.check", "GET", "/v1/demotion/check"},
     {"dogfood.report", "GET", "/v1/dogfood/report"},
     {"dogfood.review", "POST", "/v1/dogfood/review"},
     {"dogfood.tag", "POST", "/v1/dogfood/tag"},
+    {"economizer.stats", "GET", "/v1/economizer/stats"},
     {"episode.list", "GET", "/v1/episode/list"},
     {"eval.results", "GET", "/v1/eval/results"},
     {"evidence.fidelity_retrieval_event", "POST", "/v1/audit/fidelity"},
@@ -701,8 +691,6 @@ static const struct
     {"provider.quota", "POST", "/v1/provider/quota"},
     {"provider.set", "POST", "/v1/provider/set"},
     {"provider.show", "POST", "/v1/provider/show"},
-    {"provider.slot_acquire", "POST", "/v1/provider/slot_acquire"},
-    {"provider.slot_release", "POST", "/v1/provider/slot_release"},
     {"provider.test", "POST", "/v1/provider/test"},
     {"ranker.export_view", "GET", "/v1/intelligence/ranker/export-view"},
     {"ranker.fit", "POST", "/v1/intelligence/ranker/fit"},
@@ -751,19 +739,6 @@ static const struct
     {"wm.get", "POST", "/v1/wm/get"},
     {"wm.list", "POST", "/v1/wm/list"},
     {"wm.set", "POST", "/v1/wm/set"},
-    {"work.add", "POST", "/v1/work/add"},
-    {"work.add_batch", "POST", "/v1/work/add_batch"},
-    {"work.board", "GET", "/v1/work/board"},
-    {"work.cancel", "POST", "/v1/work/cancel"},
-    {"work.claim", "POST", "/v1/work/claim"},
-    {"work.clear", "POST", "/v1/work/clear"},
-    {"work.complete", "POST", "/v1/work/complete"},
-    {"work.fail", "POST", "/v1/work/fail"},
-    {"work.gc", "POST", "/v1/work/gc"},
-    {"work.list", "GET", "/v1/work"},
-    {"work.release", "POST", "/v1/work/release"},
-    {"work.stats", "GET", "/v1/work/stats"},
-    {"work.sync_proposals", "POST", "/v1/work/sync_proposals"},
     {"workspace.context", "POST", "/v1/workspaces/context"},
     {"workspace.list", "GET", "/v1/workspaces"},
     {"worktree.gc", "POST", "/v1/worktree/gc"},
@@ -784,6 +759,7 @@ static const struct
     {"index.ingest", "POST", "/v1/index/ingest"},
     {"index.scan", "POST", "/v1/index/scan"},
     {"kb.build", "POST", "/v1/kb/build"},
+    {"kb.docs.push", "POST", "/v1/kb/docs/push"},
     {"kb.ingest", "POST", "/v1/kb/ingest"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
@@ -828,6 +804,7 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"rules.list", "GET", "/v1/rules"},
        {"notes.list", "GET", "/v1/notes"},
        {"notes.search", "POST", "/v1/notes/search"},
+       {"doctor.forensics", "GET", "/v1/server/forensics"},
    };
    for (size_t i = 0; i < sizeof(bespoke) / sizeof(bespoke[0]); i++)
    {
@@ -1097,9 +1074,10 @@ static const char *cli_ws_err_message(cJSON *resp)
  * code-scan upserts per project+path, so batches accumulate. Returns 0 on
  * success, nonzero if any batch failed. */
 
-/* Per-batch content budget. The binding limit is aimee-kb's 1 MB request-body
- * cap (the server relays each batch on to kb); JSON escaping inflates the wire
- * body above the raw content total, so budget well under 1 MB. */
+/* Per-batch content budget. Batching bounds client memory and keeps each
+ * relayed request under the 1 MB body cap of pre-KB_HTTP_BODY_MAX aimee-kb
+ * images (the server relays each batch on to kb); JSON escaping inflates the
+ * wire body above the raw content total, so budget well under 1 MB. */
 #define CLI_INGEST_BATCH_BYTES (600 * 1024)
 
 /* POST one batch of files (adopted/freed) as project `name`/`root`, polling the

@@ -64,7 +64,13 @@ static void fill_task(db1_coord_task_t *out, sqlite3_stmt *stmt)
 
 int db1_coord_job_create(int plan_id, int max_concurrent)
 {
-   if (plan_id <= 0)
+   /* A real plan_id (>0) ties the job to an execution plan. WFE_COORD_PLAN_ID is
+    * the one sanctioned exception: an AD-HOC coord job the workflow engine
+    * enqueues to orchestrate a single delegate with no plan-IR decomposition
+    * (the task flow claim->dispatch->complete runs on job_id alone; plan_id is
+    * only metadata). Everything else — 0, other negatives — stays invalid, so an
+    * accidental 0 from a plan-based caller is still caught. */
+   if (plan_id <= 0 && plan_id != WFE_COORD_PLAN_ID)
       return -1;
    if (max_concurrent <= 0)
       max_concurrent = DB1_COORD_DEFAULT_PAR;
@@ -87,7 +93,7 @@ int db1_coord_job_create(int plan_id, int max_concurrent)
 }
 
 int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, const char *role,
-                           const char *prompt, const char *cwd)
+                           const char *prompt, const char *cwd, const char *persona)
 {
    if (job_id <= 0)
       return -1;
@@ -97,8 +103,8 @@ int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, cons
 
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
-       "INSERT INTO coord_job_tasks (job_id, step_id, files, role, prompt, cwd)"
-       " VALUES (?, ?, ?, ?, ?, ?)";
+       "INSERT INTO coord_job_tasks (job_id, step_id, files, role, prompt, cwd, persona)"
+       " VALUES (?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, job_id);
@@ -110,6 +116,7 @@ int db1_coord_job_add_task(int job_id, int step_id, const char *files_json, cons
    sqlite3_bind_text(stmt, 4, (role && role[0]) ? role : "execute", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 5, prompt ? prompt : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 6, cwd ? cwd : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 7, (persona && persona[0]) ? persona : "engineer", -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(stmt);
    int task_id = (rc == SQLITE_DONE) ? (int)sqlite3_last_insert_rowid(db) : -1;
    sqlite3_finalize(stmt);
@@ -125,7 +132,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   if (sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
       return -1;
 
    sqlite3_stmt *stmt = NULL;
@@ -133,7 +140,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                     " WHERE job_id = ? AND status IN ('claimed', 'running')";
    if (sqlite3_prepare_v2(db, running_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_int(stmt, 1, job_id);
@@ -149,7 +156,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                     " ORDER BY id ASC";
    if (sqlite3_prepare_v2(db, pending_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_int(stmt, 1, job_id);
@@ -183,7 +190,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
 
    if (found_id < 0)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
 
@@ -192,7 +199,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
                                   " WHERE id = ? AND status = 'pending'";
    if (sqlite3_prepare_v2(db, claim_sql, -1, &stmt, NULL) != SQLITE_OK)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_bind_text(stmt, 1, delegate_name, -1, SQLITE_TRANSIENT);
@@ -200,7 +207,7 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
    if (sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) == 0)
    {
       sqlite3_finalize(stmt);
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      (void)db1_txn_end(db, "ROLLBACK");
       return -1;
    }
    sqlite3_finalize(stmt);
@@ -215,9 +222,9 @@ int db1_coord_job_claim_next(int job_id, const char *delegate_name, db1_coord_ta
       sqlite3_finalize(stmt);
    }
 
-   if (sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK)
+   if (db1_txn_end(db, "COMMIT") != 0)
    {
-      (void)sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      /* gate already released; a failed COMMIT auto-rolls-back in sqlite */
       return -1;
    }
 
@@ -258,6 +265,38 @@ static int task_update_and_refresh(int task_id, const char *sql, const char *val
    return 0;
 }
 
+static int task_update_and_refresh_owned(int task_id, const char *claimed_by, const char *sql,
+                                         const char *value)
+{
+   if (task_id <= 0 || !claimed_by || !claimed_by[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, value ? value : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 2, task_id);
+   sqlite3_bind_text(stmt, 3, claimed_by, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) == 0)
+   {
+      sqlite3_finalize(stmt);
+      return -1;
+   }
+   sqlite3_finalize(stmt);
+
+   static const char *jid_sql = "SELECT job_id FROM coord_job_tasks WHERE id = ?";
+   if (sqlite3_prepare_v2(db, jid_sql, -1, &stmt, NULL) != SQLITE_OK)
+      return 0;
+   sqlite3_bind_int(stmt, 1, task_id);
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      (void)db1_coord_job_refresh_status(sqlite3_column_int(stmt, 0));
+   sqlite3_finalize(stmt);
+   return 0;
+}
+
 int db1_coord_job_complete_task(int task_id, const char *result)
 {
    static const char *sql = "UPDATE coord_job_tasks SET status = 'done',"
@@ -270,6 +309,22 @@ int db1_coord_job_fail_task(int task_id, const char *error)
    static const char *sql = "UPDATE coord_job_tasks SET status = 'failed',"
                             " error = ? WHERE id = ? AND status IN ('claimed', 'running')";
    return task_update_and_refresh(task_id, sql, error);
+}
+
+int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result)
+{
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'done',"
+                            " result = ? WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')";
+   return task_update_and_refresh_owned(task_id, claimed_by, sql, result);
+}
+
+int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error)
+{
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'failed',"
+                            " error = ? WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')";
+   return task_update_and_refresh_owned(task_id, claimed_by, sql, error);
 }
 
 int db1_coord_job_release_task(int task_id)
@@ -315,6 +370,94 @@ int db1_coord_job_release_task_bounded(int task_id, int max_requeues)
    int ok = (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
    sqlite3_finalize(stmt);
    return ok;
+}
+
+int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by, int max_requeues)
+{
+   if (task_id <= 0 || !claimed_by || !claimed_by[0] || max_requeues <= 0)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'pending',"
+                            " claimed_by = '', claimed_at = '', result = '', error = '',"
+                            " preempt_requeues = preempt_requeues + 1"
+                            " WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')"
+                            " AND preempt_requeues < ?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int(stmt, 1, task_id);
+   sqlite3_bind_text(stmt, 2, claimed_by, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 3, max_requeues);
+   int rc = sqlite3_step(stmt);
+   int ok = (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
+   sqlite3_finalize(stmt);
+   return ok;
+}
+
+int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *requeued_out,
+                                int *failed_out)
+{
+   if (!claimed_by || !claimed_by[0] || max_requeues <= 0)
+      return -1;
+   if (requeued_out)
+      *requeued_out = 0;
+   if (failed_out)
+      *failed_out = 0;
+
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   int requeued = 0, failed = 0;
+   for (;;)
+   {
+      sqlite3_stmt *stmt = NULL;
+      static const char *sql = "SELECT t.id, t.preempt_requeues FROM coord_job_tasks t"
+                               " JOIN coord_jobs j ON j.id = t.job_id"
+                               " WHERE t.claimed_by = ? AND t.status IN ('claimed', 'running')"
+                               " AND j.status NOT IN ('cancelled', 'complete', 'failed') LIMIT 1";
+      if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+         return -1;
+      sqlite3_bind_text(stmt, 1, claimed_by, -1, SQLITE_TRANSIENT);
+      int step = sqlite3_step(stmt);
+      if (step == SQLITE_DONE)
+      {
+         sqlite3_finalize(stmt);
+         break;
+      }
+      if (step != SQLITE_ROW)
+      {
+         sqlite3_finalize(stmt);
+         return -1;
+      }
+      int task_id = sqlite3_column_int(stmt, 0);
+      int attempts = sqlite3_column_int(stmt, 1);
+      sqlite3_finalize(stmt);
+
+      if (attempts < max_requeues)
+      {
+         if (db1_coord_job_release_task_bounded_owned(task_id, claimed_by, max_requeues) != 0)
+            return -1;
+         requeued++;
+      }
+      else
+      {
+         if (db1_coord_job_fail_task_owned(
+                 task_id, claimed_by, "previous server exited; crash retry cap exhausted") != 0)
+            return -1;
+         failed++;
+      }
+   }
+
+   if (requeued_out)
+      *requeued_out = requeued;
+   if (failed_out)
+      *failed_out = failed;
+   return 0;
 }
 
 int db1_coord_job_get(int job_id, db1_coord_job_t *out)
@@ -560,7 +703,7 @@ int db1_coord_job_list_active_ids(int *out_ids, int max)
 
 int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, char *prompt_out,
                                 size_t prompt_cap, char *files_out, size_t files_cap, char *cwd_out,
-                                size_t cwd_cap)
+                                size_t cwd_cap, char *persona_out, size_t persona_cap)
 {
    if (task_id <= 0)
       return -1;
@@ -569,7 +712,8 @@ int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, ch
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "SELECT role, prompt, files, cwd FROM coord_job_tasks WHERE id = ?";
+   static const char *sql =
+       "SELECT role, prompt, files, cwd, persona FROM coord_job_tasks WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, task_id);
@@ -584,6 +728,8 @@ int db1_coord_task_get_dispatch(int task_id, char *role_out, size_t role_cap, ch
          db1_copy_col_text(files_out, files_cap, stmt, 2);
       if (cwd_out && cwd_cap > 0)
          db1_copy_col_text(cwd_out, cwd_cap, stmt, 3);
+      if (persona_out && persona_cap > 0)
+         db1_copy_col_text(persona_out, persona_cap, stmt, 4);
       rc = 0;
    }
    sqlite3_finalize(stmt);

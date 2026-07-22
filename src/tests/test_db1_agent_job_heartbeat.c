@@ -378,6 +378,83 @@ static void test_update_does_not_overwrite_cancelled(void)
    printf("  PASS: test_update_does_not_overwrite_cancelled\n");
 }
 
+static void test_restart_reconciliation_cancels_only_nonterminal_jobs(void)
+{
+   setup_db();
+   int pending = db1_agent_job_create("review", "pending", "", "owner");
+   int running = db1_agent_job_create("code", "running", "codex", "owner");
+   int running_partial = db1_agent_job_create("code", "running partial", "codex", "owner");
+   int done = db1_agent_job_create("review", "done", "codex", "owner");
+   int failed = db1_agent_job_create("review", "failed", "codex", "owner");
+   int cancelled = db1_agent_job_create("review", "cancelled", "codex", "owner");
+   assert(pending > 0 && running > 0 && running_partial > 0 && done > 0 && failed > 0 &&
+          cancelled > 0);
+   db1_agent_job_update(running, "running", 2, NULL);
+   db1_agent_job_update(running_partial, "running", 2, "partial output");
+   db1_agent_job_update(done, "done", 3, "complete");
+   db1_agent_job_update(failed, "failed", 3, "failed result");
+   db1_agent_job_update(cancelled, "cancelled", 3, "cancelled result");
+
+   /* Larger than the removed fixed buffer, proving restart reasons are lossless. */
+   const size_t reason_len = 2048;
+   char *reason = malloc(reason_len + 1);
+   assert(reason != NULL);
+   memset(reason, 'r', reason_len);
+   reason[reason_len] = '\0';
+   assert(db1_agent_job_cancel_nonterminal_on_restart(reason) == 3);
+   assert(db1_agent_job_cancel_nonterminal_on_restart("second restart") == 0);
+
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(pending, &row) == 0);
+   assert(strcmp(row.status, "cancelled") == 0);
+   assert(strlen(row.result) == strlen("cancelled: ") + reason_len);
+   assert(strncmp(row.result, "cancelled: ", strlen("cancelled: ")) == 0);
+   assert(strcmp(row.result + strlen("cancelled: "), reason) == 0);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_get(running, &row) == 0);
+   assert(strcmp(row.status, "cancelled") == 0);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_get(running_partial, &row) == 0);
+   assert(strcmp(row.status, "cancelled") == 0);
+   assert(strcmp(row.result, "partial output") == 0);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_get(done, &row) == 0);
+   assert(strcmp(row.status, "done") == 0);
+   assert(strcmp(row.result, "complete") == 0);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_get(failed, &row) == 0);
+   assert(strcmp(row.status, "failed") == 0);
+   assert(strcmp(row.result, "failed result") == 0);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_get(cancelled, &row) == 0);
+   assert(strcmp(row.status, "cancelled") == 0);
+   assert(strcmp(row.result, "cancelled result") == 0);
+   db1_agent_job_free(&row);
+
+   sqlite3_stmt *stmt = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT cancel_reason, cancelled_at FROM agent_jobs WHERE id = ?", -1,
+                             &stmt, NULL) == SQLITE_OK);
+   sqlite3_bind_int(stmt, 1, pending);
+   assert(sqlite3_step(stmt) == SQLITE_ROW);
+   const char *stored_reason = (const char *)sqlite3_column_text(stmt, 0);
+   const char *cancelled_at = (const char *)sqlite3_column_text(stmt, 1);
+   assert(stored_reason != NULL && strcmp(stored_reason, reason) == 0);
+   assert(cancelled_at != NULL && cancelled_at[0] != '\0');
+   sqlite3_finalize(stmt);
+   free(reason);
+
+   int default_reason = db1_agent_job_create("review", "new pending", "", "owner");
+   assert(default_reason > 0);
+   assert(db1_agent_job_cancel_nonterminal_on_restart(NULL) == 1);
+   assert(db1_agent_job_get(default_reason, &row) == 0);
+   assert(strcmp(row.result, "cancelled: orphaned by server restart") == 0);
+   db1_agent_job_free(&row);
+
+   teardown_db();
+   printf("  PASS: test_restart_reconciliation_cancels_only_nonterminal_jobs\n");
+}
+
 static void test_done_update_wins_cancel_complete_race(void)
 {
    setup_db();
@@ -415,31 +492,76 @@ static void test_failed_update_does_not_overwrite_cancelled(void)
    printf("  PASS: test_failed_update_does_not_overwrite_cancelled\n");
 }
 
-static void test_backfill_agent_name_from_agent_log(void)
+static void test_status_reads_do_not_run_global_agent_name_backfill(void)
 {
    setup_db();
    int job = db1_agent_job_create("review", "test", "", "owner");
    assert(job > 0);
-   db1_agent_job_update(job, "done", 4, "ok");
-
+   db1_agent_job_update(job, "done", 1, "ok");
    db1_agent_log_insert_row_t log_row = {
-       .agent_name = "llama-eval",
+       .agent_name = "historical-agent",
        .role = "review",
        .success = 1,
-       .turns = 4,
-       .tool_calls = 4,
+       .turns = 1,
+       .tool_calls = 0,
        .confidence = 80,
        .session_id = "test-session",
    };
    assert(db1_agent_log_insert(&log_row) > 0);
 
-   assert(db1_agent_job_backfill_agent_names_from_log() >= 1);
-   db1_agent_job_t row;
-   assert(db1_agent_job_get(job, &row) == 0);
-   assert(strcmp(row.agent_name, "llama-eval") == 0);
+   sqlite3 *db = db1_conn();
+   int changes_before_reads = sqlite3_total_changes(db);
+   for (int poll = 0; poll < 100; poll++)
+   {
+      db1_agent_job_t row;
+      assert(db1_agent_job_get(job, &row) == 0);
+      assert(row.agent_name[0] == '\0');
+      db1_agent_job_free(&row);
+
+      db1_agent_job_t recent[2];
+      int count = db1_agent_job_list_recent(recent, 2, 0);
+      assert(count >= 1);
+      int found = 0;
+      for (int i = 0; i < count; i++)
+      {
+         if (recent[i].id == job)
+         {
+            found = 1;
+            assert(recent[i].agent_name[0] == '\0');
+         }
+         db1_agent_job_free(&recent[i]);
+      }
+      assert(found);
+   }
+   assert(sqlite3_total_changes(db) == changes_before_reads);
 
    teardown_db();
-   printf("  PASS: test_backfill_agent_name_from_agent_log\n");
+   printf("  PASS: test_status_reads_do_not_run_global_agent_name_backfill\n");
+}
+
+static void test_routed_agent_name_survives_status_reads(void)
+{
+   setup_db();
+   int job = db1_agent_job_create("review", "test", "routed-agent", "owner");
+   assert(job > 0);
+   db1_agent_job_update(job, "done", 1, "ok");
+
+   sqlite3 *db = db1_conn();
+   int changes_before_reads = sqlite3_total_changes(db);
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strcmp(row.agent_name, "routed-agent") == 0);
+   db1_agent_job_free(&row);
+
+   db1_agent_job_t recent[1];
+   assert(db1_agent_job_list_recent(recent, 1, 0) == 1);
+   assert(recent[0].id == job);
+   assert(strcmp(recent[0].agent_name, "routed-agent") == 0);
+   db1_agent_job_free(&recent[0]);
+   assert(sqlite3_total_changes(db) == changes_before_reads);
+
+   teardown_db();
+   printf("  PASS: test_routed_agent_name_survives_status_reads\n");
 }
 
 int main(void)
@@ -457,10 +579,12 @@ int main(void)
    test_classify_final_response_uses_idle_threshold();
    test_classify_model_wait_does_not_use_tool_threshold();
    test_is_cancelled_round_trip();
+   test_restart_reconciliation_cancels_only_nonterminal_jobs();
    test_update_does_not_overwrite_cancelled();
    test_done_update_wins_cancel_complete_race();
    test_failed_update_does_not_overwrite_cancelled();
-   test_backfill_agent_name_from_agent_log();
+   test_status_reads_do_not_run_global_agent_name_backfill();
+   test_routed_agent_name_survives_status_reads();
    printf("ok\n");
    return 0;
 }

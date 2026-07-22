@@ -204,15 +204,6 @@ void msg_session_disable(const char *key, int ttl_ms, const char *reason)
    gw_stat_inc_reason("session_disabled_set", reason ? reason : "unknown");
 }
 
-void msg_session_sweep(void)
-{
-   long long now = util_now_ms();
-   pthread_mutex_lock(&g_lock);
-   if (now - g_last_sweep_ms >= MSG_SESSION_SWEEP_INTERVAL_MS)
-      sweep_now_locked(now);
-   pthread_mutex_unlock(&g_lock);
-}
-
 size_t msg_session_count(void)
 {
    long long now = util_now_ms();

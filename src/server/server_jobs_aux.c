@@ -226,7 +226,7 @@ int handle_coord_job_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int added = 0;
    for (int i = 0; i < plan.step_count; i++)
    {
-      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "");
+      int tid = db1_coord_job_add_task(job_id, plan.steps[i].id, "[]", "", "", "", "engineer");
       if (tid > 0)
          added++;
    }

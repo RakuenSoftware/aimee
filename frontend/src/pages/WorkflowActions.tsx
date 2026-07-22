@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import { Panel, Badge, Spinner, InlineStatus, EmptyState, Button } from "@rakuensoftware/smoothgui";
 import type { BadgeVariant } from "@rakuensoftware/smoothgui";
 import { renderMd } from "./chat/markdown";
 
@@ -29,6 +29,18 @@ interface WfEvent {
   detail: string;
   cost_usd: number;
   created_at: string;
+}
+// A configured trigger rule (aimee.yaml `trigger_rules`) that auto-starts runs.
+interface Trigger {
+  source: string;
+  event: string;
+  schedule: string;
+  mode: string;
+  template: string;
+  workspace: string;
+  max_spend_usd?: number;
+  origin?: "config" | "workflow";
+  last_error?: string;
 }
 
 const POLL_MS = 4000;
@@ -79,6 +91,21 @@ async function postJSON<T>(url: string, body: unknown): Promise<{ status: number
     /* empty body ok */
   }
   return { status: r.status, data };
+}
+
+async function loadWorkflowConfig(): Promise<Record<string, unknown>> {
+  try {
+    return (await getJSON<{ config: Record<string, unknown> }>("/api/workflow/config")).config || {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveWorkflowConfig(key: string, value: unknown, previousVersion?: string): Promise<{ ok: boolean; value?: unknown; error?: string }> {
+  const response = await postJSON<{ ok?: boolean; key?: string; value?: unknown; error?: string }>("/api/workflow/config/set", { key, value, ...(previousVersion ? { previous_version: previousVersion } : {}) });
+  return response.status >= 200 && response.status < 300 && response.data.ok === true && response.data.key === key && !response.data.error
+    ? { ok: true, value: response.data.value ?? value }
+    : { ok: false, error: response.data.error || `save failed (${response.status})` };
 }
 
 // A bare method call (POST/DELETE) with no body — used for the lifecycle actions.
@@ -173,6 +200,9 @@ export default function WorkflowActions() {
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState<Draft>(loadDraft);
   const [defs, setDefs] = useState<string[]>([]);
+  const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [triggerVersion, setTriggerVersion] = useState("");
+  const [triggersOpen, setTriggersOpen] = useState(true);
   const [submitMsg, setSubmitMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const afterRef = useRef(0); // events pagination cursor for the open proposal
@@ -192,6 +222,10 @@ export default function WorkflowActions() {
     getJSON<{ defs: { name: string }[] }>("/api/workflow/defs")
       .then((d) => setDefs((d.defs || []).map((x) => x.name)))
       .catch(() => setDefs([]));
+    // Configured trigger rules — what auto-starts runs (read-only view).
+    getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers")
+      .then((d) => { setTriggers(d.triggers || []); setTriggerVersion(d.version || ""); })
+      .catch(() => setTriggers([]));
   }, [refreshList]);
 
   // Persist the in-progress draft locally (device-local; cleared on logout).
@@ -413,35 +447,47 @@ export default function WorkflowActions() {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <strong style={{ fontSize: 16 }}>Workflows</strong>
           <Badge label={`${items.length}`} variant="neutral" />
-          <button onClick={refreshList} style={btn}>
+          <Button onClick={refreshList} size="md" title="Reload the proposal list.">
             Refresh
-          </button>
+          </Button>
         </div>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={startNew}
+          title="Start composing a new proposal to submit."
           style={{
-            ...btn,
             width: "100%",
-            background: composing ? "#eef4ff" : "#2563eb",
-            color: composing ? "#2563eb" : "#fff",
-            borderColor: "#2563eb",
             marginBottom: 8,
+            ...(composing ? { background: "#eef4ff", color: "#2563eb" } : {}),
           }}
         >
           + New proposal
-        </button>
-        <label style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}>
+        </Button>
+        <label
+          style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 6 }}
+          title="Show every run across all users, not just your own."
+        >
           <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
           Show all (operator)
         </label>
         {status && (
-          <div style={{ fontSize: 12, color: status.kind === "err" ? "#c00" : "#070", marginTop: 6 }}>
-            {status.msg}
+          <div style={{ marginTop: 6 }}>
+            <InlineStatus status={status} />
           </div>
         )}
+        <TriggersPanel
+          triggers={triggers}
+          onChange={setTriggers}
+          version={triggerVersion}
+          onVersion={setTriggerVersion}
+          open={triggersOpen}
+          onToggle={() => setTriggersOpen((v) => !v)}
+        />
+        <RunPolicyPanel />
         <div style={{ marginTop: 8 }}>
           {items.length === 0 && (
-            <div style={{ color: "#999", fontSize: 13 }}>No proposals yet.</div>
+            <EmptyState message="No proposals yet." inline />
           )}
           {items.map((it) => {
             const s = statusOf(it);
@@ -449,6 +495,7 @@ export default function WorkflowActions() {
               <div
                 key={it.id}
                 onClick={() => openProposal(it.id)}
+                title="Open this run to see its status and history."
                 style={{
                   padding: "8px 8px",
                   borderRadius: 6,
@@ -506,46 +553,53 @@ export default function WorkflowActions() {
                 (below) rather than resume. */}
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "4px 0 10px" }}>
               {canResume && (
-                <button onClick={() => void doLifecycle("resume")} disabled={acting} style={btn}>
+                <Button onClick={() => void doLifecycle("resume")} disabled={acting} size="md" title="Resume this paused run.">
                   ▶ Start
-                </button>
+                </Button>
               )}
               {canPause && (
-                <button onClick={() => void doLifecycle("pause")} disabled={acting} style={btn}>
+                <Button onClick={() => void doLifecycle("pause")} disabled={acting} size="md" title="Pause this active run.">
                   ⏸ Pause
-                </button>
+                </Button>
               )}
               {canStop && (
-                <button
+                <Button
+                  variant="danger"
+                  size="md"
                   onClick={() => void doLifecycle("stop")}
                   disabled={acting}
-                  style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
+                  title="Abandon this run; it cannot be resumed."
                 >
                   ⏹ Stop
-                </button>
+                </Button>
               )}
-              <button
+              <Button
+                variant="danger"
+                size="md"
                 onClick={() => void doLifecycle("delete")}
                 disabled={acting}
-                style={{ ...btn, background: "#fff5f5", color: "#c00", borderColor: "#e6b3b3", marginLeft: "auto" }}
+                style={{ marginLeft: "auto" }}
+                title="Permanently delete this run, its history, and proposal file."
               >
                 🗑 Delete
-              </button>
+              </Button>
               {actMsg && <span style={{ fontSize: 12, color: "#c00", flexBasis: "100%" }}>{actMsg}</span>}
             </div>
 
             {canDecide && (
               <Panel title={`Human gate · ${detail.stage}`}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => void decideGate("approve")} style={btn}>
+                  <Button onClick={() => void decideGate("approve")} size="md" title="Approve this gate and resume the run.">
                     Approve
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="md"
                     onClick={() => void decideGate("reject")}
-                    style={{ ...btn, background: "#fbeaea", color: "#a33", borderColor: "#e0a0a0" }}
+                    title="Reject at this gate."
                   >
                     Reject
-                  </button>
+                  </Button>
                   {gateMsg && <span style={{ fontSize: 12, color: "#667" }}>{gateMsg}</span>}
                 </div>
               </Panel>
@@ -567,12 +621,317 @@ export default function WorkflowActions() {
                   dangerouslySetInnerHTML={{ __html: renderMd(proposalMd) }}
                 />
               ) : (
-                <div style={{ color: "#999", fontSize: 13 }}>No proposal markdown.</div>
+                <EmptyState message="No proposal markdown." inline />
               )}
             </Panel>
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Run policy: trigger admission plus the autonomy safety caps that govern how many
+// workflows start and how far each one drives (trigger -> PR). Kept here under
+// Workflows because that is exactly what they tune. Config-backed + live; exported
+// Values saved here are the live runtime authority.
+const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool"; min?: number; max?: number }[] = [
+  {
+    key: "trigger.max_concurrent",
+    label: "Trigger admission cap",
+    kind: "int",
+    help: "Maximum active runs admitted across configured triggers. New proposals remain queued for a later scheduler pass when the cap is reached. Default 2. 0 = uncapped.",
+  },
+  {
+    key: "trigger.scan_interval_secs",
+    label: "Proposal scan interval",
+    kind: "int",
+    help: "Seconds between live scans of configured pending-proposal directories. Default 5.",
+  },
+  {
+    key: "autonomy.auto_resume_cap_parks",
+    label: "Auto-resume wall-cap parks",
+    kind: "bool",
+    help: "When on (default), a run that hits its per-resume wall-clock window is resumed so it keeps going instead of being abandoned. Bounded by max auto-resumes.",
+  },
+  {
+    key: "autonomy.max_wall_secs",
+    label: "Max wall seconds / resume",
+    kind: "int",
+    help: "Per-resume wall-clock cap in seconds. On breach the run parks and (if auto-resume is on) is given a fresh window. Default 1800.",
+  },
+  {
+    key: "autonomy.max_turns",
+    label: "Max turns / run",
+    kind: "int",
+    help: "Cumulative per-run turn cap — the ultimate runaway backstop (auto-resume does not reset it). Default 300.",
+  },
+  {
+    key: "autonomy.max_resumes",
+    label: "Max auto-resumes / run",
+    kind: "int",
+    help: "How many times a run may auto-resume before the reaper is allowed to abandon it. Default 50. 0 = never auto-resume.",
+  },
+  {
+    key: "autonomy.stale_abandon_secs",
+    label: "Stale-abandon grace (s)",
+    kind: "int",
+    help: "Grace before a stuck/capped park is reaped -> abandoned. Default 3600. 0 disables the reaper.",
+  },
+  {
+    key: "autonomy.concurrency",
+    label: "Concurrency",
+    kind: "int",
+    help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
+  },
+  {
+    key: "autonomy.delegate_pending_secs",
+    label: "Unassigned delegate lease (s)",
+    kind: "int",
+    min: 2,
+    max: 3600,
+    help: "Seconds an admitted delegate job may remain pending without an assigned eligible agent before it is cancelled and safely retried. Live range 2–3600; default 120.",
+  },
+];
+
+// Collapsible run-policy editor: loads the autonomy.* config on first open and writes
+// each change back via the same /api/config/set the Settings page uses.
+function RunPolicyPanel() {
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (open && cfg === null) loadWorkflowConfig().then(setCfg);
+  }, [open, cfg]);
+  const save = async (key: string, value: unknown) => {
+    setSaving(key);
+    setErr(null);
+    const r = await saveWorkflowConfig(key, value);
+    setSaving(null);
+    if (r.ok) setCfg((c) => ({ ...(c || {}), [key]: r.value }));
+    else setErr(`${key}: ${r.error}`);
+  };
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+      <div
+        onClick={() => setOpen((v) => !v)}
+        style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>⚙ Run policy</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>admission + autonomy caps</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {cfg === null ? (
+            <div style={{ fontSize: 12, color: "#999" }}>Loading…</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: "#999", lineHeight: 1.4, marginBottom: 6 }}>
+                Admission, safety caps, and auto-resume for autonomous runs. Changes apply live.
+              </div>
+              {RUN_POLICY_FIELDS.map((f) => (
+                <div
+                  key={f.key}
+                  title={f.help}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}
+                >
+                  <span style={{ fontSize: 12, width: 190 }}>{f.label}</span>
+                  {f.kind === "bool" ? (
+                    <input
+                      type="checkbox"
+                      checked={!!cfg?.[f.key]}
+                      onChange={(e) => save(f.key, e.target.checked)}
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      min={f.min}
+                      max={f.max}
+                      defaultValue={Number(cfg?.[f.key] ?? 0)}
+                      style={{
+                        width: 90,
+                        fontFamily: "ui-monospace, monospace",
+                        fontSize: 12,
+                        padding: "2px 4px",
+                      }}
+                      onBlur={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const inRange =
+                          !Number.isNaN(v) &&
+                          (f.min === undefined || v >= f.min) &&
+                          (f.max === undefined || v <= f.max);
+                        if (!inRange) {
+                          setErr(`${f.label} must be between ${f.min ?? 0} and ${f.max ?? "the supported maximum"}.`);
+                          e.currentTarget.value = String(cfg?.[f.key] ?? 0);
+                          return;
+                        }
+                        if (v !== Number(cfg?.[f.key])) save(f.key, v);
+                      }}
+                    />
+                  )}
+                  {saving === f.key && <span style={{ fontSize: 11, color: "#999" }}>saving…</span>}
+                </div>
+              ))}
+              {err && <div style={{ fontSize: 11, color: "#c00", marginTop: 4 }}>{err}</div>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The configured trigger rules that auto-start runs, rendered as a compact,
+// collapsible section above the run list. This is the GUI's answer to "what is
+// wired to fire a workflow, and which workflow does it start" — read-only; rules
+// are edited in aimee.yaml. Empty => a hint that runs start only from a manual
+// submit (the + New proposal button).
+function TriggersPanel({
+  triggers,
+  onChange,
+  version,
+  onVersion,
+  open,
+  onToggle,
+}: {
+  triggers: Trigger[];
+  onChange: (triggers: Trigger[]) => void;
+  version: string;
+  onVersion: (version: string) => void;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const persist = async (next: Trigger[]) => {
+    setSaving(true);
+    setError("");
+    const value = next.filter((t) => t.origin !== "workflow").map((t) => ({
+      source: t.source || "watch-dir",
+      event: t.event || "docs/proposals/pending",
+      schedule: t.schedule,
+      mode: t.mode || "autonomous",
+      pipeline: {
+        template: t.template,
+        workspace: t.workspace,
+        ...(t.max_spend_usd ? { max_spend_usd: t.max_spend_usd } : {}),
+      },
+    }));
+    const result = await saveWorkflowConfig("trigger_rules", value, version);
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error || "save failed; reloading current trigger configuration");
+      try {
+        const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
+        onChange(current.triggers || []);
+        onVersion(current.version || "");
+      } catch { /* preserve the visible error */ }
+    } else {
+      const current = await getJSON<{ triggers: Trigger[]; version: string }>("/api/workflow/triggers");
+      onChange(current.triggers || []);
+      onVersion(current.version || "");
+    }
+  };
+  const add = () => onChange([...triggers, { source: "watch-dir", event: "docs/proposals/pending", schedule: "", mode: "autonomous", template: "build", workspace: "" }]);
+  const remove = (index: number) => persist(triggers.filter((_, i) => i !== index));
+  const update = (index: number, patch: Partial<Trigger>) => {
+    const next = triggers.map((t, i) => i === index ? { ...t, ...patch } : t);
+    onChange(next);
+  };
+  return (
+    <div style={{ marginTop: 10, borderTop: "1px solid #eee", paddingTop: 8 }}>
+      <div
+        onClick={onToggle}
+        style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}
+      >
+        <span style={{ fontSize: 11, color: "#999", width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>⚡ Triggers</span>
+        <Badge label={`${triggers.length}`} variant="neutral" />
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#aaa" }}>auto-start</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6 }}>
+          {triggers.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#999", lineHeight: 1.4 }}>
+              No triggers configured — runs start from a manual submit (+ New proposal).
+            </div>
+          ) : (
+            triggers.map((t, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <TriggerCard t={t} />
+                {t.origin === "workflow" ? (
+                  <div style={{ fontSize: 11, color: "#777", marginTop: 4 }}>Configured by the saved workflow’s trigger.watch-dir start node. Edit that node to change or disarm it.</div>
+                ) : (<>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 4 }}>
+                  <input value={t.workspace} placeholder="workspace path" style={inp} onChange={(e) => update(i, { workspace: e.target.value })} />
+                  <input value={t.template} placeholder="workflow" style={inp} onChange={(e) => update(i, { template: e.target.value })} />
+                  <input value={t.event} placeholder="docs/proposals/pending" style={inp} onChange={(e) => update(i, { event: e.target.value })} />
+                  <input value={t.schedule} placeholder="git ref (auto if blank)" style={inp} onChange={(e) => update(i, { schedule: e.target.value })} />
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <select value={t.mode} style={inp} onChange={(e) => update(i, { mode: e.target.value })}>
+                    <option value="autonomous">autonomous</option><option value="interactive">interactive</option>
+                  </select>
+                  <Button size="sm" onClick={() => persist(triggers)} disabled={saving || !t.workspace || !t.template}>save</Button>
+                  <Button size="sm" onClick={() => remove(i)} disabled={saving}>remove</Button>
+                </div>
+                </>)}
+              </div>
+            ))
+          )}
+          <Button size="sm" onClick={add} disabled={saving}>+ trigger</Button>
+          {error && <div style={{ color: "#c00", fontSize: 11 }}>{error}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One trigger rule as a compact card: what fires it (source + event/schedule),
+// which workflow it starts, how it runs (mode), and where (workspace).
+function TriggerCard({ t }: { t: Trigger }) {
+  const isCron = t.source === "cron";
+  const isWatch = t.source === "watch-dir" || t.source === "proposals";
+  // The "fires when" phrase, per source: a watched dir, a cron schedule, else the raw event.
+  const fires = isCron
+    ? `cron ${t.schedule || "(unset)"}`
+    : isWatch
+      ? `watches ${t.event || "docs/proposals/pending"}`
+      : t.event || t.source;
+  const interactive = t.mode === "interactive";
+  return (
+    <div
+      style={{
+        border: "1px solid #f0f0f0",
+        borderRadius: 6,
+        padding: "6px 8px",
+        marginBottom: 4,
+        background: "#fafbfc",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <Badge label={t.source} variant="running" />
+        <span style={{ fontSize: 12, color: "#555", overflowWrap: "anywhere" }}>{fires}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "#999" }}>→</span>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{t.template || "(no workflow)"}</span>
+        <Badge
+          label={interactive ? "interactive" : "autonomous"}
+          variant={interactive ? "warning" : "success"}
+        />
+      </div>
+      {t.last_error && <div style={{ marginTop: 4, color: "#c00", fontSize: 11 }}>{t.last_error}</div>}
+      {t.workspace && (
+        <div style={{ fontSize: 11, color: "#aaa", fontFamily: "monospace", marginTop: 3, overflowWrap: "anywhere" }}>
+          {t.workspace}
+          {typeof t.max_spend_usd === "number" && t.max_spend_usd > 0
+            ? ` · cap $${t.max_spend_usd.toFixed(2)}`
+            : ""}
+        </div>
+      )}
     </div>
   );
 }
@@ -710,6 +1069,7 @@ function Composer({
             onChange={(e) => update({ workflow: e.target.value })}
             style={inp}
             disabled={busy}
+            title="Workflow to run this proposal through end-to-end."
           >
             {workflows.map((w) => (
               <option key={w} value={w}>
@@ -750,18 +1110,20 @@ function Composer({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <strong style={{ fontSize: 13 }}>Delegate draft — preview</strong>
-            <button
+            <Button
+              variant="primary"
+              size="md"
               onClick={() => {
                 update({ body: preview });
                 setPreview(null);
               }}
-              style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+              title="Replace the proposal body with this generated draft."
             >
               Use this draft
-            </button>
-            <button onClick={() => setPreview(null)} style={btn}>
+            </Button>
+            <Button onClick={() => setPreview(null)} size="md" title="Discard this draft preview and keep your current body.">
               Discard
-            </button>
+            </Button>
             <span style={{ fontSize: 11, color: "#888" }}>Replaces the body above.</span>
           </div>
           <div
@@ -772,19 +1134,31 @@ function Composer({
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-        <button
+        <Button
+          variant="primary"
+          size="md"
           onClick={onSubmit}
           disabled={busy}
-          style={{ ...btn, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}
+          title="Submit the proposal and start the selected workflow."
         >
           {submitting ? "Submitting…" : `Submit → run "${draft.workflow || "build"}"`}
-        </button>
-        <button onClick={() => void generate()} disabled={busy} style={btn}>
+        </Button>
+        <Button
+          size="md"
+          onClick={() => void generate()}
+          disabled={busy}
+          title="Generate a proposal draft from your title and notes (shown as a preview to accept)."
+        >
           {drafting ? "Drafting…" : "✨ Draft with a delegate"}
-        </button>
-        <button onClick={() => (browsing ? setBrowsing(false) : openBrowser())} disabled={busy} style={btn}>
+        </Button>
+        <Button
+          size="md"
+          onClick={() => (browsing ? setBrowsing(false) : openBrowser())}
+          disabled={busy}
+          title="Browse the project checkout and load a .md file as the proposal."
+        >
           {browsing ? "Close browser" : "📂 Load from project"}
-        </button>
+        </Button>
         {submitMsg && <span style={{ fontSize: 12, color: "#c00" }}>{submitMsg}</span>}
         {draftErr && <span style={{ fontSize: 12, color: "#c00" }}>{draftErr}</span>}
       </div>
@@ -915,7 +1289,7 @@ function StatusHeader({ item }: { item: Item }) {
 }
 
 function Timeline({ events }: { events: WfEvent[] }) {
-  if (!events.length) return <div style={{ color: "#999", fontSize: 13 }}>No events yet.</div>;
+  if (!events.length) return <EmptyState message="No events yet." inline />;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
       {events.map((e) => (
@@ -959,14 +1333,6 @@ function Field({ k, v }: { k: string; v: string }) {
   );
 }
 
-const btn: React.CSSProperties = {
-  fontSize: 13,
-  padding: "4px 10px",
-  border: "1px solid #ccc",
-  borderRadius: 4,
-  background: "#fff",
-  cursor: "pointer",
-};
 const inp: React.CSSProperties = {
   fontSize: 13,
   padding: "5px 7px",

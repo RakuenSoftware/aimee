@@ -238,5 +238,153 @@ class TestRunArmCLive(unittest.TestCase):
         self.assertIsNone(rec["resolved"])             # graded later by S5
 
 
+
+class TestRunArmCBudgetTelemetry(unittest.TestCase):
+    """Regression: ``run_arm_c_supervised`` must emit the caller-attributable
+    budget telemetry so the auditor can replay the spend timeline. Until this
+    revision ``_budget.ledger.entries`` and ``_budget.ledger.escalations``
+    disappeared at function return because the local ``_budget`` was discarded."""
+
+    def setUp(self):
+        self._orig = S._FAKE
+        S._FAKE = False
+        self.addCleanup(lambda: setattr(S, "_FAKE", self._orig))
+
+    def test_run_record_carries_ledger_telemetry(self):
+        from benchmarks.coding import swebench_agentic_harness as H
+        from benchmarks.coding import swebench_live_transport as LT
+
+        def fake_dispatch(role, prompt, **kw):
+            if role == "review":
+                return LT.DispatchOutcome(
+                    100, "done", '{"action":"select","worker_id":"w1"}',
+                    "codex", "deleg-s-1-100", 2, 1,
+                )
+            wid = kw.get("via")
+            return LT.DispatchOutcome(
+                10, "done",
+                f"```diff\ndiff --git a/{wid} b/{wid}\n+fix\n```",
+                wid, f"deleg-w-1-{wid}", 3, 1,
+            )
+
+        inst = {"instance_id": "sympy__sympy-1", "repo": "sympy/sympy",
+                "base_commit": "0" * 40, "problem": "bug"}
+        rec = S.run_arm_c_supervised(
+            inst, workers=["w1"], n=1,
+            allocator=H.EnvAllocator("/tmp/c"), budget=H.LoopBudget(),
+            primary_agent="codex", primary_model="gpt-5.5",
+            dispatch=fake_dispatch,
+        )
+        # The four telemetry fields the auditor needs to replay the run:
+        for key in ("primary_tokens_by_turn", "primary_tokens_total",
+                    "supervision_budget_remaining", "budget_entries",
+                    "budget_escalations", "budget_drift_findings",
+                    "budget_cap_events", "primary_rejections"):
+            self.assertIn(key, rec,
+                          f"run record missing audit telemetry: {key!r}")
+        # budget_entries must include the primary-turn sources and the gate open.
+        # Per-turn distinct: each record_turn call carries a unique nonce suffix
+        # so the auditor sees one entry per call rather than one collapsed row
+        # per turn_index. Accept either the suffixed or bare form.
+        sources = [e["source"] for e in rec["budget_entries"]]
+        self.assertTrue(
+            any(s == "primary.turn:0" or s.startswith("primary.turn:0#")
+                for s in sources),
+            f"no primary.turn:0 entry: {sources!r}",
+        )
+        # Drift findings: a well-behaved run produces an empty list, not a
+        # missing key (drift detection is now wired into the audit record).
+        self.assertIsInstance(rec["budget_drift_findings"], list)
+        self.assertEqual(rec["budget_drift_findings"], [])
+
+    def test_primary_tokens_by_turn_is_per_turn_not_aggregate(self):
+        """F4: reviewer blocker. primary_tokens_by_turn must be the per-API-turn curve,
+        not the one-point job aggregate.
+
+        Without this fix the supervisor emitted a single point whose value was
+        the aggregate of all primary turns, making within-run context drift
+        undetectable. The invariant now is: for N primary API/model turns
+        there are >= N distinct points on the curve, each one row in
+        ``per_turn_primary``.
+        """
+        from benchmarks.coding.supervision_budget import BudgetLedger, Supervisor
+        # Simulate a 5-turn primary supervisor with rising per-turn spend so
+        # the curve is monotonically increasing and easy to inspect.
+        L = BudgetLedger(starting_balance=200000)
+        sup = Supervisor(ledger=L, cap=16000)
+        per_turn_spend = [1000, 1200, 1400, 1600, 2000]
+        for i, tokens in enumerate(per_turn_spend):
+            accepted, _ = sup.try_record_turn(i, tokens, caller="run_arm_c_supervised")
+            self.assertTrue(accepted, f"turn {i} was refused ({tokens}t)")
+        # Five primary turns -> five distinct points. Previously this was 1.
+        self.assertEqual(len(L.turn_boundaries), 5)
+        self.assertEqual(L.turn_boundaries, [1000, 2200, 3600, 5200, 7200])
+        self.assertEqual(sup.primary_tokens_by_turn, [1000, 2200, 3600, 5200, 7200])
+        # Each per_turn_primary row carries the per-call headline so the
+        # auditor sees ONE row per call (not one per turn_index).
+        self.assertEqual(len(L.per_turn_primary), 5)
+        for i, row in enumerate(L.per_turn_primary):
+            self.assertEqual(row["primary_tokens_this_turn"], per_turn_spend[i])
+            self.assertEqual(row["turn_index"], i)
+
+    def test_primary_rejections_appear_in_audit_when_budget_exhausted(self):
+        """F5 invariant: when primary_budget is exhausted, the rejection is
+        recorded on the ledger instead of being raised out of the run.
+
+        Reviewer evidence: 'uncaught RuntimeError aborts runs that exhaust
+        primary budget'. The new try_record_turn path:
+          - does NOT raise,
+          - returns (False, running_total),
+          - appends a row to ``primary_rejections`` with caller + attempted +
+            primary_spent + primary_budget for the auditor to inspect.
+        """
+        from benchmarks.coding.supervision_budget import BudgetLedger, Supervisor
+        L = BudgetLedger(starting_balance=512, primary_budget=300)
+        sup = Supervisor(ledger=L, cap=16000)
+        # First two turns fit within the budget.
+        a, _ = sup.try_record_turn(0, 100, caller="arm_c")
+        b, _ = sup.try_record_turn(1, 150, caller="arm_c")
+        self.assertTrue(a and b)
+        # Third turn would push past primary_budget: refused, recorded.
+        c, total = sup.try_record_turn(2, 999, caller="arm_c")
+        self.assertFalse(c)
+        self.assertEqual(total, 250)  # running total unchanged on rejection
+        self.assertEqual(len(L.primary_rejections), 1)
+        rej = L.primary_rejections[0]
+        self.assertEqual(rej["turn_index"], 2)
+        self.assertEqual(rej["attempted"], 999)
+        self.assertEqual(rej["primary_spent_at_reject"], 250)
+        self.assertEqual(rej["primary_budget"], 300)
+        self.assertEqual(rej["caller"], "arm_c")
+        # F4 (roundtable): the curve records a row for every turn, so drift
+        # detection is not blind at peak usage. On refusal the running balance
+        # is unchanged but the curve point still exists (equals prior balance).
+        self.assertEqual(len(L.turn_boundaries), 3)
+        self.assertEqual(L.turn_boundaries, [100, 250, 250])
+        # Per-turn observed view carries the actual per-turn tokens
+        # (accepted AND refused) so drift detection has per-turn shape.
+        self.assertEqual(L.primary_tokens_observed_by_turn, [100, 150, 999])
+
+    def test_frame_cap_audit_records_truncation(self):
+        """F1 invariant: a truncated frame leaves a cap_events row.
+
+        Reviewer evidence: 'cap result discarded with no audit'. The
+        Supervisor.cap_digest facade now records every cap call (truncated or
+        not) on ``cap_events`` so a downstream auditor can see WHEN a digest
+        was truncated and by HOW MUCH.
+        """
+        from benchmarks.coding.supervision_budget import BudgetLedger, Supervisor
+        L = BudgetLedger()
+        sup = Supervisor(ledger=L, cap=1024)
+        # Run a clean under-cap frame first.
+        sup.cap_digest("short digest", caller="run_arm_c_supervised", kind="frame")
+        # Now a frame that overflows the cap.
+        sup.cap_digest("x" * 20000, caller="run_arm_c_supervised", kind="frame")
+        # Two cap events recorded, one truncated one not.
+        self.assertEqual(len(L.cap_events), 2)
+        self.assertFalse(L.cap_events[0]["truncated"])
+        self.assertTrue(L.cap_events[1]["truncated"])
+        self.assertEqual(L.cap_events[1]["cap"], 1024)
+        self.assertGreater(L.cap_events[1]["original_tokens"], L.cap_events[1]["capped_tokens"])
 if __name__ == "__main__":
     unittest.main()

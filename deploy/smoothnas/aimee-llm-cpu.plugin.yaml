@@ -1,0 +1,59 @@
+apiVersion: smoothnas.io/v1
+kind: Plugin
+metadata:
+  name: aimee-llm-cpu
+  version: 0.1.0
+  description: >-
+    aimee-llm-cpu — the PRE-BAKED CPU variant of aimee-llm. Same Vulkan
+    llama.cpp runtime + gateway (embed / rerank / synth), but the cpu-tier GGUFs
+    are baked INTO the image (AIMEE_LLM_BAKE_TIER=cpu), so it serves offline with
+    no multi-GB first-boot download. This is the pure-CPU appliance LLM that, with
+    aimee-server + aimee-kb, replaces the all-in-one aimee-combined. For a GPU
+    host use the aimee-llm plugin instead (model-less, downloads its tier).
+  vendor: RakuenSoftware
+  homepage: https://github.com/RakuenSoftware/aimee
+profiles:
+  - default-limits
+  # No gpu-amd profile: this is the CPU tier (NGL=0), no GPU passthrough.
+services:
+  - name: llm
+    artifact:
+      type: oci-image
+      # Versioned + :latest publishing is owned by main (auto-release.yml ->
+      # publish-images.yml, the aimee-llm-cpu matrix leg). The cpu-tier GGUFs are
+      # baked in at build time, so there is no runtime download and no tier switch.
+      image: ghcr.io/rakuensoftware/aimee-llm-cpu:latest
+    container:
+      restartPolicy: unless-stopped
+    env:
+      # CPU only: the tier's models run on the CPU, no GPU offload.
+      AIMEE_LLM_NGL: "0"
+      # cpu tier (1024-dim embed). This MUST match the tier baked into the image
+      # (AIMEE_LLM_BAKE_TIER=cpu): the supervisor finds the baked GGUFs + their
+      # .ready markers and serves immediately, downloading nothing.
+      AIMEE_LLM_TIER: "cpu"
+      # Gateway port. 8742 (aimee's 874x range: server 8740, kb 8741) — same as the
+      # GPU aimee-llm plugin; the two are mutually exclusive on one host (a CPU host
+      # runs THIS, a GPU host runs aimee-llm). Keep off any port another installed
+      # plugin host-exposes.
+      AIMEE_LLM_PORT: "8742"
+      # Auth-off, same rule as aimee-llm: the aimee-kb embed path sends NO bearer
+      # (memory_embed_http_post uses a NULL auth header), so when this backs the kb's
+      # AIMEE_EMBEDDER_URL it MUST run auth-off. Leave AIMEE_LLM_AUTH_TOKEN unset.
+      # AIMEE_LLM_AUTH_TOKEN: "<set-at-deploy-time-not-in-git>"
+    # NO models volume, and that is the point: the GGUFs live IN the image. A
+    # tier-bound bind at /models would OVERLAY (hide) the baked models with an empty
+    # host dir and force a download — defeating the pre-bake. With nothing mounted,
+    # the container uses the image's baked /models, and a container recreate re-pulls
+    # the same image with the same models: recreate-safe by construction, no
+    # persistent state to lose. (This is why the pure-CPU appliance sidesteps the
+    # volume-durability problem entirely.)
+    ports:
+      # The embed/rerank/synth gateway. hostExpose so the aimee-kb plugin can reach
+      # it across the runtime bridge at http://10.100.0.1:8742 — set the kb's
+      # AIMEE_EMBEDDER_URL to that. Not exposed off-host.
+      - name: gateway
+        port: 8742
+        protocol: tcp
+        expose: false
+        hostExpose: true

@@ -53,12 +53,10 @@ static void test_registry_and_caps(void)
 {
    const provider_cli_adapter_t *codex = provider_cli_adapter_get("codex");
    const provider_cli_adapter_t *claude = provider_cli_adapter_get("claude");
-   const provider_cli_adapter_t *gemini = provider_cli_adapter_get("gemini");
    const provider_cli_adapter_t *mistral = provider_cli_adapter_get("mistral");
 
    assert(codex != NULL);
    assert(claude != NULL);
-   assert(gemini != NULL);
    assert(mistral != NULL);
    assert(provider_cli_adapter_get("mistral-plan") == mistral);
    assert(provider_cli_adapter_get("vibe") == mistral);
@@ -76,15 +74,11 @@ static void test_registry_and_caps(void)
    assert(claude->spawn != NULL);
    assert(claude->parse_line != NULL);
    assert(claude->caps.proto_stability == PROVIDER_CLI_PROTO_STABLE);
-   assert(gemini->caps.supports_tool_use == 1);
-   assert(gemini->caps.proto_stability == PROVIDER_CLI_PROTO_NATIVE);
-   assert(gemini->spawn == NULL);
-   assert(gemini->execute != NULL);
-   assert(strcmp(gemini->native_provider, "gemini") == 0);
-   assert(strcmp(gemini->native_default_endpoint,
-                 "https://generativelanguage.googleapis.com/v1beta") == 0);
-   assert(strcmp(gemini->native_default_model, "gemini-2.5-flash") == 0);
-   assert(strcmp(gemini->native_api_key_env, "GEMINI_API_KEY") == 0);
+   /* The gemini CLI adapter is gone: it pinned the NATIVE Google endpoint
+    * (generativelanguage.googleapis.com/v1beta, GEMINI_API_KEY), which is exactly
+    * the bespoke path being retired. Pinned as unregistered so it cannot come
+    * back by accident. */
+   assert(provider_cli_adapter_get("gemini") == NULL);
    assert(mistral->caps.supports_tool_use == 1);
    assert(mistral->caps.proto_stability == PROVIDER_CLI_PROTO_NATIVE);
    assert(mistral->spawn == NULL);
@@ -187,68 +181,6 @@ static void test_claude_stream_json_does_not_duplicate_final_result(void)
    unlink(path);
 }
 
-static void test_gemini_native_adapter_execution(void)
-{
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "gemini-test");
-   snprintf(agent.provider, sizeof(agent.provider), "gemini");
-   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "gemini");
-   snprintf(agent.cli_cmd, sizeof(agent.cli_cmd), "/no/such/gemini");
-   agent.cli_idle_timeout_ms = 5000;
-   agent.max_tokens = 2345;
-
-   reset_seen_agent();
-   setenv("GEMINI_API_KEY", "unit-test-gemini-key", 1);
-   agent_result_t out;
-   assert(provider_cli_adapter_execute(provider_cli_adapter_get("gemini"), &agent, ".", "sys",
-                                       "user", &out) == 0);
-   assert(out.success == 1);
-   assert(out.response != NULL);
-   assert(strcmp(out.response, "native ok") == 0);
-   assert(strcmp(g_seen_system, "sys") == 0);
-   assert(strcmp(g_seen_user, "user") == 0);
-   assert(g_seen_max_tokens == 2345);
-   assert(g_seen_temperature < 0.0);
-   assert(strcmp(g_seen_agent.name, "gemini-test") == 0);
-   assert(strcmp(g_seen_agent.provider, "gemini") == 0);
-   assert(g_seen_agent.backend[0] == '\0');
-   assert(g_seen_agent.cli_kind[0] == '\0');
-   assert(g_seen_agent.cli_cmd[0] == '\0');
-   assert(strcmp(g_seen_agent.endpoint, "https://generativelanguage.googleapis.com/v1beta") == 0);
-   assert(strcmp(g_seen_agent.model, "gemini-2.5-flash") == 0);
-   assert(strcmp(g_seen_agent.auth_type, "none") == 0);
-   assert(g_seen_agent.api_key[0] == '\0');
-   assert(strstr(g_seen_agent.extra_headers, "x-goog-api-key: unit-test-gemini-key") != NULL);
-   free(out.response);
-   unsetenv("GEMINI_API_KEY");
-}
-
-static void test_gemini_native_bearer_mechanism(void)
-{
-   const provider_cli_adapter_t *gemini = provider_cli_adapter_get("gemini");
-   assert(gemini != NULL);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "gemini-bearer-test");
-   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "gemini");
-   snprintf(agent.api_key, sizeof(agent.api_key), "bearer-key");
-
-   setenv("GEMINI_API_KEY_AUTH_MECHANISM", "bearer", 1);
-   agent_t native_agent;
-   char err[256];
-   assert(provider_cli_adapter_prepare_native_agent(gemini, &agent, &native_agent, err,
-                                                    sizeof(err)) == 0);
-   assert(strcmp(native_agent.provider, "gemini") == 0);
-   assert(strcmp(native_agent.auth_type, "bearer") == 0);
-   assert(strcmp(native_agent.api_key, "bearer-key") == 0);
-   assert(strstr(native_agent.extra_headers, "x-goog-api-key") == NULL);
-   unsetenv("GEMINI_API_KEY_AUTH_MECHANISM");
-}
-
 static void test_mistral_native_adapter_execution(void)
 {
    const provider_cli_adapter_t *mistral = provider_cli_adapter_get("mistral-plan");
@@ -313,9 +245,9 @@ static void test_native_auth_cmd_uses_bearer_token_command(void)
 static void test_missing_and_invalid_cli_fail_cleanly(void)
 {
    assert(provider_cli_command_has_shell_operators("/bin/cat ; /bin/true") == 1);
-   assert(provider_cli_check_available("/bin/cat ; /bin/true", "gemini") == 0);
-   assert(provider_cli_check_available("/bin/cat", "gemini") == 1);
-   assert(provider_cli_check_available("/no/such/provider-cli", "gemini") == 0);
+   assert(provider_cli_check_available("/bin/cat ; /bin/true", "codex") == 0);
+   assert(provider_cli_check_available("/bin/cat", "codex") == 1);
+   assert(provider_cli_check_available("/no/such/provider-cli", "codex") == 0);
 }
 
 static void test_tool_result_format(void)
@@ -333,8 +265,6 @@ int main(void)
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();
    test_claude_stream_json_does_not_duplicate_final_result();
-   test_gemini_native_adapter_execution();
-   test_gemini_native_bearer_mechanism();
    test_mistral_native_adapter_execution();
    test_native_auth_cmd_uses_bearer_token_command();
    test_missing_and_invalid_cli_fail_cleanly();

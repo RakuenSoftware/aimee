@@ -7,7 +7,7 @@
 # all collisions instead of asserting). Re-run when config_load gains fields.
 import re, sys, os
 DIAG = "--diag" in sys.argv
-lines=open("src/config.c").read().split("\n")
+lines=open("src/modules/config/config.c").read().split("\n")
 import re as _re
 _s=next(i for i,l in enumerate(lines) if l.startswith("int config_load(config_t *cfg)"))
 _e=next(i for i in range(_s+1,len(lines)) if lines[i]=="}")

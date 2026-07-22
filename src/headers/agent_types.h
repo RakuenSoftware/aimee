@@ -69,6 +69,15 @@ struct cJSON;
 #define AGENT_MAX_EVAL_TASKS      64
 #define AGENT_MAX_COORD_AGENTS    4
 
+/* Request-layer evidence gate: require provider tool selection until one tool
+ * has returned usable evidence, but never force tools on a text-only final turn. */
+static inline int agent_require_initial_tool_choice(int policy_enabled,
+                                                    int successful_tool_calls,
+                                                    int tools_active)
+{
+   return policy_enabled && successful_tool_calls == 0 && tools_active;
+}
+
 /* Per-call HTTP timeout for one turn of the multi-turn tool loop.
  *   agent_timeout_ms  configured per-call timeout (also the per-call cap)
  *   total_timeout_ms  whole-loop budget (typically agent_timeout_ms * N)
@@ -239,6 +248,10 @@ typedef struct
    int timeout_ms;
    int enabled;
    int tools_enabled;
+   /* Per-invocation runtime policy (never serialized): require the first
+    * tool-bearing model turn to select a tool. The tool loop clears the
+    * requirement after the first call so the model can produce final text. */
+   int require_initial_tool_call;
    int inject_respond_tool;
    int recommended_sampling;
    agent_ablation_flags_t ablation;
@@ -274,6 +287,14 @@ typedef struct
     * — distinct from a client-only claude. The roundtable panel seats a
     * server-hosted, authenticated claude; a client-only one stays excluded. */
    int is_server_hosted;
+   /* 1 = this agent may ONLY serve as the primary; it is never a delegation
+    * target. 0 = delegate-eligible (subject to the structural rules in
+    * agent_is_available_for_routing). Replaces the former global
+    * config.claude_cli_delegate_enabled opt-in with a per-agent choice made at
+    * add time: the Web GUI pre-checks "Primary Agent Only" for a claude-oauth
+    * subscription (driving a personal Claude plan as an automated delegate may
+    * breach Anthropic's terms) and leaves it off for every other agent. */
+   int primary_only;
 } agent_t;
 
 typedef struct
@@ -283,6 +304,9 @@ typedef struct
    char default_agent[MAX_AGENT_NAME];
    char fallback_chain[MAX_FALLBACK][MAX_AGENT_NAME];
    int fallback_count;
+   /* Transient per-request routing contract: an explicit agent/provider pin
+    * must surface that agent's result and may never substitute a peer. */
+   int route_pinned;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;
@@ -301,6 +325,17 @@ typedef struct
     * distinct agents instead of N copies of the one default agent. When NULL,
     * routing is unchanged (role-based default route). */
    const char *agent;
+   /* Run this task WITH tools (default 0 = the historical plain completion, so no
+    * existing fan-out changes). Set by the review panel: a panelist holding only a
+    * diff cannot check whether the change is reachable, or whether a new file is
+    * product — the facts that decide if a change is real live outside the diff.
+    * With tools the task's role picks the toolset (`review` -> the index-only
+    * `review_indexed`: code_search / find_symbol / search_memory / search_docs);
+    * write tools stay off regardless. */
+   int use_tools;
+   /* Require at least one tool call before accepting a text-only turn. Used by
+    * evidence-gated reviews; ignored when use_tools is false. */
+   int require_initial_tool_call;
 } agent_task_t;
 
 typedef struct
@@ -334,6 +369,7 @@ typedef struct
    char error[512];
    int turns;
    int tool_calls;
+   int successful_tool_calls; /* executed calls with a non-empty, non-error result */
    int rescue_recoveries;
    int confidence;
    int abstained;

@@ -20,6 +20,11 @@ int wf_api_block_delete(const char *name, char *resp, int cap);
  * $AIMEE_HOME/workflows (name + valid + version). */
 int wf_api_list(char *resp, int cap);
 
+/* GET /v1/workflow/triggers -- the configured trigger rules (aimee.yaml
+ * `trigger_rules`) that auto-start runs. Returns {max_concurrent, triggers:[
+ * {source,event,schedule,mode,template,workspace,max_spend_usd?}]}. Read-only. */
+int wf_api_triggers(char *resp, int cap);
+
 /* GET /v1/workflow/defs/{name} -- one definition: canonical form, version, and a
  * structured node graph for rendering. 400 on an unsafe name, 404 if missing. */
 int wf_api_get(const char *name, char *resp, int cap);

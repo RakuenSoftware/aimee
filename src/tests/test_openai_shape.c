@@ -1,6 +1,7 @@
 /* test_openai_shape.c: unit tests for the OpenAI-compatible JSON shaping
  * helpers (pure — no sockets, no network, no agent execution). */
 #include "openai_shape.h"
+#include "aimee_errors.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
@@ -130,6 +131,29 @@ int main(void)
       assert(len > 0);
       assert(strstr(resp, "\"type\":\"invalid_request_error\""));
       assert(strstr(resp, "bad model"));
+      /* A plain HTTP-semantic error carries NO aimee code. */
+      assert(!strstr(resp, "\"code\""));
+   }
+
+   /* --- aimee-coded error envelope --- */
+   {
+      int len = openai_format_error_code(resp, sizeof(resp), "server_error", "no agent configured",
+                                         AIMEE_ERR_NO_PRIMARY);
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"server_error\""));
+      assert(strstr(resp, "no agent configured"));
+      /* aimee-internal faults stamp error.code (>=1000) into the body. */
+      assert(strstr(resp, "\"code\":1001"));
+      /* code 0 is identical to the plain formatter — no code field. */
+      openai_format_error_code(resp, sizeof(resp), "server_error", "x", 0);
+      assert(!strstr(resp, "\"code\""));
+      /* slug table stays in sync with the enum. */
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_NO_PRIMARY), "no_primary") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_ROUTE_UNRESOLVED), "route_unresolved") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_BREAKER_OPEN), "breaker_open") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT), "concurrency_limit") == 0);
+      assert(strcmp(aimee_err_slug(AIMEE_ERR_REQUEST_PIPELINE), "request_pipeline") == 0);
+      assert(strcmp(aimee_err_slug(4242), "unknown") == 0);
    }
 
    /* --- optional sampling-field readers --- */

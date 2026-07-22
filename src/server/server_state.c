@@ -1,6 +1,11 @@
 /* server_state.c: server handlers for memory, index, rules, working memory, dashboard, workspace */
 #include "server_state_internal.h"
 #include "aimee.h"
+#include "aimee_ir_metrics.h"
+#include "shadow_mirror.h"
+#include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
+#include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
+#include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "server.h"
 #include "dashboard.h"
 #include "render.h"               /* decision_to_json + db2_decision_log_list */
@@ -1447,6 +1452,84 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_AddItemToObject(resp, "vector", status);
       free(json_str);
    }
+   /* Canonical-IR shadow counters. The refactor's roundtable (Q6) required these to
+    * "detect parity drift in shadow before flipping the flag" — but until now
+    * aimee_ir_metric_get had NO callers, so they were incremented and never read.
+    * Write-only metrics cannot gate a rollout: without this, an IR-build failure
+    * silently falls back to the legacy translator and nothing can measure how often.
+    * Totals across wires; ir_path vs the *_fail counters is the fallback rate. */
+   {
+      cJSON *ir = cJSON_AddObjectToObject(resp, "ir");
+      if (ir)
+         for (int m = 0; m < AIMEE_IR_M__COUNT; m++)
+            cJSON_AddNumberToObject(ir, aimee_ir_metric_name((aimee_ir_metric_t)m),
+                                    (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
+   }
+
+   /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the
+    * mirror is best-effort) but it must be visible — a high drop rate means the
+    * in-flight cap is throttling coverage, not that parity is clean. */
+   {
+      cJSON *sm = cJSON_AddObjectToObject(resp, "shadow_mirror");
+      if (sm)
+      {
+         cJSON_AddNumberToObject(sm, "subscribers", (double)shadow_mirror_subscriber_count());
+         cJSON_AddNumberToObject(sm, "sent", (double)shadow_mirror_sent_count());
+         cJSON_AddNumberToObject(sm, "dropped", (double)shadow_mirror_dropped_count());
+         cJSON_AddNumberToObject(sm, "pruned", (double)shadow_mirror_pruned_count());
+      }
+   }
+
+   return send_and_free(conn, resp);
+}
+
+/* GET /v1/economizer/stats — user-facing view of ALL economizer telemetry in one place:
+ *   gateway  — live gateway-mutation counters (mutate attempted/applied, disables,
+ *              session-blocks, sampled token-reduction %, hard-bypass/disable reasons).
+ *              Process-lifetime counters; reset on restart.
+ *   tool_condense — realized tool-output condensation savings (bytes condensed vs
+ *              re-injected on page-back). Process-lifetime.
+ *   avoided  — persistent avoided-cost aggregate from the token-audit ledger (the
+ *              economizer's forecast/dedup "avoided" rows), all-time.
+ * Read-only; CAP_DASHBOARD_READ. Previously these counters had NO reachable surface. */
+int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   cJSON *resp = jo_ok();
+
+   cJSON *gw = cJSON_AddObjectToObject(resp, "gateway");
+   if (gw)
+      gw_stat_to_json(gw);
+
+   cJSON *tc = cJSON_AddObjectToObject(resp, "tool_condense");
+   if (tc)
+   {
+      tool_condense_totals_t t;
+      tool_condense_stats_snapshot(&t);
+      cJSON_AddNumberToObject(tc, "recognized", (double)t.recognized);
+      cJSON_AddNumberToObject(tc, "applied", (double)t.applied);
+      cJSON_AddNumberToObject(tc, "applied_raw_bytes", (double)t.applied_raw);
+      cJSON_AddNumberToObject(tc, "applied_final_bytes", (double)t.applied_final);
+      cJSON_AddNumberToObject(tc, "saved_bytes", (double)t.saved_bytes);
+      cJSON_AddNumberToObject(tc, "recovered", (double)t.recovered);
+      cJSON_AddNumberToObject(tc, "recovered_bytes", (double)t.recovered_bytes);
+      cJSON_AddNumberToObject(tc, "net_saved_bytes", (double)t.net_saved_bytes);
+   }
+
+   cJSON *av = cJSON_AddObjectToObject(resp, "avoided");
+   if (av)
+   {
+      db1_token_audit_spend_t sp;
+      memset(&sp, 0, sizeof sp);
+      /* 0 = all-time (see token_audit.h). Best-effort: on a DB error the fields stay 0. */
+      (void)db1_token_audit_spend_breakdown(0, &sp);
+      cJSON_AddNumberToObject(av, "avoided_cost_usd", sp.avoided_cost_usd);
+      cJSON_AddNumberToObject(av, "realized_cost_usd", sp.realized_cost_usd);
+      cJSON_AddNumberToObject(av, "estimated_cost_usd", sp.estimated_cost_usd);
+   }
+
    return send_and_free(conn, resp);
 }
 

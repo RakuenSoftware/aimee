@@ -310,9 +310,7 @@ static void test_doctor_reports_guardrails_semantic_counts(void)
 
    config_t cfg;
    config_load(&cfg);
-   cfg.guardrails_semantic_enabled = 1;
-   cfg.guardrails_semantic_dry_run = 0;
-   cfg.guardrails_semantic_advisory_only = 1;
+   snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "advisory");
    assert(config_save(&cfg) == 0);
    assert(db1_init(cfg.db1_path) == 0);
 
@@ -351,7 +349,7 @@ static void test_doctor_reports_guardrails_semantic_counts(void)
    assert(semantic != NULL);
    cJSON *message = cJSON_GetObjectItemCaseSensitive(semantic, "message");
    assert(cJSON_IsString(message));
-   assert(strstr(message->valuestring, "enabled=true dry_run=false advisory_only=true") != NULL);
+   assert(strstr(message->valuestring, "mode=advisory") != NULL);
    assert(strstr(message->valuestring, "7d warns: 1 prompts: 1 blocks: 1") != NULL);
 
    cJSON_Delete(root);

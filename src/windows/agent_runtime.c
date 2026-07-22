@@ -91,10 +91,11 @@ char *tool_bash(const char *command, int timeout_ms)
    return safe_strdup("{\"stdout\":\"\",\"stderr\":\"not supported on Windows\",\"exit_code\":-1}");
 }
 
-char *tool_read_file(const char *path, int offset, int limit)
+char *tool_read_file(const char *path, int offset, int limit, int raw)
 {
    (void)offset;
    (void)limit;
+   (void)raw; /* Windows minimal path: un-anchored bytes only */
    /* Basic read implementation for Windows */
    char resolved[MAX_PATH_LEN];
    const char *err = guardrails_validate_file_path(path, resolved, sizeof(resolved));
@@ -304,7 +305,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
    {
       cJSON *args = cJSON_Parse(arguments_json);
       cJSON *p = args ? cJSON_GetObjectItem(args, "path") : NULL;
-      char *result = tool_read_file(p && cJSON_IsString(p) ? p->valuestring : "", 0, 0);
+      char *result = tool_read_file(p && cJSON_IsString(p) ? p->valuestring : "", 0, 0, 1);
       cJSON_Delete(args);
       return result;
    }

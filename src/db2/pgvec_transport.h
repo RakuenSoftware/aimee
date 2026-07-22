@@ -171,6 +171,13 @@ int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
 /* Delete a single curator_code_unit_vectors row by point_id. */
 int pgvec_curator_code_unit_delete(int64_t point_id);
 
+/* Purge fan-out (webchat-project-lifecycle slice 2): delete every
+ * curator_code_unit_vectors row whose owning artifact is scoped to `project`
+ * (scope_kind='project' AND scope_id=project — the table has no project
+ * column). Returns rows deleted (>=0) or -1. Artifacts rows are left intact,
+ * mirroring the ingest force-clear behavior. */
+int pgvec_curator_code_unit_delete_project(const char *project);
+
 /* Search curator_code_unit_vectors by cosine distance.  which_vec selects the
  * named vector column to rank on: "intent", "signature" or "body" (any other
  * value, including NULL, returns -1).  def_kind is an optional equality

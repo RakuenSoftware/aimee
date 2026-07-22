@@ -23,7 +23,7 @@
 
 #include "cJSON.h"
 #include "db2_test_shim.h"
-#include "../headers/roadmap.h"
+#include "roadmap.h"
 #include "../db2/artifacts.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"

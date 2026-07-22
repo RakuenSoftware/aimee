@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Badge } from '@rakuensoftware/smoothgui';
-import type { BadgeVariant } from '@rakuensoftware/smoothgui';
+import { Badge, Button, Modal, EmptyState, DataTable } from '@rakuensoftware/smoothgui';
+import type { BadgeVariant, Column } from '@rakuensoftware/smoothgui';
 
 /* All fields of an audit row, in display order, for the detail modal. */
 const DETAIL_FIELDS: { key: keyof AuditRow; label: string }[] = [
@@ -42,12 +42,23 @@ function esc(s: unknown): string {
   return s == null ? '' : String(s);
 }
 
-const th: React.CSSProperties = {
-  textAlign: 'left', padding: '6px 10px', borderBottom: '1px solid #e0e0e0',
-  color: '#666', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px',
-  position: 'sticky', top: 0, background: '#fafafa', zIndex: 1,
-};
-const td: React.CSSProperties = { padding: '5px 10px', borderBottom: '1px solid #f2f2f2', fontSize: 12 };
+const AUDIT_COLUMNS: Column<AuditRow>[] = [
+  { key: 'ts', label: 'Time', render: r => <span style={{ whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</span> },
+  { key: 'actor', label: 'Actor', render: r => esc(r.actor) },
+  {
+    key: 'tool', label: 'Tool',
+    render: r => (
+      <span style={{ fontFamily: 'monospace' }}>
+        {esc(r.tool)}
+        {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
+      </span>
+    ),
+  },
+  { key: 'verdict', label: 'Verdict', render: r => <Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /> },
+  { key: 'mode', label: 'Mode', render: r => <span style={{ color: '#888' }}>{esc(r.mode)}</span> },
+  { key: 'reason_code', label: 'Reason', render: r => <span style={{ color: '#888' }}>{esc(r.reason_code)}</span> },
+  { key: 'task_id', label: 'Task', align: 'right', render: r => <span style={{ color: '#aaa' }}>{r.task_id || ''}</span> },
+];
 
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px', borderRadius: 4, border: '1px solid #ddd', background: '#fff',
@@ -65,14 +76,6 @@ export default function Logs() {
   const [actor, setActor] = useState('all');
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<AuditRow | null>(null);
-
-  // Close the detail modal on Escape.
-  useEffect(() => {
-    if (!selected) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selected]);
 
   // Paginated fetch (most-recent first). offset=0 replaces; offset>0 appends the
   // next older page. The audit ledger can be very large, so it is never loaded in
@@ -136,13 +139,13 @@ export default function Logs() {
             placeholder="filter tool…"
             style={{ ...selectStyle, width: 120 }}
           />
-          <select value={verdict} onChange={e => setVerdict(e.target.value)} style={selectStyle}>
+          <select value={verdict} onChange={e => setVerdict(e.target.value)} style={selectStyle} title="Filter rows to a single guardrail verdict.">
             {['all', 'allow', 'block', 'rewrite', 'approval_required'].map(v => <option key={v} value={v}>{v}</option>)}
           </select>
-          <select value={actor} onChange={e => setActor(e.target.value)} style={selectStyle}>
+          <select value={actor} onChange={e => setActor(e.target.value)} style={selectStyle} title="Filter rows by actor (primary agent or delegate).">
             {['all', 'primary', 'delegate'].map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <button onClick={load} style={{ ...selectStyle, cursor: 'pointer' }}>Refresh</button>
+          <Button size="sm" onClick={load} title="Reload the newest page of audit rows.">Refresh</Button>
           {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
         </div>
       </div>
@@ -150,95 +153,54 @@ export default function Logs() {
       {/* Table (scrolls) */}
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {filtered.length === 0 ? (
-          <div style={{ padding: 16, color: '#aaa', fontSize: 13 }}>
-            {loading ? 'Loading…' : 'No audit rows'}
-          </div>
+          loading ? (
+            <div style={{ padding: 16, color: '#aaa', fontSize: 13 }}>Loading…</div>
+          ) : (
+            <EmptyState message="No audit rows" inline />
+          )
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>{['Time', 'Actor', 'Tool', 'Verdict', 'Mode', 'Reason', 'Task'].map(h => <th key={h} style={th}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filtered.map((r, i) => (
-                <tr
-                  key={i}
-                  onClick={() => setSelected(r)}
-                  style={{ cursor: 'pointer' }}
-                  onMouseEnter={ev => (ev.currentTarget.style.background = '#f6f9ff')}
-                  onMouseLeave={ev => (ev.currentTarget.style.background = 'transparent')}
-                  title="Click for full detail"
-                >
-                  <td style={{ ...td, whiteSpace: 'nowrap', color: '#888' }}>{esc(r.ts).replace('T', ' ').replace('Z', '')}</td>
-                  <td style={td}>{esc(r.actor)}</td>
-                  <td style={{ ...td, fontFamily: 'monospace' }}>
-                    {esc(r.tool)}
-                    {r.command ? <span style={{ color: '#999' }}> · {esc(r.command)}</span> : null}
-                  </td>
-                  <td style={td}><Badge label={esc(r.verdict)} variant={verdictVariant(r.verdict)} /></td>
-                  <td style={{ ...td, color: '#888' }}>{esc(r.mode)}</td>
-                  <td style={{ ...td, color: '#888' }}>{esc(r.reason_code)}</td>
-                  <td style={{ ...td, textAlign: 'right', color: '#aaa' }}>{r.task_id || ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            columns={AUDIT_COLUMNS}
+            rows={filtered}
+            rowKey={(_r, i) => i}
+            onRowClick={r => setSelected(r)}
+          />
         )}
         {rows.length < total && (
           <div style={{ padding: 12, textAlign: 'center' }}>
-            <button
+            <Button
+              size="sm"
               onClick={loadMore}
               disabled={loadingMore}
-              style={{ ...selectStyle, cursor: 'pointer', padding: '6px 16px' }}
+              style={{ padding: '6px 16px' }}
             >
               {loadingMore ? 'Loading…' : `Load ${Math.min(PAGE, total - rows.length).toLocaleString()} more`}
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
+      {/* `open` is constant true: the surrounding `selected &&` already gates
+          mount/unmount, so Modal is only rendered when there is a row to show. */}
       {selected && (
-        <div
-          onClick={() => setSelected(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 30, background: 'rgba(0,0,0,0.35)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-          }}
+        <Modal
+          open
+          onClose={() => setSelected(null)}
+          title="Audit entry"
+          headerExtra={<Badge label={esc(selected.verdict)} variant={verdictVariant(selected.verdict)} />}
         >
-          <div
-            onClick={ev => ev.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: 8, maxWidth: 560, width: '100%',
-              maxHeight: '80vh', overflow: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px',
-              borderBottom: '1px solid #eee', position: 'sticky', top: 0, background: '#fff',
-            }}>
-              <strong style={{ fontSize: 14 }}>Audit entry</strong>
-              <Badge label={esc(selected.verdict)} variant={verdictVariant(selected.verdict)} />
-              <button
-                onClick={() => setSelected(null)}
-                style={{ ...selectStyle, cursor: 'pointer', marginLeft: 'auto' }}
-              >
-                Close
-              </button>
-            </div>
-            <div style={{ padding: '8px 16px 16px' }}>
-              {DETAIL_FIELDS.map(f => {
-                const v = selected[f.key];
-                return (
-                  <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
-                    <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
-                    <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
-                      {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+          {DETAIL_FIELDS.map(f => {
+            const v = selected[f.key];
+            return (
+              <div key={f.key} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #f4f4f4' }}>
+                <span style={{ width: 130, flexShrink: 0, color: '#888', fontSize: 12 }}>{f.label}</span>
+                <span style={{ fontSize: 13, fontFamily: 'monospace', overflowWrap: 'anywhere', minWidth: 0 }}>
+                  {v == null || v === '' ? <span style={{ color: '#bbb' }}>—</span> : String(v)}
+                </span>
+              </div>
+            );
+          })}
+        </Modal>
       )}
     </div>
   );

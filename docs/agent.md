@@ -163,6 +163,11 @@ files are reported as `SKIP`; steps without `paths:` still run. A step may set
 `AIMEE_VERIFY_CHANGED_FILES_FILE`, `AIMEE_VERIFY_BASELINE_REF`, and
 `AIMEE_VERIFY_CHANGED_ALL`.
 
+`.aimee/project.yaml` also accepts a `sandbox:` block that declares the Docker
+image a sandboxed delegate runs in for this repo — a pre-baked `image:`, a
+`from:`+`packages:` build, or a `dockerfile:`. See
+[Delegate Sandbox](DELEGATE_SANDBOX.md).
+
 ---
 
 ## Build & Test
@@ -181,13 +186,14 @@ Binaries land at repo root (`../aimee`, `../aimee-webchat`, `../aimee-server`, `
 ## PR Workflow
 
 ```
-git checkout -b feat/my-feature main
+git checkout -b feat/my-feature testing
 # implement
 git commit -m "feat: short description"
-gh pr create --title "feat: short description" --body "..."
+gh pr create --base testing --title "feat: short description" --body "..."
 ```
 
-PRs target `main`. Wait for CI before merging.
+Feature PRs target `testing`. After CI passes, merge them into `testing`.
+Only the protected promotion PR may flow from `testing` to `main`.
 
 ---
 

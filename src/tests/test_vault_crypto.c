@@ -16,6 +16,23 @@ static void test_random_distinct_and_sized(void)
    printf("  PASS: test_random_distinct_and_sized\n");
 }
 
+static void test_slot_aad_is_injective_and_legacy_is_bounded(void)
+{
+   uint8_t a[VAULT_ENVELOPE_AAD_MAX], b[VAULT_ENVELOPE_AAD_MAX];
+   size_t an = 0, bn = 0;
+   assert(vault_aad_build_v2("a|b", "c", "d", 1, a, sizeof(a), &an) == 0);
+   assert(vault_aad_build_v2("a", "b|c", "d", 1, b, sizeof(b), &bn) == 0);
+   assert(an != bn || memcmp(a, b, an) != 0);
+   assert(an > 20 && !memcmp(a, "kb.vault.envelope", strlen("kb.vault.envelope")));
+   assert(vault_aad_build_v1_safe("a|b", "c", "d", 1, a, sizeof(a), &an) == -1);
+   assert(vault_aad_build_v1_safe("a", "b", "c", 1, a, sizeof(a), &an) == 0);
+   assert(an == strlen("a|b|c|1") && !memcmp(a, "a|b|c|1", an));
+   assert(vault_aad_build_v2("", "", "", 1, a, sizeof(a), &an) == -1);
+   assert(vault_aad_build_v2("a", "b", "c", 0, a, sizeof(a), &an) == -1);
+   assert(vault_aad_build_v2("a", "b", "c", 1, a, 8, &an) == -1);
+   printf("  PASS: test_slot_aad_is_injective_and_legacy_is_bounded\n");
+}
+
 static void test_kek_derive_deterministic_and_salted(void)
 {
    uint8_t root[VAULT_ROOT_KEY_LEN];
@@ -222,6 +239,7 @@ static void test_scrypt_kek_derive(void)
 int main(void)
 {
    test_random_distinct_and_sized();
+   test_slot_aad_is_injective_and_legacy_is_bounded();
    test_kek_derive_deterministic_and_salted();
    test_scrypt_kek_derive();
    test_dek_wrap_roundtrip_and_tamper();

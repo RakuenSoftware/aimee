@@ -28,8 +28,18 @@
 #include "kb_http_console.h"
 #include "kb_http_accounts.h"
 #include "kb_http_governance.h"
+#include "kb_http_insights.h"
+#include "kb_http_budget.h"
+#include "kb_http_rate.h"
+#include "kb_http_servers.h"
+#include "kb_http_telemetry.h"
 #include "db2/enrollments.h"
 #include "kb_verifier.h"
+#include "kb_auth_oidc.h"
+#include "kb_identity.h"
+#include "kb_reqctx.h"
+#include "kb_http_models.h"
+#include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
 #include "db2/pgvec_kb_service.h"
@@ -38,6 +48,9 @@
 #include "db2/vector_index_ops.h"
 #include "db2/kb_runtime_state.h"
 #include "db2/corpus_jobs.h"
+#include "db2/code_index.h"
+#include "db2/pgvec_transport.h"
+#include "db2/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
 #include "log.h"
@@ -50,11 +63,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #define KB_HTTP_BACKLOG  16
 #define KB_HTTP_READ_MAX 4096
 #define KB_HTTP_RESP_MAX (1024 * 1024)
-
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
@@ -87,6 +98,7 @@ void send_response_ex(int fd, int status, const char *body, const char *request_
                         : status == 401 ? "Unauthorized"
                         : status == 404 ? "Not Found"
                         : status == 405 ? "Method Not Allowed"
+                        : status == 413 ? "Content Too Large"
                         : status == 500 ? "Internal Server Error"
                         : status == 503 ? "Service Unavailable"
                                         : "Bad Request";
@@ -592,18 +604,80 @@ static int kb_http_owner_required(char *out, int cap, const char *what)
    snprintf(out, (size_t)cap, "{\"error\":\"forbidden: %s requires the owner credential\"}", what);
    return 403;
 }
+
+/* ── webchat-project-lifecycle slice 2: purge-route helpers ─────────────── */
+
+/* Append one purge fan-out store outcome: a plain count on success (0 for the
+ * primitives that report no count), {"error":...} on failure. A failing store
+ * clears *all_ok but never stops the fan-out. */
+static void purge_store_add(cJSON *stores, const char *name, int rc, int *all_ok)
+{
+   if (rc < 0)
+   {
+      cJSON *e = cJSON_CreateObject();
+      if (e)
+         cJSON_AddStringToObject(e, "error", "delete failed");
+      cJSON_AddItemToObject(stores, name, e);
+      *all_ok = 0;
+      return;
+   }
+   cJSON_AddNumberToObject(stores, name, rc);
+}
+
+/* Serialize `resp` into out_buf and delete it. Returns `status`. */
+static int purge_respond(cJSON *resp, char *out_buf, int out_cap, int status)
+{
+   char *out = resp ? cJSON_PrintUnformatted(resp) : NULL;
+   snprintf(out_buf, (size_t)out_cap, "%s", out ? out : "{\"error\":\"out of memory\"}");
+   free(out);
+   cJSON_Delete(resp);
+   return out ? status : 500;
+}
+
+/* Parse the shared purge-route body {project, generation, purge_id}. Returns 0
+ * on success; otherwise writes a 400 body and returns -1. Generation/purge_id
+ * become the space-separated fence value, so embedded spaces are rejected. */
+static int purge_body_parse(const char *body, char *project, size_t project_cap, char *generation,
+                            size_t generation_cap, char *purge_id, size_t purge_id_cap,
+                            char *out_buf, int out_cap)
+{
+   project[0] = generation[0] = purge_id[0] = '\0';
+   if (!json_str(body, "project", project, project_cap) || !project[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
+      return -1;
+   }
+   if (!json_str(body, "generation", generation, generation_cap) || !generation[0] ||
+       strchr(generation, ' '))
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid generation\"}");
+      return -1;
+   }
+   if (!json_str(body, "purge_id", purge_id, purge_id_cap) || !purge_id[0] || strchr(purge_id, ' '))
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing or invalid purge_id\"}");
+      return -1;
+   }
+   return 0;
+}
+
+/* Current fence rendered as its stored "generation purge_id" value (empty when
+ * no fence row exists) — echoed by heartbeat/finalize/cancel mismatch paths. */
+static void purge_fence_current(const char *project, char *out, size_t out_cap)
+{
+   char gen[128] = "", pid[128] = "";
+   out[0] = '\0';
+   if (db2_kb_purge_fence_read(project, gen, sizeof(gen), pid, sizeof(pid), NULL) == 1)
+      snprintf(out, out_cap, "%s %s", gen, pid);
+}
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
 int kb_http_route_ex(const char *method, const char *path, const char *query_string,
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap)
 {
-   /* POST /v1/enroll/redeem — a client redeems its enrollment token for a client
-    * certificate. The single-use token IS the credential, so this route is
-    * intentionally reachable WITHOUT the owner bearer (it sits BEFORE the bearer
-    * auth gate). Body: {"token":..,"csr":..}. The client supplies a CSR — its
-    * private key never leaves it — and gets back the CA-signed client cert + the
-    * granted scope. An invalid / replayed token or a bad CSR is a 401. */
+   /* The single-use enrollment token is the credential, so redeem precedes bearer
+    * auth. The caller supplies a CSR; its private key never leaves the client. */
    if (strcmp(path, "/v1/enroll/redeem") == 0)
    {
       if (strcmp(method, "POST") != 0)
@@ -632,20 +706,21 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       {
          free(cert);
          snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"enrollment failed: invalid or already-used token, or bad CSR\"}");
+                  "{\"error\":\"enrollment failed: invalid or used token, or bad CSR\"}");
          return 401;
       }
-      /* Persist a queryable enrollment record keyed by the cert's sha256
-       * fingerprint, so the console can list + revoke it. Best-effort: a DB2
-       * outage must not fail the redemption (the cert is already issued).
-       * INVARIANT: this fingerprint MUST equal what kb_tls_peer_fingerprint()
-       * computes for the same cert at the mTLS seam (both are sha256 of the cert
-       * DER via X509_digest), or revocation checks would silently miss. Live-
-       * verified in the S2a integration test. (kb_pki_ca_fingerprint despite its
-       * name hashes any cert's DER, not the CA specifically.) */
-      char fp[KB_PKI_FP_HEX] = "";
-      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) == 0)
-         db2_enrollment_insert(scope, fp, "", "", 0, NULL);
+      /* Persist the issuer/serial and mTLS certificate-DER SHA-256. Fail closed
+       * rather than release an authority the enrollment database cannot revoke. */
+      char fp[KB_PKI_FP_HEX] = "", issuer[256] = "", raw_serial[128] = "", serial[128] = "";
+      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) != 0 ||
+          kb_pki_cert_metadata(cert, issuer, sizeof(issuer), raw_serial, sizeof(raw_serial)) != 0 ||
+          kb_cert_serial_normalize(raw_serial, serial, sizeof(serial)) != 0 ||
+          db2_enrollment_insert(scope, fp, issuer, serial, "", 0, NULL) != 0)
+      {
+         free(cert);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"enrollment persistence unavailable\"}");
+         return 503;
+      }
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "client_cert", cert);
       cJSON_AddStringToObject(resp, "scope", scope);
@@ -657,6 +732,18 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return 200;
    }
 
+   /* P9a telemetry scrape/ingest TOKEN path: the dedicated token authorizes GET
+    * /v1/metrics + POST /v1/telemetry/metrics WITHOUT the kb bearer, so it runs
+    * BEFORE the bearer gate; a miss returns -1 and falls through to admin auth. */
+   {
+      const char *presented =
+          (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
+      int tk = kb_http_telemetry_token_route(method, path, query_string, body, presented, out_buf,
+                                             out_cap);
+      if (tk >= 0)
+         return tk;
+   }
+
    /* Auth + scope authorization via the pluggable Verifier seam (kb_verifier.h): the built-in
     * kb-token verifier validates the configured bearer (which may be self-describing
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
@@ -664,14 +751,48 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
     * owner-only routes (e.g. /v1/enroll) tell an unscoped owner credential from a scoped one. */
    kb_verify_result_t vr;
    memset(&vr, 0, sizeof(vr));
+   /* Reset any prior request's actor on this worker thread; a request that fails
+    * auth below leaves no actor (fail-closed) for tenant-aware handlers. */
+   kb_reqctx_clear();
+   char vr_which[32] = "";
+   /* No owner actor is manufactured in auth-off mode: the tenancy mutation routes
+    * require a real authenticated principal, so an auth-off deployment cannot make
+    * anonymous admin writes. */
    if (bearer_token && bearer_token[0])
    {
       const char *presented =
           (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
-      if (!kb_verifier_authenticate(presented, bearer_token, &vr, NULL, 0))
+      if (!kb_verifier_authenticate(presented, bearer_token, &vr, vr_which, sizeof(vr_which)))
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"unauthorized\"}");
          return 401;
+      }
+
+      /* Build the request's authenticated ACTOR principal for tenant-aware handlers
+       * (P1 slice 4). OIDC -> issuer-scoped (iss,sub); an UNSCOPED kb-token is the
+       * install owner (the bootstrap operator); a scoped kb-token is a limited
+       * service credential, not a tenancy actor, so no actor is set. */
+      {
+         kb_principal_t actor;
+         memset(&actor, 0, sizeof(actor));
+         if (strcmp(vr_which, "oidc") == 0)
+         {
+            /* OIDC: the issuer is required to form the issuer-scoped (iss,sub)
+             * identity — if it isn't configured or resolution fails, set no actor
+             * rather than a mis-scoped one. */
+            char issuer[256] = "";
+            if (kb_oidc_configured_issuer(issuer, sizeof(issuer)) == 0 && issuer[0])
+               if (kb_principal_from_verify(&vr, issuer, &actor) != 0)
+                  memset(&actor, 0, sizeof(actor));
+         }
+         else if (!vr.scope_kind[0])
+         {
+            /* Unscoped kb-token = the install owner (bootstrap operator). */
+            if (kb_principal_from_verify(&vr, "", &actor) != 0)
+               memset(&actor, 0, sizeof(actor));
+         }
+         if (actor.authenticated)
+            kb_reqctx_set_actor(&actor);
       }
 
       /* Scoped token: deny cross-scope access when the request names a scope. */
@@ -700,6 +821,65 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   method, path);
          return 403;
       }
+   }
+   /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
+    * authenticated caller; the org-admin capability for writes is enforced at the
+    * DB layer (RLS write policies), and reads are RLS-scoped to the caller's teams.
+    * The handler returns -1 for non-tenancy paths so the router falls through. */
+   {
+      int tr = kb_http_team_route(method, path, query_string, body, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
+      tr = kb_http_servers_route(method, path, query_string, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
+   }
+   /* Model catalog + entitlement routes (P2a): /v1/models/entitled (tenant read) +
+    * the /v1/models/org/ admin CRUD (admin-gated at the DB layer, WORM-audited).
+    * Returns -1 for non-models paths so the router falls through. */
+   {
+      int mr = kb_http_models_route(method, path, body, out_buf, out_cap);
+      if (mr >= 0)
+         return mr;
+   }
+
+   /* Org spend reporting (P3b): GET /v1/insights/spend. Any authenticated caller may
+    * ask; the org-admin-OR-team-lead authorization is enforced at the DB layer inside
+    * the SECURITY DEFINER org_spend_query() (a non-authorized caller surfaces as 403).
+    * Returns -1 for non-insights paths so the router falls through. */
+   {
+      int ir = kb_http_insights_route(method, path, query_string, out_buf, out_cap);
+      if (ir >= 0)
+         return ir;
+   }
+
+   /* Budget admin routes (P4a): POST /v1/budget/set (org-admin) + GET /v1/budget/show
+    * (org-admin OR team-lead). Authorization is enforced at the DB layer inside the
+    * SECURITY DEFINER org_budget_set / org_budget_show (a non-authorized caller surfaces
+    * as 403). Returns -1 for non-budget paths so the router falls through. */
+   {
+      int br = kb_http_budget_route(method, path, query_string, body, out_buf, out_cap);
+      if (br >= 0)
+         return br;
+   }
+
+   /* Rate-limit admin routes (P4b): POST /v1/rate/policy (org-admin) + GET /v1/rate/show
+    * (org-admin OR team-lead). Authorization is enforced at the DB layer inside the
+    * SECURITY DEFINER org_rate_policy_set / org_rate_policy_show (a non-authorized caller
+    * surfaces as 403). org_rate_check (egress enforcement) is not routed here (P2b).
+    * Returns -1 for non-rate paths so the router falls through. */
+   {
+      int rr = kb_http_rate_route(method, path, query_string, body, out_buf, out_cap);
+      if (rr >= 0)
+         return rr;
+   }
+
+   /* Telemetry export + ingest admin routes (P9a): the org-admin path for
+    * /v1/metrics and /v1/telemetry (the token path ran pre-gate). DB-enforced. */
+   {
+      int tr = kb_http_telemetry_route(method, path, query_string, body, out_buf, out_cap);
+      if (tr >= 0)
+         return tr;
    }
 
    /* Console + accounts routes. Served only to the owner (unscoped credential) or
@@ -1885,6 +2065,207 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       pos = json_escape(project, out_buf, pos, out_cap);
       snprintf(out_buf + pos, (size_t)(out_cap - pos), "\",\"chunks_deleted\":%d}", deleted);
       return 200;
+   }
+   /* POST /v1/maintenance/purge-project {project, generation, purge_id, takeover?}
+    * (webchat-project-lifecycle slice 2). Writes the generation fence, then fans
+    * out the writer→store→delete matrix IN ORDER, continuing past per-store
+    * failures. The fence is NOT cleared here — /v1/maintenance/purge-finalize
+    * (or purge-cancel) clears it after the server-side deletion completes.
+    * Idempotent: a re-run on a purged key returns zeros. */
+   if (strcmp(path, "/v1/maintenance/purge-project") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int takeover = json_bool(body, "takeover", 0);
+
+      /* Atomic read-decide-write: one transaction takes the project advisory
+       * guard, inspects the identity row FOR UPDATE, refuses a LIVE foreign
+       * fence (heartbeat younger than 2x the heartbeat interval, i.e. TTL/3)
+       * without takeover:true, else publishes the new fence. */
+      char cur_gen[128] = "", cur_pid[128] = "";
+      int fence_replaced = 0;
+      int arc =
+          db2_kb_purge_fence_acquire(project, generation, purge_id, takeover, cur_gen,
+                                     sizeof(cur_gen), cur_pid, sizeof(cur_pid), &fence_replaced);
+      if (arc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence write failed\"}");
+         return 500;
+      }
+      if (arc == 0)
+      {
+         cJSON *resp = cJSON_CreateObject();
+         if (resp)
+         {
+            cJSON_AddStringToObject(resp, "error", "purge fence held");
+            cJSON_AddStringToObject(resp, "generation", cur_gen);
+            cJSON_AddStringToObject(resp, "purge_id", cur_pid);
+         }
+         return purge_respond(resp, out_buf, out_cap, 409);
+      }
+
+      /* Fan-out: every kb store the ingest path writes, in matrix order. The
+       * OWN fence heartbeat is refreshed between stores so a slow delete (or
+       * a fan-out longer than the TTL) cannot let the fence lapse mid-purge;
+       * losing ownership (a takeover displaced us) aborts the remaining
+       * stores fail-closed. */
+      cJSON *stores = cJSON_CreateObject();
+      if (!stores)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         return 500;
+      }
+      typedef int (*purge_store_fn)(const char *);
+      static const struct
+      {
+         const char *name;
+         purge_store_fn fn;
+      } purge_matrix[] = {
+          {"chunks", db2_kb_service_clear_project},
+          {"file_index", db2_kb_file_index_delete_project},
+          {"vectors", pgvec_kb_vector_delete_project},
+          {"code_embeddings", pgvec_code_delete_project},
+          {"curator_code_unit_vectors", pgvec_curator_code_unit_delete_project},
+          {"canonical_index", db2_code_index_project_delete},
+          {"code_unit_jobs", kb_curator_code_unit_jobs_delete_project},
+          {"pdf_vectors", pgvec_kbpdf_delete_project},
+          {"minhash", db2_sketch_minhash_signature_delete_project},
+      };
+      int all_ok = 1, fence_lost = 0;
+      for (size_t si = 0; si < sizeof(purge_matrix) / sizeof(purge_matrix[0]); si++)
+      {
+         purge_store_add(stores, purge_matrix[si].name, purge_matrix[si].fn(project), &all_ok);
+         if (si + 1 < sizeof(purge_matrix) / sizeof(purge_matrix[0]) &&
+             db2_kb_purge_fence_heartbeat(project, generation, purge_id) != 1)
+         {
+            /* Ownership lost mid-fan-out: mark the remaining stores as
+             * errored (fail closed) — the displaced owner's purge re-runs
+             * them idempotently. */
+            fence_lost = 1;
+            all_ok = 0;
+            for (size_t sj = si + 1; sj < sizeof(purge_matrix) / sizeof(purge_matrix[0]); sj++)
+            {
+               cJSON *e = cJSON_CreateObject();
+               if (e)
+               {
+                  cJSON_AddStringToObject(e, "error", "fence lost");
+                  cJSON_AddItemToObject(stores, purge_matrix[sj].name, e);
+               }
+            }
+            aimee_log(LOG_WARN, "kb.purge",
+                      "purge-project '%s': fence ownership lost after store '%s' — remaining "
+                      "stores aborted",
+                      project, purge_matrix[si].name);
+            break;
+         }
+      }
+
+      cJSON *resp = cJSON_CreateObject();
+      if (!resp)
+      {
+         cJSON_Delete(stores);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+         return 500;
+      }
+      cJSON_AddStringToObject(resp, "status", "ok");
+      cJSON_AddBoolToObject(resp, "ok", all_ok);
+      cJSON_AddStringToObject(resp, "project", project);
+      cJSON_AddStringToObject(resp, "generation", generation);
+      cJSON_AddStringToObject(resp, "purge_id", purge_id);
+      cJSON_AddBoolToObject(resp, "fence_replaced", fence_replaced);
+      if (fence_lost)
+         cJSON_AddBoolToObject(resp, "fence_lost", 1);
+      if (fence_replaced)
+      {
+         cJSON *displaced = cJSON_CreateObject();
+         if (displaced)
+         {
+            cJSON_AddStringToObject(displaced, "generation", cur_gen);
+            cJSON_AddStringToObject(displaced, "purge_id", cur_pid);
+         }
+         cJSON_AddItemToObject(resp, "displaced", displaced);
+      }
+      cJSON_AddItemToObject(resp, "stores", stores);
+      return purge_respond(resp, out_buf, out_cap, 200);
+   }
+   /* POST /v1/maintenance/purge-heartbeat {project, generation, purge_id}:
+    * the owning delete op refreshes the fence heartbeat between phases. A
+    * displaced owner mismatches and no-ops (refreshed:false + current fence). */
+   if (strcmp(path, "/v1/maintenance/purge-heartbeat") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int rc = db2_kb_purge_fence_heartbeat(project, generation, purge_id);
+      if (rc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence heartbeat failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      if (resp)
+      {
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddBoolToObject(resp, "refreshed", rc == 1);
+         if (rc != 1)
+         {
+            char fence[280] = "";
+            purge_fence_current(project, fence, sizeof(fence));
+            cJSON_AddStringToObject(resp, "fence", fence);
+         }
+      }
+      return purge_respond(resp, out_buf, out_cap, 200);
+   }
+   /* POST /v1/maintenance/purge-finalize | purge-cancel {project, generation,
+    * purge_id}: clear BOTH fence rows iff generation AND purge_id match. A
+    * mismatch (displaced owner) is a logged no-op returning the current fence. */
+   if (strcmp(path, "/v1/maintenance/purge-finalize") == 0 ||
+       strcmp(path, "/v1/maintenance/purge-cancel") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      char project[256], generation[128], purge_id[128];
+      if (purge_body_parse(body, project, sizeof(project), generation, sizeof(generation), purge_id,
+                           sizeof(purge_id), out_buf, out_cap) != 0)
+         return 400;
+      int rc = db2_kb_purge_fence_clear(project, generation, purge_id);
+      if (rc < 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"fence clear failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      if (resp)
+      {
+         cJSON_AddStringToObject(resp, "status", "ok");
+         cJSON_AddBoolToObject(resp, "cleared", rc == 1);
+         if (rc != 1)
+         {
+            char fence[280] = "";
+            purge_fence_current(project, fence, sizeof(fence));
+            LOG_WARN("kb_http",
+                     "%s: fence mismatch for project '%s' (presented %s %s, current '%s') — no-op",
+                     path, project, generation, purge_id, fence);
+            cJSON_AddStringToObject(resp, "fence", fence);
+         }
+      }
+      return purge_respond(resp, out_buf, out_cap, 200);
    }
    /* GET /v1/jobs/{id} */
    if (strncmp(path, "/v1/jobs/", 9) == 0 && path[9])

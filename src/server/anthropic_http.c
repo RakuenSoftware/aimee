@@ -15,24 +15,28 @@
  * executes tools itself. */
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_config.h"
+#include "aimee_errors.h"
 #include "agent_exec.h"
-#include "context_reduce.h"
-#include "gateway_mutate_wire.h"
-#include "server_http_identity.h"
 #include "agent_protocol.h"
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
 #include "delegate_driver.h"
+#include "economizer_wire_snapshot.h"
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
 #include "gw_stage_memory.h"
+#include "gw_stage_registry.h"
+#include "gw_stage_governance.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
+#include "aimee_ir_metrics.h"
 #include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
+#include "aimee_backend.h"   /* Slice 3: openai_backend_parse (IR response path) */
 #include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
+#include "log.h"
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
@@ -40,20 +44,16 @@
 #include <string.h>
 #include <time.h>
 
-/* Resolve aimee's primary agent (the configured default, else the first
- * agent). Claude Code's requested model is intentionally ignored — switching
- * models is `aimee primary`. acfg is caller-owned and must outlive the returned
- * pointer (it indexes into acfg). Returns NULL when none configured. */
+/* Resolve aimee's primary agent (the configured default, else the first enabled
+ * agent — see agent_default_primary). Claude Code's requested model is
+ * intentionally ignored — switching models is `aimee primary`. acfg is
+ * caller-owned and must outlive the returned pointer (it indexes into acfg).
+ * Returns NULL when no usable agent exists → caller reports 503. */
 static agent_t *resolve_primary(agent_config_t *acfg)
 {
-   agent_t *ag = NULL;
    if (agent_load_config(acfg) != 0)
       return NULL;
-   if (acfg->default_agent[0])
-      ag = agent_find(acfg, acfg->default_agent);
-   if (!ag && acfg->agent_count > 0)
-      ag = &acfg->agents[0];
-   return ag;
+   return agent_default_primary(acfg);
 }
 
 /* Mint a "msg_<epoch>" id for the response/stream. */
@@ -137,8 +137,14 @@ static int write_json(cJSON *obj, char *resp, int cap)
    return rc;
 }
 
-/* Write an Anthropic-shaped error object into resp and return `status`. */
-static int write_error(char *resp, int cap, int status, const char *type, const char *message)
+/* Write an Anthropic-shaped error object into resp and return the wire `status`.
+ * aimee_code is an aimee-specific error code (>=1000, see aimee_errors.h) when the
+ * fault is aimee's own — it rides in the body's error.code and is logged — or 0
+ * for a plain HTTP-semantic error (client 4xx, genuine upstream 5xx). The wire
+ * status stays a standard 3-digit code regardless; the 4-digit aimee code never
+ * touches the status line. */
+static int write_error(char *resp, int cap, int status, const char *type, const char *message,
+                       int aimee_code)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *e;
@@ -146,6 +152,12 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
    e = cJSON_AddObjectToObject(o, "error");
    cJSON_AddStringToObject(e, "type", type);
    cJSON_AddStringToObject(e, "message", message);
+   if (aimee_code > 0)
+   {
+      cJSON_AddNumberToObject(e, "code", aimee_code);
+      LOG_WARN("ingress", "aimee_err=%d (%s) status=%d: %s", aimee_code, aimee_err_slug(aimee_code),
+               status, message ? message : "");
+   }
    char *out = cJSON_PrintUnformatted(o);
    if (out)
    {
@@ -159,6 +171,44 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
 static int driver_is_anthropic(const delegate_driver_t *driver)
 {
    return driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+}
+
+/* Provider wire for the response-side IR shadow: compare_response re-parses the
+ * provider reply through this backend, so it must match the wire the legacy path
+ * parsed. driver_is_anthropic() is NULL-safe, so a NULL/absent driver yields
+ * OpenAI-chat -- exactly the no-driver legacy branch, which parses with
+ * agent_ir_parse_json_response with the openai wire (0). */
+static aimee_wire_t shadow_provider_wire(const delegate_driver_t *driver)
+{
+   return driver_is_anthropic(driver) ? AIMEE_WIRE_ANTHROPIC : AIMEE_WIRE_OPENAI_CHAT;
+}
+
+/* Slice 3: parse the provider JSON response into `parsed`. When AIMEE_IR_RESP_PATH is
+ * on and the primary is OPENAI-WIRE, route through the canonical IR
+ * (openai_backend_parse -> IR -> transitional adapter); legacy driver->parse_response
+ * on flag-off, anthropic wire, or any IR-parse failure. `raw` is the original response
+ * text handed to the legacy parser. */
+static void ir_or_legacy_parse_response(cJSON *provider_resp, const char *raw,
+                                        const delegate_driver_t *driver, parsed_response_t *parsed)
+{
+   if (aimee_ir_resp_path_enabled() && !driver_is_anthropic(driver))
+   {
+      aimee_response_t ir_resp;
+      char ir_err[128];
+      memset(&ir_resp, 0, sizeof(ir_resp));
+      if (openai_backend_parse(provider_resp, &ir_resp, ir_err, sizeof(ir_err)) == 0)
+      {
+         aimee_ir_response_to_parsed(&ir_resp, parsed);
+         aimee_response_free(&ir_resp);
+         return;
+      }
+      aimee_response_free(&ir_resp);
+   }
+   if (driver && driver->parse_response)
+      driver->parse_response(provider_resp, raw, parsed);
+   else
+      /* No driver: default to the openai wire via the IR (zeroed *parsed on failure). */
+      agent_ir_parse_json_response(provider_resp, 0 /*openai*/, -1, NULL, parsed);
 }
 
 static int driver_consumes_system_prompt(const delegate_driver_t *driver, const agent_t *ag)
@@ -229,6 +279,16 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
  * place, with the same stages and order as the prior inline prelude (memory →
  * policy), plus the model-pin policy. Returns total interventions (≥0) or <0 on a
  * stage error. */
+/* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
+ * deprecated env default. Cached config_load, so an operator toggle applies without a restart;
+ * keeps gw_stage_governance config-free. */
+static int anthropic_governance_enabled(void)
+{
+   config_t c;
+   int tri = (config_load(&c) == 0) ? c.module_governance : -1;
+   return config_module_enabled(tri, gw_response_governance_enabled());
+}
+
 static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *driver,
                                          const agent_t *ag, int parity, int stream)
 {
@@ -237,39 +297,6 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    config_t pcfg;
    int cfg_ok = (config_load(&pcfg) == 0);
    int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
-
-   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
-    * is on, measure this inbound /v1/messages request's baseline + foldable
-    * opportunity and record a forecast ledger row. measure_only is forced on here so
-    * the request is NEVER mutated — the client transcript is read for the baseline
-    * and the live `req` is forwarded byte-identical (we ignore res.messages, NULL in
-    * measure-only). Done BEFORE the request pipeline so the baseline reflects the
-    * pristine client request, not the memory-injected one. Fully guarded
-    * (config-load, array, free) and context_reduce hard-bypasses on any internal
-    * error, so this can never perturb the client response. Reuses the loaded pcfg;
-    * cheap mtime-cached load keeps it dark by default. */
-   if (cfg_ok && pcfg.reduce_gateway_seam)
-   {
-      cJSON *cmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-      if (cJSON_IsArray(cmsgs))
-      {
-         char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
-         const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
-         const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
-         reduce_config_t rcfg;
-         memset(&rcfg, 0, sizeof(rcfg));
-         rcfg.gateway_seam = 1;
-         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
-         rcfg.fold.retained_msgs = pcfg.fold_retained_msgs;
-         reduce_result_t gw_res;
-         memset(&gw_res, 0, sizeof(gw_res));
-         if (context_reduce(cmsgs, sys_text, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
-                            &gw_res) == 0)
-            agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
-         context_reduce_result_free(&gw_res);
-         free(sys_text);
-      }
-   }
 
    gw_request_t r = {
        .raw = req,
@@ -283,13 +310,20 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
        .stream = stream,
        .allow_anthropic_inject = allow_anthropic_inject,
    };
-   static const gw_stage_t stages[] = {
-       {gw_stage_memory, NULL, "memory"},
-       {gw_stage_tool_policing, NULL, "tool_policing"},
-       {gw_stage_router, NULL, "router"}, /* S1/S2: the unified request->workflow seam */
-       {gw_stage_model_pin, NULL, "model_pin"},
+   /* Memory PORTED to the IR transform seam (aimee_ir_apply_request_stages): it now
+    * fires once on the typed IR after frontend_parse, so it is no longer a pre-IR
+    * wire-anchored stage here. This catalog keeps the stages that still act on the raw
+    * wire request (tool policing, routing, model pin). */
+   const gw_stage_slot_t slots[] = {
+       {"tool_policing", gw_stage_tool_policing, NULL, 1},
+       {"router", gw_stage_router, NULL, 1}, /* S1/S2: unified request->workflow seam */
+       {"model_pin", gw_stage_model_pin, NULL, 1},
    };
-   return gw_pipeline_run_request(&r, stages, sizeof(stages) / sizeof(stages[0]));
+   gw_stage_t stages[8];
+   int nstages = gw_stage_registry_build(slots, sizeof(slots) / sizeof(slots[0]), stages, 8);
+   if (nstages < 0)
+      return -1; /* misconfigured stage catalog: fail closed rather than run partial */
+   return gw_pipeline_run_request(&r, stages, (size_t)nstages);
 }
 
 /* Build the provider request body via the selected delegate driver. `stream`
@@ -373,21 +407,24 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
  * malloc'd JSON string (caller frees) or NULL. */
 static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
                                        const agent_t *ag, int parity, cJSON *messages, cJSON *tools,
-                                       const char *system_text)
+                                       const char *system_text, int stream)
 {
    char *prov_body = NULL;
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 0, parity);
+      prov_body = build_anthropic_provider_body(req, ag, stream, parity);
    else
    {
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), stream);
       if (!prov_body)
+      {
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 0);
+                                         jo_num(req, "temperature", 1.0), stream);
+      }
    }
    return prov_body;
 }
@@ -405,13 +442,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
    char msg_id[48];
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
+   econ_wire_snapshot_t *wire_snapshot = NULL;
    int status, http_status, rc;
    const char *model;
-   gw_mutate_ctx_t gwmc;
-   gw_mutate_ctx_init(&gwmc);
 
    if (!req)
-      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body");
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
    model = jo_cstr(req, "model");
 
    /* SHADOW (Slice 3): observe the IR round-trip on this live request. No-op unless
@@ -422,7 +458,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (!ag)
    {
       cJSON_Delete(req);
-      return write_error(resp, cap, 503, "api_error", "no primary agent configured");
+      return write_error(resp, cap, 503, "api_error", "no primary agent configured",
+                         AIMEE_ERR_NO_PRIMARY);
    }
 
    delegate_drivers_init();
@@ -436,61 +473,58 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * stage returns <0 today; the intervention count is plumbed for P2b's audit). */
    if (messages_run_request_pipeline(req, driver, ag, parity, 0 /* buffered */) < 0)
    {
-      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed");
+      status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed",
+                           AIMEE_ERR_REQUEST_PIPELINE);
       goto cleanup;
    }
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Economizer gateway MUTATION (primary-agent reduction). Default-OFF. Reduces
-    * req["messages"] in place (compress-only) BEFORE translate/build so the provider
-    * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
-    * caught below (restore-resend), the session is circuit-broken, and provenance is
-    * cleared. A dark no-op when reduce_gateway_mutate is off. */
-   if (gw_mutate_is_enabled())
-   {
-      char *mut_sys = anthropic_system_to_text(req);
-      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
-      free(mut_sys);
-   }
-
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
-      status = write_error(resp, cap, 502, "api_error", "failed to reach the primary provider");
+      /* Internal: we never reached the provider — the endpoint or credentials for
+       * the primary couldn't be resolved (e.g. a codex-oauth seat with no token).
+       * 503 (not 502) + an aimee code so this doesn't read as an upstream failure;
+       * surface the explicit auth reason (D6) when one was set. */
+      const char *why = agent_request_auth_error();
+      char msg[256];
+      snprintf(msg, sizeof(msg),
+               "could not resolve endpoint or credentials for primary agent '%s'%s%s", ag->name,
+               (why && why[0]) ? ": " : "", (why && why[0]) ? why : "");
+      status = write_error(resp, cap, 503, "api_error", msg, AIMEE_ERR_ROUTE_UNRESOLVED);
       goto cleanup;
    }
+   /* Codex/Responses (chatgpt wire) replies with raw SSE even to a buffered fetch
+    * and requires stream=true; asking it for stream=false yields an empty body that
+    * cJSON_Parse can't read, so the buffered reply came back empty. Keyed off the
+    * resolved upstream shape (like the streaming path), not the provider label. */
+   int responses_wire = strstr(url, "/responses") != NULL;
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
-   http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
-                                 extra[0] ? extra : NULL);
-
-   /* Gateway mutation post-send: on ANY 4xx of a mutated request, restore the
-    * pristine original, repair, disable the session, and resend ONCE from pristine;
-    * on 5xx, disable the session without resending. No-op unless we mutated. */
-   if (gw_buffered_after_status(req, "messages", http_status, &gwmc) == GW_POST_RESEND)
+   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
+                                         responses_wire);
+   const char *pristine_body = prov_body ? prov_body : "{}";
+   config_t econ_cfg;
+   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
+                                                   : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+                        &wire_snapshot, &wire_body) != 0)
    {
-      cJSON_Delete(messages);
-      messages = NULL;
-      cJSON_Delete(tools);
-      tools = NULL;
-      free(system_text);
-      system_text = NULL;
-      translate_request(req, driver, ag, &messages, &tools, &system_text);
-      free(prov_body);
-      prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
-      free(response);
-      response = NULL;
-      http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response,
-                                    ag->timeout_ms, extra[0] ? extra : NULL);
+      status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
+                           AIMEE_ERR_REQUEST_PIPELINE);
+      goto cleanup;
    }
+   http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
+                                       ag->timeout_ms, extra[0] ? extra : NULL);
 
    if (http_status != 200 || !response)
    {
@@ -507,20 +541,38 @@ static int messages_buffered(const char *body, char *resp, int cap)
       }
       else
       {
+         /* Genuine upstream failure: the provider was reached and returned
+          * non-200. 502 with no aimee code — this really is an external problem. */
          status = write_error(resp, cap, 502, "api_error",
-                              response ? response : "primary provider call failed");
+                              response ? response : "primary provider call failed", 0);
       }
       goto cleanup;
    }
 
-   provider_resp = cJSON_Parse(response);
    memset(&parsed, 0, sizeof(parsed));
-   if (provider_resp)
+   /* Codex/Responses replies with raw SSE (response.output_* / response.completed),
+    * not a JSON body — parse it directly via the driver, the same way the streaming
+    * buffered-replay path does. cJSON_Parse would fail and yield an empty reply. */
+   if (responses_wire)
    {
       if (driver && driver->parse_response)
-         driver->parse_response(provider_resp, response, &parsed);
-      else
-         agent_parse_response_openai(provider_resp, &parsed);
+         driver->parse_response(NULL, response, &parsed);
+   }
+   else
+      provider_resp = cJSON_Parse(response);
+   if (responses_wire || provider_resp)
+   {
+      /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). The
+       * responses-wire reply was already parsed above from raw SSE. */
+      if (!responses_wire)
+         ir_or_legacy_parse_response(provider_resp, response, driver, &parsed);
+
+      /* Slice 2 (canonical-IR): shadow-compare the legacy parse against the IR
+       * response parse -> RESP_MATCH / RESP_MISMATCH on GET /v1/dashboard/metrics.
+       * No-op unless AIMEE_IR_SHADOW; never affects the served reply. Provider wire
+       * is anthropic when the primary is anthropic, else OpenAI chat (codex is SSE,
+       * so provider_resp is NULL here and the compare self-skips). */
+      aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
 
       /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
        * the model emitted despite the request-side strip, before the audit row
@@ -530,25 +582,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
        * no-ops at the default config). Drop count is plumbed through to the
        * same pipeline-runner total the request-side strip already emits; a
        * future P2b audit pass surfaces both at once. */
-      gateway_policy_police_parsed_response(&parsed);
+      gw_response_run_governance(&parsed, anthropic_governance_enabled());
 
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
        * the served model and tagged as ingress. */
-      agent_result_t ar;
-      memset(&ar, 0, sizeof(ar));
-      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-      /* Claude Code's requested model is recorded separately; aimee serves its
-       * configured primary, so requested and served typically differ. */
-      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-      ar.prompt_tokens = parsed.prompt_tokens;
-      ar.completion_tokens = parsed.completion_tokens;
-      ar.cache_write_tokens = parsed.cache_write_tokens;
-      ar.cache_read_tokens = parsed.cache_read_tokens;
       if (agent_ingress_accounting_enabled())
-         agent_record_token_audit(&ar, "", "anthropic-ingress");
+         agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                   parsed.prompt_tokens, parsed.completion_tokens,
+                                   parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                   "anthropic-ingress", NULL);
    }
 
    mint_msg_id(msg_id, sizeof(msg_id));
@@ -559,7 +602,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    agent_free_parsed_response(&parsed);
 
 cleanup:
-   gw_mutate_ctx_free(&gwmc);
+   econ_wire_snapshot_destroy(wire_snapshot);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
    free(response);
@@ -609,10 +652,6 @@ typedef struct
    int output_tokens;
    int cache_write_tokens;
    int cache_read_tokens;
-   /* Gateway-mutation streaming breaker: when this stream carried a reduced payload
-    * (gwmc->mutated), an invalid-request error frame disables the session for
-    * subsequent turns (§2.5 streaming). NULL when the request was not mutated. */
-   gw_mutate_ctx_t *gwmc;
 } anthropic_relay_ctx_t;
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
@@ -730,13 +769,6 @@ static void relay_flush(anthropic_relay_ctx_t *c)
       relay_capture_usage(c, event, c->data);
       c->emit(c->emit_ctx, event, c->data);
       c->emitted++;
-      /* Inspect-as-forward (§2.5 streaming): the frame is already forwarded above;
-       * if this MUTATED stream carried an invalid-request-class error frame, the
-       * reduced payload is the likely cause -> disable subsequent turns. Transient
-       * frames (rate-limit/overloaded) are forwarded WITHOUT disabling. */
-      if (c->gwmc && c->gwmc->mutated && strcmp(event, "error") == 0 &&
-          gw_stream_anthropic_error_is_invalid_request(c->data))
-         gw_stream_disable(c->gwmc, "stream_invalid_request");
    }
    c->event[0] = '\0';
    c->data_len = 0;
@@ -788,6 +820,238 @@ static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
    return sse_parser_feed(&c->parser, data, len, anthropic_relay_line_cb, c);
 }
 
+/* P2c buffered-replay streaming: fetch the upstream reply to completion, police the
+ * parsed struct, and replay it as a well-formed Anthropic SSE sequence. Used when
+ * gateway_prevent_subagents is on, or the primary speaks the OpenAI Responses wire
+ * (whose stream shape the incremental translator does not understand). Extracted
+ * verbatim from messages_stream(); goto cleanup became return (the caller runs the
+ * shared cleanup). */
+static void messages_stream_buffered_replay(const char *url, const char *auth,
+                                            const void *prov_body, size_t prov_body_len,
+                                            const char *extra, agent_t *ag,
+                                            const delegate_driver_t *driver, const char *model,
+                                            const char *msg_id, int responses_wire,
+                                            server_http_sse_event_emit emit, void *ctx)
+{
+   char *buf_resp = NULL;
+   int buf_status;
+   parsed_response_t parsed;
+   int raw_responses = responses_wire;
+   memset(&parsed, 0, sizeof(parsed));
+   buf_status = agent_http_post_bytes(url, auth, prov_body, prov_body_len, &buf_resp,
+                                      ag->timeout_ms, extra[0] ? extra : NULL);
+   if (buf_status == 200 && buf_resp)
+   {
+      if (raw_responses)
+      {
+         if (driver && driver->parse_response)
+            driver->parse_response(NULL, buf_resp, &parsed);
+         else
+         {
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider parser unavailable\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+            free(buf_resp);
+            return;
+         }
+         gw_response_run_governance(&parsed, anthropic_governance_enabled());
+         emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+         /* Cost accounting (mirror the buffered path). */
+         if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+             agent_ingress_accounting_enabled())
+            agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                      parsed.prompt_tokens, parsed.completion_tokens,
+                                      parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                      "anthropic-ingress", NULL);
+         agent_free_parsed_response(&parsed);
+      }
+      else
+      {
+         cJSON *provider_resp = cJSON_Parse(buf_resp);
+         if (provider_resp)
+         {
+            /* Slice 3: OPENAI-WIRE response parse via the IR (default-off flag). */
+            ir_or_legacy_parse_response(provider_resp, buf_resp, driver, &parsed);
+            /* Slice 2 (canonical-IR): shadow-compare legacy vs IR response parse
+             * (RESP_MATCH / RESP_MISMATCH). No-op unless AIMEE_IR_SHADOW. */
+            aimee_ir_shadow_compare_response(&parsed, provider_resp, shadow_provider_wire(driver));
+            gw_response_run_governance(&parsed, anthropic_governance_enabled());
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+            /* Cost accounting (mirror the buffered path). */
+            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                agent_ingress_accounting_enabled())
+               agent_ingress_record_cost(ag->name, ag->model, model, parsed.stop_reason,
+                                         parsed.prompt_tokens, parsed.completion_tokens,
+                                         parsed.cache_write_tokens, parsed.cache_read_tokens,
+                                         "anthropic-ingress", NULL);
+            agent_free_parsed_response(&parsed);
+         }
+         else
+         {
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider returned an unparseable reply\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+         }
+         cJSON_Delete(provider_resp);
+      }
+   }
+   else
+   {
+      char err[256];
+      snprintf(err, sizeof(err),
+               "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+               "\"message\":\"primary provider call failed with status %d\"}}",
+               buf_status);
+      if (emit)
+         emit(ctx, "error", err);
+   }
+   free(buf_resp);
+   return;
+}
+
+/* Native Anthropic streaming relay: forward the upstream Anthropic SSE
+ * verbatim through the mutation breaker, then record realized/partial cost.
+ * Extracted from messages_stream(); goto cleanup became return. */
+static void messages_stream_native_relay(const char *url, const char *auth, const void *prov_body,
+                                         size_t prov_body_len, const char *extra, agent_t *ag,
+                                         const char *model, server_http_sse_event_emit emit,
+                                         void *ctx)
+{
+   anthropic_relay_ctx_t relay;
+   int stream_status;
+   memset(&relay, 0, sizeof(relay));
+   sse_parser_init(&relay.parser);
+   relay.emit = emit;
+   relay.emit_ctx = ctx;
+   stream_status =
+       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, anthropic_relay_chunk_cb,
+                                    &relay, ag->timeout_ms, extra[0] ? extra : NULL);
+   relay_flush(&relay);
+   if (stream_status != 200)
+   {
+      relay_emit_transport_error(&relay, stream_status);
+   }
+   /* Cost accounting for the native Anthropic streaming ingress, from the
+    * usage tapped off the relayed SSE. A clean 200 is realized spend; an
+    * aborted stream that still observed usage is recorded as partial so the
+    * observed tokens are not silently lost. */
+   if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL, relay.input_tokens,
+                                relay.output_tokens, relay.cache_write_tokens,
+                                relay.cache_read_tokens, "anthropic-ingress",
+                                stream_status == 200 ? "realized" : "partial");
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   return;
+}
+
+/* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
+ * through the neutral IR-delta model, synthesize a clean close if the upstream
+ * cut off early, and record cost. Extracted from messages_stream(). */
+static void messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
+                                     size_t prov_body_len, const char *extra, agent_t *ag,
+                                     const char *model, const char *msg_id, int input_est,
+                                     server_http_sse_event_emit emit, void *ctx)
+{
+   prov_stream_ctx_t pc;
+   /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
+    * SSE relay through the neutral IR-delta model instead of the legacy
+    * anthropic_stream_feed_openai translator -- the last live direct-translation
+    * site. */
+   memset(&pc, 0, sizeof pc);
+   sse_parser_init(&pc.parser);
+   pc.ir_relay = 1;
+   openai_stream_state_init(&pc.ir_ost);
+   pc.emit = emit;
+   pc.emit_ctx = ctx;
+   pc.msg_id = msg_id;
+   pc.model = model;
+   int ir_status = agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb,
+                                                &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   sse_parser_free(&pc.parser);
+   /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
+    * TURN_STOP was produced), synthesize the closing sequence so the client's
+    * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
+    * still-open content blocks, then emit TURN_STOP. */
+   if (pc.ir_ast.started && !pc.ir_ost.stopped)
+   {
+      aimee_delta_t bs = {0};
+      bs.type = AIMEE_DELTA_BLOCK_STOP;
+      if (pc.ir_ost.text_block >= 0)
+      {
+         bs.block_id = pc.ir_ost.text_block;
+         anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+      }
+      for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
+         if (pc.ir_ost.tool_block[i] >= 0)
+         {
+            bs.block_id = pc.ir_ost.tool_block[i];
+            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+         }
+      aimee_delta_t ts = {0};
+      ts.type = AIMEE_DELTA_TURN_STOP;
+      ts.stop_reason = AIMEE_STOP_END_TURN;
+      ts.usage_out = pc.ir_usage_out;
+      anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
+   }
+   /* Cost row: input from the local estimate (message_start reports 0, same as
+    * the legacy translator's estimate basis), output tapped from the IR
+    * TURN_STOP delta. */
+   if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
+      agent_ingress_record_cost(ag->name, ag->model, model, NULL, input_est, (int)pc.ir_usage_out,
+                                0, 0, "anthropic-ingress",
+                                ir_status == 200 ? "realized" : "partial");
+   return;
+}
+
+/* OpenAI-via-translator streaming: the legacy incremental translator path.
+ * Begins an Anthropic stream, feeds upstream OpenAI-chat chunks through it,
+ * finishes, and records cost. Extracted from messages_stream(). */
+static void messages_stream_xlate(const char *url, const char *auth, const void *prov_body,
+                                  size_t prov_body_len, const char *extra, agent_t *ag,
+                                  const char *model, const char *msg_id, int input_est,
+                                  server_http_sse_event_emit emit, void *ctx)
+{
+   anthropic_stream_xlate_t *xl;
+   prov_stream_ctx_t pc;
+   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
+   if (!xl)
+      return;
+
+   sse_parser_init(&pc.parser);
+   pc.xl = xl;
+   int xlate_status =
+       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb, &pc,
+                                    ag->timeout_ms, extra[0] ? extra : NULL);
+   sse_parser_free(&pc.parser);
+
+   anthropic_stream_finish(xl);
+
+   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
+    * usage captured off the upstream OpenAI stream (prompt count preferring the
+    * upstream-reported value over the estimate, plus completion and cached
+    * tokens) and write one ingress cost row, mirroring the native relay path. A
+    * clean 200 is realized; an aborted stream with observed usage is partial. */
+   {
+      int in_tok = 0, out_tok = 0, cr_tok = 0;
+      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
+      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
+      {
+         agent_ingress_record_cost(ag->name, ag->model, model, NULL, in_tok, out_tok, 0, cr_tok,
+                                   "anthropic-ingress",
+                                   xlate_status == 200 ? "realized" : "partial");
+      }
+   }
+
+   anthropic_stream_free(xl);
+}
+
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -803,11 +1067,11 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    const char *model = req ? jo_cstr(req, "model") : "";
    const delegate_driver_t *driver;
    anthropic_stream_xlate_t *xl;
-   prov_stream_ctx_t pc;
    int input_est;
    int responses_wire = 0;
-   gw_mutate_ctx_t gwmc;
-   gw_mutate_ctx_init(&gwmc);
+   econ_wire_snapshot_t *wire_snapshot = NULL;
+   const void *wire_prov_body = NULL;
+   size_t wire_prov_body_len = 0;
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
@@ -849,19 +1113,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Economizer gateway MUTATION (streaming). Reduces req["messages"] in place before
-    * translate/build. Streaming CANNOT restore-resend (the 200 is committed on the
-    * first byte), so on a bad reduction only SUBSEQUENT turns are circuit-broken —
-    * via the SSE error-frame inspect-as-forward in relay_flush + the post-stream
-    * fail-safe below. Default-OFF dark no-op. */
-   if (gw_mutate_is_enabled())
-   {
-      char *mut_sys = anthropic_system_to_text(req);
-      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
-                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
-      free(mut_sys);
-   }
-
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -875,8 +1126,17 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
+   /* Whether we ask the UPSTREAM to stream depends on how we READ the reply, not on
+    * what the client asked. The buffered-replay path (prevent-subagents, or a
+    * /responses wire) fetches the reply to completion, so it must request a
+    * NON-streaming body for the non-responses wires -- asking for SSE and then
+    * cJSON_Parse'ing it is the "unparseable reply" bug. This applies to the ANTHROPIC
+    * parity build too, not only the IR/openai build below. */
+   int buffered_replay = gateway_prevent_subagents_enabled() || responses_wire;
+   int upstream_stream = responses_wire ? 1 : (buffered_replay ? 0 : 1);
+
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 1, parity);
+      prov_body = build_anthropic_provider_body(req, ag, upstream_stream, parity);
    else
    {
       /* Slice 5 (streaming): build the provider request VIA THE IR when the flag is
@@ -887,12 +1147,53 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       if (aimee_ir_path_enabled())
          prov_body = aimee_ir_build_provider_body(
              req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)), upstream_stream);
+      /* Shadow: build what LEGACY would have sent for this same request and compare
+       * byte-for-byte. This is the evidence that retires the translators — proving
+       * the IR sends the provider the same bytes, not merely that it "worked". Off
+       * unless AIMEE_IR_SHADOW is set: the extra build is real work. */
+      if (prov_body && aimee_ir_shadow_enabled())
+      {
+         char *legacy_body =
+             build_provider_body(driver, ag, messages, tools, system_text,
+                                 agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                 jo_num(req, "temperature", 1.0), upstream_stream);
+         aimee_ir_shadow_compare_bodies(prov_body, legacy_body, AIMEE_WIRE_ANTHROPIC);
+         free(legacy_body);
+      }
       if (!prov_body)
+      {
+         /* Served by the LEGACY translator. Counted at the call site, not inside the
+          * IR builder: the *_FAIL counters record that a stage failed, this records
+          * that a real request was answered by legacy. Deleting the translators is
+          * gated on this reading 0 over a live window. */
+         aimee_ir_metric_inc(AIMEE_IR_M_LEGACY_FALLBACK, AIMEE_WIRE_ANTHROPIC);
          prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                          agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 1);
+                                         jo_num(req, "temperature", 1.0), upstream_stream);
+      }
    }
+
+   const char *pristine_body = prov_body ? prov_body : "{}";
+   config_t econ_cfg;
+   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
+                                                   : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+                        &wire_snapshot, &wire_body) != 0)
+   {
+      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
+      if (xl)
+      {
+         anthropic_stream_finish(xl);
+         anthropic_stream_free(xl);
+      }
+      goto cleanup;
+   }
+   wire_prov_body = (const char *)wire_body.data;
+   wire_prov_body_len = wire_body.len;
 
    /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
     * speaks the OpenAI Responses API (`chatgpt` / Codex), the streaming
@@ -906,155 +1207,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * default) falls through to today's incremental relay/translator. */
    if (gateway_prevent_subagents_enabled() || responses_wire)
    {
-      char *buf_resp = NULL;
-      int buf_status;
-      parsed_response_t parsed;
-      int raw_responses = responses_wire;
-      memset(&parsed, 0, sizeof(parsed));
-      buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
-                                   ag->timeout_ms, extra[0] ? extra : NULL);
-      if (buf_status == 200 && buf_resp)
-      {
-         if (raw_responses)
-         {
-            if (driver && driver->parse_response)
-               driver->parse_response(NULL, buf_resp, &parsed);
-            else
-            {
-               char err[256];
-               snprintf(err, sizeof(err),
-                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                        "\"message\":\"primary provider parser unavailable\"}}");
-               if (emit)
-                  emit(ctx, "error", err);
-               free(buf_resp);
-               goto cleanup;
-            }
-            gateway_policy_police_parsed_response(&parsed);
-            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-            /* Cost accounting (mirror the buffered path). */
-            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-                agent_ingress_accounting_enabled())
-            {
-               agent_result_t ar;
-               memset(&ar, 0, sizeof(ar));
-               snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-               snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-               snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-               snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-               ar.prompt_tokens = parsed.prompt_tokens;
-               ar.completion_tokens = parsed.completion_tokens;
-               ar.cache_write_tokens = parsed.cache_write_tokens;
-               ar.cache_read_tokens = parsed.cache_read_tokens;
-               agent_record_token_audit(&ar, "", "anthropic-ingress");
-            }
-            agent_free_parsed_response(&parsed);
-         }
-         else
-         {
-            cJSON *provider_resp = cJSON_Parse(buf_resp);
-            if (provider_resp)
-            {
-               if (driver && driver->parse_response)
-                  driver->parse_response(provider_resp, buf_resp, &parsed);
-               else
-                  agent_parse_response_openai(provider_resp, &parsed);
-               gateway_policy_police_parsed_response(&parsed);
-               emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
-               /* Cost accounting (mirror the buffered path). */
-               if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
-                   agent_ingress_accounting_enabled())
-               {
-                  agent_result_t ar;
-                  memset(&ar, 0, sizeof(ar));
-                  snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-                  snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-                  snprintf(ar.requested_model, sizeof(ar.requested_model), "%s",
-                           model ? model : "");
-                  snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-                  ar.prompt_tokens = parsed.prompt_tokens;
-                  ar.completion_tokens = parsed.completion_tokens;
-                  ar.cache_write_tokens = parsed.cache_write_tokens;
-                  ar.cache_read_tokens = parsed.cache_read_tokens;
-                  agent_record_token_audit(&ar, "", "anthropic-ingress");
-               }
-               agent_free_parsed_response(&parsed);
-            }
-            else
-            {
-               char err[256];
-               snprintf(err, sizeof(err),
-                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                        "\"message\":\"primary provider returned an unparseable reply\"}}");
-               if (emit)
-                  emit(ctx, "error", err);
-            }
-            cJSON_Delete(provider_resp);
-         }
-      }
-      else
-      {
-         char err[256];
-         snprintf(err, sizeof(err),
-                  "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                  "\"message\":\"primary provider call failed with status %d\"}}",
-                  buf_status);
-         if (emit)
-            emit(ctx, "error", err);
-         /* Buffered-replay streaming: circuit-break subsequent turns only when the
-          * non-200 indicates a bad reduced payload — an invalid-request-class 4xx
-          * (400/413/422) or, fail-safe, a 5xx. Auth / rate-limit / not-found
-          * (401/403/404/429) are NOT reduction bugs and are forwarded WITHOUT
-          * disabling. No restore/resend — the 200 is already committed. */
-         if (gw_status_is_invalid_request(buf_status))
-            gw_stream_disable(&gwmc, "stream_invalid_request");
-         else if (buf_status / 100 == 5)
-            gw_stream_disable(&gwmc, "stream_decoder_error");
-      }
-      free(buf_resp);
+      messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
+                                      driver, model, msg_id, responses_wire, emit, ctx);
       goto cleanup;
    }
 
    if (driver_is_anthropic(driver))
    {
-      anthropic_relay_ctx_t relay;
-      int stream_status;
-      memset(&relay, 0, sizeof(relay));
-      sse_parser_init(&relay.parser);
-      relay.emit = emit;
-      relay.emit_ctx = ctx;
-      relay.gwmc = &gwmc; /* enable the streaming breaker for a mutated stream */
-      stream_status =
-          agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
-                                 &relay, ag->timeout_ms, extra[0] ? extra : NULL);
-      relay_flush(&relay);
-      if (stream_status != 200)
-      {
-         relay_emit_transport_error(&relay, stream_status);
-         /* Fail-safe (§2.5): a non-SSE post-200 upstream failure on a mutated stream
-          * disables subsequent turns (the current turn is already lost). */
-         gw_stream_disable(&gwmc, "stream_decoder_error");
-      }
-      /* Cost accounting for the native Anthropic streaming ingress, from the
-       * usage tapped off the relayed SSE. A clean 200 is realized spend; an
-       * aborted stream that still observed usage is recorded as partial so the
-       * observed tokens are not silently lost. */
-      if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = relay.input_tokens;
-         ar.completion_tokens = relay.output_tokens;
-         ar.cache_write_tokens = relay.cache_write_tokens;
-         ar.cache_read_tokens = relay.cache_read_tokens;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       stream_status == 200 ? "realized" : "partial");
-      }
-      sse_parser_free(&relay.parser);
-      free(relay.data);
+      messages_stream_native_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
+                                   emit, ctx);
       goto cleanup;
    }
 
@@ -1062,109 +1223,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (aimee_ir_stream_relay_enabled())
    {
-      /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
-       * SSE relay through the neutral IR-delta model instead of the legacy
-       * anthropic_stream_feed_openai translator -- the last live direct-translation
-       * site. */
-      memset(&pc, 0, sizeof pc);
-      sse_parser_init(&pc.parser);
-      pc.ir_relay = 1;
-      openai_stream_state_init(&pc.ir_ost);
-      pc.emit = emit;
-      pc.emit_ctx = ctx;
-      pc.msg_id = msg_id;
-      pc.model = model;
-      int ir_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
-      sse_parser_free(&pc.parser);
-      /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
-       * TURN_STOP was produced), synthesize the closing sequence so the client's
-       * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
-       * still-open content blocks, then emit TURN_STOP. */
-      if (pc.ir_ast.started && !pc.ir_ost.stopped)
-      {
-         aimee_delta_t bs = {0};
-         bs.type = AIMEE_DELTA_BLOCK_STOP;
-         if (pc.ir_ost.text_block >= 0)
-         {
-            bs.block_id = pc.ir_ost.text_block;
-            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
-         }
-         for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
-            if (pc.ir_ost.tool_block[i] >= 0)
-            {
-               bs.block_id = pc.ir_ost.tool_block[i];
-               anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
-            }
-         aimee_delta_t ts = {0};
-         ts.type = AIMEE_DELTA_TURN_STOP;
-         ts.stop_reason = AIMEE_STOP_END_TURN;
-         ts.usage_out = pc.ir_usage_out;
-         anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
-      }
-      /* Cost row: input from the local estimate (message_start reports 0, same as
-       * the legacy translator's estimate basis), output tapped from the IR
-       * TURN_STOP delta. */
-      if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = input_est;
-         ar.completion_tokens = (int)pc.ir_usage_out;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       ir_status == 200 ? "realized" : "partial");
-      }
+      messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
+                               msg_id, input_est, emit, ctx);
       goto cleanup;
    }
 
-   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
-   if (!xl)
-      goto cleanup;
-
-   sse_parser_init(&pc.parser);
-   pc.xl = xl;
-   int xlate_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
-   sse_parser_free(&pc.parser);
-
-   /* OpenAI-via-translator streaming: this path lacks per-frame Anthropic error
-    * classification, so a non-200 upstream on a mutated request is a fail-safe
-    * disable of subsequent turns. */
-   if (xlate_status != 200)
-      gw_stream_disable(&gwmc, "stream_decoder_error");
-
-   anthropic_stream_finish(xl);
-
-   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
-    * usage captured off the upstream OpenAI stream (prompt count preferring the
-    * upstream-reported value over the estimate, plus completion and cached
-    * tokens) and write one ingress cost row, mirroring the native relay path. A
-    * clean 200 is realized; an aborted stream with observed usage is partial. */
-   {
-      int in_tok = 0, out_tok = 0, cr_tok = 0;
-      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
-      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
-      {
-         agent_result_t ar;
-         memset(&ar, 0, sizeof(ar));
-         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
-         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
-         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
-         ar.prompt_tokens = in_tok;
-         ar.completion_tokens = out_tok;
-         ar.cache_read_tokens = cr_tok;
-         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
-                                       xlate_status == 200 ? "realized" : "partial");
-      }
-   }
-
-   anthropic_stream_free(xl);
-
+   messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model, msg_id,
+                         input_est, emit, ctx);
 cleanup:
-   gw_mutate_ctx_free(&gwmc);
+   econ_wire_snapshot_destroy(wire_snapshot);
    free(prov_body);
    free(system_text);
    cJSON_Delete(messages);

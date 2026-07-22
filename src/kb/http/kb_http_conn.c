@@ -8,6 +8,8 @@
 #include "kb_http.h"
 #include "kb_http_ws.h"
 #include "kb_verifier.h"
+#include "kb_ingress.h"
+#include "kb_reqctx.h"
 #include "log.h"
 #include "kb/http/openapi_data.h"
 
@@ -17,6 +19,14 @@
 #endif
 #ifndef KB_HTTP_RESP_MAX
 #define KB_HTTP_RESP_MAX (1024 * 1024)
+#endif
+/* Protective request-body bound. Oversized bodies are REJECTED with 413 —
+ * never silently truncated (truncation turned any large /v1/code/scan push
+ * into a 400 "invalid json" with no hint of the real cause). Generous because
+ * pushed-file scans of large repos are a legitimate workload; the bound only
+ * guards the single-threaded listener against absurd Content-Length values. */
+#ifndef KB_HTTP_BODY_MAX
+#define KB_HTTP_BODY_MAX (256 * 1024 * 1024)
 #endif
 
 #include <stdio.h>
@@ -58,6 +68,15 @@ void handle_connection(int fd)
    if (sscanf(buf, "%15s %511s", method, path) < 2)
    {
       send_response(fd, 400, "{\"error\":\"bad request\"}");
+      return;
+   }
+
+   /* B5: kb never honors a client-supplied identity header; reject fail-closed. */
+   if (kb_ingress_identity_header_present(buf))
+   {
+      LOG_WARN("kb.http",
+               "kb ingress: rejected request bearing a spoofable X-Aimee-* identity header");
+      send_response(fd, 400, "{\"error\":\"identity header not permitted\"}");
       return;
    }
 
@@ -168,11 +187,19 @@ void handle_connection(int fd)
    if (cl_hdr)
    {
       cl_hdr += 18;
-      req_body_len = atoi(cl_hdr);
-      if (req_body_len < 0)
-         req_body_len = 0;
-      if (req_body_len > 1048576)
-         req_body_len = 1048576; /* 1 MB cap */
+      long cl = atol(cl_hdr);
+      if (cl < 0)
+         cl = 0;
+      if (cl > KB_HTTP_BODY_MAX)
+      {
+         free(resp_heap);
+         aimee_log(LOG_WARN, "kb.http",
+                   "request_id=%s method=%s path=%s status=413 (body %ld > %d)", request_id, method,
+                   clean_path, cl, KB_HTTP_BODY_MAX);
+         send_response_ex(fd, 413, "{\"error\":\"request body too large\"}", request_id, NULL);
+         return;
+      }
+      req_body_len = (int)cl;
       req_body_heap = malloc((size_t)req_body_len + 1);
       if (req_body_heap)
       {
@@ -208,6 +235,7 @@ void handle_connection(int fd)
        kb_http_route_ex(method, clean_path, qs[0] ? qs : NULL, auth_val[0] ? auth_val : NULL,
                         g_bearer_token[0] ? g_bearer_token : NULL, req_body_ptr, req_body_len,
                         resp_heap, KB_HTTP_RESP_MAX);
+   kb_reqctx_clear(); /* drop the request's actor before the worker handles the next */
 
    aimee_log(LOG_INFO, "kb.http", "request_id=%s method=%s path=%s status=%d", request_id, method,
              clean_path, status);
@@ -215,9 +243,17 @@ void handle_connection(int fd)
    if (strcmp(method, "HEAD") == 0)
       resp_heap[0] = '\0';
 
-   /* Serve OpenAPI spec with YAML content-type; all other routes use JSON. */
-   const char *ct =
-       (strcmp(clean_path, "/v1/openapi.yaml") == 0) ? "application/yaml" : "application/json";
+   /* Serve OpenAPI spec with YAML content-type; the Prometheus export as its text
+    * exposition format (0.0.4); all other routes use JSON. GET /v1/metrics is the
+    * P9a scrape endpoint. On an error status it still carries a JSON error body, so
+    * keep JSON unless the request succeeded. */
+   const char *ct;
+   if (strcmp(clean_path, "/v1/openapi.yaml") == 0)
+      ct = "application/yaml";
+   else if (strcmp(clean_path, "/v1/metrics") == 0 && status >= 200 && status < 300)
+      ct = "text/plain; version=0.0.4; charset=utf-8";
+   else
+      ct = "application/json";
    send_response_ex(fd, status, resp_heap, request_id, ct);
    free(req_body_heap);
    free(resp_heap);

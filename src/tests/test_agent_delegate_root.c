@@ -82,6 +82,61 @@ void test_parent_write_guard_readonly_pipeline(void)
    printf("  PASS: test_parent_write_guard_readonly_pipeline\n");
 }
 
+/* Regression: a wfe delegate runs on a pooled worker thread and inherits the
+ * process-global parent-write guard left by a PRIOR run (only the primary chat
+ * path sets it per-run). If that stale guard's read-only root encloses the
+ * delegate's OWN worktree while its write root points at a DIFFERENT worktree, a
+ * native write_file into the delegate's worktree is wrongly rejected as "parent
+ * read-only" — the implement delegate commits an empty tree (a no-op round).
+ * wfe_live_delegate_run now clears the guard before running; this pins the
+ * clear-unblocks-the-write behavior the fix relies on. */
+void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void)
+{
+   char root[512];
+   snprintf(root, sizeof(root), "%s/aimee_stale_guard_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+
+   /* Two sibling worktrees under a common read-only root, exactly the shape a
+    * prior primary session (pinned to worktree A) leaves behind when a wfe
+    * delegate then runs in worktree B. */
+   char wt_a[512], wt_b[512];
+   snprintf(wt_a, sizeof(wt_a), "%s/.aimee/worktrees/sessionA/main", root);
+   snprintf(wt_b, sizeof(wt_b), "%s/.aimee/worktrees/wfeB/main", root);
+   assert(platform_mkdir_p(wt_a, 0700) == 0 || access(wt_a, F_OK) == 0);
+   assert(platform_mkdir_p(wt_b, 0700) == 0 || access(wt_b, F_OK) == 0);
+
+   /* Stale guard from the prior session: read-only root = the common parent,
+    * write root = worktree A. */
+   agent_tools_parent_write_guard_set(root, wt_a);
+
+   /* The wfe delegate, running in worktree B, tries to write there. Under the
+    * stale guard this is blocked (B is under the ro root but not under A). */
+   run_cmd_set_cwd(wt_b);
+   char *blocked = tool_write_file("new_impl.txt", "codex output\n");
+   run_cmd_set_cwd(NULL);
+   assert(blocked != NULL);
+   assert(strstr(blocked, "blocked") != NULL); /* rejected as parent read-only */
+   assert(access("/dev/null", F_OK) == 0);     /* sanity: fs reachable */
+   char wrote_path[600];
+   snprintf(wrote_path, sizeof(wrote_path), "%s/new_impl.txt", wt_b);
+   assert(access(wrote_path, F_OK) != 0); /* nothing landed */
+   free(blocked);
+
+   /* The fix: clear the stale guard (also restores write capability). */
+   agent_tools_parent_write_guard_clear();
+
+   run_cmd_set_cwd(wt_b);
+   char *ok = tool_write_file("new_impl.txt", "codex output\n");
+   run_cmd_set_cwd(NULL);
+   assert(ok != NULL);
+   assert(strstr(ok, "blocked") == NULL); /* now allowed */
+   assert(access(wrote_path, F_OK) == 0); /* the write landed in worktree B */
+
+   free(ok);
+   platform_test_rmrf(root);
+   printf("  PASS: test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks\n");
+}
+
 void test_parent_write_guard_readonly_large_find(void)
 {
    char root[512];
@@ -400,4 +455,82 @@ void test_detached_dead_channel_reports_clear_error(void)
    cJSON_Delete(json);
    free(result);
    printf("  PASS: test_detached_dead_channel_reports_clear_error\n");
+}
+
+/* A CONTAINER-sandboxed delegate must run its shell/script INSIDE the container via
+ * the provider's exec_shell — NOT as a local fork on the aimee-server host, which
+ * would execute the model's arbitrary command on the host (its filesystem, its
+ * network) and escape the `--network none` sandbox. The file tools already route in;
+ * bash/execute_script were the hole. The spy stands in for the container: if either
+ * tool still forked locally, the spy would never be called. */
+static int g_sbx_exec_called;
+static char *g_sbx_exec_cmd;
+static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const char *cmd,
+                                        int *exit_code)
+{
+   (void)p;
+   g_sbx_exec_called = 1;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = cmd ? strdup(cmd) : NULL;
+   if (exit_code)
+      *exit_code = 0;
+   return strdup("SANDBOX-STDOUT-MARKER");
+}
+
+void test_container_bash_runs_in_sandbox(void)
+{
+   workspace_provider_t mock;
+   memset(&mock, 0, sizeof(mock));
+   mock.kind = WS_PROVIDER_CONTAINER;
+   mock.exec_shell = sandbox_capture_exec_shell;
+   workspace_provider_set_active(&mock);
+   g_sbx_exec_called = 0;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+
+   char *result = tool_bash("echo hi", 5000);
+   workspace_provider_clear_active();
+
+   /* Routed INTO the container (spy hit), carrying our command. */
+   assert(g_sbx_exec_called == 1);
+   assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
+   cJSON *j = cJSON_Parse(result);
+   assert(j);
+   cJSON *so = cJSON_GetObjectItem(j, "stdout");
+   assert(so && cJSON_IsString(so) && strstr(so->valuestring, "SANDBOX-STDOUT-MARKER"));
+   cJSON_Delete(j);
+   free(result);
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+   printf("  PASS: test_container_bash_runs_in_sandbox\n");
+}
+
+void test_container_execute_script_runs_in_sandbox(void)
+{
+   workspace_provider_t mock;
+   memset(&mock, 0, sizeof(mock));
+   mock.kind = WS_PROVIDER_CONTAINER;
+   mock.exec_shell = sandbox_capture_exec_shell;
+   workspace_provider_set_active(&mock);
+   g_sbx_exec_called = 0;
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+
+   char *result =
+       dispatch_tool_call("execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\"}", 5000);
+   workspace_provider_clear_active();
+
+   assert(g_sbx_exec_called == 1);
+   assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
+   /* Fed over a quoted heredoc so the body needs no escaping. */
+   assert(strstr(g_sbx_exec_cmd, "AIMEE_SCRIPT_EOF"));
+   cJSON *j = cJSON_Parse(result);
+   assert(j);
+   cJSON *so = cJSON_GetObjectItem(j, "stdout");
+   assert(so && cJSON_IsString(so) && strstr(so->valuestring, "SANDBOX-STDOUT-MARKER"));
+   cJSON_Delete(j);
+   free(result);
+   free(g_sbx_exec_cmd);
+   g_sbx_exec_cmd = NULL;
+   printf("  PASS: test_container_execute_script_runs_in_sandbox\n");
 }

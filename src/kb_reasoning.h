@@ -5,7 +5,7 @@
 #ifndef DEC_KB_REASONING_H
 #define DEC_KB_REASONING_H 1
 
-#include "headers/config.h"
+#include "config.h"
 #include <stddef.h>
 
 #ifdef __cplusplus

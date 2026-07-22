@@ -280,6 +280,27 @@ int kb_oidc_verify_jwt(const char *jwt, const kb_oidc_config_t *cfg, long now,
       if (expiry + 60 < now)
          break;
 
+      /* iat ceiling (P1 I9): a hard server-side cap on accepted token age,
+       * enforced regardless of the token's own exp, so a leaked/misconfigured
+       * long-lived token cannot outlive the ceiling. iat is REQUIRED and numeric;
+       * a missing/malformed iat, a future iat (beyond skew), or an age over the
+       * ceiling all reject. The future check runs BEFORE any subtraction so a
+       * now < iat can never underflow into a huge age that would pass the cap. */
+      {
+         const long skew = 60; /* symmetric clock-skew allowance (matches exp) */
+         long max_age = cfg->max_token_age_secs > 0 ? cfg->max_token_age_secs : 900;
+         cJSON *iat = cJSON_GetObjectItemCaseSensitive(pl, "iat");
+         if (!cJSON_IsNumber(iat))
+            break; /* missing or non-numeric iat */
+         long iat_v = (long)iat->valuedouble;
+         if (iat_v < 0)
+            break; /* malformed */
+         if (iat_v > now + skew)
+            break; /* issued in the future beyond skew — reject before subtracting */
+         if (now - iat_v > max_age)
+            break; /* over-age: older than the ceiling, regardless of exp */
+      }
+
       /* iss / aud when configured. */
       if (cfg->issuer[0])
       {
@@ -317,8 +338,29 @@ int kb_oidc_verify_jwt(const char *jwt, const kb_oidc_config_t *cfg, long now,
 static kb_oidc_config_t g_oidc_cfg;
 static int g_oidc_cfg_set = 0;
 static pthread_mutex_t g_oidc_lock = PTHREAD_MUTEX_INITIALIZER;
+static kb_oidc_fleet_resolver_fn g_fleet_resolver = NULL;
 
 #include <time.h>
+
+void kb_oidc_set_fleet_resolver(kb_oidc_fleet_resolver_fn fn)
+{
+   pthread_mutex_lock(&g_oidc_lock);
+   g_fleet_resolver = fn;
+   pthread_mutex_unlock(&g_oidc_lock);
+}
+
+int kb_oidc_configured_issuer(char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   pthread_mutex_lock(&g_oidc_lock);
+   int ok = (g_oidc_cfg_set && g_oidc_cfg.issuer[0]);
+   if (ok)
+      snprintf(out, cap, "%s", g_oidc_cfg.issuer);
+   pthread_mutex_unlock(&g_oidc_lock);
+   return ok ? 0 : -1;
+}
 
 static int oidc_verify_fn(const char *presented, const char *configured, kb_verify_result_t *out,
                           void *ctx)
@@ -326,6 +368,7 @@ static int oidc_verify_fn(const char *presented, const char *configured, kb_veri
    (void)configured;
    (void)ctx;
    kb_oidc_config_t cfg;
+   kb_oidc_fleet_resolver_fn fleet;
    pthread_mutex_lock(&g_oidc_lock);
    if (!g_oidc_cfg_set)
    {
@@ -333,7 +376,19 @@ static int oidc_verify_fn(const char *presented, const char *configured, kb_veri
       return 0;
    }
    cfg = g_oidc_cfg;
+   fleet = g_fleet_resolver;
    pthread_mutex_unlock(&g_oidc_lock);
+
+   /* Fleet-wide JWKS (I10): when a resolver is registered and an issuer is
+    * configured, prefer the shared Postgres key set so the fleet agrees on trusted
+    * keys and IdP rotation converges; the file cfg.jwks_json is the fallback used
+    * only when the resolver reports no fleet keys. */
+   if (fleet && cfg.issuer[0])
+   {
+      char fleet_jwks[sizeof(cfg.jwks_json)];
+      if (fleet(cfg.issuer, fleet_jwks, sizeof(fleet_jwks)) == 0 && fleet_jwks[0])
+         snprintf(cfg.jwks_json, sizeof(cfg.jwks_json), "%s", fleet_jwks);
+   }
    return kb_oidc_verify_jwt(presented, &cfg, (long)time(NULL), out);
 }
 
@@ -369,6 +424,16 @@ int kb_oidc_register_from_file(const char *jwks_file, const char *issuer, const 
       snprintf(cfg.scope_claim, sizeof(cfg.scope_claim), "%s", scope_claim);
    if (scope_kind)
       snprintf(cfg.scope_kind, sizeof(cfg.scope_kind), "%s", scope_kind);
+
+   /* Optional hard token-age ceiling (P1 I9); default 900s (15 min) when unset or
+    * non-positive. */
+   const char *max_age_env = getenv("AIMEE_KB_OIDC_MAX_TOKEN_AGE");
+   if (max_age_env && max_age_env[0])
+   {
+      long v = strtol(max_age_env, NULL, 10);
+      if (v > 0)
+         cfg.max_token_age_secs = v;
+   }
 
    /* Read the JWKS document into the (bounded) config buffer. The file must fit
     * with room for the NUL; an empty, oversized, or unreadable file is a config

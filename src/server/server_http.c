@@ -9,9 +9,11 @@
 #endif
 #include "server_http_internal.h"
 #include "server_http.h"
-#include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
-#include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
-#include "server_tls.h"     /* native TLS termination (phase 1b) */
+#include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
+#include "server.h"            /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
+#include "server_tls.h"        /* native TLS termination (phase 1b) */
+#include "pki.h"               /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -33,6 +35,8 @@
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "shadow_mirror.h"        /* generic shadow-traffic mirror */
+#include "http_content_encoding.h"
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -49,7 +53,6 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-#define SHTTP_READ_MAX 8192
 /* Max request body. The OpenAI/Codex Responses surface sends large bodies — a
  * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
  * conversation/tool-call history (175KB+ and growing), so the cap must be well
@@ -346,6 +349,23 @@ uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes
    return CAPS_AUTHENTICATED;
 }
 
+uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int remote_writes,
+                                         int mtls_mode, int mtls_authenticated)
+{
+   if (!is_tcp || mtls_mode <= 0)
+      return server_http_conn_caps(is_tcp, bearer, remote_writes);
+   if (mtls_authenticated)
+      return CAPS_AUTHENTICATED;
+   /* Optional-mode bearer fallback is deliberately weaker than a client cert:
+    * query/session reads only, with no compute or mutation capability. */
+   return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
+}
+
+int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authenticated)
+{
+   return !is_tcp || mtls_mode < 2 || mtls_authenticated;
+}
+
 /* Routes deliberately reachable over the TCP listener regardless of
  * aimee.api.remote_writes (still capability-gated): the detached-workspace
  * reverse channel and registry mutations (workspace-resource-plane). The serving
@@ -363,8 +383,8 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    return 0;
 }
 
-int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
-                              int remote_writes)
+int server_http_route_allowed_caps(int is_tcp, uint32_t have, const char *method, const char *path,
+                                   int remote_writes)
 {
    /* Over the TCP listener, a route that needs any capability beyond the read set
     * (CAPS_READ_ONLY) is "privileged" and denied unless the operator opts in via
@@ -392,8 +412,14 @@ int server_http_route_allowed(int is_tcp, const char *bearer, const char *method
       }
    }
    uint32_t need = server_http_route_caps(method, path);
-   uint32_t have = server_http_conn_caps(is_tcp, bearer, remote_writes);
    return (need & ~have) == 0;
+}
+
+int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
+                              int remote_writes)
+{
+   return server_http_route_allowed_caps(
+       is_tcp, server_http_conn_caps(is_tcp, bearer, remote_writes), method, path, remote_writes);
 }
 
 void server_http_api_status_report(int http_port, int bearer_configured, int rate_limit_per_min,
@@ -653,6 +679,68 @@ int route_capabilities(char *resp, int cap)
    return 200;
 }
 
+/* GET /v1/ready — readiness, deliberately distinct from /v1/health (liveness).
+ * `health` answers "this process is alive and serving HTTP"; `ready` answers
+ * "this process can serve work right now". An orchestrator restarts on a
+ * liveness failure but only drains on a readiness failure, so conflating the
+ * two would restart a healthy process during a transient dependency outage.
+ *
+ * The provider serves a snapshot sampled OFF the request path, so this route
+ * performs no dependency I/O and a wedged dependency cannot stall the listener.
+ * Until a provider is registered every dependency is `unknown` and the answer
+ * is 503: readiness fails closed, so an unsampled server is never advertised as
+ * ready. The body keeps one shape in every case (including the unregistered and
+ * provider-failed cases) so a client parsing `.ready` / `.dependencies` never
+ * has to special-case a server that has not sampled yet. */
+static server_http_ready_fn g_ready_fn = NULL;
+
+void server_http_set_ready_provider(server_http_ready_fn fn)
+{
+   g_ready_fn = fn;
+}
+
+/* The fail-closed body, used whenever no provider answered for us. */
+static int ready_unknown(char *resp, int cap, const char *reason)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":false,\"status\":\"unknown\",\"service\":\"aimee-server\","
+            "\"reason\":\"%s\",\"dependencies\":{}}",
+            reason);
+   return 503;
+}
+
+int route_ready(char *resp, int cap)
+{
+   if (cap > 0)
+      resp[0] = '\0';
+   if (!g_ready_fn)
+      return ready_unknown(resp, cap, "no readiness provider registered");
+
+   int status = g_ready_fn(resp, cap);
+
+   /* Fail closed on anything we cannot positively confirm. A provider is
+    * trusted to sample, not to define the contract, so the route validates
+    * rather than passes through:
+    *   - only 200 and 503 are legal; any other status is a bug, not a state;
+    *   - a 200 must actually carry ready:true, so a provider cannot advertise
+    *     readiness with a body that says otherwise (or with no body at all);
+    *   - a 503 must not carry ready:true, so the two halves cannot contradict.
+    * Checking resp[0] alone would catch an empty body but not a contradictory
+    * one, which is the case that actually matters here. */
+   if (status != 200 && status != 503)
+      return ready_unknown(resp, cap, "readiness provider returned an invalid status");
+   if (resp[0] == '\0')
+      return ready_unknown(resp, cap, "readiness provider wrote no body");
+
+   int says_ready = (strstr(resp, "\"ready\":true") != NULL);
+   if (status == 200 && !says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 200 without ready:true");
+   if (status == 503 && says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 503 with ready:true");
+
+   return status;
+}
+
 /* GET /v1/models — OpenAI-compatible model discovery. Always advertises the
  * local `aimee` model; when the server has registered a models provider, the
  * configured agent names are appended (the (provider,model) bindings a client
@@ -838,32 +926,55 @@ void server_http_set_runs_handler(server_http_completion_fn fn)
    g_runs_handler = fn;
 }
 
-/* GET /v1/runs/{id}: return the run record (404 when unknown). The snapshot
+/* GET /v1/runs/{id}: return the run record (404 when unknown, 410 when a valid
+ * op-run was interrupted by replacement or evicted from this generation). The snapshot
  * reflects live status transitions (queued -> in_progress -> terminal) as the
  * background worker publishes them. */
+static int run_missing_response(const char *id, char *resp, int cap)
+{
+   openai_runs_missing_t why = openai_runs_store_classify_missing(id);
+   if (why == OPENAI_RUNS_MISSING_UNKNOWN)
+      return err_json(resp, cap, 404, "no such run");
+   const char *status = why == OPENAI_RUNS_MISSING_INTERRUPTED ? "interrupted" : "evicted";
+   const char *message = why == OPENAI_RUNS_MISSING_INTERRUPTED
+                             ? "run interrupted by server replacement"
+                             : "run record evicted from live store";
+   cJSON *o = cJSON_CreateObject();
+   if (!o)
+      return err_json(resp, cap, 500, "out of memory");
+   cJSON_AddStringToObject(o, "error", message);
+   cJSON_AddStringToObject(o, "run_id", id);
+   cJSON_AddStringToObject(o, "status", status);
+   char *json = cJSON_PrintUnformatted(o);
+   int n = json ? snprintf(resp, (size_t)cap, "%s", json) : -1;
+   free(json);
+   cJSON_Delete(o);
+   return (n >= 0 && n < cap) ? 410 : err_json(resp, cap, 500, "response too large");
+}
+
 int route_runs_get(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
    if (!openai_runs_store_get(id, resp, (size_t)cap))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    return 200;
 }
 
 /* POST /v1/runs/{id}/stop: request cancellation of an in-flight run. Sets the
  * cancel flag (a no-op once the run is already terminal); the background worker
  * observes it at its next step boundary and finalizes the run as "cancelled".
- * Returns the current run snapshot, or 404 when unknown. */
+ * Returns the current run snapshot, 404 when unknown, or 410 when unavailable. */
 int route_runs_stop(const char *id, char *resp, int cap)
 {
    if (!id || !id[0])
       return err_json(resp, cap, 400, "missing run id");
    openai_run_status_t st;
    if (!openai_runs_store_status(id, &st))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    openai_runs_store_request_cancel(id);
    if (!openai_runs_store_get(id, resp, (size_t)cap))
-      return err_json(resp, cap, 404, "no such run");
+      return run_missing_response(id, resp, cap);
    return 200;
 }
 
@@ -993,17 +1104,23 @@ int server_http_route(const char *method, const char *path, const char *body, in
 
 /* ── socket listener ────────────────────────────────────────────────────── */
 
-static int g_listen_fd = -1;    /* UDS listener (always bound) */
-static int g_tcp_fd = -1;       /* optional localhost TCP listener */
-static int g_tls_fd = -1;       /* optional native-TLS listener (phase 1b) */
-static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
-static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
-static int g_remote_writes = 0; /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+static int g_listen_fd = -1;         /* UDS listener (always bound) */
+static int g_tcp_fd = -1;            /* optional localhost TCP listener */
+static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) */
+static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
+static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
+static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
+static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock =
     PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
 static pthread_t g_thread;
-static volatile int g_running = 0;
+static atomic_int g_running = 0;
+static int g_thread_active = 0;
+/* Serializes listener publication and teardown. In particular, start cannot
+ * reuse a just-closed fd until the old accept loop has observed its stop and
+ * exited. */
+static pthread_mutex_t g_listener_lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
 
 const char *server_http_default_path(void)
 {
@@ -1218,14 +1335,26 @@ static void handle_cli_session_stream(int fd, const char *id, const char *reques
 /* GET /v1/runs/{id}/events: subscribe to the live run record. Flush already
  * buffered events, then block-and-flush new ones as the background worker
  * produces them, until a terminal event. A periodic SSE comment heartbeat
- * doubles as a client-disconnect probe so a hangup frees the listener. 404
- * (buffered) when the run is unknown. */
+ * doubles as a client-disconnect probe so a hangup frees the listener. Missing
+ * valid op-runs return 410; arbitrary unknown ids return 404. */
 static void handle_run_events(int fd, const char *id, const char *request_id)
 {
    openai_run_status_t st0;
    if (!openai_runs_store_status(id, &st0))
    {
-      send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
+      openai_runs_missing_t why = openai_runs_store_classify_missing(id);
+      if (why == OPENAI_RUNS_MISSING_INTERRUPTED)
+         send_response(fd, 410,
+                       "{\"error\":\"run interrupted by server replacement\","
+                       "\"status\":\"interrupted\"}",
+                       request_id);
+      else if (why == OPENAI_RUNS_MISSING_EVICTED)
+         send_response(fd, 410,
+                       "{\"error\":\"run record evicted from live store\","
+                       "\"status\":\"evicted\"}",
+                       request_id);
+      else
+         send_response(fd, 404, "{\"error\":\"no such run\"}", request_id);
       return;
    }
    write_sse_headers(fd, request_id);
@@ -1393,8 +1522,10 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
-void handle_conn(int fd, int is_tcp)
+void handle_conn(int fd, int is_tcp, int is_management)
 {
+   server_http_keepalive_set(0);
+   server_http_gzip_set(0);
    char buf[SHTTP_READ_MAX];
    int total = 0;
    while (total < SHTTP_READ_MAX - 1)
@@ -1409,11 +1540,37 @@ void handle_conn(int fd, int is_tcp)
    }
    buf[total] = '\0';
 
+   /* The dedicated lane never classifies or dispatches an unterminated or
+    * header-overflow request. Generic listeners retain their legacy parser. */
+   if (is_management && !strstr(buf, "\r\n\r\n"))
+   {
+      send_response(fd, 400, "{\"error\":\"bad management request\"}", NULL);
+      return;
+   }
+
    char method[16] = {0};
    char path[512] = {0};
    if (sscanf(buf, "%15s %511s", method, path) < 2)
    {
       send_response(fd, 400, "{\"error\":\"bad request\"}", NULL);
+      return;
+   }
+
+   /* Package-access proxy (UDS listener ONLY — never the TCP/TLS surface): a CONNECT
+    * or absolute-form (`http://…`) request line is a sandboxed delegate's
+    * package-manager fetch arriving via the in-container aimee-forwarder. Hand it to
+    * the forward proxy (host-allowlist + SSRF guard + per-request audit); origin-form
+    * (`/…`) request lines fall through to the /v1 API stack below. A local /v1 client
+    * never sends CONNECT, so this cannot shadow the API. The caller closes `fd`. */
+   if (!is_tcp && (strcmp(method, "CONNECT") == 0 || strncmp(path, "http://", 7) == 0))
+   {
+      /* Defense in depth beyond !is_tcp: confirm the socket really is AF_UNIX before
+       * exposing the forward proxy, so a future is_tcp regression cannot open egress on
+       * the public TCP/TLS listener. sandbox_pkg_proxy_serve also refuses if !is_uds. */
+      struct sockaddr_storage ss;
+      socklen_t sl = sizeof(ss);
+      int is_uds = getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX;
+      sandbox_pkg_proxy_serve(fd, is_uds, buf, NULL, "sandbox");
       return;
    }
 
@@ -1438,15 +1595,130 @@ void handle_conn(int fd, int is_tcp)
                              request_id, sizeof(request_id));
    }
 
-   /* Establish the per-request context (#3) for this worker thread before any
-    * handler runs. Overwritten on every request, so thread reuse cannot leak a
-    * prior request's identity. */
-   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path,
-                                        server_http_conn_caps(is_tcp, g_bearer, g_remote_writes));
+   /* The management lane rejects malformed/ambiguous framing before peer
+    * classification, so authorization results cannot become a parser oracle. */
+   if (is_management &&
+       (!server_http_management_request_syntax_valid(method, path, buf, (size_t)total) ||
+        (server_http_management_health_route(method, path) &&
+         !server_http_management_framing_valid(method, path, buf, (size_t)total))))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
+      return;
+   }
 
-   /* Authorize before reading the body: TCP requires a valid bearer; the UDS
-    * relies on filesystem permissions. A session-scoping key without a
-    * configured bearer is refused on any transport. */
+   /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
+    * durable roster row before the bearer gate so required-mode clients do not
+    * still depend on the shared bearer. This remains authentication only: the
+    * normal route/capability gates below still deny remote-write surfaces. */
+   int mtls_authenticated = 0;
+   int management_authenticated = 0;
+   int mtls_mode = server_tls_mtls_mode();
+   char rc_cn[256] = "", rc_serial[80] = "";
+   int have_verified_peer = 0;
+   int have_management_peer = 0;
+   server_tls_peer_cert_t management_peer;
+   memset(&management_peer, 0, sizeof(management_peer));
+   if (server_conn_io_has_ssl(fd))
+   {
+      SSL *request_ssl = server_conn_io_get_ssl(fd);
+      have_verified_peer =
+          server_tls_peer_identity(request_ssl, rc_cn, sizeof(rc_cn), rc_serial, sizeof(rc_serial));
+      have_management_peer =
+          have_verified_peer && server_tls_peer_cert(request_ssl, &management_peer) == 1;
+   }
+   server_http_management_auth_t management_auth =
+       server_http_management_auth(method, path, is_management, have_management_peer,
+                                   management_peer.management_profile, management_peer.cn);
+   if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
+   {
+      int status = server_http_management_health_route(method, path) ? 401 : 403;
+      send_response(fd, status,
+                    status == 401 ? "{\"error\":{\"message\":\"a verified management client "
+                                    "certificate is required on the management listener\",\"type\":"
+                                    "\"authentication_error\"}}"
+                                  : "{\"error\":{\"message\":\"management transport is not "
+                                    "authorized for this route\",\"type\":\"permission_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> %d (management transport) req_id=%s", method, path, status,
+               request_id);
+      return;
+   }
+   if (management_auth == SERVER_HTTP_MANAGEMENT_ALLOW)
+   {
+      management_authenticated = 1;
+   }
+   else if (have_verified_peer && rc_serial[0])
+   {
+      pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
+      if (cs != PKI_CERT_VALID)
+      {
+         LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
+                  path, pki_cert_status_str(cs), rc_serial, request_id);
+         send_response(fd, 403,
+                       "{\"error\":{\"message\":\"client certificate is no longer valid "
+                       "(revoked, expired, or unrecognized)\",\"type\":"
+                       "\"authentication_error\"}}",
+                       request_id);
+         return;
+      }
+      mtls_authenticated = 1;
+      /* Presentation writes are migration-only. Once required, the durable
+       * roster is still checked above but the steady-state request path does
+       * not take DB1's write gate or recompute the whole roster hash. */
+      if (mtls_mode == 1)
+      {
+         long ramp_now = (long)time(NULL);
+         if (pki_mtls_note_presentation(rc_serial, ramp_now) != 0)
+            LOG_WARN("server.http", "mTLS ramp presentation write failed serial=%s", rc_serial);
+         else if (pki_mtls_ramp_ready(ramp_now) == 1)
+         {
+            SSL_CTX *prepared = server_tls_prepare_required();
+            if (!prepared)
+               LOG_WARN("server.http", "mTLS ramp required-context preparation failed");
+            else
+            {
+               int advanced = pki_mtls_ramp_advance(ramp_now);
+               if (advanced == 1)
+                  server_tls_activate_required(prepared);
+               else
+               {
+                  server_tls_discard_prepared(prepared);
+                  if (advanced < 0)
+                     LOG_WARN("server.http", "mTLS ramp durable advance failed");
+               }
+            }
+         }
+      }
+   }
+
+   /* Promotion applies to connections accepted under the old optional context
+    * too: once durable state is required, a no-cert keep-alive may not retain
+    * bearer fallback merely because its handshake predated the context swap. */
+   mtls_mode = server_tls_mtls_mode();
+   int transport_authenticated = mtls_authenticated || management_authenticated;
+   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, transport_authenticated))
+   {
+      send_response(fd, 401,
+                    "{\"error\":{\"message\":\"a valid client certificate is required\","
+                    "\"type\":\"authentication_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> 401 (mtls required) req_id=%s", method, path, request_id);
+      return;
+   }
+   int effective_remote_writes =
+       is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
+   uint32_t effective_caps =
+       management_authenticated ? 0
+                                : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
+                                                                  mtls_mode, mtls_authenticated);
+
+   /* Establish the per-request context (#3) only after authenticating the
+    * durable certificate, so downstream dispatch sees the same effective caps
+    * as the outer route gate. */
+   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
+
+   /* Authorize before reading the body: TCP requires either the durably valid
+    * client certificate above or a valid bearer; UDS relies on permissions. */
    {
       char auth[512] = "";
       char api_key[512] = "";
@@ -1466,8 +1738,10 @@ void handle_conn(int fd, int is_tcp)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                     has_api_key ? api_key : NULL, has_skey);
+      int az = transport_authenticated
+                   ? 0
+                   : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                           has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
@@ -1487,7 +1761,7 @@ void handle_conn(int fd, int is_tcp)
        * solely to mint the real bearer, after which g_bearer no longer equals the
        * bootstrap and this gate self-disables. Closes the "a network-published
        * server keeps accepting the public default bearer" hole. */
-      if (server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
+      if (!management_authenticated && server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
       {
          send_response(fd, 401,
                        "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
@@ -1503,7 +1777,7 @@ void handle_conn(int fd, int is_tcp)
    /* Per-bearer rate limit on the TCP listener (the UDS listener is local and
     * never throttled). Connections are handled concurrently, so g_rate_state is
     * mutated under g_rate_lock. */
-   if (is_tcp)
+   if (is_tcp && !management_authenticated)
    {
       pthread_mutex_lock(&g_rate_lock);
       int retry = server_http_rate_check(&g_rate_state, g_rate_limit, (long)time(NULL));
@@ -1520,7 +1794,8 @@ void handle_conn(int fd, int is_tcp)
     * must be a subset of the connection's effective set. UDS is same-user
     * trusted and exempt. A scoped bearer is read/query-only, so compute/write
     * routes return 403; an unscoped bearer holds CAPS_AUTHENTICATED. */
-   if (is_tcp && !server_http_route_allowed(is_tcp, g_bearer, method, path, g_remote_writes))
+   if (is_tcp && !server_http_route_allowed_caps(is_tcp, effective_caps, method, path,
+                                                 effective_remote_writes))
    {
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
@@ -1529,6 +1804,31 @@ void handle_conn(int fd, int is_tcp)
       LOG_INFO("server.http", "%s %s -> 403 (caps) req_id=%s", method, path, request_id);
       return;
    }
+
+   config_t transport_cfg;
+   config_load(&transport_cfg);
+   char connection_header[128] = "";
+   int keepalive_requested =
+       server_conn_io_has_ssl(fd) && server_http_keepalive_route_eligible(path) &&
+       http_header(buf, "Connection", connection_header, sizeof(connection_header)) &&
+       strcasestr(connection_header, "keep-alive") != NULL &&
+       strcasestr(connection_header, "close") == NULL;
+   if (transport_cfg.transport_server_keepalive_enabled && keepalive_requested)
+   {
+      if (!server_http_keepalive_framing_valid(buf, (size_t)total))
+      {
+         send_response(fd, 400, "{\"error\":\"invalid keep-alive request framing\"}", request_id);
+         return;
+      }
+      server_http_keepalive_set(1);
+   }
+   char accept_encoding[128] = "";
+   int gzip_allowed =
+       transport_cfg.transport_thinclient_gzip_enabled && server_http_gzip_route_eligible(path);
+   server_http_gzip_set(
+       gzip_allowed &&
+       http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
+       strcasestr(accept_encoding, "gzip") != NULL);
 
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
@@ -1653,6 +1953,7 @@ void handle_conn(int fd, int is_tcp)
       body = malloc((size_t)body_len + 1);
       if (body)
       {
+         int declared_body_len = body_len;
          int already = 0;
          const char *bs = strstr(buf, "\r\n\r\n");
          if (bs)
@@ -1674,8 +1975,69 @@ void handle_conn(int fd, int is_tcp)
             already += n;
          }
          body[already] = '\0';
+         if (server_http_keepalive_peek() && already != declared_body_len)
+         {
+            server_http_keepalive_set(0);
+            send_response(fd, 400, "{\"error\":\"incomplete keep-alive request body\"}",
+                          request_id);
+            free(body);
+            return;
+         }
          body_len = already;
       }
+      else if (body_len > 0 && server_http_keepalive_peek())
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 500, "{\"error\":\"oom\"}", request_id);
+         return;
+      }
+   }
+
+   char content_encoding[64] = "";
+   if (http_header(buf, "Content-Encoding", content_encoding, sizeof(content_encoding)) &&
+       content_encoding[0])
+   {
+      if (!gzip_allowed || strcasecmp(content_encoding, "gzip") != 0 || !body)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 415, "{\"error\":\"unsupported content encoding\"}", request_id);
+         free(body);
+         return;
+      }
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      const char *head_end = strstr(buf, "\r\n\r\n");
+      size_t head_bytes = head_end ? (size_t)(head_end + 4 - buf) : (size_t)total;
+      size_t decoded_cap = head_bytes < 64u * 1024u ? 64u * 1024u - head_bytes : 0;
+      int gzip_rc = decoded_cap ? http_gzip_decompress(body, (size_t)body_len, decoded_cap, 50,
+                                                       &decoded, &decoded_len)
+                                : -2;
+      free(body);
+      body = (char *)decoded;
+      body_len = (int)decoded_len;
+      if (gzip_rc != 0)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, gzip_rc == -2 ? 413 : 400,
+                       gzip_rc == -2 ? "{\"error\":\"decompressed body limit exceeded\"}"
+                                     : "{\"error\":\"malformed gzip body\"}",
+                       request_id);
+         return;
+      }
+   }
+
+   /* Shadow-traffic mirror: fire-and-forget a copy of every completion request to
+    * a configured peer aimee before we serve it, so a build under test can be
+    * validated against live traffic without being deployed here. No-op unless a
+    * peer is configured. The X-Aimee-Shadow header on an INBOUND request means we
+    * are the peer receiving a mirror -- do not re-mirror (loop guard). Placed
+    * after the body is read and before dispatch so it covers both the streaming
+    * and buffered completion paths, and it never blocks or alters the real turn. */
+   if (strcmp(method, "POST") == 0 && shadow_mirror_is_mirrorable_path(path))
+   {
+      char shadow_hdr[8] = "";
+      int inbound_is_shadow = http_header(buf, "X-Aimee-Shadow", shadow_hdr, sizeof shadow_hdr);
+      shadow_mirror_dispatch(path, body, body_len, inbound_is_shadow);
    }
 
    /* Native streaming chat over HTTP — hands off to the async chat worker, which
@@ -1685,7 +2047,7 @@ void handle_conn(int fd, int is_tcp)
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/chat/stream") == 0)
    {
       uint32_t need = server_capability_for_method("chat.send_stream");
-      uint32_t have = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
+      uint32_t have = effective_caps;
       if ((need & ~have) != 0)
       {
          send_response(fd, 403, "{\"error\":\"forbidden: chat requires an unscoped credential\"}",
@@ -1724,7 +2086,13 @@ void handle_conn(int fd, int is_tcp)
    /* Streaming completions take the SSE path (separate from the buffered unary
     * route). With no stream handler registered the request falls through to the
     * unary handler, which rejects streaming. */
-   if (strcmp(method, "POST") == 0 && openai_request_bool(body, "stream"))
+   int streaming_request = strcmp(method, "POST") == 0 && openai_request_bool(body, "stream");
+   if (streaming_request)
+   {
+      server_http_keepalive_set(0);
+      server_http_gzip_set(0);
+   }
+   if (streaming_request)
    {
       if (strcmp(path, "/v1/chat/completions") == 0 && g_chat_stream_handler)
       {
@@ -1766,7 +2134,7 @@ void handle_conn(int fd, int is_tcp)
    /* Expose this connection's effective caps to the dispatch routes (UDS =>
     * CAPS_ALL, TCP => bearer-scoped) so loopback_rpc / server_dispatch re-check
     * per-method capability. Reset to the read-only default afterward. */
-   g_rpc_conn_caps = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
+   g_rpc_conn_caps = effective_caps;
    /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
     * or a server.token-gated webuser assertion) into thread-locals, live until
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
@@ -1794,6 +2162,9 @@ void handle_conn(int fd, int is_tcp)
  * thread/fd use; over the cap the connection is handled inline by the accept
  * thread (degrades to serial under overload, never dropped). */
 atomic_int g_conn_live = 0;
+/* Keep management health traffic from exhausting data workers, and vice
+ * versa. Both pools retain the same 32 MiB per-worker stack bound. */
+atomic_int g_management_conn_live = 0;
 
 /* Single accept loop over both listeners: poll the UDS (and the TCP fd when
  * bound), accept whichever is ready, and hand each connection to a per-
@@ -1801,11 +2172,11 @@ atomic_int g_conn_live = 0;
 static void *listener_thread(void *arg)
 {
    (void)arg;
-   while (g_running)
+   while (atomic_load(&g_running))
    {
-      struct pollfd pfds[3];
+      struct pollfd pfds[4];
       int n = 0;
-      int uds_idx = -1, tcp_idx = -1, tls_idx = -1;
+      int uds_idx = -1, tcp_idx = -1, tls_idx = -1, management_idx = -1;
       if (g_listen_fd >= 0)
       {
          pfds[n].fd = g_listen_fd;
@@ -1824,6 +2195,12 @@ static void *listener_thread(void *arg)
          pfds[n].events = POLLIN;
          tls_idx = n++;
       }
+      if (g_management_tls_fd >= 0)
+      {
+         pfds[n].fd = g_management_tls_fd;
+         pfds[n].events = POLLIN;
+         management_idx = n++;
+      }
       if (n == 0)
          break;
 
@@ -1839,28 +2216,36 @@ static void *listener_thread(void *arg)
 
       if (uds_idx >= 0 && (pfds[uds_idx].revents & POLLIN))
       {
-         int fd = accept(g_listen_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 0, 0))
+         int fd = accept(pfds[uds_idx].fd, NULL, NULL);
+         if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
-            handle_conn(fd, 0);
+            handle_conn(fd, 0, 0);
             close(fd);
          }
       }
       if (tcp_idx >= 0 && (pfds[tcp_idx].revents & POLLIN))
       {
-         int fd = accept(g_tcp_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 1, 0))
+         int fd = accept(pfds[tcp_idx].fd, NULL, NULL);
+         if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
-            handle_conn(fd, 1);
+            handle_conn(fd, 1, 0);
             close(fd);
          }
       }
       if (tls_idx >= 0 && (pfds[tls_idx].revents & POLLIN))
       {
-         int fd = accept(g_tls_fd, NULL, NULL);
+         int fd = accept(pfds[tls_idx].fd, NULL, NULL);
          /* TLS conns must run in a worker (the handshake + SSL live there); if the
           * conn cap is hit we drop rather than handle inline (no SSL here). */
-         if (fd >= 0 && !conn_offload(fd, 1, 1))
+         if (fd >= 0 && !conn_offload(fd, 1, 1, 0))
+            close(fd);
+      }
+      if (management_idx >= 0 && (pfds[management_idx].revents & POLLIN))
+      {
+         int fd = accept(pfds[management_idx].fd, NULL, NULL);
+         /* Like data TLS, management TLS must never handshake on the accept
+          * thread. The cap is shared so a second listener cannot double it. */
+         if (fd >= 0 && !conn_offload(fd, 1, 1, 1))
             close(fd);
       }
    }
@@ -1910,11 +2295,63 @@ static int tcp_listen(int tcp_port, const char *bearer_token, int allow_external
    return fd;
 }
 
+static int management_tcp_listen(const server_http_management_config_t *config)
+{
+   if (!config || !config->enabled || config->port < 1 || config->port > UINT16_MAX)
+      return -1;
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   if (fd < 0)
+      return -1;
+   int yes = 1;
+   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+   struct sockaddr_in addr;
+   memset(&addr, 0, sizeof(addr));
+   addr.sin_family = AF_INET;
+   addr.sin_port = htons((uint16_t)config->port);
+   addr.sin_addr.s_addr = config->bind_addr;
+   if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(fd, SHTTP_BACKLOG) < 0)
+   {
+      close(fd);
+      return -1;
+   }
+   return fd;
+}
+
+static void close_listener_fd(int *fd)
+{
+   if (fd && *fd >= 0)
+   {
+      shutdown(*fd, SHUT_RDWR);
+      close(*fd);
+      *fd = -1;
+   }
+}
+
 int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                       int rate_limit_per_min, int remote_writes)
 {
-   if (g_running || g_listen_fd >= 0)
+   pthread_mutex_lock(&g_listener_lifecycle_lock);
+   if (atomic_load(&g_running) || g_thread_active || g_listen_fd >= 0)
+   {
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return -1;
+   }
+   server_http_management_config_t management;
+   if (server_http_management_config_from_env(&management) != 0)
+   {
+      LOG_ERROR("server.http", "invalid or partial dedicated management listener configuration");
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return SERVER_HTTP_START_MGMT_FATAL;
+   }
+   if (management.enabled &&
+       server_tls_management_init(management.cert, management.key, management.client_ca) != 0)
+   {
+      server_http_management_set_error("management TLS certificate/key/CA");
+      LOG_ERROR("server.http", "dedicated management TLS configuration is not loadable");
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return SERVER_HTTP_START_MGMT_FATAL;
+   }
+   int listener_failure = management.enabled ? SERVER_HTTP_START_MGMT_FATAL : -1;
    if (!uds_path || !uds_path[0])
       uds_path = server_http_default_path();
 
@@ -1926,13 +2363,17 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
    unlink(uds_path);
    g_listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
    if (g_listen_fd < 0)
-      return -1;
+   {
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
+   }
    if (bind(g_listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
        listen(g_listen_fd, SHTTP_BACKLOG) < 0)
    {
       close(g_listen_fd);
       g_listen_fd = -1;
-      return -1;
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
    }
 
    /* Optional localhost TCP listener for OpenAI-style external tools. */
@@ -1959,7 +2400,24 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
                    tls_port);
    }
 
-   g_running = 1;
+   if (management.enabled)
+   {
+      g_management_tls_fd = management_tcp_listen(&management);
+      if (g_management_tls_fd < 0)
+      {
+         server_http_management_set_error("management listener bind");
+         LOG_ERROR("server.http", "failed to bind dedicated management listener on %s:%d",
+                   management.bind, management.port);
+         close_listener_fd(&g_tls_fd);
+         close_listener_fd(&g_tcp_fd);
+         close_listener_fd(&g_listen_fd);
+         unlink(uds_path);
+         pthread_mutex_unlock(&g_listener_lifecycle_lock);
+         return SERVER_HTTP_START_MGMT_FATAL;
+      }
+   }
+
+   atomic_store(&g_running, 1);
    /* The listener thread runs dispatch-backed /v1 routes inline (rh_dispatch_op
     * -> loopback_rpc -> server_dispatch -> handler), whose call chains carry
     * large on-stack frames. The glibc default thread stack (~8 MB, NOT widened
@@ -1978,7 +2436,9 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_attr_destroy(lattr_p);
    if (prc != 0)
    {
-      g_running = 0;
+      if (management.enabled)
+         server_http_management_set_error("management listener thread");
+      atomic_store(&g_running, 0);
       close(g_listen_fd);
       g_listen_fd = -1;
       if (g_tcp_fd >= 0)
@@ -1986,38 +2446,49 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
          close(g_tcp_fd);
          g_tcp_fd = -1;
       }
+      close_listener_fd(&g_tls_fd);
+      close_listener_fd(&g_management_tls_fd);
       unlink(uds_path);
-      return -1;
+      pthread_mutex_unlock(&g_listener_lifecycle_lock);
+      return listener_failure;
    }
-   pthread_detach(g_thread);
+   g_thread_active = 1;
    /* The TLS listener (when up) logs its own "native TLS enabled" line from server_tls. */
    if (g_tcp_fd >= 0)
       LOG_INFO("server.http", "HTTP /v1 on %s and 127.0.0.1:%d (bearer, loopback only)", uds_path,
                tcp_port);
    else
       LOG_INFO("server.http", "HTTP /v1 on %s", uds_path);
+   if (g_management_tls_fd >= 0)
+      LOG_INFO("server.http", "dedicated management mTLS on %s:%d", management.bind,
+               management.port);
+   pthread_mutex_unlock(&g_listener_lifecycle_lock);
    return 0;
 }
 
 void server_http_stop(void)
 {
-   g_running = 0;
+   pthread_mutex_lock(&g_listener_lifecycle_lock);
+   atomic_store(&g_running, 0);
+   /* Wake poll/accept without releasing descriptor numbers yet. Closing first
+    * would let an unrelated thread reuse a number while the old accept loop
+    * still holds it in its poll snapshot. */
    if (g_listen_fd >= 0)
-   {
       shutdown(g_listen_fd, SHUT_RDWR);
-      close(g_listen_fd);
-      g_listen_fd = -1;
-   }
    if (g_tcp_fd >= 0)
-   {
       shutdown(g_tcp_fd, SHUT_RDWR);
-      close(g_tcp_fd);
-      g_tcp_fd = -1;
-   }
    if (g_tls_fd >= 0)
-   {
       shutdown(g_tls_fd, SHUT_RDWR);
-      close(g_tls_fd);
-      g_tls_fd = -1;
+   if (g_management_tls_fd >= 0)
+      shutdown(g_management_tls_fd, SHUT_RDWR);
+   if (g_thread_active)
+   {
+      pthread_join(g_thread, NULL);
+      g_thread_active = 0;
    }
+   close_listener_fd(&g_listen_fd);
+   close_listener_fd(&g_tcp_fd);
+   close_listener_fd(&g_tls_fd);
+   close_listener_fd(&g_management_tls_fd);
+   pthread_mutex_unlock(&g_listener_lifecycle_lock);
 }

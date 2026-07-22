@@ -82,6 +82,19 @@ static int cert_has_ext(const char *cert_pem, int nid)
    return idx >= 0;
 }
 
+static void assert_exact_eku(const char *cert_pem, int expected_nid)
+{
+   BIO *bio = BIO_new_mem_buf(cert_pem, -1);
+   X509 *cert = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
+   BIO_free(bio);
+   assert(cert);
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
+   assert(eku && sk_ASN1_OBJECT_num(eku) == 1);
+   assert(OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == expected_nid);
+   EXTENDED_KEY_USAGE_free(eku);
+   X509_free(cert);
+}
+
 /* RFC 5280 conformance: the CA and every issued (client/server) cert carry both
  * subjectKeyIdentifier and authorityKeyIdentifier, so strict X.509 verifiers
  * (OpenSSL 3.5+ default; python ssl) accept the chain rather than rejecting it
@@ -147,6 +160,14 @@ static void test_issue_and_verify(const kb_pki_ca_t *ca)
    assert(strstr(key, "PRIVATE KEY-----"));
    assert_cert_cn(cert, "client:project:alpha");
 
+   char issuer[256], serial[128];
+   assert(kb_pki_cert_metadata(cert, issuer, sizeof(issuer), serial, sizeof(serial)) == 0);
+   assert(strstr(issuer, "CN=aimee-kb-ca") != NULL && serial[0] != '\0');
+   for (const char *p = serial; *p; p++)
+      assert((*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'));
+   assert(kb_pki_cert_metadata("garbage", issuer, sizeof(issuer), serial, sizeof(serial)) == -1);
+   assert(kb_pki_cert_metadata(cert, issuer, 1, serial, sizeof(serial)) == -1);
+
    /* The issued cert chains to its CA. */
    assert(kb_pki_verify_client_cert(ca->cert_pem, cert) == 1);
 
@@ -186,7 +207,66 @@ static void cleanup_dir(const char *dir)
    remove(p);
    snprintf(p, sizeof(p), "%s/ca-key.pem", dir);
    remove(p);
+   snprintf(p, sizeof(p), "%s/ca-key.vault", dir);
+   remove(p);
    rmdir(dir);
+}
+
+static int all_zero(const void *p, size_t n)
+{
+   const unsigned char *bytes = p;
+   unsigned char any = 0;
+   for (size_t i = 0; i < n; ++i)
+      any |= bytes[i];
+   return any == 0;
+}
+
+static void test_custodied_load_status(const kb_pki_ca_t *ca)
+{
+   char dir[256], path[512];
+   snprintf(dir, sizeof(dir), "/tmp/aimee_ca_typed_%d", (int)getpid());
+   cleanup_dir(dir);
+   kb_pki_ca_t loaded;
+   memset(&loaded, 0xa5, sizeof(loaded));
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_UNAVAILABLE);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_load_custodied_ex(NULL, &loaded) == KB_PKI_CA_LOAD_INVALID);
+   assert(all_zero(&loaded, sizeof(loaded)));
+
+   /* Legacy plaintext input remains compatible, but is now validated as an
+    * exact certificate/private-key pair by the typed loader. */
+   assert(kb_pki_ca_save(dir, ca) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_OK);
+   assert(!strcmp(loaded.cert_pem, ca->cert_pem));
+   snprintf(path, sizeof(path), "%s/ca-key.pem", dir);
+   FILE *key_file = fopen(path, "ab");
+   static const unsigned char nul_junk[] = {0, 'j', 'u', 'n', 'k'};
+   assert(key_file && fwrite(nul_junk, 1, sizeof(nul_junk), key_file) == sizeof(nul_junk) &&
+          fclose(key_file) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_save(dir, ca) == 0);
+
+   /* A present encrypted record is authoritative. Malformed bytes are
+    * integrity failure and may not fall back to the legacy key. */
+   snprintf(path, sizeof(path), "%s/ca-key.vault", dir);
+   FILE *file = fopen(path, "wb");
+   assert(file && fwrite("bad\n", 1, 4, file) == 4 && fclose(file) == 0);
+   memset(&loaded, 0xa5, sizeof(loaded));
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_load_custodied(dir, &loaded) == -1);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(unlink(path) == 0);
+
+   /* Checked reads reject a symlinked public certificate as persisted-state
+    * corruption rather than following it. */
+   snprintf(path, sizeof(path), "%s/ca.pem", dir);
+   assert(unlink(path) == 0 && symlink("/dev/null", path) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   cleanup_dir(dir);
+   printf("  custodied_load_status: ok\n");
 }
 
 static void test_persistence(const kb_pki_ca_t *ca)
@@ -365,6 +445,60 @@ static void test_sign_csr(const kb_pki_ca_t *ca)
    printf("  sign_csr: ok\n");
 }
 
+static void test_role_csr_profiles(const kb_pki_ca_t *ca)
+{
+   EVP_PKEY *client_key = EVP_RSA_gen(2048);
+   EVP_PKEY *server_key = EVP_RSA_gen(2048);
+   assert(client_key && server_key && EVP_PKEY_eq(client_key, server_key) == 0);
+   char *client_csr = make_csr(client_key, "ignored-client");
+   char *server_csr = make_csr(server_key, "ignored-server");
+   char client_cert[KB_PKI_CERT_PEM_MAX], server_cert[KB_PKI_CERT_PEM_MAX];
+
+   assert(kb_pki_sign_server_role_csrs(ca, client_csr, "server:p5-a", server_csr,
+                                       "p5-server.example", 3600, client_cert, sizeof(client_cert),
+                                       server_cert, sizeof(server_cert)) == 0);
+   assert_exact_eku(client_cert, NID_client_auth);
+   assert_exact_eku(server_cert, NID_server_auth);
+   assert_cert_cn(client_cert, "server:p5-a");
+   assert_cert_cn(server_cert, "p5-server.example");
+
+   char mgmt_cert[KB_PKI_CERT_PEM_MAX];
+   assert(kb_pki_sign_kb_management_csr(ca, client_csr, 3600, mgmt_cert, sizeof(mgmt_cert)) == 0);
+   assert_exact_eku(mgmt_cert, NID_client_auth);
+   assert_cert_cn(mgmt_cert, "p5-kb-management");
+   BIO *mb = BIO_new_mem_buf(mgmt_cert, -1);
+   X509 *mc = mb ? PEM_read_bio_X509(mb, NULL, NULL, NULL) : NULL;
+   BIO_free(mb);
+   ASN1_OBJECT *moid = OBJ_txt2obj("1.3.6.1.4.1.55555.5.1", 1);
+   int mpos = mc && moid ? X509_get_ext_by_OBJ(mc, moid, -1) : -1;
+   X509_EXTENSION *mext = mpos >= 0 ? X509_get_ext(mc, mpos) : NULL;
+   ASN1_OCTET_STRING *mvalue = mext ? X509_EXTENSION_get_data(mext) : NULL;
+   static const unsigned char marker[] = "aimee-p5-kb-management-v1";
+   assert(mext && !X509_EXTENSION_get_critical(mext) && X509_get_ext_by_OBJ(mc, moid, mpos) < 0 &&
+          mvalue && ASN1_STRING_length(mvalue) == (int)sizeof(marker) - 1 &&
+          memcmp(ASN1_STRING_get0_data(mvalue), marker, sizeof(marker) - 1) == 0);
+   ASN1_OBJECT_free(moid);
+   X509_free(mc);
+
+   BIO *bio = BIO_new_mem_buf(server_cert, -1);
+   X509 *cert = bio ? PEM_read_bio_X509(bio, NULL, NULL, NULL) : NULL;
+   BIO_free(bio);
+   assert(cert && X509_check_host(cert, "p5-server.example", 0, 0, NULL) == 1);
+   X509_free(cert);
+
+   assert(kb_pki_sign_csr_profile(ca, client_csr, "server:p5-a", 3600, (kb_pki_csr_profile_t)99,
+                                  client_cert, sizeof(client_cert)) == -1);
+   assert(kb_pki_sign_server_role_csrs(ca, client_csr, "server:p5-a", client_csr,
+                                       "p5-server.example", 3600, client_cert, sizeof(client_cert),
+                                       server_cert, sizeof(server_cert)) == -1);
+   assert(client_cert[0] == '\0' && server_cert[0] == '\0');
+   free(client_csr);
+   free(server_csr);
+   EVP_PKEY_free(client_key);
+   EVP_PKEY_free(server_key);
+   printf("  role_csr_profiles: ok\n");
+}
+
 static void test_server_cert(const kb_pki_ca_t *ca)
 {
    char cert[KB_PKI_CERT_PEM_MAX], key[KB_PKI_KEY_PEM_MAX];
@@ -413,8 +547,10 @@ int main(void)
    test_fingerprint(&ca);
    test_issue_and_verify(&ca);
    test_persistence(&ca);
+   test_custodied_load_status(&ca);
    test_load_or_create();
    test_sign_csr(&ca);
+   test_role_csr_profiles(&ca);
    test_server_cert(&ca);
    test_akid_present(&ca);
    test_strict_verify(&ca);

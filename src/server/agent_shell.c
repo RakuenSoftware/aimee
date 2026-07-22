@@ -24,11 +24,6 @@ static void register_builtins(void)
    agent_shell_driver_register(&gemini_shell_driver);
 }
 
-void agent_shell_drivers_init(void)
-{
-   pthread_once(&g_once, register_builtins);
-}
-
 void agent_shell_driver_register(const agent_shell_driver_t *d)
 {
    if (!d || !d->name)

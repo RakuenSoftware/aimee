@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useToast } from '@rakuensoftware/smoothgui';
+import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { useSessions } from '../SessionContext';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
 import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
@@ -250,14 +250,6 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     borderRadius: 12, border: '1px solid #dde', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
     padding: '20px 22px', fontFamily: 'system-ui', color: '#233',
   };
-  const primaryBtn: React.CSSProperties = {
-    padding: '7px 16px', borderRadius: 7, border: '1px solid #2c6', background: '#2c8f56',
-    color: '#fff', cursor: 'pointer', fontSize: 13.5, fontWeight: 600,
-  };
-  const ghostBtn: React.CSSProperties = {
-    padding: '7px 14px', borderRadius: 7, border: '1px solid #ccd', background: '#f4f6fb',
-    color: '#446', cursor: 'pointer', fontSize: 13,
-  };
   const input: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
     border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
@@ -303,9 +295,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
             {!appliance && <DeployPanel kbMode={kbMode} />}
             <div style={{ display: 'flex', justifyContent: total > 0 ? 'space-between' : 'flex-end' }}>
               {total > 0 && (
-                <button style={ghostBtn} onClick={() => { setShowSummary(false); setIdx(0); }}>Back</button>
+                <Button variant="default" onClick={() => { setShowSummary(false); setIdx(0); }}>Back</Button>
               )}
-              <button style={primaryBtn} onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</button>
+              <Button variant="primary" onClick={() => { setDismissed(true); notifySetupUpdated(); close(); }}>Finish</Button>
             </div>
           </div>
         ) : (
@@ -349,18 +341,18 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={ghostBtn} disabled={safeIdx === 0} onClick={() => setIdx(Math.max(0, safeIdx - 1))}>Back</button>
-                <button style={ghostBtn} onClick={close}>Later</button>
+                <Button variant="default" disabled={safeIdx === 0} onClick={() => setIdx(Math.max(0, safeIdx - 1))}>Back</Button>
+                <Button variant="default" onClick={close}>Later</Button>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                {step.optional && <button style={ghostBtn} onClick={advance}>Skip</button>}
+                {step.optional && <Button variant="default" onClick={advance}>Skip</Button>}
                 {step.keys.length > 0 ? (
-                  <button style={primaryBtn} disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</button>
+                  <Button variant="primary" disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</Button>
                 ) : step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (
-                  <button style={primaryBtn} onClick={advance}>{safeIdx === total - 1 ? 'Review' : 'Next'}</button>
+                  <Button variant="primary" onClick={advance}>{safeIdx === total - 1 ? 'Review' : 'Next'}</Button>
                 )}
               </div>
             </div>

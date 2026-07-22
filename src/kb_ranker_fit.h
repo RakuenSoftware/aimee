@@ -4,7 +4,7 @@
 #ifndef DEC_KB_RANKER_FIT_H
 #define DEC_KB_RANKER_FIT_H 1
 
-#include "headers/config.h"
+#include "config.h"
 #include <cJSON.h>
 
 #ifdef __cplusplus

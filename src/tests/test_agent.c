@@ -13,6 +13,10 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tools.h"
+#include "anchor_snapshot.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
@@ -25,17 +29,22 @@
 void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
+void test_agent_default_primary_skips_disabled(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
 void test_responses_parser_keeps_all_output_text_parts(void);
 void test_responses_parser_accumulates_output_text_deltas(void);
+void test_responses_object_folds_in_delta_text(void);
+void test_responses_object_keeps_existing_text(void);
+void test_ir_parse_responses_tool_call(void);
+void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
-char *tool_read_file(const char *path, int offset, int limit);
+char *tool_read_file(const char *path, int offset, int limit, int raw);
 char *tool_write_file(const char *path, const char *content);
 char *tool_edit_file(const char *path, const char *old_string, const char *new_string,
                      int replace_all);
@@ -49,12 +58,15 @@ int agent_execute_cli_shell_driver(const agent_t *agent, const char *driver_name
 void test_cancelled_durable_job_blocks_tool_dispatch(void);
 void test_delegate_bash_cancel_kills_running_tool(void);
 void test_parent_write_guard_readonly_pipeline(void);
+void test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks(void);
 void test_parent_write_guard_readonly_large_find(void);
 void test_parent_write_guard_allows_mkdir_in_delegate_worktree(void);
 void test_parent_write_guard_allows_workspace_file_ops(void);
 void test_parent_write_guard_allows_workspace_chain(void);
 void test_parent_write_guard_allows_readonly_printf(void);
 void test_detached_dead_channel_reports_clear_error(void);
+void test_container_bash_runs_in_sandbox(void);
+void test_container_execute_script_runs_in_sandbox(void);
 void otel_init(const char *endpoint, const char *service_name, const char *session)
 {
    (void)endpoint;
@@ -198,8 +210,10 @@ static void test_agent_route_policy_filter(void)
    cfg.agents[1].cost_tier = 1;
    cfg.agents[1].enabled = 1;
 
-   /* Baseline: the default agent is preferred. */
+   /* The default is a primary-session preference, not an unpinned delegate pin. */
+   agent_routing_set_primary_turn(1);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   agent_routing_set_primary_turn(0);
 
    /* With the policy filter registered, the excluded agent is unroutable
     * EVERYWHERE — including as the preferred default — and routing falls back
@@ -208,7 +222,7 @@ static void test_agent_route_policy_filter(void)
    assert(agent_is_available_for_routing(&cfg.agents[0]) == 0);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
    agent_set_route_policy_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]); /* sole cheapest peer */
 }
 
 /* The server's live predicate consults agent_routing_primary_turn() so the
@@ -256,6 +270,58 @@ static void test_agent_route_client_only_claude_excluded(void)
    a.enabled = 1;
    a.is_server_hosted = 0;
    assert(agent_is_available_for_routing(&a) == 0);
+}
+
+/* agent_routing_block_reason reports WHY an agent is not routable so the delegate
+ * error path can name the real cause instead of a catch-all "unavailable". */
+static void test_agent_routing_block_reason(void)
+{
+   char detail[128];
+
+   /* Client-only claude: structural block, no filter needed. */
+   agent_t claude;
+   memset(&claude, 0, sizeof(claude));
+   strcpy(claude.name, "claude");
+   strcpy(claude.cli_kind, "claude");
+   strcpy(claude.backend, AGENT_BACKEND_TMUX_CLI);
+   claude.enabled = 1;
+   claude.is_server_hosted = 0;
+   assert(agent_routing_block_reason(&claude, detail, sizeof(detail)) ==
+          AGENT_ROUTE_CLIENT_ONLY_CLAUDE);
+
+   /* Policy exclusion of a Primary-Agent-Only agent: reason + a naming detail. */
+   agent_t primary;
+   memset(&primary, 0, sizeof(primary));
+   strcpy(primary.name, "primary");
+   strcpy(primary.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(primary.cli_cmd, "sh"); /* on PATH, so only the policy filter can block */
+   primary.enabled = 1;
+   primary.primary_only = 1;
+   agent_set_route_policy_filter(test_policy_exclude_primary);
+   assert(agent_routing_block_reason(&primary, detail, sizeof(detail)) ==
+          AGENT_ROUTE_POLICY_EXCLUDED);
+   assert(strstr(detail, "Primary Agent Only") != NULL);
+   agent_set_route_policy_filter(NULL);
+
+   /* Missing provider-cli command: reason names the absent binary. */
+   agent_t missing;
+   memset(&missing, 0, sizeof(missing));
+   strcpy(missing.name, "gone");
+   strcpy(missing.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(missing.cli_cmd, "definitely-not-a-real-binary-xyz");
+   missing.enabled = 1;
+   assert(agent_routing_block_reason(&missing, detail, sizeof(detail)) ==
+          AGENT_ROUTE_MISSING_COMMAND);
+   assert(strstr(detail, "definitely-not-a-real-binary-xyz") != NULL);
+
+   /* A provider-cli agent whose command IS on PATH is routable. */
+   agent_t ok;
+   memset(&ok, 0, sizeof(ok));
+   strcpy(ok.name, "ok");
+   strcpy(ok.backend, AGENT_BACKEND_PROVIDER_CLI);
+   strcpy(ok.cli_cmd, "sh");
+   ok.enabled = 1;
+   assert(agent_routing_block_reason(&ok, detail, sizeof(detail)) == AGENT_ROUTE_OK);
 }
 
 static void test_agent_route(void)
@@ -315,7 +381,13 @@ static void test_agent_route(void)
    cfg.agents[1].enabled = 1;
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
    cfg.agents[1].cost_tier = 0;
+   /* Equal eligible peers are both used despite an explicit primary default. */
+   agent_t *first = agent_route(&cfg, "summarize");
+   agent_t *second = agent_route(&cfg, "summarize");
+   assert(first != NULL && second != NULL && first != second);
+   agent_routing_set_primary_turn(1);
    assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   agent_routing_set_primary_turn(0);
    memset(&cfg, 0, sizeof(cfg));
    cfg.agent_count = 2;
    strcpy(cfg.agents[0].name, "missing-cli");
@@ -420,15 +492,18 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON *tools = build_tools_array();
    assert(tools_array_has_name(tools, "read_file") && tools_array_has_name(tools, "find_symbol"));
    agent_tools_filter_for_role(tools, "review");
-   /* review now uses the index-only toolset (review_indexed): the branch-index nav
-    * tools survive the filter, the filesystem/shell tools do not (the change under
-    * review reaches it as a diff in the prompt). */
+   /* review uses review_indexed: the branch-index nav tools plus the read-only
+    * worktree tools survive the filter. The read tools are reachability-gated
+    * (slice 7); the default provider here is SHARED (reachable), so they are
+    * granted. Shell/write tools are never in the toolset. */
    assert(tools_array_has_name(tools, "find_symbol") &&
           tools_array_has_name(tools, "search_memory"));
-   assert(!tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "bash"));
+   assert(tools_array_has_name(tools, "read_file") && !tools_array_has_name(tools, "bash"));
    assert(agent_tools_tool_allowed_for_role("review", "find_symbol") == 1);
    assert(agent_tools_tool_allowed_for_role("review", "search_docs") == 1);
-   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 0);
+   /* read_file granted under the reachable (SHARED) default; denied only on a
+    * DETACHED remote seat — see test_review_read_reachability_gate. */
+   assert(agent_tools_tool_allowed_for_role("review", "read_file") == 1);
    assert(agent_tools_tool_allowed_for_role("review", "create_note") == 0);
    /* diagnose stays on the current_code toolset (no index tools). */
    assert(agent_tools_tool_allowed_for_role("diagnose", "find_symbol") == 0);
@@ -567,6 +642,82 @@ static void test_codex_oauth_request_creds(void)
    agent_set_request_codex_creds(NULL, NULL);
    agent_build_extra_headers(&ag, headers, sizeof(headers));
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
+}
+
+/* On-disk codex auth is resolved under AIMEE_HOME, not just $HOME. An appliance
+ * runs the server with AIMEE_HOME set but no HOME, so <AIMEE_HOME>/.codex/auth.json
+ * must be found or codex fails /v1 auth with a route-unresolved error even though
+ * a valid token is on disk. (exp is unknown for a non-JWT token -> no refresh, so
+ * this stays hermetic: no network.) The two sub-cases pin BOTH the new appliance
+ * path (AIMEE_HOME set, no HOME) and the unchanged dev-box fallback (HOME set,
+ * AIMEE_HOME unset), so the reordering never regresses the classic HOME lookup. */
+static void test_codex_oauth_reads_aimee_home(void)
+{
+   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   assert(platform_mkdtemp(dir) != NULL);
+   char sub[512], authpath[600];
+   snprintf(sub, sizeof(sub), "%s/.codex", dir);
+   assert(mkdir(sub, 0700) == 0);
+   snprintf(authpath, sizeof(authpath), "%s/auth.json", sub);
+   FILE *f = fopen(authpath, "wb");
+   assert(f != NULL);
+   /* Distinctive token so a stray codex-auth.json elsewhere can't masquerade as a
+    * pass (a different token would fail the assert, not silently satisfy it). */
+   fputs("{\"tokens\":{\"access_token\":\"AH-ACCESS-3f9c1\",\"refresh_token\":\"AH-REFRESH\"}}", f);
+   fclose(f);
+
+   /* Restore-vs-unset must key on NULL, not emptiness, so an original AIMEE_HOME=""
+    * (or HOME="") is restored to empty rather than being unset. */
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   const char *old_home = getenv("HOME");
+   const char *old_profile = getenv("AIMEE_PROFILE");
+   char sa[600] = "", sh[600] = "", sp[128] = "";
+   if (old_aimee_home)
+      snprintf(sa, sizeof(sa), "%s", old_aimee_home);
+   if (old_home)
+      snprintf(sh, sizeof(sh), "%s", old_home);
+   if (old_profile)
+      snprintf(sp, sizeof(sp), "%s", old_profile);
+   unsetenv("AIMEE_PROFILE"); /* keep aimee_home() == the raw home in both sub-cases */
+   agent_set_request_codex_creds(NULL, NULL); /* no per-turn token: force the on-disk path */
+
+   agent_t ag;
+   char auth[512];
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.name, sizeof(ag.name), "%s", "codex");
+   snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
+
+   /* (1) Appliance: AIMEE_HOME set, HOME cleared -> the new aimee_home() branch is
+    *     the ONLY thing that can find the token. */
+   setenv("AIMEE_HOME", dir, 1);
+   unsetenv("HOME");
+   auth[0] = '\0';
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+
+   /* (2) Dev box: AIMEE_HOME unset, HOME set to the same dir -> the classic
+    *     fallback still resolves (aimee_home() collapses to HOME here). */
+   unsetenv("AIMEE_HOME");
+   setenv("HOME", dir, 1);
+   auth[0] = '\0';
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strstr(auth, "Bearer AH-ACCESS-3f9c1") != NULL);
+
+   if (old_aimee_home)
+      setenv("AIMEE_HOME", sa, 1);
+   else
+      unsetenv("AIMEE_HOME");
+   if (old_home)
+      setenv("HOME", sh, 1);
+   else
+      unsetenv("HOME");
+   if (old_profile)
+      setenv("AIMEE_PROFILE", sp, 1);
+   unlink(authpath);
+   rmdir(sub);
+   rmdir(dir);
+   printf("  PASS: test_codex_oauth_reads_aimee_home\n");
 }
 
 /* WP-C.2c(3): the vault principal must ride along in the creds snapshot so a
@@ -1085,25 +1236,25 @@ static void test_tool_read_file(void)
    close(fd);
 
    /* Read entire file */
-   char *result = tool_read_file(tmppath, 0, 0);
+   char *result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, content) == 0);
    free(result);
 
    /* Read with offset */
-   result = tool_read_file(tmppath, 1, 0);
+   result = tool_read_file(tmppath, 1, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "line2\nline3\nline4\n") == 0);
    free(result);
 
    /* Read with limit */
-   result = tool_read_file(tmppath, 0, 2);
+   result = tool_read_file(tmppath, 0, 2, 1);
    assert(result != NULL);
    assert(strcmp(result, "line1\nline2\n") == 0);
    free(result);
 
    /* Nonexistent path */
-   result = tool_read_file("/nonexistent/path/file.txt", 0, 0);
+   result = tool_read_file("/nonexistent/path/file.txt", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: cannot open") != NULL);
    free(result);
@@ -1112,10 +1263,23 @@ static void test_tool_read_file(void)
    assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
    assert(write(fd, binary_content, sizeof(binary_content)) == (ssize_t)sizeof(binary_content));
    close(fd);
-   result = tool_read_file(tmppath, 0, 0);
+   result = tool_read_file(tmppath, 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error: binary file omitted") != NULL);
    assert(memchr(result, 0x7f, strlen(result)) == NULL);
+   free(result);
+
+   /* Anchored mode (default): lines prefixed LINE:HASH| and a snapshot header. */
+   assert((fd = open(tmppath, O_WRONLY | O_TRUNC)) >= 0);
+   assert(write(fd, content, strlen(content)) == (ssize_t)strlen(content));
+   close(fd);
+   result = tool_read_file(tmppath, 0, 0, 0);
+   assert(result != NULL);
+   assert(strstr(result, "snapshot=s") != NULL);
+   assert(strstr(result, "| line1") != NULL);
+   assert(strstr(result, "| line4") != NULL);
+   /* an anchor of the shape "N:HH| " must be present */
+   assert(strstr(result, "1:") != NULL);
    free(result);
 
    unlink(tmppath);
@@ -1144,7 +1308,7 @@ static void test_tool_write_file(void)
    free(result);
 
    /* Verify contents */
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback != NULL);
    assert(strcmp(readback, "hello world") == 0);
    free(readback);
@@ -1193,7 +1357,7 @@ static void test_tool_edit_file(void)
    assert(status && strcmp(status->valuestring, "ok") == 0);
    cJSON_Delete(json);
    free(result);
-   char *readback = tool_read_file(tmppath, 0, 0);
+   char *readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1206,7 +1370,7 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 0);
    assert(result != NULL && strncmp(result, "error:", 6) == 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nbeta\nGAMMA\nbeta\n") == 0);
    free(readback);
 
@@ -1214,11 +1378,385 @@ static void test_tool_edit_file(void)
    result = tool_edit_file(tmppath, "beta", "B", 1);
    assert(result != NULL && strncmp(result, "error:", 6) != 0);
    free(result);
-   readback = tool_read_file(tmppath, 0, 0);
+   readback = tool_read_file(tmppath, 0, 0, 1);
    assert(readback && strcmp(readback, "alpha\nB\nGAMMA\nB\n") == 0);
    free(readback);
 
    unlink(tmppath);
+}
+
+/* Pull "snapshot=<id>" out of an anchored read_file header line. */
+static char *anchored_snapshot_id(const char *read_out, char *buf, size_t buflen)
+{
+   const char *m = strstr(read_out, "snapshot=");
+   if (!m)
+      return NULL;
+   m += strlen("snapshot=");
+   size_t i = 0;
+   while (m[i] && m[i] != ' ' && m[i] != '\n' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static cJSON *mk_replace(const char *anchor, const char *text)
+{
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "op", "replace");
+   cJSON_AddStringToObject(e, "at", anchor);
+   cJSON_AddStringToObject(e, "text", text);
+   return e;
+}
+
+/* Find the "N:HH" anchor for 1-based ordinal `ord` in an anchored read_file
+ * output (a line beginning "N:HH| "). */
+static char *anchored_line_token(const char *read_out, int ord, char *buf, size_t buflen)
+{
+   char needle[16];
+   snprintf(needle, sizeof(needle), "\n%d:", ord);
+   const char *m = strstr(read_out, needle);
+   if (!m)
+      return NULL;
+   m++; /* skip the leading newline */
+   size_t i = 0;
+   while (m[i] && m[i] != '|' && m[i] != ' ' && i + 1 < buflen)
+   {
+      buf[i] = m[i];
+      i++;
+   }
+   buf[i] = '\0';
+   return buf;
+}
+
+static void test_tool_edit_file_anchored(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_test_anchored_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   close(fd);
+
+   char *w = tool_write_file(tmppath, "one\ntwo\nthree\nfour\n");
+   assert(w);
+   free(w);
+
+   /* anchored read mints a snapshot */
+   char *rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   char sid[ANCHOR_SNAPSHOT_ID_MAX];
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)) && sid[0] == 's');
+   char a2[24], a3[24];
+   assert(anchored_line_token(rd, 2, a2, sizeof(a2)));
+   assert(anchored_line_token(rd, 3, a3, sizeof(a3)));
+   free(rd);
+
+   /* dry_run previews without writing */
+   cJSON *dedits = cJSON_CreateArray();
+   cJSON_AddItemToArray(dedits, mk_replace(a2, "TWO"));
+   char *edits_json = cJSON_PrintUnformatted(dedits);
+   (void)edits_json;
+   char *dry = tool_edit_file_anchored(tmppath, sid, dedits, 1);
+   assert(dry);
+   cJSON *dj = parse_json_or_die(dry);
+   assert(strcmp(cJSON_GetObjectItem(dj, "status")->valuestring, "dry_run") == 0);
+   cJSON_Delete(dj);
+   free(dry);
+   free(edits_json);
+   cJSON_Delete(dedits);
+   char *rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\ntwo\nthree\nfour\n") == 0); /* unchanged by dry_run */
+   free(rb);
+
+   /* commit a two-op batch */
+   cJSON *edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(edits, mk_replace(a2, "TWO"));
+   cJSON_AddItemToArray(edits, mk_replace(a3, "THREE"));
+   char *res = tool_edit_file_anchored(tmppath, sid, edits, 0);
+   assert(res && strncmp(res, "error:", 6) != 0);
+   cJSON *rj = parse_json_or_die(res);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "ok") == 0);
+   cJSON_Delete(rj);
+   free(res);
+   cJSON_Delete(edits);
+   rb = tool_read_file(tmppath, 0, 0, 1);
+   assert(rb && strcmp(rb, "one\nTWO\nTHREE\nfour\n") == 0);
+   free(rb);
+
+   /* the old snapshot is now stale: the file moved under it */
+   cJSON *stale_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(stale_edits, mk_replace(a2, "again"));
+   char *stale = tool_edit_file_anchored(tmppath, sid, stale_edits, 0);
+   assert(stale);
+   cJSON *sj = parse_json_or_die(stale);
+   assert(strcmp(cJSON_GetObjectItem(sj, "status")->valuestring, "stale_anchor") == 0);
+   /* rejection carries a fresh snapshot_id to retry against */
+   assert(cJSON_GetObjectItem(sj, "snapshot_id") != NULL);
+   cJSON_Delete(sj);
+   free(stale);
+   cJSON_Delete(stale_edits);
+
+   /* unknown snapshot id -> snapshot_expired, file untouched */
+   cJSON *exp_edits = cJSON_CreateArray();
+   cJSON_AddItemToArray(exp_edits, mk_replace("2:aa", "z"));
+   char *exp = tool_edit_file_anchored(tmppath, "sdeadbeef00000000", exp_edits, 0);
+   assert(exp);
+   cJSON *ej = parse_json_or_die(exp);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "snapshot_expired") == 0);
+   cJSON_Delete(ej);
+   free(exp);
+   cJSON_Delete(exp_edits);
+
+   unlink(tmppath);
+}
+
+/* A large single-span anchored rewrite must carry the edit_symbol steering
+ * advisory (roundtable P5-completion guardrail); a small one must not. */
+static void test_anchored_large_span_advisory(void)
+{
+   char tmppath[512];
+   snprintf(tmppath, sizeof(tmppath), "%s/aimee_span_XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(tmppath, sizeof(tmppath), "aim");
+   close(fd);
+   char *w = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(w);
+   free(w);
+
+   char *rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   char sid[ANCHOR_SNAPSHOT_ID_MAX];
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char a2[24], a9[24];
+   assert(anchored_line_token(rd, 2, a2, sizeof(a2)));
+   assert(anchored_line_token(rd, 9, a9, sizeof(a9)));
+   free(rd);
+
+   /* replace_range spanning lines 2..9 (8 lines) -> advisory expected */
+   cJSON *edits = cJSON_CreateArray();
+   cJSON *e = cJSON_CreateObject();
+   cJSON_AddStringToObject(e, "op", "replace_range");
+   cJSON_AddStringToObject(e, "from", a2);
+   cJSON_AddStringToObject(e, "to", a9);
+   cJSON_AddStringToObject(e, "text", "X");
+   cJSON_AddItemToArray(edits, e);
+   char *res = tool_edit_file_anchored(tmppath, sid, edits, 0);
+   assert(res && strncmp(res, "error:", 6) != 0);
+   cJSON *rj = parse_json_or_die(res);
+   assert(cJSON_GetObjectItem(rj, "advisory") != NULL);
+   assert(strstr(cJSON_GetObjectItem(rj, "advisory")->valuestring, "edit_symbol") != NULL);
+   cJSON_Delete(rj);
+   free(res);
+   cJSON_Delete(edits);
+
+   /* boundary: a 7-line span (2..8) is BELOW the threshold -> no advisory.
+    * Restore the 10-line file first (the edit above shrank it). */
+   char *wb = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(wb);
+   free(wb);
+   rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char b2[24], b8[24];
+   assert(anchored_line_token(rd, 2, b2, sizeof(b2)));
+   assert(anchored_line_token(rd, 8, b8, sizeof(b8)));
+   free(rd);
+   cJSON *e7 = cJSON_CreateArray();
+   cJSON *r7 = cJSON_CreateObject();
+   cJSON_AddStringToObject(r7, "op", "replace_range");
+   cJSON_AddStringToObject(r7, "from", b2);
+   cJSON_AddStringToObject(r7, "to", b8);
+   cJSON_AddStringToObject(r7, "text", "Y");
+   cJSON_AddItemToArray(e7, r7);
+   char *res7 = tool_edit_file_anchored(tmppath, sid, e7, 0);
+   assert(res7 && strncmp(res7, "error:", 6) != 0);
+   cJSON *rj7 = parse_json_or_die(res7);
+   assert(cJSON_GetObjectItem(rj7, "advisory") == NULL); /* 7 < 8 */
+   cJSON_Delete(rj7);
+   free(res7);
+   cJSON_Delete(e7);
+
+   /* delete_range spanning >= 8 lines also carries the advisory */
+   char *w2 = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(w2);
+   free(w2);
+   rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char d2[24], d9[24];
+   assert(anchored_line_token(rd, 2, d2, sizeof(d2)));
+   assert(anchored_line_token(rd, 9, d9, sizeof(d9)));
+   free(rd);
+   cJSON *ed = cJSON_CreateArray();
+   cJSON *rd_op = cJSON_CreateObject();
+   cJSON_AddStringToObject(rd_op, "op", "delete_range");
+   cJSON_AddStringToObject(rd_op, "from", d2);
+   cJSON_AddStringToObject(rd_op, "to", d9);
+   cJSON_AddItemToArray(ed, rd_op);
+   char *resd = tool_edit_file_anchored(tmppath, sid, ed, 0);
+   assert(resd && strncmp(resd, "error:", 6) != 0);
+   cJSON *rjd = parse_json_or_die(resd);
+   assert(cJSON_GetObjectItem(rjd, "advisory") != NULL);
+   cJSON_Delete(rjd);
+   free(resd);
+   cJSON_Delete(ed);
+
+   /* a small single-line replace must NOT carry the advisory */
+   char *w3 = tool_write_file(tmppath, "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n");
+   assert(w3);
+   free(w3);
+   rd = tool_read_file(tmppath, 0, 0, 0);
+   assert(rd);
+   assert(anchored_snapshot_id(rd, sid, sizeof(sid)));
+   char a1[24];
+   assert(anchored_line_token(rd, 1, a1, sizeof(a1)));
+   free(rd);
+   cJSON *e2 = cJSON_CreateArray();
+   cJSON_AddItemToArray(e2, mk_replace(a1, "L1"));
+   char *res2 = tool_edit_file_anchored(tmppath, sid, e2, 0);
+   assert(res2 && strncmp(res2, "error:", 6) != 0);
+   cJSON *rj2 = parse_json_or_die(res2);
+   assert(cJSON_GetObjectItem(rj2, "advisory") == NULL);
+   cJSON_Delete(rj2);
+   free(res2);
+   cJSON_Delete(e2);
+
+   unlink(tmppath);
+}
+
+static void test_part3_anchored_tools(void)
+{
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/aimee_p3_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(dir) != NULL);
+   char cfile[600];
+   snprintf(cfile, sizeof(cfile), "%s/sample.c", dir);
+   const char *src = "#include <stdio.h>\n"
+                     "int add(int a, int b)\n"
+                     "{\n"
+                     "   return a + b;\n"
+                     "}\n"
+                     "int main(void)\n"
+                     "{\n"
+                     "   return add(1, 2);\n"
+                     "}\n";
+   char *w = tool_write_file(cfile, src);
+   assert(w);
+   free(w);
+
+   /* outline: symbol skeleton with a snapshot + anchors */
+   char *outline = tool_read_outline(cfile);
+   assert(outline);
+   assert(strstr(outline, "snapshot=s") != NULL);
+   assert(strstr(outline, "add") != NULL && strstr(outline, "main") != NULL);
+   free(outline);
+
+   /* read_symbol: just the def span, anchored + headed */
+   char *sym = tool_read_symbol("add", cfile);
+   assert(sym);
+   assert(strstr(sym, "# add") != NULL);
+   assert(strstr(sym, "| int add(int a, int b)") != NULL);
+   assert(strstr(sym, "| int main") == NULL); /* only the add span */
+   free(sym);
+
+   /* grep anchored: hits become editable anchors under a per-file snapshot */
+   char *g = tool_grep_anchored(dir, "return", 50);
+   assert(g);
+   assert(strstr(g, "snapshot=s") != NULL);
+   assert(strstr(g, "|") != NULL);
+   free(g);
+
+   /* run_tests: structured pass/fail with counts+failures, full log spilled */
+   char *rt = tool_run_tests("printf 'ok\\n'; exit 0", 10000);
+   assert(rt);
+   cJSON *rj = parse_json_or_die(rt);
+   assert(strcmp(cJSON_GetObjectItem(rj, "status")->valuestring, "passed") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(rj, "passed")));
+   cJSON_Delete(rj);
+   free(rt);
+
+   char *rf = tool_run_tests("echo boom; exit 1", 10000);
+   assert(rf);
+   cJSON *fj = parse_json_or_die(rf);
+   assert(strcmp(cJSON_GetObjectItem(fj, "status")->valuestring, "failed") == 0);
+   assert(!cJSON_IsTrue(cJSON_GetObjectItem(fj, "passed")));
+   cJSON_Delete(fj);
+   free(rf);
+
+   /* edit_symbol: whole-function rewrite by name, span resolved server-side */
+   char *es = tool_edit_symbol("add", cfile, "replace_body",
+                               "int add(int a, int b)\n{\n   return a + b + 0;\n}");
+   assert(es);
+   cJSON *ej = parse_json_or_die(es);
+   assert(strcmp(cJSON_GetObjectItem(ej, "status")->valuestring, "ok") == 0);
+   /* identity echo so the agent can confirm the resolved target */
+   assert(cJSON_GetObjectItem(ej, "symbol") != NULL);
+   assert(cJSON_GetObjectItem(ej, "resolved_at") != NULL);
+   cJSON_Delete(ej);
+   free(es);
+   char *chk = tool_read_file(cfile, 0, 0, 1);
+   assert(chk && strstr(chk, "return a + b + 0;") != NULL);
+   assert(strstr(chk, "int main") != NULL); /* main untouched */
+   free(chk);
+
+   unlink(cfile);
+   rmdir(dir);
+}
+
+/* web_read.c exports this SSRF classifier. */
+int web_egress_addr_blocked(const struct sockaddr *sa);
+
+static int v4_blocked(const char *ip)
+{
+   struct sockaddr_in sa = {0};
+   sa.sin_family = AF_INET;
+   assert(inet_pton(AF_INET, ip, &sa.sin_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static int v6_blocked(const char *ip)
+{
+   struct sockaddr_in6 sa = {0};
+   sa.sin6_family = AF_INET6;
+   assert(inet_pton(AF_INET6, ip, &sa.sin6_addr) == 1);
+   return web_egress_addr_blocked((struct sockaddr *)&sa);
+}
+
+static void test_web_read_ssrf(void)
+{
+   /* private / reserved / metadata addresses are blocked */
+   assert(v4_blocked("127.0.0.1"));
+   assert(v4_blocked("10.1.2.3"));
+   assert(v4_blocked("172.16.5.4"));
+   assert(v4_blocked("192.168.0.1"));
+   assert(v4_blocked("169.254.169.254")); /* cloud metadata */
+   assert(v4_blocked("100.64.0.1"));      /* CGNAT */
+   assert(v4_blocked("0.0.0.0"));
+   assert(v4_blocked("224.0.0.1"));
+   /* public addresses are allowed */
+   assert(!v4_blocked("8.8.8.8"));
+   assert(!v4_blocked("93.184.216.34"));
+   /* IPv6 */
+   assert(v6_blocked("::1"));
+   assert(v6_blocked("fe80::1"));
+   assert(v6_blocked("fc00::1"));
+   assert(v6_blocked("::ffff:127.0.0.1")); /* mapped loopback */
+   assert(!v6_blocked("2001:4860:4860::8888"));
+
+   /* end-to-end: the tool refuses non-http schemes and private targets without
+    * any network egress */
+   char *r = tool_web_read("ftp://example.com/x", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://127.0.0.1:1/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("http://169.254.169.254/latest/meta-data/", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
+   r = tool_web_read("not-a-url", NULL, 0, NULL);
+   assert(r && strstr(r, "error:") != NULL);
+   free(r);
 }
 
 static void test_parent_write_guard_blocks_parent_writes(void)
@@ -1267,7 +1805,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "parent worktree is read-only") != NULL);
    free(result);
 
-   result = tool_read_file(parent_file, 0, 0);
+   result = tool_read_file(parent_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "original") == 0);
    free(result);
@@ -1297,7 +1835,7 @@ static void test_parent_write_guard_blocks_parent_writes(void)
    assert(strstr(result, "error:") == NULL);
    free(result);
 
-   result = tool_read_file(worktree_file, 0, 0);
+   result = tool_read_file(worktree_file, 0, 0, 1);
    assert(result != NULL);
    assert(strcmp(result, "allowed") == 0);
    free(result);
@@ -1658,6 +2196,48 @@ static void test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent(void)
    cJSON_Delete(json);
    free(result);
    platform_test_rmrf(root);
+}
+static void test_git_tools_default_to_session_worktree(void)
+{
+   /* git_status/git_log/git_diff must default 'path' to the delegate's session
+    * worktree (the run_cmd cwd) when omitted. A delegate does not know its own
+    * worktree path, so a hard "missing 'path'" error forced it to a raw `git`
+    * shell — which the require_aimee_git gate then denies, leaving it no working
+    * git route at all. Omitting 'path' must resolve to the cwd, not error. */
+   char root[512];
+   snprintf(root, sizeof(root), "%s/aimee_git_default_cwd_XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+   char cmd[1024];
+   int rc = 0;
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
+   char *out = run_cmd(cmd, &rc);
+   free(out);
+   if (rc != 0)
+   {
+      platform_test_rmrf(root);
+      printf("  git_tools_default_to_session_worktree: skipped (git unavailable)\n");
+      return;
+   }
+
+   run_cmd_set_cwd(root);
+   char *st = dispatch_tool_call("git_status", "{}", 5000);
+   char *lg = dispatch_tool_call("git_log", "{}", 5000);
+   char *df = dispatch_tool_call("git_diff", "{}", 5000);
+   run_cmd_set_cwd(NULL);
+
+   /* None of the three read-only git tools may error for a missing 'path' now
+    * that it defaults to the session worktree. */
+   assert(st != NULL && strstr(st, "requires a session worktree") == NULL &&
+          strstr(st, "missing 'path'") == NULL);
+   assert(lg != NULL && strstr(lg, "requires a session worktree") == NULL &&
+          strstr(lg, "missing 'path'") == NULL);
+   assert(df != NULL && strstr(df, "requires a session worktree") == NULL &&
+          strstr(df, "missing 'path'") == NULL);
+   free(st);
+   free(lg);
+   free(df);
+   platform_test_rmrf(root);
+   printf("  git_tools_default_to_session_worktree: ok\n");
 }
 static void test_tool_list_files(void)
 {
@@ -2035,7 +2615,7 @@ static void test_parse_openai_tool_calls(void)
 static void test_path_traversal_rejected(void)
 {
    /* read_file with traversal should be rejected */
-   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0);
+   char *result = tool_read_file("/tmp/../etc/shadow", 0, 0, 1);
    assert(result != NULL);
    assert(strstr(result, "error:") != NULL);
    free(result);
@@ -2067,7 +2647,7 @@ static void test_sensitive_path_rejected(void)
    if (home)
    {
       snprintf(ssh_path, sizeof(ssh_path), "%s/.ssh/id_rsa", home);
-      char *result = tool_read_file(ssh_path, 0, 0);
+      char *result = tool_read_file(ssh_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be rejected as sensitive or fail to open */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);
@@ -2088,7 +2668,7 @@ static void test_symlink_escape_rejected(void)
    /* Create symlink to a sensitive path */
    if (symlink("/etc/shadow", link_path) == 0)
    {
-      char *result = tool_read_file(link_path, 0, 0);
+      char *result = tool_read_file(link_path, 0, 0, 1);
       assert(result != NULL);
       /* Should be blocked by the realpath-based check */
       assert(strstr(result, "error:") != NULL || strstr(result, "denied") != NULL);
@@ -2396,6 +2976,16 @@ static void test_session_isolation_guard(void)
    assert(agent_tools_session_isolation_blocks("src/x.c",
                                                "/some/repo/.aimee/worktrees/ab12/main") == 0);
    assert(agent_tools_session_isolation_blocks("src/x.c", "/some/repo") == 1);
+   /* The workflow engine's per-work-item worktrees ARE managed isolation (the
+    * server-side mirror of #1314's guardrail fix): a wfe delegate's writes into
+    * its own wfe worktree must not be refused by this backstop. */
+   assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c",
+                                               NULL) == 0);
+   assert(agent_tools_session_isolation_blocks("src/x.c",
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
+   /* Traversal OUT of a wfe worktree still blocks. */
+   assert(agent_tools_session_isolation_blocks(
+              "/var/lib/aimee/wfe-worktrees/wi_ab12.s3/../../escape.c", NULL) == 1);
    /* NULL path is a no-op (returns 0). */
    assert(agent_tools_session_isolation_blocks(NULL, NULL) == 0);
 
@@ -2404,14 +2994,153 @@ static void test_session_isolation_guard(void)
    printf("session_isolation guard (Layer 2) OK\n");
 }
 
+/* A rewritten agents.json whose mtime did not advance must still be seen.
+ * mtime alone is not a safe cache key: it is neither monotonic nor guaranteed
+ * distinct across a rewrite. Observed live on the appliance's tiered
+ * filesystem, where a reinstalled agents.json landed with an mtime ~9h in the
+ * past and every /v1/agents request kept failing (502) and /v1/agent/list kept
+ * returning an empty array until the file was touched. Size+inode come free
+ * from the same stat() and make the rewrite detectable. */
+static void test_agent_config_cache_detects_same_mtime_rewrite(void)
+{
+   struct stat st;
+   const char *path = agent_config_path();
+
+   /* The suite runs with AIMEE_NO_CACHE=1, which disables the cache path
+    * entirely. This test is ABOUT that path, so turn caching back on for the
+    * duration -- otherwise it passes without exercising anything. */
+   unsetenv("AIMEE_NO_CACHE");
+
+   {
+      FILE *f = fopen(path, "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"before\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+
+   agent_config_t first;
+   assert(agent_load_config(&first) == 0);
+   assert(first.agent_count == 1);
+   assert(agent_find(&first, "before") != NULL);
+   assert(stat(path, &st) == 0);
+   struct timespec pinned = st.st_mtim;
+
+   /* Rewrite with different content, then pin the mtime back to what the cache
+    * already saw -- the exact situation a coarse/non-monotonic filesystem
+    * produces on its own. */
+   {
+      FILE *f = fopen(path, "w");
+      assert(f != NULL);
+      fputs("{\"agents\":[{\"name\":\"after_one\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]},"
+            "{\"name\":\"after_two\",\"provider\":\"anthropic\","
+            "\"model\":\"m\",\"roles\":[\"code\"]}]}\n",
+            f);
+      fclose(f);
+   }
+   {
+      struct timespec times[2];
+      times[0] = pinned; /* atime */
+      times[1] = pinned; /* mtime: rewind to the cached value */
+      assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+      assert(stat(path, &st) == 0);
+      assert(st.st_mtim.tv_sec == pinned.tv_sec && st.st_mtim.tv_nsec == pinned.tv_nsec);
+   }
+
+   /* The cache must NOT hand back the stale single-agent config. */
+   agent_config_t second;
+   assert(agent_load_config(&second) == 0);
+   assert(second.agent_count == 2);
+   assert(agent_find(&second, "after_one") != NULL);
+   assert(agent_find(&second, "after_two") != NULL);
+   assert(agent_find(&second, "before") == NULL);
+
+   unlink(path);
+   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0); /* restore suite default */
+   printf("  PASS: test_agent_config_cache_detects_same_mtime_rewrite\n");
+}
+
+/* The agents.json deletion guard: agent_save_config must never destroy a populated
+ * file, and its write must be atomic. This pins the two ways the file used to go
+ * missing on the live server — an empty registry overwriting it, and a truncating
+ * fopen("w") that a failed/interrupted write left at zero bytes. */
+static void test_agent_config_deletion_guard(void)
+{
+   char home[MAX_PATH_LEN];
+   snprintf(home, sizeof(home), "%s/aimee-guard-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(home) != NULL);
+   setenv("HOME", home, 1);
+   unsetenv("AIMEE_HOME");
+   assert(platform_mkdir_p(config_default_dir(), 0700) == 0 ||
+          access(config_default_dir(), F_OK) == 0);
+
+   /* Seed a populated registry (2 agents). */
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "alpha");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "beta");
+   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
+   assert(agent_save_config(&cfg) == 0);
+
+   agent_config_t chk;
+   assert(agent_load_config(&chk) == 0 && chk.agent_count == 2);
+
+   /* (1) An EMPTY registry must be REFUSED over the populated file, and the file
+    * must survive untouched. This is the guard proper. */
+   {
+      agent_config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(agent_save_config(&empty) != 0);
+      agent_config_t after;
+      assert(agent_load_config(&after) == 0);
+      assert(after.agent_count == 2); /* NOT wiped */
+   }
+
+   /* (2) A zero-agent save IS allowed with no existing file (fresh install). */
+   {
+      unlink(agent_config_path());
+      agent_config_t empty;
+      memset(&empty, 0, sizeof(empty));
+      assert(agent_save_config(&empty) == 0);
+   }
+
+   /* (3) Atomic write leaves no <path>.tmp.* behind on success. */
+   {
+      assert(agent_save_config(&cfg) == 0);
+      char cmd[MAX_PATH_LEN + 64];
+      snprintf(cmd, sizeof(cmd), "ls %s.tmp.* >/dev/null 2>&1", agent_config_path());
+      assert(system(cmd) != 0);
+   }
+
+   char rm[MAX_PATH_LEN + 16];
+   snprintf(rm, sizeof(rm), "rm -rf %s", home);
+   (void)system(rm);
+   printf("  PASS: agent_config_deletion_guard\n");
+}
+
 int main(void)
 {
    char tmp_home[512];
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmp_home) != NULL);
    assert(platform_setenv("HOME", tmp_home) == 0);
+   /* AIMEE_HOME OVERRIDES HOME in aimee_home(), so sandboxing HOME alone is a
+    * no-op anywhere AIMEE_HOME is set - which is every deployed server (the
+    * appliance runs with AIMEE_HOME=/var/lib/aimee). Tests below write to and
+    * unlink() agent_config_path(); without this line they destroy the
+    * operator's real agents.json. Set it before any config or agent call. */
+   assert(platform_setenv("AIMEE_HOME", tmp_home) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
    assert(config_output_dir()[0] != '\0');
+
+   /* Guard the sandbox itself: if agent_config_path() ever resolves outside the
+    * temp home, this suite is about to eat real operator config. Fail loudly
+    * here rather than silently deleting it. */
+   assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
    test_tool_surface_single_source();
    test_agent_name_valid();
@@ -2423,22 +3152,31 @@ int main(void)
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
+   test_agent_routing_block_reason();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
+   test_codex_oauth_reads_aimee_home();
    test_request_creds_snapshot_carries_vault_principal();
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
+   test_agent_default_primary_skips_disabled();
+   test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
+   test_agent_config_deletion_guard();
    test_local_synth_not_masked_by_tmux_codex();
    test_provider_cli_shell_exec_uses_argv_not_shell();
    test_provider_cli_shell_timeout_covers_prompt_write();
    test_codex_oauth_auth_resolution();
    test_responses_parser_keeps_all_output_text_parts();
    test_responses_parser_accumulates_output_text_deltas();
+   test_responses_object_folds_in_delta_text();
+   test_responses_object_keeps_existing_text();
+   test_ir_parse_responses_tool_call();
+   test_ir_parse_responses_text_only();
    test_responses_parser_uses_output_text_done();
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
@@ -2447,15 +3185,23 @@ int main(void)
    test_tool_read_file();
    test_tool_write_file();
    test_tool_edit_file();
+   test_tool_edit_file_anchored();
+   test_anchored_large_span_advisory();
+   test_part3_anchored_tools();
+   test_web_read_ssrf();
    test_parent_write_guard_blocks_parent_writes();
    test_session_isolation_guard();
    test_parent_write_guard_readonly_pipeline();
+   test_stale_parent_guard_blocks_other_worktree_then_clear_unblocks();
    test_parent_write_guard_allows_mkdir_in_delegate_worktree();
    test_parent_write_guard_allows_workspace_file_ops();
    test_parent_write_guard_allows_workspace_chain();
    test_parent_write_guard_allows_readonly_printf();
    test_detached_dead_channel_reports_clear_error();
+   test_container_bash_runs_in_sandbox();
+   test_container_execute_script_runs_in_sandbox();
    test_parent_write_guard_shell_uses_delegate_cwd_in_git_parent();
+   test_git_tools_default_to_session_worktree();
    test_tool_list_files();
    test_tool_grep_excludes_heavy_dirs();
    test_dispatch_tool_call();

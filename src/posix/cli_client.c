@@ -239,7 +239,7 @@ int cli_connect(cli_conn_t *conn, const char *socket_path)
  * A minimal HTTP/1.1 client for aimee-server's /v1 surface, over UDS (same
  * host) or 127.0.0.1:port. This is the thin client's only transport to
  * aimee-server; the cli_connect/cli_request primitives above survive solely for
- * the aimee-kb NDJSON sidecar socket (server/kb_client.c). */
+ * the aimee-kb NDJSON sidecar socket (modules/kb_client/kb_client.c). */
 
 cli_transport_t cli_transport_parse(const char *s)
 {

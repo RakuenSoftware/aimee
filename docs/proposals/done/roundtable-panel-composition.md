@@ -88,14 +88,12 @@ under-specified. They are the implementation contract.
    across runs regardless of shuffle order or the per-index temperature jitter
    (reproducible reviews).
 
-2. **The default panel size does NOT change.** Persona assignment *overlays* the
-   models already in `reference_models`; it does not grow the panel. "Wide
-   fan-out" stays operator-driven — list more models in `reference_models` (the
-   `ENSEMBLE_MAX_REFS = 8` hard cap stands; 8 diverse lenses is the documented
-   ceiling, not resized in this change). So no existing deployment sees a surprise
-   cost increase from this proposal alone; cost stays bounded by the existing
-   `ensemble.max_cost_usd` cap, and each panelist's cost is already folded per
-   model via `ensemble_fold_cost` — the log line now also carries the persona.
+2. **Superseded by capacity-filling seat semantics.** `reference_models` now
+   records positive must-use pins, not an exhaustive panel. Runtime fills every
+   enabled, eligible agent's `max_parallel` seats up to `ENSEMBLE_MAX_REFS`,
+   spreading the first seats across distinct providers before repeating one.
+   This later correction fixes the one-provider-name/one-seat bug while keeping
+   explicit persona bindings and cost accounting intact.
 
 3. **Personas apply to REVIEW mode only.** The engine has three fan-out call
    sites: `run_round_parallel` / `run_round_sequential` (roundtable, both

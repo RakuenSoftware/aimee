@@ -12,9 +12,10 @@
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include "git_oauth_device.h"          /* GitLab/Gitea device-flow (relocated route handlers) */
-#include "git_oauth_github.h" /* GitHub device + web (redirect) flow (relocated handlers) */
-#include "git_oauth_gh.h"     /* zero-config GitHub sign-in via the bundled gh CLI */
-#include "deploy_apply.h"     /* server-orchestrated container deploy (relocated handlers) */
+#include "git_oauth_github.h"   /* GitHub device + web (redirect) flow (relocated handlers) */
+#include "git_oauth_gh.h"       /* zero-config GitHub sign-in via the bundled gh CLI */
+#include "deploy_apply.h"       /* server-orchestrated container deploy (relocated handlers) */
+#include "shutdown_forensics.h" /* authenticated remote shutdown diagnostics */
 #include <limits.h>
 #include <time.h>
 #include "persona.h"
@@ -372,10 +373,38 @@ int route_roundtable_show(const char *name, char *resp, int cap)
    return emit(resp, cap, roundtable_preset_to_json(&p));
 }
 
+/* Roundtable definitions are execution policy, not ordinary agent-writable
+ * configuration. CAP_SESSION_ADMIN alone is insufficient because every local
+ * UDS peer receives CAPS_ALL. Require the separately attested browser operator
+ * identity as well: X-Aimee-Webuser is accepted only when authenticated with
+ * server.token by server_http_identity_capture(), and only the appliance's
+ * bootstrap administrator may mutate global policy. A shell/delegate/agent
+ * using the UDS is attributed as uid:<n> and therefore remains read-only. */
+int route_roundtable_mutation_authorized(const char *principal)
+{
+   return principal && strcmp(principal, "webuser:admin") == 0;
+}
+
+int roundtable_policy_config_key(const char *key)
+{
+   return key && strncmp(key, "roundtable.", 11) == 0;
+}
+
+static int require_roundtable_operator(char *resp, int cap)
+{
+   if (route_roundtable_mutation_authorized(server_http_identity_principal()))
+      return 0;
+   return err_json(resp, cap, 403,
+                   "roundtable changes require the authenticated appliance administrator");
+}
+
 /* Create (POST, name in body) or edit (PUT /v1/roundtables/<name>) a preset. If
  * the saved preset is the active one, re-apply it so live config stays in sync. */
 int route_roundtable_upsert(const char *url_name, const char *body, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    roundtable_preset_t p;
    const char *errmsg = NULL;
    if (roundtable_preset_from_json(body, url_name, &p, &errmsg) != 0)
@@ -394,6 +423,9 @@ int route_roundtable_upsert(const char *url_name, const char *body, char *resp, 
 
 int route_roundtable_remove(const char *name, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    if (!name || !roundtable_preset_name_valid(name))
       return err_json(resp, cap, 400, "invalid preset name");
    if (roundtable_preset_delete(name) != 0)
@@ -408,6 +440,9 @@ int route_roundtable_remove(const char *name, char *resp, int cap)
  * its values into the live ensemble/roundtable config and persist. */
 int route_roundtable_set_active(const char *body, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    cJSON *req = body ? cJSON_Parse(body) : NULL;
    cJSON *jn = req ? cJSON_GetObjectItemCaseSensitive(req, "name") : NULL;
    char name[RT_PRESET_NAME_MAX] = {0};
@@ -931,4 +966,50 @@ int rh_deploy_status(const route_req_t *rq, char *resp, int cap)
    free(s);
    cJSON_Delete(o);
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET /v1/server/forensics — authenticated access to the shutdown records that
+ * are otherwise only visible on the server filesystem. Keep this read-only:
+ * startup owns stale-running-marker reconciliation. */
+int rh_server_forensics(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   shutdown_ctx_t rows[50];
+   int count = shutdown_forensics_list_recent(rows, 50);
+   if (count < 0)
+      count = 0;
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *items = root ? cJSON_AddArrayToObject(root, "recent_shutdowns") : NULL;
+   if (!root || !items)
+   {
+      cJSON_Delete(root);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   for (int i = 0; i < count; i++)
+   {
+      cJSON *item = cJSON_CreateObject();
+      if (!item)
+         continue;
+      cJSON_AddNumberToObject(item, "at", (double)rows[i].at);
+      cJSON_AddStringToObject(item, "daemon", rows[i].daemon);
+      cJSON_AddNumberToObject(item, "daemon_pid", rows[i].daemon_pid);
+      cJSON_AddStringToObject(item, "signal", rows[i].signal_name);
+      cJSON_AddNumberToObject(item, "signal_number", rows[i].signal_number);
+      cJSON_AddNumberToObject(item, "sender_pid", rows[i].sender_pid);
+      cJSON_AddStringToObject(item, "sender_comm", rows[i].sender_comm);
+      cJSON_AddNumberToObject(item, "uptime_s", rows[i].uptime_s);
+      cJSON_AddNumberToObject(item, "inflight_turns", rows[i].inflight_turns);
+      cJSON_AddNumberToObject(item, "inflight_jobs", rows[i].inflight_jobs);
+      cJSON_AddNumberToObject(item, "inflight_workers", rows[i].inflight_workers);
+      cJSON_AddNumberToObject(item, "rss_kb", rows[i].rss_kb);
+      cJSON_AddBoolToObject(item, "unclean_exit", rows[i].unclean_exit ? 1 : 0);
+      cJSON_AddStringToObject(item, "process_tree", rows[i].process_tree);
+      cJSON_AddItemToArray(items, item);
+   }
+   char *json = cJSON_PrintUnformatted(root);
+   int n = json ? snprintf(resp, (size_t)cap, "%s", json) : -1;
+   free(json);
+   cJSON_Delete(root);
+   return (n >= 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }

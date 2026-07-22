@@ -2,6 +2,7 @@
 #define DEC_SERVER_HTTP_IDENTITY_H 1
 
 #include "server.h" /* server_conn_t, attested_transport_t */
+#include "server_tls.h"
 
 /* server_http_identity: WP-C.0 attested-identity threading for the /v1 front-end.
  *
@@ -52,6 +53,9 @@ const char *server_http_identity_principal(void);
  * principal); the bearer buffer is zeroed on clear. */
 const char *server_http_identity_session_hdr(void);
 const char *server_http_identity_bearer(void);
+const char *server_http_identity_status_staple(void);
+const server_tls_peer_cert_t *server_http_identity_peer_cert(void);
+const char *server_http_identity_local_fingerprint(void);
 
 /* The in-flight request's query string ("k=v&…", no '?'), or "" if none. Set by
  * server_http_identity_set_query around the route call, cleared by _clear. Valid

@@ -11,7 +11,7 @@
 
 #include "db1.h"
 #include "guardrail_events.h"
-#include "../guardrails_semantic.h"
+#include "guardrails_semantic.h"
 #include "platform_test_util.h"
 
 /* ── gsem_policy ──────────────────────────────────────────────────────────── */

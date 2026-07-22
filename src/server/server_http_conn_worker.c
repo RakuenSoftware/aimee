@@ -52,34 +52,43 @@ static void *conn_worker(void *arg)
    /* TLS handshake runs HERE (in the worker, never blocking the accept loop) and
     * registers the SSL on the conn-io shim; this worker owns it end to end
     * (SSE-offload is refused over TLS, so it never crosses threads). */
-   SSL *ssl = j->is_tls ? server_tls_begin(j->fd) : NULL;
+   SSL *ssl = j->is_management ? server_tls_management_begin(j->fd)
+                               : (j->is_tls ? server_tls_begin(j->fd) : NULL);
    if (!(j->is_tls && !ssl)) /* skip handle_conn only when the TLS handshake failed */
-      handle_conn(j->fd, j->is_tcp);
+   {
+      do
+      {
+         handle_conn(j->fd, j->is_tcp, j->is_management);
+      } while (j->is_tls && server_http_keepalive_take());
+   }
    server_tls_end(j->fd, ssl);
    close(j->fd);
-   atomic_fetch_sub(&g_conn_live, 1);
+   atomic_fetch_sub(j->is_management ? &g_management_conn_live : &g_conn_live, 1);
    free(j);
    return NULL;
 }
 
 /* Hand an accepted connection to a detached worker (which closes fd). Returns 1
  * if offloaded, 0 if the caller should handle it inline (cap hit / no resources). */
-int conn_offload(int fd, int is_tcp, int is_tls)
+int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
 {
-   if (atomic_fetch_add(&g_conn_live, 1) >= CONN_LIVE_MAX)
+   atomic_int *live = is_management ? &g_management_conn_live : &g_conn_live;
+   int live_max = is_management ? CONN_MANAGEMENT_LIVE_MAX : CONN_LIVE_MAX;
+   if (atomic_fetch_add(live, 1) >= live_max)
    {
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    conn_job_t *j = (conn_job_t *)malloc(sizeof(*j));
    if (!j)
    {
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    j->fd = fd;
    j->is_tcp = is_tcp;
    j->is_tls = is_tls;
+   j->is_management = is_management;
    pthread_attr_t attr;
    pthread_attr_t *ap = NULL;
    if (pthread_attr_init(&attr) == 0)
@@ -94,7 +103,7 @@ int conn_offload(int fd, int is_tcp, int is_tls)
    if (rc != 0)
    {
       free(j);
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    pthread_detach(t);

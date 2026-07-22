@@ -122,6 +122,16 @@ static void pgvec_cos_dist_func(sqlite3_context *ctx, int argc, sqlite3_value **
    sqlite3_result_double(ctx, dist);
 }
 
+/* Purge-fence advisory-lock shims: pg_advisory_xact_lock / hashtext are
+ * mapped to no-ops. SQLite's single-writer serialization already provides
+ * the mutual exclusion the transaction-scoped advisory lock exists for. */
+static void shim_noop_int_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   (void)argc;
+   (void)argv;
+   sqlite3_result_int(ctx, 0);
+}
+
 static void pgvec_register_functions(sqlite3 *db)
 {
    if (!db)
@@ -129,6 +139,10 @@ static void pgvec_register_functions(sqlite3 *db)
    sqlite3_create_function(db, "pgvec_cos_dist", 2,
                            SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, NULL,
                            pgvec_cos_dist_func, NULL, NULL);
+   sqlite3_create_function(db, "hashtext", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS,
+                           NULL, shim_noop_int_func, NULL, NULL);
+   sqlite3_create_function(db, "pg_advisory_xact_lock", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
+                           shim_noop_int_func, NULL, NULL);
    /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
    sqlite3_exec(
        db,
@@ -624,6 +638,14 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return 0;
 }
 
+int aimee_pg_exec_sqlstate(void *pg_conn, const char *sql, char state[6], char *errbuf,
+                           size_t errlen)
+{
+   if (state)
+      state[0] = '\0';
+   return aimee_pg_exec(pg_conn, sql, errbuf, errlen);
+}
+
 int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, size_t errlen,
                                int *affected_out)
 {
@@ -640,16 +662,30 @@ int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, siz
 
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
+   return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
+}
+
+aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
+                                     char *errbuf, size_t errlen)
+{
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_INVALID;
    sqlite3 *db = (sqlite3 *)pg_conn;
-   if (!db)
+   if (!db || !sql)
       return NULL;
    char *sql_t = translate_sql(sql);
    if (!sql_t)
+   {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       return NULL;
+   }
    sqlite3_stmt *st = NULL;
    int rc = sqlite3_prepare_v2(db, sql_t, -1, &st, NULL);
    if (rc != SQLITE_OK)
    {
+      if (kind && rc == SQLITE_NOMEM)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "prepare: %s (sql=%s)", sqlite3_errmsg(db), sql_t);
       free(sql_t);
@@ -659,11 +695,15 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
    aimee_pg_stmt_t *out = calloc(1, sizeof(*out));
    if (!out)
    {
+      if (kind)
+         *kind = AIMEE_PG_PREPARE_RESOURCE;
       sqlite3_finalize(st);
       return NULL;
    }
    out->st = st;
    out->db = db;
+   if (kind)
+      *kind = AIMEE_PG_PREPARE_OK;
    return out;
 }
 
@@ -699,6 +739,12 @@ int aimee_pg_reset(aimee_pg_stmt_t *stmt)
    sqlite3_reset(stmt->st);
    sqlite3_clear_bindings(stmt->st);
    return 0;
+}
+
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *stmt)
+{
+   (void)stmt;
+   return "";
 }
 
 int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt)

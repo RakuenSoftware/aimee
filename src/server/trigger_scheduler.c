@@ -9,6 +9,7 @@
 #endif
 
 #include "config.h"
+#include "server_trigger.h"
 #include <dirent.h>
 #include "cJSON.h"
 #include "db1/db1_cron_jobs.h"
@@ -21,6 +22,7 @@
 #include "skill_curator.h"
 #include "trigger_scheduler.h"
 #include "util.h"
+#include "gw_orch_workflows.h" /* trigger workflow dispatch via the orchestration seam */
 #include "wfe_autonomy.h" /* wfe_autonomy_default_max_cost_usd — the shared intake cap policy */
 #include "wfe_def.h"      /* armed workflows: parse saved defs for trigger starts */
 #include "wfe_engine.h"
@@ -348,10 +350,57 @@ static void trigger_trim_line(char *s)
       s[--n] = '\0';
 }
 
+/* A proposal rule names a branch in `schedule`. Keep the watched remote-tracking
+ * ref fresh without checking it out or modifying the operator's working tree.
+ * The conservative character set is enough for ordinary Git branch names; an
+ * unusual ref simply falls back to the pre-existing local-ref behavior. */
+static int trigger_remote_branch(const char *schedule, char *out, size_t n)
+{
+   const char *branch = schedule ? schedule : "";
+   if (strncmp(branch, "origin/", 7) == 0)
+      branch += 7;
+   if (!branch[0] || branch[0] == '-' || branch[0] == '.' || strstr(branch, "..") ||
+       strstr(branch, "//"))
+      return 0;
+   size_t len = strlen(branch);
+   if (len + 1 > n || branch[len - 1] == '/' || branch[len - 1] == '.' ||
+       (len >= 5 && strcmp(branch + len - 5, ".lock") == 0))
+      return 0;
+   for (size_t i = 0; i < len; i++)
+      if (!(isalnum((unsigned char)branch[i]) || branch[i] == '-' || branch[i] == '_' ||
+            branch[i] == '.' || branch[i] == '/'))
+         return 0;
+   snprintf(out, n, "%s", branch);
+   return 1;
+}
+
+static int trigger_fetch_scheduled_ref(const char *workspace, const char *schedule, char *out,
+                                       size_t n)
+{
+   char branch[256];
+   if (!trigger_remote_branch(schedule, branch, sizeof(branch)))
+      return 0;
+   char refspec[600];
+   if (snprintf(refspec, sizeof(refspec), "+refs/heads/%s:refs/remotes/origin/%s", branch,
+                branch) >= (int)sizeof(refspec))
+      return 0;
+   const char *const fetch_argv[] = {"git", "fetch", "--quiet", "origin", refspec, NULL};
+   char *fetch_out = NULL;
+   int rc = trigger_git_capture(fetch_argv, workspace, &fetch_out);
+   free(fetch_out);
+   if (rc != 0)
+      return 0; /* offline/local-only repositories retain the old local-ref path */
+   if (snprintf(out, n, "origin/%s", branch) >= (int)n)
+      return 0;
+   return 1;
+}
+
 static void trigger_resolve_ref(const char *workspace, const char *schedule, char *out, size_t n)
 {
    if (schedule && schedule[0])
    {
+      if (trigger_fetch_scheduled_ref(workspace, schedule, out, n))
+         return;
       snprintf(out, n, "%s", schedule);
       return;
    }
@@ -457,28 +506,73 @@ static double trigger_cost_cap(const trigger_rule_t *rule)
    return wfe_autonomy_default_max_cost_usd();
 }
 
+/* Coord of the workflow-dispatch capability for trigger filing: the create fields beyond
+ * (lane, payload) plus the create's outputs. Carried as the orchestration capability's opaque
+ * ctx; the adapter records the create outcome (rc + err) so trigger_file_run can log it. */
+typedef struct
+{
+   const char *repo;
+   const char *mode;
+   char *out_id;  /* borrows the caller's out_id[80] buffer; the adapter fills it */
+   char err[256]; /* create error text, for the caller's log */
+   int rc;        /* 0 filed, -1 refused/failed; -1 until the adapter runs */
+} trigger_wf_backing_t;
+
+/* The dispatch_workflow capability for trigger filing: create the work item on `lane` (the
+ * rule's pipeline template) with `payload` (the materialized artifact path) plus the backing's
+ * repo/mode. Returns 0/-1 and records it in the backing so the caller can log + stamp the cap. */
+static int trigger_dispatch_workflow(void *ctx, const char *lane, const char *payload)
+{
+   trigger_wf_backing_t *b = (trigger_wf_backing_t *)ctx;
+   if (!b || !b->out_id)
+      return -1; /* out_id borrows the caller's char[80]; never deref a malformed backing */
+   b->rc = -1;
+   b->err[0] = '\0';
+   b->out_id[0] = '\0';
+   if (wfe_work_item_create(lane, b->repo, payload, b->mode, b->out_id, b->err, sizeof(b->err)) !=
+           0 ||
+       !b->out_id[0])
+      return -1;
+   b->rc = 0;
+   return 0;
+}
+
 /* File one run for a materialized trigger artifact — the shared back half of
  * every artifact-producing trigger source: create the work item on the rule's
  * pipeline (in the rule's workspace, with the rule's mode), stamp the per-run
  * USD ceiling, and log the outcome. `what` labels the artifact in logs (e.g.
  * "sha=<blob>"). De-duplication is the SOURCE's job — each source knows its
  * own identity key; this helper is pure filing. Returns 0 filed (out_id set),
- * -1 refused/failed. */
+ * -1 refused/failed. The create is routed through the orchestration seam so
+ * trigger-initiated workflow dispatch is a togglable module (gw_orch_workflows). */
 static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_path, const char *what,
                             char out_id[80])
 {
-   char err[256] = "";
    out_id[0] = '\0';
    /* mode drives whether the autonomy scheduler advances the run hands-off
     * ("autonomous", the default when the rule omits it) or the item parks for
     * a human to drive in the webchat ("interactive"). */
    const char *mode = rule->mode[0] ? rule->mode : "autonomous";
-   if (wfe_work_item_create(rule->pipeline_template, rule->workspace, artifact_path, mode, out_id,
-                            err, sizeof(err)) != 0 ||
-       !out_id[0])
+   trigger_wf_backing_t backing = {rule->workspace, mode, out_id, "", -1};
+   gw_turn_capabilities_t caps = {&backing, NULL, trigger_dispatch_workflow};
+   char turn_id[64];
+   snprintf(turn_id, sizeof(turn_id), "trigger-%s", rule->source);
+   /* Resolve the workflows toggle from the config-store `modules.workflows` (canonical),
+    * falling back to the deprecated env default; keeps gw_orch_workflows config-free. */
+   config_t wcfg;
+   int wtri = (config_load(&wcfg) == 0) ? wcfg.module_workflows : -1;
+   int wf_enabled = config_module_enabled(wtri, gw_orch_workflows_enabled());
+   if (gw_orch_workflows_run(&caps, turn_id, rule->pipeline_template, artifact_path, wf_enabled) !=
+       0)
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "%s: workflows module disabled — skipping %s repo=%s",
+                rule->source, what, rule->workspace);
+      return -1;
+   }
+   if (backing.rc != 0)
    {
       aimee_log(LOG_WARN, "trigger.sched", "%s: create skipped/failed repo=%s %s: %s", rule->source,
-                rule->workspace, what, err[0] ? err : "already exists");
+                rule->workspace, what, backing.err[0] ? backing.err : "already exists");
       return -1;
    }
    double cap = trigger_cost_cap(rule);
@@ -489,10 +583,12 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
    return 0;
 }
 
-/* Count ACTIVE work items that were filed by the proposals trigger (their
+/* Count ACTIVE AUTONOMOUS work items that were filed by the proposals trigger (their
  * proposal artifact lives under <home>/triggers/proposals/), across all rules —
  * trigger.max_concurrent is a GLOBAL cap on concurrently-executing triggered
- * runs. Returns the count, or -1 on a DB read failure (caller fails closed:
+ * runs. Interactive/legacy watch rows cannot execute under the autonomy
+ * scheduler and therefore must never consume its admission slots. Returns the
+ * count, or -1 on a DB read failure (caller fails closed:
  * files nothing this pass rather than overshooting the cap). */
 static int trigger_active_filed_runs(const char *home)
 {
@@ -509,17 +605,98 @@ static int trigger_active_filed_runs(const char *home)
    int active = 0;
    size_t plen = strlen(prefix);
    for (int i = 0; i < n; i++)
-      if (strcmp(items[i].state, "active") == 0 &&
+      if (strcmp(items[i].state, "active") == 0 && strcmp(items[i].mode, "autonomous") == 0 &&
           strncmp(items[i].proposal_path, prefix, plen) == 0)
          active++;
    free(items);
    return active;
 }
 
-static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
+/* Match a pending-proposal manual-fire selector against a repo-relative ls-tree entry
+ * name. Accepts the full repo-relative path (docs/proposals/pending/foo.md), the bare
+ * basename (foo.md), or the basename without the .md suffix (foo). */
+static int proposal_name_matches(const char *entry_name, const char *want)
 {
+   if (!entry_name || !want || !want[0])
+      return 0;
+   if (strcmp(entry_name, want) == 0)
+      return 1;
+   const char *base = strrchr(entry_name, '/');
+   base = base ? base + 1 : entry_name;
+   if (strcmp(base, want) == 0)
+      return 1;
+   size_t bl = strlen(base);
+   if (bl > 3 && strcmp(base + bl - 3, ".md") == 0)
+   {
+      size_t wl = strlen(want);
+      if (wl == bl - 3 && strncmp(base, want, wl) == 0) /* basename minus the .md suffix */
+         return 1;
+   }
+   return 0;
+}
+
+static void trigger_path_segment(const char *src, char *out, size_t n)
+{
+   size_t j = 0;
+   for (size_t i = 0; src && src[i] && j + 1 < n; i++)
+   {
+      unsigned char c = (unsigned char)src[i];
+      out[j++] = (char)((isalnum(c) || c == '-' || c == '_' || c == '.') ? c : '_');
+   }
+   out[j] = '\0';
+   if (!out[0] && n > 1)
+      snprintf(out, n, "default");
+}
+
+/* The original artifact identity was only the proposal blob SHA. Preserve that
+ * stable key for completed/current runs, but let a different workflow lane or
+ * execution mode supersede a legacy binding. The lane-scoped key is deterministic,
+ * so subsequent scans still deduplicate normally. */
+static int trigger_proposal_artifact_path(const trigger_rule_t *rule, const char *home,
+                                          const char *sha, char *out, size_t n)
+{
+   if (snprintf(out, n, "%s/triggers/proposals/%s.md", home, sha) >= (int)n)
+      return -1;
+   char existing[80];
+   int found = db1_work_item_id_by_proposal(rule->workspace, out, existing, sizeof(existing));
+   if (found <= 0)
+      return found < 0 ? -1 : 0;
+
+   db1_work_item_t wi;
+   const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+   if (db1_work_item_get(existing, &wi) != 1)
+      return -1;
+   if (strcmp(wi.workflow_name, rule->pipeline_template) == 0 && strcmp(wi.mode, mode) == 0)
+      return 1; /* already filed by this lane */
+
+   char workflow[80], run_mode[32];
+   trigger_path_segment(rule->pipeline_template, workflow, sizeof(workflow));
+   trigger_path_segment(mode, run_mode, sizeof(run_mode));
+   if (snprintf(out, n, "%s/triggers/proposals/%s.%s.%s.md", home, sha, workflow, run_mode) >=
+       (int)n)
+      return -1;
+   found = db1_work_item_id_by_proposal(rule->workspace, out, existing, sizeof(existing));
+   if (found == 1)
+      return 1;
+   if (found < 0)
+      return -1;
+   aimee_log(LOG_INFO, "trigger.sched",
+             "proposals: superseding legacy binding id=%s workflow=%s mode=%s with %s/%s",
+             wi.work_item_id, wi.workflow_name, wi.mode, rule->pipeline_template, mode);
+   return 0;
+}
+
+/* Scan the rule's proposal dir and file WFE work items. only_name!=NULL files just the
+ * single matching pending proposal (manual one-at-a-time fire); NULL files all un-filed
+ * ones (the auto scan). Returns the count filed; copies the first filed work-item id into
+ * out_id when non-NULL. */
+static int scan_proposals_ex(const trigger_rule_t *rule, int max_concurrent, const char *only_name,
+                             char *out_id, size_t out_id_sz)
+{
+   if (out_id && out_id_sz)
+      out_id[0] = '\0';
    if (!rule || !rule->workspace[0] || !rule->pipeline_template[0])
-      return;
+      return 0;
 
    const char *scanpath = rule->event[0] ? rule->event : PROPOSALS_DEFAULT_DIR;
    /* Reject an absolute or traversing scan dir: `event` is repo-relative and must
@@ -528,7 +705,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals scan dir rejected (absolute/traversal): %s",
                 scanpath);
-      return;
+      return 0;
    }
 
    char ref[256];
@@ -538,7 +715,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    if (ref[0] == '-')
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals ref rejected (leading '-'): %s", ref);
-      return;
+      return 0;
    }
 
    /* git ls-tree on a bare directory pathspec lists only that directory's own
@@ -550,7 +727,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    while (sl > 0 && scanpath[sl - 1] == '/')
       sl--;
    if (snprintf(scandir, sizeof(scandir), "%.*s/", (int)sl, scanpath) >= (int)sizeof(scandir))
-      return;
+      return 0;
 
    const char *const ls_argv[] = {"git", "ls-tree", ref, "--", scandir, NULL};
    char *out = NULL;
@@ -560,7 +737,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       aimee_log(LOG_WARN, "trigger.sched", "proposals ls-tree failed repo=%s ref=%s rc=%d",
                 rule->workspace, ref, rc);
       free(out);
-      return;
+      return 0;
    }
 
    trigger_ls_tree_entry_t entries[PROPOSALS_MAX_ENTRIES];
@@ -577,13 +754,13 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
    {
       aimee_log(LOG_WARN, "trigger.sched",
                 "proposals: no resolvable AIMEE_HOME; refusing to materialize under /tmp");
-      return;
+      return 0;
    }
    if (trigger_mkdir_parents(home) != 0)
    {
       aimee_log(LOG_WARN, "trigger.sched", "proposals: could not create %s/triggers/proposals: %s",
                 home, strerror(errno));
-      return;
+      return 0;
    }
 
    /* trigger.max_concurrent: admission cap on concurrently-executing triggered
@@ -598,7 +775,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       {
          aimee_log(LOG_WARN, "trigger.sched",
                    "proposals: could not count active triggered runs; deferring this pass");
-         return; /* fail closed: never overshoot the cap on a DB read fault */
+         return 0; /* fail closed: never overshoot the cap on a DB read fault */
       }
       budget = max_concurrent - active;
       if (budget <= 0)
@@ -606,13 +783,15 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
          aimee_log(LOG_INFO, "trigger.sched",
                    "proposals: %d active triggered run(s) >= max_concurrent=%d; deferring", active,
                    max_concurrent);
-         return;
+         return 0;
       }
    }
 
    int filed = 0;
    for (int i = 0; i < n; i++)
    {
+      if (only_name && !proposal_name_matches(entries[i].name, only_name))
+         continue;
       if (budget == 0)
       {
          aimee_log(LOG_INFO, "trigger.sched",
@@ -622,13 +801,9 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
          break;
       }
       char proposal_path[1200];
-      if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md", home,
-                   entries[i].sha) >= (int)sizeof(proposal_path))
-         continue;
-
-      char existing[80];
-      if (db1_work_item_id_by_proposal(rule->workspace, proposal_path, existing,
-                                       sizeof(existing)) == 1)
+      int artifact = trigger_proposal_artifact_path(rule, home, entries[i].sha, proposal_path,
+                                                    sizeof(proposal_path));
+      if (artifact != 0) /* 1 = already filed; -1 = DB/path error (fail closed) */
          continue;
 
       const char *const cat_argv[] = {"git", "cat-file", "blob", entries[i].sha, NULL};
@@ -655,6 +830,8 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
       if (trigger_file_run(rule, proposal_path, what, id) == 0)
       {
          filed++;
+         if (out_id && out_id_sz && !out_id[0])
+            snprintf(out_id, out_id_sz, "%s", id);
          if (budget > 0)
             budget--;
       }
@@ -664,6 +841,7 @@ static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
     * its 30s backstop sweep (parity with the /v1/dev/submit intake). */
    if (filed > 0)
       wfe_scheduler_notify();
+   return filed;
 }
 
 /* ------------------------------------------------------------------ */
@@ -979,14 +1157,58 @@ typedef struct
 
 static int proposals_due(const trigger_rule_t *rule, const struct tm *tm)
 {
-   (void)rule;
    (void)tm;
+   /* The generic "watch-dir" source keeps its every-pass scan. The "proposals" source
+    * is gated OFF by default (wfe_proposals_autoscan_enabled): while the autonomous
+    * pipeline is under test, pending proposals are NOT filed automatically -- a human
+    * files them one at a time via `trigger.fire source=proposals proposal=<name>`. Set
+    * the flag true to opt back in to the every-pass autonomous scan. */
+   if (rule && strcmp(rule->source, "proposals") == 0)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      return cfg.wfe_proposals_autoscan_enabled ? 1 : 0;
+   }
    return 1; /* poll the repo every pass; per-proposal dedup makes re-scans idempotent */
+}
+
+/* Back-compat 2-arg wrapper: the auto scan files ALL un-filed pending proposals. */
+static void scan_proposals(const trigger_rule_t *rule, int max_concurrent)
+{
+   scan_proposals_ex(rule, max_concurrent, NULL, NULL, 0);
 }
 
 static void proposals_fire(const trigger_rule_t *rule, int max_concurrent)
 {
    scan_proposals(rule, max_concurrent);
+}
+
+/* Manual one-at-a-time proposal fire: file exactly the named pending proposal as a WFE
+ * work item, bypassing the (default-off) auto scan. Returns 0 and fills out_id on a
+ * successful file; -1 if the proposal was not found, already filed, or on error. */
+int trigger_proposals_file_one(const char *workspace, const char *pipeline, const char *event_dir,
+                               const char *ref, const char *mode, const char *proposal_name,
+                               char out_id[80])
+{
+   if (out_id)
+      out_id[0] = '\0';
+   if (!workspace || !workspace[0] || !pipeline || !pipeline[0] || !proposal_name ||
+       !proposal_name[0])
+      return -1;
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof(rule));
+   snprintf(rule.source, sizeof(rule.source), "proposals");
+   snprintf(rule.workspace, sizeof(rule.workspace), "%s", workspace);
+   snprintf(rule.pipeline_template, sizeof(rule.pipeline_template), "%s", pipeline);
+   if (event_dir && event_dir[0])
+      snprintf(rule.event, sizeof(rule.event), "%s", event_dir);
+   if (ref && ref[0])
+      snprintf(rule.schedule, sizeof(rule.schedule), "%s", ref);
+   if (mode && mode[0])
+      snprintf(rule.mode, sizeof(rule.mode), "%s", mode);
+   /* max_concurrent=0 -> uncapped: a deliberate single manual fire is not deferred. */
+   int filed = scan_proposals_ex(&rule, 0, proposal_name, out_id, 80);
+   return (filed > 0 && out_id && out_id[0]) ? 0 : -1;
 }
 
 static int cron_due(const trigger_rule_t *rule, const struct tm *tm)
@@ -1148,10 +1370,14 @@ static void sched_tick(void)
    time_t now = time(NULL);
    struct tm tm;
    localtime_r(&now, &tm);
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   int go_wfe = engine && strcmp(engine, "go") == 0;
 
    for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
    {
       const trigger_rule_t *rule = &cfg.trigger_rules[i];
+      if (go_wfe)
+         break; /* Go is the sole owner of every WFE admission source. */
       const trigger_source_t *src = trigger_source_find(rule->source);
       if (!src)
          continue; /* unknown source (e.g. a webhook handled on its own ingress) */
@@ -1201,7 +1427,8 @@ static void sched_tick(void)
 
    /* Armed workflows (triggers-as-blocks): saved workflows whose start node is
     * a trigger block file runs through the same plumbing as trigger_rules. */
-   sched_tick_armed(now, cfg.trigger_max_concurrent);
+   if (!go_wfe)
+      sched_tick_armed(now, cfg.trigger_max_concurrent);
 
    /* Skill curator: idle-guarded; safe to call on every tick. */
    if (cfg.skills_curator_enabled)

@@ -94,7 +94,24 @@ static void test_status_helpers(void)
    printf("  status_helpers: ok\n");
 }
 
-/* ---- 4. event buffering + ordered drain (single thread) ---- */
+/* ---- 4. generation-aware missing-run classification ---- */
+static void test_missing_classification(void)
+{
+   const char *generation = openai_runs_store_generation();
+   assert(generation && generation[0] == 'g');
+   char current[160];
+   snprintf(current, sizeof(current), "oprun_%s_1700000000_1", generation);
+   assert(openai_runs_store_classify_missing(current) == OPENAI_RUNS_MISSING_EVICTED);
+   assert(openai_runs_store_classify_missing("oprun_gprior_1700000000_1") ==
+          OPENAI_RUNS_MISSING_INTERRUPTED);
+   assert(openai_runs_store_classify_missing("oprun_1700000000_1") ==
+          OPENAI_RUNS_MISSING_INTERRUPTED);
+   assert(openai_runs_store_classify_missing("run_unknown") == OPENAI_RUNS_MISSING_UNKNOWN);
+   assert(openai_runs_store_classify_missing("oprun_malformed") == OPENAI_RUNS_MISSING_UNKNOWN);
+   printf("  missing_classification: ok\n");
+}
+
+/* ---- 5. event buffering + ordered drain (single thread) ---- */
 static void test_event_buffer(void)
 {
    openai_runs_store_reset();
@@ -125,7 +142,7 @@ static void test_event_buffer(void)
    printf("  event_buffer: ok\n");
 }
 
-/* ---- 5. cancellation ---- */
+/* ---- 6. cancellation ---- */
 static void test_cancel(void)
 {
    openai_runs_store_reset();
@@ -141,7 +158,7 @@ static void test_cancel(void)
    printf("  cancel: ok\n");
 }
 
-/* ---- 6. live cross-thread delivery ---- */
+/* ---- 7. live cross-thread delivery ---- */
 static void *producer(void *arg)
 {
    (void)arg;
@@ -195,6 +212,7 @@ int main(void)
    test_create_status_get();
    test_transitions();
    test_status_helpers();
+   test_missing_classification();
    test_event_buffer();
    test_cancel();
    test_live_stream();

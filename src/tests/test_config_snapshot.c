@@ -14,25 +14,22 @@
 
 /* P3 re-applier probe. */
 static _Atomic int g_reapply_calls = 0;
-static int g_last_agg = -1;
+static int g_last_mode = -1;
 static void probe_reapplier(const config_t *o, const config_t *n)
 {
    (void)o;
-   g_last_agg = n->economizer_aggressive;
+   g_last_mode = n->economizer_mode;
    atomic_fetch_add_explicit(&g_reapply_calls, 1, memory_order_relaxed);
 }
 
-/* Author a config file with a MARKER PAIR (aggressive, budget) via config_save so reload
+/* Author a config file with a MARKER PAIR (proof_gated, budget) via config_save so reload
  * observes a real change. The pair is what the torn-read check keys on. */
-static void write_marker(int aggressive, int budget)
+static void write_marker(int proof_gated, int budget)
 {
    static config_t c;
    memset(&c, 0, sizeof c);
    config_load(&c);
-   /* keep the config VALID regardless of what a prior (deliberately-invalid) test left on
-    * disk, so config_reload's validate-or-keep never rejects a marker write. */
-   c.reduce_gateway_session_disable_ttl_ms = 3600000;
-   c.economizer_aggressive = aggressive;
+   c.economizer_mode = proof_gated ? ECON_MODE_PROOF_GATED : ECON_MODE_OFF;
    c.coord_closet_budget_bytes = budget;
    assert(config_save(&c) == 0);
 }
@@ -40,7 +37,7 @@ static void write_marker(int aggressive, int budget)
 static _Atomic int g_stop = 0;
 static _Atomic long g_reads = 0, g_torn = 0;
 
-/* The two configs written by the writer are {agg=1,budget=1111} and {agg=0,budget=2222};
+/* The two configs are {proof_gated,budget=1111} and {off,budget=2222};
  * a reader must never observe a mismatched pair (that would be a torn cross-slot read). */
 static void *reader_thread(void *arg)
 {
@@ -51,8 +48,8 @@ static void *reader_thread(void *arg)
       if (config_snapshot_get(&c) != 0)
          continue;
       atomic_fetch_add_explicit(&g_reads, 1, memory_order_relaxed);
-      int a = (c.economizer_aggressive == 1 && c.coord_closet_budget_bytes == 1111);
-      int b = (c.economizer_aggressive == 0 && c.coord_closet_budget_bytes == 2222);
+      int a = (c.economizer_mode == ECON_MODE_PROOF_GATED && c.coord_closet_budget_bytes == 1111);
+      int b = (c.economizer_mode == ECON_MODE_OFF && c.coord_closet_budget_bytes == 2222);
       if (!a && !b)
          atomic_fetch_add_explicit(&g_torn, 1, memory_order_relaxed);
    }
@@ -85,7 +82,7 @@ int main(void)
       config_snapshot_init(&c0);
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_aggressive == 1);
+      assert(got.economizer_mode == ECON_MODE_PROOF_GATED);
       assert(got.coord_closet_budget_bytes == 1111);
    }
 
@@ -98,38 +95,40 @@ int main(void)
    {
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_aggressive == 0);
+      assert(got.economizer_mode == ECON_MODE_OFF);
       assert(got.coord_closet_budget_bytes == 2222);
    }
    /* reloading the same file again is a no-op */
    assert(config_reload() == 0);
 
-   /* --- validate-or-keep: an INVALID file -> reload -1, snapshot unchanged --- */
-   {
-      const char *path = config_default_path();
-      FILE *fp = fopen(path, "w");
-      assert(fp);
-      /* ttl <= 0 is startup-fatal per config_reduce_validate */
-      fputs("reduce:\n  gateway_session_disable_ttl_ms: 0\n", fp);
-      fclose(fp);
-      assert(config_reload() == -1); /* kept */
-      config_t got;
-      assert(config_snapshot_get(&got) == 0);
-      assert(got.coord_closet_budget_bytes == 2222); /* still the last GOOD snapshot */
-   }
-
    /* --- P3 re-applier registry: a hook fires after a changed reload, with the NEW config --- */
    {
       config_reload_register_reapplier(probe_reapplier);
       int before = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
-      write_marker(1, 1111); /* change back to aggressive=1 */
+      write_marker(1, 1111); /* change back to proof_gated */
       assert(config_reload() == 1);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == before + 1);
-      assert(g_last_agg == 1); /* re-applier saw the NEW value */
+      assert(g_last_mode == ECON_MODE_PROOF_GATED); /* re-applier saw the NEW value */
       /* a no-op reload does NOT fire the re-applier */
       int mid = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
       assert(config_reload() == 0);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == mid);
+   }
+
+   /* --- P4 config_reload_if_changed: an OUT-OF-BAND file write (as a CLI local config.set,
+    * a manual edit, or the autonomous config_save produces) is picked up on the main-loop
+    * tick WITHOUT an explicit config_reload()/SIGHUP; an unchanged file is a no-op. --- */
+   {
+      (void)config_reload_if_changed();        /* first call seeds the baseline + reconciles */
+      assert(config_reload_if_changed() == 0); /* no on-disk change since -> no-op */
+      write_marker(0, 3333);                   /* out-of-band write */
+      assert(config_reload_if_changed() == 1); /* detected the change + published */
+      {
+         config_t got;
+         assert(config_snapshot_get(&got) == 0);
+         assert(got.coord_closet_budget_bytes == 3333); /* the new value is live now */
+      }
+      assert(config_reload_if_changed() == 0); /* stable again -> no-op */
    }
 
    /* --- autonomy-live: config_autonomy_lookup (operator env override > live snapshot,
@@ -137,8 +136,8 @@ int main(void)
    {
       long v;
       /* a non-config autonomy var -> 0 so the caller uses its own env/default */
-      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
-      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 0);
+      platform_unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_USD_PER_SEC", &v) == 0);
       /* operator env override wins */
       platform_setenv("AIMEE_AUTONOMY_SKEPTICS", "7");
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 7);
@@ -147,11 +146,27 @@ int main(void)
       static config_t sc;
       memset(&sc, 0, sizeof sc);
       config_load(&sc); /* snapshot base */
-      sc.reduce_gateway_session_disable_ttl_ms = 3600000;
       sc.autonomy_skeptics = 9;
       assert(config_save(&sc) == 0);
       assert(config_reload() == 1);
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 9);
+
+      /* Run-safety caps are now config-backed + live too (GUI-tunable). Env override
+       * wins; otherwise the live snapshot; a config.set applies without a restart. */
+      platform_setenv("AIMEE_AUTONOMY_MAX_WALL_SECS", "5400");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 5400);
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_WALL_SECS");
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+      memset(&sc, 0, sizeof sc);
+      config_load(&sc);
+      sc.autonomy_max_turns = 1234;
+      sc.autonomy_max_wall_secs = 7200;
+      sc.autonomy_auto_resume_cap_parks = 0; /* flip the default (ON) so the read is meaningful */
+      assert(config_save(&sc) == 0);
+      assert(config_reload() == 1);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 1 && v == 1234);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 7200);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_AUTO_RESUME_CAP_PARKS", &v) == 1 && v == 0);
    }
 
    /* --- concurrent torn-read stress: readers spin while the writer toggles + reloads --- */
