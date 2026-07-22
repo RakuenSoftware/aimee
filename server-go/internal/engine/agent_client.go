@@ -29,6 +29,10 @@ type DelegateRequest struct {
 	Stage            string
 	ExecutionVersion string
 	RetryTag         string
+	// ArtifactStage is the validated workflow artifact stage a review delegate
+	// must evaluate. It is carried structurally so runner collaborators and test
+	// doubles never need to recover authority from prompt prose.
+	ArtifactStage string
 	// acceptPartial is reserved for native branch-producing blocks whose worktree output
 	// is independently committed and verified by the Go native runner. Structured
 	// and prose blocks must receive a complete resource-plane result.

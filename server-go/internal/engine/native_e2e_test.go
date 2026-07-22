@@ -29,7 +29,7 @@ func (a *e2eAgents) EligibleAgents(_ context.Context, _ string) ([]EligibleAgent
 func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	switch request.Role {
 	case "review":
-		return DelegateResult{Response: `{"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+		return DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
 	case "draft":
 		if strings.Contains(request.Prompt, "PACKET PLAN") || strings.Contains(request.Prompt, "Decompose the complete approved plan") {
 			return DelegateResult{Response: `{"schema_version":1,"packets":[{"packet_id":"p1","summary":"implement feature","target_blocks":["implement"],"dependencies":[],"acceptance_criteria":["feature exists"]}]}`}, nil
