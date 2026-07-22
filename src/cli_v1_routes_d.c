@@ -752,7 +752,6 @@ static const struct
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
-    {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
@@ -763,6 +762,7 @@ static const struct
     {"kb.ingest", "POST", "/v1/kb/ingest"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };
 /* @@GEN-CLI-V1-ROUTES END @@ */
