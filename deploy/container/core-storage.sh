@@ -3,6 +3,13 @@
 # The kernel interprets core_pattern in the crashing process's mount namespace,
 # so an appliance host path is useless unless the same path is mounted here.
 
+aimee_core_pattern_has_pid() {
+    # %% is a literal percent in core_pattern. Remove escaped pairs before
+    # looking for a real %p conversion (%%%p correctly leaves one conversion).
+    _pid_conversions=$(printf '%s' "$1" | sed 's/%%//g')
+    printf '%s' "$_pid_conversions" | grep -q '%p'
+}
+
 aimee_enable_core_dumps() {
     _required=${AIMEE_REQUIRE_PERSISTENT_CORES:-0}
     if ! ulimit -c unlimited 2>/dev/null; then
@@ -62,14 +69,14 @@ aimee_prepare_core_storage() {
                     return 1
                 fi
                 case "$_core_parent" in
-                    "$_core_root"|"$_core_root"/*) ;;
+                    "$_core_root") ;;
                     *)
                         printf '[server-entrypoint] fatal: core_pattern escapes persistent core storage: %s\n' \
                             "$_core_pattern" >&2
                         return 1
                         ;;
                 esac
-                if ! printf '%s' "$_core_pattern" | grep -q '%p'; then
+                if ! aimee_core_pattern_has_pid "$_core_pattern"; then
                     printf '[server-entrypoint] fatal: required core_pattern must contain %%p for attribution: %s\n' \
                         "$_core_pattern" >&2
                     return 1
@@ -118,17 +125,14 @@ aimee_verify_core_dump() {
     _core_dir=${AIMEE_CORE_DIR:-/mnt/media/cores}
     _pattern_file=${AIMEE_CORE_PATTERN_FILE:-/proc/sys/kernel/core_pattern}
     _core_pattern=$(cat "$_pattern_file" 2>/dev/null) || return 1
-    case "$_core_pattern" in
-        *%p*) ;;
-        *)
+    if ! aimee_core_pattern_has_pid "$_core_pattern"; then
             if [ "$(cat /proc/sys/kernel/core_uses_pid 2>/dev/null || printf 0)" = 1 ]; then
                 _core_pattern="$_core_pattern.%p"
             else
                 printf '[server-entrypoint] fatal: controlled core cannot be attributed without %%p\n' >&2
                 return 1
             fi
-            ;;
-    esac
+    fi
     _marker=$(mktemp "$_core_dir/.core-selftest.XXXXXX") || return 1
     (
         cd "$_core_dir" || exit 1
@@ -142,7 +146,8 @@ aimee_verify_core_dump() {
         *) _core_glob=$_core_dir/$_core_pattern ;;
     esac
     _core_glob=$(printf '%s' "$_core_glob" | sed \
-        -e "s/%p/$_crash_pid/g" -e 's/%%/%/g' -e 's/%[A-Za-z]/*/g')
+        -e 's/%%/__AIMEE_LITERAL_PERCENT__/g' -e "s/%p/$_crash_pid/g" \
+        -e 's/%[A-Za-z]/*/g' -e 's/__AIMEE_LITERAL_PERCENT__/%/g')
     _wait=0
     _produced=
     while [ "$_wait" -lt 50 ]; do

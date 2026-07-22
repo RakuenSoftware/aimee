@@ -28,8 +28,15 @@ if [ "$wfe_rc" -ne 0 ]; then
     echo "FAIL: WFE-plane supervision assertion $wfe_rc" >&2
     exit 1
 fi
-# The helper verifies first-exit attribution and peer teardown. The entrypoint
-# separately converts that successful supervision result into a nonzero unit
-# exit so restartPolicy recreates both planes.
-grep -q 'status=1' ../deploy/container/server-entrypoint.sh
+# Exercise the entrypoint-facing wrapper independently: it must convert an
+# actual first-plane exit into exactly status 1 after terminating its peer.
+sleep 30 & unit_server=$!
+sleep 30 & unit_wfe=$!
+trap 'kill "$unit_server" "$unit_wfe" 2>/dev/null || true' EXIT INT TERM
+( sleep 0.2; kill "$unit_server" ) &
+unit_rc=0
+aimee_supervise_plane_unit "$unit_server" "$unit_wfe" || unit_rc=$?
+[ "$unit_rc" -eq 1 ]
+! kill -0 "$unit_wfe" 2>/dev/null
+grep -q 'aimee_supervise_plane_unit' ../deploy/container/server-entrypoint.sh
 echo "server-plane-supervisor: ok (both exit directions terminate peer and unit)"

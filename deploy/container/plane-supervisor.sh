@@ -48,3 +48,10 @@ aimee_supervise_plane_pair() {
     wait "$_aimee_server_pid" 2>/dev/null || true
     wait "$_aimee_wfe_pid" 2>/dev/null || true
 }
+
+# Entrypoint-facing wrapper: supervision returning means one plane died, so the
+# two-plane unit must exit nonzero and let restartPolicy recreate both planes.
+aimee_supervise_plane_unit() {
+    aimee_supervise_plane_pair "$1" "$2"
+    return 1
+}

@@ -216,11 +216,11 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
 fi
 
 if [ -n "$wfe_pid" ]; then
-    aimee_supervise_plane_pair "$server_pid" "$wfe_pid"
+    status=0
+    aimee_supervise_plane_unit "$server_pid" "$wfe_pid" || status=$?
     first=$AIMEE_FIRST_EXIT
     log "$first plane exited; terminating its peer so the container restarts as one unit"
     shutdown
-    status=1
 else
     if wait "$server_pid"; then status=0; else status=$?; fi
 fi
