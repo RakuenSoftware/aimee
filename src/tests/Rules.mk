@@ -3898,6 +3898,10 @@ $(TESTPREFIX)/unit-test-vault-audit: $(OBJDIR)/tests/test_vault_audit.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-server-ready: $(OBJDIR)/tests/test_server_ready.o \
+                           $(OBJDIR)/server/server_ready.o $(OBJDIR)/log.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-prompts: $(OBJDIR)/tests/test_prompts.o \
                            $(OBJDIR)/prompts.o $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
                            $(DB1_OBJS) \

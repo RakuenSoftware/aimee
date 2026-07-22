@@ -1,0 +1,105 @@
+/* test_server_ready.c: the readiness decision behind GET /v1/ready.
+ *
+ * Exercises server_ready_render() — the pure snapshot→(body,status) function —
+ * by passing an explicit clock, so staleness and roll-up behavior are tested
+ * deterministically rather than by sleeping past a real sampling interval.
+ *
+ * The sampler's own I/O (kb_client_health / db1_is_initialized) is stubbed:
+ * this suite is about the decision, not about reaching the dependencies. */
+#include "server_http.h"
+#include "kb_client.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+
+/* --- stubs for the sampler's dependency closure (link-only) --- */
+int db1_is_initialized(void)
+{
+   return 1;
+}
+
+int kb_client_health(kb_health_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
+}
+
+void server_http_set_ready_provider(server_http_ready_fn fn)
+{
+   (void)fn;
+}
+
+#define NOW 1000000L
+
+int main(void)
+{
+   char resp[2048];
+
+   /* Never sampled ⇒ unknown, not ready, and a null age rather than a
+    * fabricated one. An unsampled server must never read as ready. */
+   {
+      int st = server_ready_render(-1, -1, 0, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"status\":\"unknown\""));
+      assert(strstr(resp, "\"sampled_at\":null"));
+      assert(strstr(resp, "\"age_seconds\":null"));
+   }
+
+   /* Fresh sample, everything ok ⇒ ready. */
+   {
+      int st = server_ready_render(1, 1, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"ready\":true"));
+      assert(strstr(resp, "\"status\":\"ok\""));
+      assert(strstr(resp, "\"db1\":\"ok\""));
+      assert(strstr(resp, "\"kb\":\"ok\""));
+      assert(strstr(resp, "\"age_seconds\":5"));
+   }
+
+   /* One dependency down ⇒ not ready, degraded, and the failing dependency is
+    * named rather than hidden behind a roll-up. */
+   {
+      int st = server_ready_render(1, 0, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"status\":\"degraded\""));
+      assert(strstr(resp, "\"db1\":\"ok\""));
+      assert(strstr(resp, "\"kb\":\"fail\""));
+   }
+   {
+      int st = server_ready_render(0, 1, NOW - 5, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"db1\":\"fail\""));
+   }
+
+   /* A stale snapshot degrades to unknown even when every dependency sampled
+    * ok — a wedged sampler must not leave "ready" standing forever. */
+   {
+      int st = server_ready_render(1, 1, NOW - 61, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"status\":\"unknown\""));
+      assert(strstr(resp, "\"db1\":\"unknown\""));
+      assert(strstr(resp, "\"kb\":\"unknown\""));
+   }
+
+   /* Exactly at the bound is still fresh (the bound is inclusive). */
+   {
+      int st = server_ready_render(1, 1, NOW - 60, NOW, 60, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"ready\":true"));
+   }
+
+   /* A snapshot stamped in the future means the clock moved; the age is
+    * meaningless, so fail closed rather than report a negative age as fresh. */
+   {
+      int st = server_ready_render(1, 1, NOW + 30, NOW, 60, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"status\":\"unknown\""));
+   }
+
+   printf("server_ready: OK\n");
+   return 0;
+}

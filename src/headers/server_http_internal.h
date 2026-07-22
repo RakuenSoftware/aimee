@@ -60,6 +60,7 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
 int route_capabilities(char *resp, int cap);
 int route_completion(server_http_completion_fn fn, const char *body, char *resp, int cap);
 int route_health(char *resp, int cap);
+int route_ready(char *resp, int cap);
 int route_json_provider(server_http_json_provider fn, char *resp, int cap, const char *what);
 int route_models(char *resp, int cap);
 int route_native_post(server_http_completion_fn fn, const char *body, char *resp, int cap,
