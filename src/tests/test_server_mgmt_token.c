@@ -410,14 +410,14 @@ static void test_compact_and_signature(EVP_PKEY *key, const char *jwks, const ch
    free(large_jwt);
    free(large_payload);
 
-   /* Signature segment decoded size > 512 and total wire > 8192 both deny. */
+   /* Signature segment decoded size > 1024 and total wire > 8192 both deny. */
    char *dots = strdup(jwt);
    char *last = strrchr(dots, '.');
    size_t prefix = (size_t)(last + 1 - dots);
-   char *huge_sig = malloc(prefix + 700 + 1);
+   char *huge_sig = malloc(prefix + 1400 + 1);
    memcpy(huge_sig, dots, prefix);
-   memset(huge_sig + prefix, 'A', 700);
-   huge_sig[prefix + 700] = '\0';
+   memset(huge_sig + prefix, 'A', 1400);
+   huge_sig[prefix + 1400] = '\0';
    assert(!verify(huge_sig, strlen(huge_sig), jwks, NOW, &claims));
    free(huge_sig);
    free(dots);
