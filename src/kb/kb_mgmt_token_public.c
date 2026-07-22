@@ -14,6 +14,54 @@ static void put_u32be(uint8_t out[4], uint32_t value)
    out[3] = (uint8_t)value;
 }
 
+static void put_u64be(uint8_t out[8], uint64_t value)
+{
+   for (unsigned i = 0; i < 8; ++i)
+      out[i] = (uint8_t)(value >> (56 - 8 * i));
+}
+
+static int aad_field(uint8_t *out, size_t cap, size_t *off, const void *value, size_t len)
+{
+   if (len > UINT32_MAX || *off > cap || cap - *off < 4 || cap - *off - 4 < len)
+      return -1;
+   put_u32be(out + *off, (uint32_t)len);
+   *off += 4;
+   if (len)
+   {
+      memcpy(out + *off, value, len);
+      *off += len;
+   }
+   return 0;
+}
+
+int kb_mgmt_token_root_aad(int64_t version, uint8_t *out, size_t cap, size_t *out_len)
+{
+   static const char domain[] = "aimee.p5.token-root.envelope.aad.v1";
+   static const char principal[] = "org:p5-token";
+   static const char agent[] = "management";
+   static const char cred[] = "rs256";
+   uint8_t encoded_version[8];
+   size_t off = 0;
+   if (out && cap)
+      OPENSSL_cleanse(out, cap);
+   if (out_len)
+      *out_len = 0;
+   if (version < 1 || !out || !out_len)
+      return -1;
+   put_u64be(encoded_version, (uint64_t)version);
+   if (aad_field(out, cap, &off, domain, sizeof(domain) - 1) ||
+       aad_field(out, cap, &off, principal, sizeof(principal) - 1) ||
+       aad_field(out, cap, &off, agent, sizeof(agent) - 1) ||
+       aad_field(out, cap, &off, cred, sizeof(cred) - 1) ||
+       aad_field(out, cap, &off, encoded_version, sizeof(encoded_version)))
+   {
+      OPENSSL_cleanse(out, cap);
+      return -1;
+   }
+   *out_len = off;
+   return 0;
+}
+
 static void hex_encode(const uint8_t *value, size_t len, char *out)
 {
    static const char hex[] = "0123456789abcdef";

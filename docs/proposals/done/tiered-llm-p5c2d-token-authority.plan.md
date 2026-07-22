@@ -1,6 +1,6 @@
 # P5-C2d online management-token authority
 
-- **State:** reviewed; implementation ready. Two completed reviewer passes were incorporated;
+- **State:** implemented and validated. Two completed reviewer passes were incorporated;
   the final multi-seat convergence call was attempted twice with distinct runner
   `p5c2d-token-authority-plan-v10-ensemble-20260722` and timed out at the bounded service gate.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
@@ -22,8 +22,10 @@ executes a plaintext-key callback. It invokes the authority daemon over a fixed 
 that accepts only correlation id and JTI and returns either one bounded JWT or a closed error. The
 daemon runs as a dedicated unprivileged `aimee-token-authority` OS identity which is never shared
 with kb, owns its private configuration and vault/HWM descriptors, and listens on an absolute,
-root-owned Unix socket with a fixed group and mode. It admits only the configured kb service UID
-verified with `SO_PEERCRED`; frames are length-delimited, one request is processed at a time, and
+root-owned Unix socket with a fixed group and mode. The client requires the listener's kernel
+`SO_PEERCRED` UID (root for root-created socket activation, which is outside the threat boundary,
+or the authority UID for an authority-created listener), and the daemon admits only the configured
+kb service UID verified with `SO_PEERCRED`; frames are length-delimited, one request is processed at a time, and
 token bytes never enter argv or environment. The authority sets `PR_SET_DUMPABLE=0`, disables core
 dumps, closes every non-allowlisted descriptor, and cannot be ptraced or inspected through `/proc`
 by the ordinary unprivileged kb identity. No public or production API accepts a signing input, digest, PEM,
@@ -81,10 +83,11 @@ same-operation serialization and are never treated as authority fencing. After a
    every pre-revocation intent rather than guessing whether a changed generation is relevant);
 5. one internally consistent FINAL generation-1 C2b publication is currently valid at primary time,
    its sole RSA JWK kid equals the journaled kid, and all candidate/registry/root public and HWM
-   digests agree;
+   public-key and envelope digests agree; the publication HWM and token-custody HWM remain
+   distinct custody domains and are each checked against their own persisted binding;
 6. the enabled token root is version 2, its platform-scoped `org:p5-token/management/rs256`
    current vault row and activated rotation agree, the vault is open, and its HWM attestation
-   exactly matches the root/publication bindings.
+   exactly matches the token root and activated token rotation binding.
 
 Issuance has two explicit transactions. First, for a new correlation, insert the immutable key-use intent and append a bounded canonical
 `vault.key_use` WORM event in the same transaction before any private-key operation. Exact replay
@@ -128,8 +131,9 @@ is known successful.
 Add an authority-internal `kb_mgmt_token_authority_issue(correlation_id, jti, out)` and a separate
 ordinary-kb checked-fd client wrapper. The authority validates and clears
 output, obtains the admitted record, rejects replay, reads/verifies the custody HWM
-anchor against the admitted version and attestation, snapshots the live vault epoch, and calls
-`kb_vault_protected_use` with the fixed token-root slot. Inside the protected callback:
+anchor against the admitted version and attestation, reconstructs the immutable version-2
+token-root AAD with the shared public codec, snapshots the live vault epoch, and calls the
+no-fallback `kb_vault_protected_use_with_aad` entry point. Inside the protected callback:
 
 - decode exactly one PKCS#8 RSA private key, require RSA-3072/e=65537, no trailing bytes, and derive
   its modulus/public digest/JWK kid to constant-time match the admitted C2a/C2b bindings;
@@ -185,6 +189,22 @@ Run hardened kb/server/status/root-provisioner/publisher builds, target/publishe
 plant checks, schema sync/alter-order/SQLite-shape checks, focused release and sanitizer/fuzz
 tests, the full CT103 gate, CT260 exact-head validation, and an adversarial full-branch roundtable.
 Keep `/v1/management/action` unconditionally 503.
+
+Implementation validation found and fixed two integration-only boundary defects. A root-created
+socket-activation listener reports root as the kernel listener peer even after the daemon drops to
+its dedicated UID, so the client now checks the configured listener creator UID while the daemon
+still authenticates the kb UID independently. Provisioning encrypts the token root under the P5
+token-root AAD domain rather than the generic tenant-vault domain, so the shared leaf codec now
+owns that byte-exact encoding and the authority uses an explicit-AAD protected path with no legacy
+fallback. The focused AAD design roundtable (job 8722) approved this separation conditionally on
+version provenance, known-answer coverage, generic-fallback regression coverage, and link
+isolation; the admitted envelope version is immutable and constrained to 2, and all requested
+coverage was added.
+
+CT260 then issued an RS256 token from the real C2a root through the dedicated unprivileged daemon,
+PG17 authority role, KMS/HWM helper, protected decrypt and production C2c verifier. Exact replay
+returned `ALREADY_USED`, the admission and WORM audit each remained singular, and the ordinary kb
+UID could inspect neither the authority process nor its private HWM fixture.
 
 Explicitly revoke EXECUTE on every new SECURITY DEFINER function from PUBLIC and every unrelated
 role before granting the authority role, and assert the full closure in PG17. The ordinary

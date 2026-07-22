@@ -1,4 +1,5 @@
 #include "kb/kb_vault_key_use.h"
+#include "kb/kb_vault_protected_use.h"
 
 #include "db2/org_vault_key_use.h"
 #include "modules/vault/vault_crypto.h"
@@ -20,6 +21,7 @@ static int g_callback_fail;
 static int g_callback_calls;
 static int g_scope_open;
 static int g_live = 1;
+static int g_decrypt_legacy;
 static const unsigned char g_secret[] = "bedrock-secret";
 
 int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
@@ -171,9 +173,14 @@ int vault_secret_decrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, s
    (void)nonce;
    (void)ciphertext;
    (void)tag;
-   if (!dek || dek[0] != 0x66 || !aad || aad_len != strlen("v2:vault|bedrock|primary|2") ||
-       memcmp(aad, "v2:vault|bedrock|primary|2", aad_len) != 0 ||
-       ciphertext_len != sizeof(g_secret) - 1)
+   static const char v2[] = "v2:vault|bedrock|primary|2";
+   static const char v1[] = "vault|bedrock|primary|2";
+   static const char custom[] = "token-root-aad";
+   int aad_ok = g_decrypt_legacy
+                    ? aad_len == sizeof(v1) - 1 && !memcmp(aad, v1, sizeof(v1) - 1)
+                    : ((aad_len == sizeof(v2) - 1 && !memcmp(aad, v2, sizeof(v2) - 1)) ||
+                       (aad_len == sizeof(custom) - 1 && !memcmp(aad, custom, sizeof(custom) - 1)));
+   if (!dek || dek[0] != 0x66 || !aad || !aad_ok || ciphertext_len != sizeof(g_secret) - 1)
       return -1;
    memcpy(plaintext, g_secret, sizeof(g_secret) - 1);
    return 0;
@@ -204,6 +211,31 @@ static void reset(void)
    g_admit_result = 1;
    g_admit_epoch = 1;
    g_live = 1;
+   g_decrypt_legacy = 0;
+}
+
+static void test_prebuilt_aad(void)
+{
+   static const uint8_t correct[] = "token-root-aad";
+   static const uint8_t wrong[] = "token-root-bad";
+   db2_vault_key_use_envelope_t e;
+   memset(&e, 0, sizeof(e));
+   e.seal_epoch = 23;
+   e.version = 2;
+   e.ciphertext_len = sizeof(g_secret) - 1;
+   reset();
+   g_admit_epoch = 23;
+   assert(kb_vault_protected_use_with_aad(9, &e, correct, sizeof(correct) - 1, consume, NULL) ==
+          KB_VAULT_KEY_USE_OK);
+   assert(g_callback_calls == 1 && g_seen_admitted_epoch == 23);
+   reset();
+   g_admit_epoch = 23;
+   assert(kb_vault_protected_use_with_aad(9, &e, wrong, sizeof(wrong) - 1, consume, NULL) ==
+          KB_VAULT_KEY_USE_INTEGRITY);
+   assert(g_callback_calls == 0);
+   assert(kb_vault_protected_use_with_aad(9, &e, NULL, 0, consume, NULL) ==
+          KB_VAULT_KEY_USE_INTEGRITY);
+   assert(g_callback_calls == 0);
 }
 
 int main(void)
@@ -254,6 +286,10 @@ int main(void)
    reset();
    g_callback_fail = 1;
    assert(run() == KB_VAULT_KEY_USE_CALLBACK_FAILED && g_callback_calls == 1);
+   reset();
+   g_decrypt_legacy = 1;
+   assert(run() == KB_VAULT_KEY_USE_OK && g_callback_calls == 1);
+   test_prebuilt_aad();
    int old_state = -1;
    assert(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_state) == 0);
    assert(old_state == PTHREAD_CANCEL_ENABLE);

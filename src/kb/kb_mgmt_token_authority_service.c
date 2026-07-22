@@ -2,6 +2,7 @@
 #include "kb_mgmt_token_authority_service.h"
 
 #include "kb_mgmt_token_authority.h"
+#include "kb_mgmt_token_public.h"
 #include "kb_vault_protected_use.h"
 #include "vault_server_key.h"
 
@@ -113,10 +114,12 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    kb_mgmt_token_authority_record_t admitted, use;
    protected_issue_t issue;
    uint8_t fresh_attestation[KB_MGMT_ROOT_ATTEST_MAX];
+   uint8_t token_aad[KB_MGMT_TOKEN_ROOT_AAD_MAX];
    memset(&admitted, 0, sizeof(admitted));
    memset(&use, 0, sizeof(use));
    memset(&issue, 0, sizeof(issue));
    memset(fresh_attestation, 0, sizeof(fresh_attestation));
+   memset(token_aad, 0, sizeof(token_aad));
 
    db2_management_token_authority_result_t db_result =
        db2_management_token_authority_admit(service->db, correlation_id, jti, &admitted);
@@ -215,8 +218,14 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    }
    issue.record = &use;
    issue.result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
-   kb_vault_key_use_status_t protected_result = kb_vault_protected_use(
-       live_epoch, "org:p5-token", "management", "rs256", &use.envelope, protected_sign, &issue);
+   size_t token_aad_len = 0;
+   if (kb_mgmt_token_root_aad(use.envelope.version, token_aad, sizeof(token_aad), &token_aad_len))
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto abort;
+   }
+   kb_vault_key_use_status_t protected_result = kb_vault_protected_use_with_aad(
+       live_epoch, &use.envelope, token_aad, token_aad_len, protected_sign, &issue);
    result = map_protected(protected_result, &issue);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto abort;
@@ -242,6 +251,7 @@ done:
    OPENSSL_cleanse(&use, sizeof(use));
    OPENSSL_cleanse(&admitted, sizeof(admitted));
    OPENSSL_cleanse(fresh_attestation, sizeof(fresh_attestation));
+   OPENSSL_cleanse(token_aad, sizeof(token_aad));
    (void)pthread_setcancelstate(old_cancel_state, NULL);
    return result;
 }

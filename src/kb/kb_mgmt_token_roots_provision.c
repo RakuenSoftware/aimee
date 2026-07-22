@@ -337,11 +337,10 @@ static int aad_field(uint8_t *out, size_t cap, size_t *off, const void *value, s
 int kb_mgmt_root_aad(kb_mgmt_root_kind_t kind, int64_t version, uint8_t *out, size_t cap,
                      size_t *out_len)
 {
-   static const char token_domain[] = "aimee.p5.token-root.envelope.aad.v1";
    static const char manifest_domain[] = "aimee.p5.manifest-root.envelope.aad.v1";
-   const char *domain = kind == KB_MGMT_ROOT_TOKEN      ? token_domain
-                        : kind == KB_MGMT_ROOT_MANIFEST ? manifest_domain
-                                                        : NULL;
+   if (kind == KB_MGMT_ROOT_TOKEN)
+      return kb_mgmt_token_root_aad(version, out, cap, out_len);
+   const char *domain = kind == KB_MGMT_ROOT_MANIFEST ? manifest_domain : NULL;
    const char *principal = root_principal(kind), *agent = root_agent(kind), *cred = root_cred(kind);
    uint8_t encoded_version[8];
    size_t off = 0;

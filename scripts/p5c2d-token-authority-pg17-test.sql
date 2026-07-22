@@ -221,8 +221,6 @@ CREATE TEMP TABLE p5c2d_pub AS SELECT repeat('f',64)::TEXT candidate_id,
  (SELECT jwk_digest FROM p5c2d_key) token_jwk_digest,
  decode(repeat('52',32),'hex') hwm_digest,
  (SELECT seal_epoch FROM public.kb_vault_control WHERE singleton=1) seal_epoch;
-UPDATE p5c2d_pub SET hwm_digest=sha256(decode(repeat('25',64),'hex'));
-
 INSERT INTO public.kb_management_jwks_publication_permit
   VALUES(pg_backend_pid(),txid_current(),'stage');
 INSERT INTO public.kb_management_jwks_publication_candidate(generation,candidate_id,phase,

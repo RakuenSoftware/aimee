@@ -10112,7 +10112,6 @@ BEGIN
      vc.principal IS NULL OR vc.version<>2 OR vs.id IS NULL OR vs.team_id IS NOT NULL OR
      vs.version<>2 OR rot.id IS NULL OR rot.state<>'activated' OR
      rot.to_version<>2 OR rot.hwm_attestation IS DISTINCT FROM vs.hwm_attestation OR
-     tr.hwm2_attestation_digest<>pg.hwm2_attestation_digest OR
      tr.hwm2_attestation_digest<>pg_catalog.sha256(vs.hwm_attestation) THEN
     RAISE EXCEPTION 'management token authority: token root binding changed' USING ERRCODE='40001';
   END IF;

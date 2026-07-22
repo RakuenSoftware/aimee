@@ -40,8 +40,11 @@ extern "C"
    } kb_mgmt_token_authority_output_t;
 
    /* Ordinary-KB client. The path must be absolute and name a root-owned Unix
-    * socket with exactly socket_mode/socket_gid. The connected server must have
-    * authority_uid. No claim, key, digest, or signing input crosses this seam. */
+    * socket with exactly socket_mode/socket_gid. authority_uid is the expected
+    * kernel peer UID: zero for a root-created socket-activation listener, or
+    * the daemon UID for an authority-created listener. Root is outside this
+    * unprivileged-compromise boundary. No claim, key, digest, or signing input
+    * crosses this seam. */
    typedef struct
    {
       const char *socket_path;

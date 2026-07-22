@@ -261,9 +261,9 @@ kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config
    const size_t jti_len = KB_MGMT_TOKEN_AUTHORITY_JTI_LEN;
    if (!out || !config || !valid_path(config->socket_path) ||
        strcmp(config->socket_path, KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH) != 0 || getuid() == 0 ||
-       geteuid() == 0 || getuid() != geteuid() || config->authority_uid == 0 ||
-       config->authority_uid == getuid() || config->authority_uid == geteuid() ||
-       !config->timeout_ms || config->timeout_ms > 60000 || config->socket_mode != 0660 ||
+       geteuid() == 0 || getuid() != geteuid() || config->authority_uid == getuid() ||
+       config->authority_uid == geteuid() || !config->timeout_ms || config->timeout_ms > 60000 ||
+       config->socket_mode != 0660 ||
        !lower_hex_exact(correlation_id, KB_MGMT_TOKEN_AUTHORITY_CORRELATION_LEN) ||
        !lower_hex_exact(jti, KB_MGMT_TOKEN_AUTHORITY_JTI_LEN))
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID;
