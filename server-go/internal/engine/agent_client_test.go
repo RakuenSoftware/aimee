@@ -417,6 +417,48 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var launches atomic.Int32
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			launches.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 20})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "running", "agent_name": ""})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
+		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_running", Stage: "gate", ExecutionVersion: "v1"}
+	if _, err := client.Delegate(t.Context(), request); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
+		t.Fatalf("unassigned running job did not return structured expiry: %v", err)
+	}
+	if launches.Load() != 1 || cancellations.Load() != 1 {
+		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
+	}
+	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("expired running job retained its durable mapping")
+	}
+}
+
 func TestHTTPAgentClientDoesNotExpireAssignedJob(t *testing.T) {
 	var polls atomic.Int32
 	var cancellations atomic.Int32

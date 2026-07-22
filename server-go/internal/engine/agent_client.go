@@ -240,15 +240,18 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			// when the status plane later fails so a retry cannot overlap the job.
 			return DelegateResult{}, err
 		}
-		// Pending with no assigned agent is not progress. Bound that resource-plane
-		// state while leaving assigned/running and terminal jobs untouched.
-		if status.JobStatus == "pending" && strings.TrimSpace(status.Agent) == "" {
+		// Any nonterminal status without an assigned agent is not progress. The
+		// resource plane can mark a job running before admission assigns an agent,
+		// so status alone cannot end the unassigned lease.
+		assigned := strings.TrimSpace(status.Agent) != ""
+		terminal := isTerminalDelegateStatus(status.JobStatus)
+		if !assigned && !terminal {
 			if unassignedSince.IsZero() {
 				unassignedSince = time.Now()
 			} else if time.Since(unassignedSince) >= c.delegatePendingTimeout() {
 				return DelegateResult{}, c.expireUnassigned(launched.JobID, key, unassignedSince)
 			}
-		} else if strings.TrimSpace(status.Agent) != "" || isTerminalDelegateStatus(status.JobStatus) {
+		} else {
 			unassignedSince = time.Time{}
 		}
 		switch status.JobStatus {
