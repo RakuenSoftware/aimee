@@ -565,10 +565,10 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
-      assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
+      assert(cfg2.css_style_graph_enabled == 0);   /* opt-out survives save/reload */
       assert(cfg2.code_cochange_git_enabled == 0); /* opt-out survives save/reload */
-      assert(cfg2.audit_worm_enabled == 1);       /* opt-in survives save/reload */
-      assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
+      assert(cfg2.audit_worm_enabled == 1);        /* opt-in survives save/reload */
+      assert(cfg2.css_render_command[0] == '\0');  /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);

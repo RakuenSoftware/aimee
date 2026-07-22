@@ -6,7 +6,7 @@
 #include "db2/code_index.h"
 #include "db2/css_graph.h"
 #include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"        /* co-change backfill idempotency marker */
+#include "db2/kb_runtime_state.h"           /* co-change backfill idempotency marker */
 #include "modules/memory/memory_ontology.h" /* REL_CO_EDITED / NODE_FILE */
 #include <ctype.h>
 #include <dirent.h>
@@ -621,8 +621,8 @@ static char *read_file_content(const char *path, size_t *out_len)
  * no new reader — history just seeds the graph that was previously populated
  * only from aimee's own edit windows. */
 
-#define COCHANGE_MAX_FILES 25  /* bulk-commit gate: skip sweeps/squashes above this */
-#define COCHANGE_NAME_CAP 64   /* per-commit distinct basenames we bother to hold */
+#define COCHANGE_MAX_FILES  25  /* bulk-commit gate: skip sweeps/squashes above this */
+#define COCHANGE_NAME_CAP   64  /* per-commit distinct basenames we bother to hold */
 #define COCHANGE_CKPT_EVERY 200 /* commits between marker checkpoints (crash re-mine bound) */
 
 /* cochange_pairs_for_commit() (the pure pairing policy) lives in cochange.c and

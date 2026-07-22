@@ -86,11 +86,11 @@ int main(void)
    assert(cochange_is_hex_sha("0123456789abcdef0123456789abcdef01234567")); /* 40-char */
    assert(!cochange_is_hex_sha(""));
    assert(!cochange_is_hex_sha(NULL));
-   assert(!cochange_is_hex_sha("abc"));                    /* too short (<4) */
-   assert(!cochange_is_hex_sha("DEADBEEF"));               /* uppercase not a git id */
-   assert(!cochange_is_hex_sha("abc123; rm -rf /"));       /* command injection */
-   assert(!cochange_is_hex_sha("$(touch pwned)"));         /* command substitution */
-   assert(!cochange_is_hex_sha("HEAD"));                   /* refname, not an object id */
+   assert(!cochange_is_hex_sha("abc"));              /* too short (<4) */
+   assert(!cochange_is_hex_sha("DEADBEEF"));         /* uppercase not a git id */
+   assert(!cochange_is_hex_sha("abc123; rm -rf /")); /* command injection */
+   assert(!cochange_is_hex_sha("$(touch pwned)"));   /* command substitution */
+   assert(!cochange_is_hex_sha("HEAD"));             /* refname, not an object id */
    {
       char toolong[80];
       memset(toolong, 'a', sizeof(toolong));
