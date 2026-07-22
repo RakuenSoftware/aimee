@@ -425,6 +425,9 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	defer store.Close()
 	var launches atomic.Int32
 	var cancellations atomic.Int32
+	var cancelledJobID atomic.Int64
+	var cancelReasonMu sync.Mutex
+	var cancelReason string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/delegate/run":
@@ -439,8 +442,12 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(_ context.Context, jobID int, reason string) (bool, error) {
 			cancellations.Add(1)
+			cancelledJobID.Store(int64(jobID))
+			cancelReasonMu.Lock()
+			cancelReason = reason
+			cancelReasonMu.Unlock()
 			return true, nil
 		}})
 	if err != nil {
@@ -454,8 +461,107 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	if launches.Load() != 1 || cancellations.Load() != 1 {
 		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
 	}
+	cancelReasonMu.Lock()
+	gotCancelReason := cancelReason
+	cancelReasonMu.Unlock()
+	if cancelledJobID.Load() != 20 || gotCancelReason != "unassigned delegate lease expired" {
+		t.Fatalf("cancelled job=%d reason=%q", cancelledJobID.Load(), gotCancelReason)
+	}
 	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired running job retained its durable mapping")
+	}
+}
+
+func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var polls atomic.Int32
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 21})
+		case "/v1/delegate/status":
+			switch polls.Add(1) {
+			case 1:
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "running", "agent_name": ""})
+			case 2:
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "running", "agent_name": "codex"})
+			default:
+				// Exceed the minimum lease after assignment. A stale unassigned
+				// clock would turn this transient status failure into an expiry.
+				time.Sleep(MinDelegatePendingTimeout + 100*time.Millisecond)
+				http.Error(w, "temporary", http.StatusServiceUnavailable)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
+		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_assigned", Stage: "gate", ExecutionVersion: "v1"}
+	_, err = client.Delegate(t.Context(), request)
+	if err == nil || errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("assigned observation did not clear lease: %v", err)
+	}
+	if cancellations.Load() != 0 {
+		t.Fatalf("assigned job was cancelled %d times", cancellations.Load())
+	}
+	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 21 {
+		t.Fatalf("assigned job mapping was not retained: job=%d err=%v", jobID, err)
+	}
+}
+
+func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var cancellations atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 22})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "failed", "agent_name": ""})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
+		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
+		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+			cancellations.Add(1)
+			return true, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_terminal", Stage: "gate", ExecutionVersion: "v1"}
+	_, err = client.Delegate(t.Context(), request)
+	if err == nil || errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "job 22 failed") {
+		t.Fatalf("empty-agent terminal status took wrong path: %v", err)
+	}
+	if cancellations.Load() != 0 {
+		t.Fatalf("terminal job was cancelled %d times", cancellations.Load())
+	}
+	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+		t.Fatal("terminal job retained its durable mapping")
 	}
 }
 
@@ -575,6 +681,33 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 	}
 	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 20 {
 		t.Fatalf("mapping after failed cancel: job=%d err=%v", jobID, err)
+	}
+}
+
+func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1",
+		Store: store,
+		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+			return false, nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "durable-rejected-key"
+	if err := store.SaveDelegateJob(t.Context(), key, 23); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.expireUnassigned(23, key, time.Now()); err == nil ||
+		!errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "durable mapping retained") {
+		t.Fatalf("rejected cancellation lost structured expiry: %v", err)
+	}
+	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 23 {
+		t.Fatalf("mapping after rejected cancel: job=%d err=%v", jobID, err)
 	}
 }
 
