@@ -34,6 +34,13 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
 
+# Preserve post-mortem evidence when the temporary C resource plane crashes.
+# Appliances set core_pattern to a persistent host mount, but the container's
+# inherited soft RLIMIT_CORE is commonly zero; without raising it the kernel
+# silently produces no core despite that pattern. Best-effort for runtimes that
+# disallow changing the limit.
+ulimit -c unlimited 2>/dev/null || true
+
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
