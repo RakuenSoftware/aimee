@@ -39,8 +39,7 @@ else
     fail "server entrypoint leaves native crash core dumps disabled after runuser"
 fi
 if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
-   grep -qF 'print $3 " " $22' ../deploy/container/server-entrypoint.sh &&
-   grep -qF '"$1" != Z' ../deploy/container/server-entrypoint.sh; then
+   sh tests/test_server_plane_supervisor.sh; then
     pass "server plane supervisor detects zombie exits without tail --pid"
 else
     fail "server plane supervisor can deadlock on an exited zombie child"

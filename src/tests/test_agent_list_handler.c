@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include "agent_exec.h"
 
 /* --- capture layer: stub the transport so we can read what the handler sent --- */
 
@@ -44,6 +45,72 @@ int server_send_error(void *conn, const char *message, const char *request_id)
 
 /* The real handler under test. Declared here to avoid dragging server.h. */
 int handle_agent_list(void *ctx, void *conn, cJSON *req);
+int handle_agent_probe(void *ctx, void *conn, cJSON *req);
+
+/* Probe transport seams. This target intentionally links no production agent
+ * transport: the handler's observable response and backend selection are under
+ * test, while these stubs record the exact executor contract it chose. */
+static int g_cli_calls, g_http_calls, g_execute_failure;
+static agent_t g_executed_agent;
+
+void agent_http_init(void)
+{
+}
+
+int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
+                  int max_tokens, double temperature, agent_result_t *out)
+{
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   g_http_calls++;
+   g_executed_agent = *agent;
+   if (g_execute_failure)
+   {
+      snprintf(out->error, sizeof(out->error), "injected HTTP failure");
+      return -1;
+   }
+   out->response = strdup("ok");
+   out->latency_ms = 11;
+   return 0;
+}
+
+int agent_execute_with_tools_for_role(const agent_t *agent, const agent_network_t *network,
+                                      const char *role, const char *system_prompt,
+                                      const char *user_prompt, int max_tokens, double temperature,
+                                      agent_result_t *out)
+{
+   (void)network;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   assert(strcmp(role, "explain") == 0);
+   g_cli_calls++;
+   g_executed_agent = *agent;
+   if (g_execute_failure)
+   {
+      snprintf(out->error, sizeof(out->error), "injected CLI failure");
+      return -1;
+   }
+   out->response = strdup("ok");
+   out->latency_ms = 12;
+   return 0;
+}
+
+int agent_http_get(const char *url, const char *headers, char **response_buf, int timeout_ms)
+{
+   (void)headers;
+   (void)timeout_ms;
+   if (strstr(url, "/models"))
+      *response_buf = strdup("{\"data\":[{\"id\":\"http-model\"}]}");
+   else if (strstr(url, "/slots"))
+      *response_buf = strdup("{\"slots\":3,\"context_window\":8192}");
+   else
+      return -1;
+   return 200;
+}
 
 /* --- helpers --- */
 
@@ -73,6 +140,24 @@ static void reset_capture(void)
       cJSON_Delete(g_last_response);
    g_last_response = NULL;
    g_last_error[0] = '\0';
+   g_cli_calls = g_http_calls = g_execute_failure = 0;
+   memset(&g_executed_agent, 0, sizeof(g_executed_agent));
+}
+
+static cJSON *probe_request(const char *name, int no_run)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString(name));
+   if (no_run)
+      cJSON_AddItemToArray(args, cJSON_CreateString("--no-run"));
+   return req;
+}
+
+static int response_bool(const char *name)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(g_last_response, name);
+   return cJSON_IsTrue(v);
 }
 
 /* --- tests --- */
@@ -153,6 +238,88 @@ static void test_primary_only_round_trips(void)
    printf("  PASS: primary_only round-trips through the list handler\n");
 }
 
+static void test_cli_probe_uses_backend_executor_and_config_discovery(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"claude\",\"provider\":\"claude\","
+                "\"backend\":\"tmux-cli\",\"cli_kind\":\"claude\",\"model\":\"opus\","
+                "\"timeout_ms\":600000,\"cli_idle_timeout_ms\":600000,\"session_reuse\":true,"
+                "\"max_parallel\":4,\"context_window\":200000,\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("claude", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   assert(g_last_error[0] == '\0' && g_last_response);
+   assert(g_cli_calls == 1 && g_http_calls == 0);
+   assert(g_executed_agent.timeout_ms == 60000);
+   assert(g_executed_agent.cli_idle_timeout_ms == 60000);
+   assert(g_executed_agent.session_reuse == 0);
+   assert(response_bool("model_available") && response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == 0);
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "slots_source")->valuestring, "config") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "model_probe") == NULL);
+   printf("  PASS: CLI probe uses backend executor with bounded isolated policy\n");
+}
+
+static void test_cli_probe_failure_and_no_run_are_observable(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"cli\",\"provider\":\"x\","
+                "\"backend\":\"provider-cli\",\"model\":\"m\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   g_execute_failure = 1;
+   cJSON *req = probe_request("cli", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 1 && !response_bool("execution_ok"));
+   assert(strstr(cJSON_GetObjectItem(g_last_response, "execution_message")->valuestring,
+                 "injected CLI failure"));
+
+   reset_capture();
+   req = probe_request("cli", 1);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 0 && g_http_calls == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "execution_ok") == NULL);
+   printf("  PASS: CLI probe failure and --no-run response contracts are explicit\n");
+}
+
+static void test_unknown_backend_fails_closed(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"mystery\",\"provider\":\"x\","
+                "\"backend\":\"telepathy\",\"model\":\"m\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("mystery", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_cli_calls == 0 && g_http_calls == 0);
+   assert(!response_bool("model_available") && !response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == -1);
+   assert(strstr(cJSON_GetObjectItem(g_last_response, "model_probe")->valuestring,
+                 "unsupported agent backend"));
+   printf("  PASS: unknown probe backend fails closed without transport fallback\n");
+}
+
+static void test_http_probe_preserves_discovery_and_plain_execution(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"http\",\"provider\":\"openai\","
+                "\"endpoint\":\"http://model.test/v1\",\"model\":\"http-model\","
+                "\"auth_type\":\"none\",\"roles\":[\"explain\"]}]}\n");
+   reset_capture();
+   cJSON *req = probe_request("http", 0);
+   assert(handle_agent_probe(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_http_calls == 1 && g_cli_calls == 0);
+   assert(response_bool("model_available") && response_bool("execution_ok"));
+   assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == 200);
+   assert(strcmp(cJSON_GetObjectItem(g_last_response, "slots_source")->valuestring, "probe") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "detected_slots")->valueint == 3);
+   printf("  PASS: HTTP probe preserves model/slot discovery and plain execution\n");
+}
+
 int main(void)
 {
    printf("agent_list_handler:\n");
@@ -160,6 +327,10 @@ int main(void)
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
    test_primary_only_round_trips();
+   test_cli_probe_uses_backend_executor_and_config_discovery();
+   test_cli_probe_failure_and_no_run_are_observable();
+   test_unknown_backend_fails_closed();
+   test_http_probe_preserves_discovery_and_plain_execution();
    printf("all agent_list_handler tests passed\n");
    return 0;
 }

@@ -111,6 +111,7 @@ for cli_dir in .codex .claude .config .npm-global; do
 done
 
 . /usr/local/bin/webchat-lib.sh
+. /usr/local/bin/plane-supervisor.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
@@ -214,29 +215,10 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
 fi
 
 if [ -n "$wfe_pid" ]; then
-    # POSIX sh has no portable wait -n. Do not use `tail --pid`: a dead child is
-    # a zombie until this parent waits for it, so tail waits forever and the
-    # container stays half-alive with its API socket gone. Track each Linux
-    # process by start time and treat Z as exited; start time also prevents PID
-    # reuse from making a replacement process look like the original plane.
-    pid_start_time() { awk '{ print $22 }' "/proc/$1/stat" 2>/dev/null || true; }
-    pid_is_live() {
-        _pid=$1 _born=$2
-        _state_born=$(awk '{ print $3 " " $22 }' "/proc/$_pid/stat" 2>/dev/null || true)
-        [ -n "$_state_born" ] || return 1
-        set -- $_state_born
-        [ "$1" != Z ] && [ "$2" = "$_born" ]
-    }
-    server_born=$(pid_start_time "$server_pid")
-    wfe_born=$(pid_start_time "$wfe_pid")
-    while pid_is_live "$server_pid" "$server_born" && pid_is_live "$wfe_pid" "$wfe_born"; do
-        sleep 0.1
-    done
-    if ! pid_is_live "$server_pid" "$server_born"; then first=server; else first=wfe; fi
+    aimee_supervise_plane_pair "$server_pid" "$wfe_pid"
+    first=$AIMEE_FIRST_EXIT
     log "$first plane exited; terminating its peer so the container restarts as one unit"
     shutdown
-    wait "$server_pid" 2>/dev/null || true
-    wait "$wfe_pid" 2>/dev/null || true
     status=1
 else
     if wait "$server_pid"; then status=0; else status=$?; fi

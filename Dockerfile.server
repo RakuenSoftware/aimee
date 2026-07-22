@@ -251,6 +251,7 @@ COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
 COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
 COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
+COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint
 
