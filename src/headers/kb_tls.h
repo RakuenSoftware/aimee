@@ -69,6 +69,10 @@ extern "C"
     * 0 if not running. */
    int kb_mtls_bound_port(void);
 
+   /* Snapshot bounded-listener occupancy for transport observability. Any
+    * output pointer may be NULL. */
+   void kb_mtls_connection_stats(int *limit_out, int *live_out, int *queued_out);
+
    /* Stop the mTLS listener and free its context. Safe when not running. */
    void kb_mtls_stop(void);
 
