@@ -135,8 +135,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
          out[i].response = strdup(
              "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
-      else if ((g_parallel_mode == 6 || g_parallel_mode == 10) && tasks[i].role &&
-               strcmp(tasks[i].role, "review") == 0)
+      else if ((g_parallel_mode == 6 || g_parallel_mode == 10 || g_parallel_mode == 11) &&
+               tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          /* review JSON wrapped in a markdown code fence + prose, as a persona'd
