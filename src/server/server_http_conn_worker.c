@@ -63,7 +63,7 @@ static void *conn_worker(void *arg)
    }
    server_tls_end(j->fd, ssl);
    close(j->fd);
-   atomic_fetch_sub(&g_conn_live, 1);
+   atomic_fetch_sub(j->is_management ? &g_management_conn_live : &g_conn_live, 1);
    free(j);
    return NULL;
 }
@@ -72,15 +72,17 @@ static void *conn_worker(void *arg)
  * if offloaded, 0 if the caller should handle it inline (cap hit / no resources). */
 int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
 {
-   if (atomic_fetch_add(&g_conn_live, 1) >= CONN_LIVE_MAX)
+   atomic_int *live = is_management ? &g_management_conn_live : &g_conn_live;
+   int live_max = is_management ? CONN_MANAGEMENT_LIVE_MAX : CONN_LIVE_MAX;
+   if (atomic_fetch_add(live, 1) >= live_max)
    {
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    conn_job_t *j = (conn_job_t *)malloc(sizeof(*j));
    if (!j)
    {
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    j->fd = fd;
@@ -101,7 +103,7 @@ int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
    if (rc != 0)
    {
       free(j);
-      atomic_fetch_sub(&g_conn_live, 1);
+      atomic_fetch_sub(live, 1);
       return 0;
    }
    pthread_detach(t);

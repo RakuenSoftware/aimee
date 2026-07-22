@@ -127,6 +127,23 @@ static int uds_request(const char *path, const char *request)
    return response_status(response);
 }
 
+static int tcp_request(int port, const char *request)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in address = {.sin_family = AF_INET,
+                                 .sin_port = htons((uint16_t)port),
+                                 .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+   assert(connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0);
+   assert(write(fd, request, strlen(request)) == (ssize_t)strlen(request));
+   char response[4096];
+   ssize_t n = read(fd, response, sizeof(response) - 1);
+   assert(n > 0);
+   response[n] = '\0';
+   close(fd);
+   return response_status(response);
+}
+
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
@@ -167,6 +184,12 @@ int main(void)
             cakey, ext, client);
    command(cmd);
 
+   /* TLS-profile failure is fatal before the UDS listener is published. */
+   int invalid_port = reserve_port(0, NULL);
+   set_management_env(invalid_port, client, clientkey, ca);
+   assert(server_http_start(uds, 0, 0, NULL, 0, 0) == SERVER_HTTP_START_MGMT_FATAL);
+   assert(access(uds, F_OK) != 0);
+
    int occupied_fd = -1;
    int occupied_port = reserve_port(1, &occupied_fd);
    set_management_env(occupied_port, server, serverkey, ca);
@@ -175,8 +198,9 @@ int main(void)
    close(occupied_fd);
 
    int port = reserve_port(0, NULL);
+   int data_port = reserve_port(0, NULL);
    set_management_env(port, server, serverkey, ca);
-   assert(server_http_start(uds, 0, 0, NULL, 0, 0) == 0);
+   assert(server_http_start(uds, data_port, 0, "p5-data-bearer", 0, 0) == 0);
    static const char challenge[] =
        "POST /v1/management/challenge HTTP/1.1\r\nHost: p5-live-test\r\n"
        "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
@@ -187,11 +211,15 @@ int main(void)
        "Connection: close\r\n\r\n";
    assert(tls_request(port, ca, client, clientkey, generic) == 403);
    assert(uds_request(uds, challenge) == 401);
+   static const char data_cross_lane[] =
+       "POST /v1/management/challenge HTTP/1.1\r\nHost: localhost\r\n"
+       "Authorization: Bearer p5-data-bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+   assert(tcp_request(data_port, data_cross_lane) == 401);
    server_http_stop();
 
    /* The process-lifetime context and listener lifecycle both support an exact
     * same-packet restart after all listener fds have drained. */
-   assert(server_http_start(uds, 0, 0, NULL, 0, 0) == 0);
+   assert(server_http_start(uds, data_port, 0, "p5-data-bearer", 0, 0) == 0);
    assert(tls_request(port, ca, client, clientkey, generic) == 403);
    server_http_stop();
 

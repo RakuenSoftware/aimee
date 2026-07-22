@@ -2340,6 +2340,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
  * thread/fd use; over the cap the connection is handled inline by the accept
  * thread (degrades to serial under overload, never dropped). */
 atomic_int g_conn_live = 0;
+/* Keep management health traffic from exhausting data workers, and vice
+ * versa. Both pools retain the same 32 MiB per-worker stack bound. */
+atomic_int g_management_conn_live = 0;
 
 /* Single accept loop over both listeners: poll the UDS (and the TCP fd when
  * bound), accept whichever is ready, and hand each connection to a per-

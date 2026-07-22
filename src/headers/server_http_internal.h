@@ -33,7 +33,9 @@ void send_response(int fd, int status, const char *body, const char *request_id)
 void handle_session_events(int fd, const char *id_in, const char *request_id);
 
 extern atomic_int g_conn_live;
-#define CONN_LIVE_MAX 64
+extern atomic_int g_management_conn_live;
+#define CONN_LIVE_MAX            64
+#define CONN_MANAGEMENT_LIVE_MAX 16
 typedef struct
 {
    int fd;
