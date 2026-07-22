@@ -42,6 +42,12 @@ extern "C"
       char cert[SERVER_HTTP_MGMT_PATH_MAX];
       char key[SERVER_HTTP_MGMT_PATH_MAX];
       char client_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_endpoint[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_ca[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_leaf_pin[65];
+      char status_secondary_leaf_pin[65];
+      char status_client_cert[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_client_key[SERVER_HTTP_MGMT_PATH_MAX];
    } server_http_management_config_t;
 
    /* Parse the all-or-none dedicated-management listener environment packet.
@@ -54,6 +60,8 @@ extern "C"
    int server_http_management_bind_addr(const char *text, uint32_t *out);
    int server_http_management_framing_valid(const char *method, const char *path,
                                             const char *request, size_t request_len);
+   int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                   const char *request, size_t request_len);
 
    /* Start the HTTP listener(s), spawning a detached accept-loop thread that
     * polls all bound sockets. The UDS at uds_path (unlinked first;

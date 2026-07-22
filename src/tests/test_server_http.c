@@ -20,6 +20,28 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
+{
+   (void)ctx;
+   if (out && cap)
+      out[0] = 0;
+   if (len)
+      *len = 0;
+   return -1;
+}
+
+int audit_worm_append(const char *role, const char *principal, const char *action,
+                      const char *resource, const char *verdict, const char *detail)
+{
+   (void)role;
+   (void)principal;
+   (void)action;
+   (void)resource;
+   (void)verdict;
+   (void)detail;
+   return 0;
+}
+
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
 {
@@ -199,32 +221,6 @@ static void submit_and_wait_op(const char *method)
    assert(status == OPENAI_RUN_COMPLETED);
 }
 
-/* The HTTP router owns only the adapter around management authorization. The
- * authorization/audit stack has its own tests, so keep this route test isolated. */
-int server_mgmt_endpoint_dispatch(const char *jwt, const char *jwks, const char *issuer,
-                                  const char *audience, const char *peer_cn,
-                                  const char *required_cap, const char *target,
-                                  const char *request_digest, server_mgmt_action_fn action,
-                                  void *ctx, char *actor, size_t actor_cap, char *jti,
-                                  size_t jti_cap)
-{
-   (void)jwt;
-   (void)jwks;
-   (void)issuer;
-   (void)audience;
-   (void)peer_cn;
-   (void)required_cap;
-   (void)target;
-   (void)request_digest;
-   (void)action;
-   (void)ctx;
-   (void)actor;
-   (void)actor_cap;
-   (void)jti;
-   (void)jti_cap;
-   return -1;
-}
-
 int main(void)
 {
    printf("server_http: ");
@@ -314,7 +310,7 @@ int main(void)
       server_http_set_ready_provider(NULL);
    }
 
-   /* P5-A: legacy management environment cannot enable a write route. */
+   /* Legacy management environment cannot bypass the composed action packet. */
    {
       platform_setenv("AIMEE_MGMT_JWKS", "{\"keys\":[]}");
       platform_setenv("AIMEE_MGMT_ISSUER", "legacy-issuer");
@@ -322,8 +318,8 @@ int main(void)
       platform_setenv("AIMEE_MGMT_PEER_CN", "legacy-peer");
       int st = server_http_route("POST", "/v1/management/action",
                                  "{\"token\":\"legacy\",\"target\":\"x\"}", 31, resp, sizeof(resp));
-      assert(st == 503);
-      assert(strstr(resp, "management control plane is not enabled"));
+      assert(st == 403);
+      assert(!strcmp(resp, "{\"result\":\"denied\",\"effect\":\"none\"}"));
    }
 
    /* --- GET /v1/version reports the build version --- */
@@ -837,7 +833,9 @@ int main(void)
       assert(server_http_management_auth("GET", "/v1/health", 1, 1, 1, "p5-kb-management") ==
              SERVER_HTTP_MANAGEMENT_DENY);
       assert(server_http_management_auth("POST", "/v1/management/action", 1, 1, 1,
-                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_DENY);
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("POST", "/v1/management/action/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
       assert(server_http_management_auth("GET", "/v1/health", 0, 1, 0, "generic-client") ==
              SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE);
       assert(server_http_management_auth("POST", "/v1/management/health", 1, 1, 1,
@@ -858,6 +856,10 @@ int main(void)
           "AIMEE_SERVER_MGMT_BIND",    "AIMEE_SERVER_MGMT_PORT",       "AIMEE_SERVER_MGMT_TLS_CERT",
           "AIMEE_SERVER_MGMT_TLS_KEY", "AIMEE_SERVER_MGMT_CLIENT_CA",  "AIMEE_SERVER_ID",
           "AIMEE_MGMT_STATUS_KEY_ID",  "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+          "AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+          "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN", "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
+          "AIMEE_SERVER_MGMT_ISSUER", "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE",
       };
       for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
          unsetenv(vars[i]);
@@ -886,9 +888,18 @@ int main(void)
       setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-v1", 1);
       setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test/v1/management/status", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_CA_FILE", "/etc/aimee/management/kb-ca.pem", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", "/etc/aimee/management/client.pem", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY", "/etc/aimee/management/client.key", 1);
+      setenv("AIMEE_SERVER_MGMT_ISSUER", "https://kb.test", 1);
+      setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/etc/aimee/management/jwks-roots.pem", 1);
       assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled && mc.port == 9443);
       assert(strcmp(mc.bind, "127.0.0.1") == 0);
       assert(strcmp(mc.cert, "/etc/aimee/management/server.pem") == 0);
+      assert(strcmp(mc.status_endpoint, "https://kb.test/v1/management/status") == 0);
       unsetenv("AIMEE_SERVER_MGMT_BIND");
       assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled);
       assert(strcmp(mc.bind, "127.0.0.1") == 0);
@@ -925,10 +936,27 @@ int main(void)
                             "X-Aimee-Management-Status: staple\r\n"
                             "Content-Type: application/json\r\nContent-Length: 0\r\n"
                             "Connection: keep-alive\r\n\r\n";
+      const char action_challenge[] =
+          "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      const char action[] =
+          "POST /v1/management/action HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 42\r\nConnection: close\r\n"
+          "Authorization: Bearer token\r\nX-Aimee-Management-Status: staple\r\n\r\n";
       assert(server_http_management_framing_valid("POST", "/v1/management/challenge", challenge,
                                                   strlen(challenge)) == 1);
       assert(server_http_management_framing_valid("GET", "/v1/management/health", health,
                                                   strlen(health)) == 1);
+      assert(server_http_management_action_framing_valid(
+                 "POST", "/v1/management/action/challenge", action_challenge,
+                 strlen(action_challenge)) == 1);
+      assert(server_http_management_action_framing_valid("POST", "/v1/management/action", action,
+                                                         strlen(action)) == 1);
+      char duplicate_auth[1024];
+      snprintf(duplicate_auth, sizeof(duplicate_auth), "%.*sAuthorization: Bearer second\r\n\r\n",
+               (int)(strlen(action) - 2), action);
+      assert(!server_http_management_action_framing_valid(
+          "POST", "/v1/management/action", duplicate_auth, strlen(duplicate_auth)));
       const char duplicate[] = "GET /v1/management/health HTTP/1.1\r\nContent-Length: 0\r\n"
                                "Content-Length: 0\r\n\r\n";
       const char duplicate_status[] =

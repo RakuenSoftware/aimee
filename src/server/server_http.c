@@ -1116,6 +1116,10 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
 static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+int server_http_remote_writes(void)
+{
+   return g_remote_writes;
+}
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock =
     PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
@@ -1602,10 +1606,16 @@ void handle_conn(int fd, int is_tcp, int is_management)
 
    /* The management lane rejects malformed/ambiguous framing before peer
     * classification, so authorization results cannot become a parser oracle. */
+   const char *management_header_end = is_management ? strstr(buf, "\r\n\r\n") : NULL;
+   size_t management_header_len =
+       management_header_end ? (size_t)(management_header_end + 4 - buf) : (size_t)total;
    if (is_management &&
-       (!server_http_management_request_syntax_valid(method, path, buf, (size_t)total) ||
+       (!server_http_management_request_syntax_valid(method, path, buf, management_header_len) ||
         (server_http_management_health_route(method, path) &&
-         !server_http_management_framing_valid(method, path, buf, (size_t)total))))
+         !server_http_management_framing_valid(method, path, buf, management_header_len)) ||
+        (server_http_management_action_route(method, path) &&
+         !server_http_management_action_framing_valid(method, path, buf,
+                                                      management_header_len))))
    {
       send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
       return;
@@ -1636,7 +1646,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
                                    management_peer.management_profile, management_peer.cn);
    if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
    {
-      int status = server_http_management_health_route(method, path) ? 401 : 403;
+      int status = server_http_management_route(method, path) ? 401 : 403;
       send_response(fd, status,
                     status == 401 ? "{\"error\":{\"message\":\"a verified management client "
                                     "certificate is required on the management listener\",\"type\":"
@@ -2350,7 +2360,8 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       return SERVER_HTTP_START_MGMT_FATAL;
    }
    if (management.enabled &&
-       server_tls_management_init(management.cert, management.key, management.client_ca) != 0)
+       (!server_http_management_checkpoint_files_valid(&management) ||
+        server_tls_management_init(management.cert, management.key, management.client_ca) != 0))
    {
       server_http_management_set_error("management TLS certificate/key/CA");
       LOG_ERROR("server.http", "dedicated management TLS configuration is not loadable");

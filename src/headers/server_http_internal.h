@@ -13,8 +13,14 @@
 /* promoted cross-TU (former .inc statics) */
 int conn_offload(int fd, int is_tcp, int is_tls, int is_management);
 int server_http_management_health_route(const char *method, const char *path);
+int server_http_management_route(const char *method, const char *path);
+int server_http_management_action_route(const char *method, const char *path);
 int server_http_management_request_syntax_valid(const char *method, const char *path,
                                                 const char *request, size_t request_len);
+int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                const char *request, size_t request_len);
+int server_http_remote_writes(void);
+int server_http_management_checkpoint_files_valid(const server_http_management_config_t *);
 void server_http_management_set_error(const char *error);
 cJSON *persona_to_json(const persona_t *p);
 void request_id_header(char *dst, size_t n, const char *request_id);
