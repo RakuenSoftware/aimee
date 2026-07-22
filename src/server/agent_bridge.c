@@ -195,7 +195,56 @@ cJSON *agent_build_request_responses(const agent_t *agent, cJSON *input, cJSON *
    {
       cJSON_AddItemReferenceToObject(req, "tools", tools);
       if (agent && agent->require_initial_tool_call)
-         cJSON_AddStringToObject(req, "tool_choice", "required");
+      {
+         /* The ChatGPT Responses transport can expose provider-native tools in
+          * addition to this request's function catalog.  A generic `required`
+          * choice therefore does not guarantee that the first call is one Aimee
+          * can execute: Codex may select Task/Agent, which the gateway correctly
+          * removes, leaving an evidence-gated reviewer with no repository lookup.
+          *
+          * Pin only the first turn to an advertised read/search function.  Once
+          * it succeeds the runtime clears require_initial_tool_call and every
+          * advertised tool is available normally on subsequent turns. */
+         static const char *const preferred[] = {"code_search", "find_symbol", "grep",
+                                                 "list_files",  "read_file",   NULL};
+         const char *selected = NULL;
+         for (int p = 0; preferred[p] && !selected; p++)
+         {
+            cJSON *tool;
+            cJSON_ArrayForEach(tool, tools)
+            {
+               cJSON *name = cJSON_GetObjectItem(tool, "name");
+               if (!cJSON_IsString(name))
+               {
+                  cJSON *fn = cJSON_GetObjectItem(tool, "function");
+                  name = cJSON_GetObjectItem(fn, "name");
+               }
+               if (cJSON_IsString(name) && strcmp(name->valuestring, preferred[p]) == 0)
+               {
+                  selected = name->valuestring;
+                  break;
+               }
+            }
+         }
+         if (!selected)
+         {
+            cJSON *first = cJSON_GetArrayItem(tools, 0);
+            cJSON *name = cJSON_GetObjectItem(first, "name");
+            if (!cJSON_IsString(name))
+            {
+               cJSON *fn = cJSON_GetObjectItem(first, "function");
+               name = cJSON_GetObjectItem(fn, "name");
+            }
+            if (cJSON_IsString(name))
+               selected = name->valuestring;
+         }
+         if (selected)
+         {
+            cJSON *choice = cJSON_AddObjectToObject(req, "tool_choice");
+            cJSON_AddStringToObject(choice, "type", "function");
+            cJSON_AddStringToObject(choice, "name", selected);
+         }
+      }
    }
 
    return req;
