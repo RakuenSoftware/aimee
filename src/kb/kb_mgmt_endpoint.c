@@ -1,9 +1,16 @@
 #include "kb_mgmt_endpoint.h"
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <netdb.h>
+#include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static int dns_name(const char *s)
@@ -122,29 +129,166 @@ int kb_mgmt_sockaddr_permitted(const struct sockaddr *addr, socklen_t len)
             (memcmp(b, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\1", 16) == 0));
 }
 
-int kb_mgmt_endpoint_connect(const kb_mgmt_endpoint_t *ep)
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t wake;
+   pthread_cond_t done_cv;
+   int ready, busy, done, abandoned, gai_rc;
+   char host[254], service[16];
+   struct addrinfo *result;
+} resolver_state_t;
+
+static resolver_state_t resolver;
+static pthread_once_t resolver_once = PTHREAD_ONCE_INIT;
+
+static uint64_t monotonic_ms(void)
+{
+   struct timespec ts;
+   return clock_gettime(CLOCK_MONOTONIC, &ts) == 0
+              ? (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000
+              : UINT64_MAX;
+}
+
+static struct timespec deadline_ts(uint64_t ms)
+{
+   struct timespec ts = {.tv_sec = (time_t)(ms / 1000), .tv_nsec = (long)(ms % 1000) * 1000000};
+   return ts;
+}
+
+static void *resolver_main(void *unused)
+{
+   (void)unused;
+   for (;;)
+   {
+      pthread_mutex_lock(&resolver.lock);
+      while (!resolver.busy || resolver.done)
+         pthread_cond_wait(&resolver.wake, &resolver.lock);
+      char host[sizeof(resolver.host)], service[sizeof(resolver.service)];
+      memcpy(host, resolver.host, sizeof(host));
+      memcpy(service, resolver.service, sizeof(service));
+      pthread_mutex_unlock(&resolver.lock);
+      struct addrinfo hints = {0}, *result = NULL;
+      hints.ai_family = AF_UNSPEC;
+      hints.ai_socktype = SOCK_STREAM;
+      int rc = getaddrinfo(host, service, &hints, &result);
+      pthread_mutex_lock(&resolver.lock);
+      if (resolver.abandoned)
+      {
+         freeaddrinfo(result);
+         resolver.busy = resolver.abandoned = 0;
+      }
+      else
+      {
+         resolver.result = result;
+         resolver.gai_rc = rc;
+         resolver.done = 1;
+      }
+      pthread_cond_broadcast(&resolver.done_cv);
+      pthread_mutex_unlock(&resolver.lock);
+   }
+   return NULL;
+}
+
+static void resolver_init(void)
+{
+   pthread_mutex_init(&resolver.lock, NULL);
+   pthread_cond_init(&resolver.wake, NULL);
+   pthread_condattr_t attr;
+   if (pthread_condattr_init(&attr) || pthread_condattr_setclock(&attr, CLOCK_MONOTONIC) ||
+       pthread_cond_init(&resolver.done_cv, &attr))
+      return;
+   pthread_condattr_destroy(&attr);
+   pthread_t thread;
+   if (pthread_create(&thread, NULL, resolver_main, NULL) || pthread_detach(thread))
+      return;
+   resolver.ready = 1;
+}
+
+static int resolve_bounded(const kb_mgmt_endpoint_t *ep, uint64_t deadline, struct addrinfo **out)
+{
+   pthread_once(&resolver_once, resolver_init);
+   if (!resolver.ready || monotonic_ms() >= deadline)
+      return -1;
+   pthread_mutex_lock(&resolver.lock);
+   if (resolver.busy)
+   {
+      pthread_mutex_unlock(&resolver.lock);
+      return -1;
+   }
+   resolver.busy = 1;
+   snprintf(resolver.host, sizeof(resolver.host), "%s", ep->host);
+   snprintf(resolver.service, sizeof(resolver.service), "%d", ep->port);
+   pthread_cond_signal(&resolver.wake);
+   struct timespec until = deadline_ts(deadline);
+   while (!resolver.done)
+      if (pthread_cond_timedwait(&resolver.done_cv, &resolver.lock, &until) == ETIMEDOUT)
+      {
+         resolver.abandoned = 1;
+         pthread_mutex_unlock(&resolver.lock);
+         return -1;
+      }
+   *out = resolver.result;
+   int rc = resolver.gai_rc;
+   resolver.result = NULL;
+   resolver.done = resolver.busy = 0;
+   pthread_mutex_unlock(&resolver.lock);
+   return rc == 0 ? 0 : -1;
+}
+
+int kb_mgmt_endpoint_connect_deadline(const kb_mgmt_endpoint_t *ep, uint64_t deadline, int trusted)
 {
    if (!ep || !ep->host[0] || ep->port < 1 || ep->port > 65535)
       return -1;
-   char service[16];
-   snprintf(service, sizeof(service), "%d", ep->port);
-   struct addrinfo hints = {0}, *res = NULL;
-   hints.ai_family = AF_UNSPEC;
-   hints.ai_socktype = SOCK_STREAM;
-   if (getaddrinfo(ep->host, service, &hints, &res) != 0)
+   struct addrinfo *res = NULL;
+   if (resolve_bounded(ep, deadline, &res))
       return -1;
    int fd = -1;
    for (const struct addrinfo *a = res; a; a = a->ai_next)
    {
-      if (!kb_mgmt_sockaddr_permitted(a->ai_addr, a->ai_addrlen))
+      if (!trusted && !kb_mgmt_sockaddr_permitted(a->ai_addr, a->ai_addrlen))
          continue;
       fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
-      if (fd >= 0 && connect(fd, a->ai_addr, a->ai_addrlen) == 0)
-         break;
+      if (fd >= 0)
+      {
+         int flags = fcntl(fd, F_GETFL, 0);
+         if (flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0)
+         {
+            int rc = connect(fd, a->ai_addr, a->ai_addrlen);
+            if (rc == 0)
+               break;
+            if (errno == EINPROGRESS)
+            {
+               struct pollfd p = {.fd = fd, .events = POLLOUT};
+               int pr = -1;
+               for (;;)
+               {
+                  uint64_t now = monotonic_ms();
+                  if (now >= deadline)
+                     break;
+                  uint64_t left = deadline - now;
+                  pr = poll(&p, 1, left > INT_MAX ? INT_MAX : (int)left);
+                  if (pr >= 0 || errno != EINTR)
+                     break;
+               }
+               int error = 0;
+               socklen_t error_len = sizeof(error);
+               if (pr > 0 && (p.revents & POLLOUT) &&
+                   getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len) == 0 && !error)
+                  break;
+            }
+         }
+      }
       if (fd >= 0)
          close(fd);
       fd = -1;
    }
    freeaddrinfo(res);
    return fd;
+}
+
+int kb_mgmt_endpoint_connect(const kb_mgmt_endpoint_t *ep)
+{
+   uint64_t now = monotonic_ms();
+   return now == UINT64_MAX ? -1 : kb_mgmt_endpoint_connect_deadline(ep, now + 30000, 0);
 }

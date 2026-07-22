@@ -34,6 +34,7 @@ int db2_server_registry_finalize(const char *, const char *, const char *,
                                  const db2_server_cert_identity_t *, char *, size_t);
 int db2_server_registry_heartbeat(const char *, const char *, const char *, const char *,
                                   const char *, const char *);
+/* 0 row loaded, 1 authoritative absence, -1 database/protocol failure. */
 int db2_server_registry_snapshot(int64_t, const char *, db2_server_snapshot_t *);
 int db2_management_status_lookup(const char *, const char *, const char *, const char *,
                                  const char *, int64_t *, char *, size_t);

@@ -6,15 +6,21 @@
 #include "kb_tls.h"
 #include <openssl/crypto.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
-static int response_content_length(const char *raw, const char *end, size_t cap, size_t *length)
+static int response_content_length(const char *raw, const char *end, size_t cap, size_t *length,
+                                   int *reusable)
 {
    const char *line = strstr(raw, "\r\n");
-   int seen = 0;
+   int seen = 0, connection_seen = 0;
+   *reusable = 1; /* HTTP/1.1 persistence is the default. */
    if (!line || line >= end)
       return -1;
    line += 2;
@@ -24,14 +30,32 @@ static int response_content_length(const char *raw, const char *end, size_t cap,
       if (!next || next > end || next == line)
          return -1;
       size_t n = (size_t)(next - line);
+      const char *colon = memchr(line, ':', n);
+      if (!colon || colon == line)
+         return -1;
+      for (const char *p = line; p < colon; p++)
+         if (!(isalnum((unsigned char)*p) || *p == '-'))
+            return -1;
+      for (const char *p = colon + 1; p < next; p++)
+         if (((unsigned char)*p < 0x20 && *p != '\t') || (unsigned char)*p == 0x7f)
+            return -1;
       if (n >= 18 && strncasecmp(line, "Transfer-Encoding:", 18) == 0)
+         return -1;
+      if ((n >= 8 && strncasecmp(line, "Upgrade:", 8) == 0) ||
+          (n >= 8 && strncasecmp(line, "Trailer:", 8) == 0))
          return -1;
       if (n >= 11 && strncasecmp(line, "Connection:", 11) == 0)
       {
+         if (connection_seen++)
+            return -1;
          const char *p = line + 11;
          while (p < next && (*p == ' ' || *p == '\t'))
             p++;
-         if ((size_t)(next - p) != 10 || strncasecmp(p, "keep-alive", 10) != 0)
+         if ((size_t)(next - p) == 10 && strncasecmp(p, "keep-alive", 10) == 0)
+            *reusable = 1;
+         else if ((size_t)(next - p) == 5 && strncasecmp(p, "close", 5) == 0)
+            *reusable = 0;
+         else
             return -1;
       }
       if (n >= 15 && strncasecmp(line, "Content-Length:", 15) == 0)
@@ -85,7 +109,7 @@ static int request_headers_valid(const char *headers)
           ((size_t)(colon - line) == 17 && strncasecmp(line, "Transfer-Encoding", 17) == 0))
          return 0;
       for (const char *p = line; p < end; p++)
-         if ((unsigned char)*p < 0x20 && *p != '\t')
+         if (((unsigned char)*p < 0x20 && *p != '\t') || (unsigned char)*p == 0x7f)
             return 0;
       line = end + 2;
    }
@@ -108,35 +132,68 @@ void kb_mgmt_client_session_close(kb_mgmt_client_session_t *s)
    s->fd = -1;
 }
 
-int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoint, const char *ca,
-                                const char *cc, const char *ck, const char *expected_issuer,
-                                const char *expected_serial, const char *expected_fp)
+static uint64_t monotonic_ms(void)
 {
-   if (!s || !ca || ((cc != NULL) != (ck != NULL)))
+   struct timespec ts;
+   return clock_gettime(CLOCK_MONOTONIC, &ts) == 0
+              ? (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000
+              : UINT64_MAX;
+}
+
+static int wait_ssl(SSL *ssl, int result, uint64_t deadline)
+{
+   int error = SSL_get_error(ssl, result);
+   short events = error == SSL_ERROR_WANT_READ    ? POLLIN
+                  : error == SSL_ERROR_WANT_WRITE ? POLLOUT
+                                                  : 0;
+   uint64_t now = monotonic_ms();
+   if (!events || now >= deadline)
+      return -1;
+   uint64_t left = deadline - now;
+   struct pollfd p = {.fd = SSL_get_fd(ssl), .events = events};
+   int rc;
+   do
+      rc = poll(&p, 1, left > INT_MAX ? INT_MAX : (int)left);
+   while (rc < 0 && errno == EINTR && monotonic_ms() < deadline);
+   return rc > 0 && (p.revents & events) ? 0 : -1;
+}
+
+int kb_mgmt_client_session_open_deadline(kb_mgmt_client_session_t *s, const char *endpoint,
+                                         const char *ca, const char *cc, const char *ck,
+                                         const char *expected_issuer, const char *expected_serial,
+                                         const char *expected_fp, uint64_t deadline, int trusted)
+{
+   if (!s || !ca || ((cc != NULL) != (ck != NULL)) || monotonic_ms() >= deadline)
       return -1;
    memset(s, 0, sizeof(*s));
    s->fd = -1;
    if (kb_mgmt_endpoint_parse(endpoint, &s->endpoint) != 0 ||
        !(s->ctx = kb_tls_client_ctx(ca, cc, ck)) ||
-       (s->fd = kb_mgmt_endpoint_connect(&s->endpoint)) < 0 || !(s->ssl = SSL_new(s->ctx)))
+       (s->fd = kb_mgmt_endpoint_connect_deadline(&s->endpoint, deadline, trusted)) < 0 ||
+       !(s->ssl = SSL_new(s->ctx)))
       goto fail;
    SSL_set_fd(s->ssl, s->fd);
    if (SSL_set_tlsext_host_name(s->ssl, s->endpoint.host) != 1 ||
-       SSL_set1_host(s->ssl, s->endpoint.host) != 1 || SSL_connect(s->ssl) != 1 ||
-       SSL_get_verify_result(s->ssl) != X509_V_OK)
+       SSL_set1_host(s->ssl, s->endpoint.host) != 1)
+      goto fail;
+   int connect_rc;
+   while ((connect_rc = SSL_connect(s->ssl)) != 1)
+      if (wait_ssl(s->ssl, connect_rc, deadline))
+         goto fail;
+   if (monotonic_ms() >= deadline || SSL_get_verify_result(s->ssl) != X509_V_OK)
       goto fail;
    if (expected_issuer || expected_serial || expected_fp)
    {
       char issuer[601] = "", serial[129] = "", fp[65] = "";
-      if (!expected_issuer || !expected_serial || !expected_fp ||
-          kb_tls_peer_issuer(s->ssl, issuer, sizeof(issuer)) != 0 ||
+      if (!expected_issuer || !expected_serial || !expected_fp || strnlen(expected_fp, 65) != 64 ||
+          !expected_serial[0] || kb_tls_peer_issuer(s->ssl, issuer, sizeof(issuer)) != 0 ||
           kb_tls_peer_serial(s->ssl, serial, sizeof(serial)) != 0 ||
           kb_tls_peer_fingerprint(s->ssl, fp, sizeof(fp)) != 0)
          goto fail;
       for (size_t i = 0; serial[i]; i++)
          serial[i] = (char)tolower((unsigned char)serial[i]);
       if (strcmp(issuer, expected_issuer) || strcmp(serial, expected_serial) ||
-          CRYPTO_memcmp(fp, expected_fp, 64) != 0 || expected_fp[64] != '\0')
+          CRYPTO_memcmp(fp, expected_fp, 64) != 0)
          goto fail;
    }
    return 0;
@@ -145,13 +202,30 @@ fail:
    return -1;
 }
 
-int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *method,
-                                   const char *path, const char *body, const char *extra_headers,
-                                   char *resp, size_t cap, int *status_out)
+int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoint, const char *ca,
+                                const char *cc, const char *ck, const char *expected_issuer,
+                                const char *expected_serial, const char *expected_fp)
 {
+   uint64_t now = monotonic_ms();
+   return now == UINT64_MAX
+              ? -1
+              : kb_mgmt_client_session_open_deadline(s, endpoint, ca, cc, ck, expected_issuer,
+                                                     expected_serial, expected_fp, now + 30000, 0);
+}
+
+int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const char *method,
+                                            const char *path, const char *body,
+                                            const char *extra_headers, uint64_t deadline,
+                                            char *resp, size_t cap, int *status_out)
+{
+   if (resp && cap)
+      resp[0] = '\0';
+   if (status_out)
+      *status_out = 0;
    if (!s || !s->ssl || !method ||
        (strcmp(method, "GET") && strcmp(method, "HEAD") && strcmp(method, "POST")) || !path ||
-       path[0] != '/' || strpbrk(path, "\r\n\t ") || !resp || !cap || cap > 1024 * 1024)
+       path[0] != '/' || strpbrk(path, "\r\n\t ") || !resp || !cap || cap > 1024 * 1024 ||
+       monotonic_ms() >= deadline)
       return -1;
    const char *b = body ? body : "", *headers = extra_headers ? extra_headers : "";
    size_t blen = strlen(b);
@@ -175,10 +249,17 @@ int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *meth
    {
       int wr = SSL_write(s->ssl, req + sent, n - (int)sent);
       if (wr <= 0)
+      {
+         if (wait_ssl(s->ssl, wr, deadline) == 0)
+            continue;
          goto done;
+      }
       sent += (size_t)wr;
+      if (monotonic_ms() >= deadline)
+         goto done;
    }
    size_t raw_cap = cap + 8192, total = 0, content_length = SIZE_MAX;
+   int reusable = 0;
    char *raw = malloc(raw_cap);
    if (!raw)
       goto done;
@@ -186,19 +267,26 @@ int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *meth
    {
       int rd = SSL_read(s->ssl, raw + total, (int)(raw_cap - 1 - total));
       if (rd <= 0)
+      {
+         if (wait_ssl(s->ssl, rd, deadline) == 0)
+            continue;
          break;
+      }
       total += (size_t)rd;
       raw[total] = '\0';
       char *end = strstr(raw, "\r\n\r\n");
       if (end && content_length == SIZE_MAX)
       {
-         if (response_content_length(raw, end, cap, &content_length) != 0)
+         if (response_content_length(raw, end, cap, &content_length, &reusable) != 0)
             break;
       }
       if (end && content_length != SIZE_MAX && total >= (size_t)(end + 4 - raw) + content_length)
       {
+         size_t exact = (size_t)(end + 4 - raw) + content_length;
          int status = response_status(raw, end);
-         if (status < 0)
+         if (status < 0 || (!strcmp(path, "/v1/management/challenge") && !reusable) ||
+             total != exact || memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
+             monotonic_ms() >= deadline)
             break;
          memcpy(resp, end + 4, content_length);
          resp[content_length] = '\0';
@@ -214,6 +302,17 @@ done:
    if (rc != 0)
       kb_mgmt_client_session_close(s);
    return rc;
+}
+
+int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *method,
+                                   const char *path, const char *body, const char *extra_headers,
+                                   char *resp, size_t cap, int *status_out)
+{
+   uint64_t now = monotonic_ms();
+   return now == UINT64_MAX
+              ? -1
+              : kb_mgmt_client_session_request_deadline(s, method, path, body, extra_headers,
+                                                        now + 30000, resp, cap, status_out);
 }
 
 int kb_mgmt_client_request_auth(const char *ep, const char *ca, const char *cc, const char *ck,
