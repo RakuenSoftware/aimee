@@ -1294,7 +1294,8 @@ char *cli_session_make_name(const char *agent_name, const char *role)
 
 char *cli_session_make_execution_name(const char *agent_name, int configured_reuse,
                                       const char *bound_session_id, int session_override,
-                                      const char *delegation_id, int *reuse_out)
+                                      const char *delegation_id, int force_isolation,
+                                      int *reuse_out)
 {
    const char *agent = agent_name && agent_name[0] ? agent_name : "agent";
    const int have_session = session_override && bound_session_id && bound_session_id[0];
@@ -1308,13 +1309,13 @@ char *cli_session_make_execution_name(const char *agent_name, int configured_reu
          *reuse_out = 0;
       return cli_session_make_name(have_session ? bound_session_id : agent, delegation_id);
    }
-   if (have_session)
+   if (have_session && !force_isolation)
    {
       if (reuse_out)
          *reuse_out = 1;
       return cli_session_make_name(bound_session_id, "cli");
    }
-   if (configured_reuse)
+   if (configured_reuse && !force_isolation)
    {
       if (reuse_out)
          *reuse_out = 1;

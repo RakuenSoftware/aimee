@@ -255,6 +255,7 @@ static void test_cli_probe_uses_backend_executor_and_config_discovery(void)
    assert(g_executed_agent.timeout_ms == 60000);
    assert(g_executed_agent.cli_idle_timeout_ms == 60000);
    assert(g_executed_agent.session_reuse == 0);
+   assert(g_executed_agent.force_cli_isolation == 1);
    assert(response_bool("model_available") && response_bool("execution_ok"));
    assert(cJSON_GetObjectItem(g_last_response, "models_status")->valueint == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "slots_source")->valuestring, "config") == 0);
