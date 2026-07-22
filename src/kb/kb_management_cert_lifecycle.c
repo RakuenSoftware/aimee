@@ -396,13 +396,68 @@ static int active_equal(const db2_management_client_active_t *a,
           a->revocation_generation == b->revocation_generation;
 }
 
+static int identity_component_append(char *out, size_t cap, size_t *used, const char *component)
+{
+   for (const unsigned char *p = (const unsigned char *)component; *p; ++p)
+   {
+      const char *replacement = NULL;
+      size_t replacement_len = 1;
+      if (*p == '%')
+         replacement = "%25";
+      else if (*p == ':')
+         replacement = "%3A";
+      if (replacement)
+         replacement_len = 3;
+      if (*used > cap || replacement_len >= cap - *used)
+         return -1;
+      if (replacement)
+         memcpy(out + *used, replacement, replacement_len);
+      else
+         out[*used] = (char)*p;
+      *used += replacement_len;
+   }
+   return 0;
+}
+
+static int active_identity_valid(const db2_management_client_active_t *active)
+{
+   char expected[sizeof(active->cert_identity)];
+   size_t used = sizeof("cert:") - 1;
+   memcpy(expected, "cert:", used);
+   if (identity_component_append(expected, sizeof(expected), &used, active->cert_issuer) != 0 ||
+       used + 1 >= sizeof(expected))
+      return 0;
+   expected[used++] = ':';
+   if (identity_component_append(expected, sizeof(expected), &used, active->cert_serial_norm) !=
+       0)
+      return 0;
+   expected[used] = '\0';
+   return !strcmp(active->cert_identity, expected);
+}
+
+#ifdef AIMEE_MANAGEMENT_CERT_TESTING
+int kb_management_cert_identity_matches_for_test(const char *issuer, const char *serial,
+                                                 const char *identity)
+{
+   if (!issuer || !serial || !identity || strlen(issuer) > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
+       strlen(serial) > DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX ||
+       strlen(identity) > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX)
+      return 0;
+   db2_management_client_active_t active = {0};
+   memcpy(active.cert_issuer, issuer, strlen(issuer) + 1);
+   memcpy(active.cert_serial_norm, serial, strlen(serial) + 1);
+   memcpy(active.cert_identity, identity, strlen(identity) + 1);
+   return active_identity_valid(&active);
+}
+#endif
+
 static int candidate_matches_active(const kb_management_cert_candidate_view_t *c,
                                     const db2_management_client_active_t *a)
 {
    return a->issue_state == DB2_MANAGEMENT_CLIENT_ISSUE_ACTIVE &&
           a->issue_kind == (a->generation == 1 ? DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL
                                                 : DB2_MANAGEMENT_CLIENT_ISSUE_RENEW) &&
-          !strcmp(a->cert_identity, "p5-kb-management") &&
+          active_identity_valid(a) &&
           !strcmp(c->installation_id, a->installation_id) &&
           !strcmp(c->lineage_id, a->replacement_lineage_id) &&
           !strcmp(c->operation_id, a->operation_id) && !strcmp(c->authority_id, a->authority_id) &&

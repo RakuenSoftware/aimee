@@ -46,6 +46,7 @@ typedef struct
 kb_management_cert_result_t kb_management_cert_lifecycle_open_for_test(
     const kb_management_cert_config_t *, kb_workload_provider_kind_t, int,
     const kb_management_cert_test_ops_t *, void *, kb_management_cert_lifecycle_t **);
+int kb_management_cert_identity_matches_for_test(const char *, const char *, const char *);
 #endif
 
 #endif

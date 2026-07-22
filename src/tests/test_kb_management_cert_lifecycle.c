@@ -305,9 +305,12 @@ static db2_management_client_instance_result_t mock_activate(
    memcpy(mock->enrollment.csr_digest, request->csr_digest, 32);
    memcpy(mock->enrollment.csr_spki_digest, request->csr_spki_digest, 32);
    memcpy(mock->enrollment.public_bundle_digest, request->public_bundle_digest, 32);
-   strcpy(mock->enrollment.cert_identity, "p5-kb-management");
    strcpy(mock->enrollment.cert_issuer, request->leaf_issuer);
    strcpy(mock->enrollment.cert_serial_norm, request->leaf_serial_norm);
+   int identity_len =
+       snprintf(mock->enrollment.cert_identity, sizeof(mock->enrollment.cert_identity),
+                "cert:%s:%s", request->leaf_issuer, request->leaf_serial_norm);
+   assert(identity_len > 0 && (size_t)identity_len < sizeof(mock->enrollment.cert_identity));
    memcpy(mock->enrollment.cert_fingerprint, request->leaf_fingerprint, 32);
    memcpy(mock->enrollment.cert_spki_digest, request->leaf_spki_digest, 32);
    mock->enrollment.cert_not_before_epoch = request->leaf_not_before_epoch;
@@ -770,6 +773,22 @@ static void test_lifecycle_constructor_guards(void)
    assert(kb_management_cert_lifecycle_open(&config, &lifecycle) == KB_MANAGEMENT_CERT_INVALID);
    assert(lifecycle == NULL);
 }
+
+#ifdef AIMEE_MANAGEMENT_CERT_TESTING
+static void test_active_identity_canonicalization(void)
+{
+   assert(kb_management_cert_identity_matches_for_test(
+       "/CN=aimee-kb-ca", "0123abcd", "cert:/CN=aimee-kb-ca:0123abcd"));
+   assert(kb_management_cert_identity_matches_for_test("issuer:%name", "ab:cd%ef",
+                                                       "cert:issuer%3A%25name:ab%3Acd%25ef"));
+   assert(!kb_management_cert_identity_matches_for_test(
+       "issuer:%name", "ab:cd%ef", "cert:issuer:%name:ab:cd%ef"));
+   char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   memset(issuer, '%', sizeof(issuer) - 1);
+   issuer[sizeof(issuer) - 1] = '\0';
+   assert(!kb_management_cert_identity_matches_for_test(issuer, "aa", "cert:overflow:aa"));
+}
+#endif
 
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
 static void remove_tree_files(const char *path)
@@ -1494,6 +1513,7 @@ int main(void)
    test_key_and_csr();
    test_lifecycle_constructor_guards();
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
+   test_active_identity_canonicalization();
    test_noncanonical_custodied_hex();
    test_lifecycle_orchestration();
 #endif
