@@ -21,10 +21,8 @@
 #include "kb_http_egress.h"
 #include "../../db2/server_registry.h"
 #include "../../db2/db2_tenant.h"
-#include "db2/db2.h"    /* request-scoped DB2 lease */
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_reqctx.h"
-#include "config.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
@@ -415,12 +413,6 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          body_len = (int)declared_body;
       }
 
-      /* Worker threads are long-lived, so a lazily acquired DB2 connection
-       * would otherwise remain pinned until shutdown. Bound every routed
-       * request explicitly; this also keeps persistent mTLS connections from
-       * exhausting the shared DB2 pool after one request per worker. */
-      db2_lease_begin();
-
       /* Split query string off the path. */
       char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
       const char *qmark = strchr(path, '?');
@@ -558,7 +550,6 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                                    synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
       }
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
-      db2_lease_end();
 
       char head[256];
       int hn = snprintf(head, sizeof(head),
@@ -586,7 +577,6 @@ done:
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <openssl/crypto.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -599,14 +589,8 @@ static volatile int g_mtls_running = 0;
 static pthread_t g_mtls_thread;
 static SSL_CTX *g_mtls_ctx = NULL;
 
-#define KB_MTLS_CONNECTIONS_MAX   64
-#define KB_MTLS_QUEUE_CAP         64
-#define KB_MTLS_WORKER_STACK_SIZE (4 * 1024 * 1024)
-/* Request routes load config_t on the worker stack. Keep ample headroom for
- * route-local state and TLS/libpq frames; a 1 MiB worker stack crashed live
- * /v1/health requests because config_t alone is roughly 750 KiB. */
-_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
-               "kb mTLS worker stack must accommodate config_t plus route headroom");
+#define KB_MTLS_CONNECTIONS_MAX 64
+#define KB_MTLS_QUEUE_CAP       64
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
 static int g_mtls_workers_started = 0;
 static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
@@ -635,8 +619,6 @@ static void *mtls_worker_thread(void *arg)
       g_mtls_queue_len--;
       pthread_mutex_unlock(&g_mtls_queue_mu);
 
-      int one = 1;
-      (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       kb_tls_serve_conn(fd, g_mtls_ctx);
       close(fd);
       pthread_mutex_lock(&g_mtls_queue_mu);
@@ -755,7 +737,7 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    int worker_attr_initialized = pthread_attr_init(&worker_attr) == 0;
    if (worker_attr_initialized)
    {
-      if (pthread_attr_setstacksize(&worker_attr, KB_MTLS_WORKER_STACK_SIZE) == 0)
+      if (pthread_attr_setstacksize(&worker_attr, 1024 * 1024) == 0)
          worker_attr_ptr = &worker_attr;
    }
    for (int i = 0; i < g_mtls_connection_limit; i++)

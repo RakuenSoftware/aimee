@@ -6,8 +6,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -75,8 +73,6 @@ int platform_net_connect(const char *host, const char *port, int timeout_ms)
       /* Restore blocking mode for simple send/recv framing. */
       if (flags >= 0)
          fcntl(fd, F_SETFL, flags);
-      int one = 1;
-      (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       break;
    }
 

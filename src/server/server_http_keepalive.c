@@ -1,5 +1,4 @@
 #include "server_http_internal.h"
-#include "server.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -36,20 +35,6 @@ int server_http_gzip_route_eligible(const char *path)
 int server_http_keepalive_route_eligible(const char *path)
 {
    return !strstr(path, "/events") && !strstr(path, "/stream") && !strstr(path, "/live");
-}
-
-uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authenticated,
-                                     int native_tls, const char *bearer, const char *method,
-                                     const char *path)
-{
-   /* An unscoped deployment bearer over verified native TLS may sign exactly
-    * the CSR needed to leave optional-mTLS migration. The route and handler
-    * still enforce POST /v1/cert/sign and ATTEST_TLS_BEARER respectively. */
-   if (is_tcp && !mtls_authenticated && native_tls && bearer && bearer[0] &&
-       strncmp(bearer, "scope:", 6) != 0 && method && path && strcmp(method, "POST") == 0 &&
-       strcmp(path, "/v1/cert/sign") == 0)
-      return caps | CAP_DELEGATE;
-   return caps;
 }
 
 /* Validate the framing boundary before allowing a second request on the same

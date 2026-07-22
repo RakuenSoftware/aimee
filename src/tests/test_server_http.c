@@ -802,22 +802,6 @@ int main(void)
       setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
       assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 0);
       unsetenv("AIMEE_API_BEARER_TOKEN");
-
-      uint32_t bootstrap_caps =
-          server_http_effective_conn_caps(1, BOOT, SERVER_REMOTE_WRITES_OFF, 1, 0);
-      assert((bootstrap_caps & CAP_SESSION_ADMIN) != 0);
-      assert((bootstrap_caps & CAP_DELEGATE) == 0);
-      assert(server_http_route_allowed_caps(1, bootstrap_caps, "POST", "/v1/api/rotate_bearer",
-                                            SERVER_REMOTE_WRITES_OFF) == 1);
-      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY | CAP_DELEGATE, "POST",
-                                            "/v1/cert/sign", SERVER_REMOTE_WRITES_OFF) == 1);
-      assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
-                                          "/v1/cert/sign") &
-              CAP_DELEGATE) != 0);
-      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 0, "deployment-token", "POST",
-                                         "/v1/cert/sign") == CAPS_READ_ONLY);
-      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "scope:read", "POST",
-                                         "/v1/cert/sign") == CAPS_READ_ONLY);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two

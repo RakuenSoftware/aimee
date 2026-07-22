@@ -354,8 +354,6 @@ uint32_t server_http_effective_conn_caps(int is_tcp, const char *bearer, int rem
 {
    if (!is_tcp || mtls_mode <= 0)
       return server_http_conn_caps(is_tcp, bearer, remote_writes);
-   if (!mtls_authenticated && bearer && strcmp(bearer, AIMEE_BOOTSTRAP_BEARER) == 0)
-      return (CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT) | CAP_SESSION_ADMIN;
    if (mtls_authenticated)
       return CAPS_AUTHENTICATED;
    /* Optional-mode bearer fallback is deliberately weaker than a client cert:
@@ -377,9 +375,6 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
    if (!method || !path)
       return 0;
    if (strcmp(path, "/v1/runner/poll") == 0 || strcmp(path, "/v1/runner/respond") == 0)
-      return 1;
-   if (strcmp(method, "POST") == 0 &&
-       (strcmp(path, "/v1/api/rotate_bearer") == 0 || strcmp(path, "/v1/cert/sign") == 0))
       return 1;
    if (strcmp(method, "POST") == 0 && strcmp(path, "/v1/workspaces") == 0) /* workspace.add */
       return 1;
@@ -1716,8 +1711,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        management_authenticated ? 0
                                 : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
                                                                   mtls_mode, mtls_authenticated);
-   effective_caps = server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
-                                                server_conn_io_has_ssl(fd), g_bearer, method, path);
+
    /* Establish the per-request context (#3) only after authenticating the
     * durable certificate, so downstream dispatch sees the same effective caps
     * as the outer route gate. */
