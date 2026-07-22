@@ -1202,6 +1202,8 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
        * aimee's own index rather than a worktree a remote seat cannot reach, and
        * still get no write tools. Drafting stays tool-less. */
       tasks[i].use_tools = (mode == ROUNDTABLE_REVIEW);
+      tasks[i].require_initial_tool_call =
+          (mode == ROUNDTABLE_REVIEW && cfg->roundtable_require_evidence);
       tasks[i].agent = cfg->ensemble_reference_models[i];
       tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];
@@ -1226,17 +1228,22 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
     * so the panel is still judging the diff alone. */
    if (mode == ROUNDTABLE_REVIEW)
    {
-      int total_calls = 0, used = 0;
+      int total_calls = 0, successful_calls = 0, used = 0;
       for (int i = 0; i < ref_count; i++)
       {
          total_calls += results[i].tool_calls;
-         if (results[i].tool_calls > 0)
+         successful_calls += results[i].successful_tool_calls;
+         if (results[i].successful_tool_calls > 0)
             used++;
       }
-      aimee_log(total_calls > 0 ? LOG_INFO : LOG_WARN, "roundtable.progress",
-                "round %d: %d/%d panelists used aimee tools (%d call%s total)%s", round, used,
-                ref_count, total_calls, total_calls == 1 ? "" : "s",
-                total_calls > 0 ? "" : " — reviewing the diff ALONE (tools offered, none called)");
+      aimee_log(successful_calls > 0 ? LOG_INFO : LOG_WARN, "roundtable.progress",
+                "round %d: %d/%d panelists obtained aimee evidence (%d successful of %d "
+                "attempted call%s)%s",
+                round, used, ref_count, successful_calls, total_calls,
+                total_calls == 1 ? "" : "s",
+                successful_calls > 0
+                    ? ""
+                    : " — reviewing the diff ALONE (no successful repository lookup)");
    }
    for (int i = 0; i < ref_count; i++)
    {
@@ -1274,9 +1281,16 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       /* Persona binds to the stable model index `i`, not the shuffled slot. */
       char *persona = panel_persona_prompt(cfg, mode, i);
       memset(&results[i], 0, sizeof(results[i]));
-      agent_run_named(acfg, cfg->ensemble_reference_models[i],
-                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", persona, prompt, 0,
-                      0.3 + (0.05 * i), &results[i]);
+      if (mode == ROUNDTABLE_REVIEW)
+      {
+         agent_run_require_initial_tool_call(cfg->roundtable_require_evidence);
+         agent_run_named_with_tools(acfg, cfg->ensemble_reference_models[i], "review", persona,
+                                    prompt, 0, 0.3 + (0.05 * i), &results[i]);
+         agent_run_require_initial_tool_call(0);
+      }
+      else
+         agent_run_named(acfg, cfg->ensemble_reference_models[i], "draft", persona, prompt, 0,
+                         0.3 + (0.05 * i), &results[i]);
       free(persona);
       if (results[i].response && results[i].response[0])
       {
@@ -1831,6 +1845,19 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
    if (out->original_request_alignment_sources[0])
       dstr_appendf(&s, " _(sources: %s)_", out->original_request_alignment_sources);
    dstr_append_str(&s, "\n");
+   dstr_appendf(&s,
+                "\n## Repository evidence coverage\n\n%d/%d responding seats used read-only "
+                "Aimee tools successfully (%d successful of %d attempted call%s).\n",
+                out->participants_tool_used,
+                out->participants_total - out->participants_failed,
+                out->participant_successful_tool_calls, out->participant_tool_calls,
+                out->participant_tool_calls == 1 ? "" : "s");
+   if (out->evidence_coverage_incomplete)
+      dstr_append_str(
+          &s,
+          "Production-wiring and shipped-artifact conclusions remain **unverified** for at "
+          "least one seat. No finding below certifies shipped behavior, and this coverage gap "
+          "cannot be removed by chair adjudication.\n");
    static const char *const sevs[] = {"blocking", "suggestion", "nit"};
    static const char *const heads[] = {"## Blocking", "## Suggestions", "## Nits"};
    int emitted = 0;
@@ -1851,6 +1878,8 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
             group_started = 1;
          }
          dstr_appendf(&s, "- **%s**", it->category[0] ? it->category : "review");
+         if (!it->tool_grounded)
+            dstr_append_str(&s, " [unverified: no successful repository lookup]");
          if (it->location[0])
             dstr_appendf(&s, " (%s)", it->location);
          dstr_appendf(&s, ": %s", it->summary);
@@ -1866,8 +1895,10 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
       if (done[i])
          continue;
       const roundtable_review_item_t *it = &out->items[i];
-      dstr_appendf(&s, "%s- **%s**: %s\n", emitted ? "" : "## Findings\n",
-                   it->category[0] ? it->category : "review", it->summary);
+      dstr_appendf(&s, "%s- **%s**%s: %s\n", emitted ? "" : "## Findings\n",
+                   it->category[0] ? it->category : "review",
+                   it->tool_grounded ? "" : " [unverified: no successful repository lookup]",
+                   it->summary);
       emitted++;
    }
    if (!emitted)
@@ -2057,6 +2088,21 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             break;
          }
          capture_round_review_items(results, ref_count, out, round);
+         out->participants_tool_used = 0;
+         out->participant_tool_calls = 0;
+         out->participant_successful_tool_calls = 0;
+         for (int i = 0; i < ref_count; i++)
+         {
+            out->participant_tool_calls += results[i].tool_calls;
+            out->participant_successful_tool_calls += results[i].successful_tool_calls;
+            if (results[i].successful_tool_calls > 0)
+               out->participants_tool_used++;
+         }
+         int responding = count_successful(results, ref_count);
+         out->evidence_coverage_incomplete |=
+             cfg->roundtable_require_evidence && out->participants_tool_used < responding;
+         if (out->evidence_coverage_incomplete)
+            out->degraded = 1;
       }
 
       /* Count usable results after review-JSON repair. The required prefix is

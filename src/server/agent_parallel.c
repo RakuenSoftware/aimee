@@ -102,6 +102,8 @@ static void *parallel_worker(void *arg)
    agent_set_request_cancel(&ctx->cancel);
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
    double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
+   agent_run_require_initial_tool_call(ctx->task->use_tools &&
+                                       ctx->task->require_initial_tool_call);
    if (ctx->task->agent && ctx->task->agent[0])
       (ctx->task->use_tools ? agent_run_named_with_tools : agent_run_named)(
           ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
@@ -113,6 +115,7 @@ static void *parallel_worker(void *arg)
    else
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
+   agent_run_require_initial_tool_call(0);
    agent_set_request_cancel(NULL);
    if (ctx->owns_process_permit)
    {
@@ -253,6 +256,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
    {
       double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
       int rc;
+      agent_run_require_initial_tool_call(tasks[0].use_tools &&
+                                          tasks[0].require_initial_tool_call);
       if (tasks[0].agent && tasks[0].agent[0])
          rc = (tasks[0].use_tools ? agent_run_named_with_tools : agent_run_named)(
              cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
@@ -264,6 +269,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       else
          rc = agent_run_ex(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
                            tasks[0].max_tokens, temp, &out[0]);
+      agent_run_require_initial_tool_call(0);
       return rc == 0 ? 1 : 0;
    }
 
