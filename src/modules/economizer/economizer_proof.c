@@ -230,6 +230,28 @@ const char *econ_reason_str(econ_reason_t reason)
       return "registry_absent";
    case ECON_REASON_NOT_STRICTLY_CHEAPER:
       return "not_strictly_cheaper";
+   case ECON_REASON_UNSUPPORTED_ENDPOINT:
+      return "unsupported_endpoint";
+   case ECON_REASON_MODEL_NOT_PINNED:
+      return "model_not_pinned";
+   case ECON_REASON_TOKENIZER_NOT_LOCAL_EXACT:
+      return "tokenizer_not_local_exact";
+   case ECON_REASON_REMOTE_TOKEN_COUNT:
+      return "remote_token_count";
+   case ECON_REASON_INVALID_REQUEST_SHAPE:
+      return "invalid_request_shape";
+   case ECON_REASON_UNSUPPORTED_CACHE_LAYOUT:
+      return "unsupported_cache_layout";
+   case ECON_REASON_INVALID_CACHE_CONTROL:
+      return "invalid_cache_control";
+   case ECON_REASON_PROTECTED_PREFIX_UNPROVEN:
+      return "protected_prefix_unproven";
+   case ECON_REASON_TOKEN_GUARD_BAND:
+      return "token_guard_band";
+   case ECON_REASON_OUTPUT_BOUND_UNAVAILABLE:
+      return "output_bound_unavailable";
+   case ECON_REASON_PRICING_UNAVAILABLE:
+      return "pricing_unavailable";
    case ECON_REASON_PROOF_ACCEPTED:
       return "proof_accepted";
    }
