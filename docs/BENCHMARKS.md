@@ -166,6 +166,11 @@ The listener reuses HTTP/1.1 connections sequentially by default, with a
 request pipelining is rejected so framing and per-request certificate authority
 checks remain unambiguous.
 
+The KB TLS client also exposes a reusable, one-in-flight connection primitive.
+It accepts only strict HTTP/1.1 responses with one `Content-Length`, a head no
+larger than 64 KiB, and a body smaller than the caller's bounded buffer; it reads
+that body exactly and never treats EOF as a successful response delimiter.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

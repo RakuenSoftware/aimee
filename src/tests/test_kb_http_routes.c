@@ -2551,6 +2551,30 @@ static void test_mtls_listener(void)
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
 
+   /* The reusable client primitive reads Content-Length exactly instead of
+    * waiting for EOF, then safely carries a second request on the same TLS
+    * connection. */
+   kb_tls_client_conn_t *persistent =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(persistent);
+   int reusable = 0;
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
+   kb_tls_client_conn_close(persistent);
+
+   kb_tls_client_conn_t *bounded =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(bounded);
+   char tiny_response[4];
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
+                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(reusable == 0);
+   kb_tls_client_conn_close(bounded);
+
    /* Primary authority is consulted before dispatch. Unknown/revoked peers are
     * forbidden and an authority outage is retryable but never fail-open. */
    test_kb_enrollment_authority_set(0);
