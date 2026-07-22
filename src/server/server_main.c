@@ -12,6 +12,7 @@
 #include "guardrails.h"
 #include "workspace.h"
 #include "kb_client_cache.h"
+#include "kb_client_mtls.h"
 #include "kb_client_ws.h"
 #include "db1.h"
 #include "mcp_client_registry.h"
@@ -182,6 +183,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
    config_snapshot_init(&cfg);
+   kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
     * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a

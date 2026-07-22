@@ -2686,18 +2686,28 @@ static void test_mtls_listener(void)
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       setenv("AIMEE_KB_CONN", conn2, 1);
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
+      unsigned long pool_exhausted = 1;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0 && pool_busy == 0 && pool_waiters == 0);
+
+      /* The hot rollout flag opts this identity into reuse without a restart. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "1", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
       g_test_registry_heartbeat_allow = 1;
       assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
       assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
       g_test_registry_heartbeat_allow = 0;
-      int pool_total = 0, pool_idle = 0, pool_busy = -1, pool_waiters = -1;
-      unsigned long pool_exhausted = 1;
       kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
                                 &pool_exhausted);
       assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
@@ -2736,10 +2746,15 @@ static void test_mtls_listener(void)
       unsigned long pool_handshakes = 0, pool_resumed = 0;
       kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
       assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
-      kb_client_mtls_pool_reset();
+      /* Disabling live restores one-shot requests and drains every idle socket. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
       kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
                                 &pool_exhausted);
       assert(pool_total == 0 && pool_idle == 0);
+      unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);

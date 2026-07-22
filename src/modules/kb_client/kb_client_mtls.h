@@ -27,6 +27,8 @@ int kb_client_mtls_heartbeat(const char *server_id, const char *health, const ch
 void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int *waiters_out,
                                unsigned long *borrow_exhausted_total_out);
 void kb_client_mtls_pool_reset(void);
+/* Bind transport.kb_pool_enabled to the server's live config snapshot. */
+void kb_client_mtls_pool_register_reload(void);
 void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out,
                               unsigned long *resumed_total_out);
 
