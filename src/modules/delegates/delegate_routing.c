@@ -388,6 +388,7 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 
    if (selected)
    {
+      cfg->route_pinned = 1;
       for (int i = 0; i < cfg->agent_count; i++)
       {
          if (&cfg->agents[i] != selected)

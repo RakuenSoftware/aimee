@@ -97,7 +97,7 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
    agent_t *ag = current ? *current : NULL;
    /* Proceed for a retryable failure OR a saturation refusal (AGENT_RC_AT_LIMIT):
     * a same-tier peer may be free even if the primary was momentarily at its cap. */
-   if (!cfg || !ag || !out || !agent_rc_should_try_another(rc, out->error))
+   if (!cfg || cfg->route_pinned || !ag || !out || !agent_rc_should_try_another(rc, out->error))
       return rc;
 
    /* Cost-tier fallback: a tier is a pool. Even when fallback_chain is stale

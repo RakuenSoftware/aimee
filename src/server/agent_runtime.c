@@ -386,6 +386,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
       }
+      if (cfg->route_pinned)
+         break;
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
       if (ntried < MAX_AGENTS)
@@ -607,7 +609,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
+   if (!cfg->route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",

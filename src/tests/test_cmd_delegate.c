@@ -863,6 +863,7 @@ static void test_via_override_rejects_role_mismatch(void)
    assert(errbuf[0] == '\0');
    assert(cfg.agents[0].enabled == 1);
    assert(cfg.agents[1].enabled == 0);
+   assert(cfg.route_pinned == 1);
    printf("  PASS: test_via_override_rejects_role_mismatch\n");
 }
 

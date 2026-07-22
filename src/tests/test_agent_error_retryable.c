@@ -48,6 +48,27 @@ int main(void)
    assert(agent_rc_should_try_another(-1, "job quota exceeded") == 0);
    assert(agent_rc_should_try_another(-1, "HTTP 400 invalid request") == 0);
 
+   /* Every peer-substitutable credential/subscription diagnostic remains a
+    * hard provider-health signal. The two classifiers must stay disjoint. */
+   static const char *const hard_peer_failures[] = {
+       "HTTP 403 authentication failed",
+       "invalid_api_key",
+       "invalid API key",
+       "incorrect API key",
+       "reached your usage limit",
+       "usage limit for this billing cycle",
+       "insufficient_quota",
+       "quota exhausted",
+       "exceeded your current quota",
+       "subscription has lapsed",
+       "payment required",
+   };
+   for (size_t i = 0; i < sizeof(hard_peer_failures) / sizeof(hard_peer_failures[0]); i++)
+   {
+      assert(agent_error_is_retryable(hard_peer_failures[i]) == 0);
+      assert(agent_rc_should_try_another(-1, hard_peer_failures[i]) == 1);
+   }
+
    /* Saturation is NOT a retryable provider error. agent_dispatch_one signals it
     * out-of-band via AGENT_RC_AT_LIMIT and callers key off that rc (never this
     * string), so the "at concurrency limit" message must stay non-retryable — else
