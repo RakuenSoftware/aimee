@@ -167,6 +167,8 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    pthread_condattr_destroy(&attr);
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   /* Parallel seats inherit the worktree that was active when this fan-out was
+    * invoked. Later parent-thread changes are intentionally not observed. */
    const char *parent_cwd = run_cmd_get_cwd();
 
    struct timespec abs;
@@ -302,6 +304,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
     * thread restores it (thread-locals don't cross pthread_create). */
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   /* Capture-at-call-time, matching the deadline path above. */
    const char *parent_cwd = run_cmd_get_cwd();
 
    for (int i = 0; i < task_count; i++)
