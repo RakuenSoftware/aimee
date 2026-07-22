@@ -1,12 +1,13 @@
 /* roundtable_preset.h: server-owned registry of NAMED roundtable presets.
  *
- * A preset captures the full roundtable panel spec — the seats (paired
- * model+persona), the aggregator, the guard/loop knobs, and the authoring
+ * A preset captures positive must-use seats (paired model+persona), the
+ * aggregator, the guard/loop knobs, and the authoring
  * pipeline knobs — so the web GUI can maintain several named configurations and
  * pick which one is "active". Selecting a preset active copies its values into
  * the live config_t ensemble_* and roundtable_* fields (the runtime source of truth,
  * read by delegate_ensemble.c) and records the name in config_t.roundtable_default;
- * the roundtable RUNTIME is otherwise untouched.
+ * the roundtable runtime expands those pins across every remaining enabled,
+ * eligible agent concurrency slot, provider-diversity first.
  *
  * Presets are stored one-per-file as JSON at <config_default_dir()>/roundtables/
  * <name>.json, mirroring the persona registry (persona.{c,h}). Server-side only —

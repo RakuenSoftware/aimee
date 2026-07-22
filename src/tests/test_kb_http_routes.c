@@ -17,10 +17,15 @@
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
+#include "kb_identity.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+
+extern int g_test_registry_heartbeat_allow;
+extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
+    g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
 #include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
 
@@ -1526,17 +1531,49 @@ static void test_capabilities(void)
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
 #include "db2/enrollments.h"
+#include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id)
+int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
+                         const kb_principal_t *transport, const char *fingerprint, char *out,
+                         int out_cap)
+{
+   (void)method;
+   (void)path;
+   (void)body;
+   (void)body_len;
+   (void)transport;
+   (void)fingerprint;
+   snprintf(out, (size_t)out_cap, "{\"error\":\"egress unavailable\"}");
+   return 503;
+}
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
 {
    (void)scope;
    (void)fingerprint;
-   (void)serial;
+   (void)cert_issuer;
+   (void)cert_serial_norm;
    (void)expires_at;
    (void)legacy;
    if (out_id)
       *out_id = 1;
+   return 0;
+}
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id)
+{
+   (void)old_fingerprint;
+   (void)old_issuer;
+   (void)old_serial_norm;
+   (void)scope;
+   (void)new_fingerprint;
+   (void)new_issuer;
+   (void)new_serial_norm;
+   if (out_id)
+      *out_id = 2;
    return 0;
 }
 static void fill_stub_row(db2_enrollment_row_t *r)
@@ -2200,6 +2237,31 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
 
+   /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
+    * authority function; none of it is accepted from JSON or the CN label. */
+   {
+      const char *hb = "{\"server_id\":\"srv-a\",\"health\":\"ok\",\"version\":\"1.0\"}";
+      char req[512], want_issuer[601], raw_serial[129], want_serial[129], want_fp[65];
+      assert(kb_pki_cert_metadata(ccert, want_issuer, sizeof(want_issuer), raw_serial,
+                                  sizeof(raw_serial)) == 0);
+      assert(kb_cert_serial_normalize(raw_serial, want_serial, sizeof(want_serial)) == 0);
+      assert(kb_pki_ca_fingerprint(ccert, want_fp, sizeof(want_fp)) == 0);
+      snprintf(req, sizeof(req),
+               "POST /v1/server/heartbeat HTTP/1.1\r\nContent-Length: %zu\r\nConnection: "
+               "close\r\n\r\n%s",
+               strlen(hb), hb);
+      g_test_registry_heartbeat_allow = 1;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "200 OK"));
+      assert(strcmp(g_test_registry_server_id, "srv-a") == 0);
+      assert(strcmp(g_test_registry_issuer, want_issuer) == 0);
+      assert(strcmp(g_test_registry_serial, want_serial) == 0);
+      assert(strcmp(g_test_registry_fingerprint, want_fp) == 0);
+      g_test_registry_heartbeat_allow = 0;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "403 Forbidden"));
+   }
+
    /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
     * from the client certificate (project:alpha), not the request. */
    mtls_request(sctx, cctx,
@@ -2244,9 +2306,9 @@ static void test_mtls_serve(void)
       SSL_CTX_free(nocert);
    }
 
-   /* Rotation: the authenticated client renews its cert for its CURRENT scope
-    * (project:alpha) by signing a fresh CSR — no token, no operator action. The
-    * renew handler signs with the persisted CA, so save this test's CA there. */
+   /* Rotation without its authoritative PostgreSQL enrollment transaction must
+    * fail closed even though TLS and CA signing are available.  The real-PG P2b
+    * gate covers the successful lineage-preserving renewal path. */
    {
       char cadir[320];
       snprintf(cadir, sizeof(cadir), "%s/kb-ca", kb_default_config_dir());
@@ -2262,10 +2324,8 @@ static void test_mtls_serve(void)
                "close\r\n\r\n%s",
                strlen(rb), rb);
       mtls_request(sctx, cctx, req, resp, sizeof(resp));
-      assert(strstr(resp, "200 OK"));
-      assert(strstr(resp, "client_cert"));
-      assert(strstr(resp, "project:alpha")); /* renewed for the same scope */
-      assert(strstr(resp, "BEGIN CERTIFICATE"));
+      assert(strstr(resp, "503 Service Unavailable"));
+      assert(strstr(resp, "renew persistence unavailable"));
       free(rb);
       cJSON_Delete(rj);
       free(rcsr);
@@ -2371,6 +2431,8 @@ static void test_mtls_listener(void)
    char rbody[4096];
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
                                 NULL, rbody, sizeof(rbody), &st) == 0);
+   if (st != 200)
+      fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
    /* the dialer's request carries the client cert's scope (project:beta): a
@@ -2424,6 +2486,10 @@ static void test_mtls_listener(void)
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
+      assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
+      g_test_registry_heartbeat_allow = 0;
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);
@@ -2440,16 +2506,11 @@ static void test_mtls_listener(void)
       assert(kb_tls_cert_expires_within(sc, 1) == 0);
       assert(kb_tls_cert_expires_within(ca.cert_pem, 60L * 60 * 24 * 14) == 0);
 
-      /* rotate the project:beta identity -> a genuinely new cert, same scope,
-       * chaining to the CA, and usable to dial. */
+      /* With no authoritative enrollment DB in this unit fixture, renewal is
+       * refused before a new certificate can escape. */
       char nc[KB_PKI_CERT_PEM_MAX], nk[KB_PKI_KEY_PEM_MAX];
       assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, nc, sizeof(nc), nk,
-                          sizeof(nk)) == 0);
-      assert(kb_pki_verify_client_cert(ca.cert_pem, nc) == 1);
-      assert(strcmp(nc, ccert) != 0);
-      assert(kb_tls_client_request("localhost", port, ca.cert_pem, nc, nk, "GET", "/v1/health",
-                                   NULL, rbody, sizeof(rbody), &st) == 0);
-      assert(st == 200);
+                          sizeof(nk)) != 0);
    }
 
    SSL_CTX_free(cctx);

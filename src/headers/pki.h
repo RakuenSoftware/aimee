@@ -70,6 +70,17 @@ extern "C"
    /* Human-readable label for a pki_cert_status_t, for distinct-cause logging. */
    const char *pki_cert_status_str(pki_cert_status_t s);
 
+   /* Durable optional->required mTLS ramp. Startup returns the effective mode
+    * (never weaker than configured_mode). A valid per-request certificate check
+    * may then record presentation; ready is a read-only preflight, and advance
+    * repeats the same roster/hash test under BEGIN IMMEDIATE before committing
+    * the monotonic state transition. */
+   int pki_mtls_ramp_init(int configured_mode);
+   int pki_mtls_note_presentation(const char *serial, long now);
+   int pki_mtls_ramp_ready(long now);
+   int pki_mtls_ramp_advance(long now);
+   int pki_mtls_ramp_get(int *state_out, char *hash_out, size_t hash_len, long *advanced_at_out);
+
    /* Enumerate issued certs (newest first), invoking cb per row. Returns the row
     * count, or -1 on error. Keeps pki.c free of the JSON layer. */
    int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,

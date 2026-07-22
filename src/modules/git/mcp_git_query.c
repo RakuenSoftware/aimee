@@ -269,8 +269,11 @@ static int mcp_git_is_managed_worktree_root(const char *path)
 
 /* --- Merged-PR detection --- */
 
-/* Check if the given branch has a merged PR. Returns 1 if merged, 0 if not.
- * Skips the check for main/master. */
+/* Check if the given branch is still at the head of its latest merged PR.
+ * Returns 1 only when reusing the branch would mutate an already-merged line
+ * with no new commits. Long-lived integration branches (for example testing)
+ * may accumulate new commits and open another promotion PR. Skips the check
+ * for main/master. */
 int check_branch_has_merged_pr_for(const char *branch)
 {
    if (!branch || !branch[0])
@@ -280,7 +283,8 @@ int check_branch_has_merged_pr_for(const char *branch)
 
    char cmd[512];
    snprintf(cmd, sizeof(cmd),
-            "gh pr list --head '%s' --state merged --json number --limit 1 2>/dev/null", branch);
+            "gh pr list --head '%s' --state merged --json number,headRefOid --limit 1 2>/dev/null",
+            branch);
 
    int rc;
    char *out = mcp_git_run(cmd, &rc);
@@ -290,9 +294,38 @@ int check_branch_has_merged_pr_for(const char *branch)
       return 0; /* gh not available or failed -- don't block */
    }
 
-   int has_merged = (strstr(out, "\"number\"") != NULL);
+   cJSON *prs = cJSON_Parse(out);
    free(out);
-   return has_merged;
+   if (!prs || !cJSON_IsArray(prs) || cJSON_GetArraySize(prs) == 0)
+   {
+      cJSON_Delete(prs);
+      return 0;
+   }
+
+   cJSON *latest = cJSON_GetArrayItem(prs, 0);
+   cJSON *merged_head = cJSON_GetObjectItemCaseSensitive(latest, "headRefOid");
+   if (!cJSON_IsString(merged_head) || !merged_head->valuestring[0])
+   {
+      cJSON_Delete(prs);
+      return 1; /* A merged PR exists but its head is unavailable: fail closed. */
+   }
+
+   char merged_head_oid[128];
+   snprintf(merged_head_oid, sizeof(merged_head_oid), "%s", merged_head->valuestring);
+   cJSON_Delete(prs);
+
+   char *current_head = mcp_git_run("git rev-parse HEAD 2>/dev/null", &rc);
+   if (rc != 0 || !current_head)
+   {
+      free(current_head);
+      return 1;
+   }
+   char *nl = strchr(current_head, '\n');
+   if (nl)
+      *nl = '\0';
+   int unchanged_since_merge = (strcmp(current_head, merged_head_oid) == 0);
+   free(current_head);
+   return unchanged_since_merge;
 }
 
 /* --- Branch helper --- */

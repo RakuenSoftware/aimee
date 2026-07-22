@@ -287,11 +287,11 @@ typedef struct config
    char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
-   int subagent_ban_enabled;        /* default ON: when set AND usable delegates are configured,
-                                       block the primary agent's own sub-agent tools (Task/Agent/
-                                       spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
-                                       Explicit `subagent_ban_enabled: false` allows provider-native
-                                       sub-agents. */
+   int subagent_ban_enabled; /* default ON: when set AND usable delegates are configured,
+                                block the primary agent's own sub-agent tools (Task/Agent/
+                                spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
+                                Explicit `subagent_ban_enabled: false` allows provider-native
+                                sub-agents. */
    char provider[16];
    /* Durable default persona: the persona a fresh primary session starts as, and
     * the persona draft roundtable panelists author with when none is set. Width =
@@ -1158,6 +1158,23 @@ typedef struct config
    int autonomy_unit_retry;
    int autonomy_unit_max;
    int autonomy_ci_retry_max;
+   /* Run safety caps + auto-resume policy — historically env-only (AIMEE_AUTONOMY_*);
+    * now config-backed + live via config_autonomy_lookup so they are tunable from the web
+    * Settings GUI (an exported env var still overrides). Defaults match the historical env
+    * defaults, so behavior is unchanged until an operator changes them.
+    * autonomy_max_turns: cumulative persisted-turn cap per run (runaway backstop).
+    * autonomy_max_wall_secs: per-resume wall-clock cap in seconds.
+    * autonomy_stale_abandon_secs: grace before a cap/stuck park is reaped -> abandoned (0
+    * disables). autonomy_concurrency: max concurrently-driven autonomous runs.
+    * autonomy_auto_resume_cap_parks: 1 = scheduler auto-resumes a wall-cap park (giving it a
+    *   fresh wall window) instead of leaving it to be reaped; bounded by autonomy_max_resumes.
+    * autonomy_max_resumes: max auto-resumes per run before the reaper is allowed to win. */
+   int autonomy_max_turns;
+   int autonomy_max_wall_secs;
+   int autonomy_stale_abandon_secs;
+   int autonomy_concurrency;
+   int autonomy_auto_resume_cap_parks;
+   int autonomy_max_resumes;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
@@ -1932,7 +1949,8 @@ typedef struct config
    char db2_vector_corpus_index[16];
    int64_t db2_vector_corpus_diskann_threshold;
    /* Mixture-of-Agents ensemble (ensemble.*).
-    * ensemble_reference_models: diverse model/agent names for the fan-out.
+    * ensemble_reference_models: positive must-use agent pins. Runtime fills all
+    * other enabled, eligible agent capacity, provider-diversity first.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means

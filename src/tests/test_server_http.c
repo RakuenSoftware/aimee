@@ -48,6 +48,8 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 static _Thread_local char g_disp_method[96];
 static _Thread_local char g_disp_body[24576];
 static char g_agg_body[24576];
+static server_ctx_t g_test_server_ctx;
+static int g_test_server_ctx_available = 1;
 
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
@@ -76,7 +78,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 }
 server_ctx_t *server_active_ctx(void)
 {
-   return NULL;
+   return g_test_server_ctx_available ? &g_test_server_ctx : NULL;
 }
 
 /* The HTTP router owns only the adapter around management authorization. The
@@ -113,6 +115,8 @@ int main(void)
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
    platform_setenv("AIMEE_HOME", home);
+   assert(compute_pool_init(&g_test_server_ctx.orchestration_pool, 4) == 0);
+   g_test_server_ctx.orchestration_pool_initialized = 1;
 
    char resp[8192];
 
@@ -122,6 +126,18 @@ int main(void)
       assert(st == 200);
       assert(strstr(resp, "\"status\":\"ok\""));
       assert(strstr(resp, "\"service\":\"aimee-server\""));
+   }
+
+   /* P5-A: legacy management environment cannot enable a write route. */
+   {
+      platform_setenv("AIMEE_MGMT_JWKS", "{\"keys\":[]}");
+      platform_setenv("AIMEE_MGMT_ISSUER", "legacy-issuer");
+      platform_setenv("AIMEE_MGMT_AUDIENCE", "legacy-audience");
+      platform_setenv("AIMEE_MGMT_PEER_CN", "legacy-peer");
+      int st = server_http_route("POST", "/v1/management/action",
+                                 "{\"token\":\"legacy\",\"target\":\"x\"}", 31, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "management control plane is not enabled"));
    }
 
    /* --- GET /v1/version reports the build version --- */
@@ -941,6 +957,27 @@ int main(void)
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_DATA) == CAPS_AUTHENTICATED);
       assert(server_http_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL) == CAPS_ALL);
 
+      /* P8 thin-client posture is independent of the operator's generic TCP
+       * remote_writes setting: bearer fallback is query-only and a cert gains
+       * authenticated session capabilities, never CAPS_ALL. */
+      uint32_t fallback = CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT;
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 0) ==
+             fallback);
+      assert(server_http_effective_conn_caps(1, "plain", SERVER_REMOTE_WRITES_FULL, 1, 1) ==
+             CAPS_AUTHENTICATED);
+      assert(server_http_mtls_transport_allowed(1, 1, 0) == 1);
+      assert(server_http_mtls_transport_allowed(1, 2, 0) == 0);
+      assert(server_http_mtls_transport_allowed(1, 2, 1) == 1);
+      assert(server_http_mtls_transport_allowed(0, 2, 0) == 1);
+      assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/chat/completions",
+                                            SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/chat/completions",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+
       /* UDS is always full, independent of the level. */
       assert(server_http_conn_caps(0, NULL, SERVER_REMOTE_WRITES_OFF) == CAPS_ALL);
    }
@@ -1008,6 +1045,15 @@ int main(void)
       assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
+      g_test_server_ctx_available = 0;
+      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+                                       CAP_DELEGATE, rb, sizeof(rb)) == 503);
+      assert(strstr(rb, "orchestration unavailable"));
+      g_test_server_ctx_available = 1;
+      compute_pool_close(&g_test_server_ctx.orchestration_pool);
+      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+                                       CAP_DELEGATE, rb, sizeof(rb)) == 503);
+      assert(strstr(rb, "orchestration unavailable"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */
@@ -1199,6 +1245,8 @@ int main(void)
       unsetenv("AIMEE_WEBCHAT_GIT");
    }
 
+   compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
+   g_test_server_ctx.orchestration_pool_initialized = 0;
    platform_test_rmrf(home);
    printf("OK\n");
    return 0;

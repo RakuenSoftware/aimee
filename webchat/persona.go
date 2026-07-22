@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,11 +20,38 @@ func (s *server) aimeeHTTPSockPath() string {
 	return filepath.Join(filepath.Dir(s.cfg.socketPath), "aimee-http.sock")
 }
 
+func (s *server) aimeeHTTPSockPathFor(path string) string {
+	if os.Getenv("AIMEE_WFE_ENGINE") == "go" &&
+		(path == "/v1/workflow" || strings.HasPrefix(path, "/v1/workflow/") || path == "/v1/trigger/fire" || path == "/v1/dev/submit") {
+		if configured := strings.TrimSpace(os.Getenv("AIMEE_WFE_HTTP_SOCKET")); configured != "" {
+			return configured
+		}
+	}
+	return s.aimeeHTTPSockPath()
+}
+
+// readBoundedBody applies an explicit memory bound before proxying a request to
+// either local control plane. Every state-changing proxy must opt into a finite
+// route-specific limit; socket timeouts do not protect against a streaming body.
+func readBoundedBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, oversized := err.(*http.MaxBytesError); oversized {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+			return nil, false
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return nil, false
+	}
+	return body, true
+}
+
 // v1Request performs an HTTP request against aimee-server's /v1 API over its
 // Unix socket. Personas (like all new client↔server features) are reached over
 // /v1, never the legacy RPC socket. Returns status, body, and a transport error.
 func (s *server) v1Request(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
-	sock := s.aimeeHTTPSockPath()
+	sock := s.aimeeHTTPSockPathFor(path)
 	// Bound the call at socketCallTimeout by default, but let a caller that passed
 	// a longer ctx deadline (e.g. the subscription-OAuth `start` proxy, whose first
 	// call installs the vendor CLI server-side) extend it. Never shorten below the

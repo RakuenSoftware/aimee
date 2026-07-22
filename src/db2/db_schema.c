@@ -44,6 +44,7 @@ static void db2_run_sqlite_migrations(sqlite3 *db)
         * (the postgres side uses IF NOT EXISTS in schema.sql). */
        "ALTER TABLE kb_async_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE kb_code_unit_jobs ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE kb_vault_rewrap_operation ADD COLUMN failure_from_state TEXT",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)

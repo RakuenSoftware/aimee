@@ -367,12 +367,55 @@ int main(void)
    printf("pki: existing server cert authoritative (kept across identity change; minted only when "
           "absent) ok\n");
 
+   /* P8c durable optional->required ramp. Isolate the authoritative roster by
+    * retiring all earlier test certs before initializing the singleton. */
+   sqlite3 *rdb = db1_conn();
+   assert(rdb);
+   assert(sqlite3_exec(rdb, "UPDATE pki_certs SET revoked=1", NULL, NULL, NULL) == SQLITE_OK);
+   assert(pki_mtls_ramp_init(1) == 1);
+   int ramp_state = 0;
+   char roster_hash[65] = "";
+   long advanced_at = -1;
+   assert(pki_mtls_ramp_get(&ramp_state, roster_hash, sizeof(roster_hash), &advanced_at) == 0);
+   assert(ramp_state == 1 && strlen(roster_hash) == 64 && advanced_at == 0);
+   assert(pki_mtls_ramp_ready(p8_now) == 0); /* empty rosters never advance */
+
+   char r1c[8192] = "", r1k[4096] = "", r1s[64] = "";
+   char r2c[8192] = "", r2k[4096] = "", r2s[64] = "";
+   assert(pki_issue("ramp-client-1", 30, r1c, sizeof(r1c), r1k, sizeof(r1k), r1s, sizeof(r1s)) ==
+          0);
+   assert(pki_issue("ramp-client-2", 30, r2c, sizeof(r2c), r2k, sizeof(r2k), r2s, sizeof(r2s)) ==
+          0);
+   long ramp_now = (long)time(NULL);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0);
+   assert(pki_mtls_note_presentation(r1s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0); /* partial roster holds */
+   assert(pki_mtls_note_presentation(r2s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 1);
+
+   /* A new enrollment after preflight changes the transactional roster hash and
+    * invalidates the stale readiness result until that client presents. */
+   char r3c[8192] = "", r3k[4096] = "", r3s[64] = "";
+   assert(pki_issue("ramp-client-3", 30, r3c, sizeof(r3c), r3k, sizeof(r3k), r3s, sizeof(r3s)) ==
+          0);
+   ramp_now = (long)time(NULL);
+   assert(pki_mtls_ramp_ready(ramp_now) == 0);
+   assert(pki_mtls_note_presentation(r3s, ramp_now) == 0);
+   assert(pki_mtls_ramp_ready(ramp_now) == 1);
+   assert(pki_mtls_ramp_advance(ramp_now) == 1);
+   assert(pki_mtls_ramp_advance(ramp_now + 1) == 0); /* idempotent + monotonic */
+   assert(pki_mtls_ramp_get(&ramp_state, roster_hash, sizeof(roster_hash), &advanced_at) == 0);
+   assert(ramp_state == 2 && advanced_at == ramp_now);
+   assert(pki_mtls_ramp_init(1) == 2); /* restart preserves required posture */
+   printf("pki: P8c durable mTLS ramp + stale-roster race gate ok\n");
+
    /* (g) Authority-down path: with DB1 shut down, db1_conn() is NULL, so the
     * durable read cannot answer -> PKI_CERT_ERROR (fail-closed, NOT a misleading
     * UNKNOWN). Done last, as it tears down the shared :memory: DB. The caller
     * (handle_conn) refuses 403 on ERROR just as on REVOKED/EXPIRED/UNKNOWN. */
    db1_shutdown();
    assert(pki_cert_check("any-serial", (long)time(NULL)) == PKI_CERT_ERROR);
+   assert(pki_mtls_ramp_init(1) == -1); /* never fall back to optional on DB failure */
    printf("pki: P8a authority-down -> ERROR (fail-closed) ok\n");
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);

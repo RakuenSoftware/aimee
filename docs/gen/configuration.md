@@ -240,7 +240,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
 - **`aimee`** — _Core API/runtime settings._ Keys: `api`
-- **`autonomy`** — `ci_retry_max`, `fanout`, `skeptics`, `unit_max`, `unit_retry`
+- **`autonomy`** — `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
 - **`auxiliary`** — _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
 - **`cache_shaping`** — _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
 - **`charter`** — _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
@@ -351,7 +351,6 @@ The binaries read 181 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GITHUB_OAUTH_CLIENT_SECRET` | Client secret of the GitHub OAuth App. Enables the seamless web (redirect) sign-in; without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image. |
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_INGRESS_PROXY_SECRET` | Shared secret authenticating a trusted ingress proxy's identity headers. |
-| `AIMEE_PARALLEL_MAX` | Maximum parallel agent fan-out. |
 | `AIMEE_SERVER_HTTP_BIND` | TCP bind address for the server `/v1` HTTP listener (else UDS-only). |
 | `AIMEE_SERVER_STARTUP_FD` | Inherited fd for startup-readiness signalling (service launch). |
 | `AIMEE_SESSION_THREADS` | Per-session worker thread count. |
@@ -386,6 +385,7 @@ The binaries read 181 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
 | `AIMEE_LLM_URL` | One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md. |
+| `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 
 ### Database & vectors
@@ -505,7 +505,7 @@ The binaries read 181 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_CONCURRENCY`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_STALE_ABANDON_SECS`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_MGMT_AUDIENCE`, `AIMEE_MGMT_CAP`, `AIMEE_MGMT_ISSUER`, `AIMEE_MGMT_JWKS`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_KB_STATUS_BIND`, `AIMEE_KB_STATUS_PORT`, `AIMEE_KB_STATUS_PROVISION_DSN`, `AIMEE_MGMT_STATUS_KEY_ID`, `AIMEE_MGMT_STATUS_PUBLIC_KEY`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_ENGINE`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 

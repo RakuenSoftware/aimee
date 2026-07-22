@@ -1480,7 +1480,7 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
 {
    char tmpdir[256], fake_home[256], fake_bin_dir[256];
    const char fake_gh_script[] = "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n"
-                                 "  printf '[{\"number\":537}]\\n'\n"
+                                 "  printf '[{\"number\":537,\"headRefOid\":\"merged-head\"}]\\n'\n"
                                  "  exit 0\n"
                                  "fi\n"
                                  "exit 1\n";
@@ -1488,6 +1488,10 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--abbrev-ref\" ] && "
        "[ \"$3\" = \"HEAD\" ]; then\n"
        "  printf 'feature-reused\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then\n"
+       "  printf 'merged-head\\n'\n"
        "  exit 0\n"
        "fi\n"
        "exit 1\n";
@@ -1514,6 +1518,60 @@ static void test_verify_prepare_pr_blocks_branch_with_merged_pr(void)
    assert(text != NULL);
    assert(strstr(text, "Branch Reuse: BLOCKED") != NULL);
    assert(strstr(text, "already has a merged PR") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   assert(chdir(saved_cwd) == 0);
+
+   {
+      char cmd[1024];
+      snprintf(cmd, sizeof(cmd), "rm -rf '%s'", fake_bin_dir);
+      system(cmd);
+   }
+   verify_test_teardown(tmpdir, fake_home);
+}
+
+static void test_verify_prepare_pr_allows_reused_branch_with_new_head(void)
+{
+   char tmpdir[256], fake_home[256], fake_bin_dir[256];
+   const char fake_gh_script[] = "if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"list\" ]; then\n"
+                                 "  printf '[{\"number\":537,\"headRefOid\":\"merged-head\"}]\\n'\n"
+                                 "  exit 0\n"
+                                 "fi\n"
+                                 "exit 1\n";
+   const char fake_git_script[] =
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"--abbrev-ref\" ] && "
+       "[ \"$3\" = \"HEAD\" ]; then\n"
+       "  printf 'testing\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then\n"
+       "  printf 'new-testing-head\\n'\n"
+       "  exit 0\n"
+       "fi\n"
+       "exit 1\n";
+   verify_test_setup_repo(tmpdir, sizeof(tmpdir), "aimee-test-verify-reused-pr-new-head");
+   verify_test_write_yaml(tmpdir, fake_home, sizeof(fake_home),
+                          "verify:\n"
+                          "  enforce: false\n"
+                          "  steps:\n"
+                          "    - name: verify-local\n"
+                          "      run: echo ok\n");
+   verify_test_set_fake_path(fake_bin_dir, sizeof(fake_bin_dir));
+   verify_test_write_fake_gh(fake_bin_dir, fake_gh_script);
+   verify_test_write_fake_git(fake_bin_dir, fake_git_script);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "prepare-pr");
+   cJSON_AddStringToObject(args, "base", "main");
+   cJSON *resp = handle_git_verify(NULL, args, NULL);
+   char *text = get_mcp_text(resp);
+   assert(text != NULL);
+   assert(strstr(text, "Branch Reuse: BLOCKED") == NULL);
    cJSON_Delete(resp);
    cJSON_Delete(args);
 
@@ -2354,6 +2412,7 @@ int main(void)
    test_verify_load_config_falls_back_to_verify_local();
    test_verify_load_config_old_flat_format_ignored();
    test_verify_prepare_pr_blocks_branch_with_merged_pr();
+   test_verify_prepare_pr_allows_reused_branch_with_new_head();
 
    /* Verify gate enforcement tests */
    test_verify_gate_not_enforced_without_enforce_flag();

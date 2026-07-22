@@ -9,6 +9,34 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
+# The server image entrypoint must honor Docker's explicit command override.
+# Run it outside the image: dispatch must happen before any image-only bootstrap.
+entrypoint_output=$(sh ../deploy/container/server-entrypoint.sh \
+    printf '%s\n' entrypoint-command-override 2>/dev/null)
+if [ "$entrypoint_output" = "entrypoint-command-override" ]; then
+    pass "server entrypoint honors explicit command override"
+else
+    fail "server entrypoint ignored explicit command override"
+fi
+
+# The server image intentionally supervises multiple long-lived planes. Its
+# entrypoint shell therefore cannot be PID 1: orphaned git/agent grandchildren
+# would accumulate as zombies until the appliance could no longer fork.
+if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
+   grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
+    pass "server image uses a PID 1 subreaper"
+else
+    fail "server image must install and enter through tini"
+fi
+
+if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
+   grep -q 'wfe_autonomy_register();' server/server.c ||
+   grep -q 'wfe_scheduler_init();' server/server.c; then
+    fail "C WFE runtime ownership is still reachable"
+else
+    pass "Go is the exclusive WFE runtime owner"
+fi
+
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;
@@ -933,6 +961,10 @@ _group_dynlink() {
         fi
         if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'db1_|sqlite3_'; then
             fail "aimee-kb: DB1/sqlite symbols present in DB2-only kb"
+            dl_fail=1
+        fi
+        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'kb_mgmt_status_provision|db2_management_status_provision'; then
+            fail "aimee-kb: offline status-provisioner symbols present in runtime kb"
             dl_fail=1
         fi
         # Server must dynamically link ssl and crypto

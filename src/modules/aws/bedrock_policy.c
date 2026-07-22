@@ -29,7 +29,27 @@ static int token_safe(const char *s)
  * arn:<partition>:bedrock:<region>::foundation-model/<id> for the SAME partition —
  * so a malformed, wildcard, or cross-service ARN cannot be smuggled verbatim into
  * the least-privilege Resource set. Rejects any '*' and any non-bedrock service. */
-static int fm_arn_valid(const char *arn, const char *part)
+static int region_valid(const char *region)
+{
+   if (!region || !region[0] || strlen(region) > 63)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)region; *p; p++)
+      if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-'))
+         return 0;
+   return 1;
+}
+
+static int account_valid(const char *account)
+{
+   if (!account || strlen(account) != 12)
+      return 0;
+   for (size_t i = 0; i < 12; i++)
+      if (account[i] < '0' || account[i] > '9')
+         return 0;
+   return 1;
+}
+
+static int fm_arn_region(const char *arn, const char *part, char region[64])
 {
    if (!token_safe(arn)) /* token_safe already forbids '*' and whitespace */
       return 0;
@@ -37,8 +57,17 @@ static int fm_arn_valid(const char *arn, const char *part)
    int pn = snprintf(prefix, sizeof(prefix), "arn:%s:bedrock:", part);
    if (pn <= 0 || (size_t)pn >= sizeof(prefix) || strncmp(arn, prefix, (size_t)pn) != 0)
       return 0;
-   /* Must name the foundation-model resource type (empty account: '::'). */
-   return strstr(arn, "::foundation-model/") != NULL;
+   const char *start = arn + (size_t)pn;
+   const char *suffix = strstr(start, "::foundation-model/");
+   if (!suffix || suffix == start || strchr(start, ':') != suffix ||
+       !suffix[strlen("::foundation-model/")])
+      return 0;
+   size_t n = (size_t)(suffix - start);
+   if (n >= 64)
+      return 0;
+   memcpy(region, start, n);
+   region[n] = '\0';
+   return region_valid(region);
 }
 
 static int partition_valid(const char *p)
@@ -47,7 +76,7 @@ static int partition_valid(const char *p)
 }
 
 /* A bounded, sorted, de-duplicated string set for the resource ARNs. */
-#define MAX_RES 64
+#define MAX_RES 65
 #define RES_LEN 512
 typedef struct
 {
@@ -96,10 +125,11 @@ int bedrock_session_policy(const bedrock_target_t *t, int is_streaming, char *ou
       return -1;
    if (!token_safe(t->id))
       return -1;
-   if (!t->region_set || t->n_regions == 0)
+   if (!region_valid(t->invoke_region) || !t->region_set || t->n_regions == 0 ||
+       t->n_regions > 64 || t->n_underlying > 64)
       return -1;
    for (size_t i = 0; i < t->n_regions; i++)
-      if (!token_safe(t->region_set[i]))
+      if (!region_valid(t->region_set[i]))
          return -1;
 
    res_set_t rs;
@@ -110,23 +140,27 @@ int bedrock_session_policy(const bedrock_target_t *t, int is_streaming, char *ou
    {
    case BEDROCK_TARGET_FOUNDATION:
       /* foundation-model ARN has no account segment (::). */
-      for (size_t i = 0; i < t->n_regions; i++)
-         if (res_addf(&rs, "arn:%s:bedrock:%s::foundation-model/%s", part, t->region_set[i],
-                      t->id) != 0)
-            return -1;
+      if (t->n_regions != 1 || strcmp(t->region_set[0], t->invoke_region) != 0 ||
+          t->n_underlying != 0)
+         return -1;
+      if (res_addf(&rs, "arn:%s:bedrock:%s::foundation-model/%s", part, t->invoke_region, t->id) !=
+          0)
+         return -1;
       break;
 
    case BEDROCK_TARGET_PROVISIONED:
    case BEDROCK_TARGET_CUSTOM:
    {
-      if (!token_safe(t->account))
+      if (!account_valid(t->account))
+         return -1;
+      if (t->n_regions != 1 || strcmp(t->region_set[0], t->invoke_region) != 0 ||
+          t->n_underlying != 0)
          return -1;
       const char *kind =
           (t->type == BEDROCK_TARGET_PROVISIONED) ? "provisioned-model" : "custom-model";
-      for (size_t i = 0; i < t->n_regions; i++)
-         if (res_addf(&rs, "arn:%s:bedrock:%s:%s:%s/%s", part, t->region_set[i], t->account, kind,
-                      t->id) != 0)
-            return -1;
+      if (res_addf(&rs, "arn:%s:bedrock:%s:%s:%s/%s", part, t->invoke_region, t->account, kind,
+                   t->id) != 0)
+         return -1;
       break;
    }
 
@@ -136,27 +170,40 @@ int bedrock_session_policy(const bedrock_target_t *t, int is_streaming, char *ou
       /* A profile with no resolved underlying destination FMs is underivable. */
       if (t->n_underlying == 0 || !t->underlying_fm_arns)
          return -1;
-      if (!token_safe(t->account))
+      if (!account_valid(t->account))
          return -1;
       const char *kind = (t->type == BEDROCK_TARGET_APP_INFERENCE_PROFILE)
                              ? "application-inference-profile"
                              : "inference-profile";
-      for (size_t i = 0; i < t->n_regions; i++)
-         if (res_addf(&rs, "arn:%s:bedrock:%s:%s:%s/%s", part, t->region_set[i], t->account, kind,
-                      t->id) != 0)
-            return -1;
+      if (res_addf(&rs, "arn:%s:bedrock:%s:%s:%s/%s", part, t->invoke_region, t->account, kind,
+                   t->id) != 0)
+         return -1;
       /* PLUS every underlying destination-region foundation-model ARN. Each is
        * SHAPE-VALIDATED (arn:<part>:bedrock:<region>::foundation-model/<id>) before
        * emission so a malformed / cross-service / wildcard ARN in the target struct
        * fails closed rather than leaking an unrelated Resource into the IAM policy.
        * (Defence-in-depth atop the P6b invariant that the target is authoritative.) */
+      int covered[64] = {0};
       for (size_t i = 0; i < t->n_underlying; i++)
       {
-         if (!fm_arn_valid(t->underlying_fm_arns[i], part))
+         char region[64];
+         if (!fm_arn_region(t->underlying_fm_arns[i], part, region))
+            return -1;
+         int found = 0;
+         for (size_t j = 0; j < t->n_regions; j++)
+            if (strcmp(t->region_set[j], region) == 0)
+            {
+               found = covered[j] = 1;
+               break;
+            }
+         if (!found)
             return -1;
          if (res_add(&rs, t->underlying_fm_arns[i]) != 0)
             return -1;
       }
+      for (size_t i = 0; i < t->n_regions; i++)
+         if (!covered[i])
+            return -1;
       break;
    }
 

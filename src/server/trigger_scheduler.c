@@ -350,10 +350,57 @@ static void trigger_trim_line(char *s)
       s[--n] = '\0';
 }
 
+/* A proposal rule names a branch in `schedule`. Keep the watched remote-tracking
+ * ref fresh without checking it out or modifying the operator's working tree.
+ * The conservative character set is enough for ordinary Git branch names; an
+ * unusual ref simply falls back to the pre-existing local-ref behavior. */
+static int trigger_remote_branch(const char *schedule, char *out, size_t n)
+{
+   const char *branch = schedule ? schedule : "";
+   if (strncmp(branch, "origin/", 7) == 0)
+      branch += 7;
+   if (!branch[0] || branch[0] == '-' || branch[0] == '.' || strstr(branch, "..") ||
+       strstr(branch, "//"))
+      return 0;
+   size_t len = strlen(branch);
+   if (len + 1 > n || branch[len - 1] == '/' || branch[len - 1] == '.' ||
+       (len >= 5 && strcmp(branch + len - 5, ".lock") == 0))
+      return 0;
+   for (size_t i = 0; i < len; i++)
+      if (!(isalnum((unsigned char)branch[i]) || branch[i] == '-' || branch[i] == '_' ||
+            branch[i] == '.' || branch[i] == '/'))
+         return 0;
+   snprintf(out, n, "%s", branch);
+   return 1;
+}
+
+static int trigger_fetch_scheduled_ref(const char *workspace, const char *schedule, char *out,
+                                       size_t n)
+{
+   char branch[256];
+   if (!trigger_remote_branch(schedule, branch, sizeof(branch)))
+      return 0;
+   char refspec[600];
+   if (snprintf(refspec, sizeof(refspec), "+refs/heads/%s:refs/remotes/origin/%s", branch,
+                branch) >= (int)sizeof(refspec))
+      return 0;
+   const char *const fetch_argv[] = {"git", "fetch", "--quiet", "origin", refspec, NULL};
+   char *fetch_out = NULL;
+   int rc = trigger_git_capture(fetch_argv, workspace, &fetch_out);
+   free(fetch_out);
+   if (rc != 0)
+      return 0; /* offline/local-only repositories retain the old local-ref path */
+   if (snprintf(out, n, "origin/%s", branch) >= (int)n)
+      return 0;
+   return 1;
+}
+
 static void trigger_resolve_ref(const char *workspace, const char *schedule, char *out, size_t n)
 {
    if (schedule && schedule[0])
    {
+      if (trigger_fetch_scheduled_ref(workspace, schedule, out, n))
+         return;
       snprintf(out, n, "%s", schedule);
       return;
    }
@@ -536,10 +583,12 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
    return 0;
 }
 
-/* Count ACTIVE work items that were filed by the proposals trigger (their
+/* Count ACTIVE AUTONOMOUS work items that were filed by the proposals trigger (their
  * proposal artifact lives under <home>/triggers/proposals/), across all rules —
  * trigger.max_concurrent is a GLOBAL cap on concurrently-executing triggered
- * runs. Returns the count, or -1 on a DB read failure (caller fails closed:
+ * runs. Interactive/legacy watch rows cannot execute under the autonomy
+ * scheduler and therefore must never consume its admission slots. Returns the
+ * count, or -1 on a DB read failure (caller fails closed:
  * files nothing this pass rather than overshooting the cap). */
 static int trigger_active_filed_runs(const char *home)
 {
@@ -556,7 +605,7 @@ static int trigger_active_filed_runs(const char *home)
    int active = 0;
    size_t plen = strlen(prefix);
    for (int i = 0; i < n; i++)
-      if (strcmp(items[i].state, "active") == 0 &&
+      if (strcmp(items[i].state, "active") == 0 && strcmp(items[i].mode, "autonomous") == 0 &&
           strncmp(items[i].proposal_path, prefix, plen) == 0)
          active++;
    free(items);
@@ -583,6 +632,57 @@ static int proposal_name_matches(const char *entry_name, const char *want)
       if (wl == bl - 3 && strncmp(base, want, wl) == 0) /* basename minus the .md suffix */
          return 1;
    }
+   return 0;
+}
+
+static void trigger_path_segment(const char *src, char *out, size_t n)
+{
+   size_t j = 0;
+   for (size_t i = 0; src && src[i] && j + 1 < n; i++)
+   {
+      unsigned char c = (unsigned char)src[i];
+      out[j++] = (char)((isalnum(c) || c == '-' || c == '_' || c == '.') ? c : '_');
+   }
+   out[j] = '\0';
+   if (!out[0] && n > 1)
+      snprintf(out, n, "default");
+}
+
+/* The original artifact identity was only the proposal blob SHA. Preserve that
+ * stable key for completed/current runs, but let a different workflow lane or
+ * execution mode supersede a legacy binding. The lane-scoped key is deterministic,
+ * so subsequent scans still deduplicate normally. */
+static int trigger_proposal_artifact_path(const trigger_rule_t *rule, const char *home,
+                                          const char *sha, char *out, size_t n)
+{
+   if (snprintf(out, n, "%s/triggers/proposals/%s.md", home, sha) >= (int)n)
+      return -1;
+   char existing[80];
+   int found = db1_work_item_id_by_proposal(rule->workspace, out, existing, sizeof(existing));
+   if (found <= 0)
+      return found < 0 ? -1 : 0;
+
+   db1_work_item_t wi;
+   const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+   if (db1_work_item_get(existing, &wi) != 1)
+      return -1;
+   if (strcmp(wi.workflow_name, rule->pipeline_template) == 0 && strcmp(wi.mode, mode) == 0)
+      return 1; /* already filed by this lane */
+
+   char workflow[80], run_mode[32];
+   trigger_path_segment(rule->pipeline_template, workflow, sizeof(workflow));
+   trigger_path_segment(mode, run_mode, sizeof(run_mode));
+   if (snprintf(out, n, "%s/triggers/proposals/%s.%s.%s.md", home, sha, workflow, run_mode) >=
+       (int)n)
+      return -1;
+   found = db1_work_item_id_by_proposal(rule->workspace, out, existing, sizeof(existing));
+   if (found == 1)
+      return 1;
+   if (found < 0)
+      return -1;
+   aimee_log(LOG_INFO, "trigger.sched",
+             "proposals: superseding legacy binding id=%s workflow=%s mode=%s with %s/%s",
+             wi.work_item_id, wi.workflow_name, wi.mode, rule->pipeline_template, mode);
    return 0;
 }
 
@@ -701,13 +801,9 @@ static int scan_proposals_ex(const trigger_rule_t *rule, int max_concurrent, con
          break;
       }
       char proposal_path[1200];
-      if (snprintf(proposal_path, sizeof(proposal_path), "%s/triggers/proposals/%s.md", home,
-                   entries[i].sha) >= (int)sizeof(proposal_path))
-         continue;
-
-      char existing[80];
-      if (db1_work_item_id_by_proposal(rule->workspace, proposal_path, existing,
-                                       sizeof(existing)) == 1)
+      int artifact = trigger_proposal_artifact_path(rule, home, entries[i].sha, proposal_path,
+                                                    sizeof(proposal_path));
+      if (artifact != 0) /* 1 = already filed; -1 = DB/path error (fail closed) */
          continue;
 
       const char *const cat_argv[] = {"git", "cat-file", "blob", entries[i].sha, NULL};
@@ -1274,10 +1370,14 @@ static void sched_tick(void)
    time_t now = time(NULL);
    struct tm tm;
    localtime_r(&now, &tm);
+   const char *engine = getenv("AIMEE_WFE_ENGINE");
+   int go_wfe = engine && strcmp(engine, "go") == 0;
 
    for (int i = 0; i < cfg.trigger_rule_count && i < TRIGGER_RULES_MAX; i++)
    {
       const trigger_rule_t *rule = &cfg.trigger_rules[i];
+      if (go_wfe)
+         break; /* Go is the sole owner of every WFE admission source. */
       const trigger_source_t *src = trigger_source_find(rule->source);
       if (!src)
          continue; /* unknown source (e.g. a webhook handled on its own ingress) */
@@ -1327,7 +1427,8 @@ static void sched_tick(void)
 
    /* Armed workflows (triggers-as-blocks): saved workflows whose start node is
     * a trigger block file runs through the same plumbing as trigger_rules. */
-   sched_tick_armed(now, cfg.trigger_max_concurrent);
+   if (!go_wfe)
+      sched_tick_armed(now, cfg.trigger_max_concurrent);
 
    /* Skill curator: idle-guarded; safe to call on every tick. */
    if (cfg.skills_curator_enabled)

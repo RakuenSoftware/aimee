@@ -124,6 +124,48 @@ static cJSON *review_items_array(cJSON *root)
    return cJSON_IsArray(issues) ? issues : NULL;
 }
 
+static int alignment_rank(const char *status)
+{
+   if (status && strcmp(status, "drifted") == 0)
+      return 3;
+   if (status && strcmp(status, "unclear") == 0)
+      return 2;
+   if (status && strcmp(status, "aligned") == 0)
+      return 1;
+   return 0;
+}
+
+static void capture_original_request_alignment(cJSON *root, const char *source,
+                                               roundtable_result_t *out)
+{
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(root, "original_request_alignment");
+   cJSON *status = cJSON_IsObject(a) ? cJSON_GetObjectItemCaseSensitive(a, "status") : NULL;
+   cJSON *summary = cJSON_IsObject(a) ? cJSON_GetObjectItemCaseSensitive(a, "summary") : NULL;
+   if (!cJSON_IsString(status) || alignment_rank(status->valuestring) == 0)
+      return;
+   int incoming = alignment_rank(status->valuestring);
+   int current = alignment_rank(out->original_request_alignment);
+   if (incoming > current || (incoming == current && !out->original_request_alignment_summary[0]))
+   {
+      snprintf(out->original_request_alignment, sizeof out->original_request_alignment, "%s",
+               status->valuestring);
+      snprintf(out->original_request_alignment_summary,
+               sizeof out->original_request_alignment_summary, "%s",
+               cJSON_IsString(summary) && summary->valuestring[0]
+                   ? summary->valuestring
+                   : "The reviewer returned no explanation for its alignment verdict.");
+      out->original_request_alignment_sources[0] = '\0';
+   }
+   if (incoming == alignment_rank(out->original_request_alignment) && source && source[0] &&
+       !strstr(out->original_request_alignment_sources, source))
+   {
+      size_t used = strlen(out->original_request_alignment_sources);
+      snprintf(out->original_request_alignment_sources + used,
+               sizeof out->original_request_alignment_sources - used, "%s%s", used ? ", " : "",
+               source);
+   }
+}
+
 /* Parse the optional "evidence" object a panelist attaches to an item into a
  * structured review_evidence_t for the replay verifier. Absent/unknown -> EV_NONE
  * (interpretive: the verifier caps it below blocking). */
@@ -167,6 +209,7 @@ static void capture_review_items_from_text(const char *text, const char *source,
    cJSON *root = parse_model_json_lenient(text);
    if (!root)
       return;
+   capture_original_request_alignment(root, source, out);
    cJSON *issues = review_items_array(root);
    if (!issues)
    {
@@ -232,6 +275,16 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
    out->item_count = 0;
    out->items_round = round;
    memset(out->items, 0, sizeof(out->items));
+   out->original_request_alignment[0] = '\0';
+   out->original_request_alignment_summary[0] = '\0';
+   out->original_request_alignment_sources[0] = '\0';
    for (int i = 0; i < ref_count; i++)
       capture_review_items_from_text(results[i].response, results[i].agent_name, out);
+   if (!out->original_request_alignment[0])
+   {
+      snprintf(out->original_request_alignment, sizeof out->original_request_alignment, "unclear");
+      snprintf(out->original_request_alignment_summary,
+               sizeof out->original_request_alignment_summary,
+               "No panelist returned the required original-request alignment assessment.");
+   }
 }

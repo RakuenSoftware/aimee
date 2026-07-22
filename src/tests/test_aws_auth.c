@@ -42,11 +42,23 @@
 #define TS_REGION "us-east-1"
 #define TS_SVC    "service"
 
+static int sign_test(const aws_sigv4_request_t *request, aws_sigv4_result_t *result)
+{
+   aws_sigv4_request_t req = *request;
+   if (!req.access_key_id_len && req.access_key_id)
+      req.access_key_id_len = strlen(req.access_key_id);
+   if (!req.secret_access_key_len && req.secret_access_key)
+      req.secret_access_key_len = strlen(req.secret_access_key);
+   if (!req.session_token_len && req.session_token)
+      req.session_token_len = strlen(req.session_token);
+   return aws_sigv4_sign(&req, result);
+}
+
 static void check_vector(const char *name, const aws_sigv4_request_t *req, const char *want_crhash,
                          const char *want_sts, const char *want_sig)
 {
    aws_sigv4_result_t r;
-   int rc = aws_sigv4_sign(req, &r);
+   int rc = sign_test(req, &r);
    assert(rc == 0);
    if (strcmp(r.canonical_request_hash, want_crhash) != 0)
    {
@@ -159,7 +171,7 @@ static void test_sigv4_vectors(void)
                                  .access_key_id = TS_AKID,
                                  .secret_access_key = TS_SECRET};
       aws_sigv4_result_t r;
-      assert(aws_sigv4_sign(&req, &r) == 0);
+      assert(sign_test(&req, &r) == 0);
       /* second line of the canonical request is the encoded URI */
       assert(strstr(r.canonical_request, "\n/example%20space/\n") != NULL);
       check_vector("normalize-path/get-space", &req,
@@ -202,7 +214,7 @@ static void test_sigv4_payload_modes(void)
                                  .access_key_id = TS_AKID,
                                  .secret_access_key = TS_SECRET};
       aws_sigv4_result_t r;
-      assert(aws_sigv4_sign(&req, &r) == 0);
+      assert(sign_test(&req, &r) == 0);
       /* the exact hashed-payload appears as the last line of the canonical request */
       assert(strstr(r.canonical_request, modes[i]) != NULL);
       snprintf(sigs[i], sizeof(sigs[i]), "%s", r.signature);
@@ -230,7 +242,7 @@ static void test_sigv4_security_token(void)
                               .secret_access_key = TS_SECRET,
                               .session_token = "FQoGZXIvYXdzTOKEN=="};
    aws_sigv4_result_t r;
-   assert(aws_sigv4_sign(&req, &r) == 0);
+   assert(sign_test(&req, &r) == 0);
    assert(r.has_security_token == 1);
    assert(strstr(r.signed_headers, "x-amz-security-token") != NULL);
    assert(strcmp(r.security_token, "FQoGZXIvYXdzTOKEN==") == 0);
@@ -391,6 +403,46 @@ static void test_web_identity(void)
       aws_webid_status_t st = aws_webidentity_validate("not-a-jwt", jwks, iss, aud, now, NULL);
       assert(st != AWS_WEBID_OK);
    }
+   /* Nonfinite/out-of-long-range NumericDates are rejected before conversion and
+    * every failure clears a caller-provided claims object. */
+   {
+      const char *bad_dates[] = {
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1e999,\"iat\":1}",
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1e20,\"iat\":1}",
+          "{\"iss\":\"https://token.actions.githubusercontent.com\","
+          "\"aud\":\"sts.amazonaws.com\",\"sub\":\"s\",\"exp\":1000300,\"iat\":1e999}",
+      };
+      for (size_t i = 0; i < sizeof(bad_dates) / sizeof(bad_dates[0]); ++i)
+      {
+         char *jwt = make_jwt(bad_dates[i], key);
+         aws_webid_claims_t claims;
+         memset(&claims, 0xa5, sizeof(claims));
+         assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, &claims) != AWS_WEBID_OK);
+         const unsigned char *bytes = (const unsigned char *)&claims;
+         for (size_t j = 0; j < sizeof(claims); ++j)
+            assert(bytes[j] == 0);
+         free(jwt);
+      }
+   }
+   /* Reject an active JSON NUL escape, but not printable literal backslash-u text. */
+   {
+      char *jwt = make_jwt("{\"iss\":\"https://token.actions.githubusercontent.com\","
+                           "\"aud\":\"sts.amazonaws.com\",\"sub\":\"bad\\u0000suffix\","
+                           "\"exp\":1000300,\"iat\":999990}",
+                           key);
+      assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, NULL) != AWS_WEBID_OK);
+      free(jwt);
+      jwt = make_jwt("{\"iss\":\"https://token.actions.githubusercontent.com\","
+                     "\"aud\":\"sts.amazonaws.com\",\"sub\":\"literal\\\\u0000\","
+                     "\"exp\":1000300,\"iat\":999990}",
+                     key);
+      aws_webid_claims_t claims;
+      assert(aws_webidentity_validate(jwt, jwks, iss, aud, now, &claims) == AWS_WEBID_OK);
+      assert(strcmp(claims.subject, "literal\\u0000") == 0);
+      free(jwt);
+   }
    /* fail-CLOSED on empty/NULL expected iss or aud: a validly-signed token whose
     * iss/aud match the token itself must still be REJECTED, never accept-any. */
    {
@@ -513,6 +565,18 @@ static void assert_no_wildcard(const char *json)
    assert(strstr(json, "bedrock:Converse") == NULL);
 }
 
+static int count_text(const char *haystack, const char *needle)
+{
+   int n = 0;
+   size_t z = strlen(needle);
+   while ((haystack = strstr(haystack, needle)) != NULL)
+   {
+      n++;
+      haystack += z;
+   }
+   return n;
+}
+
 static void test_bedrock_policy(void)
 {
    char out[4096];
@@ -523,6 +587,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "anthropic.claude-3-sonnet-20240229-v1:0"};
@@ -536,6 +601,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "meta.llama3"};
@@ -548,6 +614,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_PROVISIONED,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -561,6 +628,7 @@ static void test_bedrock_policy(void)
    {
       bedrock_target_t t = {.type = BEDROCK_TARGET_CUSTOM,
                             .partition = "aws-us-gov",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -576,8 +644,9 @@ static void test_bedrock_policy(void)
                            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
       bedrock_target_t t = {.type = BEDROCK_TARGET_APP_INFERENCE_PROFILE,
                             .partition = "aws",
-                            .region_set = regions1,
-                            .n_regions = 1,
+                            .invoke_region = "us-east-1",
+                            .region_set = regions2,
+                            .n_regions = 2,
                             .account = "123456789012",
                             .id = "myprofile",
                             .underlying_fm_arns = fms,
@@ -594,6 +663,7 @@ static void test_bedrock_policy(void)
                            "arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
       bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                             .partition = "aws",
+                            .invoke_region = "us-west-2",
                             .region_set = regions2,
                             .n_regions = 2,
                             .account = "123456789012",
@@ -602,6 +672,8 @@ static void test_bedrock_policy(void)
                             .n_underlying = 2};
       assert(bedrock_session_policy(&t, 1, out, sizeof(out)) == 0);
       assert(strstr(out, "inference-profile/us.anthropic.claude") != NULL);
+      assert(count_text(out, "arn:aws:bedrock:us-west-2:123456789012:inference-profile/") == 1);
+      assert(strstr(out, "arn:aws:bedrock:us-east-1:123456789012:inference-profile/") == NULL);
       assert(strstr(out, "\"bedrock:InvokeModelWithResponseStream\"") != NULL);
       assert_no_wildcard(out);
    }
@@ -611,6 +683,7 @@ static void test_bedrock_policy(void)
       /* unknown type */
       bedrock_target_t t = {.type = (bedrock_target_type_t)999,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "x"};
@@ -619,8 +692,11 @@ static void test_bedrock_policy(void)
    }
    {
       /* missing region set */
-      bedrock_target_t t = {
-          .type = BEDROCK_TARGET_FOUNDATION, .partition = "aws", .n_regions = 0, .id = "x"};
+      bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .n_regions = 0,
+                            .id = "x"};
       assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
       assert(out[0] == '\0');
    }
@@ -628,6 +704,7 @@ static void test_bedrock_policy(void)
       /* profile with empty underlying FM set */
       bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                             .partition = "aws",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .account = "123456789012",
@@ -640,6 +717,7 @@ static void test_bedrock_policy(void)
       /* invalid partition */
       bedrock_target_t t = {.type = BEDROCK_TARGET_FOUNDATION,
                             .partition = "gcp",
+                            .invoke_region = "us-east-1",
                             .region_set = regions1,
                             .n_regions = 1,
                             .id = "x"};
@@ -651,15 +729,18 @@ static void test_bedrock_policy(void)
       const char *bad_wildcard[] = {"arn:aws:bedrock:us-east-1::foundation-model/*"};
       const char *bad_service[] = {"arn:aws:s3:us-east-1::foundation-model/x"};
       const char *bad_shape[] = {"arn:aws:bedrock:us-east-1::provisioned-model/x"};
-      const char *cases[3];
+      const char *bad_account[] = {"arn:aws:bedrock:us-east-1:evil::foundation-model/x"};
+      const char *cases[4];
       cases[0] = bad_wildcard[0];
       cases[1] = bad_service[0];
       cases[2] = bad_shape[0];
-      for (int i = 0; i < 3; i++)
+      cases[3] = bad_account[0];
+      for (int i = 0; i < 4; i++)
       {
          const char *one[] = {cases[i]};
          bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
                                .partition = "aws",
+                               .invoke_region = "us-east-1",
                                .region_set = regions1,
                                .n_regions = 1,
                                .account = "123456789012",
@@ -669,6 +750,45 @@ static void test_bedrock_policy(void)
          assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
          assert(out[0] == '\0');
       }
+   }
+   {
+      /* Authoritative destination regions and underlying ARN regions must agree. */
+      const char *fms[] = {"arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude"};
+      bedrock_target_t t = {.type = BEDROCK_TARGET_CROSS_REGION_INFERENCE_PROFILE,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .region_set = regions1,
+                            .n_regions = 1,
+                            .account = "123456789012",
+                            .id = "p",
+                            .underlying_fm_arns = fms,
+                            .n_underlying = 1};
+      assert(bedrock_session_policy(&t, 0, out, sizeof(out)) == -1);
+      assert(out[0] == '\0');
+   }
+   {
+      /* The documented maximum is profile ARN + 64 underlying resources. */
+      char arns[64][128];
+      const char *arnp[64];
+      char large[20000];
+      for (size_t i = 0; i < 64; i++)
+      {
+         snprintf(arns[i], sizeof(arns[i]),
+                  "arn:aws:bedrock:us-east-1::foundation-model/test.model-%zu", i);
+         arnp[i] = arns[i];
+      }
+      bedrock_target_t t = {.type = BEDROCK_TARGET_APP_INFERENCE_PROFILE,
+                            .partition = "aws",
+                            .invoke_region = "us-east-1",
+                            .region_set = regions1,
+                            .n_regions = 1,
+                            .account = "123456789012",
+                            .id = "p",
+                            .underlying_fm_arns = arnp,
+                            .n_underlying = 64};
+      assert(bedrock_session_policy(&t, 0, large, sizeof(large)) == 0);
+      assert(count_text(large, "application-inference-profile/p") == 1);
+      assert(count_text(large, "::foundation-model/test.model-") == 64);
    }
    printf("  bedrock policy: 5 types exact + fail-closed (no wildcard, no Converse, "
           "bad-underlying-ARN rejected)\n");

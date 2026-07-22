@@ -16,6 +16,7 @@
 static turn_entry_t g_turns[TURN_MAX];
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_inited;
+static int g_shutting_down;
 
 void turn_registry_init(void)
 {
@@ -23,6 +24,7 @@ void turn_registry_init(void)
    if (!g_inited)
    {
       memset(g_turns, 0, sizeof(g_turns));
+      g_shutting_down = 0;
       g_inited = 1;
    }
    pthread_mutex_unlock(&g_lock);
@@ -44,6 +46,12 @@ turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id)
    if (!session_id || !session_id[0])
       return NULL;
    pthread_mutex_lock(&g_lock);
+   if (g_shutting_down)
+   {
+      pthread_mutex_unlock(&g_lock);
+      LOG_WARN("turn_registry", "publish refused during shutdown for session %s", session_id);
+      return NULL;
+   }
    if (find_locked(session_id))
    {
       /* Collision: a turn is already in flight for this session. Under the
@@ -144,6 +152,29 @@ int turn_registry_cancel_all(void)
       }
    pthread_mutex_unlock(&g_lock);
    return n;
+}
+
+int turn_registry_begin_shutdown(void)
+{
+   int n = 0;
+   pthread_mutex_lock(&g_lock);
+   g_shutting_down = 1;
+   for (int i = 0; i < TURN_MAX; i++)
+      if (g_turns[i].in_use)
+      {
+         atomic_store(&g_turns[i].cancel, 1);
+         n++;
+      }
+   pthread_mutex_unlock(&g_lock);
+   return n;
+}
+
+int turn_registry_is_shutting_down(void)
+{
+   pthread_mutex_lock(&g_lock);
+   int shutting_down = g_shutting_down;
+   pthread_mutex_unlock(&g_lock);
+   return shutting_down;
 }
 
 /* --- pending-steer store -------------------------------------------------

@@ -13,8 +13,10 @@
 #include "kb_insights_util.h"
 #include "org_budget.h"
 #include "org_rate.h"
+#include "org_egress.h"
 #include "org_telemetry.h"
 #include "org_model_catalog.h"
+#include "org_vault_key_use.h"
 #include "org_spend.h"
 #include "project.h"
 #include "kb_enroll.h"
@@ -34,6 +36,8 @@
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "db2/kb_audit_worm.h"
+#include "vault_server_key.h" /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1406,6 +1410,60 @@ int main(int argc, char **argv)
       return rc;
    }
 
+   /* Synchronize the in-process use barrier with durable primary control before
+    * any service or worker can admit a key use. PKCS#11/KMS selection may have
+    * already logged in and unsealed its provider; durable `sealed=true` always
+    * wins and is forced into the provider before the epoch is installed. Any
+    * read, seal, or initialization failure is terminal and gets one final
+    * fail-closed seal attempt before process teardown. */
+   {
+      int64_t primary_epoch = 0;
+      int primary_sealed = 0;
+      int startup_tx = db2_vault_control_startup_begin(&primary_epoch, &primary_sealed) == 0;
+      int startup_ok =
+          startup_tx && primary_epoch > 0 && (primary_sealed == 0 || primary_sealed == 1);
+      const char *startup_error = "vault control startup status invalid";
+      if (startup_ok && primary_sealed && vault_seal() != 0)
+      {
+         startup_ok = 0;
+         startup_error = "durable vault is sealed but custody seal failed";
+      }
+      if (startup_ok &&
+          vault_primary_epoch_initialize((uint64_t)primary_epoch) != VAULT_MAINTENANCE_OK)
+      {
+         startup_ok = 0;
+         startup_error = "vault primary seal epoch initialization failed";
+      }
+      if (startup_tx && db2_vault_control_startup_end(startup_ok) != 0)
+      {
+         startup_ok = 0;
+         startup_error = "vault control startup transaction failed";
+      }
+      if (!startup_ok)
+      {
+         (void)vault_seal();
+         fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
+#if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)
+   if (kb_egress_release_allowed())
+   {
+      LOG_WARN("kb.egress", "P2b integration-only egress override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "egress.test_override", "p2b", "allow",
+                              "integration-only build flag active") != 0)
+      {
+         fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
+         db2_shutdown();
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+#endif
+
    /* Hidden directories (`.git`, `.aimee`, `.worktrees`, etc.) hold
     * dotfile state, not source code, so they are never indexed. The
     * scanner enforces this at find-time (src/index.c:135); this startup
@@ -1493,10 +1551,27 @@ int main(int argc, char **argv)
 
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("kb", (time_t)g_ctx.start_time);
+   /* P2b recovery owns stale dispatch leases; bounded batches keep startup and
+    * periodic work predictable while the SQL advisory lock makes it singleton. */
+   {
+      int64_t recovered = 0;
+      do
+      {
+         recovered = 0;
+      } while (db2_org_egress_recover(100, &recovered) == 0 && recovered == 100);
+   }
+   time_t next_egress_recovery = time(NULL) + 5;
    /* HTTP listener runs on its own thread; block here until a signal
     * (SIGINT/SIGTERM/SIGHUP) flips running, then tear down. */
    while (g_ctx.running)
    {
+      time_t now = time(NULL);
+      if (now >= next_egress_recovery)
+      {
+         int64_t recovered = 0;
+         (void)db2_org_egress_recover(100, &recovered);
+         next_egress_recovery = now + 5;
+      }
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }

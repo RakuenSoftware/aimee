@@ -5,6 +5,7 @@
 aimee-forwarder
 /aimee-mcp
 /aimee-kb
+/aimee-kb-resolver
 /aimee-negation-eval
 /aimee-blast-radius-eval
 /aimee-webchat
@@ -147,3 +148,6 @@ src/vendor/tree-sitter-powershell/
 .wfe-scope.json
 intent_record_*.json
 .rt-tmp/
+
+# Local default output from `go build ./cmd/aimee-server` in the Go rewrite.
+/server-go/aimee-server

@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
- * aimee convenes. A preset captures the seats (a model + a persona per seat), the
- * aggregator, the guard/loop knobs, and the authoring-pipeline caps. Presets are
+ * aimee convenes. A preset captures required positive seat bindings (a model +
+ * persona), the aggregator, the guard/loop knobs, and authoring-pipeline caps.
+ * Runtime fills all remaining eligible agent capacity; bindings never form an
+ * exclusion list. Presets are
  * stored server-side (roundtable_preset.{c,h}); making one "active" mirrors its
  * values into the live ensemble/roundtable config the runtime reads. Several
  * named presets can coexist; one is the active default. */
@@ -288,14 +290,22 @@ export default function Roundtable() {
                 placeholder="what this panel is for"
               />
 
-              {/* Seats: who is at the table. */}
+              {/* Positive pins: required participants, never an exclusion list. */}
               <div style={{ marginTop: 14, marginBottom: 4, fontSize: 13, fontWeight: 600 }}>
-                Seats ({form.seats.length}) — a model + the persona it reviews as
+                Required seats / positive pins ({form.seats.filter((s) => s.model.trim()).length})
               </div>
               <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
-                A <strong>specific</strong> model is honored exactly — if it can't be reached, the
+                Runtime fills <strong>all eligible agent concurrency slots</strong>, spreading seats
+                across providers before reusing one. Entries here require a model/persona to
+                participate; they never exclude other enabled, eligible agents. A{" "}
+                <strong>specific</strong> model is honored exactly — if it can't be reached, the
                 workflow run fails (never silently swapped). <strong>Random</strong> lets any
                 review-capable agent fill the seat, retrying a different one until one is accepted.
+              </p>
+              <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+                Reviews always include an <strong>original-request alignment</strong> assessment.
+                Direction drift or an unclear/missing assessment fails workflow gates closed;
+                refinements that still advance the request remain aligned.
               </p>
               {form.seats.map((seat, i) => {
                 const isRandom = seat.model === RANDOM_MODEL;
@@ -338,8 +348,8 @@ export default function Roundtable() {
                 </div>
                 );
               })}
-              <Button size="md" onClick={addSeat} style={{ borderStyle: "dashed", marginBottom: 8 }} title="Add another model/persona seat to the panel.">
-                + Add seat
+              <Button size="md" onClick={addSeat} style={{ borderStyle: "dashed", marginBottom: 8 }} title="Require another model/persona participant without excluding automatic seats.">
+                + Add required seat
               </Button>
 
               {/* Aggregator + guards. */}

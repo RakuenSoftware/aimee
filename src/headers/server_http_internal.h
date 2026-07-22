@@ -108,6 +108,11 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+/* Narrow request-scoped keepalive used by the P5 management challenge. */
+void server_http_keepalive_set(int enabled);
+int server_http_keepalive_peek(void);
+int server_http_keepalive_take(void);
+
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
 
@@ -149,6 +154,7 @@ int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_git(const route_req_t *rq, char *resp, int cap);
+int rh_internal_forge_execute(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_projects(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_projects_delete(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap);

@@ -5,35 +5,6 @@
 #include "../db2/org_token_audit.h"
 #include <stdio.h>
 #include <string.h>
-typedef struct
-{
-   const kb_bedrock_target_t *target;
-   const aimee_request_t *ir;
-   int stream;
-   const char *ak, *sk, *tok, *amz, *date, *ca, *cc;
-   char *out;
-   size_t cap;
-   int *status;
-} bedrock_ctx;
-static int bedrock_cb(void *v, char *out, size_t cap, char *err, size_t errlen)
-{
-   bedrock_ctx *c = v;
-   int rc = kb_bedrock_dispatch_https(c->target, c->ir, c->stream, c->ak, c->sk, c->tok, c->amz,
-                                      c->date, c->ca, c->cc, out, cap, c->status);
-   if (rc != 0 && err && errlen)
-      snprintf(err, errlen, "bedrock dispatch failed");
-   return rc;
-}
-int kb_egress_bedrock_dispatch(const kb_egress_admission_t *a, const kb_bedrock_target_t *t,
-                               const aimee_request_t *ir, int stream, const char *ak,
-                               const char *sk, const char *tok, const char *amz, const char *date,
-                               const char *ca, const char *cc, char *out, size_t cap, int *status)
-{
-   if (!t || !ir || !ak || !sk || !amz || !date || !ca || !out || !cap)
-      return -1;
-   bedrock_ctx c = {t, ir, stream, ak, sk, tok, amz, date, ca, cc, out, cap, status};
-   return kb_egress_admit_dispatch(a, bedrock_cb, &c, out, cap);
-}
 int kb_egress_admit_dispatch(const kb_egress_admission_t *a, kb_egress_dispatch_fn fn, void *ctx,
                              char *out, size_t cap)
 {

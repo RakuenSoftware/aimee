@@ -10,6 +10,7 @@
 #include <time.h>
 
 #include "cJSON.h"
+#include "config.h" /* config_autonomy_lookup: live autonomy.* caps (env > snapshot) */
 #include "wfe_store.h"
 #include "wfe_approval.h"
 #include "wfe_blocks.h"
@@ -207,9 +208,13 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
     * cumulative turn cap. On breach -> park with the accurate cap reason
     * (turn_cap_exceeded / wall_cap_exceeded); never silently continue. These are
     * runaway backstops, NOT the dollar cost cap (which parks budget_exceeded).
-    * Env-overridable; a bad override falls back to the default. */
-   long max_turns = wfe_env_long("AIMEE_AUTONOMY_MAX_TURNS", 300);
-   long max_wall = wfe_env_long("AIMEE_AUTONOMY_MAX_WALL_SECS", 1800);
+    * Config-backed + live (env override > autonomy.* snapshot); a missing/bad value falls
+    * back to the historical default. Tunable from the web Settings GUI. */
+   long max_turns = 300, max_wall = 1800, lv;
+   if (config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &lv) && lv > 0)
+      max_turns = lv;
+   if (config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &lv) && lv > 0)
+      max_wall = lv;
    struct timespec ts0;
    clock_gettime(CLOCK_MONOTONIC, &ts0); /* monotonic: immune to NTP/clock jumps */
 

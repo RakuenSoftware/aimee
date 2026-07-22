@@ -16,6 +16,44 @@ BEGIN
 
   -- DML on existing + future tables; DDL (owner) excluded.
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO aimee_kb_runtime;
+  -- The primary maintenance barrier is owner-only even though the legacy grant
+  -- bootstrap is intentionally broad.  Keep this revoke adjacent so reapplication
+  -- can never restore a runtime mutation or observation path.
+  REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_vault_control_startup_status() TO aimee_kb_runtime;
+  -- P7-reseal-c is migration-owner orchestration only. The broad bootstrap grant
+  -- above must never make its operation ledger, staged wraps, outbox, or helper
+  -- functions visible to the runtime role on either first apply or re-apply.
+  REVOKE ALL ON TABLE kb_vault_rewrap_operation, kb_vault_rewrap_dek_stage,
+    kb_vault_rewrap_check_stage, kb_vault_rewrap_worm FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_rewrap_worm_block(),
+    org_vault_rewrap_pack_text(TEXT), org_vault_rewrap_pack_bytes(BYTEA),
+    org_vault_rewrap_worm_append(TEXT,TEXT,TEXT,TEXT),
+    org_vault_rewrap_begin(TEXT,TEXT,TEXT,BIGINT,BIGINT),
+    org_vault_rewrap_record_prepared(TEXT,BIGINT,BYTEA,BYTEA),
+    org_vault_rewrap_assert_live(TEXT,BIGINT,BOOLEAN),
+    org_vault_rewrap_status(TEXT),
+    org_vault_rewrap_snapshot(TEXT),
+    org_vault_rewrap_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+    org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER),
+    org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
+    org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
+    org_vault_rewrap_digests(TEXT), org_vault_rewrap_stage_finish(TEXT,BIGINT),
+    org_vault_rewrap_mark_committing(TEXT,BIGINT),
+    org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
+    org_vault_rewrap_promote(TEXT,BIGINT),
+    org_vault_rewrap_verify_summary(TEXT,BIGINT),
+    org_vault_rewrap_verify_secret_page(TEXT,BIGINT,BIGINT,INTEGER),
+    org_vault_rewrap_verify_check_page(TEXT,BIGINT,BYTEA,INTEGER),
+    org_vault_rewrap_complete(TEXT,BIGINT,BYTEA,BYTEA,BYTEA),
+    org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
+    org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
+    FROM aimee_kb_runtime;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
   ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_kb_runtime;
@@ -35,6 +73,16 @@ BEGIN
   -- the runtime role only, never PUBLIC (N4).
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
+
+  -- P5-A authoritative registry: runtime reaches state only through audited,
+  -- bounded definer APIs; direct reads and writes are unavailable.
+  REVOKE ALL ON kb_server_registry, kb_cert_revocation_generation FROM aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_list(BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
 
   -- P3a cost attribution. The ledger, rollup, and price tables are WRITTEN ONLY by
   -- the SECURITY DEFINER metering functions (owned by aimee_kb_owner, which bypasses
@@ -79,6 +127,7 @@ BEGIN
     org_vault_salt, org_vault_secret, org_vault_current FROM aimee_kb_runtime;
   GRANT SELECT ON
     org_vault_salt, org_vault_secret, org_vault_current TO aimee_kb_runtime;
+  REVOKE SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON org_vault_rotation FROM aimee_kb_runtime;
   -- The vault definer functions are the ONLY write/read-through path; EXECUTE to
   -- runtime, never PUBLIC.
   REVOKE ALL ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) FROM PUBLIC;
@@ -93,6 +142,23 @@ BEGIN
   REVOKE ALL ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_current_wraps(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_authorized(TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_stage(TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_get(BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_claim(TEXT,BIGINT,TEXT,TEXT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_heartbeat(TEXT,BIGINT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_release(TEXT,BIGINT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_checkpoint_old_ref(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_stage_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_probe_admit(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_vault_salt_ensure(TEXT,BYTEA) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_salt_read(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_kek_check_read(TEXT) TO aimee_kb_runtime;
@@ -105,6 +171,30 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_vault_delete(TEXT,TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_current_wraps(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_vault_rewrap(TEXT,TEXT,TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_start(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,BIGINT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_stage(TEXT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_transition(TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_finalize(TEXT,BIGINT,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_get(BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_claim(TEXT,BIGINT,TEXT,TEXT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_heartbeat(TEXT,BIGINT,TEXT,BIGINT,INTEGER) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_release(TEXT,BIGINT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_checkpoint_old_ref(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_stage_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_probe_admit(TEXT,BIGINT,TEXT,BIGINT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_transition_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_fail_claimed(TEXT,BIGINT,TEXT,BIGINT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_rotation_remediate(TEXT,BIGINT,TEXT,BIGINT,BIGINT,TEXT) TO aimee_kb_runtime;
+  REVOKE SELECT,INSERT,UPDATE,DELETE,TRUNCATE ON org_vault_key_use_intent FROM aimee_kb_runtime;
+  REVOKE ALL ON TABLE kb_vault_control FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_require_open() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_vault_control_lock_exclusive() FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_control_startup_status() FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_vault_control_startup_status() TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_key_use_candidate(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_vault_key_use_admit(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA) TO aimee_kb_runtime;
 
   -- P2a org model catalog + entitlement. The catalog is admin-managed and read/written
   -- EXCLUSIVELY through the SECURITY DEFINER functions (owned by aimee_kb_owner, which
@@ -128,13 +218,15 @@ BEGIN
   -- (org_catalog_entitled()'s projection is UNCHANGED, so account/ARNs/region never leak to
   -- a tenant read). org_bedrock_adapter_supported is a pure predicate (no table access) —
   -- left PUBLIC-callable (harmless), plus an explicit runtime grant for clarity.
-  REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_catalog_bedrock_target(BIGINT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_catalog_remove(TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_entitle(TEXT,BIGINT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION org_model_unentitle(TEXT,BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION org_catalog_entitled() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) TO aimee_kb_runtime;
-  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_upsert(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT[],TEXT[],TEXT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_catalog_bedrock_target(BIGINT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_bedrock_adapter_supported(TEXT,TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_catalog_remove(TEXT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_model_entitle(TEXT,BIGINT) TO aimee_kb_runtime;
@@ -186,6 +278,30 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_rate_policy_set(TEXT,TEXT,INT,BIGINT) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_rate_policy_show(TEXT,TEXT) TO aimee_kb_runtime;
 
+  -- P2b-a egress authority. Runtime has no direct access to the private binding or
+  -- durable dispatch ledger; every state change is owner-scoped and fenced by a
+  -- SECURITY DEFINER function. The admin-gated binding setter is intentionally
+  -- executable by runtime because it enforces kb_principal_is_admin internally.
+  REVOKE ALL ON org_egress_binding, org_egress_dispatch FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_egress_binding_set(BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BOOLEAN) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION org_egress_binding_set(BIGINT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,BOOLEAN) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_admit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_begin(TEXT,TEXT,TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_heartbeat(BIGINT,TEXT,BIGINT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT,TEXT) TO aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION org_egress_recover(INT) TO aimee_kb_runtime;
+
+  -- Certificate renewal is a single SECURITY DEFINER lineage/grant/audit
+  -- mutation. Runtime cannot invoke the underlying WORM appender directly.
+  REVOKE ALL ON FUNCTION kb_enrollment_renew(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_enrollment_renew(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_runtime;
+
   -- P9a telemetry export + content-free ingest. org_telemetry + org_telemetry_allowlist
   -- are WRITTEN ONLY by the SECURITY DEFINER ingest/allow functions (owned by
   -- aimee_kb_owner, which bypasses ENABLE-not-FORCE RLS). Runtime gets SELECT on
@@ -206,5 +322,212 @@ BEGIN
   GRANT EXECUTE ON FUNCTION org_telemetry_allow(TEXT,TEXT[],BOOLEAN) TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_telemetry_allow_show() TO aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION org_metrics_snapshot() TO aimee_kb_runtime;
+END
+$$;
+
+-- P5-B2b management-instance lineage.  The broad compatibility grants near the
+-- top of this file must never expose the primary-only lineage tables.  Runtime
+-- crosses FORCE RLS only through the five fixed owner-definer entry points;
+-- offline grant and replacement provisioning remains migration-only.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RETURN;
+  END IF;
+
+  ALTER TABLE public.kb_management_instance_grant OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_instance OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_instance_issue OWNER TO aimee_kb_owner;
+
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_issue_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_expire_quarantine(INTEGER) OWNER TO aimee_kb_owner';
+
+  -- The definer needs only the existing rows touched by activation/replacement.
+  GRANT SELECT ON public.kb_admin_grant TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE ON public.kb_enrollments TO aimee_kb_owner;
+  GRANT SELECT,INSERT ON public.kb_team_membership TO aimee_kb_owner;
+  GRANT SELECT,UPDATE ON public.kb_cert_revocation_generation TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT USAGE,SELECT ON SEQUENCE public.kb_enrollments_id_seq,
+    public.kb_team_membership_id_seq TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_owner;
+
+  REVOKE ALL ON TABLE public.kb_management_instance_grant,
+    public.kb_management_instance,public.kb_management_instance_issue FROM PUBLIC;
+  REVOKE ALL ON FUNCTION
+    public.kb_management_instance_grant_guard(),
+    public.kb_management_instance_guard(),
+    public.kb_management_instance_issue_guard(),
+    public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
+    public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_expire_quarantine(INTEGER) FROM PUBLIC;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    REVOKE ALL ON TABLE public.kb_management_instance_grant,
+      public.kb_management_instance,public.kb_management_instance_issue
+      FROM aimee_kb_runtime;
+    REVOKE ALL ON FUNCTION
+      public.kb_management_instance_grant_guard(),
+      public.kb_management_instance_guard(),
+      public.kb_management_instance_issue_guard(),
+      public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+      FROM aimee_kb_runtime;
+    GRANT EXECUTE ON FUNCTION
+      public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
+      public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_expire_quarantine(INTEGER) TO aimee_kb_runtime;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_migrate') THEN
+    GRANT EXECUTE ON FUNCTION
+      public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+      TO aimee_kb_migrate;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    RETURN;
+  END IF;
+  -- Reassert after the broad runtime grants above: the online status key is
+  -- reachable only through the distinct status role's fixed definer API.
+  -- Provisioning is roles -> schema -> grants; a runtime role created outside
+  -- that contract receives no default privileges, and the service boot/PG gates
+  -- reject any deployment whose final ACLs differ from this block.
+  REVOKE ALL ON TABLE kb_management_status_key,kb_management_status_key_use_intent
+    FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT),
+    kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA),
+    kb_management_status_key_use_guard(BIGINT),kb_management_status_key_startup_status(),
+    kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+      BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+    kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+    kb_management_status_key_bootstrap_prepare_activation(TEXT),
+    kb_management_status_key_bootstrap_finalize(TEXT,BYTEA)
+    FROM aimee_kb_runtime;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RETURN;
+  END IF;
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_resume(TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_prepare_activation(TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) OWNER TO aimee_kb_owner';
+  ALTER TABLE public.kb_management_status_key OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_secret OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_current OWNER TO aimee_kb_owner;
+  ALTER TABLE public.org_vault_rotation OWNER TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.org_vault_control_require_open(),
+    public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE ON public.kb_management_status_key,
+    public.org_vault_secret,public.org_vault_current,public.org_vault_rotation
+    TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT USAGE,SELECT ON SEQUENCE public.org_vault_secret_id_seq,
+    public.org_vault_rotation_id_seq TO aimee_kb_owner;
+  REVOKE ALL ON FUNCTION
+    kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+      BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+    kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+    kb_management_status_key_bootstrap_prepare_activation(TEXT),
+    kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) FROM PUBLIC;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_migrate') THEN
+    GRANT EXECUTE ON FUNCTION
+      kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,
+        BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+      kb_management_status_key_bootstrap_resume(TEXT,TEXT),
+      kb_management_status_key_bootstrap_prepare_activation(TEXT),
+      kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) TO aimee_kb_migrate;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_status_definer') THEN
+    RETURN;
+  END IF;
+  -- Provision the narrow fixed definer after schema.sql. Keeping ownership here
+  -- also permits a schema-only developer load when roles are not installed.
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT) OWNER TO aimee_kb_status_definer';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA) OWNER TO aimee_kb_status_definer';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_use_guard(BIGINT) OWNER TO aimee_kb_status_definer';
+  EXECUTE 'ALTER FUNCTION kb_management_status_key_startup_status() OWNER TO aimee_kb_status_definer';
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_status_definer;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_status_definer;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_status_definer;
+  GRANT SELECT ON kb_management_status_key,org_vault_current,org_vault_secret,
+    org_vault_rotation,kb_enrollments,kb_server_registry,kb_team_membership,
+    kb_cert_revocation_generation TO aimee_kb_status_definer;
+  GRANT UPDATE ON kb_management_status_key,org_vault_secret,kb_enrollments,
+    kb_server_registry,kb_team_membership,kb_cert_revocation_generation
+    TO aimee_kb_status_definer;
+  GRANT SELECT,INSERT,UPDATE ON kb_management_status_key_use_intent
+    TO aimee_kb_status_definer;
+  GRANT EXECUTE ON FUNCTION org_vault_control_require_open(),
+    org_vault_control_startup_status(),
+    kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) TO aimee_kb_status_definer;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_status') THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_status;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_status;
+  REVOKE ALL ON TABLE kb_management_status_key,kb_management_status_key_use_intent
+    FROM aimee_kb_status;
+  REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_status;
+  GRANT EXECUTE ON FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT),
+    kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA),
+    kb_management_status_key_use_guard(BIGINT),
+    kb_management_status_key_startup_status() TO aimee_kb_status;
+END
+$$;
+
+DO $$
+DECLARE role_name TEXT;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY[
+    'aimee_kb_runtime','aimee_kb_status','aimee_kb_status_definer','aimee_kb_status_login'
+  ] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION '
+        'kb_management_status_key_bootstrap_stage(TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),'
+        'kb_management_status_key_bootstrap_resume(TEXT,TEXT),'
+        'kb_management_status_key_bootstrap_prepare_activation(TEXT),'
+        'kb_management_status_key_bootstrap_finalize(TEXT,BYTEA) FROM %I',role_name);
+    END IF;
+  END LOOP;
 END
 $$;

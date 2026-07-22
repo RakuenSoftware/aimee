@@ -212,26 +212,28 @@ static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
    if (strcmp(status_text, "ok") == 0)
    {
       cJSON *r = cJSON_GetObjectItemCaseSensitive(resp, "response");
-      db1_coord_job_complete_task(cctx->coord_task_id, cJSON_IsString(r) ? r->valuestring : "");
+      db1_coord_job_complete_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                        cJSON_IsString(r) ? r->valuestring : "");
    }
    else if (strcmp(status_text, "preempted") == 0)
    {
       config_t cfg;
       config_load(&cfg);
-      if (db1_coord_job_release_task_bounded(cctx->coord_task_id,
-                                             cfg.concurrency_preempt_requeue_max) == 0)
+      if (db1_coord_job_release_task_bounded_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                                   cfg.concurrency_preempt_requeue_max) == 0)
       {
          server_coord_dispatcher_notify();
          return;
       }
-      db1_coord_job_fail_task(cctx->coord_task_id, "preempt requeue cap exhausted");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    "preempt requeue cap exhausted");
    }
    else
    {
       cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      db1_coord_job_fail_task(cctx->coord_task_id, (cJSON_IsString(m) && m->valuestring[0])
-                                                       ? m->valuestring
-                                                       : "delegate failed");
+      db1_coord_job_fail_task_owned(cctx->coord_task_id, cctx->coord_claim_owner,
+                                    (cJSON_IsString(m) && m->valuestring[0]) ? m->valuestring
+                                                                             : "delegate failed");
    }
    server_coord_dispatcher_notify();
 }
@@ -653,6 +655,7 @@ void delegate_worker(void *arg)
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+   cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
@@ -672,6 +675,9 @@ void delegate_worker(void *arg)
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
    int handoff_json = cJSON_IsTrue(jhandoff);
+   /* Only the JSON boolean literal true opts out; absent, false, and malformed
+    * values preserve automatic evidence grounding. */
+   int caller_provided_target = cJSON_IsTrue(jprovided_target);
    const char *toolset_override =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
@@ -1087,7 +1093,12 @@ void delegate_worker(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   /* Ground read-only inspection roles in parent diff evidence. */
+   /* This is delegate_worker's sole parent-diff evidence injection point.
+    * Ground read-only inspection roles in parent diff evidence unless the
+    * caller supplied the complete review target inline. In that case an
+    * unrelated current-worktree diff is competing evidence and can make a
+    * plan reviewer incorrectly demand implementation. */
+   if (!caller_provided_target)
    {
       char *evidence = delegate_prepend_parent_diff_evidence(prompt, role, delegate_allows_writes,
                                                              cwd, deleg_id);
@@ -1929,13 +1940,16 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
+   char pin_err[256];
+   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+      return server_send_error(conn, pin_err, NULL);
+   /* reference_models are positive pins, not an exhaustive roster. Validate
+    * them, then fill every eligible provider seat to configured capacity. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
    ensemble_filter_panel_availability(&cfg, &acfg);
+   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -2124,13 +2138,19 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
-   ensemble_default_panel_from_agents(&cfg, &acfg);
-   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
-    * claude as a panelist, however it got into the panel. */
+   char pin_err[256];
+   if (ensemble_validate_panel_pins(&cfg, &acfg, pin_err, sizeof(pin_err)) != 0)
+   {
+      free(brief.rendered);
+      return server_send_error(conn, pin_err, NULL);
+   }
+   /* reference_models are positive pins, not an exhaustive roster. Validate
+    * them, then fill every eligible provider seat to configured capacity. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
    ensemble_filter_panel_availability(&cfg, &acfg);
+   ensemble_fill_panel_capacity(&cfg, &acfg);
    bind_request_session_creds(req);
 
    /* Give the tool-less panelists read-only access to aimee memory + the code
@@ -2160,6 +2180,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddNumberToObject(resp, "best_round", result.best_round);
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
+   cJSON_AddNumberToObject(resp, "participants_required_failed",
+                           result.participants_required_failed);
    cJSON_AddNumberToObject(resp, "items_round", result.items_round);
    cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);

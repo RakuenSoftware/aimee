@@ -10,6 +10,17 @@
 #define DEC_SERVER_TLS_H 1
 
 #include <openssl/ssl.h>
+#include <stddef.h>
+
+typedef struct
+{
+   char cn[257];
+   char issuer[601];
+   char serial_norm[129];
+   char fingerprint[65];
+   char channel_binding[65];
+   int management_profile;
+} server_tls_peer_cert_t;
 
 #ifdef __cplusplus
 extern "C"
@@ -33,6 +44,11 @@ extern "C"
    int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
                                 size_t serial_len);
 
+   /* Exact verified leaf identity plus an RFC 5705 exporter binding for this
+    * live TLS connection. Strings are lowercase/canonical where applicable. */
+   int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out);
+   int server_tls_local_fingerprint(SSL *ssl, char out[65]);
+
    /* Run the TLS handshake on an accepted fd. Returns a new SSL* (caller owns it:
     * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */
    SSL *server_tls_accept(int fd);
@@ -45,6 +61,19 @@ extern "C"
     * in-flight connections keep the old until they drain). Validate-or-keep: a cert that fails
     * to load keeps the current one. Returns 1 = reloaded, 0 = TLS not enabled, -1 = kept. */
    int server_tls_reload(void);
+
+   /* Current effective mTLS posture (0=off, 1=optional, 2=required). The value
+    * may advance at runtime, so callers use this accessor rather than caching
+    * startup configuration. */
+   int server_tls_mtls_mode(void);
+
+   /* Build a fully validated required-mTLS context without publishing it. The
+    * caller may durably commit its posture and then pass the context to
+    * server_tls_activate_required, whose pointer swap is infallible. NULL means
+    * TLS is absent/already required, or validation failed. */
+   SSL_CTX *server_tls_prepare_required(void);
+   int server_tls_activate_required(SSL_CTX *prepared);
+   void server_tls_discard_prepared(SSL_CTX *prepared);
 
    /* Per-connection lifecycle for the conn worker: handshake an accepted fd and
     * register its SSL on the conn-io shim (NULL on failure — caller closes fd);

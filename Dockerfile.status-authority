@@ -1,0 +1,32 @@
+# Dedicated required-mTLS management-status authority. The build stage may use
+# compilers and a shell; the final scratch image contains only the allowlisted
+# authority binary and its exact dynamic-library closure. TLS identity, the
+# status-role DSN, and the executable KMS adapter are read-only runtime mounts.
+FROM debian:bookworm-slim AS build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates libpq-dev libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY . .
+ARG AIMEE_VERSION=""
+RUN make -C src status-authority-core -j"$(nproc)" \
+        ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION} \
+    && mkdir -p /runtime/usr/libexec/aimee \
+    && cp /src/aimee-kb-status-authority /runtime/usr/libexec/aimee/ \
+    && ldd /src/aimee-kb-status-authority \
+       | awk '/=> \/.* \(/ { print $3 } /^\/.* \(/ { print $1 }' \
+       | sort -u \
+       | xargs -r -n1 cp --parents -t /runtime \
+    && test -x /runtime/usr/libexec/aimee/aimee-kb-status-authority \
+    && ! find /runtime -type f \( -name 'sh' -o -name 'bash' -o -name 'psql' \
+         -o -name 'curl' -o -name 'python*' -o -name 'aimee-kb' \
+         -o -name 'aimee-server' -o -name '*provision*' \) | grep .
+
+FROM scratch
+COPY --from=build /runtime /
+USER 65532:65532
+EXPOSE 8444
+ENTRYPOINT ["/usr/libexec/aimee/aimee-kb-status-authority"]

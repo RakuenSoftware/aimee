@@ -267,6 +267,36 @@ void db2_pool_return(void *conn)
    pthread_mutex_unlock(&g_mtx);
 }
 
+void db2_pool_discard(void *conn)
+{
+   if (!conn)
+      return;
+   pthread_mutex_lock(&g_mtx);
+   int i = member_index_locked(conn);
+   if (i < 0)
+   {
+      pthread_mutex_unlock(&g_mtx);
+      g_close(conn);
+      return;
+   }
+   g_close(g_members[i].conn);
+   g_members[i].conn = NULL;
+   int64_t now = mono_ms();
+   char e[256] = "";
+   if (now - g_members[i].last_reopen >= DB2_POOL_REOPEN_MIN_MS)
+   {
+      g_members[i].conn = g_open(g_url, e, sizeof(e));
+      g_members[i].last_reopen = now;
+   }
+   g_members[i].leased = 0;
+   g_members[i].lease_ms = 0;
+   g_poisoned++;
+   if (!g_members[i].conn)
+      POOL_LOG("member %d explicitly discarded; reopen deferred/failed: %s", i, e);
+   pthread_cond_signal(&g_cond);
+   pthread_mutex_unlock(&g_mtx);
+}
+
 /* Observability sweep. Reclaim-on-thread-death is handled reliably by the
  * lease thread-local destructor (db2_init.c, WP-B) — by the time a thread is
  * dead its lease has already been returned. A lease still held past the ceiling

@@ -299,6 +299,55 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /management/challenge:
+    post:
+      summary: Issue a nonce for a read-only management health check
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and health-check purpose.
+      responses:
+        "200":
+          description: Management challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management status verification is not configured }
+  /management/health:
+    get:
+      summary: Verify a nonce-bound online revocation staple
+      description: >
+        Read-only health probe for the reverse management channel. Requires the
+        same live mTLS connection used to obtain the challenge and consumes the
+        nonce on every identifiable verification attempt.
+      parameters:
+        - in: header
+          name: X-Aimee-Management-Status
+          required: true
+          schema: { type: string, maxLength: 4096 }
+          description: Strict signed management-status JSON staple
+      responses:
+        "200":
+          description: Peer and target status verified
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, server_id]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  server_id: { type: string }
+        "401": { description: Missing or invalid peer certificate or staple }
+        "403": { description: Authenticated peer, target, or purpose mismatch }
+        "409": { description: Replayed, expired, conflicting, or rolled-back challenge }
+        "503": { description: Management status verification is unavailable }
   /version:
     get:
       summary: Build version
@@ -4638,6 +4687,70 @@ paths:
                   kb:
                     type: object
                     additionalProperties: true
+  /internal/forge/execute:
+    post:
+      summary: Mechanically execute an authenticated forge operation for Go WFE
+      description: >
+        Internal Unix-socket-only resource-plane seam. The Go WFE supplies an
+        already-decided typed operation; C confines it to a managed WFE
+        worktree and repository, retains the credential, and performs only the
+        authenticated transport. This endpoint owns no workflow state or
+        lifecycle decision and is unavailable over TCP/TLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op, workdir]
+              properties:
+                op: { type: string, enum: [push, open, info, ci, merge] }
+                workdir: { type: string }
+                head:
+                  oneOf:
+                    - { type: string, maxLength: 91, pattern: '^aimee/feat/wi_[A-Za-z0-9_]+$' }
+                    - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
+                base: { type: string }
+                title: { type: string, minLength: 1, maxLength: 256 }
+                number: { type: integer, minimum: 1 }
+              oneOf:
+                - required: [head]
+                  properties: { op: { enum: [push] } }
+                  not:
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
+                - required: [head, base, title]
+                  properties: { op: { enum: [open] } }
+                  not: { required: [number] }
+                - required: [number]
+                  properties: { op: { enum: [info, ci] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                - required: [base, number]
+                  properties: { op: { enum: [merge] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [title] }]
+      responses:
+        "200":
+          description: Mechanical forge operation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+        "400":
+          description: Invalid request or forge operation failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Non-UDS caller or unmanaged repository/worktree
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

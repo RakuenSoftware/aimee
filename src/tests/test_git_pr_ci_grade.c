@@ -4,6 +4,7 @@
  * status only when no check runs exist, and NONE when neither reports. */
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "git_pr_api.h"
 
@@ -13,6 +14,12 @@
 int main(void)
 {
    printf("git-pr-ci-grade: ");
+
+   /* Squash merges must suppress GitHub's synthesized commit body. Otherwise
+    * child commit trailers can be copied into the feature commit and fail the
+    * protected no-coauthor-trailers check on the final PR. */
+   assert(strstr(GIT_PR_SQUASH_MERGE_JSON, "\"merge_method\":\"squash\"") != NULL);
+   assert(strstr(GIT_PR_SQUASH_MERGE_JSON, "\"commit_message\":\"\"") != NULL);
 
    /* all completed successfully (neutral/skipped count as green) */
    assert(git_pr_ci_grade_json(RUNS(RUN("completed", "\"success\"") "," RUN(

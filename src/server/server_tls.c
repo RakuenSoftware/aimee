@@ -10,6 +10,7 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/x509.h>
+#include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,9 @@
 
 static SSL_CTX *g_ctx = NULL;
 static pthread_mutex_t g_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Serializes a live cert reload against the prepare -> durable commit -> activate
+ * promotion sequence. Lock order is transition, then g_ctx_mu. */
+static pthread_mutex_t g_transition_mu = PTHREAD_MUTEX_INITIALIZER;
 /* Saved at init so a SIGHUP reload can re-read the SAME cert/key files (live-config-reload). */
 static char g_cert_path[MAX_PATH_LEN];
 static char g_key_path[MAX_PATH_LEN];
@@ -138,9 +142,10 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
       if (SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1)
       {
          aimee_log(LOG_WARN, "server.tls",
-                   "mtls enabled but client CA %s not loadable: %s — "
-                   "mTLS DISABLED (client certs not verified)",
-                   ca, ERR_error_string(ERR_get_error(), NULL));
+                   "mtls enabled but client CA %s not loadable: %s — refusing TLS context", ca,
+                   ERR_error_string(ERR_get_error(), NULL));
+         SSL_CTX_free(ctx);
+         return NULL;
       }
       else
       {
@@ -190,10 +195,12 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
 
 int server_tls_reload(void)
 {
+   pthread_mutex_lock(&g_transition_mu);
    pthread_mutex_lock(&g_ctx_mu);
    if (!g_ctx)
    {
       pthread_mutex_unlock(&g_ctx_mu);
+      pthread_mutex_unlock(&g_transition_mu);
       return 0; /* TLS not enabled -> nothing to reload */
    }
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN], ca[MAX_PATH_LEN];
@@ -210,6 +217,7 @@ int server_tls_reload(void)
    {
       aimee_log(LOG_WARN, "server.tls",
                 "TLS reload: new cert/key failed to load — keeping the current cert");
+      pthread_mutex_unlock(&g_transition_mu);
       return -1;
    }
    pthread_mutex_lock(&g_ctx_mu);
@@ -221,8 +229,76 @@ int server_tls_reload(void)
     * section closes any window where an accept could observe the pointer being freed. */
    SSL_CTX_free(old);
    pthread_mutex_unlock(&g_ctx_mu);
+   pthread_mutex_unlock(&g_transition_mu);
    aimee_log(LOG_INFO, "server.tls", "TLS cert reloaded (cert %s)", cert);
    return 1;
+}
+
+int server_tls_mtls_mode(void)
+{
+   pthread_mutex_lock(&g_ctx_mu);
+   int mode = g_mtls_mode;
+   pthread_mutex_unlock(&g_ctx_mu);
+   return mode;
+}
+
+SSL_CTX *server_tls_prepare_required(void)
+{
+   pthread_mutex_lock(&g_transition_mu);
+   pthread_mutex_lock(&g_ctx_mu);
+   if (!g_ctx || g_mtls_mode >= 2)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      pthread_mutex_unlock(&g_transition_mu);
+      return NULL;
+   }
+   char cert[MAX_PATH_LEN], key[MAX_PATH_LEN], ca[MAX_PATH_LEN];
+   snprintf(cert, sizeof(cert), "%s", g_cert_path);
+   snprintf(key, sizeof(key), "%s", g_key_path);
+   snprintf(ca, sizeof(ca), "%s", g_client_ca_path);
+   pthread_mutex_unlock(&g_ctx_mu);
+   SSL_CTX *prepared = tls_build_ctx(cert, key, 2, ca[0] ? ca : NULL);
+   if (!prepared)
+      pthread_mutex_unlock(&g_transition_mu);
+   return prepared;
+}
+
+int server_tls_activate_required(SSL_CTX *prepared)
+{
+   if (!prepared)
+      return -1;
+   pthread_mutex_lock(&g_ctx_mu);
+   if (!g_ctx)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      SSL_CTX_free(prepared);
+      pthread_mutex_unlock(&g_transition_mu);
+      return -1;
+   }
+   if (g_mtls_mode >= 2)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      SSL_CTX_free(prepared);
+      pthread_mutex_unlock(&g_transition_mu);
+      return 0;
+   }
+   SSL_CTX *old = g_ctx;
+   g_ctx = prepared;
+   g_mtls_mode = 2;
+   SSL_CTX_free(old);
+   pthread_mutex_unlock(&g_ctx_mu);
+   pthread_mutex_unlock(&g_transition_mu);
+   aimee_log(LOG_INFO, "server.tls", "mTLS ramp advanced to required");
+   return 1;
+}
+
+void server_tls_discard_prepared(SSL_CTX *prepared)
+{
+   if (prepared)
+   {
+      SSL_CTX_free(prepared);
+      pthread_mutex_unlock(&g_transition_mu);
+   }
 }
 
 int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
@@ -260,6 +336,80 @@ int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial
    return ok;
 }
 
+int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   if (!out)
+      return 0;
+   memset(out, 0, sizeof(*out));
+   if (!ssl || SSL_get_verify_result(ssl) != X509_V_OK)
+      return 0;
+   X509 *cert = SSL_get1_peer_certificate(ssl);
+   if (!cert)
+      return 0;
+   int ok = 0;
+   char *issuer = NULL, *serial = NULL;
+   unsigned char digest[32], binding[32];
+   unsigned int digest_len = 0;
+   X509_NAME *subject = X509_get_subject_name(cert);
+   ASN1_INTEGER *asn_serial = X509_get_serialNumber(cert);
+   BIGNUM *bn = asn_serial ? ASN1_INTEGER_to_BN(asn_serial, NULL) : NULL;
+   issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+   serial = bn ? BN_bn2hex(bn) : NULL;
+   if (!subject ||
+       X509_NAME_get_text_by_NID(subject, NID_commonName, out->cn, (int)sizeof(out->cn)) <= 0 ||
+       !issuer || strlen(issuer) >= sizeof(out->issuer) || !serial || !serial[0] ||
+       strlen(serial) >= sizeof(out->serial_norm) ||
+       X509_digest(cert, EVP_sha256(), digest, &digest_len) != 1 || digest_len != 32 ||
+       SSL_export_keying_material(ssl, binding, sizeof(binding), "aimee-management-channel-v1",
+                                  sizeof("aimee-management-channel-v1") - 1, NULL, 0, 0) != 1)
+      goto done;
+   snprintf(out->issuer, sizeof(out->issuer), "%s", issuer);
+   for (size_t i = 0; serial[i]; i++)
+      out->serial_norm[i] = (char)tolower((unsigned char)serial[i]);
+   for (size_t i = 0; i < 32; i++)
+   {
+      snprintf(out->fingerprint + i * 2, 3, "%02x", digest[i]);
+      snprintf(out->channel_binding + i * 2, 3, "%02x", binding[i]);
+   }
+   out->fingerprint[64] = out->channel_binding[64] = '\0';
+   ASN1_OBJECT *mgmt_oid = OBJ_txt2obj("1.3.6.1.4.1.55555.5.1", 1);
+   static const unsigned char marker[] = "aimee-p5-kb-management-v1";
+   int ext_pos = mgmt_oid ? X509_get_ext_by_OBJ(cert, mgmt_oid, -1) : -1;
+   X509_EXTENSION *mgmt_ext = ext_pos >= 0 ? X509_get_ext(cert, ext_pos) : NULL;
+   ASN1_OCTET_STRING *mgmt_value = mgmt_ext ? X509_EXTENSION_get_data(mgmt_ext) : NULL;
+   out->management_profile =
+       mgmt_ext && !X509_EXTENSION_get_critical(mgmt_ext) &&
+       X509_get_ext_by_OBJ(cert, mgmt_oid, ext_pos) < 0 && mgmt_value &&
+       ASN1_STRING_length(mgmt_value) == (int)sizeof(marker) - 1 &&
+       CRYPTO_memcmp(ASN1_STRING_get0_data(mgmt_value), marker, sizeof(marker) - 1) == 0;
+   ASN1_OBJECT_free(mgmt_oid);
+   ok = 1;
+done:
+   OPENSSL_free(serial);
+   OPENSSL_free(issuer);
+   BN_free(bn);
+   X509_free(cert);
+   if (!ok)
+      memset(out, 0, sizeof(*out));
+   return ok;
+}
+
+int server_tls_local_fingerprint(SSL *ssl, char out[65])
+{
+   if (!ssl || !out)
+      return 0;
+   out[0] = '\0';
+   X509 *cert = SSL_get_certificate(ssl); /* owned by SSL */
+   unsigned char md[32];
+   unsigned int n = 0;
+   if (!cert || X509_digest(cert, EVP_sha256(), md, &n) != 1 || n != 32)
+      return 0;
+   for (size_t i = 0; i < 32; i++)
+      snprintf(out + i * 2, 3, "%02x", md[i]);
+   out[64] = '\0';
+   return 1;
+}
+
 SSL *server_tls_accept(int fd)
 {
    if (fd < 0)
@@ -294,20 +444,27 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    config_t cfg;
    config_load(&cfg);
+   int effective_mtls = pki_mtls_ramp_init(cfg.server_api_mtls);
+   if (effective_mtls < 0)
+      return -1;
+   if (effective_mtls == 1)
+      aimee_log(LOG_WARN, "server.tls",
+                "mTLS migration is optional: bearer-only clients remain accepted until the "
+                "durable roster is fully presented");
    /* Secure-by-default: when a tls_port is configured but no cert exists, the
     * server provisions a self-signed one rather than fall back to a plaintext
     * listener (the remote path now REQUIRES TLS — plaintext /v1 is loopback-only).
     * An operator-supplied cert at the same path is left untouched. mTLS still
     * needs an operator-issued client CA, so this self-signed path is server-TLS
     * only (mtls==0); when mTLS is required the operator must supply the cert. */
-   if (cfg.server_api_mtls == 0)
+   if (effective_mtls == 0)
       pki_ensure_self_signed_server_cert(cert, key);
    /* When mTLS is on, ensure aimee's client CA exists (create-or-load) and the
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
-   if (cfg.server_api_mtls > 0)
-      pki_ca_ensure();
-   return server_tls_init(cert, key, cfg.server_api_mtls, cfg.server_api_mtls_client_ca);
+   if (effective_mtls > 0 && pki_ca_ensure() != 0)
+      return -1;
+   return server_tls_init(cert, key, effective_mtls, cfg.server_api_mtls_client_ca);
 }
 
 SSL *server_tls_begin(int fd)

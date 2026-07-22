@@ -15,4 +15,9 @@ int kb_client_mtls_configured(void);
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,
                              int *status_out);
 
+/* Publish this server's bounded health record over its enrolled mTLS identity.
+ * The kb authorizes immutable issuer/serial/fingerprint metadata from TLS; the
+ * caller-supplied server_id is only a selector and cannot refresh another row. */
+int kb_client_mtls_heartbeat(const char *server_id, const char *health, const char *version);
+
 #endif /* DEC_KB_CLIENT_MTLS_H */

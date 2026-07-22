@@ -22,23 +22,40 @@ static void wipe(void *p, size_t n)
       *v++ = 0;
 }
 
-/* Run `git -C <repo_dir> <args>` and capture the trimmed first line of stdout.
- * Returns 0 + out on success (non-empty, rc==0). repo_dir is a server-resolved
- * workspace path; a stray single quote is rejected (no shell injection). */
+/* Run one fixed local git query and capture the trimmed first line of stdout.
+ * A minimal environment prevents inherited GIT_DIR/WORK_TREE/config overrides
+ * from changing the trusted repository context. No shell is involved. */
 static int git_cap(const char *repo_dir, const char *args, char *out, size_t cap)
 {
    if (out && cap)
       out[0] = '\0';
-   if (!repo_dir || strchr(repo_dir, '\''))
+   if (!repo_dir)
       return -1;
-   char cmd[1024];
-   if ((size_t)snprintf(cmd, sizeof(cmd), "git -C '%s' %s 2>/dev/null", repo_dir, args) >=
-       sizeof(cmd))
+   const char *const *argv = NULL;
+   const char *origin[] = {"git", "-C", repo_dir, "config", "--get", "remote.origin.url", NULL};
+   const char *branch[] = {"git", "-C", repo_dir, "rev-parse", "--abbrev-ref", "HEAD", NULL};
+   const char *origin_head[] = {"git",          "-C",          repo_dir, "rev-parse",
+                                "--abbrev-ref", "origin/HEAD", NULL};
+   const char *subject[] = {"git", "-C", repo_dir, "log", "-1", "--format=%s", NULL};
+   if (strcmp(args, "config --get remote.origin.url") == 0)
+      argv = origin;
+   else if (strcmp(args, "rev-parse --abbrev-ref HEAD") == 0)
+      argv = branch;
+   else if (strcmp(args, "rev-parse --abbrev-ref origin/HEAD") == 0)
+      argv = origin_head;
+   else if (strcmp(args, "log -1 --format=%s") == 0)
+      argv = subject;
+   else
       return -1;
-   int rc = 0;
-   char *r = run_cmd(cmd, &rc);
-   if (!r)
+   char *const envp[] = {"PATH=/usr/local/bin:/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM=1",
+                         "GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_GLOBAL=/dev/null", NULL};
+   char *r = NULL;
+   int rc = safe_exec_capture_cwd_env_timeout(argv, repo_dir, envp, &r, 4096, 5000);
+   if (rc != 0 || !r)
+   {
+      free(r);
       return -1;
+   }
    char *nl = strchr(r, '\n');
    if (nl)
       *nl = '\0';
@@ -47,7 +64,7 @@ static int git_cap(const char *repo_dir, const char *args, char *out, size_t cap
       r[--n] = '\0';
    snprintf(out, cap, "%s", r);
    free(r);
-   return (rc == 0 && out[0]) ? 0 : -1;
+   return out[0] ? 0 : -1;
 }
 
 /* The host (case-insensitive, between [s, e)) is exactly github.com / www.github.com. */
@@ -206,6 +223,9 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * default is e.g. "testing" would get its PR opened against the wrong branch. */
 static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
 {
+   if (!buf || n == 0)
+      return -1;
+   buf[0] = '\0';
    /* Build the URL directly: gh_get() appends a trailing "/<path>", and GitHub
     * 404s GET /repos/<owner>/<repo>/ (trailing slash) — only the bare form works. */
    char url[512];
@@ -224,7 +244,8 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
    {
       cJSON *j = cJSON_Parse(resp);
       const cJSON *db = j ? cJSON_GetObjectItem(j, "default_branch") : NULL;
-      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0])
+      if (cJSON_IsString(db) && db->valuestring && db->valuestring[0] &&
+          strlen(db->valuestring) < n)
       {
          snprintf(buf, n, "%s", db->valuestring);
          rc = 0;
@@ -232,6 +253,28 @@ static int gh_default_branch(const gh_ctx_t *cx, char *buf, size_t n)
       cJSON_Delete(j);
    }
    free(resp);
+   if (rc != 0)
+      buf[0] = '\0';
+   return rc;
+}
+
+int git_pr_default_branch_via_api(const char *principal, const char *repo_dir, char *out,
+                                  size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   gh_ctx_t cx;
+   if (!out || out_cap == 0 || gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   int rc = gh_default_branch(&cx, out, out_cap);
+   gh_ctx_done(&cx);
+   if (rc != 0)
+   {
+      out[0] = '\0';
+      snprintf(err, errlen, "cannot resolve authoritative default branch");
+   }
    return rc;
 }
 
@@ -405,6 +448,46 @@ int git_pr_create_via_api_ex(const char *principal, const char *repo_dir, const 
    return ok;
 }
 
+int git_pr_find_open_via_api(const char *principal, const char *repo_dir, const char *head,
+                             const char *base, char *out, size_t out_cap, char *err, size_t errlen)
+{
+   if (out && out_cap)
+      out[0] = '\0';
+   if (!head || !head[0] || !base || !base[0] || strlen(head) > 200 || strlen(base) > 200 ||
+       strchr(head, '&') || strchr(head, '?') || strchr(base, '&') || strchr(base, '?'))
+   {
+      snprintf(err, errlen, "invalid PR head/base");
+      return -1;
+   }
+   gh_ctx_t cx;
+   if (gh_ctx_resolve(principal, repo_dir, &cx, err, errlen) != 0)
+      return -1;
+   char path[700];
+   snprintf(path, sizeof(path), "pulls?state=open&head=%s:%s&base=%s&per_page=1", cx.owner, head,
+            base);
+   char *response = NULL;
+   int status = gh_get(&cx, path, &response);
+   gh_ctx_done(&cx);
+   if (status < 200 || status >= 300 || !response)
+   {
+      gh_err(response, status, "find PR", err, errlen);
+      free(response);
+      return -1;
+   }
+   int found = 0;
+   cJSON *array = cJSON_Parse(response);
+   const cJSON *first = cJSON_IsArray(array) ? cJSON_GetArrayItem(array, 0) : NULL;
+   const cJSON *url = first ? cJSON_GetObjectItem(first, "html_url") : NULL;
+   if (cJSON_IsString(url) && url->valuestring && url->valuestring[0])
+   {
+      snprintf(out, out_cap, "%s", url->valuestring);
+      found = 1;
+   }
+   cJSON_Delete(array);
+   free(response);
+   return found;
+}
+
 int git_pr_info_via_api(const char *principal, const char *repo_dir, int number, git_pr_info_t *out,
                         char *err, size_t errlen)
 {
@@ -441,17 +524,34 @@ int git_pr_info_via_api(const char *principal, const char *repo_dir, int number,
    const cJSON *mergeable = cJSON_GetObjectItem(j, "mergeable");
    const cJSON *headj = cJSON_GetObjectItem(j, "head");
    const cJSON *sha = headj ? cJSON_GetObjectItem(headj, "sha") : NULL;
+   const cJSON *headref = headj ? cJSON_GetObjectItem(headj, "ref") : NULL;
    const cJSON *basej = cJSON_GetObjectItem(j, "base");
    const cJSON *baseref = basej ? cJSON_GetObjectItem(basej, "ref") : NULL;
+   const char *sha_s = cJSON_IsString(sha) ? sha->valuestring : NULL;
+   const char *head_s = cJSON_IsString(headref) ? headref->valuestring : NULL;
+   const char *base_s = cJSON_IsString(baseref) ? baseref->valuestring : NULL;
+   if (!cJSON_IsString(state) || !state->valuestring || !sha_s || !sha_s[0] || !head_s ||
+       !head_s[0] || !base_s || !base_s[0])
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: pull request response is missing required refs");
+      return -1;
+   }
    out->open =
        cJSON_IsString(state) && state->valuestring && strcmp(state->valuestring, "open") == 0;
    out->merged = cJSON_IsTrue(merged) ? 1 : 0;
    if (cJSON_IsBool(mergeable))
       out->mergeable = cJSON_IsTrue(mergeable) ? 1 : 0; /* null stays -1 (computing) */
-   if (cJSON_IsString(sha) && sha->valuestring)
-      snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha->valuestring);
-   if (cJSON_IsString(baseref) && baseref->valuestring)
-      snprintf(out->base, sizeof(out->base), "%s", baseref->valuestring);
+   if (strlen(sha_s) >= sizeof(out->head_sha) || strlen(head_s) >= sizeof(out->head) ||
+       strlen(base_s) >= sizeof(out->base))
+   {
+      cJSON_Delete(j);
+      snprintf(err, errlen, "github API: pull request ref is too long");
+      return -1;
+   }
+   snprintf(out->head_sha, sizeof(out->head_sha), "%s", sha_s);
+   snprintf(out->head, sizeof(out->head), "%s", head_s);
+   snprintf(out->base, sizeof(out->base), "%s", base_s);
    cJSON_Delete(j);
    return 0;
 }
@@ -509,7 +609,7 @@ int git_pr_merge_via_api(const char *principal, const char *repo_dir, int number
    char path[64];
    snprintf(path, sizeof(path), "pulls/%d/merge", number);
    char *resp = NULL;
-   int st = gh_put(&cx, path, "{\"merge_method\":\"squash\"}", &resp);
+   int st = gh_put(&cx, path, GIT_PR_SQUASH_MERGE_JSON, &resp);
    gh_ctx_done(&cx);
    int res;
    if (st >= 200 && st < 300)

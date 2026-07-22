@@ -291,6 +291,9 @@ typedef struct
    char default_agent[MAX_AGENT_NAME];
    char fallback_chain[MAX_FALLBACK][MAX_AGENT_NAME];
    int fallback_count;
+   /* Transient per-request routing contract: an explicit agent/provider pin
+    * must surface that agent's result and may never substitute a peer. */
+   int route_pinned;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;

@@ -828,6 +828,26 @@ void config_parse_autonomy_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(autonomy, "ci_retry_max");
    if (cJSON_IsNumber(item))
       cfg->autonomy_ci_retry_max = clampi(item->valueint, 0, 20);
+   /* Run safety caps + auto-resume policy. Clamped to sane bounds; the wfe readers
+    * additionally fall back to their historical default on a non-positive value. */
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "max_turns");
+   if (cJSON_IsNumber(item)) /* must be positive — a run needs at least a few turns */
+      cfg->autonomy_max_turns = clampi(item->valueint, 1, 100000);
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "max_wall_secs");
+   if (cJSON_IsNumber(item)) /* >=30s: below that a run can't make useful progress per window */
+      cfg->autonomy_max_wall_secs = clampi(item->valueint, 30, 86400);
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "stale_abandon_secs");
+   if (cJSON_IsNumber(item)) /* 0 disables the stale-park reaper entirely */
+      cfg->autonomy_stale_abandon_secs = clampi(item->valueint, 0, 604800);
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "concurrency");
+   if (cJSON_IsNumber(item))
+      cfg->autonomy_concurrency = clampi(item->valueint, 1, 128);
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "auto_resume_cap_parks");
+   if (cJSON_IsBool(item))
+      cfg->autonomy_auto_resume_cap_parks = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "max_resumes");
+   if (cJSON_IsNumber(item)) /* 0 = never auto-resume (equivalent to the policy being off) */
+      cfg->autonomy_max_resumes = clampi(item->valueint, 0, 100000);
 }
 
 /* Bridge the autonomy config knobs to the AIMEE_AUTONOMY_* env vars the wfe library
