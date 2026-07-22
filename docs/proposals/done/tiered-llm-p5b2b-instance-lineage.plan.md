@@ -1,6 +1,6 @@
 # P5-B2b primary management-instance lineage
 
-- **State:** draft implementation plan.
+- **State:** completed; roundtable-converged and validated locally plus CT260 real PG17 and production-profile leaves.
 - **Depends on:** P5-B1c online status authority; P5-B2a workload provider;
   P5-A management certificate profile and enrollment substrate.
 - **Followed by:** P5-B2c CA signing, custody-wrapped local bundle lifecycle and
