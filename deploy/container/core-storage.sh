@@ -3,6 +3,22 @@
 # The kernel interprets core_pattern in the crashing process's mount namespace,
 # so an appliance host path is useless unless the same path is mounted here.
 
+aimee_enable_core_dumps() {
+    _required=${AIMEE_REQUIRE_PERSISTENT_CORES:-0}
+    if ! ulimit -c unlimited 2>/dev/null; then
+        printf '[server-entrypoint] %s: cannot raise the core-size resource limit\n' \
+            "$([ "$_required" = 1 ] && printf fatal || printf warning)" >&2
+        [ "$_required" = 1 ] && return 1
+        return 0
+    fi
+    _core_limit=$(ulimit -c 2>/dev/null || printf 0)
+    if [ "$_core_limit" = 0 ]; then
+        printf '[server-entrypoint] %s: effective core-size resource limit is zero\n' \
+            "$([ "$_required" = 1 ] && printf fatal || printf warning)" >&2
+        [ "$_required" = 1 ] && return 1
+    fi
+}
+
 aimee_prepare_core_storage() {
     _core_dir=${AIMEE_CORE_DIR:-/mnt/media/cores}
     _pattern_file=${AIMEE_CORE_PATTERN_FILE:-/proc/sys/kernel/core_pattern}
@@ -55,4 +71,35 @@ aimee_prepare_core_storage() {
             fi
             ;;
     esac
+}
+
+# Produce a real core as the final unprivileged launch user. Appliance profiles
+# enable this: startup is refused unless the kernel writes a non-empty file into
+# the mounted persistent directory. The retained core is direct boot evidence.
+aimee_verify_core_dump() {
+    [ "${AIMEE_CORE_SELFTEST:-0}" = 1 ] || return 0
+    _core_dir=${AIMEE_CORE_DIR:-/mnt/media/cores}
+    _marker=$(mktemp "$_core_dir/.core-selftest.XXXXXX") || return 1
+    (
+        cd "$_core_dir" || exit 1
+        ulimit -c unlimited || exit 1
+        sh -c 'kill -SEGV $$' >/dev/null 2>&1 || true
+    )
+    _wait=0
+    _produced=
+    while [ "$_wait" -lt 50 ]; do
+        _produced=$(find "$_core_dir" -maxdepth 1 -type f -newer "$_marker" \
+            ! -name '.core-selftest.*' -size +0c -print 2>/dev/null | head -n 1)
+        [ -n "$_produced" ] && break
+        _wait=$((_wait + 1))
+        sleep 0.1
+    done
+    rm -f "$_marker"
+    if [ -z "$_produced" ]; then
+        printf '[server-entrypoint] fatal: controlled SIGSEGV produced no persistent core in %s\n' \
+            "$_core_dir" >&2
+        return 1
+    fi
+    printf '[server-entrypoint] controlled SIGSEGV verified persistent core: %s\n' \
+        "$_produced"
 }

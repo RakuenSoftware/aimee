@@ -35,14 +35,10 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 ulimit -s 65536 2>/dev/null || true
 
 # Preserve post-mortem evidence when the temporary C resource plane crashes.
-# Appliances set core_pattern to a persistent host mount, but the container's
-# inherited soft RLIMIT_CORE is commonly zero; without raising it the kernel
-# silently produces no core despite that pattern. Best-effort for runtimes that
-# disallow changing the limit.
-ulimit -c unlimited 2>/dev/null || true
-
+# Required appliance profiles fail closed if either the resource limit or the
+# storage policy cannot guarantee it; other runtimes stay warning-compatible.
 . /usr/local/bin/core-storage.sh
-if ! aimee_prepare_core_storage; then
+if ! aimee_enable_core_dumps || ! aimee_prepare_core_storage; then
     exit 1
 fi
 
@@ -187,7 +183,7 @@ rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 # runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
 # parent entrypoint configured them. Raise the soft limit again as the final
 # unprivileged child operation so the actual server process inherits it.
-runuser -u aimee -- sh -c 'ulimit -c unlimited 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
+runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; aimee_verify_core_dump; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then

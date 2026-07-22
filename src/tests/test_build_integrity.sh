@@ -32,8 +32,9 @@ fi
 # A native crash must both produce evidence and cause the two-plane container
 # to restart. `tail --pid` deadlocks on a zombie child because the supervising
 # shell cannot reap that child until tail returns.
-if [ "$(grep -cF 'ulimit -c unlimited' ../deploy/container/server-entrypoint.sh)" -ge 2 ] &&
-   grep -qF "runuser -u aimee -- sh -c 'ulimit -c unlimited" ../deploy/container/server-entrypoint.sh &&
+if grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'aimee_verify_core_dump' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'AIMEE_CORE_SELFTEST: "1"' ../deploy/smoothnas/aimee-server.plugin.yaml &&
    sh tests/test_server_core_storage.sh; then
     pass "server entrypoint enables and validates persistent core dumps"
 else

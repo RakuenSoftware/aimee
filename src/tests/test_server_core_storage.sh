@@ -8,6 +8,16 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 pattern_file="$tmp/core_pattern"
 core_dir="$tmp/cores"
 
+AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_enable_core_dumps
+if (
+    ulimit -c 0
+    ulimit -Hc 0
+    AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_enable_core_dumps 2>/dev/null
+); then
+    echo "core-storage: accepted an immutable zero core-size limit" >&2
+    exit 1
+fi
+
 printf '%s/core.%%e.%%p\n' "$core_dir" > "$pattern_file"
 AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage
@@ -48,8 +58,9 @@ case "$host_pattern" in
             exit 1
         fi
         for produced in "$@"; do
-            [ -f "$produced" ] && { echo "core-storage: controlled SIGSEGV produced $produced"; break; }
+            [ -f "$produced" ] && { echo "core-storage: controlled SIGSEGV produced $produced"; rm -f "$produced"; break; }
         done
+        AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_SELFTEST=1 aimee_verify_core_dump
         ;;
 esac
 
