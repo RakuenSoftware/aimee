@@ -155,7 +155,7 @@ int kb_mgmt_jwks_build_unsigned(const uint8_t *token_modulus, size_t token_modul
    if (!record)
       return -1;
    OPENSSL_cleanse(record, sizeof(*record));
-   if (valid_until <= valid_from ||
+   if (valid_from < 0 || valid_until > KB_MGMT_JWKS_TIME_MAX || valid_until <= valid_from ||
        kb_mgmt_token_jwk(token_modulus, token_modulus_len, jwk, sizeof(jwk), &jwk_len))
       goto fail;
    int n = snprintf(record->jwks, sizeof(record->jwks), "{\"keys\":[%.*s]}", (int)jwk_len, jwk);
@@ -364,7 +364,8 @@ static kb_mgmt_jwks_result_t read_hwm(const kb_mgmt_jwks_callbacks_t *cb, const 
 
 static int config_valid(const kb_mgmt_jwks_config_t *config)
 {
-   if (!config || config->valid_until <= config->valid_from || !config->clock_skew_seconds ||
+   if (!config || config->valid_from < 0 || config->valid_until > KB_MGMT_JWKS_TIME_MAX ||
+       config->valid_until <= config->valid_from || !config->clock_skew_seconds ||
        !config->maximum_lifetime_seconds)
       return 0;
    uint64_t lifetime = (uint64_t)config->valid_until - (uint64_t)config->valid_from;

@@ -13,6 +13,7 @@
 #define KB_MGMT_JWKS_BYTES_MAX        1024
 #define KB_MGMT_JWKS_PAYLOAD_MAX      2048
 #define KB_MGMT_JWKS_ENVELOPE_MAX     3072
+#define KB_MGMT_JWKS_TIME_MAX         INT64_C(9007199254740991)
 
 typedef enum
 {

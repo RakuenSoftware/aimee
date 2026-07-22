@@ -318,6 +318,13 @@ static void test_bounds_conflicts_and_fail_closed(void)
    assert(kb_mgmt_jwks_build_unsigned(m.roots.token.public_key, m.roots.token.public_key_len, 10,
                                       10, &record));
    assert(zero(&record, sizeof(record)));
+   assert(kb_mgmt_jwks_build_unsigned(m.roots.token.public_key, m.roots.token.public_key_len, -1,
+                                      10, &record));
+   assert(zero(&record, sizeof(record)));
+   assert(kb_mgmt_jwks_build_unsigned(m.roots.token.public_key, m.roots.token.public_key_len,
+                                      KB_MGMT_JWKS_TIME_MAX,
+                                      KB_MGMT_JWKS_TIME_MAX + INT64_C(1), &record));
+   assert(zero(&record, sizeof(record)));
 
    kb_mgmt_jwks_callbacks_t cb = callbacks(&m);
    kb_mgmt_jwks_config_t c = config();
@@ -330,6 +337,15 @@ static void test_bounds_conflicts_and_fail_closed(void)
    assert(m.record.phase == KB_MGMT_JWKS_EMPTY && !n && zero(out, sizeof(out)));
    m.forged_read = 0;
    c.now = c.valid_from + (int64_t)c.clock_skew_seconds + 1;
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
+   assert(m.record.phase == KB_MGMT_JWKS_EMPTY && !n && zero(out, sizeof(out)));
+   c = config();
+   c.valid_from = -1;
+   c.now = 0;
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
+   assert(m.record.phase == KB_MGMT_JWKS_EMPTY && !n && zero(out, sizeof(out)));
+   c = config();
+   c.valid_until = KB_MGMT_JWKS_TIME_MAX + INT64_C(1);
    assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
    assert(m.record.phase == KB_MGMT_JWKS_EMPTY && !n && zero(out, sizeof(out)));
 
