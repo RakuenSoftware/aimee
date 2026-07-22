@@ -410,6 +410,7 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddStringToObject(obj, "provider", ag->provider);
    cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
    cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
+   cJSON_AddBoolToObject(obj, "delegate_available", agent_is_available_for_routing(ag));
    cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
    cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);

@@ -398,7 +398,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 		if request.Persona == "security" && request.Delegate == "kimi" {
 			foundPin = true
 		}
-		if request.Persona == "qa" && request.Delegate == "" {
+		if request.Persona == "qa" && request.Delegate == "$random" {
 			foundDynamicQA = true
 		}
 	}
@@ -527,7 +527,7 @@ func TestPanelPassesRandomAndPinnedSpecificationsToDelegate(t *testing.T) {
 		}
 	}
 	if !delegates[""] || !delegates["codex"] {
-		t.Fatalf("random must remain unbound and pin must remain explicit: %+v", agents.requests)
+		t.Fatalf("roundtable must pass random and pinned specifications opaquely: %+v", agents.requests)
 	}
 }
 

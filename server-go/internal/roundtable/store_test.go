@@ -30,11 +30,11 @@ func TestConfiguredRoundtablePreservesExactSeatSpecifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 3 || panel.MinSuccessful != 2 || !panel.Discussion || panel.DeadlineMS != 12345 || !panel.ChairmanEnabled || panel.Chairman != "" {
+	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 3 || panel.MinSuccessful != 2 || !panel.Discussion || panel.DeadlineMS != 12345 || !panel.ChairmanEnabled || panel.Chairman != "$random" {
 		t.Fatalf("panel=%+v", panel)
 	}
-	if panel.Seats[0].Selector != "" || panel.Seats[1].Selector != "codex" || panel.Seats[2].Selector != "" {
-		t.Fatalf("roundtable resolved delegate-owned random seats: %+v", panel.Seats)
+	if panel.Seats[0].Selector != "$random" || panel.Seats[1].Selector != "codex" || panel.Seats[2].Selector != "$random" {
+		t.Fatalf("roundtable altered opaque delegate seat specifications: %+v", panel.Seats)
 	}
 }
 

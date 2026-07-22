@@ -134,6 +134,7 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 		switch r.URL.Path {
 		case "/v1/agent/list":
 			_ = json.NewEncoder(w).Encode(map[string]any{"agents": []map[string]any{
+				{"name": "a-down", "provider": "third", "model": "down", "enabled": true, "delegate_available": false, "max_parallel": 10, "roles": []string{"review"}, "personas": []string{"all"}},
 				{"name": "codex", "provider": "openai", "model": "gpt", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
 				{"name": "minimax", "provider": "minimax", "model": "m3", "enabled": true, "max_parallel": 2, "roles": []string{"review"}, "personas": []string{"all"}},
 			}})

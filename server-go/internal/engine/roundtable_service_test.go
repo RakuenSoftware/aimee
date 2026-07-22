@@ -16,7 +16,7 @@ func TestSharedRoundtableReviewUsesGoEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Approved || result.Degraded || result.ParticipantsTotal != 2 || result.ParticipantsFailed != 0 || result.ParticipantsUsed != 2 {
+	if !result.Approved || !result.Converged || len(result.Items) != 0 || result.Degraded || result.ParticipantsTotal != 2 || result.ParticipantsFailed != 0 || result.ParticipantsUsed != 2 {
 		t.Fatalf("result=%+v", result)
 	}
 	if len(agents.requests) != 2 || !agents.requests[0].ProvidedTarget || !agents.requests[1].ProvidedTarget {

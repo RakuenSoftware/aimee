@@ -753,11 +753,7 @@ void delegate_worker(void *arg)
    char participant_agent[MAX_AGENT_NAME] = "";
    if (participant && participant[0])
    {
-      int prior_job_id = 0;
-      char trailing = '\0';
-      if ((via_name && via_name[0]) ||
-          sscanf(participant, "delegate-job:%d%c", &prior_job_id, &trailing) != 1 ||
-          prior_job_id <= 0)
+      if (via_name && via_name[0])
       {
          delegation_compute_error(cctx, "invalid delegate participant continuation");
          compute_ctx_free(cctx);
@@ -765,7 +761,7 @@ void delegate_worker(void *arg)
       }
       db1_agent_job_t prior;
       memset(&prior, 0, sizeof(prior));
-      if (db1_agent_job_get(prior_job_id, &prior) != 0 || !prior.agent_name[0])
+      if (db1_agent_job_get_by_participant(participant, &prior) != 0 || !prior.agent_name[0])
       {
          db1_agent_job_free(&prior);
          delegation_compute_error(cctx, "delegate participant continuation is unknown");

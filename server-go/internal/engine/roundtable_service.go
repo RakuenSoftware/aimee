@@ -84,7 +84,11 @@ func assembleRoundtableArtifact(feedback *wfe.ReviewFeedback, approved bool) str
 
 func roundtableResult(feedback *wfe.ReviewFeedback, approved bool, analysis panelAnalysis, total int, cost float64) *roundtablecfg.RunResult {
 	failed := total - len(analysis.Reports)
-	return &roundtablecfg.RunResult{Artifact: assembleRoundtableArtifact(feedback, approved), Feedback: feedback,
+	var items []wfe.Finding
+	if feedback != nil {
+		items = append(items, feedback.Findings...)
+	}
+	return &roundtablecfg.RunResult{Artifact: assembleRoundtableArtifact(feedback, approved), Feedback: feedback, Items: items,
 		Approved: approved, Degraded: failed > 0, ParticipantsTotal: total,
 		ParticipantsFailed: failed, ParticipantsUsed: len(analysis.Reports), CostUSD: cost}
 }

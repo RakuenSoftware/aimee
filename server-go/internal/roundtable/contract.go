@@ -18,6 +18,8 @@ type ReviewRequest struct {
 type RunResult struct {
 	Artifact           string              `json:"artifact"`
 	Feedback           *wfe.ReviewFeedback `json:"feedback,omitempty"`
+	Items              []wfe.Finding       `json:"items"`
+	Converged          bool                `json:"converged"`
 	Approved           bool                `json:"approved"`
 	Degraded           bool                `json:"degraded"`
 	DeadlineHit        bool                `json:"deadline_hit"`

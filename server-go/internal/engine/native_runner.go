@@ -591,12 +591,14 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	quorum := panel.MinSuccessful
 	if approvals >= quorum && len(feedback.Findings) == 0 {
 		rt := roundtableResult(&feedback, true, analysis, len(seats), totalCost)
+		rt.Converged = true
 		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, Roundtable: rt}, nil
 	}
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "quorum", Persona: "panel", Severity: "blocking", Summary: "required approval quorum was not reached", Recommendation: "revise the artifact and reconvene the configured roundtable"})
 	}
 	rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+	rt.Converged = true
 	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
 }
 

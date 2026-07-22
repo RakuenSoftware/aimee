@@ -50,9 +50,9 @@ int db1_agent_job_create(const char *role, const char *prompt, const char *agent
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "INSERT INTO agent_jobs (role, prompt, agent_name, status,"
+   static const char *sql = "INSERT INTO agent_jobs (role, prompt, agent_name, participant_token, status,"
                             " heartbeat_at, created_at, updated_at)"
-                            " VALUES (?, ?, ?, 'pending', '', datetime('now'), datetime('now'))";
+                            " VALUES (?, ?, ?, lower(hex(randomblob(32))), 'pending', '', datetime('now'), datetime('now'))";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -265,7 +265,7 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
 
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
-       "SELECT id, role, prompt, agent_name, status, result, COALESCE(cursor, ''),"
+       "SELECT id, role, prompt, agent_name, participant_token, status, result, COALESCE(cursor, ''),"
        " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
        " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
        " created_at, updated_at"
@@ -280,20 +280,39 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
       db1_copy_col_text(out->role, sizeof(out->role), stmt, 1);
       out->prompt = db1_dup_col_text(stmt, 2);
       db1_copy_col_text(out->agent_name, sizeof(out->agent_name), stmt, 3);
-      db1_copy_col_text(out->status, sizeof(out->status), stmt, 4);
-      out->result = db1_dup_col_text(stmt, 5);
-      const unsigned char *cursor_txt = sqlite3_column_text(stmt, 6);
+      db1_copy_col_text(out->participant_token, sizeof(out->participant_token), stmt, 4);
+      db1_copy_col_text(out->status, sizeof(out->status), stmt, 5);
+      out->result = db1_dup_col_text(stmt, 6);
+      const unsigned char *cursor_txt = sqlite3_column_text(stmt, 7);
       out->cursor_turn = cursor_txt ? atoi((const char *)cursor_txt) : 0;
-      db1_copy_col_text(out->lease_owner, sizeof(out->lease_owner), stmt, 7);
-      db1_copy_col_text(out->heartbeat_at, sizeof(out->heartbeat_at), stmt, 8);
-      db1_copy_col_text(out->current_tool, sizeof(out->current_tool), stmt, 9);
-      out->api_call_count = sqlite3_column_int(stmt, 10);
-      db1_copy_col_text(out->created_at, sizeof(out->created_at), stmt, 11);
-      db1_copy_col_text(out->updated_at, sizeof(out->updated_at), stmt, 12);
+      db1_copy_col_text(out->lease_owner, sizeof(out->lease_owner), stmt, 8);
+      db1_copy_col_text(out->heartbeat_at, sizeof(out->heartbeat_at), stmt, 9);
+      db1_copy_col_text(out->current_tool, sizeof(out->current_tool), stmt, 10);
+      out->api_call_count = sqlite3_column_int(stmt, 11);
+      db1_copy_col_text(out->created_at, sizeof(out->created_at), stmt, 12);
+      db1_copy_col_text(out->updated_at, sizeof(out->updated_at), stmt, 13);
       rc = 0;
    }
    sqlite3_finalize(stmt);
    return rc;
+}
+
+int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out)
+{
+   if (!participant_token || strlen(participant_token) != 64 || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, "SELECT id FROM agent_jobs WHERE participant_token = ?", -1,
+                          &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, participant_token, -1, SQLITE_TRANSIENT);
+   int job_id = sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) : 0;
+   sqlite3_finalize(stmt);
+   return job_id > 0 ? db1_agent_job_get(job_id, out) : -1;
 }
 
 int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes)

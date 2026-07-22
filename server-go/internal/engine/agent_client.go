@@ -175,6 +175,9 @@ func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
 }
 
 func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Delegate == "$random" {
+		request.Delegate = ""
+	}
 	const maxRouteAttempts = 3
 	for attempt := 0; ; attempt++ {
 		result, err := c.delegateOnce(ctx, request)
@@ -383,7 +386,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 	planned := append([]DelegateRequest(nil), requests...)
 	needsRoute := false
 	for _, request := range planned {
-		if request.Delegate == "" && request.Participant == "" {
+		if delegateSelectorUnbound(request.Delegate) && request.Participant == "" {
 			needsRoute = true
 			break
 		}
@@ -397,7 +400,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 	}
 	providerUses, modelUses, agentUses := map[string]int{}, map[string]int{}, map[string]int{}
 	for _, request := range planned {
-		if request.Delegate == "" || request.Participant != "" {
+		if delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
 		}
 		for _, candidate := range candidates {
@@ -411,7 +414,7 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 	}
 	for i := range planned {
 		request := &planned[i]
-		if request.Delegate != "" || request.Participant != "" {
+		if !delegateSelectorUnbound(request.Delegate) || request.Participant != "" {
 			continue
 		}
 		best := -1
@@ -434,6 +437,10 @@ func (c *HTTPAgentClient) planDelegateGroup(ctx context.Context, requests []Dele
 		agentUses[chosen.Name]++
 	}
 	return planned, nil
+}
+
+func delegateSelectorUnbound(selector string) bool {
+	return selector == "" || selector == "$random"
 }
 
 func candidateLess(a, b delegateCandidate, providerUses, modelUses, agentUses map[string]int) bool {
@@ -474,6 +481,7 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 			Provider    string   `json:"provider"`
 			Model       string   `json:"model"`
 			Enabled     bool     `json:"enabled"`
+			Available   *bool    `json:"delegate_available"`
 			PrimaryOnly bool     `json:"primary_only"`
 			MaxParallel int      `json:"max_parallel"`
 			Roles       []string `json:"roles"`
@@ -485,7 +493,7 @@ func (c *HTTPAgentClient) delegateCandidates(ctx context.Context) ([]delegateCan
 	}
 	var candidates []delegateCandidate
 	for _, agent := range response.Agents {
-		if !agent.Enabled || agent.PrimaryOnly || strings.TrimSpace(agent.Name) == "" || agent.MaxParallel < 1 {
+		if !agent.Enabled || (agent.Available != nil && !*agent.Available) || agent.PrimaryOnly || strings.TrimSpace(agent.Name) == "" || agent.MaxParallel < 1 {
 			continue
 		}
 		provider := strings.TrimSpace(agent.Provider)

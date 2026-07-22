@@ -120,12 +120,6 @@ func resolvePreset(p preset, lenses []string, pins map[string]string) (Panel, er
 		if pinned := strings.TrimSpace(pins[persona]); pinned != "" {
 			selector = pinned
 		}
-		// Empty is the generic delegate contract's eligibility selector. The
-		// roundtable intentionally does not inspect the roster or resolve random
-		// seats; delegate owns routing, diversity, capacity, and temporary health.
-		if selector == "$random" {
-			selector = ""
-		}
 		seats = append(seats, Seat{Persona: persona, Selector: selector})
 	}
 	minimum := p.MinSuccessful
@@ -143,9 +137,6 @@ func resolvePreset(p preset, lenses []string, pins map[string]string) (Panel, er
 	if p.ChairmanEnabled {
 		if chairman == "" {
 			return Panel{}, fmt.Errorf("roundtable %q enables its chairman without selecting an agent", p.Name)
-		}
-		if chairman == "$random" {
-			chairman = ""
 		}
 	}
 	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Discussion: p.Discussion, DeadlineMS: deadline, Chairman: chairman, ChairmanEnabled: p.ChairmanEnabled, Acquired: true}, nil

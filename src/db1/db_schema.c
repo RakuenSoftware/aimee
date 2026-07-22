@@ -32,6 +32,7 @@ static void db1_run_migrations(sqlite3 *db)
        "ALTER TABLE eval_results ADD COLUMN hardware_profile TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE eval_results ADD COLUMN seed INTEGER NOT NULL DEFAULT 0",
        "ALTER TABLE coord_job_tasks ADD COLUMN preempt_requeues INTEGER NOT NULL DEFAULT 0",
+       "ALTER TABLE agent_jobs ADD COLUMN participant_token TEXT NOT NULL DEFAULT ''",
        /* Per-task delegate persona (engineer/architect/reviewer/...). The coord
         * queue is the single delegate-dispatch queue; carrying persona lets any
         * orchestrator (coord OR the workflow engine) name the delegate identity
