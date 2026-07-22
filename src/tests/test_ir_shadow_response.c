@@ -14,7 +14,7 @@
 
 #include "aimee.h" /* MAX_PATH_LEN et al: agent_types.h depends on it */
 
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee_ir_shadow.h"
 #include "agent_protocol.h"
 #include "cJSON.h"

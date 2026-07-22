@@ -6,7 +6,7 @@
 #define DEC_GW_STAGE_MEMORY_H
 
 #include <aimee/gateway/gateway_pipeline.h>
-#include "aimee_ir.h" /* aimee_request_t: the IR the transform edits */
+#include <aimee/ir/aimee_ir.h> /* aimee_request_t: the IR the transform edits */
 
 #ifdef __cplusplus
 extern "C"

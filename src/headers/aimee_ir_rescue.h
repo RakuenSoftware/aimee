@@ -14,7 +14,7 @@
 #ifndef DEC_AIMEE_IR_RESCUE_H
 #define DEC_AIMEE_IR_RESCUE_H 1
 
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 
 /* Rewrite prose tool calls in `r`'s TEXT blocks into real AIMEE_BLK_TOOL_USE blocks.
  *

@@ -1,5 +1,5 @@
 /* aimee_ir_metrics.c -- see aimee_ir_metrics.h. Atomic counters, [metric][wire]. */
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 
 /* Sized off the LAST wire value, so adding a protocol widens the table
  * automatically. (Was AIMEE_WIRE_GEMINI + 1 until the Gemini wire was removed —

@@ -9,9 +9,11 @@ curation, which belongs to optional `kb-synthesis`, or roundtable-specific panel
 
 ## Public contracts
 
-The target contract is represented today by response-side `aimee_response_t` and helpers such as
-`aimee_ir_response_from_text` in `src/headers/aimee_ir.h`, plus assembly and finalization paths spread
-through server, gateway, delegate, and translation code. The descriptor is ahead of physical ownership:
+The target contract for response-composition is one provider-neutral `aimee_response_t` plus assembly and
+finalization paths spread through server, gateway, delegate, and translation code. The shape, allocation,
+free, and accessor symbols for `aimee_response_t`, including `aimee_ir_response_from_text`, are owned by
+the `ir` module at `src/modules/ir/include/aimee/ir/aimee_ir.h`; response-composition consumes that
+canonical shape but does not own it. The descriptor is ahead of physical ownership:
 `src/modules/response-composition` contains no implementation yet, a tracked relocation gap rather than
 evidence that core composition is absent.
 

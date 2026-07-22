@@ -1,7 +1,7 @@
 /* server_state.c: server handlers for memory, index, rules, working memory, dashboard, workspace */
 #include "server_state_internal.h"
 #include "aimee.h"
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "shadow_mirror.h"
 #include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
 #include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */

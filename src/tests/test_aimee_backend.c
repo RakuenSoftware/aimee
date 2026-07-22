@@ -11,7 +11,7 @@
 
 #include "aimee_backend.h"
 #include "aimee_frontend.h"
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "cJSON.h"
 
 static const char *ANTHROPIC =

@@ -27,6 +27,8 @@ class Contract:
     consumers: tuple[str, ...]
     document: str
     document_markers: tuple[str, ...]
+    test_cmake_source: str | None = None
+    legacy_test_cmake_source: str | None = None
 
 
 CONTRACTS = (
@@ -168,6 +170,48 @@ CONTRACTS = (
         document="docs/modules/gateway.md",
         document_markers=("gateway_delegate_run_request_pipeline", "canonical include namespace"),
     ),
+    Contract(
+        module="ir-messaging",
+        legacy_source="src/server/aimee_ir.c",
+        legacy_header="src/headers/aimee_ir.h",
+        canonical_source="src/modules/ir/aimee_ir.c",
+        canonical_header="src/modules/ir/include/aimee/ir/aimee_ir.h",
+        canonical_include="aimee/ir/aimee_ir.h",
+        make_source="modules/ir/aimee_ir.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/ir/aimee_ir.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir.o",
+        consumers=(
+            "src/modules/ir/aimee_ir.c",
+            "src/tests/test_aimee_ir.c",
+        ),
+        document="docs/modules/ir.md",
+        document_markers=("provider-neutral message model", "canonical include namespace"),
+        test_cmake_source="../modules/ir/aimee_ir.c",
+        legacy_test_cmake_source="../server/aimee_ir.c",
+    ),
+    Contract(
+        module="ir-metrics",
+        legacy_source="src/server/aimee_ir_metrics.c",
+        legacy_header="src/headers/aimee_ir_metrics.h",
+        canonical_source="src/modules/ir/aimee_ir_metrics.c",
+        canonical_header="src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
+        canonical_include="aimee/ir/aimee_ir_metrics.h",
+        make_source="modules/ir/aimee_ir_metrics.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/ir/aimee_ir_metrics.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_metrics.o",
+        consumers=(
+            "src/modules/ir/aimee_ir_metrics.c",
+            "src/tests/test_aimee_ir_metrics.c",
+        ),
+        document="docs/modules/ir.md",
+        document_markers=("IR-local metrics", "canonical include namespace"),
+        test_cmake_source="../modules/ir/aimee_ir_metrics.c",
+        legacy_test_cmake_source="../server/aimee_ir_metrics.c",
+    ),
 )
 
 LEGACY_MODULE_ROOTS = (
@@ -225,7 +269,14 @@ def validate_legacy_module_root(
                 f"{module}: {build_root} in {relative}")
 
 
-def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str, rules: str) -> None:
+def validate_contract(
+    root: Path,
+    contract: Contract,
+    makefile: str,
+    cmake: str,
+    test_cmake: str,
+    rules: str,
+) -> None:
     for relative in (contract.legacy_source, contract.legacy_header):
         require(not (root / relative).exists(), "legacy-path-removed",
                 f"{contract.module}: {relative}")
@@ -248,6 +299,12 @@ def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str,
     if contract.legacy_cmake_source is not None:
         require(contract.legacy_cmake_source not in cmake, "core-source-unique",
                 f"{contract.module}: CMake legacy source")
+    if contract.test_cmake_source is not None:
+        require(contract.test_cmake_source in test_cmake, "focused-test-source",
+                f"{contract.module}: test CMake canonical source")
+    if contract.legacy_test_cmake_source is not None:
+        require(contract.legacy_test_cmake_source not in test_cmake, "focused-test-source",
+                f"{contract.module}: test CMake legacy source")
 
     # One canonical object can appear in several independently linked test targets.
     require(rules.count(contract.test_object) >= 1, "focused-test-object",
@@ -282,9 +339,10 @@ def validate(root: Path) -> None:
     require((root / ".git").exists() or (root / ".git").is_file(), "config-root", str(root))
     makefile = read(root, "src/Makefile")
     cmake = read(root, "CMakeLists.txt")
+    test_cmake = read(root, "src/tests/CMakeLists.txt")
     rules = read(root, "src/tests/Rules.mk")
     for contract in CONTRACTS:
-        validate_contract(root, contract, makefile, cmake, rules)
+        validate_contract(root, contract, makefile, cmake, test_cmake, rules)
 
     for module, legacy_root, build_files in LEGACY_MODULE_ROOTS:
         validate_legacy_module_root(root, module, legacy_root, build_files)
@@ -324,10 +382,14 @@ def validate(root: Path) -> None:
             "module-include-root", "Make plugin-loader include root")
     require(makefile.count("-Imodules/module-runtime/include") == 1,
             "module-include-root", "Make module-runtime include root")
+    require(makefile.count("-Imodules/ir/include") == 1,
+            "module-include-root", "Make IR include root")
     require(cmake.count("set(AIMEE_PLUGIN_LOADER_INCLUDE_DIR") == 1,
             "module-include-root", "CMake plugin-loader include root")
     require(cmake.count("set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR") == 1,
             "module-include-root", "CMake module-runtime include root")
+    require(cmake.count("set(AIMEE_IR_INCLUDE_DIR") == 1,
+            "module-include-root", "CMake IR include root")
 
     descriptor = json.loads(read(root, "src/modules/plugin-loader/module.yaml"))
     features = read(root, "src/headers/aimee_features.h")
