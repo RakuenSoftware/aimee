@@ -5,7 +5,7 @@
  * NOTE (Slice 2): TOOL_RESULT -> function_call_output items (the split) applied per
  * the tool_result-grouping ruling in the follow-up; this covers instructions,
  * message text, function_call (tool_use), tools, and response parse. */
-#include "aimee_backend.h"
+#include <aimee/translation/aimee_backend.h>
 
 #include "cJSON.h"
 
