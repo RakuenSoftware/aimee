@@ -39,6 +39,7 @@ static char g_createlog[300];
 /* Path the fake tmux appends every `send-keys` invocation to, so a test can
  * assert which interrupt key (if any) the cancel path sent. */
 static char g_sendlog[320];
+static char g_capturelog[320];
 
 static void install_fake_tmux(void)
 {
@@ -47,6 +48,7 @@ static void install_fake_tmux(void)
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
    snprintf(g_sendlog, sizeof(g_sendlog), "%s/sendlog", g_fake_dir);
+   snprintf(g_capturelog, sizeof(g_capturelog), "%s/capturelog", g_fake_dir);
    snprintf(g_createlog, sizeof(g_createlog), "%s/createlog", g_fake_dir);
    char script[320];
    snprintf(script, sizeof(script), "%s/tmux", g_fake_dir);
@@ -67,6 +69,7 @@ static void install_fake_tmux(void)
            "case \"$1\" in\n"
            "  has-session) [ \"$FAKE_TMUX_MODE\" = dead ] && exit 1; exit 0 ;;\n"
            "  capture-pane)\n"
+           "    echo \"$*\" >> '%s';\n"
            "    if [ \"$FAKE_TMUX_MODE\" = changing ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo \"frame $c\";\n"
@@ -92,8 +95,8 @@ static void install_fake_tmux(void)
            "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
-           counter, counter, counter, counter, counter, counter, counter, counter, counter, counter,
-           counter, counter, g_sendlog, g_createlog);
+           g_capturelog, counter, counter, counter, counter, counter, counter, counter, counter,
+           counter, counter, counter, counter, g_sendlog, g_createlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -127,6 +130,18 @@ static int sendlog_has(const char *needle)
 static int createlog_has(const char *needle)
 {
    FILE *f = fopen(g_createlog, "r");
+   if (!f)
+      return 0;
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   return strstr(buf, needle) != NULL;
+}
+
+static int capturelog_has(const char *needle)
+{
+   FILE *f = fopen(g_capturelog, "r");
    if (!f)
       return 0;
    char buf[4096];
@@ -192,6 +207,16 @@ static void test_recv_ok_on_stable_pane(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
    assert(rc == 0);
    assert(strstr(buf, "STATIC OUTPUT") != NULL);
+}
+
+static void test_capture_joins_wraps_and_includes_scrollback(void)
+{
+   unlink(g_capturelog);
+   setenv("FAKE_TMUX_MODE", "stable", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   assert(cli_session_capture(&s, buf, sizeof(buf)) == 0);
+   assert(capturelog_has("capture-pane -p -J -S - -t aimee-faketest"));
 }
 
 static void test_recv_does_not_return_static_prompt_as_answer(void)
@@ -1055,6 +1080,10 @@ int main(void)
 
    printf("test_recv_ok_on_stable_pane... ");
    test_recv_ok_on_stable_pane();
+   printf("OK\n");
+
+   printf("test_capture_joins_wraps_and_includes_scrollback... ");
+   test_capture_joins_wraps_and_includes_scrollback();
    printf("OK\n");
 
    printf("test_recv_does_not_return_static_prompt_as_answer... ");
