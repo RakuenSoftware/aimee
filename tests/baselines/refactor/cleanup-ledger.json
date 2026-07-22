@@ -193,6 +193,23 @@
       "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to five docs, status, validation, and ledger accounting.",
       "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-16.md", "docs/modules/execution-policy.md", "docs/modules/vault.md", "docs/modules/workspace.md", "docs/modules/tools.md", "docs/modules/git.md"]
+    },
+    {
+      "slice": 17,
+      "state": "present_and_verified",
+      "disposition": "Documented required-core config and audit against current reload, GUI projection, action evidence, legacy ledger, and WORM implementations without overstating restart, retention, or immutable-storage guarantees.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["six optional module documents remain explicit status debt", "dynamic live-consumer filtering for GUI config fields is not present", "distributed config ownership and dual audit stores remain for focused source slices"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Calling all persisted settings live or all audit persistence WORM would conceal verified contract gaps and collapse distinct guarantees.",
+        "revisit": "Source slices must prove consumer liveness, round-trip compatibility, authority migration, privacy, and store parity before consolidation or removal."
+      },
+      "consumers": ["module maintainers", "technical writers", "future config and audit source slices"],
+      "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to two docs, status, validation, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-17.md", "docs/modules/config.md", "docs/modules/audit.md"]
     }
   ]
 }
