@@ -186,13 +186,14 @@ Binaries land at repo root (`../aimee`, `../aimee-webchat`, `../aimee-server`, `
 ## PR Workflow
 
 ```
-git checkout -b feat/my-feature main
+git checkout -b feat/my-feature testing
 # implement
 git commit -m "feat: short description"
-gh pr create --title "feat: short description" --body "..."
+gh pr create --base testing --title "feat: short description" --body "..."
 ```
 
-PRs target `main`. Wait for CI before merging.
+Feature PRs target `testing`. After CI passes, merge them into `testing`.
+Only the protected promotion PR may flow from `testing` to `main`.
 
 ---
 
