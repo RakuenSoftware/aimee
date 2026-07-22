@@ -960,7 +960,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/tests/test_agent_responses.o \
                       $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
                       $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
-                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/server/aimee_ir_rescue.o \
+                      $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
                       $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                       $(OBJDIR)/tests/test_agent_delegate_root.o $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
@@ -3626,7 +3626,7 @@ $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
                                  $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                                 $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                 $(OBJDIR)/modules/translation/aimee_backend_anthropic.o $(OBJDIR)/modules/ir/aimee_ir.o \
-                                $(OBJDIR)/server/aimee_ir_rescue.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
+                                $(OBJDIR)/modules/delegates/aimee_ir_rescue.o $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                 $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/modules/delegates/delegate_driver.o \
@@ -4564,7 +4564,7 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-aimee-ir-rescue: $(OBJDIR)/tests/test_aimee_ir_rescue.o \
-                                         $(OBJDIR)/server/aimee_ir_rescue.o \
+                                         $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
                                          $(OBJDIR)/modules/ir/aimee_ir.o \
                                          $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                          $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
@@ -4591,7 +4591,7 @@ $(TESTPREFIX)/unit-test-shadow-mirror: $(OBJDIR)/tests/test_shadow_mirror.o \
 
 $(TESTPREFIX)/unit-test-agent-ir-parse: $(OBJDIR)/tests/test_agent_ir_parse.o \
                                         $(OBJDIR)/posix/agent_ir_parse.o \
-                                        $(OBJDIR)/server/aimee_ir_rescue.o \
+                                        $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
                                         $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                         $(OBJDIR)/modules/translation/aimee_backend_anthropic.o \
                                         $(OBJDIR)/modules/translation/aimee_backend_openai.o \
@@ -4623,7 +4623,7 @@ $(TESTPREFIX)/unit-test-responses-parity: $(OBJDIR)/tests/test_responses_parity.
                                           $(OBJDIR)/modules/translation/aimee_backend_anthropic.o \
                                           $(OBJDIR)/modules/translation/aimee_backend_openai.o \
                                           $(OBJDIR)/modules/ir/aimee_ir.o \
-                                          $(OBJDIR)/server/aimee_ir_rescue.o \
+                                          $(OBJDIR)/modules/delegates/aimee_ir_rescue.o \
                                           $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                           $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
                                           $(OBJDIR)/server/tool_call_args.o \

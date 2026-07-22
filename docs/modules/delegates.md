@@ -16,6 +16,41 @@ orchestration. The main durable worker and HTTP/RPC orchestration still live in 
 root `cmd_agent_delegate.c` is an entry-point consumer. Remaining server/root implementations are relocation
 debt, not a second supported delegate engine.
 
+### IR-side prose tool-call rescue
+
+The module owns `aimee_ir_rescue_tool_calls` in
+`src/modules/delegates/aimee_ir_rescue.c`, with its public contract at
+`src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h`. This recovery layer handles a delegate
+model capability gap: models without reliable native tool calling may emit XML, Qwen, harmony, Mistral,
+or policy-enabled JSON calls as prose. It reuses the delegate-owned
+`delegate_rescue_parse_tool_calls` dialect parser and converts eligible `AIMEE_BLK_TEXT` content into
+canonical `AIMEE_BLK_TOOL_USE` blocks.
+
+The rescue scans only `AIMEE_BLK_TEXT`. If the response already contains an `AIMEE_BLK_TOOL_USE` block,
+it leaves the entire response unchanged to avoid duplicate dispatch. For a rewritten response, malformed
+or non-object arguments become an empty JSON object, the stop reason becomes `AIMEE_STOP_TOOL_USE`, and
+`ir_rescue_recoveries` is incremented once regardless of the number of calls recovered. Preparation and
+final block-array allocation happen before source content is consumed, so a pre-commit allocation failure
+returns `0` with the response unchanged.
+
+Provider wire parsing remains owned by `translation`; final-answer assembly remains owned by
+`response-composition`; server IR rollout, transport, and shadow controls remain outside this bounded
+delegate capability. The live bridge consumer is `src/posix/agent_ir_parse.c`.
+
+### Public-header transition
+
+The canonical rescue header is intentionally not enrolled in `module.yaml.public_headers` yet. That field
+activates the repository's all-or-nothing public-header layout contract, while delegates still has flat
+headers consumed through `-Imodules/delegates`. During this transition,
+`scripts/check_module_source_ownership.py`, its mutation suite, and the refactor public-header baseline
+enforce the rescue header's canonical path and include spelling.
+
+This debt is owned by the required-core `delegates` module and tracked by the
+`core-substrate-and-source-module-boundaries.md` proposal. Its close condition is atomic:
+move every remaining flat delegate header to `src/modules/delegates/include/aimee/delegates/`, canonicalize
+all external includes, remove the flat Make/CMake include roots, and then declare the complete public-header
+set in the descriptor. A partial descriptor claim is not permitted.
+
 ## Dependencies and consumers
 
 - `audit`: records delegate decisions, actions, evidence, and terminal outcomes.
@@ -82,6 +117,9 @@ and audit boundaries while reacquiring credentials through the authorized vault 
 ephemeral-workspace, liveness, budget, gateway-orchestration, CLI/API, and workflow suites cover the
 distributed implementation. An unavailable route, provider, or backend must fail concretely; partial runs retain audit
 evidence; policy, budget, or sandbox failure is fail-closed and cannot downgrade to raw local execution.
+`src/tests/test_aimee_ir_rescue.c` directly covers prose rescue. Consumer-level coverage runs through
+`src/tests/test_agent_ir_parse.c` and `src/tests/test_responses_parity.c`; all three must pass before changes
+to this behavior are considered verified.
 
 ## Operational diagnostics
 

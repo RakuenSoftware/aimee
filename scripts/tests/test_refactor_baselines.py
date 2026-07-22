@@ -48,6 +48,10 @@ class RefactorBaselineTests(unittest.TestCase):
             "src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
             files,
         )
+        self.assertIn(
+            "src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h",
+            files,
+        )
 
     def test_repository_baseline_is_cwd_independent(self) -> None:
         with tempfile.TemporaryDirectory() as cwd:

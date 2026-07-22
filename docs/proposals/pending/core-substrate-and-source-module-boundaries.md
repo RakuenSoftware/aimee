@@ -200,6 +200,17 @@ the liveness and delivery proposals own dispositions, cleanup ledgers, compatibi
 At completion, omitted optional modules leave no residue and feature implementation no longer lives
 in broad `src/`, `src/server/`, `src/kb/`, `src/db1/`, `src/db2/`, or global-header buckets.
 
+### Tracked delegates header transition
+
+Owner: required-core `delegates`. The rescue slice establishes
+`src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h`, but descriptor enrollment is deferred
+because the header-layout contract retires a module's flat include root as soon as any canonical public
+header is declared. The follow-up slice closes this debt only when every remaining flat delegate header is
+moved into the canonical namespace, all external consumers use canonical includes, the flat Make/CMake
+include roots are removed, and `src/modules/delegates/module.yaml` declares the complete public-header set.
+Until then, source-ownership mutation tests and the refactor public-header baseline enforce the rescue
+header independently. This transition must not be treated as a second supported public API.
+
 ## Review status
 
 Earlier roundtable approvals applied to revisions of the former monolithic proposal. They are

@@ -75,6 +75,8 @@ set(AIMEE_IR_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/ir/include")
 set(AIMEE_TRANSLATION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/translation/include")
+set(AIMEE_DELEGATES_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/delegates/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
@@ -1124,7 +1126,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}
-    ${AIMEE_SRC_DIR}/headers ${AIMEE_PLUGIN_LOADER_INCLUDE_DIR} ${AIMEE_MODULE_RUNTIME_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline
+    ${AIMEE_SRC_DIR}/headers ${AIMEE_PLUGIN_LOADER_INCLUDE_DIR} ${AIMEE_MODULE_RUNTIME_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_DELEGATES_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
