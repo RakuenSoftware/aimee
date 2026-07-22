@@ -543,6 +543,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
+               $(TESTPREFIX)/unit-test-server-mgmt-token \
+               $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
                $(TESTPREFIX)/unit-test-kb-management-health-exchange \
@@ -1786,6 +1788,17 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
                                             $(OBJDIR)/server/server_mgmt_status.o \
                                             $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
                                             $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
+                                           $(OBJDIR)/server/server_mgmt_token.o \
+                                           $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-management-jti: \
+    $(OBJDIR)/tests/test_server_management_jti.o \
+    $(OBJDIR)/db1/server_management_jti.o $(OBJDIR)/db1/db1_init.o \
+    $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-status-authority: \
