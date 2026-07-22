@@ -154,6 +154,7 @@ static void test_docker_list_dir_returns_entries(void)
  *   docker start <name>           -> exit 0 if .exists flag present, else 1
  *   docker create --name N ...    -> touch .exists flag, exit 0
  *   docker stop <name>            -> exit 0 (we don't track running state)
+ *   docker ps -aq --filter ...    -> print names of .exists state files
  *   docker rm -f <name>           -> remove the .exists flag
  *   docker exec -i N bash -c CMD  -> exec bash -c "CMD" locally so the
  *                                    test exercises the full exec path
@@ -192,6 +193,14 @@ static const char *write_fake_docker_fixture(void)
            "  stop)\n"
            "    exit 0\n"
            "    ;;\n"
+           "  ps)\n"
+           "    for path in \"$STATE_DIR\"/*.exists; do\n"
+           "      [ -e \"$path\" ] || continue\n"
+           "      name=\"${path##*/}\"\n"
+           "      printf '%%s\\n' \"${name%%.exists}\"\n"
+           "    done\n"
+           "    exit 0\n"
+           "    ;;\n"
            "  rm)\n"
            "    name=\"${@: -1}\"\n"
            "    rm -f \"$STATE_DIR/$name.exists\"\n"
@@ -228,6 +237,44 @@ static int fake_container_exists(const char *container_name)
             container_name);
    struct stat s;
    return stat(p, &s) == 0;
+}
+
+static void test_remove_orphans_accepts_only_container_ids(void)
+{
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   char valid_path[512], valid_long_path[512], invalid_path[512];
+   snprintf(valid_path, sizeof(valid_path), "/tmp/aimee-fake-docker-state-%d/0123456789ab.exists",
+            (int)getpid());
+   snprintf(valid_long_path, sizeof(valid_long_path),
+            "/tmp/aimee-fake-docker-state-%d/"
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.exists",
+            (int)getpid());
+   snprintf(invalid_path, sizeof(invalid_path),
+            "/tmp/aimee-fake-docker-state-%d/"
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0.exists",
+            (int)getpid());
+   FILE *f = fopen(valid_path, "w");
+   assert(f != NULL);
+   fclose(f);
+   f = fopen(valid_long_path, "w");
+   assert(f != NULL);
+   fclose(f);
+   f = fopen(invalid_path, "w");
+   assert(f != NULL);
+   fclose(f);
+
+   assert(delegate_backend_docker_remove_orphans() == 2);
+   assert(!fake_container_exists("0123456789ab"));
+   assert(
+       !fake_container_exists("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+   assert(
+       fake_container_exists("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"));
+
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_remove_orphans_accepts_only_container_ids\n");
 }
 
 /* Did the last `docker create` argv (captured by the fixture) contain `needle`? */
@@ -781,6 +828,7 @@ static void test_docker_workspace_validation_refusals(void)
 
 int main(void)
 {
+   test_remove_orphans_accepts_only_container_ids();
    printf("delegate_backend_docker:\n");
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();

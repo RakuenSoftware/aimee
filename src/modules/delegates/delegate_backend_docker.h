@@ -40,6 +40,11 @@ extern "C"
     * task_id or undersized buffer. */
    int delegate_backend_docker_container_name(const char *task_id, char *out, size_t outsz);
 
+   /* Remove delegate containers left running by an earlier server process.
+    * Server startup calls this before its worker pools exist, so every matching
+    * container is necessarily orphaned. Returns removed count or -1. */
+   int delegate_backend_docker_remove_orphans(void);
+
    /* Build the docker exec command-string used by exec(). Pure
     * string assembly. Shape:
     *   docker exec -i <container_name> bash -c '<base64-encoded-script>'
