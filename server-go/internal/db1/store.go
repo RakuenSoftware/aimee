@@ -165,16 +165,19 @@ func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobI
 	return changed == 1, err
 }
 
-// CancelUnassignedDelegateJob atomically reaps only a pending resource-plane job
-// that no agent has claimed. The predicate prevents a lease race from cancelling
-// work after assignment.
+// CancelUnassignedDelegateJob atomically reaps a nonterminal resource-plane job
+// that no agent has claimed. The C compatibility worker can take its queue lease
+// and mark a row running before an eligible agent is assigned, so status alone is
+// not evidence of admission. The agent-name predicate prevents a lease race from
+// cancelling work after assignment; db1_agent_job_set_agent uses the reciprocal
+// status != 'cancelled' predicate, so whichever atomic update wins closes the race.
 func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string) (bool, error) {
 	if jobID <= 0 {
 		return false, errors.New("delegate job id is required")
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
 SET status='cancelled',cancelled_at=datetime('now'),cancel_reason=?,updated_at=datetime('now')
-WHERE id=? AND status='pending' AND agent_name=''`, reason, jobID)
+WHERE id=? AND status IN ('pending','running') AND trim(agent_name)=''`, reason, jobID)
 	if err != nil {
 		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
 	}
