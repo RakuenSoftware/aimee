@@ -116,6 +116,11 @@ Aimee server log; do not loop on `touch`.
 
 ## Scenario 2 — Stale-but-present `agents.json`
 
+> The standalone operator-facing procedure for this scenario lives in
+> [`stale-agents-json-recovery.md`](./stale-agents-json-recovery.md).
+> Read it first if you are responding to a page; the section below is
+> the canonical reference for the scenario and is kept in sync with it.
+
 ### Symptom
 
 - `GET /v1/agents` returns 502 "agents backend unavailable."
