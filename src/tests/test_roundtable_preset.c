@@ -100,7 +100,7 @@ int main(void)
    roundtable_preset_t invalid;
    const char *errmsg = NULL;
    assert(roundtable_preset_from_json("{\"chairman_enabled\":true}", "invalid", &invalid,
-                                    &errmsg) != 0);
+                                      &errmsg) != 0);
    assert(errmsg && strcmp(errmsg, "chairman_enabled requires a chairman") == 0);
 
    /* url_name overrides body name */
