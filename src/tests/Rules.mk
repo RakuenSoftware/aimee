@@ -1373,6 +1373,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
+	$(OBJDIR)/modules/roundtable/roundtable_activation.o \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o \
@@ -3213,6 +3214,7 @@ $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegat
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensemble.o \
+                                       $(OBJDIR)/modules/roundtable/roundtable_activation.o \
                                        $(OBJDIR)/modules/roundtable/delegate_ensemble.o $(OBJDIR)/modules/roundtable/delegate_ensemble_review.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_verify.o \
                                        $(OBJDIR)/modules/roundtable/roundtable_chair.o \
@@ -3549,6 +3551,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
+	                  $(OBJDIR)/modules/roundtable/roundtable_activation.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
@@ -4512,6 +4515,7 @@ $(TESTPREFIX)/unit-test-mcp-osv-cache: $(OBJDIR)/tests/test_mcp_osv_cache.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o \
+                     $(OBJDIR)/modules/roundtable/roundtable_activation.o $(OBJDIR)/server/server_mcp_surface.o \
                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                      $(OBJDIR)/server/session_search_tool.o \
                      $(OBJDIR)/modules/plugin-loader/plugin.o $(OBJDIR)/modules/module-runtime/extension.o \
@@ -4525,7 +4529,7 @@ $(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_reg
                      $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o \
                      $(TEST_MCP_CLIENT_OBJS) \
                      $(TESTPREFIX)/mock-mcp-server
-	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(OBJDIR)/modules/plugin-loader/plugin.o $(OBJDIR)/modules/module-runtime/extension.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o $(OBJDIR)/server/session_search_tool.o $(OBJDIR)/modules/plugin-loader/plugin.o $(OBJDIR)/modules/module-runtime/extension.o $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/platform_random.o $(OBJDIR)/modules/config/config_save.o $(OBJDIR)/modules/roundtable/roundtable_activation.o $(OBJDIR)/server/server_mcp_surface.o $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/log.o $(OBJDIR)/server/osv_check.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_build.o \
                                        $(OBJDIR)/server/agent_request_build.o \

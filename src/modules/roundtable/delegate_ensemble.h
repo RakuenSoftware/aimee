@@ -7,6 +7,7 @@
 
 #include "agent_config.h"
 #include "config.h"
+#include "roundtable_activation.h"
 #include "roundtable_types.h" /* roundtable_opts_t / roundtable_result_t (owned by the roundtable module) */
 
 /* Max panelists in a roundtable/ensemble fan-out. Must match the
@@ -26,12 +27,6 @@ typedef struct
    int participants_total;  /* reference models fanned out this run */
    int participants_failed; /* participants that returned no usable response (partial failure) */
 } delegate_ensemble_result_t;
-
-/* Resolve the optional roundtable module at its owner boundary. Explicit
- * modules.roundtable config wins; an unspecified value consults
- * AIMEE_MODULE_ROUNDTABLE; missing or invalid environment input defaults OFF. */
-int roundtable_module_enabled(const config_t *cfg);
-const char *roundtable_module_disabled_message(void);
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
                           delegate_ensemble_result_t *out);

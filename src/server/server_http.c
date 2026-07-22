@@ -369,6 +369,8 @@ static int v1_route_tcp_exempt(const char *method, const char *path)
 int server_http_route_allowed(int is_tcp, const char *bearer, const char *method, const char *path,
                               int remote_writes)
 {
+   if (!v1_route_available(method, path))
+      return 0;
    /* Over the TCP listener, a route that needs any capability beyond the read set
     * (CAPS_READ_ONLY) is "privileged" and denied unless the operator opts in via
     * aimee.api.remote_writes, so a leaked/shared bearer cannot mutate or execute

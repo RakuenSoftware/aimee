@@ -616,6 +616,34 @@ static void test_roundtable_module_activation(void)
    printf("  test_roundtable_module_activation: ok\n");
 }
 
+static void test_roundtable_runtime_surfaces(void)
+{
+   config_t cfg = make_cfg(1, 2, 10.0);
+   cfg.module_roundtable = 0;
+   roundtable_runtime_configure(&cfg);
+   assert(roundtable_operation_available("delegate.aggregate") == 0);
+   assert(roundtable_operation_available("delegate.roundtable") == 0);
+   assert(roundtable_operation_available("pipeline.start") == 0);
+   assert(roundtable_operation_available("delegate") == 1);
+   assert(roundtable_tool_available("ensemble_review") == 0);
+   assert(roundtable_tool_available("pipeline") == 0);
+   assert(roundtable_tool_available("pipeline_start") == 0);
+   assert(roundtable_tool_available("delegate") == 1);
+
+   cfg.module_roundtable = 1;
+   roundtable_runtime_configure(&cfg);
+   assert(roundtable_operation_available("delegate.aggregate") == 1);
+   assert(roundtable_operation_available("pipeline.status") == 1);
+   assert(roundtable_tool_available("ensemble_review") == 1);
+   assert(roundtable_tool_available("pipeline") == 1);
+   assert(roundtable_tool_available("pipeline_status") == 1);
+
+   roundtable_runtime_configure(NULL);
+   assert(roundtable_operation_available("delegate.roundtable") == 0);
+   assert(roundtable_tool_available("ensemble_review") == 0);
+   printf("  test_roundtable_runtime_surfaces: ok\n");
+}
+
 static void test_roundtable_disabled_stops_before_provider_work(void)
 {
    reset_modes();
@@ -1559,6 +1587,7 @@ int main(void)
    printf("delegate_ensemble tests\n");
    test_ensemble_null_args();
    test_roundtable_module_activation();
+   test_roundtable_runtime_surfaces();
    test_roundtable_disabled_stops_before_provider_work();
    test_ensemble_basic();
    test_ensemble_cost_cap();

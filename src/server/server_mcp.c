@@ -30,6 +30,7 @@
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
 #include "server_mcp_ensemble.h"
+#include "server_mcp_surface.h"
 #include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
@@ -1683,6 +1684,15 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *content = NULL;
    cJSON *structured = NULL;
 
+   /* Check the collapsed served name before family demux; check again after
+    * demux below so direct legacy pipeline_* calls are covered too. */
+   if (!server_mcp_tool_available(tool))
+   {
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return server_send_error(conn, "unknown MCP tool", NULL);
+   }
+
    /* Family multiplex (P4): if `tool` is a collapsed family (pipeline/diagnose/
     * session/lsp/note/…), rewrite it to the legacy <family>_<command> name so all
     * downstream routing + capability gating runs unchanged. */
@@ -1699,6 +1709,15 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       if (fd == 1)
          tool = fam_tool;
+   }
+
+   /* Optional-module tools are absent, not registered-but-disabled. Check after
+    * family demux so both collapsed and legacy names use the owner predicate. */
+   if (!server_mcp_tool_available(tool))
+   {
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return server_send_error(conn, "unknown MCP tool", NULL);
    }
 
    /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.

@@ -3,6 +3,7 @@
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
+#include "roundtable_activation.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -115,6 +116,35 @@ int main(void)
    platform_setenv("AIMEE_HOME", home);
 
    char resp[8192];
+
+   /* Optional roundtable routes are absent while disabled, including internal
+    * async submission paths that bypass the declarative HTTP table. */
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.module_roundtable = 0;
+      roundtable_runtime_configure(&cfg);
+      openai_runs_store_reset();
+      snprintf(g_disp_method, sizeof(g_disp_method), "not-called");
+      const char *body = "{\"prompt\":\"draft\"}";
+      assert(server_http_route("POST", "/v1/delegate/roundtable", body, (int)strlen(body), resp,
+                               sizeof(resp)) == 404);
+      assert(server_http_route("POST", "/v1/delegate/aggregate", body, (int)strlen(body), resp,
+                               sizeof(resp)) == 404);
+      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == 0);
+      assert(server_http_route_allowed(0, NULL, "POST", "/v1/delegate/roundtable",
+                                       SERVER_REMOTE_WRITES_OFF) == 0);
+      assert(server_http_submit_op_run("delegate.roundtable", body, CAPS_ALL, resp, sizeof(resp)) ==
+             404);
+      assert(strstr(resp, "\"id\"") == NULL);
+      assert(strcmp(g_disp_method, "not-called") == 0);
+
+      cfg.module_roundtable = 1;
+      roundtable_runtime_configure(&cfg);
+      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
+      assert(server_http_route_allowed(0, NULL, "POST", "/v1/delegate/roundtable",
+                                       SERVER_REMOTE_WRITES_OFF) == 1);
+   }
 
    /* --- GET /v1/health is a liveness probe --- */
    {

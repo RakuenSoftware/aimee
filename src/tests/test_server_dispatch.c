@@ -13,6 +13,7 @@
 #include "hud.h"
 #include "log.h"
 #include "server.h"
+#include "roundtable_activation.h"
 #include "toolset.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
@@ -83,6 +84,11 @@ static session_state_t g_saved_state;
 static int g_session_state_save_calls = 0;
 static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
+
+int config_module_enabled(int explicit_value, int env_value)
+{
+   return explicit_value == -1 ? env_value : explicit_value == 1;
+}
 
 static char *read_all(int fd)
 {
@@ -1425,6 +1431,65 @@ static void test_unknown_method(void)
    free(ctx);
 }
 
+static int json_array_has_string(const cJSON *array, const char *value)
+{
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, array) if (cJSON_IsString(item) &&
+                                       strcmp(item->valuestring, value) == 0) return 1;
+   return 0;
+}
+
+static void test_roundtable_surface_registration(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->capabilities = CAPS_ALL;
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   cfg.module_roundtable = 0;
+   roundtable_runtime_configure(&cfg);
+   g_last_handler = NULL;
+   cJSON *json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\"}",
+                               strlen("{\"method\":\"delegate.roundtable\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "code")->valuestring, "UNKNOWN_METHOD") == 0);
+   assert(g_last_handler == NULL);
+   cJSON_Delete(json);
+   json = dispatch_json(ctx, conn, "{\"method\":\"pipeline.start\"}",
+                        strlen("{\"method\":\"pipeline.start\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "code")->valuestring, "UNKNOWN_METHOD") == 0);
+   cJSON_Delete(json);
+   json = dispatch_json(ctx, conn, "{\"method\":\"server.info\"}",
+                        strlen("{\"method\":\"server.info\"}"));
+   cJSON *methods = cJSON_GetObjectItemCaseSensitive(json, "methods");
+   assert(cJSON_IsArray(methods));
+   assert(!json_array_has_string(methods, "delegate.aggregate"));
+   assert(!json_array_has_string(methods, "delegate.roundtable"));
+   assert(!json_array_has_string(methods, "pipeline.start"));
+   assert(json_array_has_string(methods, "delegate"));
+   cJSON_Delete(json);
+
+   cfg.module_roundtable = 1;
+   roundtable_runtime_configure(&cfg);
+   json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\"}",
+                        strlen("{\"method\":\"delegate.roundtable\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.roundtable") == 0);
+   cJSON_Delete(json);
+   json = dispatch_json(ctx, conn, "{\"method\":\"server.info\"}",
+                        strlen("{\"method\":\"server.info\"}"));
+   methods = cJSON_GetObjectItemCaseSensitive(json, "methods");
+   assert(json_array_has_string(methods, "delegate.aggregate"));
+   assert(json_array_has_string(methods, "delegate.roundtable"));
+   assert(json_array_has_string(methods, "pipeline.start"));
+   cJSON_Delete(json);
+
+   roundtable_runtime_configure(NULL);
+   free(conn);
+   free(ctx);
+   printf("test_roundtable_surface_registration: PASS\n");
+}
+
 static void test_removed_storage_named_migration_alias(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1473,6 +1538,10 @@ static void test_routing(void)
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAPS_AUTHENTICATED;
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.module_roundtable = 1;
+   roundtable_runtime_configure(&cfg);
 
    cJSON *json = dispatch_json(ctx, conn, "{\"method\":\"server.info\"}",
                                strlen("{\"method\":\"server.info\"}"));
@@ -1692,6 +1761,7 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "cron.add") == 0);
    cJSON_Delete(json);
 
+   roundtable_runtime_configure(NULL);
    free(conn);
    free(ctx);
 }
@@ -1884,6 +1954,7 @@ int main(void)
    test_large_delegate_payload_within_limit();
    test_large_mcp_call_payload_within_limit();
    test_unknown_method();
+   test_roundtable_surface_registration();
    test_removed_storage_named_migration_alias();
    test_authz_denied_shape();
    test_routing();

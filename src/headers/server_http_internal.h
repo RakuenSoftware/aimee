@@ -68,6 +68,7 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
 int route_sessions_list(char *resp, int cap);
 int route_version(char *resp, int cap);
 uint32_t v1_route_caps_lookup(const char *method, const char *path);
+int v1_route_available(const char *method, const char *path);
 int v1_route_dispatch(const char *method, const char *path, const char *body, int body_len,
                       char *resp, int resp_cap);
 int v1_route_is_local_only(const char *method, const char *path);
