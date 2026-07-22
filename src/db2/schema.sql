@@ -7216,8 +7216,10 @@ CREATE TABLE IF NOT EXISTS kb_management_instance_issue (
           cert_fingerprint ~ '^[0-9a-f]{64}$' AND cert_spki_digest ~ '^[0-9a-f]{64}$' AND
           cert_not_before IS NOT NULL AND cert_not_after IS NOT NULL AND
           enrollment_id IS NOT NULL AND activated_at IS NOT NULL AND terminal_at IS NULL) OR
-         (state IN ('expired','quarantined') AND enrollment_id IS NULL AND
-          activated_at IS NULL AND terminal_at IS NOT NULL)),
+         (state IN ('expired','quarantined') AND public_bundle_digest IS NULL AND
+          cert_issuer IS NULL AND cert_serial_norm IS NULL AND cert_fingerprint IS NULL AND
+          cert_spki_digest IS NULL AND cert_not_before IS NULL AND cert_not_after IS NULL AND
+          enrollment_id IS NULL AND activated_at IS NULL AND terminal_at IS NOT NULL)),
   UNIQUE(installation_id,generation)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_issue_cert_identity
@@ -7336,6 +7338,627 @@ CREATE TRIGGER kb_mi_issue_delete_guard BEFORE DELETE ON kb_management_instance_
 DROP TRIGGER IF EXISTS kb_mi_issue_truncate_guard ON kb_management_instance_issue;
 CREATE TRIGGER kb_mi_issue_truncate_guard BEFORE TRUNCATE ON kb_management_instance_issue
   FOR EACH STATEMENT EXECUTE FUNCTION kb_management_instance_issue_guard();
+
+-- Canonical P5-B2b binding transcript.  Facades compare both this digest and
+-- every component; the digest is never a substitute for the exact tuple.
+CREATE OR REPLACE FUNCTION kb_management_instance_binding_digest(
+  p_issuer TEXT,p_subject TEXT,p_proof_anchor TEXT,p_custody_anchor TEXT
+) RETURNS TEXT
+LANGUAGE plpgsql IMMUTABLE STRICT SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_proof BYTEA; v_custody BYTEA;
+BEGIN
+  IF char_length(p_issuer) NOT BETWEEN 1 AND 600 OR
+     char_length(p_subject) NOT BETWEEN 1 AND 600 OR
+     p_issuer ~ '[^!-~]' OR p_subject ~ '[^!-~]' OR
+     p_proof_anchor !~ '^[0-9a-f]{64}$' OR
+     p_custody_anchor !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid management binding' USING ERRCODE='22023';
+  END IF;
+  v_proof:=pg_catalog.decode(p_proof_anchor,'hex');
+  v_custody:=pg_catalog.decode(p_custody_anchor,'hex');
+  RETURN pg_catalog.encode(pg_catalog.sha256(
+    pg_catalog.convert_to('aimee.p5.management-instance.binding.v1','UTF8') ||
+    pg_catalog.int4send(pg_catalog.octet_length(pg_catalog.convert_to(p_issuer,'UTF8'))) ||
+    pg_catalog.convert_to(p_issuer,'UTF8') ||
+    pg_catalog.int4send(pg_catalog.octet_length(pg_catalog.convert_to(p_subject,'UTF8'))) ||
+    pg_catalog.convert_to(p_subject,'UTF8') ||
+    pg_catalog.int4send(32) || v_proof || pg_catalog.int4send(32) || v_custody),'hex');
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_grant_create(
+  p_installation_id TEXT,p_team_id BIGINT,p_workload_issuer TEXT,p_workload_subject TEXT,
+  p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT,
+  p_expected_ca_issuer TEXT,p_expected_ca_fingerprint TEXT,p_creator_identity TEXT
+) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,team_id BIGINT,
+  workload_issuer TEXT,workload_subject TEXT,proof_anchor TEXT,custody_anchor TEXT,
+  binding_digest TEXT,expected_ca_issuer TEXT,expected_ca_fingerprint TEXT,
+  grant_state TEXT,created_at_epoch BIGINT,expires_at_epoch BIGINT,consumed_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE g public.kb_management_instance_grant%ROWTYPE; v_digest TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_installation_id !~ '^[0-9a-f]{32}$' OR p_team_id<1 OR
+     char_length(p_expected_ca_issuer) NOT BETWEEN 1 AND 600 OR
+     p_expected_ca_fingerprint !~ '^[0-9a-f]{64}$' OR
+     char_length(p_creator_identity) NOT BETWEEN 1 AND 600 OR p_creator_identity ~ '[[:cntrl:]]' THEN
+    RAISE EXCEPTION 'invalid management grant' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_installation_id,1345462850));
+  SELECT x.* INTO g FROM public.kb_management_instance_grant x
+   WHERE x.installation_id=p_installation_id FOR UPDATE;
+  IF FOUND THEN
+    IF ROW(g.replacement_operation_id,g.replacement_lineage_id,g.replaces_installation_id,
+           g.team_id,g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,
+           g.binding_digest,g.expected_ca_issuer,g.expected_ca_fingerprint,g.creator_identity)
+       IS DISTINCT FROM ROW(NULL::TEXT,p_installation_id,NULL::TEXT,p_team_id,p_workload_issuer,
+           p_workload_subject,p_proof_anchor,p_custody_anchor,v_digest,p_expected_ca_issuer,
+           p_expected_ca_fingerprint,p_creator_identity) THEN
+      RAISE EXCEPTION 'management grant replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
+      g.proof_anchor,g.custody_anchor,g.binding_digest,g.expected_ca_issuer,
+      g.expected_ca_fingerprint,g.state,extract(epoch FROM g.created_at)::BIGINT,
+      extract(epoch FROM g.expires_at)::BIGINT,extract(epoch FROM g.consumed_at)::BIGINT;
+    RETURN;
+  END IF;
+  PERFORM 1 FROM public.kb_team t WHERE t.id=p_team_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management grant team denied' USING ERRCODE='28000'; END IF;
+  INSERT INTO public.kb_management_instance_grant(installation_id,replacement_lineage_id,team_id,
+    workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
+    expected_ca_issuer,expected_ca_fingerprint,creator_identity)
+  VALUES(p_installation_id,p_installation_id,p_team_id,p_workload_issuer,p_workload_subject,
+    p_proof_anchor,p_custody_anchor,v_digest,p_expected_ca_issuer,p_expected_ca_fingerprint,
+    p_creator_identity) RETURNING * INTO g;
+  PERFORM public.kb_audit_worm_append('management-instance',p_installation_id,
+    'management.grant.create',p_creator_identity,'allow','state=pending');
+  RETURN QUERY SELECT FALSE,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
+    g.proof_anchor,g.custody_anchor,g.binding_digest,g.expected_ca_issuer,
+    g.expected_ca_fingerprint,g.state,extract(epoch FROM g.created_at)::BIGINT,
+    extract(epoch FROM g.expires_at)::BIGINT,NULL::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_replacement_grant_create(
+  p_replacement_operation_id TEXT,p_replacement_lineage_id TEXT,p_old_installation_id TEXT,
+  p_old_generation BIGINT,p_old_enrollment_id BIGINT,p_old_cert_issuer TEXT,
+  p_old_cert_serial_norm TEXT,p_old_cert_fingerprint TEXT,p_new_installation_id TEXT,
+  p_team_id BIGINT,p_workload_issuer TEXT,p_workload_subject TEXT,p_proof_anchor TEXT,
+  p_custody_anchor TEXT,p_binding_digest TEXT,p_expected_ca_issuer TEXT,
+  p_expected_ca_fingerprint TEXT,p_creator_identity TEXT
+) RETURNS TABLE(replayed BOOLEAN,replacement_operation_id TEXT,replacement_lineage_id TEXT,
+  replaces_installation_id TEXT,installation_id TEXT,team_id BIGINT,workload_issuer TEXT,
+  workload_subject TEXT,proof_anchor TEXT,custody_anchor TEXT,binding_digest TEXT,
+  expected_ca_issuer TEXT,expected_ca_fingerprint TEXT,grant_state TEXT,
+  old_instance_state TEXT,old_revocation_generation BIGINT,created_at_epoch BIGINT,
+  expires_at_epoch BIGINT,consumed_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE g public.kb_management_instance_grant%ROWTYPE; i public.kb_management_instance%ROWTYPE;
+  e public.kb_enrollments%ROWTYPE; v_digest TEXT; v_rev BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_replacement_operation_id !~ '^[0-9a-f]{64}$' OR
+     p_replacement_lineage_id !~ '^[0-9a-f]{32}$' OR
+     p_old_installation_id !~ '^[0-9a-f]{32}$' OR
+     p_new_installation_id !~ '^[0-9a-f]{32}$' OR
+     p_old_installation_id=p_new_installation_id OR p_old_generation<1 OR
+     p_old_enrollment_id<1 OR p_old_cert_serial_norm !~ '^[0-9a-f]{1,128}$' OR
+     p_old_cert_fingerprint !~ '^[0-9a-f]{64}$' OR p_team_id<1 OR
+     p_expected_ca_fingerprint !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid management replacement' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    LEAST(p_old_installation_id,p_new_installation_id),1345462850));
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+    GREATEST(p_old_installation_id,p_new_installation_id),1345462850));
+  SELECT x.* INTO g FROM public.kb_management_instance_grant x
+   WHERE x.replacement_operation_id=p_replacement_operation_id FOR UPDATE;
+  IF FOUND THEN
+    IF ROW(g.replacement_lineage_id,g.replaces_installation_id,g.installation_id,g.team_id,
+           g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest,
+           g.expected_ca_issuer,g.expected_ca_fingerprint,g.creator_identity)
+       IS DISTINCT FROM ROW(p_replacement_lineage_id,p_old_installation_id,p_new_installation_id,
+           p_team_id,p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,v_digest,
+           p_expected_ca_issuer,p_expected_ca_fingerprint,p_creator_identity) THEN
+      RAISE EXCEPTION 'management replacement replay conflict' USING ERRCODE='23505';
+    END IF;
+    SELECT x.state INTO old_instance_state FROM public.kb_management_instance x
+     WHERE x.installation_id=p_old_installation_id;
+    SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
+    RETURN QUERY SELECT TRUE,g.replacement_operation_id,g.replacement_lineage_id,
+      g.replaces_installation_id,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
+      g.proof_anchor,g.custody_anchor,g.binding_digest,g.expected_ca_issuer,
+      g.expected_ca_fingerprint,g.state,old_instance_state,v_rev,
+      extract(epoch FROM g.created_at)::BIGINT,extract(epoch FROM g.expires_at)::BIGINT,
+      extract(epoch FROM g.consumed_at)::BIGINT;
+    RETURN;
+  END IF;
+  SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=p_old_enrollment_id FOR UPDATE;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+   WHERE x.installation_id=p_old_installation_id FOR UPDATE;
+  IF e.id IS NULL OR i.installation_id IS NULL OR i.state<>'active' OR
+     i.current_generation<>p_old_generation OR i.current_enrollment_id<>p_old_enrollment_id OR
+     i.team_id<>p_team_id OR i.replacement_lineage_id<>p_replacement_lineage_id OR
+     e.scope<>'p5-kb-management' OR e.state<>'active' OR e.revoked_at<>'' OR
+     e.cert_issuer<>p_old_cert_issuer OR e.cert_serial_norm<>p_old_cert_serial_norm OR
+     e.fingerprint<>p_old_cert_fingerprint OR e.authority_id<>i.authority_id OR
+     NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() THEN
+    RAISE EXCEPTION 'management replacement authority denied' USING ERRCODE='28000';
+  END IF;
+  UPDATE public.kb_management_instance_issue x SET state='quarantined',terminal_at=pg_catalog.now()
+   WHERE x.installation_id=p_old_installation_id AND x.state='pending';
+  UPDATE public.kb_enrollments x SET state='revoked',revoked_at=public.pg_now_text()
+   WHERE x.id=p_old_enrollment_id;
+  UPDATE public.kb_management_instance x SET state='replaced',replaced_at=pg_catalog.now(),
+    updated_at=pg_catalog.now() WHERE x.installation_id=p_old_installation_id;
+  UPDATE public.kb_management_instance_grant x SET state='revoked',revoked_at=pg_catalog.now()
+   WHERE x.installation_id=p_old_installation_id AND x.state='consumed';
+  INSERT INTO public.kb_management_instance_grant(installation_id,replacement_operation_id,
+    replacement_lineage_id,replaces_installation_id,team_id,workload_issuer,workload_subject,
+    proof_anchor,custody_anchor,binding_digest,expected_ca_issuer,expected_ca_fingerprint,
+    creator_identity) VALUES(p_new_installation_id,p_replacement_operation_id,
+    p_replacement_lineage_id,p_old_installation_id,p_team_id,p_workload_issuer,p_workload_subject,
+    p_proof_anchor,p_custody_anchor,v_digest,p_expected_ca_issuer,p_expected_ca_fingerprint,
+    p_creator_identity) RETURNING * INTO g;
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
+  PERFORM public.kb_audit_worm_append('management-instance',p_old_installation_id,
+    'management.instance.replace',p_creator_identity,'allow','state=replaced');
+  RETURN QUERY SELECT FALSE,g.replacement_operation_id,g.replacement_lineage_id,
+    g.replaces_installation_id,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
+    g.proof_anchor,g.custody_anchor,g.binding_digest,g.expected_ca_issuer,
+    g.expected_ca_fingerprint,g.state,'replaced'::TEXT,v_rev,
+    extract(epoch FROM g.created_at)::BIGINT,extract(epoch FROM g.expires_at)::BIGINT,NULL::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_begin_initial(
+  p_operation_id TEXT,p_authority_id TEXT,p_installation_id TEXT,p_workload_issuer TEXT,
+  p_workload_subject TEXT,p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT,
+  p_csr_digest TEXT,p_csr_spki_digest TEXT
+) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,replacement_lineage_id TEXT,
+  authority_id TEXT,team_id BIGINT,binding_digest TEXT,instance_state TEXT,generation BIGINT,
+  operation_id TEXT,issue_kind TEXT,issue_state TEXT,previous_enrollment_id BIGINT,
+  previous_cert_issuer TEXT,previous_cert_serial_norm TEXT,previous_cert_fingerprint TEXT,
+  csr_digest TEXT,csr_spki_digest TEXT,pending_expires_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE g public.kb_management_instance_grant%ROWTYPE; i public.kb_management_instance%ROWTYPE;
+  q public.kb_management_instance_issue%ROWTYPE; v_digest TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_operation_id !~ '^[0-9a-f]{64}$' OR p_authority_id !~ '^[0-9a-f]{32}$' OR
+     p_installation_id !~ '^[0-9a-f]{32}$' OR p_csr_digest !~ '^[0-9a-f]{64}$' OR
+     p_csr_spki_digest !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid initial management issue' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_installation_id,1345462850));
+  SELECT x.* INTO q FROM public.kb_management_instance_issue x
+   WHERE x.operation_id=p_operation_id FOR UPDATE;
+  IF FOUND THEN
+    SELECT x.* INTO i FROM public.kb_management_instance x WHERE x.installation_id=q.installation_id;
+    IF q.installation_id<>p_installation_id OR q.issue_kind<>'initial' OR q.generation<>1 OR
+       q.previous_enrollment_id IS NOT NULL OR q.csr_digest<>p_csr_digest OR
+       q.csr_spki_digest<>p_csr_spki_digest OR i.authority_id<>p_authority_id OR
+       ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
+       IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                            v_digest) THEN
+      RAISE EXCEPTION 'initial issue replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+      i.binding_digest,i.state,q.generation,q.operation_id,q.issue_kind,q.state,
+      q.previous_enrollment_id,q.previous_cert_issuer,q.previous_cert_serial_norm,
+      q.previous_cert_fingerprint,q.csr_digest,q.csr_spki_digest,
+      extract(epoch FROM q.pending_expires_at)::BIGINT;
+    RETURN;
+  END IF;
+  SELECT x.* INTO g FROM public.kb_management_instance_grant x
+   WHERE x.installation_id=p_installation_id FOR UPDATE;
+  IF g.installation_id IS NULL OR g.state<>'pending' OR g.expires_at<=pg_catalog.now() OR
+     ROW(g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest)
+     IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                          v_digest) THEN
+    RAISE EXCEPTION 'initial management grant denied' USING ERRCODE='28000';
+  END IF;
+  PERFORM 1 FROM public.kb_team t WHERE t.id=g.team_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management grant team denied' USING ERRCODE='28000'; END IF;
+  INSERT INTO public.kb_management_instance(installation_id,replacement_lineage_id,authority_id,
+    team_id,workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
+    expected_ca_issuer,expected_ca_fingerprint)
+  VALUES(g.installation_id,g.replacement_lineage_id,p_authority_id,g.team_id,g.workload_issuer,
+    g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest,g.expected_ca_issuer,
+    g.expected_ca_fingerprint) RETURNING * INTO i;
+  INSERT INTO public.kb_management_instance_issue(operation_id,installation_id,issue_kind,
+    generation,csr_digest,csr_spki_digest)
+  VALUES(p_operation_id,p_installation_id,'initial',1,p_csr_digest,p_csr_spki_digest)
+  RETURNING * INTO q;
+  UPDATE public.kb_management_instance_grant x SET state='consumed',consumed_at=pg_catalog.now()
+   WHERE x.installation_id=p_installation_id;
+  PERFORM public.kb_audit_worm_append('management-instance',p_installation_id,
+    'management.issue.begin','runtime','allow','kind=initial;generation=1');
+  RETURN QUERY SELECT FALSE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+    i.binding_digest,i.state,q.generation,q.operation_id,q.issue_kind,q.state,
+    q.previous_enrollment_id,q.previous_cert_issuer,q.previous_cert_serial_norm,
+    q.previous_cert_fingerprint,q.csr_digest,q.csr_spki_digest,
+    extract(epoch FROM q.pending_expires_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_begin_renewal(
+  p_operation_id TEXT,p_installation_id TEXT,p_workload_issuer TEXT,p_workload_subject TEXT,
+  p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT,p_generation BIGINT,
+  p_previous_enrollment_id BIGINT,p_previous_cert_issuer TEXT,p_previous_cert_serial_norm TEXT,
+  p_previous_cert_fingerprint TEXT,p_csr_digest TEXT,p_csr_spki_digest TEXT
+) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,replacement_lineage_id TEXT,
+  authority_id TEXT,team_id BIGINT,binding_digest TEXT,instance_state TEXT,generation BIGINT,
+  operation_id TEXT,issue_kind TEXT,issue_state TEXT,previous_enrollment_id BIGINT,
+  previous_cert_issuer TEXT,previous_cert_serial_norm TEXT,previous_cert_fingerprint TEXT,
+  csr_digest TEXT,csr_spki_digest TEXT,pending_expires_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE i public.kb_management_instance%ROWTYPE; e public.kb_enrollments%ROWTYPE;
+  q public.kb_management_instance_issue%ROWTYPE; v_digest TEXT; v_current_id BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_operation_id !~ '^[0-9a-f]{64}$' OR p_installation_id !~ '^[0-9a-f]{32}$' OR
+     p_generation<2 OR p_previous_enrollment_id<1 OR
+     p_previous_cert_serial_norm !~ '^[0-9a-f]{1,128}$' OR
+     p_previous_cert_fingerprint !~ '^[0-9a-f]{64}$' OR
+     p_csr_digest !~ '^[0-9a-f]{64}$' OR p_csr_spki_digest !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid management renewal' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_installation_id,1345462850));
+  SELECT x.current_enrollment_id INTO v_current_id FROM public.kb_management_instance x
+   WHERE x.installation_id=p_installation_id;
+  IF v_current_id IS NOT NULL THEN
+    SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=v_current_id FOR UPDATE;
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+   WHERE x.installation_id=p_installation_id FOR UPDATE;
+  SELECT x.* INTO q FROM public.kb_management_instance_issue x
+   WHERE x.operation_id=p_operation_id FOR UPDATE;
+  IF FOUND THEN
+    IF q.installation_id<>p_installation_id OR q.issue_kind<>'renew' OR
+       q.generation<>p_generation OR q.previous_enrollment_id<>p_previous_enrollment_id OR
+       q.previous_cert_issuer<>p_previous_cert_issuer OR
+       q.previous_cert_serial_norm<>p_previous_cert_serial_norm OR
+       q.previous_cert_fingerprint<>p_previous_cert_fingerprint OR
+       q.csr_digest<>p_csr_digest OR q.csr_spki_digest<>p_csr_spki_digest OR
+       ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
+       IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                            v_digest) THEN
+      RAISE EXCEPTION 'renewal replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+      i.binding_digest,i.state,q.generation,q.operation_id,q.issue_kind,q.state,
+      q.previous_enrollment_id,q.previous_cert_issuer,q.previous_cert_serial_norm,
+      q.previous_cert_fingerprint,q.csr_digest,q.csr_spki_digest,
+      extract(epoch FROM q.pending_expires_at)::BIGINT;
+    RETURN;
+  END IF;
+  IF i.installation_id IS NULL OR i.state<>'active' OR i.current_generation+1<>p_generation OR
+     i.current_enrollment_id<>p_previous_enrollment_id OR
+     ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
+       IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                            v_digest) OR e.id IS NULL OR e.scope<>'p5-kb-management' OR
+     e.authority_id<>i.authority_id OR e.state<>'active' OR e.revoked_at<>'' OR
+     e.cert_issuer<>p_previous_cert_issuer OR e.cert_serial_norm<>p_previous_cert_serial_norm OR
+     e.fingerprint<>p_previous_cert_fingerprint OR NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR
+     NULLIF(e.expires_at,'')::TIMESTAMPTZ>pg_catalog.now()+pg_catalog.make_interval(secs=>1200) THEN
+    RAISE EXCEPTION 'management renewal denied' USING ERRCODE='28000';
+  END IF;
+  INSERT INTO public.kb_management_instance_issue(operation_id,installation_id,issue_kind,
+    generation,previous_enrollment_id,previous_cert_issuer,previous_cert_serial_norm,
+    previous_cert_fingerprint,csr_digest,csr_spki_digest)
+  VALUES(p_operation_id,p_installation_id,'renew',p_generation,p_previous_enrollment_id,
+    p_previous_cert_issuer,p_previous_cert_serial_norm,p_previous_cert_fingerprint,
+    p_csr_digest,p_csr_spki_digest) RETURNING * INTO q;
+  PERFORM public.kb_audit_worm_append('management-instance',p_installation_id,
+    'management.issue.begin','runtime','allow','kind=renew;generation='||p_generation::TEXT);
+  RETURN QUERY SELECT FALSE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+    i.binding_digest,i.state,q.generation,q.operation_id,q.issue_kind,q.state,
+    q.previous_enrollment_id,q.previous_cert_issuer,q.previous_cert_serial_norm,
+    q.previous_cert_fingerprint,q.csr_digest,q.csr_spki_digest,
+    extract(epoch FROM q.pending_expires_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_activate(
+  p_operation_id TEXT,p_installation_id TEXT,p_workload_issuer TEXT,p_workload_subject TEXT,
+  p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT,p_issue_kind TEXT,
+  p_generation BIGINT,p_previous_enrollment_id BIGINT,p_previous_cert_issuer TEXT,
+  p_previous_cert_serial_norm TEXT,p_previous_cert_fingerprint TEXT,p_csr_digest TEXT,
+  p_csr_spki_digest TEXT,p_public_bundle_digest TEXT,p_verified_ca_issuer TEXT,
+  p_verified_ca_fingerprint TEXT,p_leaf_issuer TEXT,p_leaf_serial_norm TEXT,
+  p_leaf_fingerprint TEXT,p_leaf_spki_digest TEXT,p_leaf_not_before_epoch BIGINT,
+  p_leaf_not_after_epoch BIGINT
+) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,replacement_lineage_id TEXT,
+  authority_id TEXT,team_id BIGINT,binding_digest TEXT,instance_state TEXT,generation BIGINT,
+  enrollment_id BIGINT,operation_id TEXT,issue_kind TEXT,issue_state TEXT,csr_digest TEXT,
+  csr_spki_digest TEXT,public_bundle_digest TEXT,cert_identity TEXT,cert_issuer TEXT,
+  cert_serial_norm TEXT,cert_fingerprint TEXT,cert_spki_digest TEXT,
+  cert_not_before_epoch BIGINT,cert_not_after_epoch BIGINT,revocation_generation BIGINT,
+  activated_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE i public.kb_management_instance%ROWTYPE; g public.kb_management_instance_grant%ROWTYPE;
+  q public.kb_management_instance_issue%ROWTYPE; e public.kb_enrollments%ROWTYPE;
+  v_digest TEXT; v_current_id BIGINT; v_enrollment BIGINT; v_identity TEXT; v_rev BIGINT;
+  v_not_before TIMESTAMPTZ; v_not_after TIMESTAMPTZ;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_operation_id !~ '^[0-9a-f]{64}$' OR p_installation_id !~ '^[0-9a-f]{32}$' OR
+     p_issue_kind NOT IN ('initial','renew') OR p_generation<1 OR
+     p_csr_digest !~ '^[0-9a-f]{64}$' OR p_csr_spki_digest !~ '^[0-9a-f]{64}$' OR
+     p_public_bundle_digest !~ '^[0-9a-f]{64}$' OR
+     p_verified_ca_fingerprint !~ '^[0-9a-f]{64}$' OR
+     p_leaf_serial_norm !~ '^[0-9a-f]{1,128}$' OR
+     p_leaf_fingerprint !~ '^[0-9a-f]{64}$' OR p_leaf_spki_digest !~ '^[0-9a-f]{64}$' OR
+     p_leaf_not_before_epoch<1 OR p_leaf_not_after_epoch<=p_leaf_not_before_epoch THEN
+    RAISE EXCEPTION 'invalid management activation' USING ERRCODE='22023';
+  END IF;
+  IF (p_issue_kind='initial' AND (p_previous_enrollment_id IS NOT NULL OR
+      p_previous_cert_issuer IS NOT NULL OR p_previous_cert_serial_norm IS NOT NULL OR
+      p_previous_cert_fingerprint IS NOT NULL)) OR
+     (p_issue_kind='renew' AND (p_previous_enrollment_id IS NULL OR
+      p_previous_cert_issuer IS NULL OR p_previous_cert_serial_norm IS NULL OR
+      p_previous_cert_fingerprint IS NULL)) THEN
+    RAISE EXCEPTION 'invalid previous enrollment tuple' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  v_not_before:=pg_catalog.to_timestamp(p_leaf_not_before_epoch);
+  v_not_after:=pg_catalog.to_timestamp(p_leaf_not_after_epoch);
+  IF p_leaf_not_after_epoch-p_leaf_not_before_epoch NOT BETWEEN 3540 AND 3660 OR
+     v_not_before>pg_catalog.now()+pg_catalog.make_interval(secs=>60) OR
+     v_not_after<=pg_catalog.now() OR
+     p_leaf_not_after_epoch-extract(epoch FROM pg_catalog.now())::BIGINT NOT BETWEEN 3000 AND 3660 THEN
+    RAISE EXCEPTION 'management certificate lifetime denied' USING ERRCODE='28000';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_installation_id,1345462850));
+  SELECT x.current_enrollment_id INTO v_current_id FROM public.kb_management_instance x
+   WHERE x.installation_id=p_installation_id;
+  IF v_current_id IS NOT NULL THEN
+    SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=v_current_id FOR UPDATE;
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+   WHERE x.installation_id=p_installation_id FOR UPDATE;
+  SELECT x.* INTO q FROM public.kb_management_instance_issue x
+   WHERE x.operation_id=p_operation_id FOR UPDATE;
+  SELECT x.* INTO g FROM public.kb_management_instance_grant x
+   WHERE x.installation_id=p_installation_id FOR UPDATE;
+  IF i.installation_id IS NULL OR q.operation_id IS NULL OR g.installation_id IS NULL OR
+     i.state<>'active' OR g.state<>'consumed' OR q.installation_id<>p_installation_id OR
+     q.issue_kind<>p_issue_kind OR q.generation<>p_generation OR
+     q.previous_enrollment_id IS DISTINCT FROM p_previous_enrollment_id OR
+     q.previous_cert_issuer IS DISTINCT FROM p_previous_cert_issuer OR
+     q.previous_cert_serial_norm IS DISTINCT FROM p_previous_cert_serial_norm OR
+     q.previous_cert_fingerprint IS DISTINCT FROM p_previous_cert_fingerprint OR
+     q.csr_digest<>p_csr_digest OR q.csr_spki_digest<>p_csr_spki_digest OR
+     ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
+       IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                            v_digest) OR i.expected_ca_issuer<>p_verified_ca_issuer OR
+     i.expected_ca_fingerprint<>p_verified_ca_fingerprint OR
+     p_leaf_issuer<>p_verified_ca_issuer OR p_leaf_spki_digest<>p_csr_spki_digest THEN
+    RAISE EXCEPTION 'management activation denied' USING ERRCODE='28000';
+  END IF;
+  IF q.state='active' THEN
+    IF e.id IS NULL OR e.id<>q.enrollment_id OR e.scope<>'p5-kb-management' OR
+       e.authority_id<>i.authority_id OR e.state<>'active' OR e.revoked_at<>'' OR
+       NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR
+       e.cert_issuer<>q.cert_issuer OR e.cert_serial_norm<>q.cert_serial_norm OR
+       e.fingerprint<>q.cert_fingerprint THEN
+      RAISE EXCEPTION 'management activation replay revoked' USING ERRCODE='28000';
+    END IF;
+    IF q.public_bundle_digest<>p_public_bundle_digest OR q.cert_issuer<>p_leaf_issuer OR
+       q.cert_serial_norm<>p_leaf_serial_norm OR q.cert_fingerprint<>p_leaf_fingerprint OR
+       q.cert_spki_digest<>p_leaf_spki_digest OR q.cert_not_before<>v_not_before OR
+       q.cert_not_after<>v_not_after OR i.current_generation<>p_generation OR
+       i.current_enrollment_id<>q.enrollment_id THEN
+      RAISE EXCEPTION 'management activation replay conflict' USING ERRCODE='23505';
+    END IF;
+    v_identity:='cert:'||pg_catalog.replace(pg_catalog.replace(q.cert_issuer,'%','%25'),':','%3A')||
+      ':'||pg_catalog.replace(pg_catalog.replace(q.cert_serial_norm,'%','%25'),':','%3A');
+    SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
+    RETURN QUERY SELECT TRUE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+      i.binding_digest,i.state,q.generation,q.enrollment_id,q.operation_id,q.issue_kind,q.state,
+      q.csr_digest,q.csr_spki_digest,q.public_bundle_digest,v_identity,q.cert_issuer,
+      q.cert_serial_norm,q.cert_fingerprint,q.cert_spki_digest,
+      extract(epoch FROM q.cert_not_before)::BIGINT,extract(epoch FROM q.cert_not_after)::BIGINT,
+      v_rev,extract(epoch FROM q.activated_at)::BIGINT;
+    RETURN;
+  END IF;
+  IF q.state<>'pending' OR q.pending_expires_at<=pg_catalog.now() OR
+     i.current_generation+1<>p_generation OR
+     (p_issue_kind='initial' AND (i.current_generation<>0 OR i.current_enrollment_id IS NOT NULL)) OR
+     (p_issue_kind='renew' AND (e.id IS NULL OR e.id<>p_previous_enrollment_id OR
+       e.scope<>'p5-kb-management' OR e.authority_id<>i.authority_id OR e.state<>'active' OR
+       e.revoked_at<>'' OR e.cert_issuer<>p_previous_cert_issuer OR
+       e.cert_serial_norm<>p_previous_cert_serial_norm OR e.fingerprint<>p_previous_cert_fingerprint OR
+       NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now())) THEN
+    RAISE EXCEPTION 'management activation stale' USING ERRCODE='28000';
+  END IF;
+  PERFORM 1 FROM public.kb_team t WHERE t.id=i.team_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'management activation team denied' USING ERRCODE='28000'; END IF;
+  IF EXISTS(SELECT 1 FROM public.kb_enrollments x WHERE
+      (x.cert_issuer=p_leaf_issuer AND x.cert_serial_norm=p_leaf_serial_norm) OR
+       x.fingerprint=p_leaf_fingerprint) THEN
+    RAISE EXCEPTION 'management certificate conflict' USING ERRCODE='23505';
+  END IF;
+  INSERT INTO public.kb_enrollments(scope,fingerprint,serial,state,authority_id,cert_issuer,
+    cert_serial_norm,expires_at) VALUES('p5-kb-management',p_leaf_fingerprint,p_leaf_serial_norm,
+    'active',i.authority_id,p_leaf_issuer,p_leaf_serial_norm,
+    pg_catalog.to_char(v_not_after AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS'))
+    RETURNING id INTO v_enrollment;
+  v_identity:='cert:'||pg_catalog.replace(pg_catalog.replace(p_leaf_issuer,'%','%25'),':','%3A')||
+    ':'||pg_catalog.replace(pg_catalog.replace(p_leaf_serial_norm,'%','%25'),':','%3A');
+  IF EXISTS(SELECT 1 FROM public.kb_team_membership m WHERE m.identity_key=v_identity AND m.team<>i.team_id) THEN
+    RAISE EXCEPTION 'management certificate membership conflict' USING ERRCODE='23505';
+  END IF;
+  INSERT INTO public.kb_team_membership(identity_key,team,is_default,created_at)
+    VALUES(v_identity,i.team_id,0,public.pg_now_text()) ON CONFLICT(identity_key,team) DO NOTHING;
+  UPDATE public.kb_management_instance_issue x SET state='active',
+    public_bundle_digest=p_public_bundle_digest,cert_issuer=p_leaf_issuer,
+    cert_serial_norm=p_leaf_serial_norm,cert_fingerprint=p_leaf_fingerprint,
+    cert_spki_digest=p_leaf_spki_digest,cert_not_before=v_not_before,cert_not_after=v_not_after,
+    enrollment_id=v_enrollment,activated_at=pg_catalog.now() WHERE x.operation_id=p_operation_id
+    RETURNING * INTO q;
+  UPDATE public.kb_management_instance x SET current_generation=p_generation,
+    current_enrollment_id=v_enrollment,updated_at=pg_catalog.now()
+    WHERE x.installation_id=p_installation_id RETURNING * INTO i;
+  PERFORM public.kb_audit_worm_append('management-instance',p_installation_id,
+    'management.issue.activate','runtime','allow','generation='||p_generation::TEXT);
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
+  RETURN QUERY SELECT FALSE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+    i.binding_digest,i.state,q.generation,q.enrollment_id,q.operation_id,q.issue_kind,q.state,
+    q.csr_digest,q.csr_spki_digest,q.public_bundle_digest,v_identity,q.cert_issuer,
+    q.cert_serial_norm,q.cert_fingerprint,q.cert_spki_digest,
+    extract(epoch FROM q.cert_not_before)::BIGINT,extract(epoch FROM q.cert_not_after)::BIGINT,
+    v_rev,extract(epoch FROM q.activated_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_snapshot(
+  p_installation_id TEXT,p_workload_issuer TEXT,p_workload_subject TEXT,
+  p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT
+) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,replacement_lineage_id TEXT,
+  authority_id TEXT,team_id BIGINT,binding_digest TEXT,instance_state TEXT,generation BIGINT,
+  enrollment_id BIGINT,operation_id TEXT,issue_kind TEXT,issue_state TEXT,
+  public_bundle_digest TEXT,cert_identity TEXT,cert_issuer TEXT,cert_serial_norm TEXT,
+  cert_fingerprint TEXT,cert_spki_digest TEXT,cert_not_before_epoch BIGINT,
+  cert_not_after_epoch BIGINT,revocation_generation BIGINT,activated_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE i public.kb_management_instance%ROWTYPE; q public.kb_management_instance_issue%ROWTYPE;
+  e public.kb_enrollments%ROWTYPE; v_digest TEXT; v_identity TEXT; v_rev BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_installation_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'invalid management snapshot' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x WHERE x.installation_id=p_installation_id;
+  IF i.installation_id IS NOT NULL THEN
+    SELECT x.* INTO q FROM public.kb_management_instance_issue x
+     WHERE x.installation_id=i.installation_id AND x.generation=i.current_generation;
+    SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=i.current_enrollment_id;
+  END IF;
+  IF i.installation_id IS NULL OR i.state<>'active' OR i.current_generation<1 OR
+     ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
+       IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                            v_digest) OR q.operation_id IS NULL OR q.state<>'active' OR
+     q.enrollment_id<>i.current_enrollment_id OR e.id IS NULL OR e.scope<>'p5-kb-management' OR
+     e.authority_id<>i.authority_id OR e.state<>'active' OR e.revoked_at<>'' OR
+     NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR
+     e.cert_issuer<>q.cert_issuer OR e.cert_serial_norm<>q.cert_serial_norm OR
+     e.fingerprint<>q.cert_fingerprint THEN
+    RAISE EXCEPTION 'active management snapshot denied' USING ERRCODE='28000';
+  END IF;
+  v_identity:='cert:'||pg_catalog.replace(pg_catalog.replace(q.cert_issuer,'%','%25'),':','%3A')||
+    ':'||pg_catalog.replace(pg_catalog.replace(q.cert_serial_norm,'%','%25'),':','%3A');
+  IF NOT EXISTS(SELECT 1 FROM public.kb_team_membership m
+      WHERE m.identity_key=v_identity AND m.team=i.team_id) OR
+     EXISTS(SELECT 1 FROM public.kb_team_membership m
+      WHERE m.identity_key=v_identity AND m.team<>i.team_id) THEN
+    RAISE EXCEPTION 'management membership invariant' USING ERRCODE='55000';
+  END IF;
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
+  IF v_rev IS NULL THEN RAISE EXCEPTION 'revocation generation unavailable' USING ERRCODE='55000'; END IF;
+  RETURN QUERY SELECT FALSE,i.installation_id,i.replacement_lineage_id,i.authority_id,i.team_id,
+    i.binding_digest,i.state,i.current_generation,i.current_enrollment_id,q.operation_id,
+    q.issue_kind,q.state,q.public_bundle_digest,v_identity,q.cert_issuer,q.cert_serial_norm,
+    q.cert_fingerprint,q.cert_spki_digest,extract(epoch FROM q.cert_not_before)::BIGINT,
+    extract(epoch FROM q.cert_not_after)::BIGINT,v_rev,extract(epoch FROM q.activated_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_instance_expire_quarantine(p_limit INTEGER)
+RETURNS TABLE(expired_grants BIGINT,expired_issues BIGINT,quarantined_issues BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE r RECORD; v_left INTEGER; v_exp_g BIGINT:=0; v_exp_i BIGINT:=0; v_quar BIGINT:=0;
+  i public.kb_management_instance%ROWTYPE; e public.kb_enrollments%ROWTYPE;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_limit NOT BETWEEN 1 AND 100 THEN
+    RAISE EXCEPTION 'invalid management maintenance bound' USING ERRCODE='22023';
+  END IF;
+  v_left:=p_limit;
+  FOR r IN SELECT x.installation_id,x.operation_id FROM public.kb_management_instance_issue x
+    WHERE x.state='pending' ORDER BY x.pending_expires_at,x.operation_id LIMIT p_limit
+  LOOP
+    EXIT WHEN v_left=0;
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(r.installation_id,1345462850));
+    SELECT x.* INTO i FROM public.kb_management_instance x
+     WHERE x.installation_id=r.installation_id FOR UPDATE;
+    IF i.current_enrollment_id IS NOT NULL THEN
+      SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=i.current_enrollment_id FOR UPDATE;
+    ELSE e:=NULL; END IF;
+    IF i.installation_id IS NULL OR i.state<>'active' OR
+       (e.id IS NOT NULL AND (e.state<>'active' OR e.revoked_at<>'')) THEN
+      UPDATE public.kb_management_instance_issue x SET state='quarantined',terminal_at=pg_catalog.now()
+       WHERE x.operation_id=r.operation_id AND x.state='pending';
+      IF FOUND THEN
+        v_quar:=v_quar+1; v_left:=v_left-1;
+        PERFORM public.kb_audit_worm_append('management-instance',r.installation_id,
+          'management.issue.quarantine','runtime','allow','state=quarantined');
+      END IF;
+    ELSE
+      UPDATE public.kb_management_instance_issue x SET state='expired',terminal_at=pg_catalog.now()
+       WHERE x.operation_id=r.operation_id AND x.state='pending' AND
+             x.pending_expires_at<=pg_catalog.now();
+      IF FOUND THEN
+        v_exp_i:=v_exp_i+1; v_left:=v_left-1;
+        PERFORM public.kb_audit_worm_append('management-instance',r.installation_id,
+          'management.issue.expire','runtime','allow','state=expired');
+      END IF;
+    END IF;
+  END LOOP;
+  FOR r IN SELECT x.installation_id FROM public.kb_management_instance_grant x
+    WHERE x.state='pending' AND x.expires_at<=pg_catalog.now()
+    ORDER BY x.expires_at,x.installation_id LIMIT v_left
+  LOOP
+    EXIT WHEN v_left=0;
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(r.installation_id,1345462850));
+    UPDATE public.kb_management_instance_grant x SET state='expired'
+     WHERE x.installation_id=r.installation_id AND x.state='pending' AND
+           x.expires_at<=pg_catalog.now();
+    IF FOUND THEN
+      v_exp_g:=v_exp_g+1; v_left:=v_left-1;
+      PERFORM public.kb_audit_worm_append('management-instance',r.installation_id,
+        'management.grant.expire','runtime','allow','state=expired');
+    END IF;
+  END LOOP;
+  RETURN QUERY SELECT v_exp_g,v_exp_i,v_quar;
+END $$;
 
 CREATE TABLE IF NOT EXISTS org_egress_binding (
   team_id BIGINT NOT NULL REFERENCES kb_team(id),

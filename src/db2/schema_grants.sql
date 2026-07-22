@@ -325,6 +325,87 @@ BEGIN
 END
 $$;
 
+-- P5-B2b management-instance lineage.  The broad compatibility grants near the
+-- top of this file must never expose the primary-only lineage tables.  Runtime
+-- crosses FORCE RLS only through the five fixed owner-definer entry points;
+-- offline grant and replacement provisioning remains migration-only.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RETURN;
+  END IF;
+
+  ALTER TABLE public.kb_management_instance_grant OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_instance OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_instance_issue OWNER TO aimee_kb_owner;
+
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_issue_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_expire_quarantine(INTEGER) OWNER TO aimee_kb_owner';
+
+  -- The definer needs only the existing rows touched by activation/replacement.
+  GRANT SELECT ON public.kb_team TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE ON public.kb_enrollments TO aimee_kb_owner;
+  GRANT SELECT,INSERT ON public.kb_team_membership TO aimee_kb_owner;
+  GRANT SELECT,UPDATE ON public.kb_cert_revocation_generation TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_audit_event TO aimee_kb_owner;
+  GRANT USAGE,SELECT ON SEQUENCE public.kb_enrollments_id_seq,
+    public.kb_team_membership_id_seq TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_owner;
+
+  REVOKE ALL ON TABLE public.kb_management_instance_grant,
+    public.kb_management_instance,public.kb_management_instance_issue FROM PUBLIC;
+  REVOKE ALL ON FUNCTION
+    public.kb_management_instance_grant_guard(),
+    public.kb_management_instance_guard(),
+    public.kb_management_instance_issue_guard(),
+    public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
+    public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_expire_quarantine(INTEGER) FROM PUBLIC;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    REVOKE ALL ON TABLE public.kb_management_instance_grant,
+      public.kb_management_instance,public.kb_management_instance_issue
+      FROM aimee_kb_runtime;
+    REVOKE ALL ON FUNCTION
+      public.kb_management_instance_grant_guard(),
+      public.kb_management_instance_guard(),
+      public.kb_management_instance_issue_guard(),
+      public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+      FROM aimee_kb_runtime;
+    GRANT EXECUTE ON FUNCTION
+      public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
+      public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_expire_quarantine(INTEGER) TO aimee_kb_runtime;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_migrate') THEN
+    GRANT EXECUTE ON FUNCTION
+      public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+      TO aimee_kb_migrate;
+  END IF;
+END
+$$;
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
