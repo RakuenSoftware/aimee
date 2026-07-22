@@ -402,6 +402,38 @@ static void preset_overlay_config(const roundtable_preset_t *p, config_t *cfg)
    snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", p->name);
 }
 
+int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char *resolved,
+                                      size_t resolved_n, char *err, size_t err_n)
+{
+   if (resolved && resolved_n)
+      resolved[0] = '\0';
+   if (err && err_n)
+      err[0] = '\0';
+   if (!cfg)
+      return -1;
+
+   const int explicit_request = requested && requested[0];
+   const int configured_default = !explicit_request && cfg->roundtable_default[0];
+   const char *name =
+       explicit_request ? requested : (configured_default ? cfg->roundtable_default : "default");
+   roundtable_preset_t p;
+   if (roundtable_preset_load(name, &p) != 0)
+   {
+      if (explicit_request || configured_default)
+      {
+         if (err && err_n)
+            snprintf(err, err_n, "roundtable preset '%s' does not exist", name);
+         return -1;
+      }
+      return 0;
+   }
+
+   preset_overlay_config(&p, cfg);
+   if (resolved && resolved_n)
+      snprintf(resolved, resolved_n, "%s", p.name);
+   return 1;
+}
+
 int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn)
 {
    roundtable_preset_t p;

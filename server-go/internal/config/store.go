@@ -203,6 +203,29 @@ func (s *Store) BoolValue(key string) (bool, bool, error) {
 	return b, true, nil
 }
 
+// StringValue reads a scalar string without adding it to the Workflows UI's
+// mutable policy allowlist. Internal control-plane modules use it for existing
+// product configuration such as roundtable.default.
+func (s *Store) StringValue(key string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	root, err := s.read()
+	if err != nil {
+		return "", false, err
+	}
+	values := make(map[string]any)
+	flatten(root, "", values)
+	value, ok := values[key]
+	if !ok {
+		return "", false, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", false, fmt.Errorf("config key %q is not a string", key)
+	}
+	return text, true, nil
+}
+
 func (s *Store) Set(key string, value any) error {
 	return s.SetVersioned(key, value, "")
 }

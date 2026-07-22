@@ -51,10 +51,7 @@ type Preset = {
   aggregator: string;
   min_successful: number;
   max_cost_usd: number;
-  max_rounds: number;
-  converge_threshold: number;
   deadline_ms: number;
-  turns: string;
   pipeline: Pipeline;
 };
 type PresetSummary = { name: string; description?: string; active?: boolean; synthesized?: boolean };
@@ -91,10 +88,7 @@ function emptyPreset(name: string): Preset {
     aggregator: "",
     min_successful: 2,
     max_cost_usd: 0,
-    max_rounds: 3,
-    converge_threshold: 2,
     deadline_ms: 360000,
-    turns: "parallel",
     pipeline: { ...DEFAULT_PIPELINE },
   };
 }
@@ -295,10 +289,11 @@ export default function Roundtable() {
                 Required seats / positive pins ({form.seats.filter((s) => s.model.trim()).length})
               </div>
               <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
-                Runtime fills <strong>all eligible agent concurrency slots</strong>, spreading seats
-                across providers before reusing one. Entries here require a model/persona to
-                participate; they never exclude other enabled, eligible agents. A{" "}
-                <strong>specific</strong> model is honored exactly — if it can't be reached, the
+                Every configured seat is filled. Assignment spreads seats across providers and
+                distinct models first, then reuses eligible models up to their parallel capacity
+                until the table is full. A specific seat is a positive must-use pin; it never
+                excludes other enabled, eligible agents. A <strong>specific</strong> model is
+                honored exactly — if it can't be reached, the
                 workflow run fails (never silently swapped). <strong>Random</strong> lets any
                 review-capable agent fill the seat, retrying a different one until one is accepted.
               </p>
@@ -374,30 +369,11 @@ export default function Roundtable() {
                 </div>
               </div>
 
-              {/* Loop knobs. */}
+              {/* Execution guard. Independent analysis always runs once in parallel. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div title="Maximum number of review/revise rounds.">
-                  <label style={lbl}>Max rounds</label>
-                  {numField(form.max_rounds, (n) => patch({ max_rounds: n }))}
-                </div>
-                <div title="Agreement level required to stop looping early.">
-                  <label style={lbl}>Converge threshold</label>
-                  {numField(form.converge_threshold, (n) => patch({ converge_threshold: n }))}
-                </div>
                 <div title="Overall time budget for the roundtable in milliseconds.">
                   <label style={lbl}>Deadline (ms)</label>
                   {numField(form.deadline_ms, (n) => patch({ deadline_ms: n }))}
-                </div>
-                <div title="Whether seats run in parallel or one after another.">
-                  <label style={lbl}>Turns</label>
-                  <select
-                    style={{ ...input, width: 140 }}
-                    value={form.turns}
-                    onChange={(e) => patch({ turns: e.target.value })}
-                  >
-                    <option value="parallel">parallel</option>
-                    <option value="sequential">sequential</option>
-                  </select>
                 </div>
               </div>
 

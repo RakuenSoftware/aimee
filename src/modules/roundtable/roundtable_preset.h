@@ -6,8 +6,7 @@
  * pick which one is "active". Selecting a preset active copies its values into
  * the live config_t ensemble_* and roundtable_* fields (the runtime source of truth,
  * read by delegate_ensemble.c) and records the name in config_t.roundtable_default;
- * the roundtable runtime expands those pins across every remaining enabled,
- * eligible agent concurrency slot, provider-diversity first.
+ * the roundtable runtime uses those seats as the complete, authoritative panel.
  *
  * Presets are stored one-per-file as JSON at <config_default_dir()>/roundtables/
  * <name>.json, mirroring the persona registry (persona.{c,h}). Server-side only —
@@ -16,6 +15,7 @@
 #define DEC_ROUNDTABLE_PRESET_H 1
 
 #include "cJSON.h"
+#include "config.h"
 #include <stddef.h>
 
 /* Bounds mirror the config_t arrays (config.h). ENSEMBLE_MAX_REFS == 32 seats;
@@ -96,6 +96,17 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
  * config_save + config_reload so the change takes effect live. Returns 0 on
  * success; -1 with a message in err (if err != NULL) on failure. */
 int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn);
+
+/* Resolve the runtime roundtable into `cfg`.
+ *
+ * Resolution order is: an explicitly requested preset, roundtable.default from
+ * cfg, then the saved preset named "default". A resolved preset is overlaid in
+ * memory and its exact seat list is authoritative. Returns 1 when a preset was
+ * acquired, 0 only when neither a configured default nor the implicit saved
+ * "default" exists, and -1 when an explicitly named/configured preset is
+ * missing. `resolved` receives the acquired name when provided. */
+int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char *resolved,
+                                      size_t resolved_n, char *err, size_t err_n);
 
 /* Synthesize a preset named `name` from the live config_t (ensemble_* and roundtable_*)
  * into *out. Used to materialize an implicit "current" preset when the store is

@@ -1948,9 +1948,10 @@ typedef struct config
     * corpus_diskann_threshold: row count per corpus table where auto picks diskann (default 1M). */
    char db2_vector_corpus_index[16];
    int64_t db2_vector_corpus_diskann_threshold;
-   /* Mixture-of-Agents ensemble (ensemble.*).
-    * ensemble_reference_models: positive must-use agent pins. Runtime fills all
-    * other enabled, eligible agent capacity, provider-diversity first.
+   /* Mixture-of-Agents ensemble compatibility representation (ensemble.*).
+    * ensemble_reference_models: exact seats overlaid from the acquired saved
+    * roundtable. When no preset is acquired, runtime discards this legacy list
+    * and constructs a provider-diverse panel of at most two agents.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means

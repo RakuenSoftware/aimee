@@ -123,6 +123,28 @@ int main(void)
    roundtable_preset_t missing;
    assert(roundtable_preset_load("nope", &missing) != 0);
 
+   /* Runtime resolution uses an explicit preset exactly, otherwise the saved
+    * default. It never invents or expands seats. */
+   config_t runtime;
+   memset(&runtime, 0, sizeof runtime);
+   char resolved[RT_PRESET_NAME_MAX], rerr[128];
+   assert(roundtable_preset_resolve_runtime("deep-review", &runtime, resolved, sizeof resolved,
+                                            rerr, sizeof rerr) == 1);
+   assert(strcmp(resolved, "deep-review") == 0);
+   assert(runtime.ensemble_reference_count == 3);
+   assert(strcmp(runtime.ensemble_reference_models[2], "glm") == 0);
+   assert(roundtable_preset_resolve_runtime("missing", &runtime, resolved, sizeof resolved, rerr,
+                                            sizeof rerr) == -1);
+
+   roundtable_preset_t default_preset = p;
+   snprintf(default_preset.name, sizeof default_preset.name, "default");
+   assert(roundtable_preset_save(&default_preset) == 0);
+   memset(&runtime, 0, sizeof runtime);
+   assert(roundtable_preset_resolve_runtime(NULL, &runtime, resolved, sizeof resolved, rerr,
+                                            sizeof rerr) == 1);
+   assert(strcmp(resolved, "default") == 0);
+   assert(runtime.ensemble_reference_count == 3);
+
    /* apply_to_config mirrors the preset onto the live config_t */
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);
@@ -145,6 +167,7 @@ int main(void)
 
    /* delete removes the file */
    assert(roundtable_preset_delete("deep-review") == 0);
+   assert(roundtable_preset_delete("default") == 0);
    assert(roundtable_preset_load("deep-review", &loaded) != 0);
    assert(roundtable_preset_delete("deep-review") != 0); /* already gone */
 

@@ -111,26 +111,25 @@ A roundtable node carries its panel in `params`:
       required: [security, architect, qa, reviewer]   # persona names
       eligible: [contrarian]                           # may join if available
     quorum: 4
-    max_rounds: 6
   on_pass: proposal_pr
   on_fail: draft
 ```
 
-Panel entries are **persona** names, see [Personas](personas.md). Each panelist
-is a persona run on a delegate model; the gate passes when the quorum of
-panelists approve (or fails after `max_rounds`). Panelists are dispatched **in
-parallel**, so a round costs roughly one model's latency rather than the sum.
+Panel entries are **persona** names, see [Personas](personas.md). Each configured
+seat performs one independent analysis in parallel. The gate passes when the
+roundtable's configured minimum succeeds with no blocking finding.
 
-**Which model reviews each persona** comes from the active roundtable preset (the
-one the GUI edits and `roundtable.default` selects). For each required persona the
-gate looks up the matching seat and honors its model:
+**Which models review the artifact** comes from the acquired roundtable preset.
+The preset the GUI edits and `roundtable.default` selects is used unless the gate
+names another preset. Its exact seats are the complete panel; required personas
+are review/verdict dimensions and do not create additional seats:
 
 - a **specific pinned model** is dispatched to that **exact** agent. If that model
   is not enabled/routable for the `review` role — or its dispatch fails — the run
   **fails** (a pinned model is a hard requirement, never silently swapped);
-- a **`$random`** seat (or a persona with no matching seat) picks **any**
-  review-capable agent and retries a different one until one is accepted, so a
-  flaky agent doesn't stall the gate.
+- a **`$random`** seat picks an available review-capable agent;
+- when no saved preset can be acquired, the fallback panel contains at most two
+  review-capable agents, selected across providers where possible.
 
 Set a seat to a specific model or to *Random* in the Roundtable page of the GUI.
 An agent is "review-capable" unless its `exec_roles` explicitly omit `review`
@@ -151,8 +150,8 @@ one workflow can use different panels:
     quorum: 4
 ```
 
-If the named preset does not exist the gate logs a warning and every lens falls
-back to `$random`.
+If an explicitly named or configured-default preset does not exist, the gate
+parks with a configuration error; it never silently substitutes another panel.
 
 There is **no engine privilege** over a user-authored workflow: `build` is just
 one composition of the same catalog you compose from. Clone it and edit freely.
