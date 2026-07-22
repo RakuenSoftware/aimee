@@ -6,10 +6,12 @@ and contains the expected agent entries, the file is almost certainly stale
 on the box clock. This runbook covers that one scenario and the single
 recovery action that resolves it.
 
-If any diagnosis check fails, this runbook does not apply. Stop here:
-restoring configuration or re-entering secrets will not fix a missing,
-malformed, or partially-populated file. Escalate to the Aimee service owner
-with the diagnosis output rather than continuing with the steps below.
+If any diagnosis check fails, this runbook does not apply. Stop here
+and escalate to the Aimee service owner with the diagnosis output rather
+than continuing with the steps below. Configuration restoration or secret
+re-entry may be appropriate for missing, malformed, or partially-populated
+files, but those cases are out of scope for this runbook and must follow
+a different procedure; do not apply this runbook to them.
 
 ## Symptoms
 
