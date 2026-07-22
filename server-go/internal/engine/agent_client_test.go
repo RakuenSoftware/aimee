@@ -63,6 +63,9 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 		case "/v1/delegate/run":
 			var payload map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if provided, ok := payload["provided_target"].(bool); !ok || !provided {
+				t.Errorf("provided review target missing from payload %v", payload)
+			}
 			for _, localOnly := range []string{"durable_slot", "DurableSlot", "durableslot", "retry_tag", "RetryTag"} {
 				if _, leaked := payload[localOnly]; leaked {
 					t.Errorf("local durable-key field %q leaked in payload %v", localOnly, payload)
@@ -82,7 +85,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := DelegateRequest{Role: "review", Persona: "qa", Prompt: "review complete artifact",
-		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1"}
+		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true}
 	for _, slot := range []string{"panel:gate:round:1:seat:0", "panel:gate:round:1:seat:1"} {
 		request.DurableSlot = slot
 		if _, err := client.Delegate(t.Context(), request); err != nil {
@@ -91,6 +94,32 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 	}
 	if launches.Load() != 2 {
 		t.Fatalf("distinct durable slots launched %d jobs", launches.Load())
+	}
+}
+
+func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if _, present := payload["provided_target"]; present {
+				t.Errorf("ordinary delegate request claimed a provided target: %v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": 1})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review worktree"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

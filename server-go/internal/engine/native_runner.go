@@ -576,13 +576,16 @@ func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats
 			// Repeated persona/agent pairs must not collide and reuse one remote
 			// result, so each capacity seat carries a distinct durable slot.
 			seatSlot := panelSeatDurableSlot(req, panelRound, seat.ordinal)
-			res, err := r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: seatSlot, ArtifactStage: artifactStage})
+			request := DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: seatSlot, ArtifactStage: artifactStage, ProvidedTarget: true}
+			res, err := r.delegate(ctx, req, request)
 			if err != nil && !seat.pinned && seat.delegate != "" {
 				// Capacity assignments are routing hints for this panel run, not UI
 				// pins. If the assigned subscription is temporarily unavailable,
 				// retry through ordinary live eligibility after that failed slot has
 				// released its lease. Never persist the failure as an exclusion.
-				res, err = r.delegate(ctx, req, DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Prompt: prompt, Workdir: req.WorkItem.Worktree, RetryTag: fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate), DurableSlot: seatSlot, ArtifactStage: artifactStage})
+				request.Delegate = ""
+				request.RetryTag = fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate)
+				res, err = r.delegate(ctx, req, request)
 			}
 			if err != nil {
 				ch <- outcome{seat: seat, err: err}

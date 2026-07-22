@@ -655,6 +655,7 @@ void delegate_worker(void *arg)
    cJSON *jmaxturns = cJSON_GetObjectItemCaseSensitive(req, "max_turns");
    cJSON *jhandoff = cJSON_GetObjectItemCaseSensitive(req, "handoff_json");
    cJSON *jtools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+   cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
@@ -674,6 +675,9 @@ void delegate_worker(void *arg)
    int timeout_ms = cJSON_IsNumber(jtimeout) ? (int)jtimeout->valuedouble : 0;
    int max_turns = cJSON_IsNumber(jmaxturns) ? (int)jmaxturns->valuedouble : -1;
    int handoff_json = cJSON_IsTrue(jhandoff);
+   /* Only the JSON boolean literal true opts out; absent, false, and malformed
+    * values preserve automatic evidence grounding. */
+   int caller_provided_target = cJSON_IsTrue(jprovided_target);
    const char *toolset_override =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
@@ -1089,7 +1093,12 @@ void delegate_worker(void *arg)
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
 
-   /* Ground read-only inspection roles in parent diff evidence. */
+   /* This is delegate_worker's sole parent-diff evidence injection point.
+    * Ground read-only inspection roles in parent diff evidence unless the
+    * caller supplied the complete review target inline. In that case an
+    * unrelated current-worktree diff is competing evidence and can make a
+    * plan reviewer incorrectly demand implementation. */
+   if (!caller_provided_target)
    {
       char *evidence = delegate_prepend_parent_diff_evidence(prompt, role, delegate_allows_writes,
                                                              cwd, deleg_id);

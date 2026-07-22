@@ -2424,6 +2424,51 @@ static void test_read_only_delegate_uses_parent_workspace(void)
    printf("  PASS: test_read_only_delegate_uses_parent_workspace\n");
 }
 
+static void test_provided_review_target_suppresses_worktree_evidence(void)
+{
+   reset_last_response();
+   int fds[2];
+   assert(pipe(fds) == 0);
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->fd = fds[1];
+   g_agent_response = "Plan review complete";
+   g_git_repo_root_rc = 0;
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s",
+            "/tmp/aimee-parent-repo");
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "review");
+   cJSON_AddStringToObject(req, "persona", "reviewer");
+   cJSON_AddStringToObject(req, "prompt",
+                           "BEGIN_ARTIFACT_DATA (plan)\nPLAN_TARGET_MARKER\nEND_ARTIFACT_DATA");
+   cJSON_AddStringToObject(req, "cwd", "/tmp/aimee-parent-repo");
+   cJSON_AddBoolToObject(req, "provided_target", 1);
+   assert(handle_delegate(ctx, conn, req) == 0);
+   assert(g_submitted_fn == delegate_worker);
+   g_submitted_fn(g_submitted_arg);
+   g_submitted_arg = NULL;
+   close(fds[1]);
+   char buf[256];
+   assert(read(fds[0], buf, sizeof(buf)) >= 0);
+   close(fds[0]);
+
+   assert(strstr(g_last_agent_prompt,
+                 "BEGIN_ARTIFACT_DATA (plan)\nPLAN_TARGET_MARKER\nEND_ARTIFACT_DATA") != NULL);
+   assert(strstr(g_last_agent_prompt, "Validation Evidence Bundle") == NULL);
+   assert(strstr(g_last_agent_prompt, "Parent Worktree Diff Evidence") == NULL);
+   db1_agent_job_t job;
+   assert(delegate_current_job(&job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
+   cJSON_Delete(req);
+   reset_last_response();
+   free(conn);
+   free(ctx);
+   printf("  PASS: test_provided_review_target_suppresses_worktree_evidence\n");
+}
+
 static void test_read_only_branch_delegate_rejected(void)
 {
    reset_last_response();
@@ -3048,6 +3093,7 @@ int main(void)
    test_readonly_refactor_delegate_disables_write_enforce();
    test_direct_delegate_max_turns_override();
    test_read_only_delegate_uses_parent_workspace();
+   test_provided_review_target_suppresses_worktree_evidence();
    test_read_only_branch_delegate_rejected();
    test_inspection_roles_get_evidence_bundle();
    test_delegate_worker_restores_caller_context();

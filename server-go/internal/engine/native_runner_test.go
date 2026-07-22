@@ -284,6 +284,9 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 	foundPin, foundDynamicQA := false, false
 	for _, request := range agents.requests {
+		if request.Role == "review" && !request.ProvidedTarget {
+			t.Fatalf("roundtable request did not declare its inline artifact: %+v", request)
+		}
 		requestMarker := "ORIGINAL REQUEST:\n" + proposal
 		if request.Role == "review" {
 			requestMarker = "BEGIN_ORIGINAL_REQUEST_DATA\n" + proposal + "\nEND_ORIGINAL_REQUEST_DATA"
@@ -360,6 +363,9 @@ func TestPanelCapacitySeatsHaveDistinctDurableJobKeys(t *testing.T) {
 		wantSlots[panelSeatDurableSlot(req, 1, ordinal)] = true
 	}
 	for _, request := range agents.requests {
+		if !request.ProvidedTarget {
+			t.Fatalf("roundtable request did not declare its inline artifact: %+v", request)
+		}
 		key := delegateJobKey(request)
 		if seen[key] {
 			t.Fatalf("capacity seats collapsed onto durable key %q: %+v", key, agents.requests)
@@ -517,7 +523,7 @@ func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.
 		t.Fatalf("dynamic assignment did not recover: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
 	wantSlot := panelSeatDurableSlot(req, 1, 0)
-	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[0].DurableSlot != wantSlot || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" || agents.requests[1].DurableSlot != wantSlot {
+	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[0].DurableSlot != wantSlot || !agents.requests[0].ProvidedTarget || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" || agents.requests[1].DurableSlot != wantSlot || !agents.requests[1].ProvidedTarget {
 		t.Fatalf("requests=%+v", agents.requests)
 	}
 

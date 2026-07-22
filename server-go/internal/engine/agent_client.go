@@ -37,6 +37,12 @@ type DelegateRequest struct {
 	// must evaluate. It is carried structurally so runner collaborators and test
 	// doubles never need to recover authority from prompt prose.
 	ArtifactStage string
+	// ProvidedTarget tells the resource-plane transport that Prompt already
+	// contains the complete artifact under review. It suppresses unrelated
+	// worktree-diff evidence. Only true emits the strict JSON boolean opt-in;
+	// false omits it and preserves automatic evidence. This is a deliberate wire
+	// field; DurableSlot and RetryTag are Go-local and must never be sent.
+	ProvidedTarget bool
 	// acceptPartial is reserved for native branch-producing blocks whose worktree output
 	// is independently committed and verified by the Go native runner. Structured
 	// and prose blocks must receive a complete resource-plane result.
@@ -163,6 +169,9 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
 	}
 	payload := map[string]any{"role": request.Role, "persona": request.Persona, "prompt": request.Prompt, "cwd": request.Workdir, "tools": request.Tools}
+	if request.ProvidedTarget {
+		payload["provided_target"] = true
+	}
 	// Empty means ordinary eligibility routing. A non-empty delegate is an
 	// explicit positive pin from the workflow, never an exclusion list.
 	if request.Delegate != "" {
