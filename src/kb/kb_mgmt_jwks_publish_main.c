@@ -571,8 +571,6 @@ int main(int argc, char **argv)
          exit_code = EXIT_INTEGRITY;
       break;
    case KB_MGMT_JWKS_CONVERGED:
-      if (!export_only)
-         exit_code = EXIT_INTEGRITY;
       break;
    case KB_MGMT_JWKS_RETRY:
       exit_code = EXIT_RETRY;
