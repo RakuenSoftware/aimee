@@ -558,18 +558,6 @@
           "sha256": "437b6c09a848212a27a360e96e78c8aa338a0b2e363d572af67d15320325e1cd"
         },
         {
-          "path": "src/headers/gateway_delegate.h",
-          "sha256": "81ffea4b320cf0df93e7e67fee923161089f247c67c4a3a5d6a10e2dbd733c6b"
-        },
-        {
-          "path": "src/headers/gateway_pipeline.h",
-          "sha256": "10fbf5a2b2584592c35e9642423987668fd371d0ad066ef645b6ec28c910da86"
-        },
-        {
-          "path": "src/headers/gateway_policy.h",
-          "sha256": "27e7d8888e88408c91821c7a49db28ede28872b7c2f624eb3d0ce3b09020c30f"
-        },
-        {
           "path": "src/headers/gw_mutate_stats.h",
           "sha256": "082505565b5482efa37feef3227c40c984e620c946555b30e62ada820349fc00"
         },
@@ -983,7 +971,7 @@
         },
         {
           "path": "src/headers/router_advise.h",
-          "sha256": "a613506805e13e0e17be880a03fd8cadfcd24dda2aae62a99690ba116b94ee70"
+          "sha256": "c05584778ad6bd1b4f94c1765ae1e8e9e48a99c4961a3b7a021b56342265335f"
         },
         {
           "path": "src/headers/s2_native_gate_hook.h",
@@ -1208,11 +1196,63 @@
         {
           "path": "src/headers/yaml.h",
           "sha256": "df2b1e116be80ba8960effac5686975de69ae222c47674ea49042cb7532a7697"
+        },
+        {
+          "path": "src/modules/audit/include/aimee/audit/audit_action.h",
+          "sha256": "68eb43eb9f0205d579368382bdf9289918f137e5e9e75034fd3a26880c9c5d72"
+        },
+        {
+          "path": "src/modules/audit/include/aimee/audit/audit_ledger.h",
+          "sha256": "68ecfb181bd20715a3cea34f2b773c9bac15198a6439228e16c71776dc4cd513"
+        },
+        {
+          "path": "src/modules/audit/include/aimee/audit/audit_worm.h",
+          "sha256": "0c6c9e66e1211f51a0fd5d96e4462d80ac92d734d26bf94bc77d2c206dd57406"
+        },
+        {
+          "path": "src/modules/audit/include/aimee/audit/audit_worm_chain.h",
+          "sha256": "b77147e58a921764cb924a2393290d1ba49afe29d5f871791036599327b8fdf2"
+        },
+        {
+          "path": "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
+          "sha256": "81ffea4b320cf0df93e7e67fee923161089f247c67c4a3a5d6a10e2dbd733c6b"
+        },
+        {
+          "path": "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+          "sha256": "10fbf5a2b2584592c35e9642423987668fd371d0ad066ef645b6ec28c910da86"
+        },
+        {
+          "path": "src/modules/gateway/include/aimee/gateway/gateway_policy.h",
+          "sha256": "27e7d8888e88408c91821c7a49db28ede28872b7c2f624eb3d0ce3b09020c30f"
+        },
+        {
+          "path": "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
+          "sha256": "c421c6372e0469631fc37a1845815766e6bfa2acf23e94d41126ca14447ac8a0"
+        },
+        {
+          "path": "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h",
+          "sha256": "f9dbb8c0371342a98dd05e0f95d64904af50ea679663dff5ea2f9f3abbd5c768"
+        },
+        {
+          "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
+          "sha256": "4d19916e464cab53f021ef25f788c415f3a84535fef16f3724ddbacfab55c187"
+        },
+        {
+          "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
+          "sha256": "238f07213725f2456053afff18af6c741e52b86cbc04c0a10de47466f059a1eb"
+        },
+        {
+          "path": "src/modules/skills/include/aimee/skills/skill.h",
+          "sha256": "150a123e2dbb8af9bdb73891470f7ef3c995d727b27b4d5358d32bc7256abeeb"
+        },
+        {
+          "path": "src/modules/skills/include/aimee/skills/skill_review.h",
+          "sha256": "42e78899b0eb072007e2747034501cdc66e3920de063ea1abd0a6df2723b6bb7"
         }
       ]
     },
     "public-symbols": {
-      "sha256": "850d2af460a00b6399fd060d15c76a6661df9e7927c15432149d87013827cacb",
+      "sha256": "7469cee26e9479b9a733548cff0a78816dfc7a0d6427b308c5ee4e3754344506",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

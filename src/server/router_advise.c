@@ -22,8 +22,8 @@
 #include "agent_exec.h"
 #include "agent_types.h"
 #include "cJSON.h"
-#include "gateway_pipeline.h"  /* gw_request_t — the shared gateway seam */
-#include "ingress_preinject.h" /* query-from-messages + per-turn id */
+#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t — the shared gateway seam */
+#include "ingress_preinject.h"              /* query-from-messages + per-turn id */
 #include "interaction_events.h"
 #include "wfe_autonomous_route.h" /* S4: clamp/floor policy */
 #include "wfe_bind_ingress.h"

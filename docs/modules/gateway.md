@@ -9,14 +9,22 @@ translation, protocol standards, workflow definitions, or channel implementation
 
 ## Public contracts
 
-Current orchestration contracts are split across `src/gateway_pipeline.c`, `src/gateway_policy.c`,
-`src/gateway_delegate.c`, and their `src/headers` interfaces. Channel/session implementation lives under
-`src/gateway`, while request mutation is partly in `src/modules/economizer/gateway_mutate*.c`. The
-descriptor-only `src/modules/gateway` directory is the target core owner; a later move must separate
-universal ingress orchestration (`gateway_pipeline`, `gateway_policy`, and `gateway_delegate`) from
-optional delivery-platform code (`platform_*`, `delivery_router`, STT, and TTS) rather than moving the tree
-wholesale. Gateway main, context, pairing, and session-key paths require a caller/lifecycle audit before
-final placement.
+The canonical orchestration sources are `src/modules/gateway/gateway_pipeline.c`,
+`src/modules/gateway/gateway_policy.c`, and `src/modules/gateway/gateway_delegate.c`. Their public
+contracts live under `src/modules/gateway/include/aimee/gateway`; consumers use the canonical include
+namespace `aimee/gateway`. This canonical include namespace is the only supported public-header route.
+The public header inventory is
+`src/modules/gateway/include/aimee/gateway/gateway_pipeline.h`,
+`src/modules/gateway/include/aimee/gateway/gateway_policy.h`, and
+`src/modules/gateway/include/aimee/gateway/gateway_delegate.h`. The `gw_` prefix predates the canonical
+namespace and remains as a compatibility name; renaming it requires the compatibility process.
+`gw_pipeline_run_request`, `gateway_policy_apply_request`, and
+`gateway_delegate_run_request_pipeline` retain their existing contracts.
+
+Gateway main, context, pairing, session-key, and channel/session code remains under `src/gateway` and
+awaits a caller and lifecycle audit. The gateway-mutation family remains owned by economizer under
+`src/modules/economizer/gateway_mutate*.c`. Optional delivery implementations (`platform_*`,
+`delivery_router`, STT, and TTS) require later provider-isolation slices and are not moved wholesale.
 
 ## Dependencies and consumers
 
@@ -77,8 +85,11 @@ journey; disabling them must leave direct headless API/CLI operation intact.
 
 ## Tests and failure behavior
 
-`test_gateway_pipeline.c`, `test_gateway_policy.c`, `test_gateway.c`, `test_gateway_p4_delegate.c`,
-platform tests, `test_gateway_mutate_wire.c`, and cross-protocol IR tests cover the present split. Identity
+The gateway descriptor owns the direct `src/tests/test_gateway_pipeline.c`,
+`src/tests/test_gateway_policy.c`, and `src/tests/test_gateway_p4_delegate.c` contracts.
+`test_gateway.c`, platform tests, `test_gateway_mutate_wire.c`,
+mixed ingress/governance tests, and cross-protocol IR tests cover adjacent boundaries without becoming
+gateway-owned. Identity
 or policy failure is fail-closed; absent optional delivery returns a typed unsupported/unready result;
 stage failure must not fall through to a second, less-policed execution path.
 

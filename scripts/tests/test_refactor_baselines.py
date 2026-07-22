@@ -22,6 +22,19 @@ SPEC.loader.exec_module(baselines)
 
 
 class RefactorBaselineTests(unittest.TestCase):
+    def test_public_header_surface_includes_canonical_module_contracts(self) -> None:
+        files = {
+            item["path"]
+            for item in baselines.build_index(ROOT)["surfaces"]["public-headers"]["files"]
+        }
+        self.assertIn("src/headers/aimee.h", files)
+        self.assertIn("src/modules/audit/include/aimee/audit/audit_action.h", files)
+        self.assertIn("src/modules/skills/include/aimee/skills/skill.h", files)
+        self.assertIn(
+            "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+            files,
+        )
+
     def test_repository_baseline_is_cwd_independent(self) -> None:
         with tempfile.TemporaryDirectory() as cwd:
             result = subprocess.run(

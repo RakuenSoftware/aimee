@@ -346,6 +346,23 @@
       "blast_radius": "Production changes are physical source/header moves and include substitutions; public symbols, target membership, CLI/API/config/storage behavior, and runtime behavior remain unchanged.",
       "independent_review": "Aimee technical-writer job 7477 approved the documentation set without edits on 2026-07-22; exact-final-diff roundtable review remains required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-25.md", "docs/modules/skills.md", "src/modules/skills/module.yaml", "scripts/check_module_source_ownership.py", "scripts/tests/test_check_module_source_ownership.py", "scripts/check_background_skill_curator_absence.py", "scripts/tests/test_check_background_skill_curator_absence.py"]
+    },
+    {
+      "slice": 26,
+      "state": "present_and_verified",
+      "disposition": "Moved the required gateway pipeline, policy, and delegate seam plus their public contracts into canonical gateway module ownership while preserving the optional-provider boundary.",
+      "production": {"added": [], "deleted": [], "consolidated": ["three root gateway sources and three flat public headers replaced by one canonical module and include namespace"]},
+      "fallbacks": ["gateway context, pairing, and session-key placement remains pending a lifecycle audit", "Telegram, webhook, ntfy, STT/TTS, and delivery providers remain outside the required core move", "CMake does not yet compile the three gateway implementation files and this slice preserves that target membership"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Three data entries extend the existing reusable ownership registry, and one existing baseline pattern now retains canonical module public APIs; no new checker or runtime subsystem is introduced.",
+        "rejected_simpler_alternative": "Compilation alone would allow flat forwarding headers, retired root sources, and legacy object paths to recreate split ownership.",
+        "revisit": "Audit the remaining gateway lifecycle and provider families independently before assigning or moving them."
+      },
+      "consumers": ["gateway ingress and delegate consumers", "descriptor validation CI", "future gateway provider-isolation slices"],
+      "blast_radius": "Production changes are physical source/header moves and include substitutions; public APIs, targets, visibility, stage order, configuration, storage, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7686 approved the revised documentation set on 2026-07-22; exact-final-diff roundtable review remains required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-26.md", "docs/modules/gateway.md", "src/modules/gateway/module.yaml", "scripts/check_module_source_ownership.py", "scripts/tests/test_check_module_source_ownership.py", "scripts/refactor_baselines.py", "scripts/tests/test_refactor_baselines.py"]
     }
   ]
 }
