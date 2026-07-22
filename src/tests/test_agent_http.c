@@ -938,9 +938,36 @@ static void test_evidence_review_requires_initial_tool_choice(void)
    cJSON_Delete(mistral);
 
    cJSON *responses = agent_build_request_responses(&agent, messages, tools, "review");
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses, "tool_choice")), "required") ==
+   cJSON *responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
+   assert(cJSON_IsObject(responses_choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "type")), "function") ==
           0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "name")), "noop") == 0);
    cJSON_Delete(responses);
+
+   cJSON *response_tools = cJSON_CreateArray();
+   cJSON *read_file = cJSON_CreateObject();
+   cJSON_AddStringToObject(read_file, "type", "function");
+   cJSON_AddStringToObject(read_file, "name", "read_file");
+   cJSON_AddItemToArray(response_tools, read_file);
+   cJSON *code_search = cJSON_CreateObject();
+   cJSON_AddStringToObject(code_search, "type", "function");
+   cJSON_AddStringToObject(code_search, "name", "code_search");
+   cJSON_AddItemToArray(response_tools, code_search);
+   responses = agent_build_request_responses(&agent, messages, response_tools, "review");
+   responses_choice = cJSON_GetObjectItem(responses, "tool_choice");
+   assert(cJSON_IsObject(responses_choice));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses_choice, "name")),
+                 "code_search") == 0);
+   cJSON_Delete(responses);
+   cJSON_Delete(response_tools);
+
+   cJSON *malformed_tools = cJSON_CreateArray();
+   cJSON_AddItemToArray(malformed_tools, cJSON_CreateObject());
+   responses = agent_build_request_responses(&agent, messages, malformed_tools, "review");
+   assert(cJSON_GetObjectItem(responses, "tool_choice") == NULL);
+   cJSON_Delete(responses);
+   cJSON_Delete(malformed_tools);
 
    cJSON *anthropic = agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
    cJSON *choice = cJSON_GetObjectItem(anthropic, "tool_choice");

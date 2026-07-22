@@ -133,7 +133,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
          out[i].response = strdup(
              "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
-      else if (g_parallel_mode == 6 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+      else if ((g_parallel_mode == 6 || g_parallel_mode == 10) && tasks[i].role &&
+               strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          /* review JSON wrapped in a markdown code fence + prose, as a persona'd
@@ -1487,6 +1488,30 @@ static void test_roundtable_no_tool_use_is_visible_degradation(void)
    printf("  test_roundtable_no_tool_use_is_visible_degradation: ok\n");
 }
 
+static void test_roundtable_failed_seat_is_incomplete_evidence_coverage(void)
+{
+   reset_modes();
+   g_parallel_mode = 10; /* first configured seat produces no response or tool evidence */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   cfg.roundtable_require_evidence = 1;
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   assert(delegate_roundtable_run(&acfg, &cfg, "audit production wiring", &opts, &result) == 0);
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 1);
+   assert(result.participants_tool_used == 2);
+   assert(result.evidence_coverage_incomplete == 1);
+   assert(result.degraded == 1);
+   assert(strstr(result.artifact, "2/3 configured seats used") != NULL);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_failed_seat_is_incomplete_evidence_coverage: ok\n");
+}
+
 static void test_roundtable_captures_original_request_alignment(void)
 {
    agent_result_t results[3];
@@ -1931,6 +1956,7 @@ int main(void)
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_no_tool_use_is_visible_degradation();
+   test_roundtable_failed_seat_is_incomplete_evidence_coverage();
    test_roundtable_captures_original_request_alignment();
    test_roundtable_aggregator_fallback_synthesizes();
    test_parse_lenient_prose_with_code_braces();
