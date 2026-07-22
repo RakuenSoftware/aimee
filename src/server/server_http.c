@@ -366,6 +366,26 @@ int server_http_mtls_transport_allowed(int is_tcp, int mtls_mode, int mtls_authe
    return !is_tcp || mtls_mode < 2 || mtls_authenticated;
 }
 
+static int management_health_route(const char *method, const char *path)
+{
+   return method && path &&
+          ((!strcmp(method, "POST") && !strcmp(path, "/v1/management/challenge")) ||
+           (!strcmp(method, "GET") && !strcmp(path, "/v1/management/health")));
+}
+
+server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
+                                                          int verified_peer, int management_profile,
+                                                          const char *peer_cn)
+{
+   int route = management_health_route(method, path);
+   int profile = verified_peer && management_profile;
+   if (route)
+      return profile && peer_cn && strcmp(peer_cn, "p5-kb-management") == 0
+                 ? SERVER_HTTP_MANAGEMENT_ALLOW
+                 : SERVER_HTTP_MANAGEMENT_DENY;
+   return profile ? SERVER_HTTP_MANAGEMENT_DENY : SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE;
+}
+
 /* Routes deliberately reachable over the TCP listener regardless of
  * aimee.api.remote_writes (still capability-gated): the detached-workspace
  * reverse channel and registry mutations (workspace-resource-plane). The serving
@@ -1522,13 +1542,38 @@ void handle_conn(int fd, int is_tcp)
     * still depend on the shared bearer. This remains authentication only: the
     * normal route/capability gates below still deny remote-write surfaces. */
    int mtls_authenticated = 0;
+   int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
    if (server_conn_io_has_ssl(fd))
    {
       char rc_cn[256] = "", rc_serial[80] = "";
-      if (server_tls_peer_identity(server_conn_io_get_ssl(fd), rc_cn, sizeof(rc_cn), rc_serial,
-                                   sizeof(rc_serial)) &&
-          rc_serial[0])
+      SSL *request_ssl = server_conn_io_get_ssl(fd);
+      int have_verified_peer =
+          server_tls_peer_identity(request_ssl, rc_cn, sizeof(rc_cn), rc_serial, sizeof(rc_serial));
+      server_tls_peer_cert_t management_peer;
+      memset(&management_peer, 0, sizeof(management_peer));
+      int have_management_peer =
+          have_verified_peer && server_tls_peer_cert(request_ssl, &management_peer) == 1;
+      server_http_management_auth_t management_auth =
+          server_http_management_auth(method, path, have_management_peer,
+                                      management_peer.management_profile, management_peer.cn);
+      if (management_auth == SERVER_HTTP_MANAGEMENT_DENY)
+      {
+         int status = management_health_route(method, path) ? 401 : 403;
+         send_response(fd, status,
+                       status == 401
+                           ? "{\"error\":{\"message\":\"a verified management client "
+                             "certificate is required\",\"type\":\"authentication_error\"}}"
+                           : "{\"error\":{\"message\":\"management client certificate is "
+                             "not authorized for this route\",\"type\":\"permission_error\"}}",
+                       request_id);
+         LOG_INFO("server.http", "%s %s -> %d (management transport) req_id=%s", method, path,
+                  status, request_id);
+         return;
+      }
+      if (management_auth == SERVER_HTTP_MANAGEMENT_ALLOW)
+         management_authenticated = 1;
+      else if (have_verified_peer && rc_serial[0])
       {
          pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
          if (cs != PKI_CERT_VALID)
@@ -1577,7 +1622,8 @@ void handle_conn(int fd, int is_tcp)
     * too: once durable state is required, a no-cert keep-alive may not retain
     * bearer fallback merely because its handshake predated the context swap. */
    mtls_mode = server_tls_mtls_mode();
-   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, mtls_authenticated))
+   int transport_authenticated = mtls_authenticated || management_authenticated;
+   if (!server_http_mtls_transport_allowed(is_tcp, mtls_mode, transport_authenticated))
    {
       send_response(fd, 401,
                     "{\"error\":{\"message\":\"a valid client certificate is required\","
@@ -1588,8 +1634,10 @@ void handle_conn(int fd, int is_tcp)
    }
    int effective_remote_writes =
        is_tcp && mtls_mode > 0 ? SERVER_REMOTE_WRITES_OFF : g_remote_writes;
-   uint32_t effective_caps = server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
-                                                             mtls_mode, mtls_authenticated);
+   uint32_t effective_caps =
+       management_authenticated ? 0
+                                : server_http_effective_conn_caps(is_tcp, g_bearer, g_remote_writes,
+                                                                  mtls_mode, mtls_authenticated);
 
    /* Establish the per-request context (#3) only after authenticating the
     * durable certificate, so downstream dispatch sees the same effective caps
@@ -1617,9 +1665,10 @@ void handle_conn(int fd, int is_tcp)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = mtls_authenticated ? 0
-                                  : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
-                                                          has_api_key ? api_key : NULL, has_skey);
+      int az = transport_authenticated
+                   ? 0
+                   : server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                           has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "
@@ -1639,7 +1688,7 @@ void handle_conn(int fd, int is_tcp)
        * solely to mint the real bearer, after which g_bearer no longer equals the
        * bootstrap and this gate self-disables. Closes the "a network-published
        * server keeps accepting the public default bearer" hole. */
-      if (server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
+      if (!management_authenticated && server_http_bootstrap_gate(is_tcp, g_bearer, method, path))
       {
          send_response(fd, 401,
                        "{\"error\":{\"message\":\"the one-time bootstrap bearer must be rotated "
