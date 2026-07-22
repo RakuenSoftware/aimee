@@ -1891,6 +1891,10 @@ paths:
   /config/set:
     post:
       summary: Set one configuration value
+      description: >
+        Roundtable policy keys are operator-controlled and require the
+        server-token-attested `webuser:admin` appliance administrator; generic
+        capabilities and local Unix-socket access are insufficient.
       requestBody:
         content:
           application/json:
@@ -1901,6 +1905,11 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "403":
+          description: Roundtable policy mutation was not authorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /cron:
     get:
       summary: List cron jobs
@@ -3979,6 +3988,7 @@ paths:
                         synthesized: { type: boolean }
     post:
       summary: Create a roundtable preset (name in body)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -3995,9 +4005,15 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/active:
     post:
       summary: Make a preset the active roundtable (mirror its values into live config)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -4022,6 +4038,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/{name}:
     get:
       summary: Show a roundtable preset by name
@@ -4043,6 +4064,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
     put:
       summary: Create or edit the named roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -4064,8 +4086,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     delete:
       summary: Remove a roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -4083,6 +4111,11 @@ paths:
                   deleted: { type: boolean }
         "404":
           description: No preset to remove
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

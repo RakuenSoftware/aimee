@@ -3,7 +3,8 @@ import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
  * aimee convenes. A preset captures required positive seat bindings (a model +
- * persona), the aggregator, the guard/loop knobs, and authoring-pipeline caps.
+ * persona), legacy aggregator, optional chairman, guard/loop knobs, and
+ * authoring-pipeline caps.
  * Runtime fills all remaining eligible agent capacity; bindings never form an
  * exclusion list. Presets are
  * stored server-side (roundtable_preset.{c,h}); making one "active" mirrors its
@@ -49,6 +50,8 @@ type Preset = {
   description: string;
   seats: Seat[];
   aggregator: string;
+  chairman: string;
+  chairman_enabled: boolean;
   min_successful: number;
   max_cost_usd: number;
   deadline_ms: number;
@@ -87,6 +90,8 @@ function emptyPreset(name: string): Preset {
     description: "",
     seats: [{ model: "", persona: "" }],
     aggregator: "",
+    chairman: "",
+    chairman_enabled: false,
     min_successful: 2,
     max_cost_usd: 0,
     deadline_ms: 360000,
@@ -186,6 +191,10 @@ export default function Roundtable() {
 
   const save = async () => {
     if (!form) return;
+    if (form.chairman_enabled && !form.chairman.trim()) {
+      setStatus({ kind: "err", msg: "select a chairman before enabling final review" });
+      return;
+    }
     const seats = form.seats.filter((s) => s.model.trim());
     const body = { ...form, seats };
     const { status: st } = await sendJSON("PUT", `/api/roundtables/${encodeURIComponent(form.name)}`, body);
@@ -254,6 +263,10 @@ export default function Roundtable() {
             A roundtable is a panel of models, each playing a persona, that review or draft together. Configure
             several named presets and pick one as the active default — the active preset drives what{" "}
             <code>aimee delegate roundtable</code> convenes.
+          </p>
+          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+            Roundtable policy is read-only to agents and automation. Creating, editing, deleting, or selecting the
+            default requires an authenticated appliance-administrator action from this UI.
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {presets.map((p) => (
@@ -349,18 +362,41 @@ export default function Roundtable() {
                 + Add required seat
               </Button>
 
-              {/* Aggregator + guards. */}
+              {/* Legacy C synthesis selector; removed with the legacy runtime. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div style={{ flex: "1 1 240px" }} title="Model that synthesizes the panel's outputs; blank uses the engine default.">
-                  <label style={lbl}>Aggregator (synthesis model)</label>
+                <div style={{ flex: "1 1 240px" }} title="Legacy C review-route synthesis agent; Go workflow synthesis is deterministic.">
+                  <label style={lbl}>Legacy synthesis agent</label>
                   <input
                     list={modelList}
                     style={input}
                     value={form.aggregator}
                     onChange={(e) => patch({ aggregator: e.target.value })}
-                    placeholder="blank = engine default"
+                    placeholder="temporary C runtime setting"
                   />
                 </div>
+                <div style={{ flex: "1 1 240px" }} title="Optional chairman that reviews deterministic synthesis and submits the final feedback.">
+                  <label style={lbl}>Chairman</label>
+                  <input
+                    list={modelList}
+                    style={input}
+                    value={form.chairman}
+                    onChange={(e) => patch({ chairman: e.target.value })}
+                    placeholder="agent used when enabled"
+                  />
+                  {form.chairman_enabled && form.chairman !== RANDOM_MODEL && models.length > 0 && !models.includes(form.chairman) && (
+                    <span style={{ fontSize: 11, color: "#9a6700" }}>
+                      This name is not in the current configured-agent list; acquisition will park until it is eligible.
+                    </span>
+                  )}
+                </div>
+                <label style={{ ...lbl, alignSelf: "center", marginBottom: 0 }} title="After deterministic synthesis, require this chairman to review and submit final feedback.">
+                  <input
+                    type="checkbox"
+                    checked={form.chairman_enabled}
+                    onChange={(e) => patch({ chairman_enabled: e.target.checked })}
+                  />{" "}
+                  Chairman final review
+                </label>
                 <div title="Minimum number of seats that must succeed for the round to count.">
                   <label style={lbl}>Min successful</label>
                   {numField(form.min_successful, (n) => patch({ min_successful: n }), 1)}

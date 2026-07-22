@@ -71,6 +71,7 @@ extern "C"
 #include "guardrail_events.h"
 #include "db1_trigger.h"
 #include "mcp_osv_cache.h"
+#include "server_management_jti.h"
 
 #ifdef __cplusplus
 }

@@ -36,11 +36,15 @@ func (s *server) handleRoundtables(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write(data)
 	case http.MethodPost:
+		if currentUser(r) != "admin" {
+			writeJSONError(w, http.StatusForbidden, "administrator access required")
+			return
+		}
 		body := readLimitedBody(w, r)
 		if body == nil {
 			return
 		}
-		st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/roundtables", body)
+		st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/roundtables", body)
 		if err != nil {
 			writeJSONError(w, http.StatusBadGateway, "roundtable service unreachable")
 			return
@@ -72,11 +76,15 @@ func (s *server) handleRoundtableItem(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 			return
 		}
+		if currentUser(r) != "admin" {
+			writeJSONError(w, http.StatusForbidden, "administrator access required")
+			return
+		}
 		body := readLimitedBody(w, r)
 		if body == nil {
 			return
 		}
-		st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/roundtables/active", body)
+		st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/roundtables/active", body)
 		if err != nil {
 			writeJSONError(w, http.StatusBadGateway, "roundtable service unreachable")
 			return
@@ -93,19 +101,34 @@ func (s *server) handleRoundtableItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		method = http.MethodGet
 	case http.MethodPut:
+		if currentUser(r) != "admin" {
+			writeJSONError(w, http.StatusForbidden, "administrator access required")
+			return
+		}
 		method = http.MethodPut
 		body = readLimitedBody(w, r)
 		if body == nil {
 			return
 		}
 	case http.MethodDelete:
+		if currentUser(r) != "admin" {
+			writeJSONError(w, http.StatusForbidden, "administrator access required")
+			return
+		}
 		method = http.MethodDelete
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
-	st, data, err := s.v1Request(ctx, method, v1path, body)
+	var st int
+	var data []byte
+	var err error
+	if method == http.MethodGet {
+		st, data, err = s.v1Request(ctx, method, v1path, body)
+	} else {
+		st, data, err = s.v1RequestWebuser(ctx, currentUser(r), method, v1path, body)
+	}
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, "roundtable service unreachable")
 		return

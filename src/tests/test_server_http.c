@@ -942,6 +942,33 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/personas") == CAP_SESSION_ADMIN);
       assert(server_http_route_caps("GET", "/v1/role_templates") == CAP_SESSION_READ);
       assert(server_http_route_caps("DELETE", "/v1/role_templates/qa") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("GET", "/v1/roundtables") == CAP_SESSION_READ);
+      assert(server_http_route_caps("PUT", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("DELETE", "/v1/roundtables/default") == CAP_SESSION_ADMIN);
+      assert(server_http_route_caps("POST", "/v1/roundtables/active") == CAP_SESSION_ADMIN);
+      assert(route_roundtable_mutation_authorized("webuser:admin") == 1);
+      assert(route_roundtable_mutation_authorized("webuser:") == 0);
+      assert(route_roundtable_mutation_authorized("webuser:alice") == 0);
+      assert(route_roundtable_mutation_authorized("uid:1000") == 0);
+      assert(route_roundtable_mutation_authorized("cert:operator") == 0);
+      assert(route_roundtable_mutation_authorized(NULL) == 0);
+      assert(roundtable_policy_config_key("roundtable.default") == 1);
+      assert(roundtable_policy_config_key("roundtable.require_evidence") == 1);
+      assert(roundtable_policy_config_key("autonomy.concurrency") == 0);
+      assert(roundtable_policy_config_key(NULL) == 0);
+      char roundtable_resp[512];
+      const char *agent_attempt = "{\"seats\":[{\"model\":\"codex\"}]}";
+      int roundtable_st =
+          server_http_route("PUT", "/v1/roundtables/agent-attempt", agent_attempt,
+                            (int)strlen(agent_attempt), roundtable_resp, sizeof(roundtable_resp));
+      assert(roundtable_st == 403);
+      assert(strstr(roundtable_resp, "authenticated appliance administrator") != NULL);
+      const char *config_attempt = "{\"key\":\"roundtable.default\",\"value\":\"agent-choice\"}";
+      roundtable_st =
+          server_http_route("POST", "/v1/config/set", config_attempt, (int)strlen(config_attempt),
+                            roundtable_resp, sizeof(roundtable_resp));
+      assert(roundtable_st == 403);
+      assert(strstr(roundtable_resp, "authenticated appliance administrator") != NULL);
       /* Proposals read surfaces: the timeline + proposal-markdown reads share the
        * dashboard-read cap (ownership is enforced in-handler, not by the route cap),
        * while the operator "list all items" view requires CAP_WORKFLOW_ADMIN. The
