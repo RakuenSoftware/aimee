@@ -62,6 +62,10 @@ proofs, ciphertext internals or candidate files. One lifecycle object serializes
 operations, and close requires callers to quiesce it. The constructor also holds
 `flock(LOCK_EX|LOCK_NB)` on the already checked bundle-directory descriptor for its
 entire lifetime, so upgrade overlap cannot create a second process-local authority.
+The provider is borrowed, must outlive the lifecycle object, and both objects must
+be quiesced before either close. B2c obtains the provider kind from a read-only B2a
+accessor on the opaque provider; it never trusts a parallel caller-supplied enum in
+a custody transcript.
 
 ## State machine and ordering
 
@@ -76,8 +80,11 @@ id rather than inheriting the replaced instance's enrollment authority.
 
 For initial issuance or renewal:
 
-1. Read the primary B2b snapshot. For an absent initial row, call the fixed initial
-   facade only after a fresh RSA-2048-or-stronger key and verified CSR exist. For an
+1. Read the primary B2b snapshot. B2b deliberately maps both absent and inactive
+   rows to `DENIED`, so B2c does not infer absence from that result. When there is
+   no local current manifest or intent, it may durably stage a fresh initial intent
+   and call the fixed initial facade; B2b remains authoritative and denies inactive,
+   revoked, replaced, or otherwise unauthorized rows. For an
    active row, begin renewal only inside B2b's inclusive 1200-second window and
    bind the exact current enrollment tuple and next generation. Outside that window
    return the still-active public snapshot without signing or writing.
