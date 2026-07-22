@@ -16,6 +16,7 @@ int main(void)
    /* Empty completion on an otherwise-successful HTTP 200 -> retryable. */
    assert(agent_error_is_retryable("no content in response") == 1);
    assert(agent_error_is_retryable("no content in response stream") == 1);
+   assert(agent_error_is_retryable("no content in final response") == 1);
 
    /* Existing transient classes stay retryable. */
    assert(agent_error_is_retryable("HTTP 429 rate limit") == 1);

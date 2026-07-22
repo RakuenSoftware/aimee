@@ -29,7 +29,8 @@ int agent_error_is_retryable(const char *error)
            * a retry / fallback usually gets a real completion. Treating it as
            * retryable stops one blank response from degrading a provider or
            * failing a pinned roundtable seat. */
-          strstr(error, "no content in response") != NULL;
+          strstr(error, "no content in response") != NULL ||
+          strstr(error, "no content in final response") != NULL;
 }
 
 /* Should a fallback/retry caller try a DIFFERENT agent for this result? Yes for a
