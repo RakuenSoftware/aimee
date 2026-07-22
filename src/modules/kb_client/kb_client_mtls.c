@@ -9,12 +9,14 @@
 #include "kb_client_mtls.h"
 #include "kb_enroll.h" /* connection-string parse (for host/port) */
 #include "kb_tls.h"    /* kb_tls_enroll / kb_tls_client_request */
+#include "config.h"
 #include "cJSON.h"
 
 #include <pthread.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 /* The enrolled identity, established once on first use. Immutable after init
@@ -54,6 +56,57 @@ static SSL_CTX *g_pool_ctx = NULL;
 static SSL_SESSION *g_pool_session = NULL;
 static unsigned long g_pool_handshakes_total = 0;
 static unsigned long g_pool_resumed_total = 0;
+static int g_pool_enabled_last = -1;
+
+static void pool_close_entry_locked(kb_pool_entry_t *entry);
+
+static int pool_feature_enabled(void)
+{
+   const char *override = getenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
+   if (override)
+      return strcmp(override, "1") == 0 || strcasecmp(override, "true") == 0;
+   pthread_mutex_lock(&g_lock);
+   int enabled = g_pool_enabled_last == 1;
+   pthread_mutex_unlock(&g_lock);
+   return enabled;
+}
+
+/* Apply a hot flag transition exactly once. Disabling closes idle entries now;
+ * borrowed entries carry the old generation and drain when returned. */
+static void pool_sync_enabled(int enabled)
+{
+   pthread_mutex_lock(&g_lock);
+   if (g_pool_enabled_last != enabled)
+   {
+      g_pool_enabled_last = enabled;
+      if (!enabled)
+      {
+         g_identity_generation++;
+         SSL_CTX_free(g_pool_ctx);
+         g_pool_ctx = NULL;
+         SSL_SESSION_free(g_pool_session);
+         g_pool_session = NULL;
+         for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
+            if (g_pool[i].conn && !g_pool[i].busy)
+               pool_close_entry_locked(&g_pool[i]);
+         pthread_cond_broadcast(&g_pool_cv);
+      }
+   }
+   pthread_mutex_unlock(&g_lock);
+}
+
+static void pool_config_reapplier(const config_t *old_cfg, const config_t *new_cfg)
+{
+   (void)old_cfg;
+   pool_sync_enabled(new_cfg && new_cfg->transport_kb_pool_enabled);
+}
+
+void kb_client_mtls_pool_register_reload(void)
+{
+   config_t cfg;
+   pool_sync_enabled(config_snapshot_get(&cfg) == 0 && cfg.transport_kb_pool_enabled);
+   config_reload_register_reapplier(pool_config_reapplier);
+}
 
 static time_t monotonic_seconds(void)
 {
@@ -277,6 +330,30 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
 
    size_t cap = 1u << 20; /* 1 MiB — covers kb /v1 responses (status/search/etc.) */
    char *resp = malloc(cap);
+   int pool_enabled = pool_feature_enabled();
+   pool_sync_enabled(pool_enabled);
+   if (!pool_enabled)
+   {
+      char host[sizeof(g_host)], ca[sizeof(g_ca)], cert[sizeof(g_cert)], key[sizeof(g_key)];
+      int port;
+      pthread_mutex_lock(&g_lock);
+      snprintf(host, sizeof(host), "%s", g_host);
+      snprintf(ca, sizeof(ca), "%s", g_ca);
+      snprintf(cert, sizeof(cert), "%s", g_cert);
+      snprintf(key, sizeof(key), "%s", g_key);
+      port = g_port;
+      pthread_mutex_unlock(&g_lock);
+      int status = -1;
+      int rc = resp ? kb_tls_client_request_auth(host, port, ca, cert, key, method, path,
+                                                 (body && body[0]) ? body : NULL, NULL, resp, cap,
+                                                 &status)
+                    : -1;
+      if (status_out)
+         *status_out = status;
+      char *out = (rc == 0 && status >= 200 && status < 300) ? strdup(resp) : NULL;
+      free(resp);
+      return out;
+   }
    int pool_error = -1;
    kb_pool_entry_t *entry = resp ? pool_borrow(&pool_error) : NULL;
    if (!entry)
