@@ -261,6 +261,23 @@
       "blast_radius": "The checker reads only the proposal's normative governance block, its machine-readable projection, canonical inventory, and module descriptors; mutation tests cover capability, owner, classification, dependency, alias, parser, path, ordering, and CLI failures without changing runtime behavior.",
       "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-20.md", "tests/baselines/modules/governance-ownership.yaml", "scripts/check_capability_ownership.py", "scripts/tests/test_check_capability_ownership.py"]
+    },
+    {
+      "slice": 21,
+      "state": "present_and_verified",
+      "disposition": "Piloted optional source, public-header, test, and documentation ownership fields on required module-runtime with one shared fail-closed validator and deterministic declared-ownership report.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["Make and CMake retain separate build-input lists until descriptor-driven generation", "the remaining twenty-five descriptors omit ownership fields pending focused family slices", "mixed plugin-loader test ownership remains deliberately unclaimed by module-runtime"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "The slice extends repository validation, schema, tests, and documentation without adding shipped runtime code.",
+        "rejected_simpler_alternative": "Bulk-populating every descriptor before proving role and containment rules would turn unverified path guesses into apparent authority.",
+        "revisit": "Enrich one ownership family at a time, then replace duplicate Make and CMake lists with a single generated projection after profile parity is proven."
+      },
+      "consumers": ["descriptor validation CI", "module maintainers", "future generated-build and source-movement slices"],
+      "blast_radius": "Only optional descriptor vocabulary and module-runtime inventory change; mutation tests cover each role, order, omission, missing and nonregular files, normalization, traversal, symlink rejection, local and cross-descriptor duplicates, cross-role claims, CLI output, and unrelated docs.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-21.md", "src/modules/module-runtime/module.yaml", "src/modules/module.schema.json", "scripts/validate_module_descriptors.py", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }

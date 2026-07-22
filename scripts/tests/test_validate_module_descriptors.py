@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import copy
+import errno
 import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +22,25 @@ SPEC = importlib.util.spec_from_file_location("validate_module_descriptors", CHE
 assert SPEC and SPEC.loader
 validator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(validator)
+
+
+def production_repo() -> tempfile.TemporaryDirectory[str]:
+    tmp = tempfile.TemporaryDirectory()
+    repo = Path(tmp.name)
+    inventory = repo / validator.INVENTORY_PATH
+    inventory.parent.mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
+    for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
+        target = repo / "src/modules" / source.parent.name / "module.yaml"
+        target.parent.mkdir(parents=True)
+        shutil.copy2(source, target)
+        descriptor = json.loads(source.read_text(encoding="utf-8"))
+        for field in validator.OWNERSHIP_FIELDS:
+            for relative in descriptor.get(field, []):
+                owned_target = repo / relative
+                owned_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO_ROOT / relative, owned_target)
+    return tmp
 
 
 class DescriptorTests(unittest.TestCase):
@@ -42,16 +65,7 @@ class DescriptorTests(unittest.TestCase):
         return validator.load_inventory(REPO_ROOT)
 
     def production_repo(self) -> tempfile.TemporaryDirectory[str]:
-        tmp = tempfile.TemporaryDirectory()
-        repo = Path(tmp.name)
-        inventory = repo / validator.INVENTORY_PATH
-        inventory.parent.mkdir(parents=True)
-        shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
-        for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
-            target = repo / "src/modules" / source.parent.name / "module.yaml"
-            target.parent.mkdir(parents=True)
-            shutil.copy2(source, target)
-        return tmp
+        return production_repo()
 
     def mutate_descriptor(self, repo: Path, identifier: str, mutate) -> None:
         path = repo / "src/modules" / identifier / "module.yaml"
@@ -185,6 +199,211 @@ class DescriptorTests(unittest.TestCase):
         runtime_empty = self.required()
         runtime_empty["runtime_toggle"] = {}
         self.assert_rule(runtime_empty, "runtime-toggle-shape")
+
+    def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
+        report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["result"], "PASS")
+        descriptors = report["descriptors"]
+        self.assertEqual([item["id"] for item in descriptors], sorted(item["id"] for item in descriptors))
+        runtime = next(item for item in descriptors if item["id"] == "module-runtime")
+        self.assertEqual(runtime["module_root"], "src/modules/module-runtime")
+        self.assertEqual(
+            [item["path"] for item in runtime["ownership"]["sources"]],
+            [
+                "src/modules/module-runtime/extension.c",
+                "src/modules/module-runtime/pre_llm_hook.c",
+            ],
+        )
+        self.assertEqual(
+            runtime["ownership"]["docs"],
+            [{"path": "docs/modules/module-runtime.md", "result": "PASS"}],
+        )
+        memory = next(item for item in descriptors if item["id"] == "memory")
+        self.assertEqual(memory["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS})
+
+    def test_ownership_report_sorts_descriptors_independent_of_root_order(self) -> None:
+        root = Path("tests/fixtures/modules/positive")
+        roots = [root / "runtime-web", root / "memory", root / "control-web"]
+        forward = validator.ownership_report(REPO_ROOT, roots)
+        reverse = validator.ownership_report(REPO_ROOT, list(reversed(roots)))
+        self.assertEqual(forward, reverse)
+        self.assertEqual(
+            [item["id"] for item in forward["descriptors"]],
+            ["control-web", "memory", "runtime-web"],
+        )
+
+    def test_each_ownership_role_is_validated(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        report = validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
+        self.assertEqual(
+            {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
+            {"sources": 2, "public_headers": 2, "tests": 1, "docs": 1},
+        )
+
+    def test_ownership_duplicate_and_cross_role_mutations(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        duplicate = copy.deepcopy(descriptor)
+        duplicate["sources"].append(duplicate["sources"][0])
+        with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-duplicate"):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", duplicate)
+
+        cross_role = copy.deepcopy(descriptor)
+        cross_role["tests"] = [cross_role["sources"][0]]
+        with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-cross-role"):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", cross_role)
+
+    def test_cross_descriptor_duplicate_includes_prior_location(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            memory = self.required()
+            memory["tests"] = ["src/tests/test_plugin_c_hook.c"]
+            config = {
+                "descriptor_version": 1,
+                "id": "config",
+                "dependencies": ["module-runtime"],
+                "runtime_toggle": {"supported": False},
+                "tests": ["src/tests/test_plugin_c_hook.c"],
+            }
+            for name, descriptor in (("one", memory), ("two", config)):
+                path = root / name / "module.yaml"
+                path.parent.mkdir()
+                path.write_text(json.dumps(descriptor), encoding="utf-8")
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-cross-descriptor.*memory tests at /tests/0",
+            ):
+                validator.validate_roots(REPO_ROOT, [root])
+
+    def test_role_policy_must_cover_every_ownership_field(self) -> None:
+        descriptor = self.required()
+        original = validator.ROLE_EXTENSIONS.pop("sources")
+        try:
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-role-undefined"):
+                validator.validate_ownership(REPO_ROOT, "memory", descriptor)
+        finally:
+            validator.ROLE_EXTENSIONS["sources"] = original
+
+    def test_ownership_path_and_role_mutations(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        cases = (
+            ("sources", "/tmp/extension.c", "ownership-path-normalized"),
+            ("sources", "src/modules/module-runtime/../config/config.c", "ownership-path-normalized"),
+            ("sources", "src/modules/config/config.c", "ownership-role-boundary"),
+            ("sources", "src/modules/module-runtime/module.yaml", "ownership-role"),
+            ("public_headers", "src/modules/module-runtime/module.yaml", "ownership-role-boundary"),
+            ("tests", "src/tests/Rules.mk", "ownership-role"),
+            ("docs", "docs/modules/config.md", "ownership-doc-canonical"),
+            ("docs", "docs/modules/module-runtime.txt", "ownership-doc-canonical"),
+            ("sources", "src/modules/module-runtime/missing.c", "ownership-file"),
+        )
+        for field, path, rule in cases:
+            mutated = copy.deepcopy(descriptor)
+            mutated[field] = [path]
+            with self.subTest(field=field, path=path), self.assertRaisesRegex(
+                validator.DescriptorError, f"rule={rule}"
+            ):
+                validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
+
+        for value, rule in (("not-an-array", "ownership-field-type"), ([7], "ownership-path-type")):
+            mutated = copy.deepcopy(descriptor)
+            mutated["sources"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(
+                validator.DescriptorError, f"rule={rule}"
+            ):
+                validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
+
+    def test_ownership_nonregular_and_symlink_escape_mutations(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            directory = repo / "src/modules/module-runtime/not-a-file.c"
+            directory.mkdir()
+            self.mutate_descriptor(
+                repo, "module-runtime", lambda value: value.__setitem__(
+                    "sources", ["src/modules/module-runtime/not-a-file.c"]
+                )
+            )
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-file"):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+        tmp = self.production_repo()
+        outside = Path(tmp.name).parent / f"{Path(tmp.name).name}-outside.c"
+        try:
+            repo = Path(tmp.name)
+            outside.write_text("outside\n", encoding="utf-8")
+            link = repo / "src/modules/module-runtime/escape.c"
+            link.symlink_to(outside)
+            self.mutate_descriptor(
+                repo, "module-runtime", lambda value: value.__setitem__(
+                    "sources", ["src/modules/module-runtime/escape.c"]
+                )
+            )
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-path-escape"):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            outside.unlink(missing_ok=True)
+            tmp.cleanup()
+
+    def test_inward_and_self_referential_symlinks_fail_stably(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            link = repo / "src/modules/module-runtime/alias.c"
+            link.symlink_to(repo / "src/modules/module-runtime/extension.c")
+            self.mutate_descriptor(
+                repo, "module-runtime", lambda value: value.__setitem__(
+                    "sources", ["src/modules/module-runtime/alias.c"]
+                )
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError, r"rule=ownership-path-symlink pointer=/sources/0"
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_resolve_errors_are_classified_without_masking_io(self) -> None:
+        path = Path("owned.c")
+        with mock.patch.object(Path, "resolve", side_effect=OSError(errno.ELOOP, "loop")):
+            with self.assertRaisesRegex(validator.DescriptorError, "rule=ownership-file"):
+                validator._resolve_owned(path, "/sources/0")
+        with mock.patch.object(
+            Path, "resolve", side_effect=OSError(errno.ENAMETOOLONG, "long")
+        ):
+            with self.assertRaisesRegex(
+                validator.DescriptorError, "rule=ownership-path-normalized"
+            ):
+                validator._resolve_owned(path, "/sources/0")
+        with mock.patch.object(Path, "resolve", side_effect=OSError(errno.EACCES, "denied")):
+            with self.assertRaises(OSError):
+                validator._resolve_owned(path, "/sources/0")
+
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            link = repo / "src/modules/module-runtime/loop.c"
+            link.symlink_to(link)
+            self.mutate_descriptor(
+                repo, "module-runtime", lambda value: value.__setitem__(
+                    "sources", ["src/modules/module-runtime/loop.c"]
+                )
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError, r"rule=ownership-file pointer=/sources/0"
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
 
     def test_duplicate_module_id_fails_across_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -372,6 +591,60 @@ class DescriptorTests(unittest.TestCase):
         try:
             with self.assertRaisesRegex(validator.DescriptorError, "json-surrogate"):
                 validator.load_json(path)
+        finally:
+            tmp.cleanup()
+
+
+class OwnershipCliTests(unittest.TestCase):
+    def run_checker(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-I", "-S", str(CHECKER), *args],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def test_emit_ownership_is_one_complete_json_report(self) -> None:
+        result = self.run_checker("--check-schema", "--emit-ownership", "src/modules")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["result"], "PASS")
+        self.assertEqual(len(payload["descriptors"]), 26)
+        for descriptor in payload["descriptors"]:
+            self.assertEqual(
+                set(descriptor), {"id", "module_root", "ownership", "result"}
+            )
+
+    def test_emit_flags_are_mutually_exclusive(self) -> None:
+        result = self.run_checker(
+            "--emit-schema", "--emit-ownership", "src/modules"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("rule=cli-flag-conflict pointer=/args", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_emit_ownership_failure_has_stable_rule_without_json(self) -> None:
+        tmp = production_repo()
+        try:
+            repo = Path(tmp.name)
+            descriptor_path = repo / "src/modules/module-runtime/module.yaml"
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            descriptor["sources"] = ["src/modules/module-runtime/loop.c"]
+            descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+            link = repo / "src/modules/module-runtime/loop.c"
+            link.symlink_to(link)
+            result = self.run_checker(
+                "--config-root", str(repo), "--emit-ownership", "src/modules"
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("rule=ownership-file pointer=/sources/0", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
         finally:
             tmp.cleanup()
 

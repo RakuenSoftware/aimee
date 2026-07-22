@@ -28,6 +28,13 @@ the shared logging primitive. Production consumers include `src/server/agent_run
 optional plugin-loader contract; focused consumers are `src/tests/test_plugin.c` and
 `src/tests/test_plugin_c_hook.c`.
 
+As the ownership-descriptor pilot, `module.yaml` also declares this module's two implementation
+sources, two public headers, focused C-hook test, and canonical module document. The descriptor
+validator rejects symlinked paths before claiming them and rejects duplicate normalized lexical
+paths within or across descriptors, then emits a deterministic declared-ownership report. Build
+inputs are still maintained by Make and CMake in this slice; descriptor-driven build generation
+remains a later step, so these ownership fields are documentation and validation only.
+
 ## Providers and readiness
 
 `module-runtime` is its own required reference implementation and has no replaceable provider.

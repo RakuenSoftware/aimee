@@ -4,5 +4,19 @@
   "dependencies": [],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/module-runtime/extension.c",
+    "src/modules/module-runtime/pre_llm_hook.c"
+  ],
+  "public_headers": [
+    "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
+    "src/modules/module-runtime/include/aimee/module-runtime/pre_llm_hook.h"
+  ],
+  "tests": [
+    "src/tests/test_plugin_c_hook.c"
+  ],
+  "docs": [
+    "docs/modules/module-runtime.md"
+  ]
 }
