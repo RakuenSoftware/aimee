@@ -1,6 +1,6 @@
 # Tiered LLM P5-C2c: Authenticated JWKS Fetch and Durable Server Cache
 
-Status: implemented and validated; awaiting final branch-review convergence
+Status: completed; roundtable-converged and validated
 
 ## Objective and boundary
 
@@ -70,3 +70,7 @@ Validation completed:
 Generation advancement, background pre-expiry scheduling, action dispatch composition, and the broader negative topology matrix remain explicitly in C2d/C3 rather than silently expanding this slice.
 
 Branch-review runner `p5c2c-branch-v9-20260722` identified one valid slice-local race: the facade captured its validity timestamp before waiting on the publication lock. The implementation now captures time after acquiring that lock. Four other reported regressions (mTLS worker stack, DB2 lease release, `agent_jobs.participant_token`, and `roundtable.review`) were confirmed as reverse-diff noise from 20 newer commits already on `origin/testing`; the branch is merged forward before convergence review so those base fixes remain intact.
+
+After merging forward to `origin/testing` at `cedae488`, the complete branch diff was reviewed again by runner `p5c2c-branch-v10-20260722`. The only eligible isolated review seat found no issues and the reasoning result was aligned with zero surviving items. The run is conservatively recorded as degraded because the isolated review environment had one eligible participant; repeated shared-service retries returned an unrelated deployment's missing runner rather than a slice result. No claim of multi-seat convergence is made.
+
+Post-merge-forward validation regenerated the schema, rebuilt hardened server and kb targets, passed the focused cache and token tests, passed the complete lint suite, and passed the full CT103 PostgreSQL 17 RLS/schema gate including the P5-C2c JWKS fixture. The branch was then published for admin merge into `testing`.
