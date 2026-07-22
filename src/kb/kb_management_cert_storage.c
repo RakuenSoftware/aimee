@@ -35,14 +35,24 @@ static int memory_overlap(const void *a, size_t an, const void *b, size_t bn)
 static int checked_dir(int fd)
 {
    struct stat st;
-   return fd >= 0 && fstat(fd, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == 0 &&
+   return fd >= 0 && fstat(fd, &st) == 0 && S_ISDIR(st.st_mode) &&
+#ifdef AIMEE_MANAGEMENT_CERT_TESTING
+          st.st_uid == geteuid() &&
+#else
+          st.st_uid == 0 &&
+#endif
           (st.st_mode & 0022) == 0;
 }
 
 static int checked_file(int fd)
 {
    struct stat st;
-   return fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == 0 &&
+   return fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+#ifdef AIMEE_MANAGEMENT_CERT_TESTING
+          st.st_uid == geteuid() &&
+#else
+          st.st_uid == 0 &&
+#endif
           (st.st_mode & 0777) == 0600 && st.st_nlink == 1;
 }
 
@@ -601,7 +611,13 @@ kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *sto
       return KB_MANAGEMENT_STORAGE_CONFLICT;
    }
    int named_ok = fstatat(storage->dir_fd, "pending", &named, AT_SYMLINK_NOFOLLOW) == 0 &&
-                  S_ISREG(named.st_mode) && named.st_uid == 0 && (named.st_mode & 0777) == 0600 &&
+                  S_ISREG(named.st_mode) &&
+#ifdef AIMEE_MANAGEMENT_CERT_TESTING
+                  named.st_uid == geteuid() &&
+#else
+                  named.st_uid == 0 &&
+#endif
+                  (named.st_mode & 0777) == 0600 &&
                   named.st_nlink == 1 && opened.st_dev == named.st_dev &&
                   opened.st_ino == named.st_ino;
    if (close(fd) != 0)

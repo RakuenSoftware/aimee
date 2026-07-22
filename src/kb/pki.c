@@ -27,6 +27,61 @@
 
 int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out);
 
+static kb_pki_ca_load_result_t custodied_read(const char *path, char *out, size_t cap)
+{
+   if (!path || !out || cap < 2)
+      return KB_PKI_CA_LOAD_INVALID;
+   OPENSSL_cleanse(out, cap);
+   int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+   if (fd < 0)
+      return errno == ELOOP || errno == ENOTDIR ? KB_PKI_CA_LOAD_INTEGRITY
+                                                : KB_PKI_CA_LOAD_UNAVAILABLE;
+   struct stat st;
+   if (fstat(fd, &st) || !S_ISREG(st.st_mode))
+   {
+      close(fd);
+      return KB_PKI_CA_LOAD_INTEGRITY;
+   }
+   size_t used = 0;
+   while (used < cap - 1)
+   {
+      ssize_t n = read(fd, out + used, cap - 1 - used);
+      if (n > 0)
+         used += (size_t)n;
+      else if (!n)
+         break;
+      else if (errno != EINTR)
+      {
+         close(fd);
+         OPENSSL_cleanse(out, cap);
+         return KB_PKI_CA_LOAD_UNAVAILABLE;
+      }
+   }
+   char extra;
+   ssize_t more;
+   do
+      more = read(fd, &extra, 1);
+   while (more < 0 && errno == EINTR);
+   int close_error = close(fd) != 0;
+   if (more < 0 || close_error)
+   {
+      OPENSSL_cleanse(out, cap);
+      return KB_PKI_CA_LOAD_UNAVAILABLE;
+   }
+   if (!used || more > 0)
+   {
+      OPENSSL_cleanse(out, cap);
+      return KB_PKI_CA_LOAD_INTEGRITY;
+   }
+   if (memchr(out, 0, used))
+   {
+      OPENSSL_cleanse(out, cap);
+      return KB_PKI_CA_LOAD_INTEGRITY;
+   }
+   out[used] = 0;
+   return KB_PKI_CA_LOAD_OK;
+}
+
 static int hx(const uint8_t *in, size_t n, char *out, size_t cap)
 {
    static const char d[] = "0123456789abcdef";
@@ -811,49 +866,136 @@ done:
    return rc;
 }
 
-int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out)
+kb_pki_ca_load_result_t kb_pki_ca_load_custodied_ex(const char *dir, kb_pki_ca_t *out)
 {
-   if (!dir || !out)
-      return -1;
+   if (out)
+      OPENSSL_cleanse(out, sizeof(*out));
+   if (!dir || !dir[0] || !out)
+      return KB_PKI_CA_LOAD_INVALID;
    char cp[1024], ep[1024], buf[KB_PKI_KEY_PEM_MAX * 2 + 256];
+   size_t key_bytes = 0;
    if (join_path(dir, "ca.pem", cp, sizeof(cp)) || join_path(dir, "ca-key.vault", ep, sizeof(ep)))
-      return -1;
-   if (read_text_file(cp, out->cert_pem, sizeof(out->cert_pem)) < 0)
-      return -1;
-   if (read_text_file(ep, buf, sizeof(buf)) < 0)
+      return KB_PKI_CA_LOAD_INVALID;
+   kb_pki_ca_load_result_t result = custodied_read(cp, out->cert_pem, sizeof(out->cert_pem));
+   if (result != KB_PKI_CA_LOAD_OK)
+      goto failed;
+   result = custodied_read(ep, buf, sizeof(buf));
+   if (result != KB_PKI_CA_LOAD_OK)
    {
-      if (access(ep, F_OK) == 0)
-         return -1; /* present-but-invalid: fail closed */
+      if (result == KB_PKI_CA_LOAD_INTEGRITY)
+         goto failed;
+      struct stat encrypted;
+      if (lstat(ep, &encrypted) == 0)
+      {
+         /* A present but unreadable record remains an availability failure;
+          * do not turn EACCES or transient I/O into a corruption oracle. */
+         goto failed;
+      }
+      if (errno != ENOENT)
+      {
+         result = KB_PKI_CA_LOAD_UNAVAILABLE;
+         goto failed;
+      }
       /* One-way migration compatibility: an existing legacy key is accepted
        * only when no encrypted artifact exists; new writes never create it. */
       char legacy[1024];
       if (join_path(dir, "ca-key.pem", legacy, sizeof(legacy)) != 0 ||
-          read_text_file(legacy, out->key_pem, sizeof(out->key_pem)) < 0)
-         return -1;
-      return 0;
+          (result = custodied_read(legacy, out->key_pem, sizeof(out->key_pem))) !=
+              KB_PKI_CA_LOAD_OK)
+         goto failed;
+      key_bytes = strlen(out->key_pem);
+      goto validate;
    }
-   char *a = strtok(buf, "\n"), *n = strtok(NULL, "\n"), *t = strtok(NULL, "\n"),
-        *c = strtok(NULL, "\n");
-   if (!a || !n || !t || !c || strcmp(a, "AIMEE-CA-VAULT-V1"))
-      return -1;
+   size_t envelope_len = strlen(buf), newline_count = 0;
+   for (size_t i = 0; i < envelope_len; ++i)
+      newline_count += buf[i] == '\n';
+   if (!envelope_len || buf[envelope_len - 1] != '\n' || newline_count != 4 ||
+       strstr(buf, "\n\n") || strchr(buf, '\r'))
+   {
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto failed;
+   }
+   char *save = NULL;
+   char *a = strtok_r(buf, "\n", &save), *n = strtok_r(NULL, "\n", &save),
+        *t = strtok_r(NULL, "\n", &save), *c = strtok_r(NULL, "\n", &save);
+   char *trailing = strtok_r(NULL, "\n", &save);
+   if (!a || !n || !t || !c || trailing || strcmp(a, "AIMEE-CA-VAULT-V1"))
+   {
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto failed;
+   }
    uint8_t kek[VAULT_KEK_LEN], nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN],
        ct[KB_PKI_KEY_PEM_MAX];
-   int rc = -1;
+   memset(kek, 0, sizeof(kek));
+   memset(ct, 0, sizeof(ct));
    size_t cn = strlen(c);
-   if (unhx(n, strlen(n), nonce, sizeof(nonce)) || unhx(t, strlen(t), tag, sizeof(tag)) ||
-       unhx(c, cn, ct, sizeof(ct)) || vault_server_kek(kek) != 0)
-      goto done;
+   if (strlen(n) != sizeof(nonce) * 2 || strlen(t) != sizeof(tag) * 2 || !cn || (cn & 1) ||
+       cn / 2 >= sizeof(out->key_pem) || unhx(n, strlen(n), nonce, sizeof(nonce)) ||
+       unhx(t, strlen(t), tag, sizeof(tag)) || unhx(c, cn, ct, sizeof(ct)))
+   {
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto decrypt_done;
+   }
+   if (vault_server_kek(kek) != 0)
+   {
+      result = KB_PKI_CA_LOAD_UNAVAILABLE;
+      goto decrypt_done;
+   }
    if (vault_secret_decrypt(kek, (const uint8_t *)"aimee-kb-ca-key-v1", 18, nonce, ct, cn / 2, tag,
                             (uint8_t *)out->key_pem) != 0)
-      goto done;
-   rc = 0;
-   out->key_pem[cn / 2] = 0;
-done:
+   {
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto decrypt_done;
+   }
+   key_bytes = cn / 2;
+   if (memchr(out->key_pem, 0, key_bytes))
+   {
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto decrypt_done;
+   }
+   out->key_pem[key_bytes] = 0;
+   result = KB_PKI_CA_LOAD_OK;
+decrypt_done:
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(ct, sizeof(ct));
-   if (rc < 0)
-      OPENSSL_cleanse(out->key_pem, sizeof(out->key_pem));
-   return rc;
+   if (result != KB_PKI_CA_LOAD_OK)
+      goto failed;
+
+validate:
+   {
+      X509 *cert = x509_from_pem(out->cert_pem);
+      EVP_PKEY *key = key_from_pem(out->key_pem);
+      char canonical_cert[KB_PKI_CERT_PEM_MAX] = {0};
+      char canonical_key[KB_PKI_KEY_PEM_MAX] = {0};
+      int valid = cert && key && X509_check_private_key(cert, key) == 1 &&
+                  pem_from_x509(cert, canonical_cert, sizeof(canonical_cert)) == 0 &&
+                  pem_from_key(key, canonical_key, sizeof(canonical_key)) == 0 &&
+                  strlen(canonical_cert) == strlen(out->cert_pem) &&
+                  !memcmp(canonical_cert, out->cert_pem, strlen(canonical_cert)) &&
+                  strlen(canonical_key) == key_bytes &&
+                  !memcmp(canonical_key, out->key_pem, key_bytes);
+      OPENSSL_cleanse(canonical_key, sizeof(canonical_key));
+      OPENSSL_cleanse(canonical_cert, sizeof(canonical_cert));
+      EVP_PKEY_free(key);
+      X509_free(cert);
+      if (!valid)
+      {
+         result = KB_PKI_CA_LOAD_INTEGRITY;
+         goto failed;
+      }
+   }
+   OPENSSL_cleanse(buf, sizeof(buf));
+   return KB_PKI_CA_LOAD_OK;
+
+failed:
+   OPENSSL_cleanse(buf, sizeof(buf));
+   OPENSSL_cleanse(out, sizeof(*out));
+   return result;
+}
+
+int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out)
+{
+   return kb_pki_ca_load_custodied_ex(dir, out) == KB_PKI_CA_LOAD_OK ? 0 : -1;
 }
 
 int kb_pki_ca_load_or_create_custodied(const char *dir, kb_pki_ca_t *out, int *created)
