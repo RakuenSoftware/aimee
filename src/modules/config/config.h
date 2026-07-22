@@ -336,6 +336,13 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
+   /* code_cochange_git_enabled: gate (default 1, on) for mining git history at
+    * `index scan` time to accumulate co_edited edges (files that change
+    * together in a commit) into the entity graph that index_blast_radius
+    * already reads. Incremental and idempotent via a per-project HEAD marker in
+    * kb_runtime_state; bulk commits (> 25 code files) are skipped. Set false to
+    * keep co_edited edges session-derived only. */
+   int code_cochange_git_enabled;
    /* wfe_live_forge_enabled: gate (default 0, OFF — 2026-07-17: opt-in while the
     * autonomous pipeline is under test) for the autonomous live forge
     * (full-autonomous-development F4). When OFF the wfe forge provider is not
