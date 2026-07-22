@@ -220,8 +220,8 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
                                const char *system_prompt, const char *user_prompt, int max_tokens,
                                double temperature, agent_result_t *out)
 {
-   int rc = agent_run_named(cfg, name, role, system_prompt, user_prompt, max_tokens, temperature,
-                            out);
+   int rc =
+       agent_run_named(cfg, name, role, system_prompt, user_prompt, max_tokens, temperature, out);
    if (rc == 0 && g_named_require_initial_tool)
    {
       out->tool_calls = 1;
@@ -1531,9 +1531,8 @@ static void test_roundtable_captures_original_request_alignment(void)
    assert(strcmp(out.original_request_alignment, "unclear") == 0);
    assert(strstr(out.original_request_alignment_summary, "No panelist") != NULL);
 
-   results[0].response =
-       "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
-       "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}";
+   results[0].response = "{\"items\":[{\"severity\":\"suggestion\",\"category\":\"correctness\","
+                         "\"location\":\"src/a.c:1\",\"summary\":\"same grounded fact\"}]}";
    results[0].successful_tool_calls = 0;
    memset(&out, 0, sizeof out);
    capture_round_review_items(results, 1, &out, 4);

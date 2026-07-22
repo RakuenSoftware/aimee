@@ -256,8 +256,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
    {
       double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
       int rc;
-      agent_run_require_initial_tool_call(tasks[0].use_tools &&
-                                          tasks[0].require_initial_tool_call);
+      agent_run_require_initial_tool_call(tasks[0].use_tools && tasks[0].require_initial_tool_call);
       if (tasks[0].agent && tasks[0].agent[0])
          rc = (tasks[0].use_tools ? agent_run_named_with_tools : agent_run_named)(
              cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,

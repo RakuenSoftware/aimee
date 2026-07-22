@@ -1239,8 +1239,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
       aimee_log(successful_calls > 0 ? LOG_INFO : LOG_WARN, "roundtable.progress",
                 "round %d: %d/%d panelists obtained aimee evidence (%d successful of %d "
                 "attempted call%s)%s",
-                round, used, ref_count, successful_calls, total_calls,
-                total_calls == 1 ? "" : "s",
+                round, used, ref_count, successful_calls, total_calls, total_calls == 1 ? "" : "s",
                 successful_calls > 0
                     ? ""
                     : " — reviewing the diff ALONE (no successful repository lookup)");
@@ -1848,16 +1847,14 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
    dstr_appendf(&s,
                 "\n## Repository evidence coverage\n\n%d/%d responding seats used read-only "
                 "Aimee tools successfully (%d successful of %d attempted call%s).\n",
-                out->participants_tool_used,
-                out->participants_total - out->participants_failed,
+                out->participants_tool_used, out->participants_total - out->participants_failed,
                 out->participant_successful_tool_calls, out->participant_tool_calls,
                 out->participant_tool_calls == 1 ? "" : "s");
    if (out->evidence_coverage_incomplete)
       dstr_append_str(
-          &s,
-          "Production-wiring and shipped-artifact conclusions remain **unverified** for at "
-          "least one seat. No finding below certifies shipped behavior, and this coverage gap "
-          "cannot be removed by chair adjudication.\n");
+          &s, "Production-wiring and shipped-artifact conclusions remain **unverified** for at "
+              "least one seat. No finding below certifies shipped behavior, and this coverage gap "
+              "cannot be removed by chair adjudication.\n");
    static const char *const sevs[] = {"blocking", "suggestion", "nit"};
    static const char *const heads[] = {"## Blocking", "## Suggestions", "## Nits"};
    int emitted = 0;

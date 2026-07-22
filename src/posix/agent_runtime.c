@@ -1586,8 +1586,8 @@ native_provider_http:
          /* An attempted lookup is not evidence. Validation/policy/directive
           * failures never reach this branch; dispatch failures conventionally
           * return "error:" or a JSON object containing an error member. */
-         int usable_tool_result = result_str && result_str[0] &&
-                                  strncmp(result_str, "error", 5) != 0;
+         int usable_tool_result =
+             result_str && result_str[0] && strncmp(result_str, "error", 5) != 0;
          if (usable_tool_result && result_str[0] == '{')
          {
             cJSON *result_json = cJSON_Parse(result_str);

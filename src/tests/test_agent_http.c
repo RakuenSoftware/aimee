@@ -938,12 +938,11 @@ static void test_evidence_review_requires_initial_tool_choice(void)
    cJSON_Delete(mistral);
 
    cJSON *responses = agent_build_request_responses(&agent, messages, tools, "review");
-   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses, "tool_choice")),
-                 "required") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(responses, "tool_choice")), "required") ==
+          0);
    cJSON_Delete(responses);
 
-   cJSON *anthropic =
-       agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
+   cJSON *anthropic = agent_build_request_anthropic(&agent, messages, tools, "review", 32, 0.0);
    cJSON *choice = cJSON_GetObjectItem(anthropic, "tool_choice");
    assert(cJSON_IsObject(choice));
    assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(choice, "type")), "any") == 0);
