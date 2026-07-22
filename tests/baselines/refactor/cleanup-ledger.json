@@ -329,6 +329,23 @@
       "blast_radius": "Only the audit descriptor, audit documentation, validation record, and cleanup ledger change; production sources, public headers, test sources, build registrations, storage behavior, and runtime behavior remain unchanged.",
       "independent_review": "Aimee technical-writer job 7234 approved the artifact without edits; exact-final-diff roundtable review remains required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-24.md", "docs/modules/audit.md", "src/modules/audit/module.yaml"]
+    },
+    {
+      "slice": 25,
+      "state": "present_and_verified",
+      "disposition": "Moved the required skills implementation and public contracts from the singular legacy root into the canonical plural module and include namespace without changing behavior or target membership.",
+      "production": {"added": [], "deleted": [], "consolidated": ["one singular skills source/header root replaced by the canonical plural module and public include namespace"]},
+      "fallbacks": ["Make and CMake retain separate source and include inventories until descriptor-driven generation", "optional benchmarks source isolation remains deferred because its build and runtime surfaces require a separate liveness and profile slice"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Small reusable legacy-root and retired-curator mutation guards prevent the obsolete directory, build spelling, and deleted feature from returning.",
+        "rejected_simpler_alternative": "Relying on successful compilation would permit forwarding headers, source-root exposure, and historical curator resurrection to recreate split ownership.",
+        "revisit": "Add later path-only moves to the generic legacy-root registry and replace duplicate build inventories after descriptor-driven generation proves parity."
+      },
+      "consumers": ["skills consumers", "descriptor validation CI", "future canonical module-root slices"],
+      "blast_radius": "Production changes are physical source/header moves and include substitutions; public symbols, target membership, CLI/API/config/storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7477 approved the documentation set without edits on 2026-07-22; exact-final-diff roundtable review remains required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-25.md", "docs/modules/skills.md", "src/modules/skills/module.yaml", "scripts/check_module_source_ownership.py", "scripts/tests/test_check_module_source_ownership.py", "scripts/check_background_skill_curator_absence.py", "scripts/tests/test_check_background_skill_curator_absence.py"]
     }
   ]
 }

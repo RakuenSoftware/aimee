@@ -22,7 +22,7 @@
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
-#include "skill_review.h"
+#include <aimee/skills/skill_review.h>
 #include "trigger_scheduler.h"
 #include "wfe_live_delegate.h"
 #include "wfe_scheduler.h"

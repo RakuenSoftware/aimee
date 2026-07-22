@@ -1,7 +1,7 @@
 /* cmd_skill.c: aimee skill — list and show project-scoped skill files */
 #include "aimee.h"
 #include "commands.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "config.h"
 #include "cJSON.h"
 #include "kb_client.h"

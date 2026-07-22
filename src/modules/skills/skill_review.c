@@ -7,7 +7,7 @@
  * Integration: server.c calls skill_review_should_fire(hook_call_count, nudge_interval)
  * and invokes server_compute_skill_review_async() when it returns 1.
  */
-#include "skill_review.h"
+#include <aimee/skills/skill_review.h>
 
 int skill_review_should_fire(int hook_call_count, int nudge_interval)
 {

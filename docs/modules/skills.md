@@ -9,10 +9,12 @@ unbounded mechanism for downloaded text to bypass routing, policy, or user appro
 
 ## Public contracts
 
-The current contract is `src/modules/skill/skill.h`, implemented by `skill.c`, `skill_review.c`, and
-`skill_rollback.c`, with CLI orchestration in `src/cmd_skill.c`. The singular physical directory and the
-plural descriptor ID `skills` are an acknowledged naming/ownership mismatch to resolve during source
-movement, without creating forwarding APIs or a parallel skill registry.
+The canonical contracts are
+`src/modules/skills/include/aimee/skills/skill.h` and
+`src/modules/skills/include/aimee/skills/skill_review.h`, implemented by `skill.c`, `skill_review.c`,
+and `skill_rollback.c` in `src/modules/skills`, with CLI orchestration in `src/cmd_skill.c`. Consumers
+use the `aimee/skills` include namespace. The former singular source directory is retired without a
+forwarding API or parallel skill registry.
 
 ## Dependencies and consumers
 
@@ -51,9 +53,9 @@ surfaces with bounded content and stable precedence.
 ## Data and migrations
 
 Skill bodies and support files are filesystem data; usage, state, snapshots, and review records use
-sidecars or repository databases according to the current implementation. A move from
-`src/modules/skill` to `src/modules/skills` changes source ownership only and must not change project-over-
-user precedence, archive behavior, size limits, or rollback snapshot interpretation.
+sidecars or repository databases according to the current implementation. Canonical source ownership
+under `src/modules/skills` does not change project-over-user precedence, archive behavior, size limits,
+or rollback snapshot interpretation.
 
 ## Security and privacy
 
@@ -71,10 +73,11 @@ changes derived from learning or uncovered tools.
 
 ## Tests and failure behavior
 
-`test_skill.c` covers discovery, loading, validation, management, injection, lifecycle, and telemetry;
-`test_skill_review.c` covers review and rollback behavior. Invalid names, oversized content, unsafe
-support paths, failed lint/evaluation, and write errors fail closed; a missing requested skill leaves the
-base prompt usable rather than inventing instructions.
+The descriptor owns `test_skill.c`, which covers discovery, loading, validation, management, injection,
+lifecycle, rollback, and telemetry, and `test_skill_review.c`, which covers the review predicate and
+poison checks through the management contract. Invalid names, oversized content, unsafe support paths,
+failed lint/evaluation, and write errors fail closed; a missing requested skill leaves the base prompt
+usable rather than inventing instructions.
 
 ## Operational diagnostics
 
@@ -86,9 +89,8 @@ secrets.
 ## Compatibility
 
 CLI verbs, `skill_*` C signatures, project/user lookup precedence, frontmatter interpretation, file size
-limits, and snapshot semantics are compatibility contracts. Canonicalizing the directory to
-`src/modules/skills` must update build graphs and includes atomically while keeping stored skill files and
-the external `SKILL.md` convention readable.
+limits, and snapshot semantics are compatibility contracts. The canonical directory and include
+namespace preserve stored skill files and the external `SKILL.md` convention.
 
 ## Extension and removal
 

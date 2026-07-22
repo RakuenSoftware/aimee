@@ -71,6 +71,16 @@ class CuratorAbsenceTests(unittest.TestCase):
                     "retired-build-object",
                 )
 
+    def test_canonical_curator_resurrection_paths_are_rejected(self) -> None:
+        for relative in checker.CANONICAL_DELETED:
+            with self.subTest(relative=relative):
+                def resurrect(root: Path, path: str = relative) -> None:
+                    target = root / path
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("")
+
+                self.assert_rejected(resurrect, "deleted-file")
+
     def test_every_config_reader_path_and_key_is_rejected(self) -> None:
         for rel in checker.CONFIG_FILES:
             for key in checker.CONFIG_KEYS:

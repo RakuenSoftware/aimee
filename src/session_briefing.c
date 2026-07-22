@@ -11,7 +11,7 @@
 #include "aimee.h"
 #include "memory.h"
 #include "session_briefing.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

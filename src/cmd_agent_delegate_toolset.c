@@ -14,7 +14,7 @@
 #include "prompts.h"
 #include "persona.h"
 #include "role_templates.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "events.h"
 #include "agent_coord.h"
 #include "delegate_role.h"
