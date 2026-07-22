@@ -9,6 +9,8 @@
 #include "config_fields.h"
 #include "json_fluent.h" /* jo_ok */
 #include "server.h"
+#include "server_http.h"
+#include "server_http_identity.h"
 #include <string.h>
 
 /* config.show: return every allowlisted field and its current value. */
@@ -73,6 +75,15 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *key = jo_str(req, "key", "");
    if (!key || !key[0])
       return server_send_error(conn, "usage: aimee config set <key> <value>", NULL);
+
+   /* Do not let the generic config surface bypass the roundtable preset API's
+    * operator boundary (notably through roundtable.default). Local UDS callers
+    * have full generic capabilities, but remain uid: principals; only the
+    * server.token-attested appliance administrator may alter this policy. */
+   if (roundtable_policy_config_key(key) &&
+       !route_roundtable_mutation_authorized(server_http_identity_principal()))
+      return server_send_error(
+          conn, "roundtable changes require the authenticated appliance administrator", NULL);
 
    /* Accept any JSON scalar for value; coerce to string for the field parser. */
    cJSON *jval = cJSON_GetObjectItemCaseSensitive(req, "value");
