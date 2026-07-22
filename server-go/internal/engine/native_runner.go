@@ -653,12 +653,15 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		for i, outcomeIndex := range repairIndexes {
 			seat := outcomes[outcomeIndex].seat
 			repairs[i] = DelegateRequest{
-				Role:           roundtableDelegateRole,
-				Persona:        seat.persona,
-				Participant:    seat.participant,
-				Prompt:         panelResponseRepairPrompt(artifactStage),
-				Workdir:        req.WorkItem.Worktree,
-				Tools:          false,
+				Role:        roundtableDelegateRole,
+				Persona:     seat.persona,
+				Participant: seat.participant,
+				Prompt:      panelResponseRepairPrompt(artifactStage),
+				Workdir:     req.WorkItem.Worktree,
+				// Preserve the review delegate's tool-capable transport. In particular,
+				// CLI-backed agents do not have an HTTP request URL; tools:false would
+				// incorrectly send their continuation through the simple HTTP path.
+				Tools:          true,
 				DurableSlot:    panelSeatDurableSlot(req, panelRound, seat.ordinal) + ":repair:1",
 				ArtifactStage:  artifactStage,
 				ProvidedTarget: true,
