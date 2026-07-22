@@ -161,6 +161,11 @@ bound with `AIMEE_KB_MTLS_MAX_CONNECTIONS` (1–64); invalid values fail startup
 `kb_mtls_connection_stats()` exposes the configured limit plus current live and
 queued counts for transport capture without exposing request content.
 
+The listener reuses HTTP/1.1 connections sequentially by default, with a
+30-second between-request idle deadline. `Connection: close` is honored, and
+request pipelining is rejected so framing and per-request certificate authority
+checks remain unambiguous.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.
