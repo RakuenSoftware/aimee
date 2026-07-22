@@ -117,11 +117,6 @@ extern "C"
     * tolerates a zero-initialized struct (a failed get) and double calls. */
    void db1_agent_job_free(db1_agent_job_t *job);
 
-   /* Repair finished job rows created before routed agent metadata was
-    * persisted. Matches blank agent_name rows to nearby agent_log rows with
-    * the same role. Returns rows changed, or -1 on DB error. */
-   int db1_agent_job_backfill_agent_names_from_log(void);
-
    /* Check if a heartbeat_at timestamp is older than `stale_minutes`
     * ago. Returns 1 if stale, 0 if fresh or unparseable. */
    int db1_agent_job_heartbeat_is_stale(const char *heartbeat_at, int stale_minutes);

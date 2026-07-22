@@ -39,51 +39,6 @@ static int agent_job_stale_threshold_secs(const char *role, const char *current_
    return in_tool_threshold_secs;
 }
 
-/* Explicit historical maintenance only. This scans and may update the entire
- * terminal job history, so status get/list hot paths must never call it. New
- * jobs persist their routed agent through db1_agent_job_set_agent(). */
-int db1_agent_job_backfill_agent_names_from_log(void)
-{
-   sqlite3 *db = db1_conn();
-   if (!db)
-      return -1;
-
-   static const char *sql =
-       "UPDATE agent_jobs"
-       " SET agent_name = ("
-       "   SELECT candidate.agent_name FROM ("
-       "      SELECT al.agent_name, al.id,"
-       "             abs(strftime('%s', al.created_at) -"
-       "                 strftime('%s', CASE WHEN agent_jobs.updated_at <> ''"
-       "                                    THEN agent_jobs.updated_at ELSE agent_jobs.created_at"
-       "                               END)) AS distance"
-       "      FROM agent_log al"
-       "      WHERE al.agent_name <> ''"
-       "        AND al.role = agent_jobs.role"
-       "   ) candidate"
-       "   WHERE candidate.distance <= 900"
-       "   ORDER BY candidate.distance, candidate.id DESC LIMIT 1"
-       " )"
-       " WHERE agent_name = ''"
-       "   AND status IN ('done', 'failed', 'partial', 'cancelled')"
-       "   AND EXISTS ("
-       "      SELECT 1 FROM agent_log al"
-       "      WHERE al.agent_name <> ''"
-       "        AND al.role = agent_jobs.role"
-       "        AND abs(strftime('%s', al.created_at) -"
-       "                strftime('%s', CASE WHEN agent_jobs.updated_at <> ''"
-       "                                   THEN agent_jobs.updated_at ELSE agent_jobs.created_at"
-       "                              END)) <= 900"
-       "   )";
-   sqlite3_stmt *stmt = NULL;
-   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
-      return -1;
-   int rc = sqlite3_step(stmt);
-   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
-   sqlite3_finalize(stmt);
-   return changed;
-}
-
 int db1_agent_job_create(const char *role, const char *prompt, const char *agent_name,
                          const char *lease_owner)
 {
@@ -299,6 +254,8 @@ int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_too
 
 int db1_agent_job_get(int job_id, db1_agent_job_t *out)
 {
+   /* Status polling is a read-only hot path. Agent identity is persisted by
+    * create/set_agent and must never be reconstructed here with a global write. */
    if (!out || job_id <= 0)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -395,6 +352,7 @@ void db1_agent_job_free(db1_agent_job_t *job)
 
 int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
 {
+   /* This endpoint is polled by every active delegate; keep it read-only. */
    if (!out || max <= 0)
       return 0;
    sqlite3 *db = db1_conn();
