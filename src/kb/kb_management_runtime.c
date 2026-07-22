@@ -1,5 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "kb_management_runtime.h"
+#include "kb_management_action.h"
+#include "db2/management_action_journal.h"
 
 #include "kb/http/kb_http_servers.h"
 #include "kb_mgmt_endpoint.h"
@@ -34,6 +36,7 @@ typedef struct
    kb_management_runtime_state_t state;
    int configured;
    int registered;
+   int action_registered;
    int reconciling;
    int construction_complete;
    int had_success;
@@ -56,6 +59,11 @@ typedef struct
    char status_secondary_leaf_pin[65];
    char status_key_id[65];
    unsigned char status_public_key[32];
+   char token_socket[108];
+   char token_issuer[256];
+   char token_kid[65];
+   gid_t token_socket_gid;
+   int token_ttl_seconds;
 } runtime_t;
 
 static runtime_t runtime = {
@@ -65,13 +73,25 @@ static runtime_t runtime = {
 };
 
 static const char *const required_env[] = {
-    "AIMEE_KB_MGMT_INSTALLATION_ID", "AIMEE_KB_MGMT_CUSTODIED_CA_DIR",
-    "AIMEE_KB_MGMT_BUNDLE_DIR",      "AIMEE_KB_MGMT_WORKLOAD_HELPER",
-    "AIMEE_KB_MGMT_WORKLOAD_JWKS",   "AIMEE_KB_MGMT_WORKLOAD_PROOF_SPKI",
-    "AIMEE_KB_MGMT_WORKLOAD_ISSUER", "AIMEE_KB_MGMT_WORKLOAD_AUDIENCE",
-    "AIMEE_KB_MGMT_SERVER_CA_FILE",  "AIMEE_KB_MGMT_STATUS_ENDPOINT",
-    "AIMEE_KB_MGMT_STATUS_CA_FILE",  "AIMEE_KB_MGMT_STATUS_LEAF_PIN",
-    "AIMEE_MGMT_STATUS_KEY_ID",      "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+    "AIMEE_KB_MGMT_INSTALLATION_ID",
+    "AIMEE_KB_MGMT_CUSTODIED_CA_DIR",
+    "AIMEE_KB_MGMT_BUNDLE_DIR",
+    "AIMEE_KB_MGMT_WORKLOAD_HELPER",
+    "AIMEE_KB_MGMT_WORKLOAD_JWKS",
+    "AIMEE_KB_MGMT_WORKLOAD_PROOF_SPKI",
+    "AIMEE_KB_MGMT_WORKLOAD_ISSUER",
+    "AIMEE_KB_MGMT_WORKLOAD_AUDIENCE",
+    "AIMEE_KB_MGMT_SERVER_CA_FILE",
+    "AIMEE_KB_MGMT_STATUS_ENDPOINT",
+    "AIMEE_KB_MGMT_STATUS_CA_FILE",
+    "AIMEE_KB_MGMT_STATUS_LEAF_PIN",
+    "AIMEE_MGMT_STATUS_KEY_ID",
+    "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+    "AIMEE_KB_MGMT_TOKEN_AUTHORITY_SOCKET",
+    "AIMEE_KB_MGMT_TOKEN_AUTHORITY_GID",
+    "AIMEE_KB_MGMT_TOKEN_ISSUER",
+    "AIMEE_KB_MGMT_TOKEN_KID",
+    "AIMEE_KB_MGMT_TOKEN_TTL_SECONDS",
 };
 
 static int lower_hex(const char *s, size_t n)
@@ -114,6 +134,21 @@ static int copy_env(char *out, size_t cap, const char *name)
    if (!n || n >= cap)
       return -1;
    memcpy(out, value, n + 1);
+   return 0;
+}
+
+static int canonical_uint(const char *text, uint64_t max, uint64_t *out)
+{
+   if (!text || !*text || (text[0] == '0' && text[1]) || !out)
+      return -1;
+   uint64_t value = 0;
+   for (const unsigned char *p = (const unsigned char *)text; *p; p++)
+   {
+      if (*p < '0' || *p > '9' || value > (max - (uint64_t)(*p - '0')) / 10U)
+         return -1;
+      value = value * 10U + (uint64_t)(*p - '0');
+   }
+   *out = value;
    return 0;
 }
 
@@ -308,6 +343,87 @@ static kb_management_health_result_t runtime_health(void *unused, const kb_princ
    return result;
 }
 
+static kb_management_action_result_t runtime_action(void *unused, const kb_principal_t *actor,
+                                                    int64_t team_id, const char *server_id,
+                                                    const char *body, size_t body_len)
+{
+   (void)unused;
+   kb_management_cert_lifecycle_t *lifecycle = NULL;
+   kb_management_health_server_config_t server = {0};
+   kb_mgmt_status_client_config_t authority = {0};
+   kb_mgmt_token_authority_client_config_t token = {0};
+   char status_key_id[sizeof(runtime.status_key_id)];
+   char token_issuer[sizeof(runtime.token_issuer)], kid[sizeof(runtime.token_kid)];
+   char installation[sizeof(runtime.installation_id)];
+   unsigned char status_public_key[32];
+   int ttl = 0;
+
+   pthread_mutex_lock(&runtime.mutex);
+   if ((runtime.state != KB_MANAGEMENT_RUNTIME_READY &&
+        runtime.state != KB_MANAGEMENT_RUNTIME_READY_DEGRADED) ||
+       !runtime.lifecycle)
+   {
+      pthread_mutex_unlock(&runtime.mutex);
+      return KB_MANAGEMENT_ACTION_UNAVAILABLE;
+   }
+   lifecycle = runtime.lifecycle;
+   server.server_ca_pem = runtime.server_ca;
+   authority.endpoint = runtime.status_endpoint;
+   authority.ca_pem = runtime.status_ca;
+   authority.leaf_pin = runtime.status_leaf_pin;
+   authority.secondary_leaf_pin =
+       runtime.status_secondary_leaf_pin[0] ? runtime.status_secondary_leaf_pin : NULL;
+   token.socket_path = runtime.token_socket;
+   token.socket_gid = runtime.token_socket_gid;
+   token.socket_mode = 0660;
+   token.timeout_ms = KB_MGMT_TOKEN_AUTHORITY_IO_TIMEOUT_MS;
+   memcpy(status_key_id, runtime.status_key_id, sizeof(status_key_id));
+   memcpy(status_public_key, runtime.status_public_key, sizeof(status_public_key));
+   memcpy(token_issuer, runtime.token_issuer, sizeof(token_issuer));
+   memcpy(kid, runtime.token_kid, sizeof(kid));
+   memcpy(installation, runtime.installation_id, sizeof(installation));
+   ttl = runtime.token_ttl_seconds;
+   pthread_mutex_unlock(&runtime.mutex);
+
+   uint64_t now = monotonic_millis(NULL);
+   if (now == UINT64_MAX || now > UINT64_MAX - 15000U)
+      return KB_MANAGEMENT_ACTION_UNAVAILABLE;
+   kb_management_action_request_t request = {.actor = actor,
+                                             .team_id = team_id,
+                                             .server_id = server_id,
+                                             .body = body,
+                                             .body_len = body_len,
+                                             .deadline_millis = now + 15000U};
+   kb_management_action_dependencies_t deps = {
+       .operation_init = db2_management_action_operation_init,
+       .intent_start = db2_management_action_intent_start,
+       .outcome_append = db2_management_action_outcome_append,
+       .snapshot = kb_management_health_snapshot_primary,
+       .bundle_load = kb_management_health_bundle_active,
+       .bundle_ctx = lifecycle,
+       .bundle_clear = kb_management_health_bundle_cleanse,
+       .server_open = kb_management_health_server_open_production,
+       .server_ctx = &server,
+       .server_request = kb_management_action_server_request_production,
+       .server_close = kb_management_health_server_close_production,
+       .authority_issue = kb_mgmt_status_client_adapter,
+       .authority_ctx = &authority,
+       .token_issue = kb_management_action_token_issue_production,
+       .token_ctx = &token,
+       .wall_seconds = wall_seconds,
+       .monotonic_millis = monotonic_millis,
+       .status_key_id = status_key_id,
+       .status_public_key = status_public_key,
+       .token_issuer = token_issuer,
+       .kid = kid,
+       .installation_id = installation,
+       .ttl_seconds = ttl,
+   };
+   kb_management_action_result_t result = kb_management_action_execute(&request, &deps);
+   OPENSSL_cleanse(status_public_key, sizeof(status_public_key));
+   return result;
+}
+
 unsigned kb_management_runtime_retry_seconds(unsigned retry_index)
 {
    static const unsigned delays[] = {5, 10, 20, 40, 80, 160, 300};
@@ -445,13 +561,19 @@ static void clear_configuration(void)
    memset(runtime.status_leaf_pin, 0, sizeof(runtime.status_leaf_pin));
    memset(runtime.status_secondary_leaf_pin, 0, sizeof(runtime.status_secondary_leaf_pin));
    memset(runtime.status_key_id, 0, sizeof(runtime.status_key_id));
+   memset(runtime.token_socket, 0, sizeof(runtime.token_socket));
+   memset(runtime.token_issuer, 0, sizeof(runtime.token_issuer));
+   memset(runtime.token_kid, 0, sizeof(runtime.token_kid));
+   runtime.token_socket_gid = 0;
+   runtime.token_ttl_seconds = 0;
 }
 
 int kb_management_runtime_start(void)
 {
    pthread_mutex_lock(&runtime.mutex);
    int inactive = runtime.state == KB_MANAGEMENT_RUNTIME_DISABLED && !runtime.configured &&
-                  !runtime.registered && !runtime.provider && !runtime.lifecycle;
+                  !runtime.registered && !runtime.action_registered && !runtime.provider &&
+                  !runtime.lifecycle;
    pthread_mutex_unlock(&runtime.mutex);
    if (!inactive)
       return -1;
@@ -470,6 +592,7 @@ int kb_management_runtime_start(void)
       return -1;
 
    char server_ca_file[PATH_MAX], status_ca_file[PATH_MAX], public_hex[65];
+   char gid_text[32], ttl_text[8];
    if (copy_env(runtime.installation_id, sizeof(runtime.installation_id), required_env[0]) ||
        copy_env(runtime.custodied_ca_dir, sizeof(runtime.custodied_ca_dir), required_env[1]) ||
        copy_env(runtime.bundle_dir, sizeof(runtime.bundle_dir), required_env[2]) ||
@@ -483,7 +606,12 @@ int kb_management_runtime_start(void)
        copy_env(status_ca_file, sizeof(status_ca_file), required_env[10]) ||
        copy_env(runtime.status_leaf_pin, sizeof(runtime.status_leaf_pin), required_env[11]) ||
        copy_env(runtime.status_key_id, sizeof(runtime.status_key_id), required_env[12]) ||
-       copy_env(public_hex, sizeof(public_hex), required_env[13]))
+       copy_env(public_hex, sizeof(public_hex), required_env[13]) ||
+       copy_env(runtime.token_socket, sizeof(runtime.token_socket), required_env[14]) ||
+       copy_env(gid_text, sizeof(gid_text), required_env[15]) ||
+       copy_env(runtime.token_issuer, sizeof(runtime.token_issuer), required_env[16]) ||
+       copy_env(runtime.token_kid, sizeof(runtime.token_kid), required_env[17]) ||
+       copy_env(ttl_text, sizeof(ttl_text), required_env[18]))
       goto invalid;
    if (secondary && *secondary)
    {
@@ -491,6 +619,7 @@ int kb_management_runtime_start(void)
          goto invalid;
       memcpy(runtime.status_secondary_leaf_pin, secondary, 65);
    }
+   uint64_t gid_value = 0, ttl_value = 0;
    if (!lower_hex(runtime.installation_id, 32) || !absolute_path(runtime.custodied_ca_dir) ||
        !absolute_path(runtime.bundle_dir) || !absolute_path(runtime.helper_path) ||
        !absolute_path(runtime.jwks_path) || !absolute_path(runtime.proof_spki_path) ||
@@ -503,8 +632,14 @@ int kb_management_runtime_start(void)
        !token(runtime.status_key_id, 64) || hex_key(public_hex, runtime.status_public_key) ||
        read_root_file(server_ca_file, runtime.server_ca, sizeof(runtime.server_ca)) ||
        read_root_file(status_ca_file, runtime.status_ca, sizeof(runtime.status_ca)) ||
-       !valid_ca_pem(runtime.server_ca) || !valid_ca_pem(runtime.status_ca))
+       !valid_ca_pem(runtime.server_ca) || !valid_ca_pem(runtime.status_ca) ||
+       strcmp(runtime.token_socket, KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH) ||
+       canonical_uint(gid_text, (uint64_t)(gid_t)-1, &gid_value) ||
+       canonical_uint(ttl_text, 90, &ttl_value) || ttl_value < 1 ||
+       !printable(runtime.token_issuer, 255) || !token(runtime.token_kid, 64))
       goto invalid;
+   runtime.token_socket_gid = (gid_t)gid_value;
+   runtime.token_ttl_seconds = (int)ttl_value;
 
    pthread_mutex_lock(&runtime.mutex);
    runtime.configured = 1;
@@ -515,6 +650,11 @@ int kb_management_runtime_start(void)
       goto invalid_configured;
    pthread_mutex_lock(&runtime.mutex);
    runtime.registered = 1;
+   pthread_mutex_unlock(&runtime.mutex);
+   if (kb_http_servers_action_register(runtime_action, NULL))
+      goto invalid_registered;
+   pthread_mutex_lock(&runtime.mutex);
+   runtime.action_registered = 1;
    pthread_mutex_unlock(&runtime.mutex);
    kb_management_runtime_tick((int64_t)wall_seconds(NULL));
    pthread_mutex_lock(&runtime.mutex);
@@ -529,6 +669,12 @@ int kb_management_runtime_start(void)
    }
    OPENSSL_cleanse(public_hex, sizeof(public_hex));
    return 0;
+
+invalid_registered:
+   (void)kb_http_servers_health_unregister(runtime_health, NULL);
+   pthread_mutex_lock(&runtime.mutex);
+   runtime.registered = 0;
+   pthread_mutex_unlock(&runtime.mutex);
 
 invalid_configured:
    pthread_mutex_lock(&runtime.mutex);
@@ -546,8 +692,12 @@ void kb_management_runtime_stop(void)
    pthread_mutex_lock(&runtime.mutex);
    runtime.state = KB_MANAGEMENT_RUNTIME_STOPPING;
    int registered = runtime.registered;
+   int action_registered = runtime.action_registered;
    runtime.registered = 0;
+   runtime.action_registered = 0;
    pthread_mutex_unlock(&runtime.mutex);
+   if (action_registered)
+      (void)kb_http_servers_action_unregister(runtime_action, NULL);
    if (registered)
       (void)kb_http_servers_health_unregister(runtime_health, NULL);
 

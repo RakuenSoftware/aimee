@@ -44,6 +44,60 @@ int kb_http_servers_health_unregister(kb_http_servers_health_handler_fn handler,
    return 0;
 }
 
+int kb_http_servers_action_register(kb_http_servers_action_handler_fn handler, void *ctx)
+{
+   (void)handler;
+   (void)ctx;
+   return 0;
+}
+
+int kb_http_servers_action_unregister(kb_http_servers_action_handler_fn handler, void *ctx)
+{
+   (void)handler;
+   (void)ctx;
+   return 0;
+}
+
+db2_management_action_result_t db2_management_action_operation_init(
+    int64_t team, const char *server, db2_management_action_capability_t cap,
+    const uint8_t digest[32], const char *issuer, const char *kid, int ttl,
+    const char *installation, db2_management_action_operation_t *out)
+{
+   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+}
+db2_management_action_result_t
+db2_management_action_intent_start(const kb_principal_t *p,
+                                   const db2_management_action_operation_t *op,
+                                   db2_management_action_intent_t *out)
+{
+   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+}
+db2_management_action_result_t
+db2_management_action_outcome_append(const kb_principal_t *p,
+                                     const db2_management_action_outcome_operation_t *op,
+                                     db2_management_action_outcome_t *out)
+{
+   return DB2_MANAGEMENT_ACTION_UNAVAILABLE;
+}
+kb_management_action_transport_t kb_management_action_server_request_production(
+    void *ctx, void *session, const char *method, const char *path, const char *body,
+    const char *headers, uint64_t deadline, char *response, size_t cap, int *status)
+{
+   return KB_MANAGEMENT_ACTION_NOT_SENT;
+}
+kb_mgmt_token_authority_ipc_result_t
+kb_management_action_token_issue_production(void *ctx, const char *correlation, const char *jti,
+                                            kb_mgmt_token_authority_output_t *out)
+{
+   return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+}
+kb_management_action_result_t
+kb_management_action_execute(const kb_management_action_request_t *request,
+                             const kb_management_action_dependencies_t *deps)
+{
+   return KB_MANAGEMENT_ACTION_UNAVAILABLE;
+}
+
 kb_workload_helper_result_t kb_workload_checked_root_file_open(const char *path,
                                                                int require_exec_elf, int *fd)
 {
@@ -212,6 +266,11 @@ static void clear_packet(void)
        "AIMEE_KB_MGMT_STATUS_SECONDARY_LEAF_PIN",
        "AIMEE_MGMT_STATUS_KEY_ID",
        "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+       "AIMEE_KB_MGMT_TOKEN_AUTHORITY_SOCKET",
+       "AIMEE_KB_MGMT_TOKEN_AUTHORITY_GID",
+       "AIMEE_KB_MGMT_TOKEN_ISSUER",
+       "AIMEE_KB_MGMT_TOKEN_KID",
+       "AIMEE_KB_MGMT_TOKEN_TTL_SECONDS",
    };
    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
       unsetenv(names[i]);
@@ -266,6 +325,11 @@ static void set_packet(const char *ca_path)
    setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-key", 1);
    setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
           "2222222222222222222222222222222222222222222222222222222222222222", 1);
+   setenv("AIMEE_KB_MGMT_TOKEN_AUTHORITY_SOCKET", KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH, 1);
+   setenv("AIMEE_KB_MGMT_TOKEN_AUTHORITY_GID", "1000", 1);
+   setenv("AIMEE_KB_MGMT_TOKEN_ISSUER", "https://issuer.example", 1);
+   setenv("AIMEE_KB_MGMT_TOKEN_KID", "kid-1", 1);
+   setenv("AIMEE_KB_MGMT_TOKEN_TTL_SECONDS", "90", 1);
 }
 
 static void *tick_thread(void *unused)

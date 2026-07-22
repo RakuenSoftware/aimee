@@ -3,6 +3,7 @@
 #include "kb_mgmt_endpoint.h"
 #include "kb_reqctx.h"
 #include "cJSON.h"
+#include <openssl/crypto.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -15,6 +16,49 @@ static kb_http_servers_health_handler_fn health_handler;
 static void *health_ctx;
 static unsigned int health_inflight;
 static int health_unregistering;
+static pthread_mutex_t action_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t action_cv = PTHREAD_COND_INITIALIZER;
+static kb_http_servers_action_handler_fn action_handler;
+static void *action_ctx;
+static unsigned action_inflight;
+static int action_unregistering;
+
+int kb_http_servers_action_register(kb_http_servers_action_handler_fn handler, void *ctx)
+{
+   int rc = -1;
+   if (!handler)
+      return -1;
+   pthread_mutex_lock(&action_mu);
+   if (!action_handler && !action_unregistering && action_inflight == 0)
+   {
+      action_handler = handler;
+      action_ctx = ctx;
+      rc = 0;
+   }
+   pthread_mutex_unlock(&action_mu);
+   return rc;
+}
+
+int kb_http_servers_action_unregister(kb_http_servers_action_handler_fn handler, void *ctx)
+{
+   if (!handler)
+      return -1;
+   pthread_mutex_lock(&action_mu);
+   if (action_handler != handler || action_ctx != ctx || action_unregistering)
+   {
+      pthread_mutex_unlock(&action_mu);
+      return -1;
+   }
+   action_unregistering = 1;
+   action_handler = NULL;
+   action_ctx = NULL;
+   while (action_inflight)
+      pthread_cond_wait(&action_cv, &action_mu);
+   action_unregistering = 0;
+   pthread_cond_broadcast(&action_cv);
+   pthread_mutex_unlock(&action_mu);
+   return 0;
+}
 
 int kb_http_servers_health_register(kb_http_servers_health_handler_fn handler, void *ctx)
 {
@@ -182,6 +226,18 @@ static int q_unique(const char *s, const char *k, char *o, size_t n)
    return found;
 }
 
+static int q_exact_team(const char *s, char *out, size_t cap)
+{
+   if (!s || strncmp(s, "team=", 5) || strchr(s, '&') || strchr(s, '%') || strchr(s, ';') ||
+       strchr(s, '#') || strchr(s, '?'))
+      return -1;
+   size_t n = strlen(s + 5);
+   if (!n || n >= cap)
+      return -1;
+   memcpy(out, s + 5, n + 1);
+   return 0;
+}
+
 /* Preserve the pre-B3b list-route behavior: the first value wins, duplicate
  * values are ignored, and the copied value is truncated to the legacy buffer. */
 static int q_list_legacy(const char *s, const char *k, char *o, size_t n)
@@ -239,7 +295,58 @@ static int server_id_valid(const char *text)
    return 1;
 }
 
-int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
+static int action_status(kb_management_action_result_t rc)
+{
+   switch (rc)
+   {
+   case KB_MANAGEMENT_ACTION_OK:
+      return 200;
+   case KB_MANAGEMENT_ACTION_NOT_FOUND:
+      return 404;
+   case KB_MANAGEMENT_ACTION_DENIED:
+      return 403;
+   case KB_MANAGEMENT_ACTION_CONFLICT:
+      return 409;
+   case KB_MANAGEMENT_ACTION_INTEGRITY:
+   case KB_MANAGEMENT_ACTION_INDETERMINATE:
+      return 502;
+   case KB_MANAGEMENT_ACTION_INVALID:
+      return 400;
+   case KB_MANAGEMENT_ACTION_UNAVAILABLE:
+      return 503;
+   }
+   return 503;
+}
+
+static int action_dispatch(const kb_principal_t *actor, int64_t team, const char *server,
+                           const char *body, char *out, int cap)
+{
+   pthread_mutex_lock(&action_mu);
+   kb_http_servers_action_handler_fn handler = action_handler;
+   void *ctx = action_ctx;
+   if (handler)
+      action_inflight++;
+   pthread_mutex_unlock(&action_mu);
+   if (!handler)
+   {
+      snprintf(out, (size_t)cap, "{\"error\":\"server action unavailable\"}");
+      return 503;
+   }
+   kb_management_action_result_t rc = handler(ctx, actor, team, server, body, strlen(body));
+   pthread_mutex_lock(&action_mu);
+   action_inflight--;
+   if (!action_inflight)
+      pthread_cond_broadcast(&action_cv);
+   pthread_mutex_unlock(&action_mu);
+   int status = action_status(rc);
+   snprintf(out, (size_t)cap,
+            rc == KB_MANAGEMENT_ACTION_OK ? "{\"result\":\"succeeded\"}"
+                                          : "{\"error\":\"server action failed\"}");
+   return status;
+}
+
+int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const char *body,
+                             char *out, int cap)
 {
    if (!m || !p || !out || cap <= 0)
       return -1;
@@ -249,11 +356,15 @@ int kb_http_servers_route(const char *m, const char *p, const char *qs, char *ou
    }
    else if (!strncmp(p, "/v1/servers/", 12))
    {
-      const char *id = p + 12, *slash = strstr(id, "/health");
+      const char *id = p + 12, *slash = strchr(id, '/');
       char sid[128];
-      if (!slash || slash[7] || slash == id || (size_t)(slash - id) >= sizeof(sid))
+      if (!slash || slash == id || (size_t)(slash - id) >= sizeof(sid))
          return -1;
-      if (strcmp(m, "GET"))
+      int is_health = !strcmp(slash, "/health");
+      int is_action = !strcmp(slash, "/actions");
+      if (!is_health && !is_action)
+         return -1;
+      if ((is_health && strcmp(m, "GET")) || (is_action && strcmp(m, "POST")))
          return 405;
       memcpy(sid, id, (size_t)(slash - id));
       sid[slash - id] = 0;
@@ -264,7 +375,8 @@ int kb_http_servers_route(const char *m, const char *p, const char *qs, char *ou
       }
       char t[32];
       int64_t team;
-      int team_query = q_unique(qs, "team", t, sizeof(t));
+      int team_query = is_action ? (q_exact_team(qs, t, sizeof(t)) ? -1 : 1)
+                                 : q_unique(qs, "team", t, sizeof(t));
       if (team_query == 0)
       {
          snprintf(out, cap, "{\"error\":\"team is required\"}");
@@ -285,6 +397,17 @@ int kb_http_servers_route(const char *m, const char *p, const char *qs, char *ou
       {
          snprintf(out, (size_t)cap, "{\"error\":\"authentication required\"}");
          return 401;
+      }
+      if (is_action)
+      {
+         kb_management_action_body_t parsed;
+         if (!body || kb_management_action_body_parse(body, strlen(body), &parsed))
+         {
+            snprintf(out, (size_t)cap, "{\"error\":\"invalid action\"}");
+            return 400;
+         }
+         OPENSSL_cleanse(&parsed, sizeof(parsed));
+         return action_dispatch(actor, team, sid, body, out, cap);
       }
       return health_dispatch(actor, team, sid, out, cap);
    }
@@ -352,4 +475,9 @@ int kb_http_servers_route(const char *m, const char *p, const char *qs, char *ou
    free(json);
    cJSON_Delete(root);
    return rc;
+}
+
+int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
+{
+   return kb_http_servers_route_ex(m, p, qs, NULL, out, cap);
 }

@@ -199,7 +199,9 @@ int db2_management_status_runtime_lookup(db2_management_status_runtime_t *runtim
    if (!runtime || !runtime->connection || runtime->transaction_active ||
        aimee_pg_in_transaction(runtime->connection) || !printable(issuer, 1, 600) ||
        !lower_hex(serial_norm, 1, 128) || !lower_hex(fingerprint, 64, 64) ||
-       !token(target, 1, 127) || !purpose || strcmp(purpose, "management.health.v1") != 0 ||
+       !token(target, 1, 127) || !purpose ||
+       (strcmp(purpose, "management.health.v1") != 0 &&
+        strcmp(purpose, "management.action.v1") != 0) ||
        !generation || !target_fingerprint || target_fingerprint_len < 65)
       return DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
 

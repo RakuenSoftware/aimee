@@ -6506,7 +6506,7 @@ BEGIN
      OR p_serial !~ '^[0-9a-f]{1,128}$'
      OR p_fingerprint !~ '^[0-9a-f]{64}$'
      OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
-     OR p_purpose<>'management.health.v1' THEN
+     OR p_purpose NOT IN ('management.health.v1','management.action.v1') THEN
     RAISE EXCEPTION 'invalid management status input' USING ERRCODE='22023';
   END IF;
   RETURN QUERY SELECT g.generation,r.mgmt_fingerprint
@@ -9724,10 +9724,20 @@ CREATE TABLE IF NOT EXISTS kb_management_action_outcome (
     REFERENCES kb_management_action_intent(correlation_id,team_id),
   CHECK ((result='succeeded' AND result_class='remote_success') OR
          (result='denied' AND result_class='remote_denied') OR
-         (result='failed' AND result_class IN
-            ('remote_failure','protocol_failure','local_failure')) OR
-         (result='indeterminate' AND result_class='transport_ambiguous'))
+         (result='failed' AND result_class IN ('remote_failure','local_failure')) OR
+         (result='indeterminate' AND result_class IN
+            ('transport_ambiguous','protocol_failure')))
 );
+
+ALTER TABLE kb_management_action_outcome
+  DROP CONSTRAINT IF EXISTS kb_management_action_outcome_check;
+ALTER TABLE kb_management_action_outcome
+  ADD CONSTRAINT kb_management_action_outcome_check CHECK (
+    (result='succeeded' AND result_class='remote_success') OR
+    (result='denied' AND result_class='remote_denied') OR
+    (result='failed' AND result_class IN ('remote_failure','local_failure')) OR
+    (result='indeterminate' AND result_class IN
+       ('transport_ambiguous','protocol_failure')));
 
 ALTER TABLE kb_management_action_intent ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_intent FORCE ROW LEVEL SECURITY;
@@ -9929,9 +9939,9 @@ BEGIN
        'transport_ambiguous','protocol_failure','local_failure') OR
      NOT ((p_result='succeeded' AND p_result_class='remote_success') OR
           (p_result='denied' AND p_result_class='remote_denied') OR
-          (p_result='failed' AND p_result_class IN
-             ('remote_failure','protocol_failure','local_failure')) OR
-          (p_result='indeterminate' AND p_result_class='transport_ambiguous')) OR
+          (p_result='failed' AND p_result_class IN ('remote_failure','local_failure')) OR
+          (p_result='indeterminate' AND p_result_class IN
+             ('transport_ambiguous','protocol_failure'))) OR
      (p_status_code IS NOT NULL AND p_status_code NOT BETWEEN 100 AND 599) OR
      (p_response_sha256 IS NOT NULL AND p_response_sha256 !~ '^[0-9a-f]{64}$') THEN
     RAISE EXCEPTION 'invalid management action outcome' USING ERRCODE='22023';

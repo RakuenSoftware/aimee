@@ -138,7 +138,8 @@ kb_mgmt_status_authority_result_t kb_mgmt_status_request_from_json(const char *r
    }
    if (count != 4 || seen != 0x0fu || nonce_decode(values[0], out->nonce) != 0 ||
        !ascii_token(values[1], 1, 127) || !lower_hex(values[2], 64, 64) ||
-       strcmp(values[3], "management.health.v1") != 0 ||
+       (strcmp(values[3], "management.health.v1") != 0 &&
+        strcmp(values[3], "management.action.v1") != 0) ||
        copy_field(out->target_server_id, sizeof(out->target_server_id), values[1]) != 0 ||
        copy_field(out->target_mgmt_fingerprint, sizeof(out->target_mgmt_fingerprint), values[2]) !=
            0 ||
@@ -175,9 +176,11 @@ kb_mgmt_status_authority_issue(const kb_mgmt_status_request_t *r, const char *is
    if (!r || !issuer || !serial || !fingerprint || !key_id || !lookup || !sign || !out ||
        !ascii_token(r->target_server_id, 1, 127) ||
        !lower_hex(r->target_mgmt_fingerprint, 64, 64) ||
-       strcmp(r->purpose, "management.health.v1") != 0 || !printable(issuer, 1, 600) ||
-       !lower_hex(serial, 1, 128) || !lower_hex(fingerprint, 64, 64) ||
-       !ascii_token(key_id, 1, 64) || now == 0 || now > UINT64_MAX - 10)
+       (strcmp(r->purpose, "management.health.v1") != 0 &&
+        strcmp(r->purpose, "management.action.v1") != 0) ||
+       !printable(issuer, 1, 600) || !lower_hex(serial, 1, 128) ||
+       !lower_hex(fingerprint, 64, 64) || !ascii_token(key_id, 1, 64) || now == 0 ||
+       now > UINT64_MAX - 10)
       return KB_MGMT_STATUS_AUTHORITY_INVALID;
    int64_t generation = 0;
    char authoritative_fp[65] = "";

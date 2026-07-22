@@ -13,6 +13,13 @@ typedef struct
    int fd;
 } kb_mgmt_client_session_t;
 
+typedef enum
+{
+   KB_MGMT_CLIENT_NOT_SENT = 0,
+   KB_MGMT_CLIENT_SENT_RESPONSE,
+   KB_MGMT_CLIENT_SENT_AMBIGUOUS
+} kb_mgmt_client_send_result_t;
+
 int kb_mgmt_client_session_open(kb_mgmt_client_session_t *, const char *endpoint, const char *ca,
                                 const char *client_cert, const char *client_key,
                                 const char *expected_issuer, const char *expected_serial_norm,
@@ -30,6 +37,10 @@ int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *, const ch
                                             const char *path, const char *body,
                                             const char *extra_headers, uint64_t deadline_millis,
                                             char *resp, size_t cap, int *status);
+kb_mgmt_client_send_result_t
+kb_mgmt_client_session_action_deadline(kb_mgmt_client_session_t *, const char *body,
+                                       const char *extra_headers, uint64_t deadline_millis,
+                                       char *resp, size_t cap, int *status);
 void kb_mgmt_client_session_close(kb_mgmt_client_session_t *);
 
 int kb_mgmt_client_request(const char *endpoint, const char *ca, const char *client_cert,

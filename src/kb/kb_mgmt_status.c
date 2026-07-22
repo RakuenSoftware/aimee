@@ -54,8 +54,9 @@ static int status_shape(const kb_mgmt_status_t *s)
           printable(s->caller_issuer, 1, 600) && hex_lower(s->caller_serial_norm, 1, 128) &&
           hex_lower(s->caller_fingerprint, 64, 64) && ascii_token(s->target_server_id, 1, 127) &&
           hex_lower(s->target_mgmt_fingerprint, 64, 64) &&
-          strcmp(s->purpose, "management.health.v1") == 0 && s->issued_at > 0 &&
-          s->expires_at > s->issued_at && s->expires_at - s->issued_at <= 10 &&
+          (!strcmp(s->purpose, "management.health.v1") ||
+           !strcmp(s->purpose, "management.action.v1")) &&
+          s->issued_at > 0 && s->expires_at > s->issued_at && s->expires_at - s->issued_at <= 10 &&
           s->revocation_generation >= 1;
 }
 

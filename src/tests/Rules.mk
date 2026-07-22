@@ -561,6 +561,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-status-client \
                $(TESTPREFIX)/unit-test-kb-management-runtime \
                $(TESTPREFIX)/unit-test-kb-http-servers-health \
+               $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
@@ -1848,6 +1849,14 @@ $(TESTPREFIX)/unit-test-kb-management-health-exchange: \
     $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-management-action: \
+    $(OBJDIR)/tests/test_kb_management_action.o \
+    $(OBJDIR)/kb/kb_management_action.o $(OBJDIR)/kb/kb_management_health_exchange.o \
+    $(OBJDIR)/kb/kb_mgmt_status_authority.o $(OBJDIR)/kb/kb_mgmt_status.o \
+    $(OBJDIR)/kb/kb_mgmt_endpoint.o $(OBJDIR)/kb/kb_mgmt_client.o \
+    $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-kb-mgmt-status-client: \
     $(OBJDIR)/tests/test_kb_mgmt_status_client.o \
     $(OBJDIR)/kb/kb_mgmt_status_client.o $(OBJDIR)/kb/kb_mgmt_client.o \
@@ -1862,7 +1871,8 @@ $(TESTPREFIX)/unit-test-kb-management-runtime: \
 
 $(TESTPREFIX)/unit-test-kb-http-servers-health: \
     $(OBJDIR)/tests/test_kb_http_servers_health.o \
-    $(OBJDIR)/kb/http/kb_http_servers.o $(OBJDIR)/kb/kb_reqctx.o \
+    $(OBJDIR)/kb/http/kb_http_servers.o $(OBJDIR)/kb/kb_management_action.o \
+    $(OBJDIR)/kb/kb_reqctx.o \
     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

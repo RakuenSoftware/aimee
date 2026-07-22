@@ -12,7 +12,8 @@ static int lookup(const char *issuer, const char *serial, const char *fp, const 
 {
    (void)ctx;
    if (strcmp(issuer, "/CN=ca") || strcmp(serial, "01") || strlen(fp) != 64 ||
-       strcmp(target, "server-1") || strcmp(purpose, "management.health.v1"))
+       strcmp(target, "server-1") ||
+       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1")))
       return -1;
    *generation = 9;
    snprintf(target_fp, cap, "%064d", 2);
@@ -121,6 +122,14 @@ static void test_codec(void)
    for (size_t i = 0; i < sizeof(r.nonce); ++i)
       assert(r.nonce[i] == 7);
    assert(!strcmp(r.target_server_id, "server-1"));
+   char action[sizeof(valid)];
+   snprintf(action, sizeof(action), "%s", valid);
+   char *purpose = strstr(action, "management.health.v1");
+   assert(purpose);
+   memcpy(purpose, "management.action.v1", strlen("management.action.v1"));
+   assert(kb_mgmt_status_request_from_json(action, strlen(action), &r) ==
+          KB_MGMT_STATUS_AUTHORITY_OK);
+   assert(!strcmp(r.purpose, "management.action.v1"));
 
    static const char *invalid[] = {
        "{}",

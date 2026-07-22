@@ -18,6 +18,39 @@ static pthread_mutex_t block_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t block_cv = PTHREAD_COND_INITIALIZER;
 static int callback_entered;
 static int callback_release;
+static unsigned action_calls;
+static char action_body[128];
+
+static kb_management_action_result_t action_handler_fn(void *ctx, const kb_principal_t *actor,
+                                                       int64_t team, const char *server,
+                                                       const char *body, size_t body_len)
+{
+   assert(ctx == (void *)0x4321 && actor && actor->authenticated && team == 9);
+   assert(!strcmp(server, "server-a") && body_len < sizeof(action_body));
+   memcpy(action_body, body, body_len);
+   action_body[body_len] = 0;
+   action_calls++;
+   return KB_MANAGEMENT_ACTION_OK;
+}
+
+static kb_management_action_result_t blocking_action_handler(void *ctx, const kb_principal_t *actor,
+                                                             int64_t team, const char *server,
+                                                             const char *body, size_t body_len)
+{
+   (void)ctx;
+   (void)actor;
+   (void)team;
+   (void)server;
+   (void)body;
+   (void)body_len;
+   pthread_mutex_lock(&block_mu);
+   callback_entered = 1;
+   pthread_cond_broadcast(&block_cv);
+   while (!callback_release)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   return KB_MANAGEMENT_ACTION_OK;
+}
 
 int db2_server_registry_list(int64_t team, db2_server_row_t *rows, int max)
 {
@@ -67,6 +100,13 @@ static int route(const char *method, const char *path, const char *query, char *
 {
    memset(out, 0, (size_t)cap);
    return kb_http_servers_route(method, path, query, out, cap);
+}
+
+static int route_body(const char *method, const char *path, const char *query, const char *body,
+                      char *out, int cap)
+{
+   memset(out, 0, (size_t)cap);
+   return kb_http_servers_route_ex(method, path, query, body, out, cap);
 }
 
 static void set_actor(void)
@@ -144,6 +184,34 @@ static void test_rejections_and_list_isolation(void)
    assert(route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 401);
 }
 
+static void test_action_route(void)
+{
+   char out[512];
+   const char *body = "{\"agent\":\"alpha\",\"action\":\"agent.enable\"}";
+   set_actor();
+   assert(kb_http_servers_action_register(action_handler_fn, (void *)0x4321) == 0);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=9", body, out, sizeof(out)) ==
+          200);
+   assert(action_calls == 1 && !strcmp(action_body, body));
+   assert(route_body("POST", "/v1/servers/server-a/actions", "x=1&team=9", body, out,
+                     sizeof(out)) == 400);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=09", body, out, sizeof(out)) ==
+          400);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=9&team=9", body, out,
+                     sizeof(out)) == 400);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=%39", body, out, sizeof(out)) ==
+          400);
+   assert(route_body("GET", "/v1/servers/server-a/actions", "team=9", body, out, sizeof(out)) ==
+          405);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=9",
+                     "{\"action\":\"agent.run\",\"agent\":\"alpha\"}", out, sizeof(out)) == 400);
+   assert(action_calls == 1);
+   assert(kb_http_servers_action_unregister(action_handler_fn, (void *)0x4321) == 0);
+   assert(route_body("POST", "/v1/servers/server-a/actions", "team=9", body, out, sizeof(out)) ==
+          503);
+   kb_reqctx_clear();
+}
+
 typedef struct
 {
    int status;
@@ -165,6 +233,26 @@ static void *unregister_thread(void *opaque)
 {
    thread_result_t *r = opaque;
    r->status = kb_http_servers_health_unregister(blocking_handler, (void *)0x5678);
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
+static void *action_route_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   char out[256];
+   set_actor();
+   r->status = route_body("POST", "/v1/servers/server-a/actions", "team=1",
+                          "{\"action\":\"agent.enable\",\"agent\":\"a\"}", out, sizeof(out));
+   kb_reqctx_clear();
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
+static void *action_unregister_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   r->status = kb_http_servers_action_unregister(blocking_action_handler, (void *)0x8765);
    atomic_store(&r->done, 1);
    return NULL;
 }
@@ -204,11 +292,37 @@ static void test_unregister_waits_for_borrow(void)
    assert(kb_http_servers_health_unregister(handler, (void *)0x1234) == 0);
 }
 
+static void test_action_unregister_waits_for_borrow(void)
+{
+   pthread_t request_tid, unregister_tid;
+   thread_result_t request = {0}, unreg = {0};
+   callback_entered = 0;
+   callback_release = 0;
+   assert(kb_http_servers_action_register(blocking_action_handler, (void *)0x8765) == 0);
+   assert(pthread_create(&request_tid, NULL, action_route_thread, &request) == 0);
+   pthread_mutex_lock(&block_mu);
+   while (!callback_entered)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_create(&unregister_tid, NULL, action_unregister_thread, &unreg) == 0);
+   usleep(20000);
+   assert(!atomic_load(&unreg.done));
+   pthread_mutex_lock(&block_mu);
+   callback_release = 1;
+   pthread_cond_broadcast(&block_cv);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_join(request_tid, NULL) == 0);
+   assert(pthread_join(unregister_tid, NULL) == 0);
+   assert(request.status == 200 && unreg.status == 0);
+}
+
 int main(void)
 {
    test_route_mapping();
    test_rejections_and_list_isolation();
+   test_action_route();
    test_unregister_waits_for_borrow();
+   test_action_unregister_waits_for_borrow();
    kb_reqctx_clear();
    puts("kb_http_servers_health: all tests passed");
    return 0;

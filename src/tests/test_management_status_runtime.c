@@ -283,6 +283,9 @@ int main(void)
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
               target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
    assert(g_bind_mask == 0x1fu && generation == 9 && strlen(target_fp) == 64);
+   assert(db2_management_status_runtime_lookup(
+              &runtime, "issuer", "01", caller_fp, "server-1", "management.action.v1", &generation,
+              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
 
    g_lookup_denied = 1;
    assert(db2_management_status_runtime_lookup(
