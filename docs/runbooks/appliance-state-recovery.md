@@ -1,14 +1,20 @@
-# Runbook: SmoothNAS/tierd appliance state recovery
+# Prerequisites and Safety Checks — SmoothNAS/tierd appliance state recovery
 
-This runbook restores the two pieces of live state a SmoothNAS/tierd
-appliance running the `aimee-server` plugin can lose on its tier-bound
-volumes: the agent config (`$AIMEE_HOME/agents.json`) and a workspace
-repo's git metadata (`.../workspaces/<user>/<repo>/.git`).
+This document is the **§1 Prerequisites and Safety Checks** section of the
+SmoothNAS/tierd appliance state recovery runbook. It is published as a
+standalone file so the prerequisites can be reviewed, signed off, and
+referenced under incident pressure without dragging the full runbook into
+the operator's working set. The failure-mode-specific recovery steps
+(restoring a lost or absent `$AIMEE_HOME/agents.json`, and replacing a
+corrupt or lost workspace repo `.git/`) live in the runbook proper and
+must be executed from there once every check in this section has passed.
 
-Every state-changing step in this runbook is preceded by the prerequisites
-below. Do not skip them; under incident pressure, the wrong appliance,
-tier, repository, branch, or filesystem identity is exactly how a
-recovery becomes data loss.
+State-changing recovery or replacement steps can target the wrong
+appliance, tier, repository, branch, or filesystem identity if the
+prerequisites below are not verified first. The checks in this section
+exist to reduce the risk of data loss, permission drift, invalid
+restoration, failed same-volume replacement, and secret exposure. Do not
+skip them.
 
 ## 1. Prerequisites and Safety Checks
 
@@ -70,16 +76,25 @@ intervention.
 
 ### 1.4 Run all commands as the owner of the files
 
-Every command in this runbook that reads, replaces, or otherwise
+Every command in the recovery runbook that reads, replaces, or otherwise
 touches state under `$AIMEE_HOME` or a workspace repo must run as the
 account that **owns those files**. Running as root, as another service
 account, or as the operator's personal user will silently change
 ownership or permissions on the restored files and break the appliance
 on next restart.
 
-- Confirm your shell's effective UID/GID matches the owner of
-  `$AIMEE_HOME/agents.json`, any `agents.json.bak-*` candidates, and
-  the workspace repo's `.git/`.
+The owner check applies to the **required-surviving** paths the recovery
+expects to find in place: the parent directory of `$AIMEE_HOME/agents.json`,
+`$AIMEE_HOME/.vault/`, every `agents.json.bak-*` candidate, and the
+parent directory of the workspace repo's `.git/`. The recovery target
+itself — `$AIMEE_HOME/agents.json` when it is being restored, and the
+workspace repo's `.git/` when it is being replaced — may be absent by
+definition; capture its owning identity from the surviving parent and
+the candidate backups instead of treating its absence as a permission
+problem.
+
+- Confirm your shell's effective UID/GID matches the owner of every
+  required-surviving path listed above.
 - If they differ, switch to the owning account (e.g. `sudo -u <owner>`
   or the equivalent on this tier) before any further command. Do not
   `chown` the files as a shortcut — that is itself a state change.
@@ -94,20 +109,34 @@ Before any replacement or restoration, snapshot the current ownership
 and permissions of every file or directory that will be touched. This
 snapshot is the rollback target if the recovery must be reverted.
 
-- Record owner, group, and mode for `$AIMEE_HOME/agents.json` (if
-  present), every `agents.json.bak-*` candidate, the parent directory
-  of `$AIMEE_HOME/agents.json`, and the workspace repo's `.git/` and
-  its parent.
+The snapshot is partitioned into **required-surviving paths** (which
+must be inspectable now, on pain of stopping) and **expected-missing
+recovery targets** (whose absence is the reason the recovery is being
+run and must be recorded explicitly, with the baseline captured from
+the surviving parent and any candidate backups):
+
+- **Required-surviving — must be inspectable:**
+  - The parent directory of `$AIMEE_HOME/agents.json`.
+  - `$AIMEE_HOME/.vault/` and its contents.
+  - Every `agents.json.bak-*` candidate and its parent directory.
+  - The parent directory of the workspace repo's `.git/`.
+- **Expected-missing recovery targets — record the absence, capture
+  the baseline from the survivor:**
+  - `$AIMEE_HOME/agents.json` (if absent, restore baseline from its
+    parent directory and the matching `agents.json.bak-*` candidate).
+  - The workspace repo's `.git/` (if absent or corrupt, capture the
+    owning UID/GID and mode from the parent workspace repo directory).
 - Use a non-mutating form (`stat`, `ls -ln`, `getfacl`) so the
   inspection itself does not update mtimes or atimes that downstream
   steps rely on.
 - Store the snapshot alongside the incident notes; do not edit it
   during the recovery.
 
-If any of these paths cannot be inspected (missing, permission denied,
-on a non-tier mount), **stop immediately** and resolve access. You
-cannot restore ownership and permissions after the fact if you did not
-record them first.
+If any **required-surviving** path cannot be inspected (missing,
+permission denied, on a non-tier mount), **stop immediately** and
+resolve access. You cannot restore ownership and permissions after the
+fact if you did not record them first. A missing or corrupt recovery
+target is recorded, not a stop condition.
 
 ### 1.6 Abort conditions — stop immediately if any of these are true
 
@@ -156,12 +185,12 @@ structure.
   are not retained in `~/.bash_history`.
 
 Treat any secret that does appear in output as compromised: rotate it
-following `docs/runbooks/vault-master-key-rotation.md` rather than
-attempting to scrub the output.
+following [`docs/runbooks/vault-master-key-rotation.md`](vault-master-key-rotation.md)
+rather than attempting to scrub the output.
 
 ---
 
-Once every check in §1 has passed and recorded, proceed to the
-failure-mode-specific recovery steps (§2 covers lost/absent
-`agents.json` and stale-but-present `agents.json`; §3 covers a corrupt
-or lost workspace repo git directory).
+Once every check in §1 has passed and recorded, return to the recovery
+runbook proper and proceed to the failure-mode-specific steps there
+(restoring a lost or absent `$AIMEE_HOME/agents.json`, or replacing a
+corrupt or lost workspace repo `.git/`).
