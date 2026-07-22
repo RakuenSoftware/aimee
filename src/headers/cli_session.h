@@ -145,6 +145,13 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
  * Caller must free returned string. */
 char *cli_session_make_name(const char *agent_name, const char *role);
 
+/* Resolve the tmux execution name and reuse policy from the runtime identity.
+ * Delegations are always isolated, even when they run outside a bound web
+ * session; primary turns may reuse only their explicitly scoped pane. */
+char *cli_session_make_execution_name(const char *agent_name, int configured_reuse,
+                                      const char *session_id, int session_override,
+                                      const char *delegation_id, int *reuse_out);
+
 /* --- Parser --- */
 /* Extract plain text response from raw CLI terminal capture.
  * Strips ANSI escapes and leading/trailing whitespace.
