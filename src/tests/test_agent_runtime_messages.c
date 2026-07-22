@@ -156,6 +156,26 @@ static void test_required_evidence_runtime_policy(void)
    assert(agent_required_evidence_budget_exhausted(1, 0, 3) == 1);
    assert(agent_required_evidence_budget_exhausted(1, 1, 99) == 0);
    assert(agent_required_evidence_budget_exhausted(0, 0, 99) == 0);
+
+   assert(agent_required_evidence_needs_fallback(1, 0, 1, 1, 0) == 1);
+   assert(agent_required_evidence_needs_fallback(1, 1, 1, 1, 0) == 0);
+   assert(agent_required_evidence_needs_fallback(1, 0, 0, 1, 0) == 0);
+   assert(agent_required_evidence_needs_fallback(1, 0, 1, 0, 0) == 0);
+   assert(agent_required_evidence_needs_fallback(1, 0, 1, 1, 1) == 0);
+}
+
+static void test_repository_evidence_message(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   agent_session_append_repository_evidence(messages, "list_files", "{\"path\":\".\"}",
+                                            "README.md\nsrc");
+   assert(cJSON_GetArraySize(messages) == 1);
+   assert(strstr(last_content(messages), "AIMEE REPOSITORY EVIDENCE FALLBACK") != NULL);
+   assert(strstr(last_content(messages), "tool=list_files") != NULL);
+   assert(strstr(last_content(messages), "README.md") != NULL);
+   assert(strstr(last_content(messages), "untrusted tool output") != NULL);
+   assert(strstr(last_content(messages), "non-recursive, bounded, and may be incomplete") != NULL);
+   cJSON_Delete(messages);
 }
 
 static void test_null_safe(void)
@@ -165,6 +185,7 @@ static void test_null_safe(void)
    agent_session_append_final_retry_instruction(NULL, "tool call");
    agent_session_append_degenerate_retry_instruction(NULL);
    agent_session_append_required_evidence_instruction(NULL);
+   agent_session_append_repository_evidence(NULL, "list_files", "{}", "result");
 }
 
 int main(void)
@@ -176,6 +197,7 @@ int main(void)
    test_degenerate_retry_budget();
    test_required_evidence_retry_budget();
    test_required_evidence_runtime_policy();
+   test_repository_evidence_message();
    test_null_safe();
    printf("test_agent_runtime_messages: ok\n");
    return 0;
