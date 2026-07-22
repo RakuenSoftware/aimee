@@ -82,15 +82,34 @@ stores produce the same canonical row hashes, but remain independently enabled, 
 
 ## Tests and failure behavior
 
-`test_audit_action.c`, `test_audit_action_log.c`, `test_audit_ledger.c`, `test_audit_worm.c`,
-`test_audit_worm_chain.c`, `test_kb_audit_worm.c`, and vault/management audit suites cover bounded
-evidence, reads, chains, checkpoints, mutation rejection, and store consumers. Current governed-action
-emission is best-effort: hashing writes a stable sentinel on failure, and WORM loss does not block the
-action while legacy logging is authoritative.
+The descriptor owns the four tests that directly exercise audit module implementations. Similarly
+named tests remain with their actual subsystem or integration boundary; a filename containing
+`audit` is not ownership evidence.
 
-The descriptor records an explicit empty test list as deferred cross-boundary ownership, tracked by
-issue #1753 across server, KB, vault, management, and storage integration tests; it does not imply
-that audit lacks live test coverage.
+| Test | Boundary exercised | Audit ownership |
+| --- | --- | --- |
+| `test_audit_action.c` | `audit_args_hash`, key provisioning, HMAC vectors, and bounded command previews from `audit_action.c` | Owned |
+| `test_audit_ledger.c` | `audit_ledger_read` parsing, ordering, rotation, filtering, and malformed-input handling from `audit_ledger.c` | Owned |
+| `test_audit_worm.c` | SQLite append/read, mutation rejection, checkpoints, sealing, paging, and verification from `audit_worm.c`; consumes the shared chain | Owned |
+| `test_audit_worm_chain.c` | Engine-independent row serialization, hashing, hex encoding, and checkpoint MAC invariants from `audit_worm_chain.c` | Owned |
+| `test_audit_action_log.c` | The core `log.c` JSON-line writer and `audit_action_log` API | Not assigned; no audit module implementation is under test |
+| `test_code_audit.c` | The independent CLI code-audit feature | Not assigned; code-health analysis is not the audit evidence module |
+| `test_code_audit_graph.c` | The independent code-audit graph algorithms | Not assigned; code-health analysis is not the audit evidence module |
+| `test_db2_code_audit.c` | DB2 code-audit assembly and PostgreSQL query shims | Not assigned; this is a DB2 code-intelligence test |
+| `test_harness_memory_audit.c` | Memory-interception JSONL logging through `hmem_audit` | Not assigned; this is a memory harness test |
+| `test_kb_audit_worm.c` | The KB PostgreSQL store and artifact capture seam, using the shared chain contract | Not assigned; this is a mixed KB/store integration test |
+| `test_kb_audit_worm_pg.c` | SQL and C append parity against a real PostgreSQL KB store | Not assigned; this is a mixed KB/PostgreSQL integration test |
+| `test_token_audit.c` | DB1 token accounting and agent ingress attribution | Not assigned; this is a DB1/agent-accounting test |
+| `test_token_audit_load.c` | Concurrent DB1 token writes and asynchronous ingress recording | Not assigned; this is a DB1/agent-ingress load test |
+| `test_vault_audit.c` | Vault-to-server audit emission through the core log | Not assigned; this is a vault/server/log integration test |
+
+The direct tests deliberately separate the shared chain primitive from the SQLite store that consumes
+it. That is complementary coverage, not duplicate ownership. The CMake suite registers the action and
+ledger tests; the Make unit-test suite registers the WORM store and chain tests. Issue #1753 records the
+evidence used to resolve this classification.
+
+Current governed-action emission is best-effort: hashing writes a stable sentinel on failure, and WORM
+loss does not block the action while legacy logging is authoritative.
 
 ## Operational diagnostics
 

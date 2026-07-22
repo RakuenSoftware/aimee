@@ -312,6 +312,23 @@
       "blast_radius": "Production changes are physical header moves plus include substitutions; public names, prototypes, source inputs, target visibility, storage behavior, and runtime behavior remain unchanged.",
       "independent_review": "Aimee technical-writing review was satisfied on 2026-07-22 with its wording corrections applied; exact-final-diff roundtable review remains required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-23.md", "docs/modules/audit.md", "src/modules/audit/module.yaml", "scripts/check_module_header_layout.py", "scripts/tests/test_check_module_header_layout.py"]
+    },
+    {
+      "slice": 24,
+      "state": "present_and_verified",
+      "disposition": "Assigned audit's four direct unit tests to the audit descriptor and documented every audit-named test without dual-claiming cross-boundary integrations.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["Make and CMake retain separate test registrations until descriptor-driven generation", "KB, vault, log, DB1, DB2, code-audit, and memory-harness integration tests remain outside audit ownership"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata and documentation only, not shipped production code or test behavior.",
+        "rejected_simpler_alternative": "Assigning tests by filename would falsely dual-claim mixed integration tests; leaving all tests unclaimed would hide four direct module contracts.",
+        "revisit": "Reassign a mixed integration test only after its production boundary has one canonical owner or a reproduced maintenance defect justifies splitting the test."
+      },
+      "consumers": ["audit maintainers", "descriptor validation CI", "future generated test projections"],
+      "blast_radius": "Only the audit descriptor, audit documentation, validation record, and cleanup ledger change; production sources, public headers, test sources, build registrations, storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writer job 7234 approved the artifact without edits; exact-final-diff roundtable review remains required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-24.md", "docs/modules/audit.md", "src/modules/audit/module.yaml"]
     }
   ]
 }
