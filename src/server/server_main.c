@@ -23,7 +23,7 @@
 #include "events.h"
 #include "agent_exec.h"
 #include "log.h"
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 #include "platform_path.h"
 #include "platform_process.h"
 #include "shutdown_forensics.h"

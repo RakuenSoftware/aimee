@@ -1,7 +1,7 @@
 #include "kb_vault_key_use.h"
 #include "kb_vault_policy.h"
 #include "vault_server_key.h"
-#include "audit_worm.h"
+#include <aimee/audit/audit_worm.h>
 #include "vault_crypto.h"
 #include <stdint.h>
 #include <stdio.h>

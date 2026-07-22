@@ -32,7 +32,7 @@
 
 #include <stddef.h>
 
-#include "audit_worm_chain.h" /* AUDIT_WORM_DOMAIN/GENESIS_PREV/DETAIL_MAX + shared chain fns */
+#include <aimee/audit/audit_worm_chain.h> /* AUDIT_WORM_DOMAIN/GENESIS_PREV/DETAIL_MAX + shared chain fns */
 
 #ifdef __cplusplus
 extern "C"

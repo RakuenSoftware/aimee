@@ -295,6 +295,23 @@
       "blast_radius": "Only plugin-loader ownership metadata and its explanatory documentation change; enabled and default-off profile CI continue to prove liveness and physical omission.",
       "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-22.md", "docs/modules/plugin-loader.md", "src/modules/plugin-loader/module.yaml"]
+    },
+    {
+      "slice": 23,
+      "state": "present_and_verified",
+      "disposition": "Moved audit's four public contracts to the canonical include tree, converted all consumers and build roots, declared implementation/header/document ownership, and added a descriptor-derived guard against flat-header and include-root regression.",
+      "production": {"added": [], "deleted": [], "consolidated": ["four flat audit public-header locations replaced by one canonical include namespace"]},
+      "fallbacks": ["audit test ownership is explicitly empty pending issue #1753", "Make and CMake remain authoritative build-input lists until descriptor-driven generation", "server SQLite and KB PostgreSQL WORM stores remain independently owned across the shared chain contract"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "One small descriptor-derived checker and mutation suite prevent retired public-header paths, basename includes, and source-root build exposure from returning for this and future canonicalized modules.",
+        "rejected_simpler_alternative": "Audit-specific checks in the source-move validator would mix migration residue with implementation ownership and require another registry for each module.",
+        "revisit": "Issue #1753 must resolve audit test ownership within the next two module re-rooting slices; descriptor-driven build projection later replaces duplicate Make and CMake inventories."
+      },
+      "consumers": ["audit consumers", "descriptor validation CI", "future public-header re-rooting slices"],
+      "blast_radius": "Production changes are physical header moves plus include substitutions; public names, prototypes, source inputs, target visibility, storage behavior, and runtime behavior remain unchanged.",
+      "independent_review": "Aimee technical-writing review was satisfied on 2026-07-22 with its wording corrections applied; exact-final-diff roundtable review remains required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-23.md", "docs/modules/audit.md", "src/modules/audit/module.yaml", "scripts/check_module_header_layout.py", "scripts/tests/test_check_module_header_layout.py"]
     }
   ]
 }
