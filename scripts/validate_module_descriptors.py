@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import sys
 import unicodedata
@@ -22,7 +24,14 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
+OWNERSHIP_FIELDS = ("sources", "public_headers", "tests", "docs")
 DEFAULT_ON = {"runtime-web", "control-web"}
+ROLE_EXTENSIONS = {
+    "sources": {".c", ".cpp", ".S", ".s"},
+    "public_headers": {".h", ".hpp"},
+    "tests": {".c", ".cpp", ".py", ".sh"},
+    "docs": {".md"},
+}
 
 
 class DescriptorError(ValueError):
@@ -147,6 +156,14 @@ def schema() -> dict[str, object]:
                 "required": ["supported"],
                 "properties": {"supported": {"type": "boolean"}},
             },
+            **{
+                field: {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                }
+                for field in OWNERSHIP_FIELDS
+            },
         },
     }
 
@@ -171,12 +188,13 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     identifier = module_id(raw_id, "/id")
     if identifier not in required | optional:
         fail("module-unknown", f"unknown module ID {identifier!r}", "/id")
-    expected_keys = BASE_KEYS | ({"enabled_by_default"} if identifier in optional else set())
-    if set(value) != expected_keys:
+    required_keys = BASE_KEYS | ({"enabled_by_default"} if identifier in optional else set())
+    allowed_keys = required_keys | set(OWNERSHIP_FIELDS)
+    if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",
-            f"keys mismatch; missing={sorted(expected_keys-set(value))}, "
-            f"unknown={sorted(set(value)-expected_keys)}",
+            f"keys mismatch; missing={sorted(required_keys-set(value))}, "
+            f"unknown={sorted(set(value)-allowed_keys)}",
         )
     if type(value["descriptor_version"]) is not int or value["descriptor_version"] != VERSION:
         fail(
@@ -231,6 +249,131 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     return identifier
 
 
+def _contained(path: Path, boundary: Path) -> bool:
+    try:
+        path.relative_to(boundary)
+    except ValueError:
+        return False
+    return True
+
+
+def _resolve_owned(path: Path, pointer: str) -> Path:
+    """Resolve an ownership path while keeping symlink-loop diagnostics stable."""
+    try:
+        return path.resolve()
+    except RuntimeError as exc:
+        fail("ownership-file", f"cannot resolve ownership path: {exc}", pointer)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            fail("ownership-file", f"cannot resolve ownership path: {exc}", pointer)
+        if exc.errno == errno.ENAMETOOLONG:
+            fail("ownership-path-normalized", f"ownership path is too long: {exc}", pointer)
+        raise
+
+
+def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
+                        pointer: str) -> dict[str, str]:
+    """Validate one declared ownership path through the shared role table."""
+    if not isinstance(raw, str):
+        fail("ownership-path-type", "ownership path must be a string", pointer)
+    if not raw or "\\" in raw or raw.endswith("/"):
+        fail("ownership-path-normalized", f"path is not normalized: {raw!r}", pointer)
+    pure = PurePosixPath(raw)
+    if pure.is_absolute() or "." in pure.parts or ".." in pure.parts or pure.as_posix() != raw:
+        fail("ownership-path-normalized", f"path is not repository-relative: {raw!r}", pointer)
+
+    role_prefixes = {
+        "sources": PurePosixPath("src/modules") / identifier,
+        "public_headers": PurePosixPath("src/modules") / identifier / "include/aimee" / identifier,
+        "tests": PurePosixPath("src/tests"),
+        "docs": PurePosixPath("docs/modules"),
+    }
+    prefix = role_prefixes[field]
+    try:
+        pure.relative_to(prefix)
+    except ValueError:
+        fail("ownership-role-boundary", f"{field} path is outside {prefix}: {raw}", pointer)
+
+    resolved_repo = repo.resolve()
+    lexical = resolved_repo.joinpath(*pure.parts)
+    resolved = _resolve_owned(lexical, pointer)
+    if not _contained(resolved, resolved_repo):
+        fail("ownership-path-escape", f"path escapes repository: {raw}", pointer)
+    if resolved != lexical:
+        fail("ownership-path-symlink", f"ownership path must not traverse a symlink: {raw}", pointer)
+
+    module_root = _resolve_owned(resolved_repo / "src/modules" / identifier, pointer)
+    boundaries = {
+        "sources": module_root,
+        "public_headers": _resolve_owned(module_root / "include/aimee" / identifier, pointer),
+        "tests": _resolve_owned(resolved_repo / "src/tests", pointer),
+        "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
+    }
+    boundary = boundaries[field]
+    if not _contained(resolved, boundary):
+        fail("ownership-role-boundary", f"{field} path is outside {boundary}: {raw}", pointer)
+    if field == "tests" and not PurePosixPath(raw).name.startswith("test_"):
+        fail("ownership-role", f"test path must use the test_ convention: {raw}", pointer)
+    if field == "docs" and raw != f"docs/modules/{identifier}.md":
+        fail("ownership-doc-canonical", f"expected docs/modules/{identifier}.md, actual {raw}",
+             pointer)
+    if PurePosixPath(raw).suffix not in ROLE_EXTENSIONS[field]:
+        fail("ownership-role", f"extension does not match {field}: {raw}", pointer)
+    if not resolved.is_file():
+        fail("ownership-file", f"path is not an existing regular file: {raw}", pointer)
+    return {"path": raw, "result": "PASS"}
+
+
+def validate_ownership(
+    repo: Path,
+    identifier: str,
+    value: dict[str, object],
+    cross_claims: dict[str, tuple[str, str, str]] | None = None,
+) -> dict[str, object]:
+    """Validate all optional roles without reordering their declared entries."""
+    for field in OWNERSHIP_FIELDS:
+        if field not in ROLE_EXTENSIONS:
+            fail("ownership-role-undefined", f"no role policy exists for {field}", f"/{field}")
+    report: dict[str, object] = {
+        "id": identifier,
+        "module_root": f"src/modules/{identifier}",
+        "ownership": {},
+        "result": "PASS",
+    }
+    ownership = report["ownership"]
+    assert isinstance(ownership, dict)
+    claimed: dict[str, str] = {}
+    for field in OWNERSHIP_FIELDS:
+        raw_entries = value.get(field, [])
+        if not isinstance(raw_entries, list):
+            fail("ownership-field-type", f"{field} must be an array", f"/{field}")
+        seen: set[str] = set()
+        entries: list[dict[str, str]] = []
+        for index, raw in enumerate(raw_entries):
+            pointer = f"/{field}/{index}"
+            if not isinstance(raw, str):
+                fail("ownership-path-type", "ownership path must be a string", pointer)
+            if raw in seen:
+                fail("ownership-duplicate", f"duplicate {field} path: {raw}", pointer)
+            if raw in claimed:
+                fail("ownership-cross-role", f"{raw} is already declared in {claimed[raw]}",
+                     pointer)
+            if cross_claims is not None and raw in cross_claims:
+                prior_id, prior_field, prior_pointer = cross_claims[raw]
+                fail(
+                    "ownership-cross-descriptor",
+                    f"{raw} is already declared by {prior_id} {prior_field} at {prior_pointer}",
+                    pointer,
+                )
+            seen.add(raw)
+            claimed[raw] = field
+            entries.append(validate_owned_path(repo, identifier, field, raw, pointer))
+            if cross_claims is not None:
+                cross_claims[raw] = (identifier, field, pointer)
+        ownership[field] = entries
+    return report
+
+
 def discover(root: Path) -> list[Path]:
     if not root.is_dir():
         fail("root", f"descriptor root is not a directory: {root}")
@@ -276,13 +419,15 @@ def validate_graph(descriptors: dict[str, tuple[Path, list[str]]],
             visit(identifier)
 
 
-def validate_roots(repo: Path, roots: list[Path]) -> int:
+def validate_roots(repo: Path, roots: list[Path],
+                   ownership_reports: list[dict[str, object]] | None = None) -> int:
     required, optional = load_inventory(repo)
     production_root = (repo / "src/modules").resolve()
     unresolved_roots = [root if root.is_absolute() else repo / root for root in roots]
     resolved_roots = [root.resolve() for root in unresolved_roots]
     seen: dict[str, Path] = {}
     graph: dict[str, tuple[Path, list[str]]] = {}
+    cross_claims: dict[str, tuple[str, str, str]] = {}
     count = 0
     for root, resolved in zip(roots, resolved_roots, strict=True):
         files = discover(resolved)
@@ -301,6 +446,9 @@ def validate_roots(repo: Path, roots: list[Path]) -> int:
                 )
             seen[identifier] = path
             graph[identifier] = (path, list(value["dependencies"]))
+            ownership = validate_ownership(repo, identifier, value, cross_claims)
+            if ownership_reports is not None:
+                ownership_reports.append(ownership)
             count += 1
     if resolved_roots == [production_root]:
         expected = required | optional
@@ -336,26 +484,40 @@ def validate_roots(repo: Path, roots: list[Path]) -> int:
     return count
 
 
+def ownership_report(repo: Path, roots: list[Path]) -> dict[str, object]:
+    reports: list[dict[str, object]] = []
+    validate_roots(repo, roots, reports)
+    reports.sort(key=lambda report: str(report["id"]))
+    return {"schema_version": 1, "descriptors": reports, "result": "PASS"}
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("roots", nargs="*", type=Path)
     parser.add_argument("--config-root", type=Path)
     parser.add_argument("--check-schema", action="store_true")
     parser.add_argument("--emit-schema", action="store_true")
+    parser.add_argument("--emit-ownership", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    if args.emit_schema:
-        sys.stdout.buffer.write(schema_bytes())
-        return 0
-    repo = Path(os.path.realpath(args.config_root or REPO_ROOT))
     try:
+        if args.emit_schema and args.emit_ownership:
+            fail("cli-flag-conflict", "--emit-schema and --emit-ownership are mutually exclusive",
+                 "/args")
+        if args.emit_schema:
+            sys.stdout.buffer.write(schema_bytes())
+            return 0
+        repo = Path(os.path.realpath(args.config_root or REPO_ROOT))
         if args.check_schema:
             check_schema(repo)
         if not args.roots:
             fail("root", "at least one descriptor root is required")
+        if args.emit_ownership:
+            print(json.dumps(ownership_report(repo, args.roots), indent=2, ensure_ascii=False))
+            return 0
         count = validate_roots(repo, args.roots)
     except (DescriptorError, OSError, UnicodeError, ValueError) as exc:
         print(f"validate_module_descriptors: error: {exc}", file=sys.stderr)

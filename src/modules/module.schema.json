@@ -15,12 +15,26 @@
     "descriptor_version": {
       "const": 1
     },
+    "docs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "enabled_by_default": {
       "type": "boolean"
     },
     "id": {
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
       "type": "string"
+    },
+    "public_headers": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
     },
     "runtime_toggle": {
       "additionalProperties": false,
@@ -33,6 +47,20 @@
         "supported"
       ],
       "type": "object"
+    },
+    "sources": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "tests": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
     }
   },
   "required": [
