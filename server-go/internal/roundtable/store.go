@@ -10,6 +10,7 @@ import (
 )
 
 const DirectMaxSeats = 2
+const DefaultDeadlineMS = 360000
 
 type Agent struct {
 	Name        string
@@ -27,6 +28,8 @@ type Panel struct {
 	Name          string
 	Seats         []Seat
 	MinSuccessful int
+	Discussion    bool
+	DeadlineMS    int
 	Acquired      bool
 }
 
@@ -39,6 +42,8 @@ type preset struct {
 	Name          string       `json:"name"`
 	Seats         []presetSeat `json:"seats"`
 	MinSuccessful int          `json:"min_successful"`
+	Discussion    bool         `json:"discussion"`
+	DeadlineMS    int          `json:"deadline_ms"`
 }
 
 type DefaultSource func() (string, error)
@@ -140,7 +145,11 @@ func resolvePreset(p preset, agents []Agent, lenses []string, pins map[string]st
 	if minimum > len(seats) {
 		return Panel{}, fmt.Errorf("roundtable %q min_successful %d exceeds its %d seats", p.Name, minimum, len(seats))
 	}
-	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Acquired: true}, nil
+	deadline := p.DeadlineMS
+	if deadline <= 0 {
+		deadline = DefaultDeadlineMS
+	}
+	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Discussion: p.Discussion, DeadlineMS: deadline, Acquired: true}, nil
 }
 
 func directPanel(agents []Agent, lenses []string, pins map[string]string) (Panel, error) {

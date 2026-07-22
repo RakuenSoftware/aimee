@@ -119,6 +119,16 @@ Panel entries are **persona** names, see [Personas](personas.md). Each configure
 seat performs one independent analysis in parallel. The gate passes when the
 roundtable's configured minimum succeeds with no blocking finding.
 
+If Discussion mode is enabled on that preset, all successful seats compare the
+independent reports once. Nits, suggestions, and ordinary defects cannot extend
+discussion beyond that cycle. Only disagreement about a foundational issue may
+continue, carrying just the contested stable issue IDs until a strict majority
+forms. Deadline or quorum loss parks the gate instead of inventing consensus.
+Strict majority is measured over successful seats returning a complete valid
+ballot in that cycle; abstentions remain in the denominator but do not alone
+extend discussion. The preset's `deadline_ms` covers analysis and discussion
+together, with zero/omitted legacy values normalized to 360 seconds.
+
 **Which models review the artifact** comes from the acquired roundtable preset.
 The preset the GUI edits and `roundtable.default` selects is used unless the gate
 names another preset. Its exact seats are the complete panel; required personas

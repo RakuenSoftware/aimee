@@ -283,9 +283,24 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
    cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
-   if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_tls_port,
-                         cfg.server_api_bearer_token, cfg.server_api_rate_limit_per_min,
-                         cfg.server_api_remote_writes) != 0)
+   int http_start = server_http_start(
+       NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,
+       cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes);
+   if (http_start == SERVER_HTTP_START_MGMT_FATAL)
+   {
+      char management_error[256];
+      snprintf(management_error, sizeof(management_error),
+               "error: dedicated management listener failed at %s\n",
+               server_http_management_last_error());
+      startup_notify(notify_fd, management_error);
+      server_http_stop();
+      server_shutdown(&g_ctx);
+      agent_http_cleanup();
+      mcp_client_registry_shutdown();
+      audit_log_close();
+      return 1;
+   }
+   if (http_start != 0)
       LOG_WARN("server.http", "failed to start inbound /v1 HTTP listener");
 
    /* Install signal handlers */
