@@ -194,11 +194,16 @@ aimee_verify_core_dump_strict() {
 }
 
 aimee_verify_core_dump() {
-    [ "${AIMEE_CORE_SELFTEST:-0}" = 1 ] || return 0
+    _required=${AIMEE_REQUIRE_PERSISTENT_CORES:-0}
+    # Required mode owns the guarantee and cannot be weakened by independently
+    # disabling the optional-mode diagnostic switch.
+    if [ "$_required" != 1 ] && [ "${AIMEE_CORE_SELFTEST:-0}" != 1 ]; then
+        return 0
+    fi
     if aimee_verify_core_dump_strict; then
         return 0
     fi
-    if [ "${AIMEE_REQUIRE_PERSISTENT_CORES:-0}" = 1 ]; then
+    if [ "$_required" = 1 ]; then
         printf '[server-entrypoint] fatal: persistent core self-test failed\n' >&2
         return 1
     fi

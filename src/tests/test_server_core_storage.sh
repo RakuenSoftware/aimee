@@ -34,6 +34,11 @@ if AIMEE_CORE_DIR="$tmp/missing" AIMEE_CORE_SELFTEST=1 \
     echo "core-storage: required self-test failure did not fail closed" >&2
     exit 1
 fi
+if AIMEE_CORE_DIR="$tmp/missing" AIMEE_REQUIRE_PERSISTENT_CORES=1 \
+    AIMEE_CORE_SELFTEST=0 aimee_verify_core_dump 2>/dev/null; then
+    echo "core-storage: required mode allowed the self-test to be disabled" >&2
+    exit 1
+fi
 
 printf '%s/core.%%e.%%p\n' "$core_dir" > "$pattern_file"
 AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
