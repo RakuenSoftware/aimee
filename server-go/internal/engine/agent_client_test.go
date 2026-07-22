@@ -391,7 +391,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			cancellations.Add(1)
 			return true, nil
 		}})
@@ -442,7 +442,7 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(_ context.Context, jobID int, reason string) (bool, error) {
+		CancelUnassigned: func(_ context.Context, jobID int, reason string, _ time.Duration) (bool, error) {
 			cancellations.Add(1)
 			cancelledJobID.Store(int64(jobID))
 			cancelReasonMu.Lock()
@@ -503,7 +503,7 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			cancellations.Add(1)
 			return true, nil
 		}})
@@ -544,7 +544,7 @@ func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: MinDelegatePendingTimeout,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			cancellations.Add(1)
 			return true, nil
 		}})
@@ -631,7 +631,7 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
 		PollEvery: time.Millisecond, PendingTimeout: 20 * time.Millisecond,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			cancellations.Add(1)
 			return true, nil
 		}})
@@ -666,7 +666,7 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 	}))
 	defer server.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			return false, errors.New("agent job database unavailable")
 		}})
 	if err != nil {
@@ -692,7 +692,7 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.
 	defer store.Close()
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1",
 		Store: store,
-		CancelUnassigned: func(context.Context, int, string) (bool, error) {
+		CancelUnassigned: func(context.Context, int, string, time.Duration) (bool, error) {
 			return false, nil
 		}})
 	if err != nil {

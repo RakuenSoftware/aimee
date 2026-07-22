@@ -85,7 +85,7 @@ type AgentHTTPConfig struct {
 	RequestTimeout       time.Duration
 	PendingTimeout       time.Duration
 	PendingTimeoutSource func() time.Duration
-	CancelUnassigned     func(context.Context, int, string) (bool, error)
+	CancelUnassigned     func(context.Context, int, string, time.Duration) (bool, error)
 	Store                *db1.Store
 }
 
@@ -108,7 +108,7 @@ type HTTPAgentClient struct {
 	client           *http.Client
 	pollEvery        time.Duration
 	pendingTimeout   func() time.Duration
-	cancelUnassigned func(context.Context, int, string) (bool, error)
+	cancelUnassigned func(context.Context, int, string, time.Duration) (bool, error)
 	store            *db1.Store
 }
 
@@ -310,7 +310,7 @@ func isTerminalDelegateStatus(status string) bool {
 func (c *HTTPAgentClient) expireUnassigned(jobID int, key string, since time.Time) error {
 	if c.cancelUnassigned != nil {
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cancelled, err := c.cancelUnassigned(cancelCtx, jobID, "unassigned delegate lease expired")
+		cancelled, err := c.cancelUnassigned(cancelCtx, jobID, "unassigned delegate lease expired", c.delegatePendingTimeout())
 		cancel()
 		if err != nil {
 			return errors.Join(ErrDelegateUnassignedExpired, fmt.Errorf("cancel expired delegate job %d: %w", jobID, err))
