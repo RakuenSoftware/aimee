@@ -1,5 +1,6 @@
 #include "aimee.h"
 #include "agent.h"
+#include "agent_config.h" /* agent_catalog_provider */
 #include "model_registry.h"
 
 size_t agent_exec_context_budget_chars(const agent_t *agent)
@@ -11,7 +12,8 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
     * with no explicit agent cap, fall back to the model registry rather than a
     * hardcoded default (which is now 0 = "unset"). */
    int output_tokens =
-       agent->max_tokens > 0 ? agent->max_tokens : model_max_output(agent->provider, agent->model);
+       agent->max_tokens > 0 ? agent->max_tokens
+                             : model_max_output(agent_catalog_provider(agent), agent->model);
    int prompt_tokens = agent->middleware.context_window - output_tokens;
    if (prompt_tokens <= 0)
       prompt_tokens = agent->middleware.context_window / 2;

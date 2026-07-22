@@ -10,6 +10,7 @@
 #include "log.h"
 #include "model_sampling.h"
 #include "model_registry.h"
+#include "agent_config.h" /* agent_catalog_provider */
 #include "tool_call_args.h"
 #include "cJSON.h"
 #include <string.h>
@@ -123,7 +124,11 @@ int agent_request_max_tokens(const agent_t *agent, int requested)
    if (agent && agent->max_tokens > 0)
       return agent->max_tokens; /* agents.json / --max-tokens pinned a cap */
    /* No explicit cap: use the model's own output ceiling, never a hardcoded one. */
-   return model_max_output(agent ? agent->provider : NULL, agent ? agent->model : NULL);
+   /* Catalog identity, not the wire provider: a third-party vendor on another
+    * vendor's API otherwise resolves the wrong capability row and gets the
+    * non-reasoning 8192 output ceiling instead of its real one. */
+   return model_max_output(agent ? agent_catalog_provider(agent) : NULL,
+                           agent ? agent->model : NULL);
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
