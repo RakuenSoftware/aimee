@@ -95,13 +95,15 @@ int agent_session_retry_final_tool_violation(cJSON *messages, const char *attemp
    return 1;
 }
 
-int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count)
+int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *retry_count,
+                                            int *force_text_only_retry)
 {
-   if (!messages || !turn || !retry_count)
+   if (!messages || !turn || !retry_count || !force_text_only_retry)
       return 0;
    if (*retry_count >= AGENT_DEGENERATE_RESPONSE_RETRY_LIMIT)
       return 0;
    (*retry_count)++;
+   *force_text_only_retry = 1;
    agent_session_append_degenerate_retry_instruction(messages);
    (*turn)++;
    return 1;

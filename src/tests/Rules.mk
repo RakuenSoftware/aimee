@@ -285,6 +285,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tdd \
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-coord-closet \
+               $(TESTPREFIX)/unit-test-economizer-proof \
                $(TESTPREFIX)/unit-test-fold-budget \
                $(TESTPREFIX)/unit-test-context-fold \
                $(TESTPREFIX)/unit-test-fold-register \
@@ -2885,6 +2886,10 @@ $(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compac
 
 $(TESTPREFIX)/unit-test-coord-closet: $(OBJDIR)/tests/test_coord_closet.o $(OBJDIR)/modules/economizer/coord_closet.o \
                                   $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-economizer-proof: $(OBJDIR)/tests/test_economizer_proof.o \
+                                  $(OBJDIR)/modules/economizer/economizer_proof.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-fold-budget: $(OBJDIR)/tests/test_fold_budget.o $(OBJDIR)/modules/economizer/fold_budget.o \

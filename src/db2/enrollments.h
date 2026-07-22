@@ -53,6 +53,12 @@ int db2_enrollment_is_revoked(const char *fingerprint);
  * Returns 1 revoked, 0 active/unknown. */
 int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm);
 
+/* Primary-authoritative per-request status by immutable certificate key.
+ * Returns 1 only for an enrolled active identity, 0 for revoked or unknown,
+ * and -1 when the authority cannot be queried or returns an invalid state.
+ * Keep-alive/pooled request paths must require a return value of exactly 1. */
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm);
+
 /* Resolve the stable egress authority for one exact active certificate instance.
  * Returns 0 and writes 32 hex chars, 1 when not active/enrolled, or -1 on error. */
 int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,

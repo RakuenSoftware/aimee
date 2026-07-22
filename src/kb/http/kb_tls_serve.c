@@ -391,10 +391,10 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
    }
 
-   /* Revocation (mTLS seam): reject a client cert whose enrollment has been
-    * revoked. The DB revoked_at is the source of truth (short-TTL cached); a
-    * live cert also gets a debounced last-seen bump. */
-   int cert_revoked = 0;
+   /* Primary-authoritative mTLS seam: issuer + normalized serial must resolve
+    * to an active enrollment. Unknown, revoked, and authority-error outcomes
+    * all fail closed before routing; active use gets a debounced last-seen bump. */
+   int cert_authority = 0;
    char fp[65] = "", issuer[256] = "", serial[128] = "";
    kb_principal_t transport;
    memset(&transport, 0, sizeof(transport));
@@ -405,8 +405,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
           kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 &&
           kb_principal_from_cert(issuer, serial, cn, &transport) == 0)
       {
-         cert_revoked = db2_enrollment_is_revoked(fp);
-         if (!cert_revoked)
+         cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
+         if (cert_authority == 1)
             db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
       }
    }
@@ -426,11 +426,22 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
       status = 400;
    }
-   /* A revoked client cert is rejected before any route runs. */
-   else if (cert_revoked)
+   /* A revoked/unknown cert or unavailable authority is rejected before any
+    * route runs. Authority failure is retryable but never fail-open. */
+   else if (have_cert && cert_authority != 1)
    {
-      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"client certificate has been revoked\"}");
-      status = 401;
+      if (cert_authority < 0)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"certificate authority temporarily unavailable\"}");
+         status = 503;
+      }
+      else
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"client certificate is unknown or revoked\"}");
+         status = 403;
+      }
    }
    /* A client without a cert yet (still enrolling) may ONLY use bootstrap
     * routes. Everything else requires an identity, so a cert-less peer is 401. */
