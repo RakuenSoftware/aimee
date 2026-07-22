@@ -24,6 +24,16 @@ static int64_t monotonic_ms(void)
    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static int64_t scalar(const char *sql)
+{
+   sqlite3_stmt *stmt = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(), sql, -1, &stmt, NULL) == SQLITE_OK);
+   assert(sqlite3_step(stmt) == SQLITE_ROW);
+   int64_t value = sqlite3_column_int64(stmt, 0);
+   sqlite3_finalize(stmt);
+   return value;
+}
+
 static server_management_jti_t token(const char *jti, int64_t issued_at, int64_t expires_at)
 {
    server_management_jti_t t = {
@@ -83,6 +93,14 @@ int main(void)
    bad = fresh;
    bad.correlation_id = "control\ncharacter";
    assert(server_management_jti_consume(&bad, 192) == SERVER_MANAGEMENT_JTI_INVALID);
+   bad = fresh;
+   bad.capability = "not/a/token";
+   assert(server_management_jti_consume(&bad, 192) == SERVER_MANAGEMENT_JTI_INVALID);
+
+   /* P1 identity keys preserve non-ASCII UTF-8 bytes; DB1 must not narrow that canonical form. */
+   server_management_jti_t unicode = token("unicode.identity1", 200, 290);
+   unicode.subject = "oidc:https%3A//idp.example:jos\303\251";
+   assert(server_management_jti_consume(&unicode, 201) == SERVER_MANAGEMENT_JTI_OK);
 
    /* A failed/ambiguous COMMIT is unavailable. Its row is rolled back and the same shared
     * connection remains usable for a later unambiguous consume. */
@@ -116,6 +134,20 @@ int main(void)
    db1_shutdown();
    assert(db1_init(path) == 0);
    assert(server_management_jti_consume(&missing_schema, 201) == SERVER_MANAGEMENT_JTI_OK);
+
+   /* Even a table inflated outside the typed API performs at most one production-cap batch of
+    * expiry GC per authorization transaction. */
+   static const char inflate[] =
+       "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<4097) "
+       "INSERT INTO server_management_jti "
+       "SELECT printf('expired%010d',x),'issuer','kid','server','owner',1,'cap','peer','01',"
+       "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',"
+       "'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',"
+       "printf('corr%010d',x),1,2,1 FROM n";
+   assert(sqlite3_exec(db1_conn(), inflate, NULL, NULL, NULL) == SQLITE_OK);
+   server_management_jti_t after_burst = token("7123456789abcdef", 5000, 5090);
+   assert(server_management_jti_consume(&after_burst, 5001) == SERVER_MANAGEMENT_JTI_OK);
+   assert(scalar("SELECT count(*) FROM server_management_jti WHERE expires_at<5001") >= 1);
 
    db1_shutdown();
    unlink(path);

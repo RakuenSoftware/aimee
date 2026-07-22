@@ -6,7 +6,10 @@
 #include <sqlite3.h>
 #include <string.h>
 
-static int bounded_ascii(const char *s, size_t min, size_t max, int token)
+#define STRINGIFY_INNER(V) #V
+#define STRINGIFY(V)       STRINGIFY_INNER(V)
+
+static int control_free(const char *s, size_t min, size_t max)
 {
    if (!s)
       return 0;
@@ -16,9 +19,23 @@ static int bounded_ascii(const char *s, size_t min, size_t max, int token)
    for (size_t i = 0; i < n; i++)
    {
       unsigned char c = (unsigned char)s[i];
-      if (c < 0x20 || c > 0x7e || (token && (c == ' ' || c == '\t')))
+      if (c < 0x20 || c == 0x7f)
          return 0;
    }
+   return 1;
+}
+
+static int ascii_token(const char *s, size_t min, size_t max)
+{
+   if (!s)
+      return 0;
+   size_t n = strnlen(s, max + 1);
+   if (n < min || n > max)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+      if (!((s[i] >= 'A' && s[i] <= 'Z') || (s[i] >= 'a' && s[i] <= 'z') ||
+            (s[i] >= '0' && s[i] <= '9') || s[i] == '.' || s[i] == '_' || s[i] == '-'))
+         return 0;
    return 1;
 }
 
@@ -37,13 +54,13 @@ static int lowercase_hex(const char *s, size_t min, size_t max)
 
 static int valid_record(const server_management_jti_t *t, int64_t consumed_at)
 {
-   return t && bounded_ascii(t->jti, 16, 128, 1) && bounded_ascii(t->issuer, 1, 255, 0) &&
-          bounded_ascii(t->kid, 1, 64, 1) && bounded_ascii(t->audience, 1, 127, 0) &&
-          bounded_ascii(t->subject, 1, 576, 0) && t->team_id > 0 &&
-          bounded_ascii(t->capability, 1, 64, 1) && bounded_ascii(t->peer_issuer, 1, 511, 0) &&
-          lowercase_hex(t->peer_serial, 1, 79) && lowercase_hex(t->peer_fingerprint, 64, 64) &&
-          lowercase_hex(t->request_sha256, 64, 64) && bounded_ascii(t->correlation_id, 1, 128, 1) &&
-          t->issued_at >= 0 && t->issued_at < t->expires_at && consumed_at >= t->issued_at &&
+   return t && ascii_token(t->jti, 16, 128) && control_free(t->issuer, 1, 255) &&
+          ascii_token(t->kid, 1, 64) && ascii_token(t->audience, 1, 127) &&
+          control_free(t->subject, 1, 576) && t->team_id > 0 && ascii_token(t->capability, 1, 64) &&
+          control_free(t->peer_issuer, 1, 511) && lowercase_hex(t->peer_serial, 1, 79) &&
+          lowercase_hex(t->peer_fingerprint, 64, 64) && lowercase_hex(t->request_sha256, 64, 64) &&
+          ascii_token(t->correlation_id, 1, 128) && t->issued_at >= 0 &&
+          t->issued_at < t->expires_at && consumed_at >= t->issued_at &&
           consumed_at < t->expires_at;
 }
 
@@ -91,8 +108,11 @@ static server_management_jti_result_t consume(const server_management_jti_t *t, 
 
    server_management_jti_result_t result = SERVER_MANAGEMENT_JTI_STORAGE;
    sqlite3_stmt *q = NULL;
-   if (sqlite3_prepare_v2(db, "DELETE FROM server_management_jti WHERE expires_at<?1", -1, &q,
-                          NULL) != SQLITE_OK ||
+   static const char gc_sql[] =
+       "DELETE FROM server_management_jti WHERE jti IN "
+       "(SELECT jti FROM server_management_jti WHERE expires_at<?1 "
+       "ORDER BY expires_at,jti LIMIT " STRINGIFY(SERVER_MANAGEMENT_JTI_LIVE_LIMIT) ")";
+   if (sqlite3_prepare_v2(db, gc_sql, -1, &q, NULL) != SQLITE_OK ||
        sqlite3_bind_int64(q, 1, consumed_at) != SQLITE_OK || sqlite3_step(q) != SQLITE_DONE)
       goto rollback;
    sqlite3_finalize(q);

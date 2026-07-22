@@ -9,7 +9,7 @@ extern "C"
 {
 #endif
 
-#define SERVER_MANAGEMENT_JTI_LIVE_LIMIT 4096U
+#define SERVER_MANAGEMENT_JTI_LIVE_LIMIT 4096
 
    typedef struct
    {
