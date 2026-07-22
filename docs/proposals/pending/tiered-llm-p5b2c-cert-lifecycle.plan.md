@@ -82,8 +82,31 @@ For initial issuance or renewal:
 
 1. Read the primary B2b snapshot. B2b deliberately maps both absent and inactive
    rows to `DENIED`, so B2c does not infer absence from that result. When there is
-   no local current manifest or intent, it may durably stage a fresh initial intent
-   and call the fixed initial facade; B2b remains authoritative and denies inactive,
+   no local current manifest or intent, it calls a new read-only primary B2b grant
+   preflight with the installation id and exact verified workload binding. The
+   `SECURITY DEFINER` facade `kb_management_instance_grant_preflight` explicitly
+   rejects recovery/read-only transactions, takes the installation advisory lock,
+   recomputes the supplied binding, rejects a missing, non-pending, expired
+   (`expires_at <= now()`) or binding-mismatched grant, and returns only its public
+   installation id, replacement-lineage id and integer expiry. It does not consume, extend,
+   audit or expose the grant's workload tuple, anchors, team or CA pins. B2c uses
+   the returned lineage in the durable initial intent. `begin_initial` gains that
+   expected lineage in `db2_management_client_initial_request_t` and compares it to
+   the grant inside its existing locked transaction before consuming anything. Its
+   exact-operation replay branch compares the same expected lineage to the persisted
+   instance lineage as well as the existing authority, CSR and binding tuple. Thus
+   expiry or grant replacement
+   between preflight and begin is a denial/conflict, never consumption under a
+   different lineage. Crash replay reads lineage from the immutable intent and
+   calls `begin_initial` directly; it never preflights into a changed operation.
+   The preflight lock is intentionally statement-scoped and is not treated as a
+   cross-call lock: the expected-lineage comparison inside `begin_initial` is the
+   authoritative TOCTOU closure. Preflight or begin missing/expired/unauthorized
+   maps to `DENIED`; changed expected lineage or a different consuming operation
+   maps to `CONFLICT`; read-only/transport failure maps to `UNAVAILABLE` and only
+   serialization/deadlock maps to the bounded retry path.
+   The facade is revoked from PUBLIC and granted only to the existing KB runtime
+   role. B2b remains authoritative and denies inactive,
    revoked, replaced, or otherwise unauthorized rows. For an
    active row, begin renewal only inside B2b's inclusive 1200-second window and
    bind the exact current enrollment tuple and next generation. Outside that window
@@ -219,6 +242,10 @@ crash after durable stage, crash after activation, renewal at the inclusive
 threshold, old-generation refusal, revocation/replacement refusal, changed workload
 or either anchor, corrupted ciphertext/header/manifest, and absence of private/PEM/
 token/proof bytes in PostgreSQL and WORM. B3/listener behavior remains out of scope.
+The PG race gate pauses deterministically between preflight and begin and proves
+grant expiry, grant replacement/lineage change, and consumption by another operation
+cannot consume or activate the staged operation; exact-operation crash replay must
+still match the persisted instance lineage.
 
 Run an adversarial plan roundtable, bake every valid minority finding, delegate the
 bounded implementation, validate locally and on CT260, then run an adversarial full
