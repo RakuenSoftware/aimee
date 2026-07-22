@@ -306,6 +306,7 @@ static const config_schema_entry_t config_schema[] = {
     {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
     {"gateway_pin_model", SCHEMA_BOOL, 0},
     {"css_style_graph_enabled", SCHEMA_BOOL, 0},
+    {"code_cochange_git_enabled", SCHEMA_BOOL, 0},
     {"wfe_live_forge_enabled", SCHEMA_BOOL, 0},
     {"wfe_proposals_autoscan_enabled", SCHEMA_BOOL, 0},
     {"client_integrations_enabled", SCHEMA_BOOL, 0},
@@ -863,6 +864,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->css_style_graph_enabled = 1;        /* default-on: the indexer builds the CSS style
                                                graph so the read-only css signals/report work
                                                out of the box (set false to opt out) */
+   cfg->code_cochange_git_enabled = 1;      /* default-on: index scan mines git history into
+                                               co_edited edges that blast radius already reads
+                                               (incremental/idempotent; set false to opt out) */
    cfg->wfe_live_forge_enabled = 0;         /* default-OFF (2026-07-17): the live forge does
                                                REAL git push + PR + merge, so it stays opt-in
                                                while the autonomous pipeline is under test.
@@ -1313,6 +1317,10 @@ int config_load_file(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "css_style_graph_enabled");
    if (cJSON_IsBool(item))
       cfg->css_style_graph_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "code_cochange_git_enabled");
+   if (cJSON_IsBool(item))
+      cfg->code_cochange_git_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "wfe_live_forge_enabled");
    if (cJSON_IsBool(item))
