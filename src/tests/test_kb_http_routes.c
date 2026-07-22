@@ -2249,6 +2249,36 @@ static int mtls_read_response(SSL *ssl, char *resp, size_t cap)
    return -1;
 }
 
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t cv;
+   int ready;
+   int go;
+} mtls_pool_gate_t;
+
+typedef struct
+{
+   mtls_pool_gate_t *gate;
+   int ok;
+} mtls_pool_request_arg_t;
+
+static void *mtls_pool_request_thread(void *opaque)
+{
+   mtls_pool_request_arg_t *arg = opaque;
+   pthread_mutex_lock(&arg->gate->lock);
+   arg->gate->ready++;
+   pthread_cond_broadcast(&arg->gate->cv);
+   while (!arg->gate->go)
+      pthread_cond_wait(&arg->gate->cv, &arg->gate->lock);
+   pthread_mutex_unlock(&arg->gate->lock);
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/health", NULL, &status);
+   arg->ok = status == 200 && response && strstr(response, "\"status\":\"ok\"");
+   free(response);
+   return NULL;
+}
+
 static void test_mtls_serve(void)
 {
    extern void test_kb_enrollment_authority_set(int status);
@@ -2501,11 +2531,11 @@ static void test_mtls_listener(void)
 
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
-   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "4", 1);
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == 0);
    int connection_limit = 0, connections_live = -1, connections_queued = -1;
    kb_mtls_connection_stats(&connection_limit, &connections_live, &connections_queued);
-   assert(connection_limit == 4);
+   assert(connection_limit == 8);
    assert(connections_live == 0);
    assert(connections_queued == 0);
    int port = kb_mtls_bound_port();
@@ -2550,6 +2580,53 @@ static void test_mtls_listener(void)
       fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
+
+   /* The reusable client primitive reads Content-Length exactly instead of
+    * waiting for EOF, then safely carries a second request on the same TLS
+    * connection. */
+   kb_tls_client_conn_t *persistent =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(persistent);
+   int reusable = 0;
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
+   kb_tls_client_conn_close(persistent);
+
+   kb_tls_client_conn_t *bounded =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(bounded);
+   char tiny_response[4];
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
+                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(reusable == 0);
+   kb_tls_client_conn_close(bounded);
+
+   /* A long-lived identity context can explicitly carry the negotiated session
+    * into a replacement connection. */
+   SSL_CTX *shared_client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
+   assert(shared_client_ctx);
+   kb_tls_client_conn_t *session_one =
+       kb_tls_client_conn_open_ctx("localhost", port, shared_client_ctx);
+   assert(session_one);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(reusable == 1);
+   SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
+   assert(saved_session);
+   kb_tls_client_conn_close(session_one);
+   kb_tls_client_conn_t *session_two =
+       kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
+   assert(session_two);
+   assert(kb_tls_client_conn_session_reused(session_two) == 1);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   kb_tls_client_conn_close(session_two);
+   SSL_SESSION_free(saved_session);
+   SSL_CTX_free(shared_client_ctx);
 
    /* Primary authority is consulted before dispatch. Unknown/revoked peers are
     * forbidden and an authority outage is retryable but never fail-open. */
@@ -2609,16 +2686,75 @@ static void test_mtls_listener(void)
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       setenv("AIMEE_KB_CONN", conn2, 1);
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
+      unsigned long pool_exhausted = 1;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0 && pool_busy == 0 && pool_waiters == 0);
+
+      /* The hot rollout flag opts this identity into reuse without a restart. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "1", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
       g_test_registry_heartbeat_allow = 1;
       assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
       assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
       g_test_registry_heartbeat_allow = 0;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_exhausted == 0);
+
+      enum
+      {
+         POOL_TEST_CLIENTS = 16
+      };
+      mtls_pool_gate_t gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0};
+      pthread_t pool_threads[POOL_TEST_CLIENTS];
+      mtls_pool_request_arg_t pool_args[POOL_TEST_CLIENTS];
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pool_args[i] = (mtls_pool_request_arg_t){.gate = &gate, .ok = 0};
+         assert(pthread_create(&pool_threads[i], NULL, mtls_pool_request_thread, &pool_args[i]) ==
+                0);
+      }
+      pthread_mutex_lock(&gate.lock);
+      while (gate.ready != POOL_TEST_CLIENTS)
+         pthread_cond_wait(&gate.cv, &gate.lock);
+      gate.go = 1;
+      pthread_cond_broadcast(&gate.cv);
+      pthread_mutex_unlock(&gate.lock);
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pthread_join(pool_threads[i], NULL);
+         assert(pool_args[i].ok);
+      }
+      pthread_cond_destroy(&gate.cv);
+      pthread_mutex_destroy(&gate.lock);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total >= 1 && pool_total <= 2 && pool_total == pool_idle && pool_busy == 0 &&
+             pool_waiters == 0);
+      unsigned long pool_handshakes = 0, pool_resumed = 0;
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+      /* Disabling live restores one-shot requests and drains every idle socket. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0);
+      unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);

@@ -387,6 +387,34 @@ extern "C"
     * openai_chat_register (it pulls the agent dependency closure). */
    void server_http_set_runs_handler(server_http_completion_fn fn);
 
+   /* GET /v1/ready readiness seam. Unlike the JSON-provider seams above, a
+    * readiness answer carries a status code as well as a body, so the provider
+    * mirrors the models-raw shape: write the JSON body into resp[cap] and
+    * return the HTTP status (200 ready, 503 not ready).
+    *
+    * The provider must not perform I/O — it serves a snapshot sampled off the
+    * request path — so that a slow or wedged dependency cannot stall the
+    * listener. Until a provider is registered the route reports every
+    * dependency `unknown` and answers 503: readiness fails closed, so an
+    * unsampled server is never advertised as ready. Wired by
+    * server_native_register (it pulls the dependency closure). */
+   typedef int (*server_http_ready_fn)(char *resp, int cap);
+   void server_http_set_ready_provider(server_http_ready_fn fn);
+
+   /* Readiness sampler (server/server_ready.c). server_ready_register() takes
+    * one sample synchronously, starts the background sampler, and registers the
+    * provider above. server_ready_sample_now() forces a synchronous sample so a
+    * caller never has to wait on the interval. */
+   void server_ready_register(void);
+   void server_ready_sample_now(void);
+
+   /* The readiness decision as a pure function (no globals, locks, or I/O), so
+    * roll-up and staleness behavior can be tested by passing a clock instead of
+    * sleeping past a real interval. db1_ok/kb_ok: 1 ok, 0 fail, -1 unknown.
+    * Writes the JSON body and returns the HTTP status (200 ready / 503 not). */
+   int server_ready_render(int db1_ok, int kb_ok, long sampled_at, long now, int stale_secs,
+                           char *resp, int cap);
+
    void server_native_register(void);
 
    /* --- Per-session active persona (set via POST /v1/sessions/<id>/persona,

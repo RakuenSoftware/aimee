@@ -72,6 +72,24 @@ void agent_session_append_degenerate_retry_instruction(cJSON *messages)
    cJSON_AddItemToArray(messages, msg);
 }
 
+void agent_session_append_required_evidence_instruction(cJSON *messages)
+{
+   if (!messages)
+      return;
+
+   cJSON *msg = cJSON_CreateObject();
+   if (!msg)
+      return;
+   cJSON_AddStringToObject(msg, "role", "user");
+   cJSON_AddStringToObject(
+       msg, "content",
+       "[REPOSITORY EVIDENCE REQUIRED] Your previous response did not produce a successful "
+       "repository lookup. Do not return final review prose yet. Call one of the available "
+       "read-only repository or index tools now. Aimee will accept a final response only after "
+       "a successful tool result has been returned to you.");
+   cJSON_AddItemToArray(messages, msg);
+}
+
 int agent_session_retry_final_tool_violation(cJSON *messages, const char *attempted_action,
                                              int *turn, int *max_t, int initial_max_t,
                                              int *retry_count, char *error, size_t error_len)
@@ -107,4 +125,49 @@ int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *ret
    agent_session_append_degenerate_retry_instruction(messages);
    (*turn)++;
    return 1;
+}
+
+int agent_session_retry_required_evidence(cJSON *messages, int *turn, int *max_t, int initial_max_t,
+                                          int *retry_count, char *error, size_t error_len)
+{
+   if (!messages || !turn || !max_t || !retry_count)
+      return 0;
+   if (*retry_count >= AGENT_REQUIRED_EVIDENCE_RETRY_LIMIT)
+   {
+      if (error && error_len > 0)
+         snprintf(error, error_len,
+                  "model repeatedly returned without successful repository evidence");
+      return 0;
+   }
+
+   (*retry_count)++;
+   agent_session_append_required_evidence_instruction(messages);
+   if (*turn >= *max_t - 1 && *max_t < initial_max_t + AGENT_REQUIRED_EVIDENCE_RETRY_LIMIT)
+      (*max_t)++;
+   (*turn)++;
+   return 1;
+}
+
+static int evidence_pending(int required, int successful_evidence_calls)
+{
+   return required && successful_evidence_calls == 0;
+}
+
+int agent_required_evidence_keep_tools(int required, int successful_evidence_calls)
+{
+   return evidence_pending(required, successful_evidence_calls);
+}
+
+int agent_required_evidence_reject_response(int required, int successful_evidence_calls,
+                                            int is_tool_call, int call_count)
+{
+   return evidence_pending(required, successful_evidence_calls) &&
+          (!is_tool_call || call_count <= 0);
+}
+
+int agent_required_evidence_budget_exhausted(int required, int successful_evidence_calls,
+                                             int pre_evidence_responses)
+{
+   return evidence_pending(required, successful_evidence_calls) &&
+          pre_evidence_responses >= AGENT_REQUIRED_EVIDENCE_RETRY_LIMIT + 1;
 }

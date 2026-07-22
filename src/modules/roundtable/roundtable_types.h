@@ -95,6 +95,7 @@ typedef struct
    char identity_key[128];
    char sources[256];
    int count;
+   int tool_grounded; /* at least one contributing seat obtained successful Aimee evidence */
    review_evidence_t evidence; /* Part A: structured replay evidence (zeroed = EV_NONE) */
 } roundtable_review_item_t;
 
@@ -122,6 +123,10 @@ typedef struct
    /* Failures in the adopted best round's required prefix. This is always <=
     * participants_failed; degraded remains run-level and sticky across rounds. */
    int participants_required_failed;
+   int participants_tool_used; /* adopted review round: seats with >=1 Aimee tool call */
+   int participant_tool_calls; /* adopted review round: total Aimee tool calls */
+   int participant_successful_tool_calls; /* adopted review round: non-error results */
+   int evidence_coverage_incomplete; /* evidence gate was on but a responding seat used none */
    double cost_usd;
    /* Explicit assessment of whether the reviewed direction still serves the
     * originating request. `unclear` is fail-closed for workflow gates: a panel

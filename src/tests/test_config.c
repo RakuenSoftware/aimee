@@ -169,6 +169,10 @@ int main(void)
       /* git co-change backfill defaults on: index scan seeds co_edited edges that
        * blast radius already reads (incremental/idempotent). */
       assert(cfg.code_cochange_git_enabled == 1);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      assert(cfg.transport_thinclient_gzip_enabled == 0);
+      assert(cfg.transport_kb_gzip_enabled == 0);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -213,6 +217,10 @@ int main(void)
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
       cfg.server_api_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      cfg.transport_kb_pool_enabled = 1;
+      cfg.transport_server_keepalive_enabled = 1;
+      cfg.transport_thinclient_gzip_enabled = 1;
+      cfg.transport_kb_gzip_enabled = 1;
       cfg.ingress_preinject_assembly_budget = 8192;
       cfg.ingress_max_raw_scans = 2;
       /* Per-workspace provider: a detached entry round-trips as {path,provider};
@@ -466,6 +474,10 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
+      assert(cfg2.transport_kb_pool_enabled == 1);
+      assert(cfg2.transport_server_keepalive_enabled == 1);
+      assert(cfg2.transport_thinclient_gzip_enabled == 1);
+      assert(cfg2.transport_kb_gzip_enabled == 1);
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);

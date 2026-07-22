@@ -593,6 +593,7 @@ native_provider_http:
 
    int turn = 0;
    int total_calls = 0;
+   int successful_tool_calls = 0;
    /* §3 fold-freeze: per-run boundary state, persisted across turns so the folded
     * prefix stays byte-identical (warm provider cache). Honored only when
     * fold_freeze_enabled; ignored otherwise. */
@@ -611,6 +612,8 @@ native_provider_http:
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
+   int required_evidence_retry_count = 0;
+   int required_evidence_responses = 0;
    /* A provider may emit a reasoning-only/empty turn while tools are offered
     * even though it has finished investigating (observed with Codex review
     * seats). Retrying with the identical tool contract can repeat forever and
@@ -658,6 +661,17 @@ native_provider_http:
 
    while (turn < max_t)
    {
+      /* Stop before issuing a fourth provider request without evidence. The
+       * third response is allowed to execute its calls; if none succeeds, the
+       * next iteration fails closed here. */
+      if (agent_required_evidence_budget_exhausted(
+              agent->require_initial_tool_call, successful_tool_calls, required_evidence_responses))
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "repository evidence not obtained within %d provider responses",
+                  AGENT_REQUIRED_EVIDENCE_RETRY_LIMIT + 1);
+         break;
+      }
       char cancel_reason[128];
       if (agent_durable_cancelled(cancel_reason, sizeof(cancel_reason)))
       {
@@ -773,6 +787,15 @@ native_provider_http:
           force_text_only_retry || final_mode != LIVENESS_FINAL_RESPONSE_NONE;
       int final_text_only_turn =
           force_text_only_retry || !liveness_final_response_allows_tools(final_mode);
+      /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
+       * available until one actually succeeds; provider tool_choice is a request,
+       * not an enforcement boundary, and some compatible endpoints ignore it. */
+      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
+                                             successful_tool_calls))
+      {
+         final_instruction_turn = 0;
+         final_text_only_turn = 0;
+      }
       force_text_only_retry = 0;
       if (final_instruction_turn && !final_instruction_added)
       {
@@ -780,6 +803,11 @@ native_provider_http:
          final_instruction_added = 1;
       }
       cJSON *active_tools = final_text_only_turn ? NULL : tools;
+      /* Evidence-gated review can require one real repository lookup. Force
+       * provider tool selection only until the first successful tool call;
+       * leaving it required would prevent the final text turn forever. */
+      fb_agent.require_initial_tool_call = agent_require_initial_tool_choice(
+          agent->require_initial_tool_call, successful_tool_calls, active_tools != NULL);
 
       /* Context economizer (delegate seam): record a baseline + foldable-opportunity
        * ledger row, and — when reduce.history_fold is on — ACTUALLY fold the prefix
@@ -1130,6 +1158,10 @@ native_provider_http:
       agent_trace_log(0, turn, "response", parsed.content ? parsed.content : "(tool_calls)", NULL,
                       NULL, NULL, NULL);
 
+      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
+                                             successful_tool_calls))
+         required_evidence_responses++;
+
       /* Accumulate tokens */
       out->prompt_tokens += parsed.prompt_tokens;
       out->completion_tokens += parsed.completion_tokens;
@@ -1266,6 +1298,27 @@ native_provider_http:
          }
          finish_final_tool_violation(out, agent, attempted_tool, parsed.content, last_tool_name,
                                      last_tool_result, total_calls);
+         agent_free_parsed_response(&parsed);
+         break;
+      }
+
+      /* Enforce the evidence requirement at the response boundary, not merely in
+       * provider request shaping. Providers can ignore tool_choice, and policy
+       * policing can remove an unusable call while leaving a nominal tool-call
+       * response. Neither is repository evidence. Retry with an explicit
+       * instruction, then fail closed after the bounded retry budget. */
+      if (agent_required_evidence_reject_response(agent->require_initial_tool_call,
+                                                  successful_tool_calls, parsed.is_tool_call,
+                                                  parsed.call_count))
+      {
+         if (agent_session_retry_required_evidence(messages, &turn, &max_t, initial_max_t,
+                                                   &required_evidence_retry_count, out->error,
+                                                   sizeof(out->error)))
+         {
+            agent_free_parsed_response(&parsed);
+            continue;
+         }
+         out->success = 0;
          agent_free_parsed_response(&parsed);
          break;
       }
@@ -1577,6 +1630,24 @@ native_provider_http:
          }
          total_calls++;
 
+         /* An attempted lookup is not evidence. Validation/policy/directive
+          * failures never reach this branch; dispatch failures conventionally
+          * return "error:" or a JSON object containing an error member. */
+         int usable_tool_result =
+             result_str && result_str[0] && strncmp(result_str, "error", 5) != 0;
+         if (usable_tool_result && result_str[0] == '{')
+         {
+            cJSON *result_json = cJSON_Parse(result_str);
+            if (result_json)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(result_json, "error"))
+                  usable_tool_result = 0;
+               cJSON_Delete(result_json);
+            }
+         }
+         if (usable_tool_result)
+            successful_tool_calls++;
+
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
             consecutive_errors++;
@@ -1764,6 +1835,7 @@ native_provider_http:
                            (end_ts.tv_nsec - loop_start.tv_nsec) / 1000000);
    out->turns = turn;
    out->tool_calls = total_calls;
+   out->successful_tool_calls = successful_tool_calls;
 
    /* Confidence estimation and abstention */
    if (out->response)

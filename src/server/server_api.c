@@ -261,4 +261,7 @@ void server_native_register(void)
    server_http_set_kb_search_handler(kb_search_handler);
    server_http_set_memory_recall_handler(memory_recall_handler);
    server_http_set_notes_search_handler(notes_search_handler);
+   /* Readiness samples db1 + aimee-kb on a background interval and registers
+    * its own provider; see server/server_ready.c. */
+   server_ready_register();
 }
