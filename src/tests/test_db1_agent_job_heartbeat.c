@@ -434,29 +434,57 @@ static void test_status_reads_do_not_run_global_agent_name_backfill(void)
 
    sqlite3 *db = db1_conn();
    int changes_before_reads = sqlite3_total_changes(db);
-   db1_agent_job_t row;
-   assert(db1_agent_job_get(job, &row) == 0);
-   assert(row.agent_name[0] == '\0');
-   db1_agent_job_free(&row);
-
-   db1_agent_job_t recent[2];
-   int count = db1_agent_job_list_recent(recent, 2, 0);
-   assert(count >= 1);
-   int found = 0;
-   for (int i = 0; i < count; i++)
+   for (int poll = 0; poll < 100; poll++)
    {
-      if (recent[i].id == job)
+      db1_agent_job_t row;
+      assert(db1_agent_job_get(job, &row) == 0);
+      assert(row.agent_name[0] == '\0');
+      db1_agent_job_free(&row);
+
+      db1_agent_job_t recent[2];
+      int count = db1_agent_job_list_recent(recent, 2, 0);
+      assert(count >= 1);
+      int found = 0;
+      for (int i = 0; i < count; i++)
       {
-         found = 1;
-         assert(recent[i].agent_name[0] == '\0');
+         if (recent[i].id == job)
+         {
+            found = 1;
+            assert(recent[i].agent_name[0] == '\0');
+         }
+         db1_agent_job_free(&recent[i]);
       }
-      db1_agent_job_free(&recent[i]);
+      assert(found);
    }
-   assert(found);
    assert(sqlite3_total_changes(db) == changes_before_reads);
 
    teardown_db();
    printf("  PASS: test_status_reads_do_not_run_global_agent_name_backfill\n");
+}
+
+static void test_routed_agent_name_survives_status_reads(void)
+{
+   setup_db();
+   int job = db1_agent_job_create("review", "test", "routed-agent", "owner");
+   assert(job > 0);
+   db1_agent_job_update(job, "done", 1, "ok");
+
+   sqlite3 *db = db1_conn();
+   int changes_before_reads = sqlite3_total_changes(db);
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strcmp(row.agent_name, "routed-agent") == 0);
+   db1_agent_job_free(&row);
+
+   db1_agent_job_t recent[1];
+   assert(db1_agent_job_list_recent(recent, 1, 0) == 1);
+   assert(recent[0].id == job);
+   assert(strcmp(recent[0].agent_name, "routed-agent") == 0);
+   db1_agent_job_free(&recent[0]);
+   assert(sqlite3_total_changes(db) == changes_before_reads);
+
+   teardown_db();
+   printf("  PASS: test_routed_agent_name_survives_status_reads\n");
 }
 
 int main(void)
@@ -478,6 +506,7 @@ int main(void)
    test_done_update_wins_cancel_complete_race();
    test_failed_update_does_not_overwrite_cancelled();
    test_status_reads_do_not_run_global_agent_name_backfill();
+   test_routed_agent_name_survives_status_reads();
    printf("ok\n");
    return 0;
 }

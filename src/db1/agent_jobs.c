@@ -254,8 +254,8 @@ int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_too
 
 int db1_agent_job_get(int job_id, db1_agent_job_t *out)
 {
-   /* Status polling is a read-only hot path. Agent identity is persisted by
-    * create/set_agent and must never be reconstructed here with a global write. */
+   /* Status polling is read-only. Agent identity is persisted by
+    * db1_agent_job_create/db1_agent_job_set_agent. */
    if (!out || job_id <= 0)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -352,7 +352,7 @@ void db1_agent_job_free(db1_agent_job_t *job)
 
 int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
 {
-   /* This endpoint is polled by every active delegate; keep it read-only. */
+   /* Every active delegate polls this endpoint; keep it read-only. */
    if (!out || max <= 0)
       return 0;
    sqlite3 *db = db1_conn();

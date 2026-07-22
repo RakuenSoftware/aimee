@@ -107,7 +107,7 @@ extern "C"
    int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs,
                                     char *out_state, size_t out_state_cap);
 
-   /* Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
+   /* Read-only. Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
     * out->result are heap-allocated (never NULL) and must be released with
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
@@ -125,7 +125,7 @@ extern "C"
     * Returns 0 on success, -1 on error. */
    int db1_agent_job_take_lease(int job_id, const char *owner);
 
-   /* List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
+   /* Read-only. List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
     * returned row owns heap prompt/result; free every returned row with
     * db1_agent_job_free. When include_heavy == 0, the (potentially large)
     * prompt/result are returned as empty strings (not loaded) so list callers
