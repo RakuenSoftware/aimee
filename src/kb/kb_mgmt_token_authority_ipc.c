@@ -89,22 +89,34 @@ static int wait_for(int fd, short events, int64_t deadline)
    return rc == 1 && ready && !(pfd.revents & (POLLERR | POLLNVAL)) ? 0 : -1;
 }
 
-static int write_all(int fd, const unsigned char *data, size_t len, int64_t deadline)
+static int write_all_count(int fd, const unsigned char *data, size_t len, int64_t deadline,
+                           size_t *written)
 {
    size_t done = 0;
+   if (written)
+      *written = 0;
    while (done < len)
    {
       if (wait_for(fd, POLLOUT, deadline) != 0)
          return -1;
       ssize_t n = send(fd, data + done, len - done, MSG_NOSIGNAL);
       if (n > 0)
+      {
          done += (size_t)n;
+         if (written)
+            *written = done;
+      }
       else if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
          continue;
       else
          return -1;
    }
    return 0;
+}
+
+static int write_all(int fd, const unsigned char *data, size_t len, int64_t deadline)
+{
+   return write_all_count(fd, data, len, deadline, NULL);
 }
 
 static int read_all(int fd, unsigned char *data, size_t len, int64_t deadline)
@@ -239,7 +251,7 @@ static int connect_checked(const kb_mgmt_token_authority_client_config_t *config
    if (connected != 0 ||
        !exact_socket(config->socket_path, 0, config->socket_gid, config->socket_mode) ||
        getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_len) != 0 || peer_len != sizeof(peer) ||
-       peer.uid != config->authority_uid)
+       peer.uid != 0)
    {
       (void)close(fd);
       return -1;
@@ -261,9 +273,8 @@ kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config
    const size_t jti_len = KB_MGMT_TOKEN_AUTHORITY_JTI_LEN;
    if (!out || !config || !valid_path(config->socket_path) ||
        strcmp(config->socket_path, KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH) != 0 || getuid() == 0 ||
-       geteuid() == 0 || getuid() != geteuid() || config->authority_uid == getuid() ||
-       config->authority_uid == geteuid() || !config->timeout_ms || config->timeout_ms > 60000 ||
-       config->socket_mode != 0660 ||
+       geteuid() == 0 || getuid() != geteuid() || !config->timeout_ms ||
+       config->timeout_ms > 60000 || config->socket_mode != 0660 ||
        !lower_hex_exact(correlation_id, KB_MGMT_TOKEN_AUTHORITY_CORRELATION_LEN) ||
        !lower_hex_exact(jti, KB_MGMT_TOKEN_AUTHORITY_JTI_LEN))
       return KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID;
@@ -286,15 +297,28 @@ kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config
    memcpy(request + REQUEST_HEADER_LEN, correlation_id, KB_MGMT_TOKEN_AUTHORITY_CORRELATION_LEN);
    memcpy(request + REQUEST_HEADER_LEN + KB_MGMT_TOKEN_AUTHORITY_CORRELATION_LEN, jti, jti_len);
 
-   unsigned char response[RESPONSE_HEADER_LEN];
-   int failed = write_all(fd, request, request_len, deadline) != 0 || shutdown(fd, SHUT_WR) != 0 ||
-                read_all(fd, response, sizeof(response), deadline) != 0;
+   size_t request_bytes_sent = 0;
+   int request_sent = write_all_count(fd, request, request_len, deadline, &request_bytes_sent) == 0;
    OPENSSL_cleanse(request, sizeof(request));
-   if (failed || memcmp(response, response_magic, sizeof(response_magic)) != 0 ||
-       response[4] != 1 || response[5] != 1)
+   if (!request_sent)
    {
       (void)close(fd);
-      return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+      /* Once any byte crosses the socket, prefer terminal availability loss:
+       * future protocol versions must not make a prefix independently usable. */
+      return request_bytes_sent ? KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS
+                                : KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+   }
+   unsigned char response[RESPONSE_HEADER_LEN];
+   if (shutdown(fd, SHUT_WR) != 0 || read_all(fd, response, sizeof(response), deadline) != 0)
+   {
+      (void)close(fd);
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+   }
+   if (memcmp(response, response_magic, sizeof(response_magic)) != 0 || response[4] != 1 ||
+       response[5] != 1)
+   {
+      (void)close(fd);
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
    }
    uint16_t status = get_u16(response + 6);
    uint32_t body_len = get_u32(response + 8);
@@ -310,13 +334,15 @@ kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config
    {
       clear_output(out);
       (void)close(fd);
-      return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
    }
-   if (read_eof(fd, deadline) != 0 || close(fd) != 0)
+   if (read_eof(fd, deadline) != 0)
    {
       clear_output(out);
-      return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      (void)close(fd);
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
    }
+   (void)close(fd);
    if (status != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       return (kb_mgmt_token_authority_ipc_result_t)status;
    if (!valid_jwt(out->jwt, body_len))

@@ -39,16 +39,14 @@ extern "C"
       size_t jwt_len;
    } kb_mgmt_token_authority_output_t;
 
-   /* Ordinary-KB client. The path must be absolute and name a root-owned Unix
-    * socket with exactly socket_mode/socket_gid. authority_uid is the expected
-    * kernel peer UID: zero for a root-created socket-activation listener, or
-    * the daemon UID for an authority-created listener. Root is outside this
-    * unprivileged-compromise boundary. No claim, key, digest, or signing input
-    * crosses this seam. */
+   /* Ordinary-KB client. The path must be absolute and name the root-created
+    * socket-activation listener with exactly socket_mode/socket_gid. The
+    * connected peer credential must remain root: authority-created listeners
+    * are never accepted. Root is outside this unprivileged-compromise boundary.
+    * No claim, key, digest, or signing input crosses this seam. */
    typedef struct
    {
       const char *socket_path;
-      uid_t authority_uid;
       gid_t socket_gid;
       mode_t socket_mode;
       uint32_t timeout_ms;
@@ -81,8 +79,17 @@ extern "C"
       void *issue_opaque;
    } kb_mgmt_token_authority_daemon_config_t;
 
-   /* Harden the current, already-separated authority process and serve one
-    * connection at a time until accept(2) is interrupted by a signal. */
+   /* Must run exactly once before selecting/unsealing a custody provider or
+    * opening authority storage. It verifies a root-created listener, disables
+    * dumps/privilege acquisition, and closes every non-allowlisted fd. */
+   int kb_mgmt_token_authority_daemon_harden(const kb_mgmt_token_authority_daemon_config_t *config);
+
+   /* Async-signal-safe SIGINT/SIGTERM hook. daemon_run observes the flag even
+    * when the signal arrives immediately before its listener wait. */
+   void kb_mgmt_token_authority_daemon_request_stop(void);
+
+   /* Serve one connection at a time. Refuses to run unless daemon_harden
+    * completed for this exact listener and authority identity. */
    int kb_mgmt_token_authority_daemon_run(const kb_mgmt_token_authority_daemon_config_t *config);
 
 #ifdef __cplusplus

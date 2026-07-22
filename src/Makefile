@@ -1150,12 +1150,15 @@ $(KB_STATUS_AUTHORITY): $(STATUS_AUTHORITY_OBJS) $(STATUS_AUTHORITY_VAULT_OBJS) 
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
-.PHONY: token-authority-core token-authority-isolation-check
+.PHONY: token-authority-core token-authority-isolation-check token-authority-regression-check
 token-authority-isolation-check:
 	cd .. && python3 scripts/check-token-authority-isolation.py
 	cd .. && python3 scripts/check-token-authority-isolation.py --plant-test
 
-token-authority-core: token-authority-isolation-check $(KB_TOKEN_AUTHORITY)
+token-authority-regression-check:
+	cd .. && scripts/run-p5c2d-token-authority-regressions.sh
+
+token-authority-core: token-authority-isolation-check token-authority-regression-check $(KB_TOKEN_AUTHORITY)
 
 $(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
                        $(STATUS_PROVISIONER_PLATFORM_OBJS) $(OBJDIR)/cJSON.o \

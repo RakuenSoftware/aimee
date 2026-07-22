@@ -96,6 +96,28 @@ GRANT aimee_kb_jwks_runtime_definer TO aimee_kb_migrate;
 REVOKE aimee_kb_token_authority_definer FROM aimee_kb_migrate;
 REVOKE aimee_kb_token_authority_store_owner FROM aimee_kb_migrate;
 
+-- The three token-authority roles are closed compartments, never grouping or
+-- inheriting any other role and never inherited by any role.  Remove every
+-- direct edge in either direction so reapplying provisioning also repairs an
+-- accidental/operator-added membership.
+DO $$
+DECLARE edge RECORD;
+BEGIN
+  FOR edge IN
+    SELECT granted.rolname AS granted_role, member.rolname AS member_role
+      FROM pg_catalog.pg_auth_members am
+      JOIN pg_catalog.pg_roles granted ON granted.oid=am.roleid
+      JOIN pg_catalog.pg_roles member ON member.oid=am.member
+     WHERE granted.rolname IN ('aimee_kb_token_authority_definer',
+              'aimee_kb_token_authority_runtime','aimee_kb_token_authority_store_owner')
+        OR member.rolname IN ('aimee_kb_token_authority_definer',
+              'aimee_kb_token_authority_runtime','aimee_kb_token_authority_store_owner')
+  LOOP
+    EXECUTE format('REVOKE %I FROM %I',edge.granted_role,edge.member_role);
+  END LOOP;
+END
+$$;
+
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_runtime;

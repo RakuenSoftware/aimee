@@ -19,10 +19,9 @@ BEGIN
   IF definer_oid IS NULL OR runtime_oid IS NULL OR store_oid IS NULL THEN
     RAISE EXCEPTION 'P5-C2d role posture mismatch';
   END IF;
-  IF pg_has_role('aimee_kb_token_authority_runtime',
-       'aimee_kb_token_authority_definer','MEMBER') OR
-     pg_has_role('aimee_kb_runtime','aimee_kb_token_authority_definer','MEMBER') OR
-     pg_has_role('aimee_kb_migrate','aimee_kb_token_authority_store_owner','MEMBER') OR
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members am
+       WHERE am.roleid IN (definer_oid,runtime_oid,store_oid)
+          OR am.member IN (definer_oid,runtime_oid,store_oid)) OR
      (SELECT relowner<>store_oid FROM pg_class
        WHERE oid='public.kb_management_token_key_use_intent'::regclass) THEN
     RAISE EXCEPTION 'P5-C2d definer inheritance escaped';
@@ -45,6 +44,13 @@ BEGIN
       RAISE EXCEPTION 'P5-C2d function posture mismatch: %',fn;
     END IF;
   END LOOP;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p
+      WHERE p.oid='public.kb_management_token_authority_snapshot(text,text)'::regprocedure
+        AND p.proowner=definer_oid AND p.prosecdef AND p.provolatile='v'
+        AND p.proconfig @> ARRAY['search_path=pg_catalog, pg_temp','TimeZone=UTC']::TEXT[]) THEN
+    RAISE EXCEPTION 'P5-C2d snapshot search path/timezone posture mismatch';
+  END IF;
 
   IF (SELECT count(*) FROM pg_proc p WHERE p.oid=ANY(ARRAY[
        'public.kb_management_token_authority_admit(text,text)'::regprocedure,
@@ -266,6 +272,9 @@ SELECT repeat('6',64),repeat('7',64),97522,'oidc:https%3A%25issuer:p5c2d-lead',
  repeat('2',64),(SELECT generation FROM public.kb_cert_revocation_generation WHERE singleton=1)
  FROM p5c2d_key;
 
+-- These legacy certificate timestamps are timezone-less text.  A hostile
+-- session timezone must not shift their authority window inside the definer.
+SET LOCAL TimeZone='Pacific/Kiritimati';
 SET LOCAL ROLE aimee_kb_token_authority_runtime;
 DO $$ DECLARE r RECORD; BEGIN
  SELECT * INTO STRICT r FROM public.kb_management_token_authority_admit(repeat('6',64),repeat('7',64));

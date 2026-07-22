@@ -206,6 +206,22 @@ PG17 authority role, KMS/HWM helper, protected decrypt and production C2c verifi
 returned `ALREADY_USED`, the admission and WORM audit each remained singular, and the ordinary kb
 UID could inspect neither the authority process nor its private HWM fixture.
 
+The split adversarial branch review found three further process-boundary defects and two SQL
+hardening gaps. Process hardening now runs before the first custody-provider operation; SIGINT and
+SIGTERM set a durable `sig_atomic_t` stop request that the bounded listener loop observes even
+after serving an in-flight request; and every transport failure after any request byte is sent is
+reported as `COMMIT_AMBIGUOUS`, while a proven zero-byte send remains `UNAVAILABLE`. Both ends now
+document and enforce the root-created socket-activation contract. Permanent focused regressions
+cover the partial-send distinction, missing/truncated/malformed responses, output clearing,
+pre-custody hardening, descriptor closure, and bounded signal shutdown.
+
+The snapshot SECURITY DEFINER function now pins `TimeZone=UTC` before interpreting legacy
+timezone-less certificate timestamps. Idempotent role provisioning removes every direct
+membership edge into or out of the authority runtime, definer, and store-owner roles, and the
+PG17 gate proves both the closed membership graph and correct authorization under a hostile
+caller timezone. CT260 passed that gate after deliberately seeding and repairing inbound and
+outbound membership edges.
+
 Explicitly revoke EXECUTE on every new SECURITY DEFINER function from PUBLIC and every unrelated
 role before granting the authority role, and assert the full closure in PG17. The ordinary
 `aimee_kb_runtime` role receives no execution on these functions and no access to encrypted

@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <openssl/crypto.h>
+#include <poll.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,6 +26,10 @@ int kb_mgmt_token_authority_ipc_write_response(int fd, uint32_t timeout_ms,
                                                kb_mgmt_token_authority_ipc_result_t status,
                                                const kb_mgmt_token_authority_output_t *out);
 int kb_mgmt_token_authority_ipc_socket_matches(int fd, const char *path, gid_t gid, mode_t mode);
+
+static volatile sig_atomic_t g_stop_requested;
+static int g_hardened_listen_fd = -1;
+static uid_t g_hardened_authority_uid;
 
 static int preserved(int fd, const int *fds, size_t count)
 {
@@ -61,26 +66,71 @@ static int cleanse_fds(const int *fds, size_t count)
    return 0;
 }
 
-static int harden(const kb_mgmt_token_authority_daemon_config_t *config)
+static int root_created_listener(int fd)
+{
+#if defined(__linux__) && defined(SO_PEERCRED)
+   struct ucred creator;
+   socklen_t creator_len = sizeof(creator);
+   return getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &creator, &creator_len) == 0 &&
+          creator_len == sizeof(creator) && creator.uid == 0;
+#else
+   (void)fd;
+   return 0;
+#endif
+}
+
+static int valid_config(const kb_mgmt_token_authority_daemon_config_t *config)
+{
+   int accepting = 0;
+   socklen_t accepting_len = sizeof(accepting);
+   return config && config->listen_fd >= 0 && config->issue && config->socket_path &&
+          strcmp(config->socket_path, KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH) == 0 &&
+          config->authority_uid != 0 && config->kb_uid != 0 &&
+          config->kb_uid != config->authority_uid && config->socket_mode == 0660 &&
+          config->timeout_ms && config->timeout_ms <= 60000 &&
+          preserved(config->listen_fd, config->preserve_fds, config->preserve_fd_count) &&
+          getsockopt(config->listen_fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) ==
+              0 &&
+          accepting_len == sizeof(accepting) && accepting &&
+          root_created_listener(config->listen_fd) &&
+          kb_mgmt_token_authority_ipc_socket_matches(config->listen_fd, config->socket_path,
+                                                     config->socket_gid, config->socket_mode) != 0;
+}
+
+int kb_mgmt_token_authority_daemon_harden(const kb_mgmt_token_authority_daemon_config_t *config)
 {
 #if defined(__linux__) && defined(SO_PEERCRED)
    struct rlimit no_core = {0, 0};
-   if (!config || getuid() != config->authority_uid || geteuid() != config->authority_uid ||
-       config->authority_uid == 0 || config->authority_uid == config->kb_uid ||
-       setrlimit(RLIMIT_CORE, &no_core) != 0 || prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 ||
-       prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
+   if (g_hardened_listen_fd >= 0 || !valid_config(config) || getuid() != config->authority_uid ||
+       geteuid() != config->authority_uid || config->authority_uid == 0 ||
+       config->authority_uid == config->kb_uid || setrlimit(RLIMIT_CORE, &no_core) != 0 ||
+       prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0 || prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
       return -1;
 #ifdef PR_GET_DUMPABLE
    if (prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 0)
       return -1;
 #endif
+   int flags = fcntl(config->listen_fd, F_GETFL);
+   int fd_flags = fcntl(config->listen_fd, F_GETFD);
+   if (flags < 0 || fd_flags < 0 || fcntl(config->listen_fd, F_SETFL, flags | O_NONBLOCK) != 0 ||
+       fcntl(config->listen_fd, F_SETFD, fd_flags | FD_CLOEXEC) != 0)
+      return -1;
    (void)umask(077);
-   return cleanse_fds(config->preserve_fds, config->preserve_fd_count);
+   if (cleanse_fds(config->preserve_fds, config->preserve_fd_count) != 0)
+      return -1;
+   g_hardened_listen_fd = config->listen_fd;
+   g_hardened_authority_uid = config->authority_uid;
+   return 0;
 #else
    (void)config;
    errno = ENOTSUP; /* Refuse platforms without Linux peer/process hardening. */
    return -1;
 #endif
+}
+
+void kb_mgmt_token_authority_daemon_request_stop(void)
+{
+   g_stop_requested = 1;
 }
 
 static int peer_is_kb(int fd, uid_t expected)
@@ -120,28 +170,29 @@ static void serve_one(const kb_mgmt_token_authority_daemon_config_t *config, int
 
 int kb_mgmt_token_authority_daemon_run(const kb_mgmt_token_authority_daemon_config_t *config)
 {
-   int accepting = 0;
-   socklen_t accepting_len = sizeof(accepting);
-   if (!config || config->listen_fd < 0 || !config->issue || !config->socket_path ||
-       strcmp(config->socket_path, KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH) != 0 ||
-       config->kb_uid == 0 || config->kb_uid == config->authority_uid ||
-       config->socket_mode != 0660 || !config->timeout_ms || config->timeout_ms > 60000 ||
-       !preserved(config->listen_fd, config->preserve_fds, config->preserve_fd_count) ||
-       getsockopt(config->listen_fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &accepting_len) != 0 ||
-       accepting_len != sizeof(accepting) || !accepting ||
-       kb_mgmt_token_authority_ipc_socket_matches(config->listen_fd, config->socket_path,
-                                                  config->socket_gid, config->socket_mode) == 0 ||
-       harden(config) != 0)
+   if (!valid_config(config) || g_hardened_listen_fd != config->listen_fd ||
+       g_hardened_authority_uid != config->authority_uid || getuid() != config->authority_uid ||
+       geteuid() != config->authority_uid)
       return -1;
 
-   for (;;)
+   while (!g_stop_requested)
    {
+      struct pollfd ready = {.fd = config->listen_fd, .events = POLLIN};
+      int poll_rc = poll(&ready, 1, 250);
+      if (g_stop_requested)
+         break;
+      if (poll_rc < 0 && errno == EINTR)
+         continue;
+      if (poll_rc < 0)
+         return -1;
+      if (poll_rc == 0)
+         continue;
+      if (!(ready.revents & POLLIN) || (ready.revents & (POLLERR | POLLHUP | POLLNVAL)))
+         return -1;
       int fd = accept4(config->listen_fd, NULL, NULL, SOCK_CLOEXEC);
       if (fd < 0)
       {
-         if (errno == EINTR)
-            return 0;
-         if (errno == ECONNABORTED)
+         if (errno == EINTR || errno == ECONNABORTED || errno == EAGAIN || errno == EWOULDBLOCK)
             continue;
          return -1;
       }
@@ -151,4 +202,5 @@ int kb_mgmt_token_authority_daemon_run(const kb_mgmt_token_authority_daemon_conf
       (void)shutdown(fd, SHUT_RDWR);
       (void)close(fd);
    }
+   return 0;
 }

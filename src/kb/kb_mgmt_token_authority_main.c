@@ -102,6 +102,7 @@ static int reopen_database(void *opaque, db2_management_token_authority_ctx_t *d
 static void stop_signal(int signal_number)
 {
    (void)signal_number;
+   kb_mgmt_token_authority_daemon_request_stop();
 }
 
 int main(int argc, char **argv)
@@ -142,14 +143,6 @@ int main(int argc, char **argv)
       fixed_error("environment");
       return 65;
    }
-   vault_custody_set_provider(vault_custody_kms_provider());
-   if (vault_unseal(NULL, 0) != 0 || vault_custody_kms_hwm_refresh() != 0 || vault_is_sealed() ||
-       !vault_custody_kms_hwm_ready())
-   {
-      fixed_error("custody");
-      return 68;
-   }
-
    struct sigaction action;
    memset(&action, 0, sizeof(action));
    action.sa_handler = stop_signal;
@@ -179,6 +172,16 @@ int main(int argc, char **argv)
        .issue = kb_mgmt_token_authority_service_issue,
        .issue_opaque = &service,
    };
+   if (kb_mgmt_token_authority_daemon_harden(&daemon) != 0)
+      return 69;
+
+   /* Process and inherited-fd hardening is complete before the first custody
+    * provider call can open, attest, or decrypt authority material. */
+   vault_custody_set_provider(vault_custody_kms_provider());
+   if (vault_unseal(NULL, 0) != 0 || vault_custody_kms_hwm_refresh() != 0 || vault_is_sealed() ||
+       !vault_custody_kms_hwm_ready())
+      return 68;
+
    int daemon_rc = kb_mgmt_token_authority_daemon_run(&daemon);
    db2_management_token_authority_close(&database);
    int seal_rc = vault_seal();

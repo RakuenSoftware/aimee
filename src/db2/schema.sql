@@ -9974,7 +9974,8 @@ RETURNS TABLE(correlation_id TEXT,jti TEXT,team_id BIGINT,actor_identity TEXT,
   token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
   vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
   wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
 DECLARE
   a public.kb_management_action_intent%ROWTYPE;
   m public.kb_team_membership%ROWTYPE;
