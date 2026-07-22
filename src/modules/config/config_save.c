@@ -1129,9 +1129,13 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* The economizer tier -- persist as a string only when non-default (default: safe). */
-   if (cfg->economizer_tier != ECON_TIER_SAFE)
-      cJSON_AddStringToObject(root, "economizer", econ_tier_name(cfg->economizer_tier));
+   /* OFF is the default. Persist proof_gated in the explicit nested public shape. */
+   if (cfg->economizer_mode == ECON_MODE_PROOF_GATED)
+   {
+      cJSON *econ = cJSON_AddObjectToObject(root, "economizer");
+      if (econ)
+         cJSON_AddStringToObject(econ, "mode", "proof_gated");
+   }
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
     * unit_retry 2, unit_max 16, ci_retry_max 2; caps: max_turns 300, max_wall 1800,

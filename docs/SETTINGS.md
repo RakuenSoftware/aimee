@@ -33,24 +33,23 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer: the `economizer` tier
+### Context economizer: `economizer.mode`
 
-The economizer is a **single tiered control** — one string, not a set of levers:
+The economizer has one fail-closed mode control:
 
 ```yaml
-economizer: safe        # off | safe | aggressive   (default: safe)
+economizer:
+  mode: off             # off | proof_gated (default: off)
 ```
 
-| Tier | What it does |
+| Mode | What it does |
 | --- | --- |
-| `off` | Verbatim passthrough — no prompt-cache breakpoint, no reduction. |
-| `safe` (default) | Anthropic prompt caching **+** deterministic, freeze-on-first-send tool-output condensation (the full output stays recall-restorable); recall-restorable history fold on OpenAI. Lossless — nothing the model can see is dropped. |
-| `aggressive` | Everything in `safe` **+** lossy tool-body compression and live inbound `/v1` request mutation. Mutation/compression apply to **OpenAI-family egress only** — Anthropic context is never mutated at any tier. |
+| `off` (default) | Sends the completed provider body without economizer registry work. |
+| `proof_gated` | Validates the signed transform registry and freezes the selected body behind an immutable exact-length wire snapshot. The current registry is empty, so only pristine bytes can be selected. |
 
-`modules.economizer: false` is an authoritative hard-kill that forces the tier to `off`
-regardless of the `economizer` value. The per-tier reduction behavior (fold, condensation,
-compression, gateway mutation) is an **internal preset** selected by the tier — there are no
-per-lever config knobs. See [The aimee Economizer](features/economizer.md).
+`modules.economizer: false` is an authoritative hard-kill that forces the effective mode to
+`off`. Legacy folding, condensation, compression, gateway mutation, and restore/resend are
+disconnected from production request paths. See [The aimee Economizer](features/economizer.md).
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -89,29 +88,25 @@ and is not affected by this key.
 
 ---
 
-## Choosing an economizer tier
+## Choosing an economizer mode
 
-The economizer is on by default at the `safe` tier (lossless). To change it, in the web UI
-open **⚙️ Settings** and set **`economizer`**, or from the CLI / config file:
+The economizer defaults to `off`. To enable its proof fence, set `economizer.mode`:
 
 ```yaml
-economizer: aggressive   # or: off
+economizer:
+  mode: proof_gated
 ```
 
 ```sh
-aimee config set economizer aggressive
+aimee config set economizer.mode proof_gated
 ```
 
-Tool-output condensation (recognized command output condensed before it enters context, with
-the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer) is part of
-the `safe` tier and on by default. See
-[features/tool-output-condensation.md](features/tool-output-condensation.md) for the
-condensation safety contract and observability, and
-[features/economizer.md](features/economizer.md) for the full tier model.
+Explicit legacy `safe` and `aggressive` values are rejected rather than mapped. See
+[features/economizer.md](features/economizer.md) for the migration and safety contract.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the `economizer` tier and most other fields. The
+- **Immediately (next turn):** `economizer.mode` and most other fields. The
   server reloads config per request.
 - **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module

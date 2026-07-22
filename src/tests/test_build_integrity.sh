@@ -80,9 +80,12 @@ for t in $targets; do
     src="tests/test_${name}.c"
     if [ ! -f "$src" ]; then
         # Some variant targets intentionally reuse the base test source with
-        # different backing objects, e.g. unit-test-working-memory-mock.
+        # different backing objects, e.g. unit-test-working-memory-mock. A
+        # shell-backed TEST_TARGET is also valid when the rule installs the
+        # matching script as its executable artifact.
         alt="${src%_mock.c}.c"
-        [ -f "$alt" ] || missing_tests="$missing_tests $src"
+        shell_src="${src%.c}.sh"
+        [ -f "$alt" ] || [ -f "$shell_src" ] || missing_tests="$missing_tests $src"
     fi
 done
 if [ -z "$missing_tests" ]; then
