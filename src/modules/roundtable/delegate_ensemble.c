@@ -1359,7 +1359,8 @@ static const char *panel_agent_provider(const agent_t *ag)
    return ag->provider[0] ? ag->provider : ag->name;
 }
 
-static int panel_provider_seats(const agent_config_t *acfg, const int seated[], const char *provider)
+static int panel_provider_seats(const agent_config_t *acfg, const int seated[],
+                                const char *provider)
 {
    int total = 0;
    for (int i = 0; i < acfg->agent_count; i++)
@@ -1523,9 +1524,8 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
       {
          snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
                   "%s", name);
-         snprintf(cfg->ensemble_reference_personas[n],
-                  sizeof(cfg->ensemble_reference_personas[n]), "%s",
-                  cfg->ensemble_reference_personas[i]);
+         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
+                  "%s", cfg->ensemble_reference_personas[i]);
       }
       n++;
    }
@@ -1569,9 +1569,8 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
       {
          snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
                   "%s", name);
-         snprintf(cfg->ensemble_reference_personas[n],
-                  sizeof(cfg->ensemble_reference_personas[n]), "%s",
-                  cfg->ensemble_reference_personas[i]);
+         snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
+                  "%s", cfg->ensemble_reference_personas[i]);
       }
       n++;
    }
@@ -1652,8 +1651,8 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
                cfg->ensemble_reference_models[0]);
 }
 
-int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg,
-                                   const agent_config_t *acfg, char *err, size_t err_n)
+int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+                                   char *err, size_t err_n)
 {
    if (err && err_n)
       err[0] = '\0';

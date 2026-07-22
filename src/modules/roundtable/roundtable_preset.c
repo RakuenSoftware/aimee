@@ -414,8 +414,8 @@ int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char
 
    const int explicit_request = requested && requested[0];
    const int configured_default = !explicit_request && cfg->roundtable_default[0];
-   const char *name = explicit_request ? requested
-                                       : (configured_default ? cfg->roundtable_default : "default");
+   const char *name =
+       explicit_request ? requested : (configured_default ? cfg->roundtable_default : "default");
    roundtable_preset_t p;
    if (roundtable_preset_load(name, &p) != 0)
    {

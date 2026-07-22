@@ -123,7 +123,8 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
       if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
       {
          cJSON_Delete(body);
-         return server_send_error(conn, "roundtable_review 'brief' must be a string or object", NULL);
+         return server_send_error(conn, "roundtable_review 'brief' must be a string or object",
+                                  NULL);
       }
       cJSON *brief_copy = cJSON_Duplicate(brief, 1);
       if (!brief_copy)
@@ -158,7 +159,8 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
    {
       cJSON *err = cJSON_Parse(respbuf);
       cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
-      const char *text = cJSON_IsString(msg) ? msg->valuestring : "could not queue roundtable_review";
+      const char *text =
+          cJSON_IsString(msg) ? msg->valuestring : "could not queue roundtable_review";
       int rc = server_send_error(conn, text, NULL);
       cJSON_Delete(err);
       return rc;

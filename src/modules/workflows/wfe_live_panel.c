@@ -2,8 +2,8 @@
  *
  * gate.roundtable calls this to convene a diverse panel THROUGH THE ROUNDTABLE
  * ENGINE (delegate_roundtable_run, REVIEW mode): the exact seats from the
- * named/default configured roundtable (or at most two fallback agents), whose findings are captured as review items with
- * replayable evidence, deduped across the panel, replay-VERIFIED against the
+ * named/default configured roundtable (or at most two fallback agents), whose findings are captured
+ * as review items with replayable evidence, deduped across the panel, replay-VERIFIED against the
  * gate's worktree (wfe_replay_worktree — interpretation never blocks, a
  * contradicted claim is rejected), and finally mapped onto per-lens verdicts
  * (wfe_panel_verdicts_from_roundtable) for the fail-closed wfe_gate_decide.

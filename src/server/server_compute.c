@@ -2103,8 +2103,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "roundtable must name a saved preset", NULL);
    const char *requested_roundtable = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
    char preset_err[256];
-   int acquired = roundtable_preset_resolve_runtime(requested_roundtable, &cfg, NULL, 0,
-                                                    preset_err, sizeof preset_err);
+   int acquired = roundtable_preset_resolve_runtime(requested_roundtable, &cfg, NULL, 0, preset_err,
+                                                    sizeof preset_err);
    if (acquired < 0)
       return server_send_error(conn, preset_err, NULL);
    roundtable_opts_t opts;
