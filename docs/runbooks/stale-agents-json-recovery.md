@@ -6,9 +6,10 @@ and contains the expected agent entries, the file is almost certainly stale
 on the box clock. This runbook covers that one scenario and the single
 recovery action that resolves it.
 
-If the diagnosis below does not all hold, stop and follow the parent
-[`appliance-state-recovery`](./appliance-state-recovery.md) runbook (Scenario 1
-or Scenario 3) instead.
+If any diagnosis check fails, this runbook does not apply. Stop here:
+restoring configuration or re-entering secrets will not fix a missing,
+malformed, or partially-populated file. Escalate to the Aimee service owner
+with the diagnosis output rather than continuing with the steps below.
 
 ## Symptoms
 
@@ -39,14 +40,14 @@ continue with the recovery action.
    ```
 
    The command exits 0 with no output on success. Any error here means the
-   file is malformed; stop and follow Scenario 1 of the parent runbook
-   instead.
+   file is malformed; this runbook does not apply — stop and escalate
+   to the Aimee service owner.
 
 3. **File contains the expected agent entries.**
 
    Inspect the parsed object and confirm each expected agent (by name and
-   adapter) is present. If any expected agent is missing, stop and follow
-   Scenario 1 — this runbook does not apply to a partially-populated file.
+   adapter) is present. If any expected agent is missing, this runbook
+   does not apply — stop and escalate to the Aimee service owner.
 
 4. **File mtime lags the box clock.**
 
