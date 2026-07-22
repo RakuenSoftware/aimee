@@ -210,6 +210,23 @@
       "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to two docs, status, validation, and ledger accounting.",
       "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-17.md", "docs/modules/config.md", "docs/modules/audit.md"]
+    },
+    {
+      "slice": 18,
+      "state": "present_and_verified",
+      "disposition": "Documented optional workflows, roundtable, and benchmarks with a shared ownership/liveness matrix; triggers remain workflow intake, workflow/roundtable integration preserves split ownership, and legacy eval names do not create an evals module or runtime benchmark authority.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["three control-plane module documents remain explicit status debt", "workflow and roundtable optionality is not fully enforced by current startup/build wiring", "the benchmarks target directory remains descriptor-only while live harnesses remain distributed under legacy names"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Treating descriptor optionality as implemented or renaming every legacy eval symbol in a docs slice would hide current liveness and compatibility constraints.",
+        "revisit": "Profile/source slices must add effective activation, move ownership, preserve aliases and data contracts, and prove disabled residue plus supported journeys."
+      },
+      "consumers": ["module maintainers", "technical writers", "future optional execution and benchmark source slices"],
+      "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-18.md", "docs/modules/workflows.md", "docs/modules/roundtable.md", "docs/modules/benchmarks.md"]
     }
   ]
 }
