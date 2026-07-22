@@ -72,6 +72,7 @@ def check(extra: str = "") -> list[str]:
         "provider",
         "kb_mgmt_jwks_publish_main.o",
         "kb_mgmt_token_roots_provision_main.o",
+        "kb_mgmt_token_roots_provision.o",
         "management_action_journal.o",
         "kb_http_",
     )

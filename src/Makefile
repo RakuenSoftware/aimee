@@ -500,7 +500,7 @@ TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
                        $(OBJDIR)/kb/kb_mgmt_token_authority.o \
                        $(OBJDIR)/kb/kb_vault_protected_use.o \
                        $(OBJDIR)/kb/kb_mgmt_token.o \
-                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_public.o \
                        $(OBJDIR)/db2/management_token_authority.o \
                        $(OBJDIR)/db2/db_postgres.o
 TOKEN_AUTHORITY_VAULT_OBJS = $(STATUS_AUTHORITY_VAULT_OBJS)
@@ -528,6 +528,7 @@ STATUS_PROVISIONER_PLATFORM_OBJS = $(filter %/platform_path.o,$(PLATFORM_BASIC_O
 # closure out of every runtime target and installation surface.
 TOKEN_ROOTS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_token_roots_provision_main.o \
                                $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                               $(OBJDIR)/kb/kb_mgmt_token_public.o \
                                $(OBJDIR)/db2/management_token_roots.o \
                                $(OBJDIR)/db2/db_postgres.o
 TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
@@ -542,6 +543,7 @@ TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
 JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
                       $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                      $(OBJDIR)/kb/kb_mgmt_token_public.o \
                       $(OBJDIR)/db2/management_jwks_publication.o \
                       $(OBJDIR)/db2/db_postgres.o
 JWKS_PUBLISHER_VAULT_OBJS = $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS)
@@ -706,7 +708,7 @@ GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
@@ -1662,14 +1664,19 @@ FUZZ_SERVER_MGMT_TOKEN_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_token.o \
 FUZZ_KB_MGMT_TOKEN_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_token.o \
                           $(OBJDIR)/kb/kb_mgmt_token.o
 
+FUZZ_KB_MGMT_TOKEN_AUTHORITY_IPC_OBJS = \
+    $(OBJDIR)/tests/fuzz_kb_mgmt_token_authority_ipc.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o
+
 FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publication.o \
                                      $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
-                                     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o
+                                     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                                     $(OBJDIR)/kb/kb_mgmt_token_public.o
 
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse tests/fuzz_config_load \
                tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
                tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
-               tests/fuzz_kb_mgmt_jwks_publication
+               tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -1707,6 +1714,10 @@ $(OBJDIR)/tests/fuzz_kb_mgmt_token.o: tests/fuzz_kb_mgmt_token.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
+$(OBJDIR)/tests/fuzz_kb_mgmt_token_authority_ipc.o: tests/fuzz_kb_mgmt_token_authority_ipc.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
 $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publication.o: tests/fuzz_kb_mgmt_jwks_publication.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
@@ -1738,6 +1749,9 @@ tests/fuzz_server_mgmt_token: $(FUZZ_SERVER_MGMT_TOKEN_OBJS)
 tests/fuzz_kb_mgmt_token: $(FUZZ_KB_MGMT_TOKEN_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
+tests/fuzz_kb_mgmt_token_authority_ipc: $(FUZZ_KB_MGMT_TOKEN_AUTHORITY_IPC_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
 tests/fuzz_kb_mgmt_jwks_publication: $(FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
@@ -1751,6 +1765,7 @@ fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_kb_workload_wire tests/fuzz_corpus/seed.*
 	./tests/fuzz_server_mgmt_token tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_token tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_jwks_publication tests/fuzz_corpus/seed.*
 
 # --- Coverage reporting ---
