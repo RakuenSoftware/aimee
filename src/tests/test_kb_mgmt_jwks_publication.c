@@ -35,6 +35,9 @@ typedef struct
    unsigned stages, records, finals, signs;
    int fail_record_once;
    int forged_read;
+   int cas_advances_before_error;
+   kb_mgmt_jwks_hwm_result_t read_result;
+   kb_mgmt_jwks_hwm_result_t cas_result;
 } mock_t;
 
 static void roots(mock_t *m)
@@ -139,6 +142,8 @@ static kb_mgmt_jwks_hwm_result_t hwm_read(void *p, const char *id, uint64_t *ver
                                           size_t cap, size_t *n)
 {
    mock_t *m = p;
+   if (m->read_result != KB_MGMT_JWKS_HWM_OK)
+      return m->read_result;
    if (strcmp(id, "kms:p5-publication") || cap < 64)
       return KB_MGMT_JWKS_HWM_RETRY;
    *version = g_hwm;
@@ -152,7 +157,13 @@ static kb_mgmt_jwks_hwm_result_t hwm_read(void *p, const char *id, uint64_t *ver
 static kb_mgmt_jwks_hwm_result_t hwm_cas(void *p, const char *id, uint64_t old, uint64_t next,
                                          uint8_t *att, size_t cap, size_t *n)
 {
-   (void)p;
+   mock_t *m = p;
+   if (m->cas_result != KB_MGMT_JWKS_HWM_OK)
+   {
+      if (m->cas_advances_before_error)
+         g_hwm = next;
+      return m->cas_result;
+   }
    if (strcmp(id, "kms:p5-publication") || cap < 64 || g_hwm != old || old != 1 || next != 2)
       return KB_MGMT_JWKS_HWM_COMPARE;
    g_hwm = next;
@@ -322,8 +333,8 @@ static void test_bounds_conflicts_and_fail_closed(void)
                                       10, &record));
    assert(zero(&record, sizeof(record)));
    assert(kb_mgmt_jwks_build_unsigned(m.roots.token.public_key, m.roots.token.public_key_len,
-                                      KB_MGMT_JWKS_TIME_MAX,
-                                      KB_MGMT_JWKS_TIME_MAX + INT64_C(1), &record));
+                                      KB_MGMT_JWKS_TIME_MAX, KB_MGMT_JWKS_TIME_MAX + INT64_C(1),
+                                      &record));
    assert(zero(&record, sizeof(record)));
 
    kb_mgmt_jwks_callbacks_t cb = callbacks(&m);
@@ -366,11 +377,72 @@ static void test_bounds_conflicts_and_fail_closed(void)
    assert(!n && zero(out, sizeof(out)));
 }
 
+static void test_provider_failure_matrix(void)
+{
+   mock_t m;
+   char out[KB_MGMT_JWKS_ENVELOPE_MAX];
+   size_t n;
+
+#define RESET_PROVIDER_CASE()                                                                      \
+   do                                                                                              \
+   {                                                                                               \
+      roots(&m);                                                                                   \
+      g_hwm = 1;                                                                                   \
+      memset(out, 0xa5, sizeof(out));                                                              \
+      n = 999;                                                                                     \
+   } while (0)
+
+   RESET_PROVIDER_CASE();
+   m.read_result = KB_MGMT_JWKS_HWM_RETRY;
+   kb_mgmt_jwks_callbacks_t cb = callbacks(&m);
+   kb_mgmt_jwks_config_t c = config();
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_RETRY);
+   assert(!m.stages && !m.signs && !n && zero(out, sizeof(out)));
+
+   RESET_PROVIDER_CASE();
+   m.read_result = KB_MGMT_JWKS_HWM_INTEGRITY;
+   cb = callbacks(&m);
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
+   assert(!m.stages && !m.signs && !n && zero(out, sizeof(out)));
+
+   const uint64_t invalid_fresh_versions[] = {0, 2, 3};
+   for (size_t i = 0; i < sizeof(invalid_fresh_versions) / sizeof(invalid_fresh_versions[0]); ++i)
+   {
+      RESET_PROVIDER_CASE();
+      g_hwm = invalid_fresh_versions[i];
+      cb = callbacks(&m);
+      assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
+      assert(!m.stages && !m.signs && !n && zero(out, sizeof(out)));
+   }
+
+   RESET_PROVIDER_CASE();
+   m.cas_result = KB_MGMT_JWKS_HWM_COMPARE;
+   cb = callbacks(&m);
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_RETRY);
+   assert(m.record.phase == KB_MGMT_JWKS_STAGED && g_hwm == 1 && !n && zero(out, sizeof(out)));
+
+   RESET_PROVIDER_CASE();
+   m.cas_result = KB_MGMT_JWKS_HWM_COMPARE;
+   m.cas_advances_before_error = 1;
+   cb = callbacks(&m);
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_FRESH);
+   assert(m.record.phase == KB_MGMT_JWKS_FINAL && g_hwm == 2 && n > 0);
+
+   RESET_PROVIDER_CASE();
+   m.cas_result = KB_MGMT_JWKS_HWM_INTEGRITY;
+   cb = callbacks(&m);
+   assert(kb_mgmt_jwks_publish(&c, &cb, out, sizeof(out), &n) == KB_MGMT_JWKS_INTEGRITY);
+   assert(m.record.phase == KB_MGMT_JWKS_STAGED && g_hwm == 1 && !n && zero(out, sizeof(out)));
+
+#undef RESET_PROVIDER_CASE
+}
+
 int main(void)
 {
    test_codec_and_crypto();
    test_fresh_export_and_recovery();
    test_bounds_conflicts_and_fail_closed();
+   test_provider_failure_matrix();
    puts("kb_mgmt_jwks_publication: all tests passed");
    return 0;
 }
