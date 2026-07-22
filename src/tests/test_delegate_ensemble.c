@@ -427,6 +427,7 @@ static config_t make_cfg(int enabled, int min_ok, double max_cost)
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    (void)enabled;
+   cfg.module_roundtable = 1;
    cfg.ensemble_min_successful = min_ok;
    cfg.ensemble_max_cost_usd = max_cost;
    cfg.ensemble_reference_count = 3;
@@ -575,6 +576,62 @@ static void test_ensemble_null_args(void)
    assert(delegate_ensemble_run(NULL, NULL, NULL, &result) == -1);
    assert(delegate_ensemble_cost_usd(NULL) == 0.0);
    printf("  test_ensemble_null_args: ok\n");
+}
+
+static void test_roundtable_module_activation(void)
+{
+   config_t cfg = make_cfg(1, 2, 10.0);
+   cfg.module_roundtable = -1;
+   unsetenv("AIMEE_MODULE_ROUNDTABLE");
+   assert(roundtable_module_enabled(&cfg) == 0);
+
+   const char *truthy[] = {"1", "true", "ON", "Yes"};
+   for (size_t i = 0; i < sizeof(truthy) / sizeof(truthy[0]); i++)
+   {
+      setenv("AIMEE_MODULE_ROUNDTABLE", truthy[i], 1);
+      assert(roundtable_module_enabled(&cfg) == 1);
+   }
+   const char *falsy[] = {"0", "false", "OFF", "No"};
+   for (size_t i = 0; i < sizeof(falsy) / sizeof(falsy[0]); i++)
+   {
+      setenv("AIMEE_MODULE_ROUNDTABLE", falsy[i], 1);
+      assert(roundtable_module_enabled(&cfg) == 0);
+   }
+   setenv("AIMEE_MODULE_ROUNDTABLE", "invalid", 1);
+   assert(roundtable_module_enabled(&cfg) == 0);
+   setenv("AIMEE_MODULE_ROUNDTABLE", " yes ", 1);
+   assert(roundtable_module_enabled(&cfg) == 0);
+   setenv("AIMEE_MODULE_ROUNDTABLE", " true", 1);
+   assert(roundtable_module_enabled(&cfg) == 0);
+   setenv("AIMEE_MODULE_ROUNDTABLE", "1 ", 1);
+   assert(roundtable_module_enabled(&cfg) == 0);
+
+   setenv("AIMEE_MODULE_ROUNDTABLE", "0", 1);
+   cfg.module_roundtable = 1;
+   assert(roundtable_module_enabled(&cfg) == 1);
+   setenv("AIMEE_MODULE_ROUNDTABLE", "1", 1);
+   cfg.module_roundtable = 0;
+   assert(roundtable_module_enabled(&cfg) == 0);
+   unsetenv("AIMEE_MODULE_ROUNDTABLE");
+   printf("  test_roundtable_module_activation: ok\n");
+}
+
+static void test_roundtable_disabled_stops_before_provider_work(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   cfg.module_roundtable = 0;
+   agent_config_t acfg = make_acfg();
+   delegate_ensemble_result_t ensemble;
+   assert(delegate_ensemble_run(&acfg, &cfg, "disabled aggregate", &ensemble) == -1);
+   assert(g_parallel_calls == 0 && g_named_calls == 0 && g_aggregator_calls == 0);
+
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   roundtable_result_t roundtable;
+   assert(delegate_roundtable_run(&acfg, &cfg, "disabled roundtable", &opts, &roundtable) == -1);
+   assert(g_parallel_calls == 0 && g_named_calls == 0 && g_aggregator_calls == 0);
+   printf("  test_roundtable_disabled_stops_before_provider_work: ok\n");
 }
 
 /* §0.1 regression: the engine must route each fan-out task to its OWN configured
@@ -1501,6 +1558,8 @@ int main(void)
 {
    printf("delegate_ensemble tests\n");
    test_ensemble_null_args();
+   test_roundtable_module_activation();
+   test_roundtable_disabled_stops_before_provider_work();
    test_ensemble_basic();
    test_ensemble_cost_cap();
    test_ensemble_cost_uses_model_registry_prices();

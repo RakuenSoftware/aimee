@@ -727,9 +727,12 @@ def render_env(found):
     out = ["## Environment variables",
            "",
            f"The binaries read {len(found)} `AIMEE_*` environment variables (scanned "
-           "from `getenv()` in `src/`, excluding tests). They override config-store "
-           "values and are mostly for deployment/runtime wiring. Secrets/tokens should "
-           "be supplied via the environment or the credential vault, never committed.",
+           "from `getenv()` in `src/`, excluding tests). Depending on the setting, these "
+           "variables either override config-store values or provide fallbacks when no "
+           "explicit config value is present. Module-activation variables use fallback "
+           "semantics; deployment and runtime wiring variables commonly override stored "
+           "values. Secrets and tokens should be supplied through the environment or "
+           "credential vault, never committed.",
            ""]
     by_group = {}
     undocumented = []

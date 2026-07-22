@@ -203,20 +203,34 @@ int main(void)
       config_load(&cfg); /* no modules: block -> all unspecified */
       assert(cfg.module_memory == -1 && cfg.module_governance == -1);
       assert(cfg.module_delegates == -1 && cfg.module_workflows == -1);
+      assert(cfg.module_roundtable == -1);
       assert(cfg.module_economizer == -1);
 
       /* save the pristine defaults: nothing written -> reload still -1 (no stray 0). */
       assert(config_save(&cfg) == 0);
+      char saved_path[700];
+      snprintf(saved_path, sizeof(saved_path), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *saved = fopen(saved_path, "rb");
+      assert(saved);
+      char saved_text[32768];
+      size_t saved_n = fread(saved_text, 1, sizeof(saved_text) - 1, saved);
+      fclose(saved);
+      saved_text[saved_n] = '\0';
+      /* All module tristates are unspecified, so config_save must not create a modules block.
+       * (A separate top-level roundtable settings section is expected and unrelated.) */
+      assert(strstr(saved_text, "\nmodules:") == NULL);
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
       assert(cfg2.module_memory == -1 && cfg2.module_governance == -1);
       assert(cfg2.module_delegates == -1 && cfg2.module_workflows == -1);
+      assert(cfg2.module_roundtable == -1);
       assert(cfg2.module_economizer == -1);
 
       /* explicit user toggles round-trip: governance OFF, delegates ON, economizer OFF. */
       cfg2.module_governance = 0;
       cfg2.module_delegates = 1;
+      cfg2.module_roundtable = 1;
       cfg2.module_economizer = 0;
       assert(config_save(&cfg2) == 0);
       static config_t cfg3;
@@ -224,6 +238,7 @@ int main(void)
       config_load(&cfg3);
       assert(cfg3.module_governance == 0); /* explicit disable persisted */
       assert(cfg3.module_delegates == 1);  /* explicit enable persisted  */
+      assert(cfg3.module_roundtable == 1); /* explicit enable persisted  */
       assert(cfg3.module_economizer == 0); /* explicit disable persisted */
       assert(cfg3.module_memory == -1 && cfg3.module_workflows == -1); /* untouched stay -1 */
 

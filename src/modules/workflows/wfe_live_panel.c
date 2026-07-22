@@ -222,6 +222,16 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
    if (!pkt || !pkt->workdir || !pkt->workdir[0])
       return WFE_PANEL_UNREACHABLE; /* no worktree to review in -> park */
 
+   config_t cfg;
+   memset(&cfg, 0, sizeof cfg);
+   if (config_load(&cfg) != 0)
+      return WFE_PANEL_UNREACHABLE;
+   if (!roundtable_module_enabled(&cfg))
+   {
+      aimee_log(LOG_WARN, "wfe-panel", "%s", roundtable_module_disabled_message());
+      return WFE_PANEL_MODULE_DISABLED;
+   }
+
    agent_config_t acfg;
    memset(&acfg, 0, sizeof acfg);
    if (agent_load_config(&acfg) != 0)
@@ -233,11 +243,6 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
    roundtable_preset_t preset;
    int have_preset = load_panel_preset(&preset, pkt->roundtable);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof cfg);
-   if (config_load(&cfg) != 0)
-      return WFE_PANEL_UNREACHABLE;
 
    char *task = build_review_task(pkt);
    if (!task)

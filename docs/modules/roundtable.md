@@ -37,13 +37,19 @@ and pipeline state. A compiled route or saved preset is not proof of an executab
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `false`; the descriptor is `enabled_by_default: false`, so activation is selected before startup rather than hot-toggled.
+- `runtime_toggle.supported`: `false`; there is no administrative hot-toggle surface for this module.
+- `modules.roundtable` is the canonical boolean activation control. When absent, the owner-local
+  fallback reads `AIMEE_MODULE_ROUNDTABLE`; it accepts case-insensitive `1`, `true`, `on`, and
+  `yes`, or `0`, `false`, `off`, and `no`. Missing, empty, whitespace-padded, or unknown values
+  fail closed to disabled. An explicit config value always wins over the environment.
 
 Configuration covers reference seats/models, consensus rounds/turns, personas, chair behavior, cost and
-token bounds, pipeline passes/attempts/gates, capture, and named presets. Unlike workflows, no
-`modules.roundtable` activation field was found in `config_parse_modules_section`; server routes and
-roundtable objects are compiled directly. Descriptor-declared optionality is therefore not fully
-enforced by current configuration/build wiring.
+token bounds, pipeline passes/attempts/gates, capture, and named presets. The aggregate and roundtable
+engines enforce activation before fan-out or provider/model work. The server and CLI return an explicit
+disabled diagnostic, while a workflow `gate.roundtable` records a permanent step failure when the
+module is disabled instead of entering the transient provider-retry loop. Server routes and roundtable objects are still compiled and
+advertised when disabled; profile-driven object omission and conditional surface registration remain
+required follow-up work.
 
 ## Surfaces
 
@@ -51,6 +57,11 @@ Surfaces include `aimee ensemble roundtable`, ensemble review/start/status/pause
 roundtable presets, authoring-pipeline APIs, frontend authoring controls, sweep review, and workflow
 roundtable/panel blocks. Generic delegate calls belong to delegates; generic output rendering belongs to
 response composition; only panel deliberation semantics belong here.
+
+As of slice 27, linked disabled surfaces include `delegate.aggregate`, `delegate.roundtable`, HTTP
+`POST /v1/delegate/aggregate`, HTTP `POST /v1/delegate/roundtable`, MCP `ensemble_review`, the
+roundtable authoring pipeline, and workflow roundtable gates. They fail closed through the activation
+boundary; they are not yet removed from discovery or the selected object closure.
 
 ## Data and migrations
 

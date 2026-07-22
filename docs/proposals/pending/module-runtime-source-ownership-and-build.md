@@ -14,6 +14,18 @@
 descriptor graph generates Make and CMake inputs, runtime registration, effective configuration,
 profile selection, dependency reports, and module-documentation inventories.
 
+## Implementation status
+
+Slice 27 establishes an enforceable activation boundary for the optional `roundtable` module:
+`modules.roundtable` and its default-off environment fallback guard the aggregate/roundtable engines,
+CLI/server handlers, and workflow panel provider before model or seat work. Routes and implementation
+objects remain linked and advertised for compatibility. Conditional registration and profile-driven
+object omission remain required before the proposal's physical-absence contract is complete.
+The owner API is `roundtable_module_enabled`; workflows map its disabled result through
+`WFE_PANEL_MODULE_DISABLED` to a permanent step failure rather than a transient provider retry.
+Resuming or redispatching that disabled gate re-evaluates activation and, while still disabled,
+fails immediately without entering live-panel seat acquisition or retry.
+
 ## Physical boundary
 
 Each module owns `module.yaml`, `include/aimee/<module>/`, private source, tests, and a corresponding
