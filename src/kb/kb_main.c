@@ -36,6 +36,7 @@
 #include "db2/rel_types_store.h" /* db2_rel_types_ensure_seed (typed-fact ontology) */
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
+#include "kb/kb_management_runtime.h"
 #include "db2/kb_audit_worm.h"
 #include "vault_server_key.h" /* startup durable seal-epoch synchronization */
 #include <signal.h>
@@ -1509,6 +1510,14 @@ int main(int argc, char **argv)
    /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
    kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
+   if (kb_management_runtime_start() != 0)
+   {
+      fprintf(stderr, "aimee-kb: invalid management runtime configuration; refusing to start\n");
+      kb_service_shutdown(&g_ctx);
+      db2_shutdown();
+      agent_http_cleanup();
+      return 1;
+   }
    if (kb_http_start(http_port, kb_cfg.kb_api_bearer_token) != 0)
    {
       /* Another instance owns the port; yield gracefully with success so
@@ -1516,6 +1525,8 @@ int main(int argc, char **argv)
       LOG_WARN("kb_http",
                "failed to start HTTP listener on port %d; another instance likely owns it",
                http_port);
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
       db2_shutdown();
       agent_http_cleanup();
       return 0;
@@ -1572,12 +1583,14 @@ int main(int argc, char **argv)
          (void)db2_org_egress_recover(100, &recovered);
          next_egress_recovery = now + 5;
       }
+      kb_management_runtime_tick((int64_t)now);
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
    int rc = 0;
    kb_mtls_stop();
    kb_http_stop();
+   kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
