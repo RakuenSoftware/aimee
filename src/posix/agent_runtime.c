@@ -159,7 +159,20 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
                                                char *last_tool_result, size_t last_tool_result_n)
 {
    static const char *const name = "list_files";
-   static const char *const args = "{\"path\":\".\"}";
+   /* Never let a synthetic evidence call fall back to the server process CWD.
+    * Delegate execution installs its effective worktree in thread-local command
+    * context; a direct roundtable without a checkout must remain ungrounded. */
+   const char *worktree = run_cmd_get_cwd();
+   if (!worktree || !worktree[0] || !aimee_path_is_absolute(worktree))
+      return 0;
+   cJSON *arg_obj = cJSON_CreateObject();
+   if (!arg_obj)
+      return 0;
+   cJSON_AddStringToObject(arg_obj, "path", worktree);
+   char *args = cJSON_PrintUnformatted(arg_obj);
+   cJSON_Delete(arg_obj);
+   if (!args)
+      return 0;
    char *result = dispatch_tool_call_ctx(name, args, timeout_ms);
    agent_trace_log(0, turn, "tool_call", NULL, name, args, result, NULL);
    if (last_tool_name && last_tool_name_n)
@@ -170,6 +183,7 @@ static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int ti
    if (usable)
       agent_session_append_repository_evidence(messages, name, args, result);
    free(result);
+   free(args);
    return usable;
 }
 
@@ -994,22 +1008,26 @@ native_provider_http:
          required_evidence_responses++;
 
       /* ChatGPT can expose provider-native Task/Agent tools outside the function
-       * catalog and ignore a named tool_choice. The gateway must still deny those
-       * delegation calls, but an evidence-gated seat must not become permanently
-       * unusable as a result. When policing removed every call, perform one
-       * deterministic, read-only repository bootstrap and return its output to
-       * that same seat. This is a fallback for a denied native call, not a general
-       * substitute for model-selected tools. */
+       * catalog, ignore a named tool_choice, or return a native tool response the
+       * wire parser cannot recognize. The gateway still denies identified native
+       * delegation calls. When no advertised call survives, perform one bounded,
+       * read-only bootstrap from the delegate's explicit worktree and return its
+       * output to that same seat. */
       /* This value is intentionally captured after policy compaction. A mixed
        * [denied, allowed] response retains its allowed call and never falls back. */
       int remaining_calls_after_policy = parsed.call_count;
       if (agent_required_evidence_needs_fallback(agent->require_initial_tool_call,
-                                                 successful_tool_calls, chatgpt, denied_calls,
+                                                 successful_tool_calls, chatgpt,
                                                  remaining_calls_after_policy))
       {
-         aimee_log(LOG_WARN, "agent.evidence",
-                   "provider selected denied tool '%s'; bootstrapping seat with list_files",
-                   denied_tool[0] ? denied_tool : "Subagent");
+         if (denied_calls > 0)
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider selected denied tool '%s'; bootstrapping seat with list_files",
+                      denied_tool[0] ? denied_tool : "Subagent");
+         else
+            aimee_log(LOG_WARN, "agent.evidence",
+                      "provider returned no executable repository call; bootstrapping seat with "
+                      "list_files");
          total_calls++;
          if (agent_bootstrap_repository_evidence(messages, turn, agent->timeout_ms, last_tool_name,
                                                  sizeof last_tool_name, last_tool_result,

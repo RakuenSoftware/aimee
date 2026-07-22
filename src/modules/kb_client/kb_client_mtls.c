@@ -375,6 +375,40 @@ char *kb_client_mtls_request(const char *method, const char *path, const char *b
    return out;
 }
 
+int kb_client_mtls_management_jwks(char *envelope_out, size_t envelope_cap, size_t *envelope_len)
+{
+   if (envelope_out && envelope_cap)
+      memset(envelope_out, 0, envelope_cap);
+   if (envelope_len)
+      *envelope_len = 0;
+   if (!envelope_out || envelope_cap < 2 || !envelope_len)
+      return -1;
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/management/jwks", NULL, &status);
+   if (!response || status != 200)
+   {
+      free(response);
+      return -1;
+   }
+   size_t n = strnlen(response, 3072);
+   if (!n || n >= 3072 || n + 1 > envelope_cap)
+   {
+      free(response);
+      return -1;
+   }
+   memcpy(envelope_out, response, n + 1);
+   *envelope_len = n;
+   free(response);
+   return 0;
+}
+
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *envelope_out, size_t envelope_cap,
+                                         size_t *envelope_len)
+{
+   (void)ctx;
+   return kb_client_mtls_management_jwks(envelope_out, envelope_cap, envelope_len);
+}
+
 void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int *waiters_out,
                                unsigned long *borrow_exhausted_total_out)
 {

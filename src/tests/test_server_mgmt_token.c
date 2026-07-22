@@ -504,6 +504,22 @@ int main(void)
    assert(strcmp(claims.subject, "oidc:https%3A//idp.example:user%3A42") == 0);
    assert(strcmp(claims.kid, "management-1") == 0);
 
+   char *unknown = mint(key, "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"management-2\"}", raw);
+   memset(&claims, 0xa5, sizeof(claims));
+   assert(server_mgmt_token_verify_ex(unknown, strlen(unknown), jwks, issuer, audience, peer_issuer,
+                                      peer_serial, fingerprint, request_hash, NOW,
+                                      &claims) == SERVER_MGMT_TOKEN_UNKNOWN_KID);
+   for (size_t i = 0; i < sizeof(claims); ++i)
+      assert(((const unsigned char *)&claims)[i] == 0);
+   char *malformed_jwks = replace_once(jwks, "\"e\":\"AQAB\"", "\"e\":\"AQ\"");
+   assert(server_mgmt_token_verify_ex(unknown, strlen(unknown), malformed_jwks, issuer, audience,
+                                      peer_issuer, peer_serial, fingerprint, request_hash, NOW,
+                                      &claims) == SERVER_MGMT_TOKEN_INVALID);
+   assert(!server_mgmt_token_verify(unknown, strlen(unknown), jwks, issuer, audience, peer_issuer,
+                                    peer_serial, fingerprint, request_hash, NOW, &claims));
+   free(malformed_jwks);
+   free(unknown);
+
    test_header_matrix(key, jwks, raw);
    test_payload_type_and_numeric_matrix(key, jwks, raw);
    test_payload_duplicates(key, jwks, raw);

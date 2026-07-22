@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 60
+Total commands: 61
 
 ## Core commands
 
@@ -522,6 +522,18 @@ Subcommands:
   set <url> [token]  Persist a remote server target
   status             Show the resolved transport and a health probe
   clear              Revert to the local Unix socket
+```
+
+### `aimee roundtable`
+
+Review an artifact with a configured roundtable.
+
+Subcommands:
+
+```
+  review <artifact>  Run the configured roundtable review
+                     --roundtable NAME selects a saved preset
+                     --original-request TEXT supplies the governing request
 ```
 
 ### `aimee server`

@@ -67,6 +67,24 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	return r.agents.Delegate(ctx, request)
 }
 
+func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requests []DelegateRequest) []DelegateGroupResult {
+	for i := range requests {
+		requests[i].WorkItemID = step.WorkItem.ID
+		requests[i].Stage = step.Node.ID
+		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
+	}
+	if group, ok := r.agents.(DelegateGroupClient); ok {
+		return group.DelegateGroup(ctx, requests)
+	}
+	// Roundtable never reconstructs grouped delegation or participant identity.
+	// A resource plane without the generic group contract is unavailable to it.
+	out := make([]DelegateGroupResult, len(requests))
+	for i := range requests {
+		out[i].Err = errors.New("delegate service does not support grouped delegation")
+	}
+	return out
+}
+
 func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
 	if db == nil || worktrees == nil || agents == nil || artifacts == nil || workflows == nil {
 		return nil, errors.New("DB1, worktrees, agent client, artifacts, and workflow registry are required")
@@ -469,10 +487,8 @@ type panelResponse struct {
 	Findings                 []panelFinding `json:"findings"`
 }
 type panelSeat struct {
-	persona, delegate string
-	required          bool
-	pinned            bool
-	ordinal           int
+	persona, selector, participant string
+	ordinal                        int
 }
 
 type panelSeatReport struct {
@@ -492,40 +508,31 @@ type panelAnalysis struct {
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
 	lenses := panelSeats(req.Node)
 	if len(lenses) == 0 {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable"}, nil
-	}
-	rosterClient, ok := r.agents.(AgentRosterClient)
-	if !ok {
-		return StepResult{Status: StepPending, PauseReason: "panel_wiring_missing", Detail: "agent resource plane does not expose the live eligible roster"}, nil
-	}
-	// gate.roundtable always dispatches the review role. A roster failure cannot
-	// safely fall back to a smaller static panel: without the live enabled-role
-	// roster, WFE cannot know either eligibility or configured capacity. Park and
-	// retry instead of silently violating the operator's UI configuration.
-	roster, err := rosterClient.EligibleAgents(ctx, roundtableDelegateRole)
-	if err != nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "load eligible roundtable roster: " + err.Error()}, nil
-	}
-	roundtableAgents := make([]roundtablecfg.Agent, 0, len(roster))
-	for _, agent := range roster {
-		roundtableAgents = append(roundtableAgents, roundtablecfg.Agent{Name: agent.Name, Provider: agent.Provider, MaxParallel: agent.MaxParallel})
+		// A saved roundtable owns its exact seats and personas. Workflow-local panel
+		// metadata is only an optional lens/pin overlay; it must not be required to
+		// enter the one shared roundtable route. The direct fallback consumes only
+		// the first two lenses by contract.
+		for _, persona := range []string{"original-request", "reviewer"} {
+			lenses = append(lenses, panelSeat{persona: persona})
+		}
 	}
 	lensNames := make([]string, 0, len(lenses))
 	for _, lens := range lenses {
 		lensNames = append(lensNames, lens.persona)
 	}
 	var panel roundtablecfg.Panel
+	var err error
 	if r.roundtables != nil {
-		panel, err = r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), roundtableAgents, lensNames, panelPins(req.Node))
+		panel, err = r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	} else {
-		panel, err = roundtablecfg.ResolveDirect(roundtableAgents, lensNames, panelPins(req.Node))
+		panel, err = roundtablecfg.ResolveDirect(lensNames, panelPins(req.Node))
 	}
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
 	}
 	seats := make([]panelSeat, 0, len(panel.Seats))
 	for _, seat := range panel.Seats {
-		seats = append(seats, panelSeat{persona: seat.Persona, delegate: seat.Agent, required: true, pinned: seat.Pinned})
+		seats = append(seats, panelSeat{persona: seat.Persona, selector: seat.Selector})
 	}
 	for i := range seats {
 		seats[i].ordinal = i
@@ -535,7 +542,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		return StepResult{}, errors.New("roundtable missing src input")
 	}
 	workdir := req.WorkItem.Worktree
-	if workdir == "" {
+	if workdir == "" && req.WorkItem.Repo != "" {
 		var err error
 		workdir, _, err = r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 		if err != nil {
@@ -558,31 +565,39 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	defer cancel()
 	analysis := r.runPanelAnalysis(roundtableCtx, req, seats, basePrompt, reviewed.Hash, stage, 1)
 	if analysis.Unreachable != "" {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD}, nil
+		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
+		rt.DeadlineHit = roundtableCtx.Err() != nil
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, Roundtable: rt}, nil
 	}
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
 	if panel.Discussion {
 		var discussionErr string
 		feedback, approvals, totalCost, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
 		if discussionErr != "" {
-			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost}, nil
+			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
+			rt.DeadlineHit = roundtableCtx.Err() != nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
 	}
 	if panel.ChairmanEnabled {
 		var chairmanErr string
 		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
 		if chairmanErr != "" {
-			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost}, nil
+			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
+			rt.DeadlineHit = roundtableCtx.Err() != nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
 	}
 	quorum := panel.MinSuccessful
 	if approvals >= quorum && len(feedback.Findings) == 0 {
-		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost}, nil
+		rt := roundtableResult(&feedback, true, true, analysis, len(seats), totalCost)
+		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, Roundtable: rt}, nil
 	}
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "quorum", Persona: "panel", Severity: "blocking", Summary: "required approval quorum was not reached", Recommendation: "revise the artifact and reconvene the configured roundtable"})
 	}
-	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost}, nil
+	rt := roundtableResult(&feedback, false, true, analysis, len(seats), totalCost)
+	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
 }
 
 func roundtableStageGuidance(stage string) string {
@@ -614,53 +629,61 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		cost   float64
 		err    error
 	}
-	ch := make(chan outcome, len(seats))
-	for _, seat := range seats {
-		seat := seat
-		go func() {
-			// Repeated persona/agent pairs must not collide and reuse one remote
-			// result, so each capacity seat carries a distinct durable slot.
-			seatSlot := panelSeatDurableSlot(req, panelRound, seat.ordinal)
-			request := DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: seatSlot, ArtifactStage: artifactStage, ProvidedTarget: true}
-			res, err := r.delegate(ctx, req, request)
-			if err != nil && !seat.pinned && seat.delegate != "" {
-				// Capacity assignments are routing hints for this panel run, not UI
-				// pins. If the assigned subscription is temporarily unavailable,
-				// retry through ordinary live eligibility after that failed slot has
-				// released its lease. Never persist the failure as an exclusion.
-				request.Delegate = ""
-				request.RetryTag = fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate)
-				res, err = r.delegate(ctx, req, request)
+	requests := make([]DelegateRequest, len(seats))
+	for i, seat := range seats {
+		// Repeated persona/agent specifications must not collide and reuse one
+		// remote result, so each capacity seat carries a distinct durable slot.
+		// Empty Delegate is deliberate: generic delegation resolves eligibility.
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ProvidedTarget: true}
+	}
+	delegated := r.delegateGroup(ctx, req, requests)
+	outcomes := make([]outcome, len(seats))
+	repairIndexes := make([]int, 0, len(seats))
+	for i, call := range delegated {
+		parsed, err := parsePanelResponse(call.Response, call.Err)
+		seat := seats[i]
+		seat.participant = call.Participant
+		outcomes[i] = outcome{seat: seat, result: parsed, cost: call.CostUSD, err: err}
+		if err != nil && call.Err == nil && strings.TrimSpace(call.Participant) != "" {
+			repairIndexes = append(repairIndexes, i)
+		}
+	}
+	if len(repairIndexes) > 0 {
+		repairs := make([]DelegateRequest, len(repairIndexes))
+		for i, outcomeIndex := range repairIndexes {
+			seat := outcomes[outcomeIndex].seat
+			repairs[i] = DelegateRequest{
+				Role:        roundtableDelegateRole,
+				Persona:     seat.persona,
+				Participant: seat.participant,
+				Prompt:      panelResponseRepairPrompt(artifactStage),
+				Workdir:     req.WorkItem.Worktree,
+				// Preserve the review delegate's tool-capable transport. In particular,
+				// CLI-backed agents do not have an HTTP request URL; tools:false would
+				// incorrectly send their continuation through the simple HTTP path.
+				Tools:          true,
+				DurableSlot:    panelSeatDurableSlot(req, panelRound, seat.ordinal) + ":repair:1",
+				ArtifactStage:  artifactStage,
+				ProvidedTarget: true,
 			}
-			if err != nil {
-				ch <- outcome{seat: seat, err: err}
-				return
-			}
-			doc, e := extractJSONObject(res.Response)
-			var parsed panelResponse
-			if e == nil {
-				e = json.Unmarshal(doc, &parsed)
-			}
-			ch <- outcome{seat: seat, result: parsed, cost: res.CostUSD, err: e}
-		}()
+		}
+		for i, call := range r.delegateGroup(ctx, req, repairs) {
+			outcomeIndex := repairIndexes[i]
+			parsed, err := parsePanelResponse(call.Response, call.Err)
+			outcomes[outcomeIndex].cost += call.CostUSD
+			outcomes[outcomeIndex].result = parsed
+			outcomes[outcomeIndex].err = err
+		}
 	}
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifactHash}
 	reports := make([]panelSeatReport, 0, len(seats))
 	approvals, voters := 0, len(seats)
 	var cost float64
-	type requiredFailure struct {
-		seat panelSeat
-		err  error
-	}
-	var requiredFailures []requiredFailure
-	validPersona := make(map[string]bool)
-	for range seats {
-		o := <-ch
+	var seatFailures []string
+	for _, o := range outcomes {
 		cost += o.cost
 		if o.err != nil {
-			if o.seat.required {
-				requiredFailures = append(requiredFailures, requiredFailure{seat: o.seat, err: o.err})
-			}
+			seatFailures = append(seatFailures, o.seat.persona+": "+o.err.Error())
 			voters--
 			continue
 		}
@@ -672,7 +695,6 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		reports = append(reports, panelSeatReport{Seat: o.seat, Response: o.result})
 		alignment := strings.ToLower(strings.TrimSpace(o.result.OriginalRequestAlignment.Status))
 		alignmentOK := alignment == "aligned"
-		alignmentRecognized := alignmentOK || alignment == "drifted" || alignment == "unclear"
 		if !alignmentOK {
 			if alignment != "drifted" && alignment != "unclear" {
 				alignment = "unclear"
@@ -693,7 +715,6 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			// The feedback finding already prevents advancement; also exclude this
 			// vote from quorum so the fail-closed invariant is local and explicit.
 			if alignmentOK {
-				validPersona[o.seat.persona] = true
 				approvals++
 			}
 			continue
@@ -702,27 +723,44 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: o.seat.persona + "-malformed", Persona: o.seat.persona, Severity: "blocking", Summary: "reviewer returned a contradictory or incomplete verdict", Recommendation: "return approve with no findings, or changes with actionable findings"})
 			continue
 		}
-		if alignmentRecognized {
-			validPersona[o.seat.persona] = true
-		}
 		for i, f := range o.result.Findings {
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: firstNonempty(f.ID, fmt.Sprintf("%s-%d", o.seat.persona, i+1)), Persona: o.seat.persona, Severity: firstNonempty(f.Severity, "blocking"), Location: f.Location, Summary: f.Summary, Recommendation: f.Recommendation})
 		}
 	}
-	var unreachable []string
-	for _, failure := range requiredFailures {
-		// Required config names a review lens, not an exclusive agent. Capacity
-		// fill repeats those lenses, so any valid duplicate satisfies an unpinned
-		// required persona when its initially assigned slot loses admission. An
-		// explicit positive pin remains strict and cannot be substituted.
-		if !failure.seat.pinned && validPersona[failure.seat.persona] {
-			continue
-		}
-		unreachable = append(unreachable, failure.seat.persona+": "+failure.err.Error())
-	}
-	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(unreachable, "; "), Reports: reports}
+	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
 }
 
+func parsePanelResponse(response string, delegateErr error) (panelResponse, error) {
+	parsed := panelResponse{}
+	if delegateErr != nil {
+		return parsed, delegateErr
+	}
+	doc, err := extractJSONObject(response)
+	if err != nil {
+		return parsed, err
+	}
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return panelResponse{}, err
+	}
+	// A response missing its outer object can still contain a valid nested
+	// alignment or finding object. extractJSONObject correctly recovers that
+	// fragment, but it is not the roundtable report and must be repaired rather
+	// than misclassified as a semantic stage failure.
+	if parsed.ArtifactStage == "" && parsed.Verdict == "" && parsed.Findings == nil {
+		return panelResponse{}, errors.New("delegate returned a JSON fragment instead of the complete roundtable report")
+	}
+	return parsed, nil
+}
+
+func panelResponseRepairPrompt(artifactStage string) string {
+	return "Your preceding roundtable report was not valid JSON. Preserve its analysis and findings; only repair the serialization. " +
+		"Return exactly one JSON object and no prose or markdown. The required shape is " +
+		`{"artifact_stage":"` + artifactStage + `","original_request_alignment":{"status":"aligned|drifted|unclear","summary":"brief reason"},` +
+		`"verdict":"approve|changes","findings":[{"id":"stable id","severity":"foundational|blocking|suggestion|nit","location":"path or section","summary":"issue","recommendation":"action"}]}. ` +
+		"Use approve only with an empty findings array; use changes with at least one actionable finding."
+}
+
+// runPanelRound remains the focused test seam for independent analysis.
 func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats []panelSeat, prompt, artifactHash, artifactStage string, panelRound int) (wfe.ReviewFeedback, int, int, float64, string) {
 	result := r.runPanelAnalysis(ctx, req, seats, prompt, artifactHash, artifactStage, panelRound)
 	return result.Feedback, result.Approvals, result.Voters, result.CostUSD, result.Unreachable
@@ -979,12 +1017,12 @@ func panelSeats(node wfe.Node) []panelSeat {
 	pins := stringMap(panel["pins"])
 	var out []panelSeat
 	for _, p := range required {
-		delegate := pins[p]
-		out = append(out, panelSeat{persona: p, delegate: delegate, required: true, pinned: delegate != ""})
+		selector := pins[p]
+		out = append(out, panelSeat{persona: p, selector: selector})
 	}
 	for _, p := range eligible {
-		delegate := pins[p]
-		out = append(out, panelSeat{persona: p, delegate: delegate, pinned: delegate != ""})
+		selector := pins[p]
+		out = append(out, panelSeat{persona: p, selector: selector})
 	}
 	return out
 }

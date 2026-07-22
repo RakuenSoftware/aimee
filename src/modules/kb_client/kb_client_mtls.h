@@ -5,6 +5,8 @@
 #ifndef DEC_KB_CLIENT_MTLS_H
 #define DEC_KB_CLIENT_MTLS_H 1
 
+#include <stddef.h>
+
 #define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
 
 /* 1 when AIMEE_KB_CONN holds an aimee:// connection string (a remote kb), else 0. */
@@ -16,6 +18,12 @@ int kb_client_mtls_configured(void);
  * method is "GET"/"POST"; body is NULL for GET. */
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,
                              int *status_out);
+
+/* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
+ * response on the fixed route is accepted; output is cleared on every error. */
+int kb_client_mtls_management_jwks(char *envelope_out, size_t envelope_cap, size_t *envelope_len);
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *envelope_out, size_t envelope_cap,
+                                         size_t *envelope_len);
 
 /* Publish this server's bounded health record over its enrolled mTLS identity.
  * The kb authorizes immutable issuer/serial/fingerprint metadata from TLS; the

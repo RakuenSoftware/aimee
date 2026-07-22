@@ -198,6 +198,17 @@ remains off until workload captures demonstrate a latency win rather than merely
 a byte-count reduction. A build without zlib (including the current Windows
 thin-client job) advertises no gzip capability and stays identity encoded.
 
+Thin-client HTTPS keep-alive is independently opt-in with
+`transport.server_keepalive_enabled` on the server and
+`AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED=1` in a resident client. Each client
+thread owns at most one TLS connection with one in-flight request, a 30-second
+idle lifetime, 10-minute maximum age, and 1,000-request ceiling. Responses are
+read to their exact bounded `Content-Length`; close requests are honored and
+streaming/event routes remain one-shot. The server accepts reuse only after
+strict HTTP/1.1 framing validation and repeats certificate, revocation, bearer,
+and route-capability checks on every request. Short-lived CLI invocations still
+perform one handshake because process-local sockets do not survive process exit.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

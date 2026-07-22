@@ -265,6 +265,8 @@ static int load_self_signed(SSL_CTX *ctx)
 }
 
 static int g_tls_listen_fd;
+static int g_tls_requests;
+static int g_tls_seen_requests;
 
 static void *tls_mock_server(void *arg)
 {
@@ -286,14 +288,23 @@ static void *tls_mock_server(void *arg)
    SSL_set_fd(ssl, c);
    if (SSL_accept(ssl) == 1)
    {
-      char buf[4096];
-      SSL_read(ssl, buf, sizeof(buf));
-      const char *body = "{\"ok\":true}";
-      char resp[256];
-      int rlen = snprintf(resp, sizeof(resp),
-                          "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-                          (int)strlen(body), body);
-      SSL_write(ssl, resp, rlen);
+      for (int request = 0; request < g_tls_requests; request++)
+      {
+         char buf[4096];
+         int n = SSL_read(ssl, buf, sizeof(buf) - 1);
+         if (n <= 0)
+            break;
+         buf[n] = '\0';
+         assert(strstr(buf, "Connection: keep-alive\r\n"));
+         g_tls_seen_requests++;
+         const char *body = "{\"ok\":true}";
+         char resp[256];
+         int rlen = snprintf(resp, sizeof(resp),
+                             "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: %s\r\n\r\n%s",
+                             (int)strlen(body),
+                             request + 1 == g_tls_requests ? "close" : "keep-alive", body);
+         SSL_write(ssl, resp, rlen);
+      }
    }
    SSL_shutdown(ssl);
    SSL_free(ssl);
@@ -322,6 +333,8 @@ static void test_tls_roundtrip(void)
    assert(getsockname(fd, (struct sockaddr *)&addr, &alen) == 0);
    int port = ntohs(addr.sin_port);
    g_tls_listen_fd = fd;
+   g_tls_requests = 2;
+   g_tls_seen_requests = 0;
 
    pthread_t th;
    assert(pthread_create(&th, NULL, tls_mock_server, NULL) == 0);
@@ -329,20 +342,26 @@ static void test_tls_roundtrip(void)
    char url[64];
    snprintf(url, sizeof(url), "https://127.0.0.1:%d", port);
    setenv("AIMEE_TLS_INSECURE", "1", 1); /* accept the self-signed cert */
+   setenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED", "1", 1);
    aimee_client_set_remote(url, NULL);
 
    int st = -1;
    char *body = aimee_client_request("GET", "/v1/health", NULL, &st);
+   assert(body != NULL && st == 200 && strcmp(body, "{\"ok\":true}") == 0);
+   free(body);
+   body = aimee_client_request("GET", "/v1/health", NULL, &st);
    pthread_join(th, NULL);
    close(fd);
 
    assert(body != NULL);
    assert(st == 200);
    assert(strcmp(body, "{\"ok\":true}") == 0);
+   assert(g_tls_seen_requests == 2);
    free(body);
    unsetenv("AIMEE_TLS_INSECURE");
+   unsetenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED");
    aimee_client_set_remote(NULL, NULL);
-   PASS("tls https round-trip (self-signed, insecure)");
+   PASS("tls https keep-alive reuses one connection for two requests");
 }
 #endif /* WITH_TLS */
 

@@ -396,13 +396,22 @@ done:
    return result;
 }
 
-static EVP_PKEY *select_key(const char *jwks, size_t jwks_n, const char *kid)
+typedef enum
 {
+   KEY_SELECT_INVALID = 0,
+   KEY_SELECT_OK = 1,
+   KEY_SELECT_UNKNOWN = 2,
+} key_select_result_t;
+
+static key_select_result_t select_key(const char *jwks, size_t jwks_n, const char *kid,
+                                      EVP_PKEY **out)
+{
+   *out = NULL;
    cJSON *root = parse_json((const unsigned char *)jwks, jwks_n);
    if (!root || !no_duplicate_members(root))
    {
       json_delete(root);
-      return NULL;
+      return KEY_SELECT_INVALID;
    }
    static const char *const root_names[] = {"keys"};
    const cJSON *root_v[1];
@@ -410,7 +419,7 @@ static EVP_PKEY *select_key(const char *jwks, size_t jwks_n, const char *kid)
        cJSON_GetArraySize(root_v[0]) < 1)
    {
       json_delete(root);
-      return NULL;
+      return KEY_SELECT_INVALID;
    }
    static const char *const key_names[] = {"kty", "kid", "use", "alg", "n", "e"};
    const cJSON *chosen = NULL;
@@ -420,7 +429,7 @@ static EVP_PKEY *select_key(const char *jwks, size_t jwks_n, const char *kid)
       if (!exact_object(key, key_names, 6, v))
       {
          json_delete(root);
-         return NULL;
+         return KEY_SELECT_INVALID;
       }
       for (const cJSON *other = key->next; other; other = other->next)
       {
@@ -429,7 +438,7 @@ static EVP_PKEY *select_key(const char *jwks, size_t jwks_n, const char *kid)
              strcmp(v[1]->valuestring, other_kid->valuestring) == 0)
          {
             json_delete(root);
-            return NULL;
+            return KEY_SELECT_INVALID;
          }
       }
       if (!cJSON_IsString(v[0]) || strcmp(v[0]->valuestring, "RSA") != 0 || !cJSON_IsString(v[1]) ||
@@ -438,21 +447,30 @@ static EVP_PKEY *select_key(const char *jwks, size_t jwks_n, const char *kid)
           strcmp(v[3]->valuestring, "RS256") != 0 || !cJSON_IsString(v[4]) || !cJSON_IsString(v[5]))
       {
          json_delete(root);
-         return NULL;
+         return KEY_SELECT_INVALID;
+      }
+      EVP_PKEY *validated = rsa_from_jwk(key);
+      if (!validated)
+      {
+         json_delete(root);
+         return KEY_SELECT_INVALID;
       }
       if (strcmp(v[1]->valuestring, kid) == 0)
       {
          if (chosen)
          {
+            EVP_PKEY_free(validated);
             json_delete(root);
-            return NULL;
+            return KEY_SELECT_INVALID;
          }
          chosen = key;
+         *out = validated;
       }
+      else
+         EVP_PKEY_free(validated);
    }
-   EVP_PKEY *result = chosen ? rsa_from_jwk(chosen) : NULL;
    json_delete(root);
-   return result;
+   return chosen ? KEY_SELECT_OK : KEY_SELECT_UNKNOWN;
 }
 
 static int verify_signature(EVP_PKEY *key, const char *signed_bytes, size_t signed_n,
@@ -525,11 +543,12 @@ static int parse_payload(cJSON *payload, const unsigned char *raw, size_t raw_n,
           copy_string(v[11], out->peer_fingerprint, sizeof(out->peer_fingerprint));
 }
 
-int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,
-                             const char *expected_issuer, const char *expected_audience,
-                             const char *peer_issuer, const char *peer_serial,
-                             const char *peer_fingerprint, const char *request_sha256, int64_t now,
-                             server_mgmt_token_claims_t *out)
+server_mgmt_token_result_t
+server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_json,
+                            const char *expected_issuer, const char *expected_audience,
+                            const char *peer_issuer, const char *peer_serial,
+                            const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                            server_mgmt_token_claims_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -537,19 +556,19 @@ int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
        !ascii_token(expected_audience, 1, 127) || !control_free(peer_issuer, 1, 511) ||
        !lower_hex(peer_serial, 0, 79) || !lower_hex(peer_fingerprint, 64, 64) ||
        !lower_hex(request_sha256, 64, 64) || now < 0)
-      return 0;
+      return SERVER_MGMT_TOKEN_INVALID;
    size_t wire_n = jwt_len;
    size_t jwks_n = strnlen(jwks_json, JWKS_MAX + 1);
    if (!wire_n || wire_n > TOKEN_WIRE_MAX || memchr(jwt, '\0', wire_n) || !jwks_n ||
        jwks_n > JWKS_MAX)
-      return 0;
+      return SERVER_MGMT_TOKEN_INVALID;
    const char *dot1 = memchr(jwt, '.', wire_n);
    size_t after_dot1 = dot1 ? wire_n - (size_t)(dot1 + 1 - jwt) : 0;
    const char *dot2 = dot1 ? memchr(dot1 + 1, '.', after_dot1) : NULL;
    size_t after_dot2 = dot2 ? wire_n - (size_t)(dot2 + 1 - jwt) : 0;
    if (!dot1 || !dot2 || dot1 == jwt || dot2 == dot1 + 1 || !after_dot2 ||
        memchr(dot2 + 1, '.', after_dot2))
-      return 0;
+      return SERVER_MGMT_TOKEN_INVALID;
    size_t henc_n = (size_t)(dot1 - jwt), penc_n = (size_t)(dot2 - dot1 - 1);
    size_t senc_n = wire_n - (size_t)(dot2 + 1 - jwt);
    unsigned char header_raw[TOKEN_HEADER_MAX + 1], payload_raw[TOKEN_PAYLOAD_MAX + 1];
@@ -559,6 +578,7 @@ int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
    EVP_PKEY *key = NULL;
    server_mgmt_token_claims_t candidate;
    memset(&candidate, 0, sizeof(candidate));
+   server_mgmt_token_result_t result = SERVER_MGMT_TOKEN_INVALID;
    int ok = decode_segment(jwt, henc_n, header_raw, TOKEN_HEADER_MAX, &header_n) &&
             decode_segment(dot1 + 1, penc_n, payload_raw, TOKEN_PAYLOAD_MAX, &payload_n) &&
             b64_decode(dot2 + 1, senc_n, signature, TOKEN_SIG_MAX, &signature_n) &&
@@ -572,13 +592,20 @@ int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_j
    payload = parse_json(payload_raw, payload_n);
    if (!header || !payload || !parse_header(header, candidate.kid))
       goto done;
-   key = select_key(jwks_json, jwks_n, candidate.kid);
-   if (!key || !verify_signature(key, jwt, (size_t)(dot2 - jwt), signature, signature_n) ||
+   key_select_result_t selected = select_key(jwks_json, jwks_n, candidate.kid, &key);
+   if (selected == KEY_SELECT_UNKNOWN)
+   {
+      result = SERVER_MGMT_TOKEN_UNKNOWN_KID;
+      goto done;
+   }
+   if (selected != KEY_SELECT_OK || !key ||
+       !verify_signature(key, jwt, (size_t)(dot2 - jwt), signature, signature_n) ||
        !parse_payload(payload, payload_raw, payload_n, expected_issuer, expected_audience,
                       peer_issuer, peer_serial, peer_fingerprint, request_sha256, now, &candidate))
       goto done;
    *out = candidate;
    ok = 1;
+   result = SERVER_MGMT_TOKEN_OK;
 done:
    if (!ok)
       memset(out, 0, sizeof(*out));
@@ -589,5 +616,16 @@ done:
    OPENSSL_cleanse(header_raw, sizeof(header_raw));
    OPENSSL_cleanse(payload_raw, sizeof(payload_raw));
    OPENSSL_cleanse(signature, sizeof(signature));
-   return ok;
+   return result;
+}
+
+int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,
+                             const char *expected_issuer, const char *expected_audience,
+                             const char *peer_issuer, const char *peer_serial,
+                             const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                             server_mgmt_token_claims_t *out)
+{
+   return server_mgmt_token_verify_ex(jwt, jwt_len, jwks_json, expected_issuer, expected_audience,
+                                      peer_issuer, peer_serial, peer_fingerprint, request_sha256,
+                                      now, out) == SERVER_MGMT_TOKEN_OK;
 }

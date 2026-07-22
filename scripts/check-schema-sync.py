@@ -90,6 +90,7 @@ DB1_ONLY_TABLES = {
     "server_mgmt_nonce",
     "server_mgmt_status_hwm",
     "server_management_jti",
+    "server_management_jwks_cache",
     "session_state",
     "user_memories",
     "session_state_ap_hits",

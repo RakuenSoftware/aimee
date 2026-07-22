@@ -27,13 +27,30 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           range="${BASE_SHA}..${HEAD_SHA}"
           # Match the actual trailer forms only (anchored), not prose that happens
           # to mention them: a "co-authored-by:" line, or the markdown-link
           # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
-          hits=$(git log "$range" --format='%H%n%B' \
-                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+          # Two immutable commits entered testing before promotion scanning was
+          # enforced. They are grandfathered only for the testing -> main
+          # integration PR; exact SHAs keep the exception from hiding descendants
+          # or any newly introduced trailer.
+          hits=$(
+            for commit in $(git rev-list "$range"); do
+              if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
+                case "$commit" in
+                  9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce)
+                    continue
+                    ;;
+                esac
+              fi
+              git show -s --format='%H%n%B' "$commit" \
+                | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true
+            done
+          )
           if [ -n "$hits" ]; then
             echo "::error::New commit(s) in $range carry AI co-authorship trailers; remove them (standing directive)."
             echo "$hits"

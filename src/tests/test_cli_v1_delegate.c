@@ -130,9 +130,9 @@ static void test_delegate_roundtable_brief_marshaled(void)
                    "--brief-json",
                    "{\"questions\":[\"does auth hold?\"]}",
                    "--apply"};
-   cJSON *req = marshal_delegate_roundtable(14, argv);
+   cJSON *req = marshal_roundtable_review(14, argv);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate.roundtable") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "roundtable.review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
                  "review this change thoroughly") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "mode")->valuestring, "review") == 0);
@@ -156,7 +156,7 @@ static void test_delegate_roundtable_invalid_brief_json_exits(void)
    if (pid == 0)
    {
       char *argv[] = {"review this change thoroughly", "--brief-json", "{\"questions\":["};
-      cJSON *req = marshal_delegate_roundtable(3, argv);
+      cJSON *req = marshal_roundtable_review(3, argv);
       cJSON_Delete(req);
       _exit(0);
    }
@@ -182,7 +182,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    close(fd);
 
    char *argv[] = {"critique the block above", "--context-file", path};
-   cJSON *req = marshal_delegate_roundtable(3, argv);
+   cJSON *req = marshal_roundtable_review(3, argv);
    assert(req != NULL);
    const cJSON *prompt = cJSON_GetObjectItem(req, "prompt");
    assert(cJSON_IsString(prompt));
@@ -197,7 +197,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    /* Preload-only invocation (no positional prompt): the preload still becomes
     * the prompt. Exercises the base == "" branch. */
    char *argv_only[] = {"--context-file", path};
-   cJSON *req_only = marshal_delegate_roundtable(2, argv_only);
+   cJSON *req_only = marshal_roundtable_review(2, argv_only);
    assert(req_only != NULL);
    const cJSON *p_only = cJSON_GetObjectItem(req_only, "prompt");
    assert(cJSON_IsString(p_only));
@@ -208,7 +208,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
 
    /* No preload flags => prompt is unchanged (no spurious Source Packet). */
    char *argv2[] = {"a plain roundtable prompt with no preload flags"};
-   cJSON *req2 = marshal_delegate_roundtable(1, argv2);
+   cJSON *req2 = marshal_roundtable_review(1, argv2);
    assert(req2 != NULL);
    const cJSON *p2 = cJSON_GetObjectItem(req2, "prompt");
    assert(cJSON_IsString(p2));

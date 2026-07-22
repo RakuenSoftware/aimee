@@ -20,9 +20,12 @@
 #include "kb_http.h"   /* kb_http_route_ex */
 #include "kb_http_egress.h"
 #include "../../db2/server_registry.h"
+#include "../../db2/management_jwks_runtime.h"
 #include "../../db2/db2_tenant.h"
+#include "db2/db2.h"    /* request-scoped DB2 lease */
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_reqctx.h"
+#include "config.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
@@ -238,6 +241,26 @@ static int mtls_server_heartbeat(const char *issuer, const char *serial, const c
    return ok ? 200 : 403;
 }
 
+static int mtls_management_jwks(const char *issuer, const char *serial, const char *fingerprint,
+                                char *resp, int cap)
+{
+   db2_management_jwks_runtime_record_t record;
+   db2_management_jwks_runtime_result_t result =
+       db2_management_jwks_runtime_fetch(issuer, serial, fingerprint, &record);
+   if (result == DB2_MANAGEMENT_JWKS_RUNTIME_DENIED)
+   {
+      snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS fetch denied\"}");
+      return 403;
+   }
+   if (result != DB2_MANAGEMENT_JWKS_RUNTIME_OK || record.envelope_len + 1 > (size_t)cap)
+   {
+      snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS unavailable\"}");
+      return 503;
+   }
+   memcpy(resp, record.envelope, record.envelope_len + 1);
+   return 200;
+}
+
 /* GET /v1/enroll/ca: return the CA certificate (public trust anchor) so a
  * bootstrapping client can pin it by fingerprint. The private key is never
  * exposed. Writes the JSON response; returns the HTTP status. */
@@ -413,6 +436,12 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          body_len = (int)declared_body;
       }
 
+      /* Worker threads are long-lived, so a lazily acquired DB2 connection
+       * would otherwise remain pinned until shutdown. Bound every routed
+       * request explicitly; this also keeps persistent mTLS connections from
+       * exhausting the shared DB2 pool after one request per worker. */
+      db2_lease_begin();
+
       /* Split query string off the path. */
       char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
       const char *qmark = strchr(path, '?');
@@ -520,6 +549,26 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
          status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp, resp,
                                        KB_TLS_RESP_MAX);
       }
+      /* P5-C2c public verification artifact: certificate-only, primary-backed,
+       * exact FINAL bytes.  It never enters the bearer/console router. */
+      else if (have_cert && strcmp(cpath, "/v1/management/jwks") == 0)
+      {
+         if (qs[0] || body_len)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"query or body not allowed\"}");
+            status = 400;
+         }
+         else if (strcmp(method, "GET") != 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+            status = 405;
+         }
+         else
+            status = mtls_management_jwks(transport.issuer, transport.subject, fp, resp,
+                                          KB_TLS_RESP_MAX);
+         if (status == 403 || status == 503)
+            close_after_response = 1;
+      }
       /* Cert rotation: an authenticated client renews its cert for its CURRENT
        * verified scope (the cert is the credential — no token needed). */
       else if (have_cert && strcmp(cpath, "/v1/enroll/renew") == 0)
@@ -550,6 +599,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
                                    synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
       }
       kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
+      db2_lease_end();
 
       char head[256];
       int hn = snprintf(head, sizeof(head),
@@ -577,6 +627,7 @@ done:
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <openssl/crypto.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -589,8 +640,14 @@ static volatile int g_mtls_running = 0;
 static pthread_t g_mtls_thread;
 static SSL_CTX *g_mtls_ctx = NULL;
 
-#define KB_MTLS_CONNECTIONS_MAX 64
-#define KB_MTLS_QUEUE_CAP       64
+#define KB_MTLS_CONNECTIONS_MAX   64
+#define KB_MTLS_QUEUE_CAP         64
+#define KB_MTLS_WORKER_STACK_SIZE (4 * 1024 * 1024)
+/* Request routes load config_t on the worker stack. Keep ample headroom for
+ * route-local state and TLS/libpq frames; a 1 MiB worker stack crashed live
+ * /v1/health requests because config_t alone is roughly 750 KiB. */
+_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
+               "kb mTLS worker stack must accommodate config_t plus route headroom");
 static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
 static int g_mtls_workers_started = 0;
 static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
@@ -619,6 +676,8 @@ static void *mtls_worker_thread(void *arg)
       g_mtls_queue_len--;
       pthread_mutex_unlock(&g_mtls_queue_mu);
 
+      int one = 1;
+      (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
       kb_tls_serve_conn(fd, g_mtls_ctx);
       close(fd);
       pthread_mutex_lock(&g_mtls_queue_mu);
@@ -737,7 +796,7 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    int worker_attr_initialized = pthread_attr_init(&worker_attr) == 0;
    if (worker_attr_initialized)
    {
-      if (pthread_attr_setstacksize(&worker_attr, 1024 * 1024) == 0)
+      if (pthread_attr_setstacksize(&worker_attr, KB_MTLS_WORKER_STACK_SIZE) == 0)
          worker_attr_ptr = &worker_attr;
    }
    for (int i = 0; i < g_mtls_connection_limit; i++)

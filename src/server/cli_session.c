@@ -139,7 +139,11 @@ void cli_session_mark_baseline(cli_session_t *s)
 
 static void cli_session_capture_cmd(const cli_session_t *s, char *cmd, size_t cmd_len)
 {
-   snprintf(cmd, cmd_len, "tmux capture-pane -p -t '%s' 2>/dev/null", s->session_name);
+   /* -J joins visually wrapped pane rows back into their logical line. Without
+    * it, JSON strings wider than the pane acquire literal newlines and become
+    * invalid. -S - includes scrollback from the start of the pane so a long
+    * answer cannot lose its opening object/fields above the visible 50 rows. */
+   snprintf(cmd, cmd_len, "tmux capture-pane -p -J -S - -t '%s' 2>/dev/null", s->session_name);
 }
 
 int cli_session_is_alive(const cli_session_t *s)
@@ -908,9 +912,50 @@ static char *cli_extract_impl(const char *raw, const char *cli_kind, const char 
    return filtered;
 }
 
+/* Claude's TUI hard-wraps long rendered lines itself.  Those rows are not tmux
+ * soft wraps, so capture-pane -J cannot join them.  In ordinary prose the row
+ * break is harmless, but inside a JSON string it turns otherwise-correct model
+ * output into invalid JSON.  Preserve formatting outside strings and replace
+ * only literal control characters inside a response that starts as JSON. */
+static void cli_normalize_json_string_wraps(char *text)
+{
+   if (!text)
+      return;
+   char *p = text;
+   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+      p++;
+   if (*p != '{' && *p != '[')
+      return;
+
+   int in_string = 0, escaped = 0;
+   for (; *p; p++)
+   {
+      if (in_string && (*p == '\n' || *p == '\r' || *p == '\t'))
+      {
+         *p = ' ';
+         escaped = 0;
+         continue;
+      }
+      if (escaped)
+      {
+         escaped = 0;
+         continue;
+      }
+      if (in_string && *p == '\\')
+      {
+         escaped = 1;
+         continue;
+      }
+      if (*p == '"')
+         in_string = !in_string;
+   }
+}
+
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
 {
-   return cli_extract_impl(raw, cli_kind, baseline, 1);
+   char *response = cli_extract_impl(raw, cli_kind, baseline, 1);
+   cli_normalize_json_string_wraps(response);
+   return response;
 }
 
 /* Recognize the CLI's animated working/status line so the answer extractor can
@@ -1014,6 +1059,8 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    long long start = mono_ms();
    int err_active = 0;      /* 1 once the pane is in a provider-error state */
    long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
+   int saw_answer = 0;
+   int marker_cli = strstr(s->cli_kind, "claude") != NULL || strstr(s->cli_kind, "codex") != NULL;
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
 
@@ -1101,6 +1148,18 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       if (cli_session_capture(s, cap, sizeof(cap)) != 0)
          continue;
 
+      /* A freshly pasted prompt can leave the pane static for several polls
+       * before the CLI begins inference. It is user/composer text, not a reply.
+       * Remember whether a known TUI has ever rendered a new assistant marker;
+       * completion below must not return the baseline delta until that happens.
+       * Once seen, the marker may scroll off a long answer, so retain the bit. */
+      if (marker_cli && !saw_answer)
+      {
+         char *marked = cli_extract_impl(cap, s->cli_kind, s->baseline, 0);
+         saw_answer = marked && marked[0];
+         free(marked);
+      }
+
       /* Stream the clean answer's growth as it is produced: extract this turn's
        * response so far and emit only the newly appended suffix. */
       if (g_stream_cb)
@@ -1187,6 +1246,11 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
             }
             else
             {
+               if (marker_cli && !saw_answer)
+               {
+                  stable = 0;
+                  continue;
+               }
                char *resp = cli_session_extract_response(cap, s->cli_kind, s->baseline);
                snprintf(out, out_max, "%s", resp ? resp : "");
                free(resp);

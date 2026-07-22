@@ -24,7 +24,17 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
 }
 static __thread atomic_int *g_request_cancel;
 static __thread int g_require_initial_tool_call;
+static __thread char g_run_cwd[MAX_PATH_LEN];
 static atomic_int g_saw_required_tool_call;
+static atomic_int g_saw_expected_cwd;
+void run_cmd_set_cwd(const char *cwd)
+{
+   snprintf(g_run_cwd, sizeof(g_run_cwd), "%s", cwd ? cwd : "");
+}
+const char *run_cmd_get_cwd(void)
+{
+   return g_run_cwd[0] ? g_run_cwd : NULL;
+}
 void agent_run_require_initial_tool_call(int on)
 {
    g_require_initial_tool_call = on ? 1 : 0;
@@ -106,6 +116,8 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
    memset(out, 0, sizeof(*out));
    if (g_require_initial_tool_call)
       atomic_store(&g_saw_required_tool_call, 1);
+   if (run_cmd_get_cwd() && strcmp(run_cmd_get_cwd(), "/tmp/review-worktree") == 0)
+      atomic_store(&g_saw_expected_cwd, 1);
    out->response = strdup("ok+tools");
    out->success = 1;
    out->tool_calls = 1;
@@ -207,6 +219,26 @@ static void test_no_deadline_runs_all(void)
       free(out[i].response);
    }
    printf("  test_no_deadline_runs_all: ok\n");
+}
+
+static void test_parallel_worker_inherits_cwd(void)
+{
+   agent_task_t task;
+   memset(&task, 0, sizeof(task));
+   task.agent = "reviewer";
+   task.role = "review";
+   task.use_tools = 1;
+   agent_result_t out;
+   memset(&out, 0, sizeof(out));
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   atomic_store(&g_saw_expected_cwd, 0);
+   run_cmd_set_cwd("/tmp/review-worktree");
+   assert(agent_run_parallel(&cfg, &task, 1, &out, 1) == 1);
+   run_cmd_set_cwd(NULL);
+   assert(atomic_load(&g_saw_expected_cwd) == 1);
+   free(out.response);
 }
 
 static void test_no_deadline_ignores_generic_compute_width(void)
@@ -353,6 +385,7 @@ int main(void)
    printf("agent_parallel tests\n");
    test_deadline_cancels_and_joins_slow_worker();
    test_no_deadline_runs_all();
+   test_parallel_worker_inherits_cwd();
    test_no_deadline_ignores_generic_compute_width();
    test_process_limit_is_shared_across_panels();
    test_use_tools_routes_to_tools_runner();

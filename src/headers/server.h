@@ -386,7 +386,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Deepening sweep (Part B): analysis-only — proposes seams per area and re-grounds
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

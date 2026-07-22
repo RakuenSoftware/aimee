@@ -41,6 +41,12 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_token_roots_provision') THEN
     CREATE ROLE aimee_kb_token_roots_provision NOLOGIN NOINHERIT;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_jwks_publish') THEN
+    CREATE ROLE aimee_kb_jwks_publish NOLOGIN NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_jwks_runtime_definer') THEN
+    CREATE ROLE aimee_kb_jwks_runtime_definer NOLOGIN NOINHERIT BYPASSRLS;
+  END IF;
 END
 $$;
 
@@ -57,11 +63,18 @@ ALTER ROLE aimee_kb_owner NOLOGIN NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSE
 -- RLS and is not inherited by the execution role.
 ALTER ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_token_roots_provision NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+ALTER ROLE aimee_kb_jwks_publish NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+-- This role owns only the certificate-authenticated public JWKS reader.  Its
+-- BYPASSRLS authority is not inherited by runtime and is constrained by exact
+-- object grants in schema_grants.sql.
+ALTER ROLE aimee_kb_jwks_runtime_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 
 -- migrate acts as owner for DDL; runtime never does.
 GRANT aimee_kb_owner TO aimee_kb_migrate;
 GRANT aimee_kb_status TO aimee_kb_status_login;
 GRANT aimee_kb_token_roots_provision TO aimee_kb_migrate;
+GRANT aimee_kb_jwks_publish TO aimee_kb_migrate;
+GRANT aimee_kb_jwks_runtime_definer TO aimee_kb_migrate;
 
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
@@ -74,6 +87,10 @@ GRANT USAGE ON SCHEMA public TO aimee_kb_status_definer;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_definer;
 GRANT USAGE ON SCHEMA public TO aimee_kb_token_roots_provision;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_token_roots_provision;
+GRANT USAGE ON SCHEMA public TO aimee_kb_jwks_publish;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_jwks_publish;
+GRANT USAGE ON SCHEMA public TO aimee_kb_jwks_runtime_definer;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_jwks_runtime_definer;
 
 -- NOTE: table/sequence/function GRANTs live in schema_grants.sql, applied AFTER
 -- schema.sql (the tables must exist first). Provisioning order is:

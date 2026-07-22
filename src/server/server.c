@@ -22,6 +22,8 @@
 #include "server_http.h"
 #include "server_tls.h" /* server_http_api_status_report */
 #include "server_mgmt_status.h"
+#include "server_mgmt_jwks_cache.h"
+#include "kb_client_mtls.h"
 #include "config.h" /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
@@ -1578,7 +1580,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
-    {"delegate.roundtable", handle_delegate_roundtable},
+    {"roundtable.review", handle_roundtable_review_proxy},
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
@@ -2196,6 +2198,12 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
          LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
       if (server_mgmt_status_init() != 0)
          LOG_WARN("server", "management status nonce initialization failed");
+      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+      if (trust_path && trust_path[0] &&
+          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                         kb_client_mtls_management_jwks_fetch,
+                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
    }
    /* Container cleanup is independent of DB availability. No worker pool exists
     * yet, so a matching container cannot belong to this server generation. */

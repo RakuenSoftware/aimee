@@ -39,6 +39,7 @@ static char g_createlog[300];
 /* Path the fake tmux appends every `send-keys` invocation to, so a test can
  * assert which interrupt key (if any) the cancel path sent. */
 static char g_sendlog[320];
+static char g_capturelog[320];
 
 static void install_fake_tmux(void)
 {
@@ -47,6 +48,7 @@ static void install_fake_tmux(void)
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
    snprintf(g_sendlog, sizeof(g_sendlog), "%s/sendlog", g_fake_dir);
+   snprintf(g_capturelog, sizeof(g_capturelog), "%s/capturelog", g_fake_dir);
    snprintf(g_createlog, sizeof(g_createlog), "%s/createlog", g_fake_dir);
    char script[320];
    snprintf(script, sizeof(script), "%s/tmux", g_fake_dir);
@@ -57,14 +59,17 @@ static void install_fake_tmux(void)
     * line (never stabilises); `banner_retry` animates a │-prefixed box line whose
     * prose contains "Retrying in" (mimics the welcome banner — must NOT be read as
     * a provider error); `busy_tool` returns a STATIC pane whose footer still shows
-    * "esc to interrupt" (a long-running tool — recv must NOT finalize it); anything
-    * else returns a static pane. send-keys is logged so the cancel/error tests can
+    * "esc to interrupt" (a long-running tool — recv must NOT finalize it);
+    * `prompt_then_answer` holds a pasted prompt static past the stability threshold
+    * before rendering a Claude assistant bullet; anything else returns a static
+    * pane. send-keys is logged so the cancel/error tests can
     * assert the interrupt key. */
    fprintf(f,
            "#!/bin/sh\n"
            "case \"$1\" in\n"
            "  has-session) [ \"$FAKE_TMUX_MODE\" = dead ] && exit 1; exit 0 ;;\n"
            "  capture-pane)\n"
+           "    echo \"$*\" >> '%s';\n"
            "    if [ \"$FAKE_TMUX_MODE\" = changing ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo \"frame $c\";\n"
@@ -80,13 +85,18 @@ static void install_fake_tmux(void)
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo '\xe2\x94\x82 stream-stall hint now reads Retrying in seconds frame "
            "'\"$c\"' end';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = prompt_then_answer ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      if [ \"$c\" -le 6 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
+           "else printf '%%s\\n' '\xe2\x9d\xaf pasted repair prompt' "
+           "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
            "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
-           counter, counter, counter, counter, counter, counter, counter, counter, counter,
-           g_sendlog, g_createlog);
+           g_capturelog, counter, counter, counter, counter, counter, counter, counter, counter,
+           counter, counter, counter, counter, g_sendlog, g_createlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -120,6 +130,18 @@ static int sendlog_has(const char *needle)
 static int createlog_has(const char *needle)
 {
    FILE *f = fopen(g_createlog, "r");
+   if (!f)
+      return 0;
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   return strstr(buf, needle) != NULL;
+}
+
+static int capturelog_has(const char *needle)
+{
+   FILE *f = fopen(g_capturelog, "r");
    if (!f)
       return 0;
    char buf[4096];
@@ -185,6 +207,30 @@ static void test_recv_ok_on_stable_pane(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
    assert(rc == 0);
    assert(strstr(buf, "STATIC OUTPUT") != NULL);
+}
+
+static void test_capture_joins_wraps_and_includes_scrollback(void)
+{
+   unlink(g_capturelog);
+   setenv("FAKE_TMUX_MODE", "stable", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   assert(cli_session_capture(&s, buf, sizeof(buf)) == 0);
+   assert(capturelog_has("capture-pane -p -J -S - -t aimee-faketest"));
+}
+
+static void test_recv_does_not_return_static_prompt_as_answer(void)
+{
+   setenv("FAKE_TMUX_MODE", "prompt_then_answer", 1);
+   char counter[300];
+   snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
+   unlink(counter);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   assert(rc == 0);
+   assert(strcmp(buf, "{\"ok\":true}") == 0);
 }
 
 static void test_recv_dead_session(void)
@@ -557,6 +603,27 @@ static void test_extract_claude_multiline(void)
    free(r);
 }
 
+/* Claude renders long JSON strings as hard terminal rows.  tmux marks those as
+ * real newlines (not soft wraps), so extraction must make the structured result
+ * valid without flattening pretty-printed newlines between JSON fields. */
+static void test_extract_claude_json_hard_wrap_inside_string(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f {\"status\":\"ok\",\"evidence\":\"long text at the hard\n"
+                      "  terminal wrap\",\n"
+                      "  \"findings\":[]}\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   cJSON *parsed = cJSON_Parse(r);
+   assert(parsed != NULL);
+   cJSON *evidence = cJSON_GetObjectItemCaseSensitive(parsed, "evidence");
+   assert(cJSON_IsString(evidence));
+   assert(strstr(evidence->valuestring, "hard terminal wrap") != NULL);
+   cJSON_Delete(parsed);
+   free(r);
+}
+
 /* Regression (found by live e2e): claude renders its model/effort status with the
  * SAME ● bullet as a real answer ("● high · /effort"); it must be treated as
  * chrome and skipped, not returned as the reply. */
@@ -918,6 +985,10 @@ int main(void)
    test_extract_claude_multiline();
    printf("OK\n");
 
+   printf("test_extract_claude_json_hard_wrap_inside_string... ");
+   test_extract_claude_json_hard_wrap_inside_string();
+   printf("OK\n");
+
    printf("test_extract_claude_skips_effort_status... ");
    test_extract_claude_skips_effort_status();
    printf("OK\n");
@@ -1034,6 +1105,14 @@ int main(void)
 
    printf("test_recv_ok_on_stable_pane... ");
    test_recv_ok_on_stable_pane();
+   printf("OK\n");
+
+   printf("test_capture_joins_wraps_and_includes_scrollback... ");
+   test_capture_joins_wraps_and_includes_scrollback();
+   printf("OK\n");
+
+   printf("test_recv_does_not_return_static_prompt_as_answer... ");
+   test_recv_does_not_return_static_prompt_as_answer();
    printf("OK\n");
 
    printf("test_recv_dead_session... ");

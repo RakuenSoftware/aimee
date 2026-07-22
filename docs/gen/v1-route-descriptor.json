@@ -842,15 +842,6 @@
     },
     {
       "verb": "POST",
-      "path": "/v1/delegate/roundtable",
-      "suffix": null,
-      "match": "exact",
-      "op": "delegate.roundtable",
-      "caps": "0",
-      "handler": "rh_dispatch_op_async"
-    },
-    {
-      "verb": "POST",
       "path": "/v1/delegate/run",
       "suffix": null,
       "match": "exact",
@@ -1991,6 +1982,15 @@
       "op": null,
       "caps": "CAP_SESSION_ADMIN",
       "handler": "rh_role_template_put"
+    },
+    {
+      "verb": "POST",
+      "path": "/v1/roundtable/review",
+      "suffix": null,
+      "match": "exact",
+      "op": "roundtable.review",
+      "caps": "0",
+      "handler": "rh_dispatch_op_async"
     },
     {
       "verb": "GET",
