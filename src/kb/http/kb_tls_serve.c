@@ -47,9 +47,38 @@ static int header_name_char(unsigned char c)
           strchr("!#$%&'*+-.^_`|~", c) != NULL;
 }
 
-/* Read exactly one strict HTTP/1.1 request. Returns an HTTP error status or 0. */
+static int header_value_has_token(const char *start, const char *end, const char *token)
+{
+   size_t token_len = strlen(token);
+   while (start < end)
+   {
+      while (start < end && (*start == ' ' || *start == '\t' || *start == ','))
+         start++;
+      const char *item_end = start;
+      while (item_end < end && *item_end != ',')
+         item_end++;
+      const char *trimmed_end = item_end;
+      while (trimmed_end > start && (trimmed_end[-1] == ' ' || trimmed_end[-1] == '\t'))
+         trimmed_end--;
+      if ((size_t)(trimmed_end - start) == token_len && !strncasecmp(start, token, token_len))
+         return 1;
+      start = item_end < end ? item_end + 1 : end;
+   }
+   return 0;
+}
+
+static void set_recv_timeout(SSL *ssl, int seconds)
+{
+   int fd = SSL_get_fd(ssl);
+   struct timeval timeout = {.tv_sec = seconds, .tv_usec = 0};
+   if (fd >= 0)
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+}
+
+/* Read exactly one strict HTTP/1.1 request. Returns an HTTP error status, 0 on
+ * success, or -1 when an idle/cleanly closed peer supplied no request bytes. */
 static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
-                               size_t *body_out)
+                               size_t *body_out, int *close_out)
 {
    size_t total = 0, header_len = 0, content_len = 0;
    int have_cl = 0;
@@ -57,8 +86,9 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    {
       int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
       if (n <= 0)
-         return 400;
+         return total == 0 ? -1 : 400;
       total += (size_t)n;
+      set_recv_timeout(ssl, 10); /* first byte arrived: bound the remaining head */
       buf[total] = '\0';
       char *end = strstr(buf, "\r\n\r\n");
       if (end)
@@ -70,7 +100,8 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
    if (!header_len || header_len > KB_TLS_HEADER_MAX)
       return 413;
    for (size_t i = 0; i < header_len; i++)
-      if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r'))
+      if (buf[i] == '\0' || (buf[i] == '\r' && (i + 1 >= header_len || buf[i + 1] != '\n')) ||
+          (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')))
          return 400;
    char *line_end = strstr(buf, "\r\n");
    if (!line_end || (size_t)(line_end - buf) > KB_TLS_REQUEST_LINE_MAX)
@@ -126,6 +157,9 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
          }
          content_len = value;
       }
+      if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
+          header_value_has_token(colon + 1, e, "close"))
+         *close_out = 1;
       p = e + 2;
    }
    int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
@@ -135,6 +169,7 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
       return 413;
    if (total > header_len + content_len)
       return 400;
+   set_recv_timeout(ssl, 30); /* body transfer uses the normal I/O deadline */
    while (total < header_len + content_len)
    {
       int n = SSL_read(ssl, buf + total, (int)(header_len + content_len - total));
@@ -321,202 +356,212 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       return;
    }
 
-   /* Request heads have a shorter slowloris deadline than route/response I/O. */
-   io_timeout.tv_sec = 10;
-   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
-
    char *buf = malloc(KB_TLS_REQ_MAX);
    char *resp = malloc(KB_TLS_RESP_MAX);
    if (!buf || !resp)
       goto done;
 
-   int total = 0, header_len = 0;
-   size_t declared_body = 0;
-   int read_status =
-       strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body);
-   io_timeout.tv_sec = 30;
-   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
-   if (read_status)
+   for (;;)
    {
-      const char *b =
-          read_status == 413 ? "{\"error\":\"request too large\"}" : "{\"error\":\"bad request\"}";
-      char head[160];
+      /* A reusable connection may idle for 30 seconds before the next request.
+       * strict_request_read shortens the deadline after the first byte arrives. */
+      set_recv_timeout(ssl, 30);
+      int total = 0, header_len = 0;
+      size_t declared_body = 0;
+      int close_after_response = 0;
+      int read_status = strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len,
+                                            &declared_body, &close_after_response);
+      io_timeout.tv_sec = 30;
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
+      if (read_status < 0)
+         break;
+      if (read_status)
+      {
+         const char *b = read_status == 413 ? "{\"error\":\"request too large\"}"
+                                            : "{\"error\":\"bad request\"}";
+         char head[160];
+         int hn = snprintf(head, sizeof(head),
+                           "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
+                           "%zu\r\nConnection: close\r\n\r\n",
+                           read_status, read_status == 413 ? "Payload Too Large" : "Bad Request",
+                           strlen(b));
+         SSL_write(ssl, head, hn);
+         SSL_write(ssl, b, (int)strlen(b));
+         goto done;
+      }
+
+      char method[16] = {0}, path[KB_TLS_URI_MAX + 1] = {0};
+      if (sscanf(buf, "%15s %4096s", method, path) < 2)
+      {
+         const char *b = "{\"error\":\"bad request\"}";
+         char head[160];
+         int hn = snprintf(head, sizeof(head),
+                           "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-"
+                           "Length: %zu\r\nConnection: close\r\n\r\n",
+                           strlen(b));
+         SSL_write(ssl, head, hn);
+         SSL_write(ssl, b, (int)strlen(b));
+         goto done;
+      }
+
+      /* Body follows the blank line. */
+      const char *body = "";
+      int body_len = 0;
+      if (header_len > 0)
+      {
+         body = buf + header_len;
+         body_len = (int)declared_body;
+      }
+
+      /* Split query string off the path. */
+      char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
+      const char *qmark = strchr(path, '?');
+      if (qmark)
+      {
+         size_t plen = (size_t)(qmark - path);
+         if (plen >= sizeof(cpath))
+            plen = sizeof(cpath) - 1;
+         memcpy(cpath, path, plen);
+         cpath[plen] = '\0';
+         snprintf(qs, sizeof(qs), "%s", qmark + 1);
+      }
+      else
+      {
+         snprintf(cpath, sizeof(cpath), "%s", path);
+      }
+
+      /* Derive the caller's scope from the verified client certificate. A scoped
+       * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
+       * via verify-then-trust; "global"/owner (no ':') gets full access. */
+      char cn[128] = "";
+      char synth[160] = "", authhdr[180] = "";
+      int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
+      if (have_cert && strchr(cn, ':'))
+      {
+         snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
+      }
+
+      /* Primary-authoritative mTLS seam: issuer + normalized serial must resolve
+       * to an active enrollment. Unknown, revoked, and authority-error outcomes
+       * all fail closed before routing; active use gets a debounced last-seen bump. */
+      int cert_authority = 0;
+      char fp[65] = "", issuer[256] = "", serial[128] = "";
+      kb_principal_t transport;
+      memset(&transport, 0, sizeof(transport));
+      if (have_cert)
+      {
+         if (kb_tls_peer_fingerprint(ssl, fp, sizeof(fp)) == 0 &&
+             kb_tls_peer_issuer(ssl, issuer, sizeof(issuer)) == 0 &&
+             kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 &&
+             kb_principal_from_cert(issuer, serial, cn, &transport) == 0)
+         {
+            cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
+            if (cert_authority == 1)
+               db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
+         }
+      }
+
+      /* Routes reachable WITHOUT a client cert (the enrollment bootstrap): fetch
+       * the CA for TOFU pinning, and redeem a token for a cert. */
+      int is_bootstrap =
+          (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
+
+      int status;
+      /* B5: kb never honors a client-supplied identity header; reject fail-closed
+       * before any route runs. */
+      if (kb_ingress_identity_header_present(buf))
+      {
+         LOG_WARN(
+             "kb.tls",
+             "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
+         status = 400;
+      }
+      /* A revoked/unknown cert or unavailable authority is rejected before any
+       * route runs. Authority failure is retryable but never fail-open. */
+      else if (have_cert && cert_authority != 1)
+      {
+         close_after_response = 1;
+         if (cert_authority < 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX,
+                     "{\"error\":\"certificate authority temporarily unavailable\"}");
+            status = 503;
+         }
+         else
+         {
+            snprintf(resp, KB_TLS_RESP_MAX,
+                     "{\"error\":\"client certificate is unknown or revoked\"}");
+            status = 403;
+         }
+      }
+      /* A client without a cert yet (still enrolling) may ONLY use bootstrap
+       * routes. Everything else requires an identity, so a cert-less peer is 401. */
+      else if (!have_cert && !is_bootstrap)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"client certificate required (enroll first via "
+                  "/v1/enroll/redeem)\"}");
+         status = 401;
+      }
+      /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
+       * by fingerprint (the value in its connection string). */
+      else if (strcmp(cpath, "/v1/enroll/ca") == 0)
+      {
+         status = (strcmp(method, "GET") == 0) ? mtls_get_ca(resp, KB_TLS_RESP_MAX) : 405;
+         if (status == 405)
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+      }
+      /* Certificate-only P2b egress authority: never route through the synthetic
+       * CN bearer. The exact verified issuer/serial/fingerprint are carried in. */
+      else if (have_cert && strcmp(cpath, "/v1/llm/egress") == 0)
+      {
+         status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp, resp,
+                                       KB_TLS_RESP_MAX);
+      }
+      /* Cert rotation: an authenticated client renews its cert for its CURRENT
+       * verified scope (the cert is the credential — no token needed). */
+      else if (have_cert && strcmp(cpath, "/v1/enroll/renew") == 0)
+      {
+         if (strcmp(method, "POST") != 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+            status = 405;
+         }
+         else
+         {
+            status = mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp,
+                                KB_TLS_RESP_MAX);
+         }
+      }
+      else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
+      {
+         status = (strcmp(method, "POST") == 0)
+                      ? mtls_server_heartbeat(transport.issuer, transport.subject, fp, body, resp,
+                                              KB_TLS_RESP_MAX)
+                      : 405;
+         if (status == 405)
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+      }
+      else
+      {
+         status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
+                                   synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
+      }
+      kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
+
+      char head[256];
       int hn = snprintf(head, sizeof(head),
                         "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
-                        "%zu\r\nConnection: close\r\n\r\n",
-                        read_status, read_status == 413 ? "Payload Too Large" : "Bad Request",
-                        strlen(b));
+                        "%zu\r\nConnection: %s\r\n\r\n",
+                        status, http_reason(status), strlen(resp),
+                        close_after_response ? "close" : "keep-alive");
       SSL_write(ssl, head, hn);
-      SSL_write(ssl, b, (int)strlen(b));
-      goto done;
+      SSL_write(ssl, resp, (int)strlen(resp));
+      if (close_after_response)
+         break;
    }
-
-   char method[16] = {0}, path[KB_TLS_URI_MAX + 1] = {0};
-   if (sscanf(buf, "%15s %4096s", method, path) < 2)
-   {
-      const char *b = "{\"error\":\"bad request\"}";
-      char head[160];
-      int hn = snprintf(head, sizeof(head),
-                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-"
-                        "Length: %zu\r\nConnection: close\r\n\r\n",
-                        strlen(b));
-      SSL_write(ssl, head, hn);
-      SSL_write(ssl, b, (int)strlen(b));
-      goto done;
-   }
-
-   /* Body follows the blank line. */
-   const char *body = "";
-   int body_len = 0;
-   if (header_len > 0)
-   {
-      body = buf + header_len;
-      body_len = (int)declared_body;
-   }
-
-   /* Split query string off the path. */
-   char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
-   const char *qmark = strchr(path, '?');
-   if (qmark)
-   {
-      size_t plen = (size_t)(qmark - path);
-      if (plen >= sizeof(cpath))
-         plen = sizeof(cpath) - 1;
-      memcpy(cpath, path, plen);
-      cpath[plen] = '\0';
-      snprintf(qs, sizeof(qs), "%s", qmark + 1);
-   }
-   else
-   {
-      snprintf(cpath, sizeof(cpath), "%s", path);
-   }
-
-   /* Derive the caller's scope from the verified client certificate. A scoped
-    * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-    * via verify-then-trust; "global"/owner (no ':') gets full access. */
-   char cn[128] = "";
-   char synth[160] = "", authhdr[180] = "";
-   int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
-   if (have_cert && strchr(cn, ':'))
-   {
-      snprintf(synth, sizeof(synth), "scope:%s:m", cn);
-      snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
-   }
-
-   /* Primary-authoritative mTLS seam: issuer + normalized serial must resolve
-    * to an active enrollment. Unknown, revoked, and authority-error outcomes
-    * all fail closed before routing; active use gets a debounced last-seen bump. */
-   int cert_authority = 0;
-   char fp[65] = "", issuer[256] = "", serial[128] = "";
-   kb_principal_t transport;
-   memset(&transport, 0, sizeof(transport));
-   if (have_cert)
-   {
-      if (kb_tls_peer_fingerprint(ssl, fp, sizeof(fp)) == 0 &&
-          kb_tls_peer_issuer(ssl, issuer, sizeof(issuer)) == 0 &&
-          kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 &&
-          kb_principal_from_cert(issuer, serial, cn, &transport) == 0)
-      {
-         cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
-         if (cert_authority == 1)
-            db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
-      }
-   }
-
-   /* Routes reachable WITHOUT a client cert (the enrollment bootstrap): fetch
-    * the CA for TOFU pinning, and redeem a token for a cert. */
-   int is_bootstrap =
-       (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
-
-   int status;
-   /* B5: kb never honors a client-supplied identity header; reject fail-closed
-    * before any route runs. */
-   if (kb_ingress_identity_header_present(buf))
-   {
-      LOG_WARN("kb.tls",
-               "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
-      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
-      status = 400;
-   }
-   /* A revoked/unknown cert or unavailable authority is rejected before any
-    * route runs. Authority failure is retryable but never fail-open. */
-   else if (have_cert && cert_authority != 1)
-   {
-      if (cert_authority < 0)
-      {
-         snprintf(resp, KB_TLS_RESP_MAX,
-                  "{\"error\":\"certificate authority temporarily unavailable\"}");
-         status = 503;
-      }
-      else
-      {
-         snprintf(resp, KB_TLS_RESP_MAX,
-                  "{\"error\":\"client certificate is unknown or revoked\"}");
-         status = 403;
-      }
-   }
-   /* A client without a cert yet (still enrolling) may ONLY use bootstrap
-    * routes. Everything else requires an identity, so a cert-less peer is 401. */
-   else if (!have_cert && !is_bootstrap)
-   {
-      snprintf(resp, KB_TLS_RESP_MAX,
-               "{\"error\":\"client certificate required (enroll first via "
-               "/v1/enroll/redeem)\"}");
-      status = 401;
-   }
-   /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
-    * by fingerprint (the value in its connection string). */
-   else if (strcmp(cpath, "/v1/enroll/ca") == 0)
-   {
-      status = (strcmp(method, "GET") == 0) ? mtls_get_ca(resp, KB_TLS_RESP_MAX) : 405;
-      if (status == 405)
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-   }
-   /* Certificate-only P2b egress authority: never route through the synthetic
-    * CN bearer. The exact verified issuer/serial/fingerprint are carried in. */
-   else if (have_cert && strcmp(cpath, "/v1/llm/egress") == 0)
-   {
-      status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp, resp,
-                                    KB_TLS_RESP_MAX);
-   }
-   /* Cert rotation: an authenticated client renews its cert for its CURRENT
-    * verified scope (the cert is the credential — no token needed). */
-   else if (have_cert && strcmp(cpath, "/v1/enroll/renew") == 0)
-   {
-      if (strcmp(method, "POST") != 0)
-      {
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-         status = 405;
-      }
-      else
-      {
-         status =
-             mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp, KB_TLS_RESP_MAX);
-      }
-   }
-   else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
-   {
-      status = (strcmp(method, "POST") == 0)
-                   ? mtls_server_heartbeat(transport.issuer, transport.subject, fp, body, resp,
-                                           KB_TLS_RESP_MAX)
-                   : 405;
-      if (status == 405)
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-   }
-   else
-   {
-      status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
-                                synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
-   }
-   kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
-
-   char head[256];
-   int hn = snprintf(head, sizeof(head),
-                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
-                     "%zu\r\nConnection: close\r\n\r\n",
-                     status, http_reason(status), strlen(resp));
-   SSL_write(ssl, head, hn);
-   SSL_write(ssl, resp, (int)strlen(resp));
 
 done:
    free(buf);
