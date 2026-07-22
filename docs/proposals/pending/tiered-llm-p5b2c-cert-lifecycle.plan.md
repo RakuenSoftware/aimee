@@ -123,8 +123,16 @@ For initial issuance or renewal:
    digest, ciphertext length and ciphertext; the wrapped plaintext is the key/CSR
    intent only. It uses the same checked create/reread/sync protocol as a candidate
    but is a different record type and can never be overwritten or promoted as the
-   final bundle. Only after file and
-   directory sync may B2c call `begin_initial` or `begin_renewal` with that operation
+   final bundle. After the immutable intent and directory are synced, publish a
+   distinct strict root-owned 0600 `pending` manifest containing installation,
+   lineage, generation, issue kind, operation, authority, the B2b binding digest,
+   and SHA-256 of the exact encoded outer intent record. Publication uses checked
+   no-replace creation plus complete write/reread/fdatasync and directory fsync; an
+   existing pending manifest is never overwritten or adopted as a new operation.
+   This O(1) recovery coordinate is preferred to scanning historical intent files,
+   which cannot safely choose among multiple same-generation orphans. Only after
+   both intent and pending file and directory sync may B2c call `begin_initial` or
+   `begin_renewal` with that operation
    id. Exact replay unwraps the key-intent capsule and reproduces the same CSR and
    digests; it never generates a new key for a persisted pending intent. Missing or
    mismatched intent for a pending issue is integrity until B2b expires/quarantines it.
@@ -146,11 +154,18 @@ For initial issuance or renewal:
    bundle digest over exactly that plaintext. The plaintext never embeds that
    digest, nonce, storage id, binding digest or ciphertext, so the construction is
    acyclic; those values exist only in the outer header/transcript.
-5. Build the domain-separated B2c custody binding from version, installation id,
-   immutable lineage root, generation, the canonical B2b binding digest, both B2a
-   anchors, certificate issuer/serial/fingerprint, leaf SPKI digest, public bundle
-   digest, fresh bundle nonce, fresh storage id, and the configured provider kind.
-   Every variable field is big-endian length-prefixed. Call B2a `wrap` with a fresh
+5. Build three domain-separated transcripts whose variable fields are u32-BE
+   length-prefixed and whose integers are fixed-width BE byte strings. Attestation
+   `aimee.p5.management-attest.v1` binds installation and actual provider kind.
+   Intent `aimee.p5.management-key-intent-custody.v1` binds installation, immutable
+   lineage, generation, operation, authority, canonical B2b binding digest, exact
+   issuer/subject, both B2a anchors, both CSR digests, provider kind, nonce and
+   storage id. Candidate `aimee.p5.management-bundle-custody.v1` binds all of those
+   fields plus verified CA issuer/fingerprint, leaf issuer/serial/fingerprint/SPKI,
+   not-before/not-after and public plaintext-bundle digest, with independent fresh
+   nonce and storage id. Neither transcript hashes its stored custody digest,
+   ciphertext or ciphertext length. Binding operation, authority and CSR metadata
+   prevents relabeling under another outer record. Call B2a `wrap` with a fresh
    challenge into a buffer of at least B2a's required 32768 bytes. Exact returned
    literal issuer/subject and both anchors must still match the initial attestation,
    and must recompute the same B2b binding digest. B2a independently verifies the
@@ -158,8 +173,9 @@ For initial issuance or renewal:
 6. Durably stage one immutable `candidate.<operation-id>` file. It is separate from
    and cannot alias the key-intent record for the same operation. Its strict public
    header contains a distinct magic/version, installation,
-   lineage, generation, operation id, nonce, storage id, public certificate
-   metadata/digests, custody-binding digest, ciphertext length and ciphertext.
+   lineage, generation, operation id, authority, provider kind, nonce, storage id,
+   CSR digests and public certificate metadata/digests including the verified CA
+   fingerprint, custody-binding digest, ciphertext length and ciphertext.
    Create with `openat(O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600)`, immediately
    `fstat` a root-owned regular 0600 one-link inode, write completely, `fdatasync`,
    verify by reread/parse, then `fsync` the directory. Partial/oversize writes are
@@ -178,7 +194,12 @@ For initial issuance or renewal:
    but before activation retries exact activation; a crash after activation but
    before manifest promotion reads the B2b snapshot, unwraps and verifies the matching staged
    candidate, and promotes it. A manifest can never authorize a generation that is
-   not the current primary B2b snapshot.
+   not the current primary B2b snapshot. Only after synced current promotion may
+   B2c unlink the exact matching `pending` manifest and fsync the directory. A crash
+   with current and pending validates that they name the same operation before
+   clearing pending. A crash before pending publication leaves a provably unbegun
+   orphan intent that is ignored and eligible only for bounded safe cleanup;
+   malformed pending is integrity because it may have crossed the begin boundary.
 
 Failed signing/wrapping/staging leaves the B2b issue pending for bounded exact
 retry. A mismatch between a pending intent and candidate is integrity and never
@@ -204,6 +225,12 @@ state never yields a usable key. Unwrap always provides B2a's required 16384-byt
 plaintext capacity. DER is re-encoded to canonical PEM with OpenSSL's standard
 writer into the fixed output fields, with exactly one terminal NUL outside each
 reported length and no retained DER scratch.
+The persisted-bundle verifier strictly consumes and byte-canonically re-encodes
+unencrypted PKCS#8, leaf DER and CA DER; requires RSA exactly 2048 bits and a valid
+private key; rechecks key-to-leaf, exact chain/profile/positive serial/validity;
+derives all issuer, fingerprint, SPKI and epoch metadata; and zeroes verified and
+PEM outputs on entry/failure. Load compares every derived field plus SHA-256 of the
+exact bundle plaintext against the authenticated candidate and both snapshots.
 
 Renewal keeps the prior active manifest usable until B2b atomically activates the
 new enrollment. Once generation N+1 is active, generation N is revoked and
@@ -229,8 +256,9 @@ with jitter and an absolute caller deadline; no reconcile call loops indefinitel
 Unit/fuzz/ASAN/UBSAN/leak tests cover strict bundle/header/transcript codecs,
 overflow/truncation/trailing bytes, output clearing, key/CSR/certificate/profile
 verification, provider and DB status mapping, aliasing, and cleansing. Deterministic
-injected crash-point tests cover every boundary around key-intent sync, begin, sign,
-wrap, candidate sync, activate, manifest file sync, rename and directory sync. They
+injected crash-point tests cover every boundary around key-intent sync, pending
+publication/sync, begin, sign, wrap, candidate sync, activate, manifest file sync,
+rename, directory sync and pending removal. They
 prove that a crash after begin always retains the exact wrapped key/CSR intent.
 Adversarial file tests cover symlinks, ownership/mode/link-count swaps,
 short writes, stale manifests, duplicate candidates and planted unrelated files.
