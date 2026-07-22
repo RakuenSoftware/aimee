@@ -603,6 +603,27 @@ static void test_extract_claude_multiline(void)
    free(r);
 }
 
+/* Claude renders long JSON strings as hard terminal rows.  tmux marks those as
+ * real newlines (not soft wraps), so extraction must make the structured result
+ * valid without flattening pretty-printed newlines between JSON fields. */
+static void test_extract_claude_json_hard_wrap_inside_string(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f {\"status\":\"ok\",\"evidence\":\"long text at the hard\n"
+                      "  terminal wrap\",\n"
+                      "  \"findings\":[]}\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   cJSON *parsed = cJSON_Parse(r);
+   assert(parsed != NULL);
+   cJSON *evidence = cJSON_GetObjectItemCaseSensitive(parsed, "evidence");
+   assert(cJSON_IsString(evidence));
+   assert(strstr(evidence->valuestring, "hard terminal wrap") != NULL);
+   cJSON_Delete(parsed);
+   free(r);
+}
+
 /* Regression (found by live e2e): claude renders its model/effort status with the
  * SAME ● bullet as a real answer ("● high · /effort"); it must be treated as
  * chrome and skipped, not returned as the reply. */
@@ -962,6 +983,10 @@ int main(void)
 
    printf("test_extract_claude_multiline... ");
    test_extract_claude_multiline();
+   printf("OK\n");
+
+   printf("test_extract_claude_json_hard_wrap_inside_string... ");
+   test_extract_claude_json_hard_wrap_inside_string();
    printf("OK\n");
 
    printf("test_extract_claude_skips_effort_status... ");

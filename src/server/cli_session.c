@@ -912,9 +912,50 @@ static char *cli_extract_impl(const char *raw, const char *cli_kind, const char 
    return filtered;
 }
 
+/* Claude's TUI hard-wraps long rendered lines itself.  Those rows are not tmux
+ * soft wraps, so capture-pane -J cannot join them.  In ordinary prose the row
+ * break is harmless, but inside a JSON string it turns otherwise-correct model
+ * output into invalid JSON.  Preserve formatting outside strings and replace
+ * only literal control characters inside a response that starts as JSON. */
+static void cli_normalize_json_string_wraps(char *text)
+{
+   if (!text)
+      return;
+   char *p = text;
+   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+      p++;
+   if (*p != '{' && *p != '[')
+      return;
+
+   int in_string = 0, escaped = 0;
+   for (; *p; p++)
+   {
+      if (in_string && (*p == '\n' || *p == '\r' || *p == '\t'))
+      {
+         *p = ' ';
+         escaped = 0;
+         continue;
+      }
+      if (escaped)
+      {
+         escaped = 0;
+         continue;
+      }
+      if (in_string && *p == '\\')
+      {
+         escaped = 1;
+         continue;
+      }
+      if (*p == '"')
+         in_string = !in_string;
+   }
+}
+
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
 {
-   return cli_extract_impl(raw, cli_kind, baseline, 1);
+   char *response = cli_extract_impl(raw, cli_kind, baseline, 1);
+   cli_normalize_json_string_wraps(response);
+   return response;
 }
 
 /* Recognize the CLI's animated working/status line so the answer extractor can
