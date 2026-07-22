@@ -33,7 +33,7 @@ any process that holds the workspace open before step 6.
 | `WORKSPACE_DIR` | Workspace directory whose `.git` is being repaired | `${APPLIANCE_HOME}/workspace` |
 | `BACKUP_DIR` | A scratch directory for pre-recovery snapshots | `/var/tmp/aimee-recovery-$(date +%s)` |
 
-```
+```sh
 # Export once per session.
 export APPLIANCE_HOME="/var/lib/aimee"
 export AGENTS_JSON_PATH="${APPLIANCE_HOME}/agents.json"
@@ -50,7 +50,7 @@ Confirmation gates: `# Confirm you can reach the host and own the paths.`
 Run the four checks below and read the result table that follows to pick the
 matching procedure (§4, §5, or §6).
 
-```
+```sh
 [ -e "${AGENTS_JSON_PATH}" ]   && echo "agents.json: present"   || echo "agents.json: absent"
 [ -f "${AGENTS_JSON_PATH}" ]   && jq -e . "${AGENTS_JSON_PATH}" >/dev/null && echo "agents.json: valid JSON" || echo "agents.json: invalid/empty"
 [ -d "${WORKSPACE_DIR}/.git" ] && echo "workspace .git: present" || echo "workspace .git: absent"
@@ -81,7 +81,7 @@ Steps:
       file is missing, capture the directory listing and any sibling artifacts
       so the recovery is auditable.
 
-```
+```sh
 test ! -e "${AGENTS_JSON_PATH}" && echo "confirmed: agents.json absent at ${AGENTS_JSON_PATH}"
 mkdir -p "${BACKUP_DIR}"
 ( cd "${APPLIANCE_HOME}" && tar --exclude='*.sock' -cf "${BACKUP_DIR}/appliance-home.tar" . )
@@ -91,7 +91,7 @@ mkdir -p "${BACKUP_DIR}"
       transport (`git`, `curl`, `scp`) to whatever `AGENTS_JSON_SOURCE` actually
       is.
 
-```
+```sh
 case "${AGENTS_JSON_SOURCE}" in
   git@*|git://*|https://*.git)
     git clone --depth=1 -- "${AGENTS_JSON_SOURCE}" "${BACKUP_DIR}/agents-source"
@@ -110,7 +110,7 @@ chmod 0644 "${AGENTS_JSON_PATH}"
 - [ ] **Fall back to repo defaults when the upstream is unreachable.** Only when
       `AGENTS_JSON_SOURCE` is empty or every branch above failed.
 
-```
+```sh
 DEFAULTS="appliance/agents/defaults.json"
 if [ ! -s "${AGENTS_JSON_PATH}" ] && [ -f "${DEFAULTS}" ]; then
   jq . "${DEFAULTS}" > "${AGENTS_JSON_PATH}"
@@ -120,7 +120,7 @@ test -s "${AGENTS_JSON_PATH}" || { echo "FATAL: no agents.json produced"; exit 1
 
 - [ ] **Validate the reconstructed file before any process touches it.**
 
-```
+```sh
 jq -e 'type == "object" and (.agents | type == "array")' "${AGENTS_JSON_PATH}" >/dev/null \
   || { echo "FATAL: reconstructed agents.json is not an object with an agents[] array"; exit 1; }
 jq . "${AGENTS_JSON_PATH}" >/dev/null || { echo "FATAL: agents.json is not valid JSON"; exit 1; }
@@ -137,7 +137,7 @@ Steps:
 
 - [ ] **Snapshot the current agents.json so the rewrite is reversible.**
 
-```
+```sh
 mkdir -p "${BACKUP_DIR}"
 cp -p "${AGENTS_JSON_PATH}" "${BACKUP_DIR}/agents.json.before"
 ls -la "${AGENTS_JSON_PATH}" "${BACKUP_DIR}/agents.json.before"
@@ -147,7 +147,7 @@ ls -la "${AGENTS_JSON_PATH}" "${BACKUP_DIR}/agents.json.before"
       script from wherever the appliance exposes it; the example below
       inspects the supervisor socket as a stand-in.
 
-```
+```sh
 LIVE_JSON="${BACKUP_DIR}/agents.live.json"
 if command -v aimee-supervisor-ctl >/dev/null 2>&1; then
   aimee-supervisor-ctl --format=json agents > "${LIVE_JSON}" 2>/dev/null || echo '[]' > "${LIVE_JSON}"
@@ -163,7 +163,7 @@ jq -e 'type == "array"' "${LIVE_JSON}" >/dev/null || echo '[]' > "${LIVE_JSON}"
 - [ ] **Pull the upstream canonical agents.json into a sibling file (do not
       overwrite yet).**
 
-```
+```sh
 UPSTREAM_JSON="${BACKUP_DIR}/agents.upstream.json"
 case "${AGENTS_JSON_SOURCE}" in
   git@*|git://*|https://*.git)
@@ -184,7 +184,7 @@ test -s "${UPSTREAM_JSON}" || { echo "FATAL: could not pull upstream agents.json
       is in the live set and absent upstream.** The merge is explicit —
       operator eyeballs the diff before accepting.
 
-```
+```sh
 RECONCILED="${BACKUP_DIR}/agents.reconciled.json"
 jq -s '
   (.[0].agents // []) as $upstream
@@ -202,7 +202,7 @@ jq . "${RECONCILED}"
 - [ ] **Diff the reconciled version against the on-disk file; abort if the
       diff exceeds 10% of the file.**
 
-```
+```sh
 diff -u "${AGENTS_JSON_PATH}" "${RECONCILED}" | tee "${BACKUP_DIR}/agents.diff" | head -200
 RECON_LINES=$(jq -r '.agents | length' "${RECONCILED}")
 FILE_LINES=$(jq -r '.agents | length' "${AGENTS_JSON_PATH}")
@@ -213,7 +213,7 @@ awk -v a="${RECON_LINES}" -v b="${FILE_LINES}" 'BEGIN{ if (b==0){exit 0} d=(a-b)
 - [ ] **Install the reconciled file atomically** (write to a sibling, then
       rename).
 
-```
+```sh
 INSTALL_TMP="${AGENTS_JSON_PATH}.reconciled.tmp"
 install -m 0644 "${RECONCILED}" "${INSTALL_TMP}"
 mv -f "${INSTALL_TMP}" "${AGENTS_JSON_PATH}"
@@ -233,7 +233,7 @@ Steps:
 - [ ] **Stop every process that has the workspace open.** A repair against a
       live working tree is not safe.
 
-```
+```sh
 pkill -STOP -f "${WORKSPACE_DIR}" 2>/dev/null || true
 systemctl --quiet is-active aimee-supervisor.service \
   && systemctl stop aimee-supervisor.service || true
@@ -242,7 +242,7 @@ systemctl --quiet is-active aimee-supervisor.service \
 - [ ] **Snapshot the workspace as-is before any repair.** The snapshot is your
       rollback target.
 
-```
+```sh
 ( cd "$(dirname "${WORKSPACE_DIR}")" && tar --exclude='*.sock' -cf "${BACKUP_DIR}/workspace.tar" "$(basename "${WORKSPACE_DIR}")" )
 ls -la "${BACKUP_DIR}/workspace.tar"
 ```
@@ -250,7 +250,7 @@ ls -la "${BACKUP_DIR}/workspace.tar"
 - [ ] **Run `git fsck` and capture the report.** This is your evidence the
       directory really is corrupt — do not skip it; escalation (§8) needs it.
 
-```
+```sh
 if [ -d "${WORKSPACE_DIR}/.git" ]; then
   ( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs --strict 2>&1 | tee "${BACKUP_DIR}/fsck.log" ) || true
 else
@@ -262,7 +262,7 @@ fi
       recovery tools.** Run all three; stop on the first that produces a clean
       fsck.
 
-```
+```sh
 if [ -d "${WORKSPACE_DIR}/.git" ]; then
   ( cd "${WORKSPACE_DIR}" && git update-ref --no-deref --no-head HEAD HEAD ) || true
   ( cd "${WORKSPACE_DIR}" && git reflog expire --expire=now --all ) || true
@@ -275,7 +275,7 @@ fi
 - [ ] **If `.git` is absent, re-clone from the upstream remote and rebuild the
       working tree on top.** Only do this when no other clone exists on disk.
 
-```
+```sh
 if [ ! -d "${WORKSPACE_DIR}/.git" ]; then
   ORIGIN_URL="$(git -C "${APPLIANCE_HOME}" config --get remote.origin.url 2>/dev/null || true)"
   if [ -z "${ORIGIN_URL}" ]; then
@@ -290,7 +290,7 @@ fi
       (config, hooks, `.git/local`). This is the only step that copies files
       back from the pre-repair tar.
 
-```
+```sh
 ( cd "${WORKSPACE_DIR}" && tar -xf "${BACKUP_DIR}/workspace.tar" \
     --wildcards '*/.git/hooks/*' \
     --wildcards '*/.git/config' \
@@ -301,7 +301,7 @@ git -C "${WORKSPACE_DIR}" config --local --get-regexp '.*' | head -50 > "${BACKU
 - [ ] **Re-run `git fsck` to confirm the workspace is healthy before resuming
       service.**
 
-```
+```sh
 ( cd "${WORKSPACE_DIR}" && git fsck --no-progress --no-reflogs --strict ) \
   || { echo "FATAL: workspace still fails fsck -- escalate (see §8)"; }
 git -C "${WORKSPACE_DIR}" status --porcelain > "${BACKUP_DIR}/status.porcelain"
@@ -309,7 +309,7 @@ git -C "${WORKSPACE_DIR}" status --porcelain > "${BACKUP_DIR}/status.porcelain"
 
 - [ ] **Resume service.**
 
-```
+```sh
 pkill -CONT -f "${WORKSPACE_DIR}" 2>/dev/null || true
 systemctl --quiet is-enabled aimee-supervisor.service \
   && systemctl start aimee-supervisor.service || true
@@ -325,7 +325,7 @@ check must pass; on any failure, jump to §8.
 - [ ] **`agents.json` exists, is valid JSON, and matches the documented
       schema.**
 
-```
+```sh
 test -s "${AGENTS_JSON_PATH}"
 jq -e 'type == "object" and (.agents | type == "array" and length > 0)' "${AGENTS_JSON_PATH}" >/dev/null
 jq . "${AGENTS_JSON_PATH}" >/dev/null
@@ -333,7 +333,7 @@ jq . "${AGENTS_JSON_PATH}" >/dev/null
 
 - [ ] **Live agent count and on-disk agent count agree.**
 
-```
+```sh
 LIVE_COUNT=$([ -S "${APPLIANCE_HOME}/run/supervisor.sock" ] \
   && curl -fsS --unix-socket "${APPLIANCE_HOME}/run/supervisor.sock" "http://localhost/agents" 2>/dev/null \
      | jq 'length' || echo 0)
@@ -344,7 +344,7 @@ FILE_COUNT=$(jq '.agents | length' "${AGENTS_JSON_PATH}")
 
 - [ ] **Workspace git is healthy and the working tree is clean.**
 
-```
+```sh
 git -C "${WORKSPACE_DIR}" fsck --no-progress --no-reflogs --strict
 git -C "${WORKSPACE_DIR}" rev-parse --verify HEAD >/dev/null
 git -C "${WORKSPACE_DIR}" status --porcelain
@@ -353,7 +353,7 @@ git -C "${WORKSPACE_DIR}" status --porcelain
 - [ ] **Recovery artifacts are archived to `${BACKUP_DIR}` and listed for the
       postmortem.**
 
-```
+```sh
 ls -la "${BACKUP_DIR}"
 echo "RECOVERY_ARTIFACTS=${BACKUP_DIR}" >> "${BACKUP_DIR}/MANIFEST"
 ```
