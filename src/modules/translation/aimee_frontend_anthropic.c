@@ -1,6 +1,6 @@
 /* aimee_frontend_anthropic.c -- Anthropic Messages API (/v1/messages) <-> IR.
  * Parse only in this slice; render lands with the response path. See aimee_frontend.h. */
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 

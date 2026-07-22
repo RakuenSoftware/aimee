@@ -5,7 +5,7 @@
  * handled per the Q1 roundtable ruling on tool-argument representation and are
  * added in the follow-up; this slice covers system-lifting + text/image content +
  * tool DEFINITIONS + sampling params, which is what the basic golden pair needs. */
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 

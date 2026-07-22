@@ -7,5 +7,19 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/translation/aimee_frontend_anthropic.c",
+    "src/modules/translation/aimee_frontend_openai.c",
+    "src/modules/translation/aimee_frontend_responses.c"
+  ],
+  "public_headers": [
+    "src/modules/translation/include/aimee/translation/aimee_frontend.h"
+  ],
+  "tests": [
+    "src/tests/test_aimee_frontend.c"
+  ],
+  "docs": [
+    "docs/modules/translation.md"
+  ]
 }

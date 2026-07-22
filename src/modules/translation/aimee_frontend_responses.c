@@ -8,7 +8,7 @@
  * function_call becomes an assistant tool_use block and a function_call_output
  * merges into a user tool_result block, so the IR is identical to the equivalent
  * Anthropic/OpenAI turn. */
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 
 #include "cJSON.h"
 

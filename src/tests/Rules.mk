@@ -1653,9 +1653,9 @@ $(TESTPREFIX)/unit-test-aimee-ir-metrics: $(OBJDIR)/tests/test_aimee_ir_metrics.
 
 # Slice 1: frontend parse adapters (pure — cJSON only).
 $(TESTPREFIX)/unit-test-aimee-frontend: $(OBJDIR)/tests/test_aimee_frontend.o \
-                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                       $(OBJDIR)/server/aimee_frontend_openai.o \
-                                       $(OBJDIR)/server/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1664,8 +1664,8 @@ $(TESTPREFIX)/unit-test-aimee-backend: $(OBJDIR)/tests/test_aimee_backend.o \
                                       $(OBJDIR)/server/aimee_backend_anthropic.o \
                                       $(OBJDIR)/server/aimee_backend_openai.o \
                                       $(OBJDIR)/server/aimee_backend_responses.o \
-                                      $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                      $(OBJDIR)/server/aimee_frontend_openai.o \
+                                      $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                       $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
                                       $(OBJDIR)/text.o $(OBJDIR)/util.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1710,8 +1710,8 @@ $(TESTPREFIX)/unit-test-aimee-ir-shadow: $(OBJDIR)/tests/test_aimee_ir_shadow.o 
                                         $(OBJDIR)/server/aimee_ir_shadow.o \
                                         $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                         $(OBJDIR)/server/aimee_backend_anthropic.o \
-                                        $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                        $(OBJDIR)/server/aimee_frontend_openai.o \
+                                        $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                        $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                         $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1720,9 +1720,9 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
                                        $(OBJDIR)/server/aimee_ir_serve.o \
                                        $(OBJDIR)/server/aimee_backend_openai.o \
                                        $(OBJDIR)/server/aimee_backend_responses.o \
-                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                       $(OBJDIR)/server/aimee_frontend_openai.o \
-                                       $(OBJDIR)/server/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
@@ -4544,8 +4544,8 @@ $(TESTPREFIX)/unit-test-agent-request-build: $(OBJDIR)/tests/test_agent_request_
 
 $(TESTPREFIX)/unit-test-ir-crossproto-egress: $(OBJDIR)/tests/test_ir_crossproto_egress.o \
                                        $(OBJDIR)/server/aimee_backend_anthropic.o \
-                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                       $(OBJDIR)/server/aimee_frontend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                        $(OBJDIR)/text.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
@@ -4555,9 +4555,9 @@ $(TESTPREFIX)/unit-test-ir-legacy-parity: $(OBJDIR)/tests/test_ir_legacy_parity.
                                        $(OBJDIR)/server/aimee_ir_serve.o \
                                        $(OBJDIR)/server/aimee_backend_openai.o \
                                        $(OBJDIR)/server/aimee_backend_responses.o \
-                                       $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                       $(OBJDIR)/server/aimee_frontend_openai.o \
-                                       $(OBJDIR)/server/aimee_frontend_responses.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                                       $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                        $(OBJDIR)/modules/ir/aimee_ir.o \
                                        $(OBJDIR)/tests/support/ir_seam_memory_stub.o \
                                        $(OBJDIR)/modules/ir/aimee_ir_metrics.o $(OBJDIR)/cJSON.o
@@ -4576,9 +4576,9 @@ $(TESTPREFIX)/unit-test-ir-shadow-response: $(OBJDIR)/tests/test_ir_shadow_respo
                                             $(OBJDIR)/server/aimee_backend_anthropic.o \
                                             $(OBJDIR)/server/aimee_backend_openai.o \
                                             $(OBJDIR)/server/aimee_backend_responses.o \
-                                            $(OBJDIR)/server/aimee_frontend_anthropic.o \
-                                            $(OBJDIR)/server/aimee_frontend_openai.o \
-                                            $(OBJDIR)/server/aimee_frontend_responses.o \
+                                            $(OBJDIR)/modules/translation/aimee_frontend_anthropic.o \
+                                            $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                                            $(OBJDIR)/modules/translation/aimee_frontend_responses.o \
                                             $(OBJDIR)/modules/ir/aimee_ir.o \
                                             $(OBJDIR)/modules/ir/aimee_ir_metrics.o \
                                             $(TEST_CORE_OBJS)
