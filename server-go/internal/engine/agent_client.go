@@ -213,12 +213,14 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	}
 	key := delegateJobKey(request)
 	var launched struct {
-		JobID int    `json:"job_id"`
-		Error string `json:"error"`
+		JobID       int    `json:"job_id"`
+		Participant string `json:"participant"`
+		Error       string `json:"error"`
 	}
 	if c.store != nil && request.WorkItemID != "" {
-		if existing, err := c.store.DelegateJob(ctx, key); err == nil {
+		if existing, participant, err := c.store.DelegateJob(ctx, key); err == nil {
 			launched.JobID = existing
+			launched.Participant = participant
 		}
 	}
 	if launched.JobID == 0 {
@@ -245,7 +247,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			return DelegateResult{}, fmt.Errorf("%w: %s", ErrDelegateNoJobID, detail)
 		}
 		if c.store != nil && request.WorkItemID != "" {
-			if err := c.store.SaveDelegateJob(ctx, key, launched.JobID); err != nil {
+			if err := c.store.SaveDelegateJob(ctx, key, launched.JobID, launched.Participant); err != nil {
 				return DelegateResult{}, err
 			}
 		}
@@ -261,12 +263,11 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			return DelegateResult{}, err
 		}
 		var status struct {
-			JobStatus   string  `json:"job_status"`
-			Result      string  `json:"result"`
-			Agent       string  `json:"agent_name"`
-			Participant string  `json:"participant"`
-			CostUSD     float64 `json:"cost_usd"`
-			Error       string  `json:"error"`
+			JobStatus string  `json:"job_status"`
+			Result    string  `json:"result"`
+			Agent     string  `json:"agent_name"`
+			CostUSD   float64 `json:"cost_usd"`
+			Error     string  `json:"error"`
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
@@ -307,7 +308,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		switch status.JobStatus {
 		case "done":
-			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: status.Participant, CostUSD: status.CostUSD}, nil
+			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: launched.Participant, CostUSD: status.CostUSD}, nil
 		case "partial":
 			if strings.TrimSpace(status.Result) == "" {
 				if c.store != nil {

@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS wfe_convergence (
 CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
   execution_key TEXT PRIMARY KEY,
   job_id INTEGER NOT NULL,
+  participant_token TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -124,20 +125,28 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 			}
 		}
 	}
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN participant_token TEXT NOT NULL DEFAULT ''`)
+	// Older lifecycle mappings predate opaque participant capabilities. The C
+	// resource plane backfills agent_jobs first; copy those capabilities into
+	// the Go-owned durable mapping when both tables are present.
+	_, _ = s.db.ExecContext(ctx, `UPDATE lifecycle_delegate_job
+		SET participant_token = COALESCE((SELECT participant_token FROM agent_jobs WHERE agent_jobs.id = lifecycle_delegate_job.job_id), '')
+		WHERE participant_token = ''`)
 	return nil
 }
 
-func (s *Store) DelegateJob(ctx context.Context, key string) (int, error) {
+func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error) {
 	var id int
-	err := s.db.QueryRowContext(ctx, `SELECT job_id FROM lifecycle_delegate_job WHERE execution_key=?`, key).Scan(&id)
-	return id, err
+	var participant string
+	err := s.db.QueryRowContext(ctx, `SELECT job_id,participant_token FROM lifecycle_delegate_job WHERE execution_key=?`, key).Scan(&id, &participant)
+	return id, participant, err
 }
 
-func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int) error {
+func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES(?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,updated_at=datetime('now')`, key, id)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id,participant_token) VALUES(?,?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,participant_token=excluded.participant_token,updated_at=datetime('now')`, key, id, participant)
 	return err
 }
 

@@ -1929,6 +1929,13 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "job_id", job_id);
+   db1_agent_job_t job;
+   if (db1_agent_job_get(job_id, &job) == 0)
+   {
+      if (job.participant_token[0])
+         cJSON_AddStringToObject(resp, "participant", job.participant_token);
+      db1_agent_job_free(&job);
+   }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);
 }

@@ -144,9 +144,9 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 			mu.Lock()
 			vias = append(vias, fmt.Sprint(payload["via"]))
 			mu.Unlock()
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1)})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1), "participant": "opaque-participant"})
 		case "/v1/delegate/status":
-			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "participant": "delegate-job:1"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -168,7 +168,7 @@ func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t
 		if result.Err != nil {
 			t.Fatal(result.Err)
 		}
-		if result.Participant != "delegate-job:1" {
+		if result.Participant != "opaque-participant" {
 			t.Fatalf("participant = %q, want delegate-issued continuation", result.Participant)
 		}
 	}
@@ -255,7 +255,7 @@ func TestHTTPAgentClientPreservesContextCancellationWhenRemoteDoesNotAcknowledge
 	if !errors.Is(callErr, context.Canceled) {
 		t.Fatalf("context cancellation was replaced: %v", callErr)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 45 {
+	if jobID, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 45 {
 		t.Fatalf("unacknowledged remote cancellation mapping job=%d err=%v", jobID, err)
 	}
 }
@@ -318,7 +318,7 @@ func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *test
 	if singularCancels.Load() != 0 || pluralCancels.Load() != 1 || cancelledJobID.Load() != 43 {
 		t.Fatalf("singular=%d plural=%d job_id=%d", singularCancels.Load(), pluralCancels.Load(), cancelledJobID.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("acknowledged cancelled delegate retained its durable mapping")
 	}
 }
@@ -361,7 +361,7 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 				t.Fatal(err)
 			}
 			const key = "cancel-unacknowledged"
-			if err := store.SaveDelegateJob(t.Context(), key, 44); err != nil {
+			if err := store.SaveDelegateJob(t.Context(), key, 44, "participant-44"); err != nil {
 				t.Fatal(err)
 			}
 			cancelErr := client.cancelRemoteAndForget(44, key, t.Context())
@@ -371,7 +371,7 @@ func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 			if !errors.Is(cancelErr, ErrDelegateCancelUnacknowledged) {
 				t.Fatalf("cancel error=%v", cancelErr)
 			}
-			if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 44 {
+			if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 44 {
 				t.Fatalf("unacknowledged cancellation mapping job=%d err=%v", jobID, err)
 			}
 		})
@@ -437,7 +437,7 @@ func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
 	}
 	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
 		WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}
-	if jobID, lookupErr := store.DelegateJob(t.Context(), delegateJobKey(request)); !errors.Is(lookupErr, sql.ErrNoRows) {
+	if jobID, _, lookupErr := store.DelegateJob(t.Context(), delegateJobKey(request)); !errors.Is(lookupErr, sql.ErrNoRows) {
 		t.Fatalf("invalid launch mapping job=%d err=%v", jobID, lookupErr)
 	}
 	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
@@ -564,7 +564,7 @@ func TestHTTPAgentClientExpiresUnassignedPendingJob(t *testing.T) {
 	if launches.Load() != 1 || cancellations.Load() != 1 {
 		t.Fatalf("launches=%d cancellations=%d", launches.Load(), cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired pending job retained its durable mapping")
 	}
 	if _, err := client.Delegate(t.Context(), request); err == nil {
@@ -625,7 +625,7 @@ func TestHTTPAgentClientExpiresUnassignedRunningJob(t *testing.T) {
 	if cancelledJobID.Load() != 20 || gotCancelReason != "unassigned delegate lease expired" {
 		t.Fatalf("cancelled job=%d reason=%q", cancelledJobID.Load(), gotCancelReason)
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired running job retained its durable mapping")
 	}
 }
@@ -677,7 +677,7 @@ func TestHTTPAgentClientAssignedObservationClearsUnassignedLease(t *testing.T) {
 	if cancellations.Load() != 0 {
 		t.Fatalf("assigned job was cancelled %d times", cancellations.Load())
 	}
-	if jobID, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 21 {
+	if jobID, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err != nil || jobID != 21 {
 		t.Fatalf("assigned job mapping was not retained: job=%d err=%v", jobID, err)
 	}
 }
@@ -718,7 +718,7 @@ func TestHTTPAgentClientTerminalEmptyAgentDoesNotExpire(t *testing.T) {
 	if cancellations.Load() != 0 {
 		t.Fatalf("terminal job was cancelled %d times", cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("terminal job retained its durable mapping")
 	}
 }
@@ -804,7 +804,7 @@ func TestHTTPAgentClientExpiresAfterTransientStatusFailures(t *testing.T) {
 	if cancellations.Load() != 1 {
 		t.Fatalf("cancellations=%d, want 1", cancellations.Load())
 	}
-	if _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
+	if _, _, err := store.DelegateJob(t.Context(), delegateJobKey(request)); err == nil {
 		t.Fatal("expired job retained mapping after transient status failures")
 	}
 }
@@ -831,13 +831,13 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationFails(t *testing.T) 
 		t.Fatal(err)
 	}
 	const key = "durable-key"
-	if err := store.SaveDelegateJob(t.Context(), key, 20); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 20, "participant-20"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.expireUnassigned(20, key, time.Now()); err == nil || !errors.Is(err, ErrDelegateUnassignedExpired) {
 		t.Fatalf("failed cancellation lost structured expiry: %v", err)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 20 {
+	if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 20 {
 		t.Fatalf("mapping after failed cancel: job=%d err=%v", jobID, err)
 	}
 }
@@ -857,14 +857,14 @@ func TestHTTPAgentClientRetainsMappingWhenExpiryCancellationRejected(t *testing.
 		t.Fatal(err)
 	}
 	const key = "durable-rejected-key"
-	if err := store.SaveDelegateJob(t.Context(), key, 23); err != nil {
+	if err := store.SaveDelegateJob(t.Context(), key, 23, "participant-23"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.expireUnassigned(23, key, time.Now()); err == nil ||
 		!errors.Is(err, ErrDelegateUnassignedExpired) || !strings.Contains(err.Error(), "durable mapping retained") {
 		t.Fatalf("rejected cancellation lost structured expiry: %v", err)
 	}
-	if jobID, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 23 {
+	if jobID, _, err := store.DelegateJob(t.Context(), key); err != nil || jobID != 23 {
 		t.Fatalf("mapping after rejected cancel: job=%d err=%v", jobID, err)
 	}
 }

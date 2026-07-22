@@ -47,8 +47,6 @@ static void delegate_status_populate_job(cJSON *resp, int job_id)
       cJSON_AddStringToObject(resp, "job_status", job.status);
       cJSON_AddStringToObject(resp, "role", job.role);
       cJSON_AddStringToObject(resp, "agent_name", job.agent_name);
-      if (job.agent_name[0] && job.participant_token[0])
-         cJSON_AddStringToObject(resp, "participant", job.participant_token);
       cJSON_AddNumberToObject(resp, "cursor_turn", job.cursor_turn);
       if (job.result[0])
          cJSON_AddStringToObject(resp, "result", job.result);

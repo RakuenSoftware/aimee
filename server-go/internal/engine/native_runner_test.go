@@ -511,7 +511,7 @@ func TestPanelPassesRandomAndPinnedSpecificationsToDelegate(t *testing.T) {
 	runner := &NativeRunner{agents: agents}
 	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
 	analysis := runner.runPanelAnalysis(context.Background(), req,
-		[]panelSeat{{persona: "qa", ordinal: 0}, {persona: "security", selector: "codex", ordinal: 1}}, "review", "hash", "plan", 1)
+		[]panelSeat{{persona: "qa", selector: "$random", ordinal: 0}, {persona: "security", selector: "codex", ordinal: 1}}, "review", "hash", "plan", 1)
 	feedback, approvals, voters, unreachable := analysis.Feedback, analysis.Approvals, analysis.Voters, analysis.Unreachable
 	if unreachable != "" || approvals != 2 || voters != 2 || len(feedback.Findings) != 0 {
 		t.Fatalf("delegate specifications failed: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
@@ -526,7 +526,7 @@ func TestPanelPassesRandomAndPinnedSpecificationsToDelegate(t *testing.T) {
 			t.Fatalf("provided target omitted: %+v", request)
 		}
 	}
-	if !delegates[""] || !delegates["codex"] {
+	if !delegates["$random"] || !delegates["codex"] {
 		t.Fatalf("roundtable must pass random and pinned specifications opaquely: %+v", agents.requests)
 	}
 }

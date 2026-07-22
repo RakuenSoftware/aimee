@@ -565,7 +565,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	defer cancel()
 	analysis := r.runPanelAnalysis(roundtableCtx, req, seats, basePrompt, reviewed.Hash, stage, 1)
 	if analysis.Unreachable != "" {
-		rt := roundtableResult(&analysis.Feedback, false, analysis, len(seats), analysis.CostUSD)
+		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
 		rt.DeadlineHit = roundtableCtx.Err() != nil
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, Roundtable: rt}, nil
 	}
@@ -574,7 +574,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		var discussionErr string
 		feedback, approvals, totalCost, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
 		if discussionErr != "" {
-			rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
 			rt.DeadlineHit = roundtableCtx.Err() != nil
 			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
@@ -583,22 +583,20 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		var chairmanErr string
 		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
 		if chairmanErr != "" {
-			rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
 			rt.DeadlineHit = roundtableCtx.Err() != nil
 			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
 	}
 	quorum := panel.MinSuccessful
 	if approvals >= quorum && len(feedback.Findings) == 0 {
-		rt := roundtableResult(&feedback, true, analysis, len(seats), totalCost)
-		rt.Converged = true
+		rt := roundtableResult(&feedback, true, true, analysis, len(seats), totalCost)
 		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, Roundtable: rt}, nil
 	}
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "quorum", Persona: "panel", Severity: "blocking", Summary: "required approval quorum was not reached", Recommendation: "revise the artifact and reconvene the configured roundtable"})
 	}
-	rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
-	rt.Converged = true
+	rt := roundtableResult(&feedback, false, true, analysis, len(seats), totalCost)
 	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
 }
 
