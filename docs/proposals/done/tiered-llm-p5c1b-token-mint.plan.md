@@ -1,6 +1,6 @@
 # P5-C1b exact management-token mint core
 
-- **State:** PLAN — roundtable-reviewed packet boundary; implementation pending.
+- **State:** DONE — implementation, adversarial branch review, local/ASAN/fuzz gates, and exact-head CT260 validation passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P5-C1a strict verifier and durable server replay consume.
 - **Followed by:** P5-C1c primary/WORM action journal, P5-C2 custody-backed signing and signed
