@@ -20,8 +20,8 @@ class Contract:
     canonical_header: str
     canonical_include: str
     make_source: str
-    cmake_source: str
-    legacy_cmake_source: str
+    cmake_source: str | None
+    legacy_cmake_source: str | None
     test_object: str
     legacy_test_object: str
     consumers: tuple[str, ...]
@@ -111,6 +111,63 @@ CONTRACTS = (
         document="docs/modules/module-runtime.md",
         document_markers=("plugin_ctx_create", "plugin_ctx_destroy"),
     ),
+    Contract(
+        module="gateway-pipeline",
+        legacy_source="src/gateway_pipeline.c",
+        legacy_header="src/headers/gateway_pipeline.h",
+        canonical_source="src/modules/gateway/gateway_pipeline.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+        canonical_include="aimee/gateway/gateway_pipeline.h",
+        make_source="modules/gateway/gateway_pipeline.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_pipeline.o",
+        legacy_test_object="$(OBJDIR)/gateway_pipeline.o",
+        consumers=(
+            "src/modules/gateway/gateway_pipeline.c",
+            "src/tests/test_gateway_pipeline.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gw_pipeline_run_request", "canonical include namespace"),
+    ),
+    Contract(
+        module="gateway-policy",
+        legacy_source="src/gateway_policy.c",
+        legacy_header="src/headers/gateway_policy.h",
+        canonical_source="src/modules/gateway/gateway_policy.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_policy.h",
+        canonical_include="aimee/gateway/gateway_policy.h",
+        make_source="modules/gateway/gateway_policy.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_policy.o",
+        legacy_test_object="$(OBJDIR)/gateway_policy.o",
+        consumers=(
+            "src/modules/gateway/gateway_policy.c",
+            "src/tests/test_gateway_policy.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gateway_policy_apply_request", "canonical include namespace"),
+    ),
+    Contract(
+        module="gateway-delegate",
+        legacy_source="src/gateway_delegate.c",
+        legacy_header="src/headers/gateway_delegate.h",
+        canonical_source="src/modules/gateway/gateway_delegate.c",
+        canonical_header="src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
+        canonical_include="aimee/gateway/gateway_delegate.h",
+        make_source="modules/gateway/gateway_delegate.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/gateway/gateway_delegate.o",
+        legacy_test_object="$(OBJDIR)/gateway_delegate.o",
+        consumers=(
+            "src/modules/gateway/gateway_delegate.c",
+            "src/tests/test_gateway_p4_delegate.c",
+        ),
+        document="docs/modules/gateway.md",
+        document_markers=("gateway_delegate_run_request_pipeline", "canonical include namespace"),
+    ),
 )
 
 LEGACY_MODULE_ROOTS = (
@@ -181,11 +238,16 @@ def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str,
             f"{contract.module}: Make canonical source")
     require(Path(contract.legacy_source).name not in make_tokens, "core-source-unique",
             f"{contract.module}: Make legacy source")
-    cmake_pattern = re.compile(rf"^\s*{re.escape(contract.cmake_source)}\s*$", re.MULTILINE)
-    require(len(cmake_pattern.findall(cmake)) == 1, "core-source-unique",
-            f"{contract.module}: CMake canonical source")
-    require(contract.legacy_cmake_source not in cmake, "core-source-unique",
-            f"{contract.module}: CMake legacy source")
+    if contract.cmake_source is not None:
+        cmake_pattern = re.compile(rf"^\s*{re.escape(contract.cmake_source)}\s*$", re.MULTILINE)
+        require(len(cmake_pattern.findall(cmake)) == 1, "core-source-unique",
+                f"{contract.module}: CMake canonical source")
+    else:
+        require(Path(contract.canonical_source).name not in cmake, "core-source-unique",
+                f"{contract.module}: CMake source must remain absent")
+    if contract.legacy_cmake_source is not None:
+        require(contract.legacy_cmake_source not in cmake, "core-source-unique",
+                f"{contract.module}: CMake legacy source")
 
     # One canonical object can appear in several independently linked test targets.
     require(rules.count(contract.test_object) >= 1, "focused-test-object",
@@ -193,9 +255,12 @@ def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str,
     require(contract.legacy_test_object not in rules, "focused-test-object",
             f"{contract.module}: legacy object")
 
-    include = f'#include "{contract.canonical_include}"'
+    include = re.compile(
+        rf'^\s*#\s*include\s*[<"]{re.escape(contract.canonical_include)}[>"]\s*$',
+        re.MULTILINE,
+    )
     for relative in contract.consumers:
-        count = read(root, relative).count(include)
+        count = len(include.findall(read(root, relative)))
         require(count >= 1, "canonical-include-missing", f"{contract.module}: {relative}")
         require(count == 1, "canonical-include-duplicated", f"{contract.module}: {relative}")
 

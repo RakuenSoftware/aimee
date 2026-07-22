@@ -25,8 +25,8 @@
 #include "anthropic_ingress.h"
 #include "cJSON.h"
 #include "delegate_driver.h"
-#include "gateway_policy.h"
-#include "gateway_pipeline.h"
+#include <aimee/gateway/gateway_policy.h>
+#include <aimee/gateway/gateway_pipeline.h>
 #include "gw_stage_memory.h"
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"

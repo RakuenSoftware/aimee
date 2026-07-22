@@ -2,7 +2,7 @@
  * Deliberately dependency-free — it only sequences stage callbacks over the IR and
  * never touches `raw`/`driver`/`ag`, so it stays a core module both the proxy
  * ingresses and the agentic path can link. See gateway_pipeline.h. */
-#include "gateway_pipeline.h"
+#include <aimee/gateway/gateway_pipeline.h>
 
 int gw_pipeline_run_request(gw_request_t *r, const gw_stage_t *stages, size_t n)
 {

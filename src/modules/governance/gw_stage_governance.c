@@ -6,7 +6,7 @@
 
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_protocol.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "gw_response_registry.h"
 
 int gw_response_governance_enabled(void)

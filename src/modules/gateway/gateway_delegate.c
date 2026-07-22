@@ -4,11 +4,11 @@
  * gateway_policy_* primitives (gateway_policy.c) — one implementation of tool-policing,
  * called from both the ingresses and here. */
 #include "aimee.h" /* size macros for agent_types.h (MAX_PATH_LEN), via gateway_policy.h */
-#include "gateway_delegate.h"
+#include <aimee/gateway/gateway_delegate.h>
 
 #include "cJSON.h"
-#include "gateway_pipeline.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_pipeline.h>
+#include <aimee/gateway/gateway_policy.h>
 #include "log.h"
 
 gw_tool_shape_t gateway_delegate_tool_shape(int anthropic, int chatgpt)

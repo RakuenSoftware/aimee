@@ -17,8 +17,8 @@
 #include "delegate_driver.h"
 #include "delegate_role.h"
 #include "delegate_xml_fallback.h"
-#include "gateway_delegate.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_delegate.h>
+#include <aimee/gateway/gateway_policy.h>
 #include "http_retry.h"
 #include "log.h"
 #include "middleware.h"

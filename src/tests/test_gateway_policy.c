@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "config.h"
-#include "../headers/gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "../vendor/headers/cJSON.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))

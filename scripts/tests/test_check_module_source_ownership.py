@@ -120,6 +120,22 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                     ))
                 self.assert_rejected(contract, mutate, "canonical-include-missing")
 
+    def test_cmake_absence_contracts_reject_source_additions(self) -> None:
+        for contract in checker.CONTRACTS:
+            if contract.cmake_source is not None:
+                continue
+            with self.subTest(contract=contract.module):
+                self.assert_rejected(
+                    contract,
+                    lambda root, value: (root / "CMakeLists.txt").write_text(
+                        (root / "CMakeLists.txt").read_text()
+                        + "\n"
+                        + value.canonical_source
+                        + "\n"
+                    ),
+                    "core-source-unique",
+                )
+
     def test_document_markers_are_required_for_every_contract(self) -> None:
         for contract in checker.CONTRACTS:
             markers = (contract.canonical_source, contract.canonical_header,
@@ -135,7 +151,9 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                     )
 
     def test_removed_wrapper_symbols_cannot_return(self) -> None:
-        contract = checker.CONTRACTS[-1]
+        contract = next(
+            item for item in checker.CONTRACTS if item.module == "module-runtime-extension"
+        )
         self.assert_rejected(
             contract,
             lambda root, value: (root / value.canonical_source).write_text(
@@ -145,7 +163,9 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
         )
 
     def test_required_runtime_cannot_include_optional_loader(self) -> None:
-        contract = checker.CONTRACTS[-1]
+        contract = next(
+            item for item in checker.CONTRACTS if item.module == "module-runtime-extension"
+        )
         self.assert_rejected(
             contract,
             lambda root, value: (root / value.canonical_source).write_text(
@@ -156,7 +176,9 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
         )
 
     def test_retired_plugin_headers_cannot_be_included(self) -> None:
-        contract = checker.CONTRACTS[-1]
+        contract = next(
+            item for item in checker.CONTRACTS if item.module == "module-runtime-extension"
+        )
         self.assert_rejected(
             contract,
             lambda root, value: (root / value.canonical_source).write_text(

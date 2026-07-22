@@ -25,7 +25,10 @@ SURFACES = {
     ),
     "routes": ("docs/gen/v1-route-descriptor.json",),
     "configuration": ("docs/gen/configuration.md",),
-    "public-headers": ("src/headers/*.h",),
+    "public-headers": (
+        "src/headers/*.h",
+        "src/modules/*/include/**/*.h",
+    ),
     "plugin-abi": (
         "src/modules/module-runtime/include/**/*.h",
         "src/modules/plugin-loader/include/**/*.h",

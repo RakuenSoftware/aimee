@@ -9,7 +9,7 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
 #include "agent.h"

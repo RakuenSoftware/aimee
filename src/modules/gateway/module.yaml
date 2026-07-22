@@ -11,5 +11,23 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/gateway/gateway_delegate.c",
+    "src/modules/gateway/gateway_pipeline.c",
+    "src/modules/gateway/gateway_policy.c"
+  ],
+  "public_headers": [
+    "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
+    "src/modules/gateway/include/aimee/gateway/gateway_pipeline.h",
+    "src/modules/gateway/include/aimee/gateway/gateway_policy.h"
+  ],
+  "tests": [
+    "src/tests/test_gateway_p4_delegate.c",
+    "src/tests/test_gateway_pipeline.c",
+    "src/tests/test_gateway_policy.c"
+  ],
+  "docs": [
+    "docs/modules/gateway.md"
+  ]
 }

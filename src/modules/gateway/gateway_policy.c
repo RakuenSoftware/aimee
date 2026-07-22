@@ -1,7 +1,7 @@
 /* gateway_policy.c: per-call gateway request/response policy. See gateway_policy.h.
  * CORE layer: cJSON + config + guardrails only; no DB, network, or agent state. */
 #include "aimee.h" /* size macros for agent_types.h (MAX_PATH_LEN) */
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "cJSON.h"
 #include "config.h"
 #include "json_fluent.h" /* jo_cstr */

@@ -11,7 +11,7 @@
 
 #include <stddef.h>
 
-#include "gateway_pipeline.h"
+#include <aimee/gateway/gateway_pipeline.h>
 
 /* One candidate stage in an ingress's ordered catalog. `enabled == 0` removes the
  * module from the built pipeline. `name` is a stable id used for order-independent

@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "gateway_pipeline.h"
+#include <aimee/gateway/gateway_pipeline.h>
 #include "gw_stage_registry.h"
 
 static int g_spy;
