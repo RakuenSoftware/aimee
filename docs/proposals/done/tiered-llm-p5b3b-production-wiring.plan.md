@@ -1,6 +1,6 @@
 # P5-B3b production startup, route, and server-auth wiring
 
-- **State:** implementation plan pending roundtable review.
+- **State:** DONE — implemented, adversarially reviewed, and exact-commit validated on CT260.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-B3a and its B2a/B2b/B2c prerequisites.
 - **Followed by:** P5-B3c real two-node topology and adversarial outage/revocation closeout.
@@ -167,3 +167,17 @@ that a management leaf cannot use generic server routes.
 Plan roundtable, delegated implementation, local production/focused/sanitizer validation, CT260,
 adversarial full-branch roundtable, all CI, PR merge to `testing`, delivery-table update, and an
 aimee memory are mandatory. Any ambiguous auth/configuration state fails closed.
+
+## Completion evidence
+
+The production kb runtime, live health route, and exact-route server authentication seam landed as
+one composition slice. Independent review caught and closed set-empty configuration, initial
+static-constructor cleanup, and legacy list-query compatibility defects. The adversarial branch
+roundtable then produced one genuinely valid additional boundary: reject non-canonical server IDs
+at the HTTP route rather than relying only on B3a's downstream token validation. The convergence
+roundtable aligned after that fix and found no remaining evidence-backed code blocker.
+
+Production `server`, `kb`, and `status-authority-core` builds; the runtime, route, server HTTP,
+B3a exchange, and authority-client focused suites; fresh ASAN/UBSAN runs; OpenAPI conformance and
+route inventory; and a clean-archive exact-commit CT260 gate all pass. B3c retains the distinct
+management listener and real two-node revocation/outage wire matrix.
