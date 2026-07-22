@@ -23,11 +23,10 @@
     "audit",
     "workflows",
     "roundtable",
-    "benchmarks"
-  ],
-  "debt": [
+    "benchmarks",
     "control-web",
     "governance",
     "runtime-web"
-  ]
+  ],
+  "debt": []
 }

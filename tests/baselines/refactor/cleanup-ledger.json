@@ -227,6 +227,23 @@
       "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting.",
       "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-18.md", "docs/modules/workflows.md", "docs/modules/roundtable.md", "docs/modules/benchmarks.md"]
+    },
+    {
+      "slice": 19,
+      "state": "present_and_verified",
+      "disposition": "Completed the individual module documentation catalog with the Control Plane, Runtime web, and optional governance contracts; separated target default-on GUI lifecycle from current wiring, made dashboards inseparable, and preserved provider-neutral OIDC plus core SSH/SSHSIG and enforcement boundaries.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["control-web and runtime-web remain descriptor-only while implementations are distributed", "current Control console default-off startup contradicts the target default-on profile", "governance selection does not yet omit distributed OIDC and response-policy code", "effective GUI configuration filtering is not implemented"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Describing target lifecycle as current behavior or treating Git-provider OAuth as organizational OIDC would hide the highest-risk implementation gaps.",
+        "revisit": "Profile/source slices must unify generated lifecycle controls, move owned source, preserve bounded aliases and data custody, and prove headless plus full-minus-one journeys."
+      },
+      "consumers": ["module maintainers", "technical writers", "future product rename, governance, web, and effective-config source slices"],
+      "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting, while the validation matrix records tenant, custody, identity, and disabled-profile boundaries.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-19.md", "docs/modules/control-web.md", "docs/modules/governance.md", "docs/modules/runtime-web.md"]
     }
   ]
 }
