@@ -972,6 +972,17 @@ bench-baseline: tests/bench-perf
 	./tests/bench-perf --save $(BENCH_BASELINE)
 	@echo "Baseline updated. Commit benchmarks/baseline.json to persist."
 
+# Evaluate a captured transport artifact against the latency_slo.v1 contract.
+# Promotion evidence must name the artifact explicitly; a missing sample never
+# passes by silently substituting a synthetic benchmark.
+check-latency-slo:
+	@test -n "$(LATENCY_SLO_INPUT)" || \
+	  (echo "LATENCY_SLO_INPUT is required (latency_slo.v1 JSON artifact)" >&2; exit 2)
+	@python3 ../benchmarks/transport/latency_slo.py "$(LATENCY_SLO_INPUT)"
+
+test-latency-slo:
+	@python3 ../tests/test_latency_slo.py
+
 memory-retrieval-eval-check: $(TESTPREFIX)/unit-test-memory-retrieval-eval
 	$< --corpus ../tests/eval/memory_retrieval_corpus.json --baseline ../tests/eval/memory_retrieval_baseline.json
 

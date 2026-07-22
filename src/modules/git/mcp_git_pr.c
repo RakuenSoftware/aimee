@@ -32,85 +32,6 @@ static cJSON *mcp_error(const char *fmt, const char *detail)
    return mcp_text(buf);
 }
 
-static int checks_state_is_pending(const char *state)
-{
-   return state && (strcmp(state, "pending") == 0 || strcmp(state, "queued") == 0 ||
-                    strcmp(state, "in_progress") == 0 || strcmp(state, "waiting") == 0 ||
-                    strcmp(state, "requested") == 0);
-}
-
-static int checks_state_is_failed(const char *state)
-{
-   return state && (strcmp(state, "fail") == 0 || strcmp(state, "failure") == 0 ||
-                    strcmp(state, "error") == 0 || strcmp(state, "cancel") == 0 ||
-                    strcmp(state, "cancelled") == 0 || strcmp(state, "timed_out") == 0 ||
-                    strcmp(state, "action_required") == 0 || strcmp(state, "startup_failure") == 0);
-}
-
-static void checks_parse_plain_output(char *out, int *total, int *pending, int *failed, int *passed)
-{
-   if (total)
-      *total = 0;
-   if (pending)
-      *pending = 0;
-   if (failed)
-      *failed = 0;
-   if (passed)
-      *passed = 0;
-   if (!out)
-      return;
-
-   char *line = out;
-   while (line && *line)
-   {
-      char *nl = strchr(line, '\n');
-      if (nl)
-         *nl = '\0';
-
-      char state[64] = "";
-      char *tab = strchr(line, '\t');
-      if (tab)
-      {
-         char *start = tab + 1;
-         char *end = strchr(start, '\t');
-         if (!end)
-            end = start + strlen(start);
-         snprintf(state, sizeof(state), "%.*s", (int)(end - start), start);
-      }
-      else
-      {
-         char name[128];
-         if (sscanf(line, "%127s %63s", name, state) != 2)
-            state[0] = '\0';
-      }
-
-      for (char *p = state; *p; p++)
-         *p = (char)tolower((unsigned char)*p);
-
-      if (state[0])
-      {
-         if (total)
-            (*total)++;
-         if (checks_state_is_pending(state))
-         {
-            if (pending)
-               (*pending)++;
-         }
-         else if (checks_state_is_failed(state))
-         {
-            if (failed)
-               (*failed)++;
-         }
-         else if (passed)
-         {
-            (*passed)++;
-         }
-      }
-
-      line = nl ? nl + 1 : NULL;
-   }
-}
-
 static int get_origin_repo_slug(char *buf, size_t len)
 {
    if (!buf || len == 0)
@@ -162,7 +83,7 @@ cJSON *handle_git_pr(cJSON *args)
    cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
    if (!cJSON_IsString(jaction))
       return mcp_text("error: 'action' parameter is required "
-                      "(create/view/list/edit/checks/watch/merge_status)");
+                      "(create/view/list/edit/checks/merge_status/merge)");
 
    const char *action = jaction->valuestring;
    int watch_checks = 0;
@@ -180,41 +101,13 @@ cJSON *handle_git_pr(cJSON *args)
       if (jwatch && cJSON_IsTrue(jwatch))
          watch_checks = 1;
 
-      /* --wait: poll until all checks settle, return clean pass/fail summary */
-      if (jwait && cJSON_IsTrue(jwait))
-      {
-         int pr_num = jnum->valueint;
-         for (int i = 0; i < 40; i++) /* up to 10 min at 15 s intervals */
-         {
-            if (i > 0)
-               sleep(15);
-            char wcmd[256];
-            snprintf(wcmd, sizeof(wcmd), "gh pr checks %d 2>&1", pr_num);
-            int wrc;
-            char *wout = mcp_git_run(wcmd, &wrc);
-            if (wrc != 0 && wrc != 1 && wrc != 8)
-            {
-               cJSON *r = mcp_error("error: gh pr checks failed: %s", wout ? wout : "unknown");
-               free(wout);
-               return r;
-            }
-
-            int total = 0, pending = 0, failed = 0, passed = 0;
-            checks_parse_plain_output(wout, &total, &pending, &failed, &passed);
-            free(wout);
-            if (pending == 0)
-            {
-               char res[256];
-               if (failed > 0)
-                  snprintf(res, sizeof(res), "checks complete: %d/%d failed, %d passed", failed,
-                           total, passed);
-               else
-                  snprintf(res, sizeof(res), "checks complete: all %d passed", total);
-               return mcp_text(res);
-            }
-         }
-         return mcp_text("error: timed out waiting for checks (10 minutes)");
-      }
+      /* MCP stdio dispatch is synchronous. A watcher or sleep/poll loop blocks every
+       * unrelated tool on that session, and cancelling the caller does not cancel the
+       * server-side operation. Keep this action snapshot-only; callers poll it with
+       * their own bounded scheduling instead of occupying the MCP request lane. */
+      if ((jwait && cJSON_IsTrue(jwait)) || watch_checks)
+         return mcp_text("error: blocking PR check waits are disabled; call action=checks with "
+                         "wait=false and poll with a bounded client-side interval");
 
       char cmd[256];
       snprintf(cmd, sizeof(cmd), "gh pr checks %d%s 2>&1", jnum->valueint,
@@ -279,6 +172,8 @@ cJSON *handle_git_pr(cJSON *args)
       int pr_num = jnum->valueint;
 
       cJSON *jmethod = cJSON_GetObjectItemCaseSensitive(args, "merge_method");
+      cJSON *jauto = cJSON_GetObjectItemCaseSensitive(args, "auto");
+      int auto_merge = jauto && cJSON_IsTrue(jauto);
       const char *mflag = "--merge";
       if (cJSON_IsString(jmethod))
       {
@@ -328,6 +223,8 @@ cJSON *handle_git_pr(cJSON *args)
             why = NULL; /* genuinely zero checks -> nothing to fail -> merge */
          else if (crc == 0)
             why = NULL; /* gh: every check passed */
+         else if (crc == 8 && auto_merge)
+            why = NULL; /* branch protection keeps an auto-merge pending until green */
          else if (crc == 8)
             why = "CI has not finished; re-try once checks settle";
          else if (crc == 1)
@@ -346,7 +243,8 @@ cJSON *handle_git_pr(cJSON *args)
       }
 
       char cmd[512];
-      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s 2>&1", pr_num, mflag, match);
+      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s%s 2>&1", pr_num, mflag, match,
+               auto_merge ? " --auto" : "");
       int rc = 0;
       char *out = mcp_git_run(cmd, &rc);
       cJSON *res = cJSON_CreateObject();
@@ -355,7 +253,14 @@ cJSON *handle_git_pr(cJSON *args)
       cJSON_AddNumberToObject(res, "exit_code", rc);
       cJSON_AddStringToObject(res, "output", out ? out : "");
       free(out);
-      if (rc == 0)
+      if (rc == 0 && auto_merge)
+      {
+         /* Success means the request was accepted, not necessarily that GitHub merged
+          * it synchronously. Do not manufacture merge evidence for a queued PR. */
+         cJSON_AddBoolToObject(res, "auto_merge_enabled", 1);
+         cJSON_AddBoolToObject(res, "merged", 0);
+      }
+      else if (rc == 0)
       {
          /* recover the merge commit SHA for the ledger. */
          char vcmd[128];
