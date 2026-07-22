@@ -322,7 +322,7 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
            db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c \
            db2/cross_repo_route.c db2/cross_repo_build.c \
            db2/vault_pg.c db2/org_vault_rewrap.c db2/org_vault_rotation.c db2/org_vault_key_use.c db2/org_model_catalog.c db2/org_spend.c db2/org_budget.c db2/org_rate.c db2/org_egress.c db2/org_telemetry.c db2/org_telemetry_fmt.c
-DB2_SRCS += db2/server_registry.c db2/management_client_instance.c
+DB2_SRCS += db2/server_registry.c db2/management_client_instance.c db2/management_action_journal.c
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
