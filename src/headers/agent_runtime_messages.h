@@ -20,10 +20,15 @@ int agent_required_evidence_reject_response(int required, int successful_evidenc
                                             int is_tool_call, int call_count);
 int agent_required_evidence_budget_exhausted(int required, int successful_evidence_calls,
                                              int pre_evidence_responses);
+int agent_required_evidence_needs_fallback(int required, int successful_evidence_calls,
+                                           int chatgpt_provider, int denied_calls,
+                                           int remaining_calls);
 void agent_session_append_final_message(cJSON *messages, const char *content);
 void agent_session_append_final_instruction(cJSON *messages);
 void agent_session_append_final_retry_instruction(cJSON *messages, const char *attempted_action);
 void agent_session_append_degenerate_retry_instruction(cJSON *messages);
 void agent_session_append_required_evidence_instruction(cJSON *messages);
+void agent_session_append_repository_evidence(cJSON *messages, const char *tool_name,
+                                              const char *arguments, const char *result);
 
 #endif /* DEC_AGENT_RUNTIME_MESSAGES_H */
