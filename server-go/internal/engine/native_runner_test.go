@@ -166,7 +166,7 @@ func TestNativeRoundtableFailsClosedWhenReviewerEvaluatesWrongStage(t *testing.T
 			}
 			agents := &recordingAgents{reviewResponse: `{` + prefix + `"original_request_alignment":{"status":"aligned","summary":"looks related"},"verdict":"approve","findings":[]}`}
 			runner := &NativeRunner{agents: agents}
-			feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}}, "review", "hash", "plan")
+			feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}}, "review", "hash", "plan", 1)
 			if unreachable != "" || approvals != 0 || voters != 1 || len(feedback.Findings) != 1 {
 				t.Fatalf("stage mismatch accounting: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 			}
@@ -179,7 +179,7 @@ func TestNativeRoundtableFailsClosedWhenReviewerEvaluatesWrongStage(t *testing.T
 	for _, echoed := range []string{`"Plan"`, `"PLAN"`, `" plan "`} {
 		agents := &recordingAgents{reviewResponse: `{"artifact_stage":` + echoed + `,"original_request_alignment":{"status":"aligned","summary":"looks related"},"verdict":"approve","findings":[]}`}
 		runner := &NativeRunner{agents: agents}
-		feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}}, "review", "hash", "plan")
+		feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}}, "review", "hash", "plan", 1)
 		if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
 			t.Fatalf("canonical stage echo %s rejected: approvals=%d voters=%d unreachable=%q feedback=%+v", echoed, approvals, voters, unreachable, feedback)
 		}
@@ -208,7 +208,7 @@ func TestStageMismatchCannotBeOverriddenByAnotherApproval(t *testing.T) {
 		`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"related"},"verdict":"approve","findings":[]}`,
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}, {persona: "security", required: true}}, "review", "hash", "plan")
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa", required: true}, {persona: "security", required: true}}, "review", "hash", "plan", 1)
 	if unreachable != "" || approvals != 1 || voters != 2 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
 		t.Fatalf("mixed-stage panel could approve: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
@@ -338,6 +338,63 @@ func TestFillPanelCapacityUsesEverySlotWithDiversityFirst(t *testing.T) {
 	}
 }
 
+func TestPanelCapacitySeatsHaveDistinctDurableJobKeys(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{
+		{persona: "security", delegate: "codex", ordinal: 0},
+		{persona: "security", delegate: "codex", ordinal: 1},
+		{persona: "security", delegate: "codex", ordinal: 2},
+	}
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable != "" || approvals != 3 || voters != 3 || len(feedback.Findings) != 0 {
+		t.Fatalf("panel result approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
+	}
+	if len(agents.requests) != 3 {
+		t.Fatalf("requests=%d", len(agents.requests))
+	}
+	seen := map[string]bool{}
+	wantSlots := map[string]bool{}
+	for ordinal := range seats {
+		wantSlots[panelSeatDurableSlot(req, 1, ordinal)] = true
+	}
+	for _, request := range agents.requests {
+		key := delegateJobKey(request)
+		if seen[key] {
+			t.Fatalf("capacity seats collapsed onto durable key %q: %+v", key, agents.requests)
+		}
+		seen[key] = true
+		if !wantSlots[request.DurableSlot] {
+			t.Fatalf("unexpected durable slot=%q want one of %v", request.DurableSlot, wantSlots)
+		}
+	}
+}
+
+func TestPanelSeatDurableSlotCannotAliasDelimitedIdentifiers(t *testing.T) {
+	left := StepRequest{WorkItem: db1.WorkItem{ID: "a:b"}, Node: wfe.Node{ID: "c"}}
+	right := StepRequest{WorkItem: db1.WorkItem{ID: "a"}, Node: wfe.Node{ID: "b:c"}}
+	if got, other := panelSeatDurableSlot(left, 1, 0), panelSeatDurableSlot(right, 1, 0); got == other {
+		t.Fatalf("structured identities aliased: %q", got)
+	}
+}
+
+func TestPanelCapacityRoundsHaveDistinctDurableJobKeys(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{{persona: "security", delegate: "codex", ordinal: 0}}
+	for round := 1; round <= 2; round++ {
+		feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "same review", "hash", "plan", round)
+		if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
+			t.Fatalf("round %d approvals=%d voters=%d unreachable=%q feedback=%+v", round, approvals, voters, unreachable, feedback)
+		}
+	}
+	if len(agents.requests) != 2 || delegateJobKey(agents.requests[0]) == delegateJobKey(agents.requests[1]) {
+		t.Fatalf("panel rounds shared durable key: %+v", agents.requests)
+	}
+}
+
 func TestFillPanelCapacityInterleavesProvidersBeforeFillingAllSeats(t *testing.T) {
 	configured := []panelSeat{{persona: "correctness"}}
 	roster := []EligibleAgent{
@@ -455,18 +512,19 @@ func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.
 	runner := &NativeRunner{agents: agents}
 	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
 	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req,
-		[]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, "review", "hash", "plan")
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true}}, "review", "hash", "plan", 1)
 	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
 		t.Fatalf("dynamic assignment did not recover: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
-	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" {
+	wantSlot := panelSeatDurableSlot(req, 1, 0)
+	if len(agents.requests) != 2 || agents.requests[0].Delegate != "kimi" || agents.requests[0].DurableSlot != wantSlot || agents.requests[1].Delegate != "" || agents.requests[1].RetryTag != "eligible-fallback:0:kimi" || agents.requests[1].DurableSlot != wantSlot {
 		t.Fatalf("requests=%+v", agents.requests)
 	}
 
 	agents = &temporaryFailureAgents{}
 	runner.agents = agents
 	_, _, _, _, unreachable = runner.runPanelRound(context.Background(), req,
-		[]panelSeat{{persona: "qa", delegate: "kimi", required: true, pinned: true}}, "review", "hash", "plan")
+		[]panelSeat{{persona: "qa", delegate: "kimi", required: true, pinned: true}}, "review", "hash", "plan", 1)
 	if unreachable == "" || len(agents.requests) != 1 {
 		t.Fatalf("explicit pin was silently weakened: requests=%+v unreachable=%q", agents.requests, unreachable)
 	}
