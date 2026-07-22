@@ -255,7 +255,8 @@ COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
-RUN chmod +x /usr/local/bin/aimee-server-entrypoint /usr/local/bin/core-storage.sh
+RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
+    /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the

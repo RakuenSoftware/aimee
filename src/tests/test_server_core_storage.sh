@@ -43,7 +43,7 @@ fi
 printf '%s/core.%%e.%%p\n' "$core_dir" > "$pattern_file"
 AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage
-[ -d "$core_dir" ] && [ "$(stat -c %a "$core_dir")" = 1777 ]
+[ -d "$core_dir" ] && find "$core_dir" -prune -perm 1777 -print | grep -q .
 
 ln -s "$core_dir" "$tmp/core-alias"
 AIMEE_CORE_DIR="$tmp/core-alias/" AIMEE_CORE_PATTERN_FILE="$pattern_file" \

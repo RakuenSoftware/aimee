@@ -2,13 +2,26 @@
 # Shared two-plane lifecycle primitive for aimee-server + aimee-wfe.
 # Sourced by server-entrypoint.sh and exercised with real child processes by CI.
 
+aimee_pid_state_start() {
+    _aimee_stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+    # comm is parenthesized and may itself contain spaces or ')'. Strip through
+    # the final ") " so positional parsing begins at field 3 (state).
+    _aimee_stat=${_aimee_stat##*) }
+    set -- $_aimee_stat
+    _aimee_state=$1
+    shift 19 || return 1
+    [ "$#" -ge 1 ] || return 1
+    printf '%s %s\n' "$_aimee_state" "$1"
+}
+
 aimee_pid_start_time() {
-    awk '{ print $22 }' "/proc/$1/stat" 2>/dev/null || true
+    set -- $(aimee_pid_state_start "$1") || return 1
+    [ "$#" -eq 2 ] && printf '%s\n' "$2"
 }
 
 aimee_pid_is_live() {
     _aimee_pid=$1 _aimee_born=$2
-    _aimee_state_born=$(awk '{ print $3 " " $22 }' "/proc/$_aimee_pid/stat" 2>/dev/null || true)
+    _aimee_state_born=$(aimee_pid_state_start "$_aimee_pid" 2>/dev/null || true)
     [ -n "$_aimee_state_born" ] || return 1
     set -- $_aimee_state_born
     [ "$1" != Z ] && [ "$2" = "$_aimee_born" ]

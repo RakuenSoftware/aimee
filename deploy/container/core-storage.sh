@@ -154,7 +154,10 @@ aimee_verify_core_dump_strict() {
                 return 1
             fi
     fi
-    _marker=$(mktemp "$_core_dir/.core-selftest.XXXXXX") || return 1
+    # The timestamp marker need not live on the persistent mount. Keeping it in
+    # scratch storage also guarantees a failed/interrupted boot cannot leave
+    # self-test bookkeeping behind beside retained diagnostic cores.
+    _marker=$(mktemp "${TMPDIR:-/tmp}/aimee-core-selftest.XXXXXX") || return 1
     (
         cd "$_core_dir" || exit 1
         ulimit -c unlimited || exit 1

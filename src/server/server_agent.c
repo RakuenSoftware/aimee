@@ -1237,7 +1237,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             local.cli_idle_timeout_ms = 60000;
          local.session_reuse = 0;
          pthread_mutex_lock(&g_agent_cli_probe_mu);
-         rc = agent_execute_with_tools_for_role(&local, &cfg.network, "explain", "",
+         rc = agent_execute_with_tools_for_role(&local, &cfg.network, "explain",
+                                                "You are performing a bounded availability probe.",
                                                 "Respond with ok.", 16, 0.0, &result);
          pthread_mutex_unlock(&g_agent_cli_probe_mu);
       }
