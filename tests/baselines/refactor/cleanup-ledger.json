@@ -138,6 +138,27 @@
       "blast_radius": "Documentation and repository validation only; no production source, descriptor, build, route, config, or runtime behavior changes.",
       "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-13.md", "docs/modules/module-runtime.md", "docs/modules/plugin-loader.md"]
+    },
+    {
+      "slice": 14,
+      "state": "present_and_verified",
+      "disposition": "Documented the memory, learning, skills, response-composition, and KB-synthesis family against current source and made physical-ownership gaps explicit.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": []
+      },
+      "fallbacks": ["nineteen module documents remain explicit status debt", "distributed source ownership remains for later behavior-preserving slices"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Placeholder documents would hide the actual split between target ownership and current physical placement.",
+        "revisit": "Each documented relocation candidate requires a focused liveness, consumer, surface, and compatibility audit before movement."
+      },
+      "consumers": ["module maintainers", "technical writers", "modular-refactor CI", "future source-movement slices"],
+      "blast_radius": "No runtime surface changes; the documentation gate verifies descriptor dependencies, activation claims, and the exact debt partition.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-14.md", "docs/modules/memory.md", "docs/modules/learning.md", "docs/modules/skills.md", "docs/modules/response-composition.md", "docs/modules/kb-synthesis.md"]
     }
   ]
 }
