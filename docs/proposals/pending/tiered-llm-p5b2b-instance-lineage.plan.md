@@ -83,7 +83,7 @@ This explicitly selects lineage option A. Option B adds a second operator-provis
 128-bit value without adding entropy because the installation id is already random;
 option C mutates identity on first replacement. This slice is greenfield, so there
 is no deployed-row migration. DDL checks enforce the root from the first row, and
-validation includes a three-hop chain plus concurrent fork attempts.
+validation includes a three-hop chain plus distinct successor-fork attempts.
 
 ## PostgreSQL state
 

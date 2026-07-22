@@ -237,6 +237,14 @@ BEGIN
       '/CN=wrong-ca',current_setting('p5b2b.ca_fp'),'owner:p5b2b-test');
     RAISE EXCEPTION 'grant mismatch replayed';
   EXCEPTION WHEN unique_violation THEN NULL; END;
+  BEGIN
+    PERFORM * FROM public.kb_management_instance_grant_create(repeat('6',32),
+      current_setting('p5b2b.team_a')::BIGINT,current_setting('p5b2b.issuer'),
+      current_setting('p5b2b.subject_a'),current_setting('p5b2b.proof_a'),
+      current_setting('p5b2b.custody_a'),current_setting('p5b2b.binding_a'),
+      current_setting('p5b2b.leaf_a_issuer'),current_setting('p5b2b.ca_fp'),'owner:p5b2b-test');
+    RAISE EXCEPTION 'duplicate live custody/binding accepted';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
   PERFORM * FROM public.kb_management_instance_grant_create(repeat('2',32),
     current_setting('p5b2b.team_a')::BIGINT,current_setting('p5b2b.issuer'),
     current_setting('p5b2b.subject_b'),current_setting('p5b2b.proof_b'),
