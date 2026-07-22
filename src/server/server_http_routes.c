@@ -110,6 +110,12 @@ static int rh_health(const route_req_t *rq, char *resp, int cap)
    return route_health(resp, cap);
 }
 
+static int rh_ready(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_ready(resp, cap);
+}
+
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -1503,6 +1509,7 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 static const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
+    {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},
     {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
     {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
