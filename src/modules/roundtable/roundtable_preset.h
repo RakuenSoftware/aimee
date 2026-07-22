@@ -1,7 +1,7 @@
 /* roundtable_preset.h: server-owned registry of NAMED roundtable presets.
  *
  * A preset captures positive must-use seats (paired model+persona), the
- * aggregator, the guard/loop knobs, and the authoring
+ * legacy aggregator, optional chairman, guard/loop knobs, and authoring
  * pipeline knobs — so the web GUI can maintain several named configurations and
  * pick which one is "active". Selecting a preset active copies its values into
  * the live config_t ensemble_* and roundtable_* fields (the runtime source of truth,
@@ -19,7 +19,7 @@
 #include <stddef.h>
 
 /* Bounds mirror the config_t arrays (config.h). ENSEMBLE_MAX_REFS == 32 seats;
- * model/persona/aggregator widths match the config_t field sizes exactly so an
+ * model/persona/agent widths match the config_t field sizes exactly so an
  * apply-to-config copy never truncates differently than the config parser. */
 #define RT_PRESET_MAX_SEATS   32
 #define RT_PRESET_NAME_MAX    64
@@ -44,12 +44,15 @@ typedef struct
    int seat_count;
 
    char aggregator[RT_PRESET_MODEL_MAX];
+   char chairman[RT_PRESET_MODEL_MAX];
+   int chairman_enabled;
    int min_successful;
    double max_cost_usd;
 
    int max_rounds;
    int converge_threshold;
    int deadline_ms;
+   int discussion;
    char turns[16]; /* "parallel" | "sequential" */
 
    /* Authoring pipeline (roundtable.pipeline_*). */

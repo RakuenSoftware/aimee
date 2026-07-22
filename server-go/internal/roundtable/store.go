@@ -10,6 +10,7 @@ import (
 )
 
 const DirectMaxSeats = 2
+const DefaultDeadlineMS = 360000
 
 type Agent struct {
 	Name        string
@@ -24,10 +25,14 @@ type Seat struct {
 }
 
 type Panel struct {
-	Name          string
-	Seats         []Seat
-	MinSuccessful int
-	Acquired      bool
+	Name            string
+	Seats           []Seat
+	MinSuccessful   int
+	Discussion      bool
+	DeadlineMS      int
+	Chairman        string
+	ChairmanEnabled bool
+	Acquired        bool
 }
 
 type presetSeat struct {
@@ -36,9 +41,13 @@ type presetSeat struct {
 }
 
 type preset struct {
-	Name          string       `json:"name"`
-	Seats         []presetSeat `json:"seats"`
-	MinSuccessful int          `json:"min_successful"`
+	Name            string       `json:"name"`
+	Seats           []presetSeat `json:"seats"`
+	MinSuccessful   int          `json:"min_successful"`
+	Discussion      bool         `json:"discussion"`
+	DeadlineMS      int          `json:"deadline_ms"`
+	Chairman        string       `json:"chairman"`
+	ChairmanEnabled bool         `json:"chairman_enabled"`
 }
 
 type DefaultSource func() (string, error)
@@ -140,7 +149,26 @@ func resolvePreset(p preset, agents []Agent, lenses []string, pins map[string]st
 	if minimum > len(seats) {
 		return Panel{}, fmt.Errorf("roundtable %q min_successful %d exceeds its %d seats", p.Name, minimum, len(seats))
 	}
-	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Acquired: true}, nil
+	deadline := p.DeadlineMS
+	if deadline <= 0 {
+		deadline = DefaultDeadlineMS
+	}
+	chairman := strings.TrimSpace(p.Chairman)
+	if p.ChairmanEnabled {
+		if chairman == "" {
+			return Panel{}, fmt.Errorf("roundtable %q enables its chairman without selecting an agent", p.Name)
+		}
+		if chairman == "$random" {
+			freshCapacity := capacities(agents)
+			chairman = pickAgent(agents, freshCapacity, providerSeats, agentSeats)
+			if chairman == "" {
+				return Panel{}, fmt.Errorf("roundtable %q has no eligible chairman", p.Name)
+			}
+		} else if capacities(agents)[chairman] <= 0 {
+			return Panel{}, fmt.Errorf("required roundtable chairman %q is unavailable", chairman)
+		}
+	}
+	return Panel{Name: p.Name, Seats: seats, MinSuccessful: minimum, Discussion: p.Discussion, DeadlineMS: deadline, Chairman: chairman, ChairmanEnabled: p.ChairmanEnabled, Acquired: true}, nil
 }
 
 func directPanel(agents []Agent, lenses []string, pins map[string]string) (Panel, error) {

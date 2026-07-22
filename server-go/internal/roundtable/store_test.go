@@ -9,7 +9,7 @@ import (
 
 func TestConfiguredRoundtableExactSeatsAndDefaultRouting(t *testing.T) {
 	dir := t.TempDir()
-	p := preset{Name: "large", MinSuccessful: 4, Seats: []presetSeat{
+	p := preset{Name: "large", MinSuccessful: 4, Discussion: true, DeadlineMS: 12345, Chairman: "codex", ChairmanEnabled: true, Seats: []presetSeat{
 		{Model: "$random", Persona: "security"},
 		{Model: "$random", Persona: "qa"},
 		{Model: "$random", Persona: "architect"},
@@ -28,13 +28,35 @@ func TestConfiguredRoundtableExactSeatsAndDefaultRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 5 || panel.MinSuccessful != 4 {
+	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 5 || panel.MinSuccessful != 4 || !panel.Discussion || panel.DeadlineMS != 12345 || !panel.ChairmanEnabled || panel.Chairman != "codex" {
 		t.Fatalf("panel=%+v", panel)
 	}
 	if panel.Seats[0].Agent != "codex" || panel.Seats[1].Agent != "minimax" ||
 		panel.Seats[2].Agent != "codex" || panel.Seats[3].Agent != "minimax" ||
 		panel.Seats[4].Agent != "codex" {
 		t.Fatalf("provider-diverse ordering not preserved: %+v", panel.Seats)
+	}
+}
+
+func TestEnabledChairmanMustResolveToEligibleAgent(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name, chairman string
+	}{
+		{"missing", ""},
+		{"unavailable", "claude"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := preset{Name: tc.name, Chairman: tc.chairman, ChairmanEnabled: true, Seats: []presetSeat{{Model: "$random"}}}
+			data, _ := json.Marshal(p)
+			if err := os.WriteFile(filepath.Join(dir, tc.name+".json"), data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store, _ := NewStore(dir, func() (string, error) { return tc.name, nil })
+			if _, err := store.Resolve("", []Agent{{Name: "codex", MaxParallel: 2}}, nil, nil); err == nil {
+				t.Fatal("enabled chairman silently resolved without its configured eligible agent")
+			}
+		})
 	}
 }
 

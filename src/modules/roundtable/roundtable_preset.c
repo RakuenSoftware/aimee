@@ -169,12 +169,15 @@ static void preset_fill_from_object(const cJSON *root, roundtable_preset_t *out)
    }
 
    snprintf(out->aggregator, sizeof(out->aggregator), "%s", json_str(root, "aggregator", ""));
+   snprintf(out->chairman, sizeof(out->chairman), "%s", json_str(root, "chairman", ""));
+   out->chairman_enabled = json_bool(root, "chairman_enabled", 0);
    out->min_successful = (int)json_num(root, "min_successful", 2);
    out->max_cost_usd = json_num(root, "max_cost_usd", 0.0);
 
    out->max_rounds = (int)json_num(root, "max_rounds", 0);
    out->converge_threshold = (int)json_num(root, "converge_threshold", 0);
    out->deadline_ms = (int)json_num(root, "deadline_ms", 0);
+   out->discussion = json_bool(root, "discussion", 0);
    snprintf(out->turns, sizeof(out->turns), "%s", json_str(root, "turns", "parallel"));
 
    const cJSON *pl = cJSON_GetObjectItemCaseSensitive(root, "pipeline");
@@ -215,11 +218,14 @@ cJSON *roundtable_preset_to_json(const roundtable_preset_t *p)
    }
 
    cJSON_AddStringToObject(root, "aggregator", p->aggregator);
+   cJSON_AddStringToObject(root, "chairman", p->chairman);
+   cJSON_AddBoolToObject(root, "chairman_enabled", p->chairman_enabled ? 1 : 0);
    cJSON_AddNumberToObject(root, "min_successful", p->min_successful);
    cJSON_AddNumberToObject(root, "max_cost_usd", p->max_cost_usd);
    cJSON_AddNumberToObject(root, "max_rounds", p->max_rounds);
    cJSON_AddNumberToObject(root, "converge_threshold", p->converge_threshold);
    cJSON_AddNumberToObject(root, "deadline_ms", p->deadline_ms);
+   cJSON_AddBoolToObject(root, "discussion", p->discussion ? 1 : 0);
    cJSON_AddStringToObject(root, "turns", p->turns);
 
    cJSON *pl = cJSON_AddObjectToObject(root, "pipeline");
@@ -259,6 +265,12 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
    }
    snprintf(out->name, sizeof(out->name), "%s", name);
    preset_fill_from_object(req, out);
+   if (out->chairman_enabled && !out->chairman[0])
+   {
+      cJSON_Delete(req);
+      *errmsg = "chairman_enabled requires a chairman";
+      return -1;
+   }
    cJSON_Delete(req);
    return 0;
 }

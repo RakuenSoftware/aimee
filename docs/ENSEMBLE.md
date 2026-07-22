@@ -56,6 +56,30 @@ panelists get read-only Aimee index tools and a
 diverse persona lineup (original-request alignment, security, architect, QA,
 contrarian, constructive reviewer).
 
+When a saved roundtable enables **Discussion mode**, the same successful seats
+compare their independent reports once before deterministic synthesis. Nits,
+suggestions, and ordinary blocking findings always stop after that one cycle.
+A foundational finding also stops after one cycle when the seats agree or one
+position already has a strict majority. Only an explicitly disputed
+foundational finding may continue to another cycle, and subsequent cycles carry
+only those contested stable issue IDs. Discussion ends when a strict majority
+forms; deadline or quorum loss parks the workflow visibly rather than fabricating
+consensus. Deterministic synthesis retains findings unless a strict majority
+rejects them.
+The denominator is the successful seated participants that return a complete,
+valid ballot in that discussion cycle. Abstentions remain in that denominator
+but do not by themselves count as disagreement or extend discussion. The saved
+`deadline_ms` is the overall analysis-plus-discussion budget; an omitted or zero
+legacy value is normalized to 360 seconds.
+
+After deterministic synthesis, a preset may optionally require a **chairman**.
+The chairman is one configured, enabled review agent selected visibly in the
+Roundtable GUI. It receives the original request, reviewed artifact, independent
+reports, and deterministic feedback, then submits one final structured verdict.
+There is no chairman retry across the roster: an unavailable chairman, malformed
+verdict, stage mismatch, or missing original-request alignment parks the workflow
+visibly. With the chairman disabled, deterministic synthesis is final.
+
 Every review must explicitly report `original_request_alignment` as `aligned`,
 `drifted`, or `unclear`, with a comparison to the originating request. A useful
 refinement remains aligned; substituting an unrelated goal or deliverable is
