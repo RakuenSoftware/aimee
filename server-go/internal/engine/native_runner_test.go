@@ -485,8 +485,8 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	if repair.Participant != "opaque-seat-token" || repair.Delegate != "" {
 		t.Fatalf("repair did not preserve opaque participant without rerouting: %+v", repair)
 	}
-	if repair.Tools || !repair.ProvidedTarget || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
-		t.Fatalf("repair request was not bounded serialization-only continuation: %+v", repair)
+	if !repair.Tools || !repair.ProvidedTarget || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
+		t.Fatalf("repair request did not preserve tool-capable transport as a bounded continuation: %+v", repair)
 	}
 	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {
 		t.Fatalf("repair prompt=%q", repair.Prompt)
