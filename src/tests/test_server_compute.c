@@ -2435,8 +2435,7 @@ static void test_provided_review_target_suppresses_worktree_evidence(void)
    conn->fd = fds[1];
    g_agent_response = "Plan review complete";
    g_git_repo_root_rc = 0;
-   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s",
-            "/tmp/aimee-parent-repo");
+   snprintf(g_git_repo_root_value, sizeof(g_git_repo_root_value), "%s", "/tmp/aimee-parent-repo");
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "review");
