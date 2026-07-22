@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "slice": 5,
+      "state": "present_and_verified",
+      "disposition": "Deleted the self-contained background skill-curator feature after its liveness audit found no independent production consumer.",
+      "production": {
+        "added": [],
+        "deleted": ["background skill-curator scheduler, state, metrics, configuration, and implementation"],
+        "consolidated": []
+      },
+      "fallbacks": ["legacy nested config remains accepted as unknown input and is omitted on save", "the inert maintenance_state row is retained without a reader"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice removed production code.",
+        "rejected_simpler_alternative": "Keeping or relocating the unconsumed feature was rejected.",
+        "revisit": "The absence gate prevents accidental resurrection; a new supported journey requires a new proposal."
+      },
+      "consumers": ["skill review", "generic memory maintenance", "KB synthesis curator"],
+      "blast_radius": "The absence checker preserves the adjacent live maintenance and KB-curator boundaries while rejecting deleted sources, symbols, config, and build objects.",
+      "independent_review": "Roundtable run oprun_g6a5f2d161a3aecef_1784623013_6 approved the disposition.",
+      "evidence": ["docs/validation/core-modularization-slice-5.md", "docs/audit/dispositions/background-skill-curator.yaml"]
+    },
+    {
+      "slice": 8,
+      "state": "present_and_verified",
+      "disposition": "Moved plugin discovery implementation and its header to plugin-loader without changing behavior or prematurely moving the mixed extension contract.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": ["plugin-loader discovery source and header gained one canonical owner"]
+      },
+      "fallbacks": ["the relocated header temporarily retained its legacy plugin.h include edge"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "This was a path-only ownership move plus validation.",
+        "rejected_simpler_alternative": "Moving the mixed ABI in the same slice was rejected as an unsafe ownership claim.",
+        "revisit": "The temporary include edge was assigned to the following contract-split slice."
+      },
+      "consumers": ["Runtime startup", "plugin-loader focused tests", "Make and CMake build graphs"],
+      "blast_radius": "The slice was restricted to the loader-only file pair; extension ABI, hooks, CLI, dashboard, and runtime consumers remained unchanged.",
+      "independent_review": "Roundtable approved the narrowed loader-only move.",
+      "evidence": ["docs/validation/core-modularization-slice-8.md"]
+    },
+    {
+      "slice": 9,
+      "state": "present_and_verified",
+      "disposition": "Moved the required pre-LLM hook registry into module-runtime and consolidated physical-ownership enforcement.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": ["pre-LLM hook registry source and header moved into module-runtime", "module source ownership checks now use one data-driven checker"]
+      },
+      "fallbacks": ["legacy plugin_chook symbol names remain for compatibility"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "Production behavior and symbol inventory were preserved.",
+        "rejected_simpler_alternative": "Treating the required hook registry as optional plugin loading was rejected.",
+        "revisit": "Compatibility symbol names can be reconsidered only through the compatibility process."
+      },
+      "consumers": ["agent runtime", "module-runtime", "focused hook tests"],
+      "blast_radius": "The source, public include, Make/CMake objects, agent-runtime consumer, and focused test moved together.",
+      "independent_review": "The slice received roundtable review before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-9.md"]
+    },
+    {
+      "slice": 10,
+      "state": "present_and_verified",
+      "disposition": "Separated the required extension ABI from optional loader management and deleted an unused wrapper island.",
+      "production": {
+        "added": [],
+        "deleted": ["plugin_ctx convenience wrapper implementation, header, and unused extended symbols"],
+        "consolidated": ["required typed registries and context lifecycle moved into module-runtime"]
+      },
+      "fallbacks": ["retained public plugin symbol names preserve compatibility"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The contract split removed a duplicate wrapper layer.",
+        "rejected_simpler_alternative": "Relocating the unused wrapper would preserve duplicate API and global state.",
+        "revisit": "Retained compatibility names require an approved compatibility record before removal."
+      },
+      "consumers": ["module-runtime registries", "plugin-loader", "Runtime and protocol consumers"],
+      "blast_radius": "The full source definition/reference inventory and both build graphs were checked before deleting the wrapper island.",
+      "independent_review": "The exact diff returned to roundtable after material corrections.",
+      "evidence": ["docs/validation/core-modularization-slice-10.md"]
+    },
+    {
+      "slice": 11,
+      "state": "present_and_verified",
+      "disposition": "Made plugin-loader default-off and physically absent while retaining the required extension runtime in every profile.",
+      "production": {
+        "added": ["compile-time plugin-loader profile selection and capability guards"],
+        "deleted": [],
+        "consolidated": ["one feature flag controls Make, CMake, runtime, CLI, HTTP, OpenAPI, dashboard, and GUI exposure"]
+      },
+      "fallbacks": ["re-enabling plugin-loader reads the preserved installed-plugin registry"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "Small conditional seams are required to prove the optional module is absent from disabled builds.",
+        "rejected_simpler_alternative": "Runtime-only disablement would leave loader objects, symbols, routes, and configuration residue.",
+        "revisit": "Generated profiles will replace hand-wired feature selection in the descriptor-generation phase."
+      },
+      "consumers": ["default headless/runtime builds", "full builds that opt into plugin-loader", "web capability probe"],
+      "blast_radius": "Disabled and enabled Make/CMake profiles verify object, symbol, route, OpenAPI, dashboard, and GUI behavior.",
+      "independent_review": "Roundtable approved the implementation and both focused CI corrections; all pull-request checks passed.",
+      "evidence": ["docs/validation/core-modularization-slice-11.md"]
+    },
+    {
+      "slice": 12,
+      "state": "present_and_verified",
+      "disposition": "Added one deterministic surface baseline and one cleanup ledger contract before broader source movement.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": ["public surface drift is represented by one index", "slice cleanup accounting is represented by one ledger"]
+      },
+      "fallbacks": [],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds repository validation and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Independent ad hoc snapshots would duplicate membership and normalization rules.",
+        "revisit": "Replace source projections with generated descriptor projections as those become authoritative."
+      },
+      "consumers": ["modular-refactor CI", "maintainers reviewing later source moves"],
+      "blast_radius": "The gate reads repository files only, never a live database, network service, built binary, or ambient toolchain.",
+      "independent_review": "The implementation plan and exact diff are reviewed by the modularization roundtable.",
+      "evidence": ["docs/validation/core-modularization-slice-12.md", "docs/refactor-baselines.md"]
+    }
+  ]
+}

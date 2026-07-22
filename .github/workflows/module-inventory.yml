@@ -70,6 +70,14 @@ jobs:
         run: python3 -I -S scripts/check_module_source_ownership.py
       - name: Test module source ownership failure modes
         run: python3 -I scripts/tests/test_check_module_source_ownership.py -v
+      - name: Enforce refactor surface baselines
+        run: python3 -I -S scripts/refactor_baselines.py
+      - name: Enforce refactor cleanup accounting
+        run: python3 -I -S scripts/check_cleanup_ledger.py
+      - name: Test refactor baseline failure modes
+        run: python3 -I scripts/tests/test_refactor_baselines.py -v
+      - name: Test cleanup-ledger failure modes
+        run: python3 -I scripts/tests/test_check_cleanup_ledger.py -v
 
   git-core-contract:
     name: git-core-contract
