@@ -44,6 +44,13 @@ if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     exit 1
 fi
 
+printf '%s/../outside/core.%%p\n' "$core_dir" > "$pattern_file"
+if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
+    AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_prepare_core_storage 2>/dev/null; then
+    echo "core-storage: required mode accepted a traversal outside core storage" >&2
+    exit 1
+fi
+
 # Exercise the kernel path when the test host exposes a relative core_pattern.
 # Hosted runners may route crashes to systemd-coredump; policy coverage above is
 # deterministic there, while appliance acceptance performs this same crash with

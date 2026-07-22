@@ -11,17 +11,21 @@ exercise_exit() (
     if [ "$first" = server ]; then victim=$server_pid; peer=$wfe_pid; else victim=$wfe_pid; peer=$server_pid; fi
     ( sleep 0.2; kill "$victim" ) &
     aimee_supervise_plane_pair "$server_pid" "$wfe_pid"
-    [ "$AIMEE_FIRST_EXIT" = "$first" ]
-    ! kill -0 "$peer" 2>/dev/null
+    [ "$AIMEE_FIRST_EXIT" = "$first" ] || return 11
+    if kill -0 "$peer" 2>/dev/null; then return 12; fi
     return 0
 )
 
-if ! exercise_exit server; then
-    echo "FAIL: server-plane exit was not detected or its peer survived" >&2
+server_rc=0
+exercise_exit server || server_rc=$?
+if [ "$server_rc" -ne 0 ]; then
+    echo "FAIL: server-plane supervision assertion $server_rc" >&2
     exit 1
 fi
-if ! exercise_exit wfe; then
-    echo "FAIL: WFE-plane exit was not detected or its peer survived" >&2
+wfe_rc=0
+exercise_exit wfe || wfe_rc=$?
+if [ "$wfe_rc" -ne 0 ]; then
+    echo "FAIL: WFE-plane supervision assertion $wfe_rc" >&2
     exit 1
 fi
 # The helper verifies first-exit attribution and peer teardown. The entrypoint

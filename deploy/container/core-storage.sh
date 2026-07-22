@@ -24,6 +24,17 @@ aimee_prepare_core_storage() {
     _pattern_file=${AIMEE_CORE_PATTERN_FILE:-/proc/sys/kernel/core_pattern}
     _required=${AIMEE_REQUIRE_PERSISTENT_CORES:-0}
 
+    if [ "$_required" = 1 ]; then
+        case "$_core_dir" in
+            /*) ;;
+            *)
+                printf '[server-entrypoint] fatal: required core directory must be absolute: %s\n' \
+                    "$_core_dir" >&2
+                return 1
+                ;;
+        esac
+    fi
+
     if ! mkdir -p "$_core_dir" 2>/dev/null ||
        ! chmod 1777 "$_core_dir" 2>/dev/null ||
        ! [ -w "$_core_dir" ]; then
@@ -42,10 +53,27 @@ aimee_prepare_core_storage() {
 
     case "$_core_pattern" in
         "$_core_dir"/*)
-            if [ "$_required" = 1 ] && ! printf '%s' "$_core_pattern" | grep -q '%p'; then
-                printf '[server-entrypoint] fatal: required core_pattern must contain %%p for attribution: %s\n' \
-                    "$_core_pattern" >&2
-                return 1
+            if [ "$_required" = 1 ]; then
+                _core_root=$(readlink -f "$_core_dir" 2>/dev/null || true)
+                _core_parent=$(readlink -f "$(dirname "$_core_pattern")" 2>/dev/null || true)
+                if [ -z "$_core_root" ] || [ -z "$_core_parent" ]; then
+                    printf '[server-entrypoint] fatal: cannot canonicalize core storage path: %s\n' \
+                        "$_core_pattern" >&2
+                    return 1
+                fi
+                case "$_core_parent" in
+                    "$_core_root"|"$_core_root"/*) ;;
+                    *)
+                        printf '[server-entrypoint] fatal: core_pattern escapes persistent core storage: %s\n' \
+                            "$_core_pattern" >&2
+                        return 1
+                        ;;
+                esac
+                if ! printf '%s' "$_core_pattern" | grep -q '%p'; then
+                    printf '[server-entrypoint] fatal: required core_pattern must contain %%p for attribution: %s\n' \
+                        "$_core_pattern" >&2
+                    return 1
+                fi
             fi
             printf '[server-entrypoint] native crash evidence: %s (%s)\n' \
                 "$_core_pattern" "$_core_dir"
