@@ -528,6 +528,11 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
                 $(TESTPREFIX)/unit-test-kb-mgmt-status-provision \
                 $(TESTPREFIX)/unit-test-management-status-runtime
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
+                $(TESTPREFIX)/unit-test-kb-workload-proof \
+                $(TESTPREFIX)/unit-test-kb-workload-jwt \
+                $(TESTPREFIX)/unit-test-kb-workload-helper-posix \
+                $(TESTPREFIX)/unit-test-kb-workload-provider
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1777,6 +1782,43 @@ $(TESTPREFIX)/unit-test-management-status-runtime: \
     $(OBJDIR)/tests/test_management_status_runtime.o \
     $(OBJDIR)/db2/management_status_runtime.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-kb-workload-wire: $(OBJDIR)/tests/test_kb_workload_wire.o \
+                                            $(OBJDIR)/kb/kb_workload_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-kb-workload-proof: $(OBJDIR)/tests/test_kb_workload_proof.o \
+                                             $(OBJDIR)/kb/kb_workload_proof.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-workload-jwt: $(OBJDIR)/tests/test_kb_workload_jwt.o \
+                                           $(OBJDIR)/kb/kb_workload_jwt.o \
+                                           $(OBJDIR)/modules/aws/aws_sts.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-workload-helper-posix: \
+    $(OBJDIR)/tests/test_kb_workload_helper_posix.o \
+    $(OBJDIR)/kb/kb_workload_helper_posix.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Provider orchestration is tested with deterministic lower-level seams. The
+# production object above still links the real checked-fd/JWT/proof objects into
+# aimee-kb; only this isolated test object rewrites their symbol names.
+$(OBJDIR)/tests/kb_workload_provider_mocked.o: kb/kb_workload_provider.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(TEST_C_FLAGS) \
+	  -Dkb_workload_checked_root_file_open=mock_checked_root_file_open \
+	  -Dkb_workload_helper_invoke=mock_helper_invoke \
+	  -Dkb_workload_proof_key_load_der=mock_proof_key_load \
+	  -Dkb_workload_proof_key_close=mock_proof_key_close \
+	  -Dkb_workload_proof_anchor_id=mock_proof_anchor \
+	  -Dkb_workload_proof_verify=mock_proof_verify \
+	  -Dkb_workload_jwt_validate=mock_jwt_validate -o $@ $<
+
+$(TESTPREFIX)/unit-test-kb-workload-provider: \
+    $(OBJDIR)/tests/test_kb_workload_provider.o \
+    $(OBJDIR)/tests/kb_workload_provider_mocked.o $(OBJDIR)/kb/kb_workload_wire.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-kms: $(OBJDIR)/tests/test_vault_kms.o \
                                   $(OBJDIR)/modules/vault/vault_custody_kms.o \

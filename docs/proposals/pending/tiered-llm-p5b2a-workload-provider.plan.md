@@ -92,6 +92,10 @@ Callers own no helper allocations. Identity equality is exact issuer+subject plu
 both anchor ids. A changed identity or anchor is a terminal integrity result, never
 renewal. The opaque provider is constructor-allocated and owns one checked helper
 fd plus copied public configuration; `close` releases and cleanses all of it.
+Wrap callers provide at least 32768 output bytes and unwrap callers at least 16384,
+so capacity failure is rejected before the custody operation. Input and output data
+may overlap; identity and length objects may not overlap data or one another. The
+caller quiesces all operations before `close`.
 
 The JWT validator first bounds the compact token, then reuses
 `aws_webidentity_validate` only behind a distinctly named wrapper. Because that
@@ -127,8 +131,12 @@ files. Unsupported platforms return DISABLED. The parent creates CLOEXEC pipes,
 forks with a precomputed fd bound, and the child receives only stdin/stdout; stderr
 and every unrelated fd are closed. Before descriptor exec the child sets
 `PR_SET_NO_NEW_PRIVS`; the environment is an explicit empty array. A five-second
-absolute deadline covers write, read, wait, and kill/reap. Calls on one provider are
-mutex-serialized so a provider cannot create an unbounded concurrent child set.
+absolute deadline covers request write, response read, and normal child exit. On
+expiry the parent kills the helper process group and exactly reaps the direct child;
+the final kernel reap can extend past the deadline only for an uninterruptible task,
+avoiding zombies at the cost of that explicit kernel-state exception. Calls on one
+provider are mutex-serialized so a provider cannot create an unbounded concurrent
+child set.
 Short/extra output, signal exit, timeout, partial framing, or diagnostics are generic
 unavailable and all request/response buffers are cleansed.
 
