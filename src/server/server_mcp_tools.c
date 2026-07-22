@@ -1,5 +1,6 @@
 /* server_mcp_tools.c: server-owned MCP tool discovery */
 #include "server.h"
+#include "server_mcp_surface.h"
 #include "config.h"
 #include "db1.h"
 #include "mcp_tools.h"
@@ -182,7 +183,10 @@ cJSON *mcp_build_full_served_list(void)
 {
    cJSON *tools = mcp_build_tools_list();
    if (tools)
+   {
       append_server_only_tools(tools);
+      server_mcp_filter_unavailable_tools(tools);
+   }
    return tools;
 }
 

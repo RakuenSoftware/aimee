@@ -999,7 +999,7 @@
         },
         {
           "path": "src/headers/server_http_internal.h",
-          "sha256": "f668a09a2820bd21c6dd80cb9b41f66e5900f1b1e5dab738961d1edb882b572e"
+          "sha256": "f952a6a83413579734534590b9f22c086df21a54dbcd1749fba5442b262f5db3"
         },
         {
           "path": "src/headers/server_internal.h",
@@ -1324,7 +1324,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "ca092b9187333b5dfbe5b3912ed9bda734bf03727bedad67b57302a2b2c2f2ed",
+      "sha256": "895567884546d24412f80c562df80000c6dd983713b0d2273f1672703d73b918",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

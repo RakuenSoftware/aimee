@@ -5,6 +5,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "roundtable_activation.h"
 #include "server_mgmt_endpoint.h"
 #include "server_http_identity.h"
 #include <openssl/sha.h>
@@ -1098,6 +1099,10 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
 int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                               char *resp, int cap)
 {
+   /* Internal callers (MCP ensemble_review and authoring pipelines) bypass
+    * route_match(), so reject before submit_op_run_internal allocates a run. */
+   if (!roundtable_operation_available(op_method))
+      return err_json(resp, cap, 404, "not found");
    return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
 }
 
@@ -1926,7 +1931,11 @@ static const http_route_t *route_match(const char *method, const char *path, cha
       if (e->kind == RM_EXACT)
       {
          if (strcmp(path, e->path) == 0)
+         {
+            if (e->op && !roundtable_operation_available(e->op))
+               continue;
             return e;
+         }
          continue;
       }
       size_t plen = strlen(e->path);
@@ -1955,9 +1964,16 @@ static const http_route_t *route_match(const char *method, const char *path, cha
          memcpy(id_out, rest, idlen);
          id_out[idlen] = '\0';
       }
+      if (e->op && !roundtable_operation_available(e->op))
+         continue;
       return e;
    }
    return NULL;
+}
+
+int v1_route_available(const char *method, const char *path)
+{
+   return method && path && route_match(method, path, NULL, 0) != NULL;
 }
 
 /* Backing implementation for server_http_route_caps (declared earlier). */

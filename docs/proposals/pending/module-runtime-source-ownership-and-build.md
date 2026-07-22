@@ -1,6 +1,7 @@
 # Proposal: make module ownership drive source, builds, config, and documentation
 
-- **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
+- **State:** PENDING — roundtable-approved 2026-07-20; slices 27–28 implemented; physical
+  profile omission and the remaining module migrations still await project acceptance
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
 - **Owns:** descriptor schema/validation, physical source ownership, generated Make/CMake and
   ownership-map outputs, include/type/symbol/link dependency enforcement, and complete individual
@@ -19,12 +20,17 @@ profile selection, dependency reports, and module-documentation inventories.
 Slice 27 establishes an enforceable activation boundary for the optional `roundtable` module:
 `modules.roundtable` and its default-off environment fallback guard the aggregate/roundtable engines,
 CLI/server handlers, and workflow panel provider before model or seat work. Routes and implementation
-objects remain linked and advertised for compatibility. Conditional registration and profile-driven
-object omission remain required before the proposal's physical-absence contract is complete.
+objects remain linked. Slice 28 adds startup-only runtime registration: disabled roundtable operations
+are absent from raw method discovery/dispatch and HTTP matching, while disabled roundtable MCP tools are
+absent from served and meta-tool discovery and reject direct invocation. Profile-driven object omission
+remains required before the proposal's physical-absence contract is complete.
 The owner API is `roundtable_module_enabled`; workflows map its disabled result through
 `WFE_PANEL_MODULE_DISABLED` to a permanent step failure rather than a transient provider retry.
 Resuming or redispatching that disabled gate re-evaluates activation and, while still disabled,
 fails immediately without entering live-panel seat acquisition or retry.
+Server composition is restart-required and uses `roundtable_runtime_configure`,
+`roundtable_operation_available`, and `roundtable_tool_available` from the owner-local
+`roundtable_activation.c`; the operation/tool name tables are not repeated in server, HTTP, or MCP code.
 
 ## Physical boundary
 

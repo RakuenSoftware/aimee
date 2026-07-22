@@ -13,6 +13,7 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
+#include "roundtable_activation.h"
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -347,7 +348,8 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (methods)
    {
       for (int i = 0; server_dispatch_table[i].method; i++)
-         cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
+         if (roundtable_operation_available(server_dispatch_table[i].method))
+            cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
       cJSON_AddItemToObject(resp, "methods", methods);
    }
    return server_send_ok(conn, resp);
@@ -1747,6 +1749,22 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    const char *m = method->valuestring;
    int rc;
 
+   /* Optional-module methods are absent from the live registry. Keep this
+    * before capability lookup so disabled operations have unknown-method, not
+    * authorization, semantics and can never reach a handler. */
+   if (!roundtable_operation_available(m))
+   {
+      cJSON *resp = cJSON_CreateObject();
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "code", "UNKNOWN_METHOD");
+      cJSON_AddStringToObject(resp, "message", "unknown method");
+      cJSON_AddStringToObject(resp, "method", m);
+      rc = server_send_response(conn, resp);
+      cJSON_Delete(resp);
+      cJSON_Delete(req);
+      return rc;
+   }
+
    /* Capability check */
    uint32_t required = server_capability_for_method(m);
    if (required && (conn->capabilities & required) == 0)
@@ -2170,7 +2188,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    server_pid_write(socket_path);
    /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
    config_t cfg;
-   config_load(&cfg);
+   int config_rc = config_load(&cfg);
+   roundtable_runtime_configure(config_rc == 0 ? &cfg : NULL);
    if (db1_init(cfg.db1_path) != 0)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
                cfg.db1_path);

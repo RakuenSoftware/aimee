@@ -25,8 +25,8 @@ handing the result to general response composition or a consuming workflow.
 - `routing`: selects eligible delegate providers/models without owning panel policy.
 
 Consumers include `ensemble` CLI/MCP/API routes, server authoring pipelines, sweep/review flows, optional
-workflow roundtable gates, and the frontend Roundtable surface. Workflows may await a result, but retains
-its own durable state, triggers, approvals, and scheduling.
+workflow roundtable gates, and the frontend Roundtable surface. Workflows may await a result, but retain
+their own durable state, triggers, approvals, and scheduling.
 
 ## Providers and readiness
 
@@ -45,11 +45,16 @@ and pipeline state. A compiled route or saved preset is not proof of an executab
 
 Configuration covers reference seats/models, consensus rounds/turns, personas, chair behavior, cost and
 token bounds, pipeline passes/attempts/gates, capture, and named presets. The aggregate and roundtable
-engines enforce activation before fan-out or provider/model work. The server and CLI return an explicit
-disabled diagnostic, while a workflow `gate.roundtable` records a permanent step failure when the
-module is disabled instead of entering the transient provider-retry loop. Server routes and roundtable objects are still compiled and
-advertised when disabled; profile-driven object omission and conditional surface registration remain
-required follow-up work.
+engines enforce activation before fan-out or provider/model work. The CLI returns an explicit disabled
+diagnostic, while a workflow `gate.roundtable` records a permanent step failure when the module is
+disabled instead of entering the transient provider-retry loop.
+
+The server resolves activation once at startup because administrative hot toggling is unsupported.
+Changing `modules.roundtable` or its environment fallback therefore requires a server restart. While
+disabled, roundtable-owned raw methods are absent from `server.info`, HTTP operation routes return 404,
+and MCP tools are absent from `tools/list`, `find_tools`, and `describe_tool`; direct raw method or MCP
+calls return unknown-method/tool semantics. Implementation objects remain compiled, so profile-driven
+object omission is still required follow-up work.
 
 ## Surfaces
 
@@ -58,10 +63,13 @@ roundtable presets, authoring-pipeline APIs, frontend authoring controls, sweep 
 roundtable/panel blocks. Generic delegate calls belong to delegates; generic output rendering belongs to
 response composition; only panel deliberation semantics belong here.
 
-As of slice 27, linked disabled surfaces include `delegate.aggregate`, `delegate.roundtable`, HTTP
-`POST /v1/delegate/aggregate`, HTTP `POST /v1/delegate/roundtable`, MCP `ensemble_review`, the
-roundtable authoring pipeline, and workflow roundtable gates. They fail closed through the activation
-boundary; they are not yet removed from discovery or the selected object closure.
+As of slice 28, `roundtable_activation.c` is the single owner of roundtable operation and MCP-tool
+classification. Disabled server operations are `delegate.aggregate`, `delegate.roundtable`, and
+`pipeline.*`; disabled MCP surfaces are `ensemble_review`, the collapsed `pipeline` family, and direct
+`pipeline_*` aliases. HTTP `POST /v1/delegate/aggregate` and
+`POST /v1/delegate/roundtable` are absent at the route matcher. Workflow roundtable gates remain valid
+workflow schema but fail permanently without panel work while the module is disabled. CLI commands and
+static reference documentation remain visible so operators can discover and enable the module.
 
 ## Data and migrations
 
@@ -86,8 +94,9 @@ the workflow provider seam; roundtable never owns the work item's durable lifecy
 
 ## Tests and failure behavior
 
-`test_delegate_ensemble` and chair, preset, seat-resolution, pipeline capture/chunk/eval, panel composition, verification,
-MCP, HTTP, and workflow-gate suites cover current behavior. No eligible/available seats, provider error,
+`test_delegate_ensemble`, `test_server_dispatch`, `test_server_http`, and `test_mcp_client_registry`,
+plus chair, preset, seat-resolution, pipeline capture/chunk/eval, panel composition, verification, and
+workflow-gate suites cover current behavior. No eligible/available seats, provider error,
 invalid model output, budget/turn exhaustion, failed quorum, capture failure, or non-convergence must
 produce a typed incomplete/failure result rather than invented consensus.
 
