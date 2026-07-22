@@ -169,6 +169,8 @@ static void preset_fill_from_object(const cJSON *root, roundtable_preset_t *out)
    }
 
    snprintf(out->aggregator, sizeof(out->aggregator), "%s", json_str(root, "aggregator", ""));
+   snprintf(out->chairman, sizeof(out->chairman), "%s", json_str(root, "chairman", ""));
+   out->chairman_enabled = json_bool(root, "chairman_enabled", 0);
    out->min_successful = (int)json_num(root, "min_successful", 2);
    out->max_cost_usd = json_num(root, "max_cost_usd", 0.0);
 
@@ -216,6 +218,8 @@ cJSON *roundtable_preset_to_json(const roundtable_preset_t *p)
    }
 
    cJSON_AddStringToObject(root, "aggregator", p->aggregator);
+   cJSON_AddStringToObject(root, "chairman", p->chairman);
+   cJSON_AddBoolToObject(root, "chairman_enabled", p->chairman_enabled ? 1 : 0);
    cJSON_AddNumberToObject(root, "min_successful", p->min_successful);
    cJSON_AddNumberToObject(root, "max_cost_usd", p->max_cost_usd);
    cJSON_AddNumberToObject(root, "max_rounds", p->max_rounds);
@@ -261,6 +265,12 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
    }
    snprintf(out->name, sizeof(out->name), "%s", name);
    preset_fill_from_object(req, out);
+   if (out->chairman_enabled && !out->chairman[0])
+   {
+      cJSON_Delete(req);
+      *errmsg = "chairman_enabled requires a chairman";
+      return -1;
+   }
    cJSON_Delete(req);
    return 0;
 }

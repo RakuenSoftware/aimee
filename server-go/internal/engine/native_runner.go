@@ -581,6 +581,13 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost}, nil
 		}
 	}
+	if panel.ChairmanEnabled {
+		var chairmanErr string
+		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
+		if chairmanErr != "" {
+			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost}, nil
+		}
+	}
 	quorum := panel.MinSuccessful
 	if approvals >= quorum && len(feedback.Findings) == 0 {
 		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost}, nil
