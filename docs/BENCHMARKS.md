@@ -95,6 +95,67 @@ those packages.
 
 ## Performance Benchmarks
 
+### Transport latency SLO artifact
+
+Transport promotion uses the executable `latency_slo.v1` contract. A producer
+records eligibility before execution and emits at least 10,000 eligible attempts:
+
+```json
+{
+  "schema_version": "latency_slo.v1",
+  "eligibility_set_before_execution": true,
+  "profile": "wan-thin-client",
+  "path": "thin-client-server",
+  "budget": {
+    "p50_ms": 10,
+    "p99_ms": 20,
+    "combined_failure_tail_rate": 0.01,
+    "confidence": 0.95
+  },
+  "attempts": [
+    {"eligible": true, "success": true, "latency_ms": 7.2}
+  ]
+}
+```
+
+Percentiles use nearest-rank selection. An eligible attempt counts against the
+combined failure/tail budget when it fails or exceeds `budget.p99_ms`; an attempt
+is counted once when both occur. The evaluator compares the one-sided exact
+Clopper-Pearson upper confidence bound—not merely the observed rate—to the
+configured budget. Ineligible attempts remain in the artifact for auditability.
+Artifacts may tighten but cannot relax the transport ceilings of 10ms p50, 20ms
+p99, a 1% combined failure/tail upper bound, and 95% confidence.
+
+Run the contract tests and evaluate a captured artifact with:
+
+```bash
+make -C src test-latency-slo
+make -C src check-latency-slo LATENCY_SLO_INPUT=/absolute/path/result.json
+```
+
+The detailed capture format is `transport_benchmark.v1`. Its authoritative
+network profiles and workload matrix live in
+`benchmarks/transport/profiles.json`; the validator requires every timing,
+byte-count, connection, pool, and process field to be present. A stage that the
+current probe cannot measure is recorded explicitly as `null` and appears as a
+coverage gap rather than disappearing from the artifact. `timings_ms.total` is
+always required.
+
+Validate a capture and project it into the SLO evaluator's narrower input:
+
+```bash
+make -C src test-transport-artifact
+make -C src check-transport-artifact \
+  TRANSPORT_ARTIFACT_INPUT=/absolute/path/capture.json \
+  LATENCY_SLO_OUTPUT=/absolute/path/latency-slo.json
+make -C src check-latency-slo \
+  LATENCY_SLO_INPUT=/absolute/path/latency-slo.json
+```
+
+The projection does not manufacture samples or fill coverage gaps. Promotion
+still requires at least 10,000 attempts in the projected artifact and a passing
+`check-latency-slo` result.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

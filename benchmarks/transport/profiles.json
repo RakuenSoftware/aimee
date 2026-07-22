@@ -1,0 +1,44 @@
+{
+  "schema_version": "transport_profiles.v1",
+  "profiles": {
+    "loopback-control": {
+      "description": "No intentional impairment; local control run.",
+      "rtt_ms": 0,
+      "down_mbit_s": null,
+      "up_mbit_s": null,
+      "loss_percent": 0
+    },
+    "lan-server-kb": {
+      "description": "LAN server to KB link.",
+      "rtt_ms": 1,
+      "down_mbit_s": 1000,
+      "up_mbit_s": 1000,
+      "loss_percent": 0
+    },
+    "constrained-remote-server-kb": {
+      "description": "Constrained remote server to KB link.",
+      "rtt_ms": 30,
+      "down_mbit_s": 100,
+      "up_mbit_s": 100,
+      "loss_percent": 0.1
+    },
+    "wan-thin-client": {
+      "description": "Remote thin-client link.",
+      "rtt_ms": 80,
+      "down_mbit_s": 20,
+      "up_mbit_s": 5,
+      "loss_percent": 0.5
+    }
+  },
+  "workloads": {
+    "cold-connection": {"concurrency": 1, "connection_mode": "cold", "payload": "small-json"},
+    "warm-sequential": {"concurrency": 1, "connection_mode": "warm", "payload": "small-json"},
+    "concurrent-8": {"concurrency": 8, "connection_mode": "warm", "payload": "small-json"},
+    "concurrent-32": {"concurrency": 32, "connection_mode": "warm", "payload": "small-json"},
+    "concurrent-64": {"concurrency": 64, "connection_mode": "warm", "payload": "small-json"},
+    "large-buffered-json": {"concurrency": 1, "connection_mode": "warm", "payload": "large-buffered-json"},
+    "incompressible-json": {"concurrency": 1, "connection_mode": "warm", "payload": "incompressible-json"},
+    "streaming-sse": {"concurrency": 1, "connection_mode": "warm", "payload": "streaming-sse"},
+    "streaming-ndjson": {"concurrency": 1, "connection_mode": "warm", "payload": "streaming-ndjson"}
+  }
+}
