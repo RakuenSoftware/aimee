@@ -309,7 +309,7 @@ CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 # of the tree call typed domain functions declared in db1/*.h and never
 # see a handle. db1/*_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = db1/db1_init.c db1/db1_write.c db1/wm.c db1/fsnap.c db1/checkpoints.c db1/roadmap_runtime.c db1/clarify.c db1/diagnose.c db1/ensemble.c db1/caches.c db1/primary_sessions.c db1/webchat_claude_sessions.c db1/webchat_live.c db1/env.c db1/delegations.c db1/delegation_checkpoint.c db1/decisions.c db1/eval.c db1/runtime_state.c db1/server_sessions.c db1/session_state.c db1/session_paths.c db1/token_audit.c db1/model_pricing.c db1/agent_log.c db1/agent_jobs.c db1/coord_jobs.c db1/execution_plans.c db1/pipelines.c db1/roundtable_pipeline.c db1/secrets.c db1/cognify_jobs.c db1/cost_fold.c db1/local_operator.c db1/project_clones.c db1/git_ownership.c db1/tool_local_availability.c db1/model_catalog.c db1/execution_trace.c db1/working_profile_local.c db1/windows.c db1/diagnostics.c db1/maintenance.c db1/conv_context.c db1/payload_rewrite_state.c db1/guardrail_events.c db1/db1_trigger.c db1/db1_cron_jobs.c db1/delegate_learning.c db1/interaction_events.c db1/mcp_osv_cache.c db1/wfe_store.c db1/wfe_binding.c db1/user_memory.c
+DB1_SRCS = db1/db1_init.c db1/db1_write.c db1/wm.c db1/fsnap.c db1/checkpoints.c db1/roadmap_runtime.c db1/clarify.c db1/diagnose.c db1/ensemble.c db1/caches.c db1/primary_sessions.c db1/webchat_claude_sessions.c db1/webchat_live.c db1/env.c db1/delegations.c db1/delegation_checkpoint.c db1/decisions.c db1/eval.c db1/runtime_state.c db1/server_sessions.c db1/session_state.c db1/session_paths.c db1/token_audit.c db1/model_pricing.c db1/agent_log.c db1/agent_jobs.c db1/coord_jobs.c db1/execution_plans.c db1/pipelines.c db1/roundtable_pipeline.c db1/secrets.c db1/cognify_jobs.c db1/cost_fold.c db1/local_operator.c db1/project_clones.c db1/git_ownership.c db1/tool_local_availability.c db1/model_catalog.c db1/execution_trace.c db1/working_profile_local.c db1/windows.c db1/diagnostics.c db1/maintenance.c db1/conv_context.c db1/payload_rewrite_state.c db1/guardrail_events.c db1/db1_trigger.c db1/db1_cron_jobs.c db1/delegate_learning.c db1/interaction_events.c db1/mcp_osv_cache.c db1/server_management_jti.c db1/wfe_store.c db1/wfe_binding.c db1/user_memory.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: DB2 (shared knowledge tier) ---
@@ -1385,7 +1385,7 @@ clean:
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \
 	       tests/fuzz_config_load tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
-	       tests/fuzz_kb_workload_wire \
+	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
@@ -1548,9 +1548,12 @@ FUZZ_ACLPARSE_OBJS = $(OBJDIR)/tests/fuzz_acl_parse.o $(OBJDIR)/cJSON.o
 FUZZ_KB_WORKLOAD_WIRE_OBJS = $(OBJDIR)/tests/fuzz_kb_workload_wire.o \
                              $(OBJDIR)/kb/kb_workload_wire.o
 
+FUZZ_SERVER_MGMT_TOKEN_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_token.o \
+                              $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/cJSON.o
+
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse tests/fuzz_config_load \
                tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
-               tests/fuzz_kb_workload_wire
+               tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -1580,6 +1583,10 @@ $(OBJDIR)/tests/fuzz_kb_workload_wire.o: tests/fuzz_kb_workload_wire.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
+$(OBJDIR)/tests/fuzz_server_mgmt_token.o: tests/fuzz_server_mgmt_token.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
 tests/fuzz_extractors: $(FUZZ_EXTRACTOR_OBJS)
 	$(CC) -o $@ $^ $(L_FULL)
 
@@ -1601,6 +1608,9 @@ tests/fuzz_acl_parse: $(FUZZ_ACLPARSE_OBJS)
 tests/fuzz_kb_workload_wire: $(FUZZ_KB_WORKLOAD_WIRE_OBJS)
 	$(CC) -o $@ $^ $(L_CORE)
 
+tests/fuzz_server_mgmt_token: $(FUZZ_SERVER_MGMT_TOKEN_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*
 	./tests/fuzz_json_parse tests/fuzz_corpus/seed.json tests/fuzz_corpus/seed_config.json
@@ -1609,6 +1619,7 @@ fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_message_frame tests/fuzz_corpus/message_frame/*
 	./tests/fuzz_acl_parse tests/fuzz_corpus/acl_parse/*
 	./tests/fuzz_kb_workload_wire tests/fuzz_corpus/seed.*
+	./tests/fuzz_server_mgmt_token tests/fuzz_corpus/seed.*
 
 # --- Coverage reporting ---
 

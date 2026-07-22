@@ -34,6 +34,13 @@ extern "C"
    int db1_txn_begin(sqlite3 *db, const char *begin_sql);
    int db1_txn_end(sqlite3 *db, const char *end_sql);
 
+   /* Security-sensitive sibling: attempt BEGIN exactly once without invoking DB1's retrying busy
+    * handler. The connection mutex makes the temporary handler swap race-free. */
+   int db1_txn_begin_nowait(sqlite3 *db, const char *begin_sql);
+
+   /* Attempt COMMIT and, on any failure/ambiguity, issue ROLLBACK before releasing the gate. */
+   int db1_txn_commit_or_rollback(sqlite3 *db);
+
    /* Copy a TEXT column into a fixed-size buffer with NULL-safety — the
     * `snprintf(dst, cap, "%s", sqlite3_column_text(...) ?: "")` shape that
     * ~19 db1 row-mapper .c files each open-coded as a private static. */

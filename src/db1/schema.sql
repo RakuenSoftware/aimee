@@ -53,6 +53,36 @@ CREATE TABLE IF NOT EXISTS server_mgmt_status_hwm (
   generation INTEGER NOT NULL CHECK(generation>=0)
 );
 INSERT OR IGNORE INTO server_mgmt_status_hwm(singleton,generation) VALUES(1,0);
+CREATE TABLE IF NOT EXISTS server_management_jti (
+  jti TEXT PRIMARY KEY NOT NULL CHECK(
+    typeof(jti)='text' AND length(jti) BETWEEN 16 AND 128 AND jti NOT GLOB '*[^!-~]*'),
+  issuer TEXT NOT NULL CHECK(
+    typeof(issuer)='text' AND length(issuer) BETWEEN 1 AND 255 AND issuer NOT GLOB '*[^ -~]*'),
+  kid TEXT NOT NULL CHECK(
+    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND kid NOT GLOB '*[^!-~]*'),
+  audience TEXT NOT NULL CHECK(
+    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND audience NOT GLOB '*[^ -~]*'),
+  subject TEXT NOT NULL CHECK(
+    typeof(subject)='text' AND length(subject) BETWEEN 1 AND 576 AND subject NOT GLOB '*[^ -~]*'),
+  team_id INTEGER NOT NULL CHECK(typeof(team_id)='integer' AND team_id > 0),
+  capability TEXT NOT NULL CHECK(
+    typeof(capability)='text' AND length(capability) BETWEEN 1 AND 64 AND capability NOT GLOB '*[^!-~]*'),
+  peer_issuer TEXT NOT NULL CHECK(
+    typeof(peer_issuer)='text' AND length(peer_issuer) BETWEEN 1 AND 511 AND peer_issuer NOT GLOB '*[^ -~]*'),
+  peer_serial TEXT NOT NULL CHECK(
+    typeof(peer_serial)='text' AND length(peer_serial) BETWEEN 1 AND 79 AND peer_serial NOT GLOB '*[^0-9a-f]*'),
+  peer_fingerprint TEXT NOT NULL CHECK(
+    typeof(peer_fingerprint)='text' AND length(peer_fingerprint)=64 AND peer_fingerprint NOT GLOB '*[^0-9a-f]*'),
+  request_sha256 TEXT NOT NULL CHECK(
+    typeof(request_sha256)='text' AND length(request_sha256)=64 AND request_sha256 NOT GLOB '*[^0-9a-f]*'),
+  correlation_id TEXT NOT NULL CHECK(
+    typeof(correlation_id)='text' AND length(correlation_id) BETWEEN 1 AND 128 AND correlation_id NOT GLOB '*[^!-~]*'),
+  issued_at INTEGER NOT NULL CHECK(typeof(issued_at)='integer' AND issued_at >= 0),
+  expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > issued_at),
+  consumed_at INTEGER NOT NULL CHECK(typeof(consumed_at)='integer' AND consumed_at >= issued_at AND consumed_at < expires_at)
+);
+CREATE INDEX IF NOT EXISTS idx_server_management_jti_expiry
+  ON server_management_jti(expires_at,jti);
 CREATE TABLE IF NOT EXISTS token_audit ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL DEFAULT '', delegation_id TEXT NOT NULL DEFAULT '', project_name TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', requested_model TEXT NOT NULL DEFAULT '', stop_reason TEXT NOT NULL DEFAULT '', usage_kind TEXT NOT NULL DEFAULT 'realized', agent_log_id INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, principal TEXT NOT NULL DEFAULT '', served_model TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost_usd REAL NOT NULL DEFAULT 0.0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS model_catalog ( provider TEXT NOT NULL, model TEXT NOT NULL, context_window INTEGER NOT NULL DEFAULT 0, pricing_tier INTEGER NOT NULL DEFAULT 0, tool_support INTEGER NOT NULL DEFAULT 0, streaming_support INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL DEFAULT (datetime('now')), metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (provider, model));
 CREATE TABLE IF NOT EXISTS model_pricing ( model TEXT PRIMARY KEY, cost_in_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_in_per_mtok >= 0), cost_out_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_out_per_mtok >= 0), updated_at TEXT NOT NULL DEFAULT (datetime('now')));

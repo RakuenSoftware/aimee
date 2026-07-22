@@ -89,6 +89,7 @@ DB1_ONLY_TABLES = {
     "server_sessions",
     "server_mgmt_nonce",
     "server_mgmt_status_hwm",
+    "server_management_jti",
     "session_state",
     "user_memories",
     "session_state_ap_hits",
