@@ -20,14 +20,14 @@
     "tools",
     "git",
     "config",
-    "audit"
+    "audit",
+    "workflows",
+    "roundtable",
+    "benchmarks"
   ],
   "debt": [
-    "benchmarks",
     "control-web",
     "governance",
-    "roundtable",
-    "runtime-web",
-    "workflows"
+    "runtime-web"
   ]
 }
