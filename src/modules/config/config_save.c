@@ -447,12 +447,20 @@ int config_save(const config_t *cfg)
       if (cfg->memory_query_expansion_k > 0)
          cJSON_AddNumberToObject(qe, "k", cfg->memory_query_expansion_k);
    }
-   if (cfg->cache_aware_rewrite_enabled || cfg->cache_aware_rewrite_min_savings_tokens != 500 ||
+   if (cfg->transport_kb_pool_enabled || cfg->transport_server_keepalive_enabled ||
+       cfg->transport_thinclient_gzip_enabled || cfg->transport_kb_gzip_enabled ||
+       cfg->cache_aware_rewrite_enabled || cfg->cache_aware_rewrite_min_savings_tokens != 500 ||
        cfg->cache_aware_rewrite_hard_context_threshold != 0.85 ||
        cfg->cache_aware_rewrite_max_defer_turns != 20 ||
        cfg->cache_aware_rewrite_segment_check_turns != 5)
    {
       cJSON *transport = cJSON_AddObjectToObject(root, "transport");
+      cJSON_AddBoolToObject(transport, "kb_pool_enabled", cfg->transport_kb_pool_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "server_keepalive_enabled",
+                            cfg->transport_server_keepalive_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "thinclient_gzip_enabled",
+                            cfg->transport_thinclient_gzip_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "kb_gzip_enabled", cfg->transport_kb_gzip_enabled ? 1 : 0);
       cJSON *cr = cJSON_AddObjectToObject(transport, "cache_aware_rewrite");
       cJSON_AddBoolToObject(cr, "enabled", cfg->cache_aware_rewrite_enabled ? 1 : 0);
       cJSON_AddNumberToObject(cr, "min_savings_tokens",

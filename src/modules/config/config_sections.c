@@ -1158,6 +1158,18 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
    cJSON *tr = cJSON_GetObjectItemCaseSensitive(root, "transport");
    if (cJSON_IsObject(tr))
    {
+      item = cJSON_GetObjectItemCaseSensitive(tr, "kb_pool_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_kb_pool_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "server_keepalive_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_server_keepalive_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "thinclient_gzip_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_thinclient_gzip_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(tr, "kb_gzip_enabled");
+      if (cJSON_IsBool(item))
+         cfg->transport_kb_gzip_enabled = cJSON_IsTrue(item) ? 1 : 0;
       cJSON *cr = cJSON_GetObjectItemCaseSensitive(tr, "cache_aware_rewrite");
       if (cJSON_IsObject(cr))
       {

@@ -1301,6 +1301,14 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
+   /* Live transport rollout controls (transport.*). All default off so a new
+    * binary stays on the established one-shot, uncompressed wire behavior
+    * until an operator selects a measured canary cohort. */
+   int transport_kb_pool_enabled;
+   int transport_server_keepalive_enabled;
+   int transport_thinclient_gzip_enabled;
+   int transport_kb_gzip_enabled;
+
    /* Cost-shaped delegate-routing bandit reward (cost_reward.*).
     * cost_reward_enabled: 0 = off (default; the bandit learns from the binary
     *   success outcome only), 1 = on (subtract a normalized cost penalty so the
