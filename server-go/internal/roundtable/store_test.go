@@ -9,7 +9,7 @@ import (
 
 func TestConfiguredRoundtableExactSeatsAndDefaultRouting(t *testing.T) {
 	dir := t.TempDir()
-	p := preset{Name: "large", MinSuccessful: 4, Seats: []presetSeat{
+	p := preset{Name: "large", MinSuccessful: 4, Discussion: true, DeadlineMS: 12345, Seats: []presetSeat{
 		{Model: "$random", Persona: "security"},
 		{Model: "$random", Persona: "qa"},
 		{Model: "$random", Persona: "architect"},
@@ -28,7 +28,7 @@ func TestConfiguredRoundtableExactSeatsAndDefaultRouting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 5 || panel.MinSuccessful != 4 {
+	if !panel.Acquired || panel.Name != "large" || len(panel.Seats) != 5 || panel.MinSuccessful != 4 || !panel.Discussion || panel.DeadlineMS != 12345 {
 		t.Fatalf("panel=%+v", panel)
 	}
 	if panel.Seats[0].Agent != "codex" || panel.Seats[1].Agent != "minimax" ||
