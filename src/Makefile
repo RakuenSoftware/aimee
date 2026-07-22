@@ -1220,6 +1220,11 @@ $(OBJDIR)/server/server_mcp.o: server/server_mcp.c server/server_mcp_call_table.
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -o $@ $<
 
+# These translation units include the generated help payload directly too. Keep
+# the dependency explicit so a clean parallel build cannot compile them before
+# agent_help_data.h has been atomically generated.
+$(OBJDIR)/server/server_mcp_call_table.o $(OBJDIR)/server/server_mcp_ast_grep.o: agent_help_data.h
+
 TOOL_PROMPT_FILES := $(sort $(wildcard tool_prompts/*.md))
 
 tool_prompts_data.h: $(TOOL_PROMPT_FILES) gen_tool_prompts.py

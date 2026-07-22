@@ -165,16 +165,28 @@ func (s *Store) ForgetDelegateJobIfMatches(ctx context.Context, key string, jobI
 	return changed == 1, err
 }
 
-// CancelUnassignedDelegateJob atomically reaps only a pending resource-plane job
-// that no agent has claimed. The predicate prevents a lease race from cancelling
-// work after assignment.
-func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string) (bool, error) {
+// CancelUnassignedDelegateJob returns true only when this call atomically moves
+// an expired, nonterminal, unassigned job to cancelled. The C compatibility
+// worker can mark a row running before assignment, so status alone is not
+// admission. Its db1_agent_job_set_agent update is reciprocal (`WHERE id = ? AND
+// status != 'cancelled'`): whichever SQLite update wins prevents the other.
+func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string, minAge time.Duration) (bool, error) {
 	if jobID <= 0 {
 		return false, errors.New("delegate job id is required")
 	}
+	if minAge <= 0 {
+		return false, errors.New("delegate minimum unassigned age is required")
+	}
+	cutoff := time.Now().UTC().Add(-minAge).Format("2006-01-02 15:04:05")
 	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
-SET status='cancelled',cancelled_at=datetime('now'),cancel_reason=?,updated_at=datetime('now')
-WHERE id=? AND status='pending' AND agent_name=''`, reason, jobID)
+SET status='cancelled',
+    cancelled_at=datetime('now'),
+    cancel_reason=?,
+    updated_at=datetime('now')
+WHERE id=?
+  AND status IN ('pending','running')
+  AND trim(agent_name)=''
+  AND COALESCE(NULLIF(heartbeat_at,''),created_at) <= ?`, reason, jobID, cutoff)
 	if err != nil {
 		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
 	}
