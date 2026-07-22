@@ -55,31 +55,39 @@ CREATE TABLE IF NOT EXISTS server_mgmt_status_hwm (
 INSERT OR IGNORE INTO server_mgmt_status_hwm(singleton,generation) VALUES(1,0);
 CREATE TABLE IF NOT EXISTS server_management_jti (
   jti TEXT PRIMARY KEY NOT NULL CHECK(
-    typeof(jti)='text' AND length(jti) BETWEEN 16 AND 128 AND jti NOT GLOB '*[^A-Za-z0-9._-]*'),
+    typeof(jti)='text' AND length(jti) BETWEEN 16 AND 128 AND instr(jti,char(0))=0 AND
+    jti NOT GLOB '*[^A-Za-z0-9._-]*'),
   issuer TEXT NOT NULL CHECK(
     typeof(issuer)='text' AND length(issuer) BETWEEN 1 AND 255 AND instr(issuer,char(0))=0 AND
     issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
   kid TEXT NOT NULL CHECK(
-    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND kid NOT GLOB '*[^A-Za-z0-9._-]*'),
+    typeof(kid)='text' AND length(kid) BETWEEN 1 AND 64 AND instr(kid,char(0))=0 AND
+    kid NOT GLOB '*[^A-Za-z0-9._-]*'),
   audience TEXT NOT NULL CHECK(
-    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND audience NOT GLOB '*[^A-Za-z0-9._-]*'),
+    typeof(audience)='text' AND length(audience) BETWEEN 1 AND 127 AND instr(audience,char(0))=0 AND
+    audience NOT GLOB '*[^A-Za-z0-9._-]*'),
   subject TEXT NOT NULL CHECK(
     typeof(subject)='text' AND length(subject) BETWEEN 1 AND 576 AND instr(subject,char(0))=0 AND
     subject NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
   team_id INTEGER NOT NULL CHECK(typeof(team_id)='integer' AND team_id > 0),
   capability TEXT NOT NULL CHECK(
-    typeof(capability)='text' AND length(capability) BETWEEN 1 AND 64 AND capability NOT GLOB '*[^A-Za-z0-9._-]*'),
+    typeof(capability)='text' AND length(capability) BETWEEN 1 AND 64 AND instr(capability,char(0))=0 AND
+    capability NOT GLOB '*[^A-Za-z0-9._-]*'),
   peer_issuer TEXT NOT NULL CHECK(
     typeof(peer_issuer)='text' AND length(peer_issuer) BETWEEN 1 AND 511 AND instr(peer_issuer,char(0))=0 AND
     peer_issuer NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')),
   peer_serial TEXT NOT NULL CHECK(
-    typeof(peer_serial)='text' AND length(peer_serial) BETWEEN 1 AND 79 AND peer_serial NOT GLOB '*[^0-9a-f]*'),
+    typeof(peer_serial)='text' AND length(peer_serial) BETWEEN 1 AND 79 AND instr(peer_serial,char(0))=0 AND
+    peer_serial NOT GLOB '*[^0-9a-f]*'),
   peer_fingerprint TEXT NOT NULL CHECK(
-    typeof(peer_fingerprint)='text' AND length(peer_fingerprint)=64 AND peer_fingerprint NOT GLOB '*[^0-9a-f]*'),
+    typeof(peer_fingerprint)='text' AND length(peer_fingerprint)=64 AND instr(peer_fingerprint,char(0))=0 AND
+    peer_fingerprint NOT GLOB '*[^0-9a-f]*'),
   request_sha256 TEXT NOT NULL CHECK(
-    typeof(request_sha256)='text' AND length(request_sha256)=64 AND request_sha256 NOT GLOB '*[^0-9a-f]*'),
+    typeof(request_sha256)='text' AND length(request_sha256)=64 AND instr(request_sha256,char(0))=0 AND
+    request_sha256 NOT GLOB '*[^0-9a-f]*'),
   correlation_id TEXT NOT NULL CHECK(
-    typeof(correlation_id)='text' AND length(correlation_id) BETWEEN 1 AND 128 AND correlation_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+    typeof(correlation_id)='text' AND length(correlation_id) BETWEEN 1 AND 128 AND instr(correlation_id,char(0))=0 AND
+    correlation_id NOT GLOB '*[^A-Za-z0-9._-]*'),
   issued_at INTEGER NOT NULL CHECK(typeof(issued_at)='integer' AND issued_at >= 0),
   expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > issued_at),
   consumed_at INTEGER NOT NULL CHECK(typeof(consumed_at)='integer' AND consumed_at >= issued_at AND consumed_at < expires_at)
