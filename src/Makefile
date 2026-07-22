@@ -208,15 +208,15 @@ LEAN_OBJDIR = build/obj-lean
 
 # Linker flag sets (layered -- each level adds to the previous)
 L_MINIMAL = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lpthread $(EXTRA_L_FLAGS)
-L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS)
+L_CORE    = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz $(EXTRA_L_FLAGS)
 L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-L_CLIENT  = $(L_MINIMAL) $(TLS_LIBS) -lm
+L_CLIENT  = $(L_MINIMAL) $(TLS_LIBS) -lm -lz
 L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # Server (DB1 daemon) link flags — same as L_FULL minus libpq. The daemon
 # no longer carries DB2 code; the only postgres-bound work routes
 # through the kb client socket to aimee-kb, which carries libpq itself.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 -lm -lpthread $(EXTRA_L_FLAGS) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 -lm -lpthread -lz $(EXTRA_L_FLAGS) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
@@ -406,6 +406,7 @@ TLS_OBJS = $(OBJDIR)/aimee_tls.o
 else
 TLS_OBJS =
 endif
+CLI_SRCS += http_content_encoding.c
 CLI_OBJS = $(CLI_SRCS:%.c=$(OBJDIR)/%.o)
 CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_path.o %/platform_process.o %/history.o %/cli_client.o %/cli_main.o,$(PLATFORM_OBJS))
 # Detached-workspace runner: the serve loop executes file/exec ops locally, so
@@ -430,6 +431,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
 SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_status.c kb/kb_mgmt_status.c
+SERVER_SRCS += http_content_encoding.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \

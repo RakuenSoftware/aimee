@@ -1287,6 +1287,7 @@ endif()
 add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
+    ${AIMEE_SRC_DIR}/http_content_encoding.c
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/codex_auth.c
@@ -1312,7 +1313,8 @@ add_executable(aimee
 )
 target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/delegates ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_SRC_DIR}/modules/audit ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skill ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE Threads::Threads)
+find_package(ZLIB REQUIRED)
+target_link_libraries(aimee PRIVATE Threads::Threads ZLIB::ZLIB)
 if(NOT WIN32)
     # cmd_optimize.c (bandit math) and cli_attention_guard.c use sqrt/pow/log;
     # libm is implicit in libSystem on Apple but a separate link on Linux. The

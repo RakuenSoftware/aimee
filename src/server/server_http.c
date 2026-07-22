@@ -36,6 +36,7 @@
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
 #include "shadow_mirror.h"        /* generic shadow-traffic mirror */
+#include "http_content_encoding.h"
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -58,6 +59,26 @@
  * above the legacy 64KB or large requests are truncated and misparsed. */
 #define SHTTP_MAX_BODY (4 * 1024 * 1024)
 #define SHTTP_BACKLOG  16
+
+static int gzip_route_eligible(const char *path)
+{
+   /* An explicit allowlist keeps new and sensitive routes identity encoded.
+    * Split literals keep the OpenAPI route scanner from mistaking policy data
+    * for dispatch declarations. Adjacent literals are identical at runtime. */
+   static const char *const allowed[] = {"/v1/"
+                                         "responses",
+                                         "/v1/"
+                                         "completions",
+                                         "/v1/"
+                                         "embeddings",
+                                         "/v1/"
+                                         "messages",
+                                         NULL};
+   for (int i = 0; allowed[i]; i++)
+      if (strcmp(path, allowed[i]) == 0)
+         return 1;
+   return 0;
+}
 
 /* ── per-session persona store ──────────────────────────────────────────── */
 
@@ -1523,6 +1544,7 @@ int http_header(const char *buf, const char *name, char *out, size_t n)
 
 void handle_conn(int fd, int is_tcp, int is_management)
 {
+   server_http_gzip_set(0);
    char buf[SHTTP_READ_MAX];
    int total = 0;
    while (total < SHTTP_READ_MAX - 1)
@@ -1802,6 +1824,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
+   config_t transport_cfg;
+   config_load(&transport_cfg);
+   char accept_encoding[128] = "";
+   int gzip_allowed = transport_cfg.transport_thinclient_gzip_enabled && gzip_route_eligible(path);
+   server_http_gzip_set(
+       gzip_allowed &&
+       http_header(buf, "Accept-Encoding", accept_encoding, sizeof(accept_encoding)) &&
+       strcasestr(accept_encoding, "gzip") != NULL);
+
    /* GET /v1/runs/{id}/events takes the SSE path (no body); other run routes
     * fall through to the buffered router below. */
    {
@@ -1947,6 +1978,37 @@ void handle_conn(int fd, int is_tcp, int is_management)
          }
          body[already] = '\0';
          body_len = already;
+      }
+   }
+
+   char content_encoding[64] = "";
+   if (http_header(buf, "Content-Encoding", content_encoding, sizeof(content_encoding)) &&
+       content_encoding[0])
+   {
+      if (!gzip_allowed || strcasecmp(content_encoding, "gzip") != 0 || !body)
+      {
+         send_response(fd, 415, "{\"error\":\"unsupported content encoding\"}", request_id);
+         free(body);
+         return;
+      }
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      const char *head_end = strstr(buf, "\r\n\r\n");
+      size_t head_bytes = head_end ? (size_t)(head_end + 4 - buf) : (size_t)total;
+      size_t decoded_cap = head_bytes < 64u * 1024u ? 64u * 1024u - head_bytes : 0;
+      int gzip_rc = decoded_cap ? http_gzip_decompress(body, (size_t)body_len, decoded_cap, 50,
+                                                       &decoded, &decoded_len)
+                                : -2;
+      free(body);
+      body = (char *)decoded;
+      body_len = (int)decoded_len;
+      if (gzip_rc != 0)
+      {
+         send_response(fd, gzip_rc == -2 ? 413 : 400,
+                       gzip_rc == -2 ? "{\"error\":\"decompressed body limit exceeded\"}"
+                                     : "{\"error\":\"malformed gzip body\"}",
+                       request_id);
+         return;
       }
    }
 
