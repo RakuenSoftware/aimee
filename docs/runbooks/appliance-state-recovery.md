@@ -18,9 +18,16 @@ skip them.
 
 ## 1. Prerequisites and Safety Checks
 
-Complete every check below before touching `$AIMEE_HOME` or any
-workspace repo. If any check fails, stop and resolve it before
-continuing — do not work around a failed prerequisite.
+Each check below is scoped: §1.1, §1.2, §1.3, §1.4, §1.5, and §1.7
+apply to **every** recovery path (the `agents.json` restoration path
+and the workspace `.git/` replacement path). The §1.6 abort conditions
+are scoped per path: the backup-availability and backup-validation
+conditions apply only to the `agents.json` restoration path, while
+the fresh-clone and unconfirmed canonical-URL/default-branch
+conditions apply only to the workspace `.git/` replacement path. Do
+not apply a path-specific condition to the other path. If any check
+fails, stop and resolve it before continuing — do not work around a
+failed prerequisite.
 
 ### 1.1 Confirm the host
 
@@ -86,15 +93,24 @@ on next restart.
 The owner check applies to the **required-surviving** paths the recovery
 expects to find in place: the parent directory of `$AIMEE_HOME/agents.json`,
 `$AIMEE_HOME/.vault/`, every `agents.json.bak-*` candidate, and the
-parent directory of the workspace repo's `.git/`. The recovery target
-itself — `$AIMEE_HOME/agents.json` when it is being restored, and the
-workspace repo's `.git/` when it is being replaced — may be absent by
-definition; capture its owning identity from the surviving parent and
-the candidate backups instead of treating its absence as a permission
-problem.
+parent directory of the workspace repo's `.git/`. For the recovery
+target itself, the rule is:
+
+- `$AIMEE_HOME/agents.json` when it is being restored: may be absent
+  by definition; capture its owning identity from the surviving parent
+  directory and the matching `agents.json.bak-*` candidate.
+- The workspace repo's `.git/` when it is being replaced: **inspect
+  the existing `.git/` directory itself** — when it is present (even
+  if corrupt), its UID/GID, mode, and ACLs are the authoritative
+  baseline. A present `.git/` can have a different owner or mode than
+  its parent workspace directory; do not derive owner from the parent
+  in that case. Fall back to the parent directory's metadata only when
+  `.git/` is genuinely absent.
 
 - Confirm your shell's effective UID/GID matches the owner of every
-  required-surviving path listed above.
+  required-surviving path listed above **and**, for the workspace
+  `.git/` replacement path, matches the owner recorded from the
+  present `.git/` (or its parent when absent).
 - If they differ, switch to the owning account (e.g. `sudo -u <owner>`
   or the equivalent on this tier) before any further command. Do not
   `chown` the files as a shortcut — that is itself a state change.
@@ -120,12 +136,21 @@ the surviving parent and any candidate backups):
   - `$AIMEE_HOME/.vault/` and its contents.
   - Every `agents.json.bak-*` candidate and its parent directory.
   - The parent directory of the workspace repo's `.git/`.
-- **Expected-missing recovery targets — record the absence, capture
-  the baseline from the survivor:**
-  - `$AIMEE_HOME/agents.json` (if absent, restore baseline from its
-    parent directory and the matching `agents.json.bak-*` candidate).
-  - The workspace repo's `.git/` (if absent or corrupt, capture the
-    owning UID/GID and mode from the parent workspace repo directory).
+- **Recovery-target handling:**
+  - `$AIMEE_HOME/agents.json`: this file is the agent config; when the
+    incident is a lost/absent `agents.json`, its absence is the
+    trigger. Record the absence, then capture the ownership/permissions
+    baseline from its parent directory and from the matching
+    `agents.json.bak-*` candidate.
+  - The workspace repo's `.git/`: this directory is being **replaced**
+    because it is corrupt or lost. **If `.git/` is present, inspect
+    and record its own UID/GID, mode, and ACLs as the baseline** —
+    a present `.git/` is the object being replaced, not the parent
+    directory, and may have a different owner or permissions than
+    its parent workspace directory. **If `.git/` is genuinely
+    absent** (e.g. deleted), record the absence and capture the
+    owning UID/GID and mode from the parent workspace repo directory
+    as the baseline.
 - Use a non-mutating form (`stat`, `ls -ln`, `getfacl`) so the
   inspection itself does not update mtimes or atimes that downstream
   steps rely on.
@@ -140,30 +165,42 @@ target is recorded, not a stop condition.
 
 ### 1.6 Abort conditions — stop immediately if any of these are true
 
-The following conditions mean the recovery as written cannot proceed
-safely. Stop, do not improvise, and escalate.
+These conditions are scoped to the recovery path that triggers them.
+Stop, do not improvise, and escalate. Do not apply a path-specific
+condition to the other recovery path.
+
+**`agents.json` restoration path only:**
 
 - **No suitable `agents.json.bak-*` backup exists.** If the directory
   contains no `agents.json.bak-*` file (or none whose mtime predates
   the incident and whose owner matches the owning account), the
   backup-restore path for "lost/absent `agents.json`" is not available.
   Restoring from a corrupted or post-incident backup is worse than
-  none; do not synthesize a new `agents.json` from memory.
+  none; do not synthesize a new `agents.json` from memory. **Stop.**
 - **Selected backup is not valid JSON or is missing expected agent
   names.** Before any restore, validate the candidate backup with a
   JSON parser and confirm it contains the agent names the incident
-  ticket says should be present. If validation fails, the backup is
-  not the one you think it is; pick a different candidate or stop.
+  ticket says should be present. If validation fails for the
+  selected candidate, that candidate is **stopped** and must not be
+  used. Any alternative candidate must independently re-pass the
+  full §1.4 owner check, the §1.5 ownership/permissions snapshot,
+  the incident-time mtime check, the JSON validity check, and the
+  expected-agent-names check before recovery resumes. A validation
+  failure on one candidate is not a free pass to try another without
+  revalidation.
+
+**Workspace `.git/` replacement path only:**
+
 - **Fresh clone on the same volume fails.** The workspace-recovery
   step depends on a healthy clone of the repo onto the same tier-bound
   volume. If `git clone <canonical-url> <scratch-on-tier>` errors out,
   the volume or the network is the problem, not the workspace.
   Replacing the `.git` directory on a broken volume will not fix it
-  and may destroy forensic state.
+  and may destroy forensic state. **Stop.**
 - **Canonical HTTPS clone URL or default branch cannot be confirmed.**
   See §1.3. If either is unknown, the replacement clone will attach
   the workspace to the wrong upstream and the recovery will silently
-  fail on the next proposals-trigger poll.
+  fail on the next proposals-trigger poll. **Stop.**
 
 ### 1.7 Handling secrets during validation
 
