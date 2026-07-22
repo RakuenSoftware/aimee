@@ -271,6 +271,12 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
                ag->max_parallel, aimee_err_slug(AIMEE_ERR_CONCURRENCY_LIMIT));
       return AGENT_RC_AT_LIMIT;
    }
+   /* The durable id is thread-local (agent_tasks.c), so overlapping workers
+    * cannot cross-attribute jobs. Persist only after admission: this agent is
+    * now actually being attempted, rather than merely considered or saturated. */
+   int durable_job_id = agent_get_durable_job_id();
+   if (durable_job_id > 0)
+      db1_agent_job_set_agent(durable_job_id, ag->name);
    int rc = use_tools ? agent_execute_with_tools_for_role(ag, net, role, system_prompt, user_prompt,
                                                           max_tokens, temperature, out)
                       : agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
@@ -379,6 +385,12 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          if (cache_enabled && out->response)
             db1_agent_cache_put(role, user_prompt, out->response);
          return 0;
+      }
+      if (cfg->route_pinned)
+      {
+         free(out->response);
+         out->response = NULL;
+         break;
       }
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
@@ -601,7 +613,7 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
                                0.3, 1 /* use_tools */, out);
    free(enhanced);
 
-   if (agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
+   if (!cfg->route_pinned && agent_rc_should_try_another(rc, out->error) && cfg->fallback_count > 0)
    {
       aimee_log(LOG_INFO, "agent",
                 "delegate agent '%s' retryable/at-limit, trying fallback chain (%d entries)",
@@ -633,8 +645,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       }
    }
 
-   rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                     enforce_writes, out, rc);
+   if (!cfg->route_pinned)
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
+                                        enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */

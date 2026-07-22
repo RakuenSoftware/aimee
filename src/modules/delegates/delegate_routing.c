@@ -274,6 +274,9 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 {
    if (!cfg)
       return 0;
+   /* Callers load a request-local config today, but reset explicitly so a
+    * reused config can never leak a previous request's positive pin. */
+   cfg->route_pinned = 0;
    if (errbuf && errbuf_sz > 0)
       errbuf[0] = '\0';
 
@@ -388,6 +391,7 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
 
    if (selected)
    {
+      cfg->route_pinned = 1;
       for (int i = 0; i < cfg->agent_count; i++)
       {
          if (&cfg->agents[i] != selected)
@@ -396,6 +400,8 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
    }
    else if (selected_tier >= 0)
    {
+      /* A tier is a pool, not a pin: every enabled role-eligible peer in the
+       * selected tier remains a valid substitute. */
       for (int i = 0; i < cfg->agent_count; i++)
       {
          if (cfg->agents[i].cost_tier != selected_tier)
