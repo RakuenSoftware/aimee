@@ -30,6 +30,10 @@ void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 void test_agent_default_primary_skips_disabled(void);
+void test_catalog_provider_separates_vendor_from_wire(void);
+void test_catalog_provider_explicit_round_trip(void);
+void test_unknown_context_window_does_not_pass_min_context(void);
+void test_context_window_table_covers_live_vendors(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
@@ -3164,6 +3168,10 @@ int main(void)
    test_agent_config_provider_cli_roundtrip();
    test_tools_enabled_capability_default();
    test_agent_default_primary_skips_disabled();
+   test_catalog_provider_separates_vendor_from_wire();
+   test_catalog_provider_explicit_round_trip();
+   test_unknown_context_window_does_not_pass_min_context();
+   test_context_window_table_covers_live_vendors();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();

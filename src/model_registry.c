@@ -97,7 +97,8 @@ typedef struct
 static const detect_entry_t g_detect[] = {
     {"claude", "anthropic"}, {"gpt-", "openai"},         {"gpt4", "openai"},     {"o1", "openai"},
     {"o3", "openai"},        {"text-davinci", "openai"}, {"gemini", "gemini"},   {"palm", "gemini"},
-    {"mistral", "mistral"},  {"codestral", "mistral"},   {"minimax", "minimax"}, {NULL, NULL},
+    {"mistral", "mistral"},  {"codestral", "mistral"},   {"minimax", "minimax"},
+    {"kimi", "moonshotai"},  {NULL, NULL},
 };
 
 const char *model_detect_provider(const char *model_id)
@@ -190,10 +191,20 @@ static const ctx_window_entry_t g_ctx_windows[] = {
     {"mistral-small", 128000},
     {"mistral", 128000}, /* fallback */
 
-    /* MiniMax */
+    /* MiniMax. Prefix matching is longest-specific-first: the bare "minimax"
+     * fallback below must stay LAST in this group, and must not claim a window
+     * for a newer family than it knows. M3 is 1M, not the 200k the old bare
+     * fallback silently reported for it. */
+    {"MiniMax-M3", 1000000},
+    {"minimax-m3", 1000000},
     {"MiniMax-M2", 200000},
     {"minimax-m2", 200000},
-    {"minimax", 200000}, /* fallback */
+    {"minimax", 200000}, /* fallback: oldest known family, never a newer one */
+
+    /* Moonshot / Kimi */
+    {"kimi-k3", 1048576},
+    {"kimi-k2", 262144},
+    {"kimi", 262144}, /* fallback */
 
     /* Sentinel */
     {NULL, 0},
@@ -302,6 +313,16 @@ static int model_capability_get_heuristic(const char *provider, const char *mode
       out->flags = MODEL_CAP_STREAMING | MODEL_CAP_TOOLS;
    }
    else if (effective_provider && strcasecmp(effective_provider, "minimax") == 0)
+   {
+      out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
+   }
+   /* Moonshot/Kimi. Required once an agent's CATALOG identity resolves to
+    * "moonshotai": without this branch the heuristic falls through with flags
+    * == 0 whenever the models.dev cache is cold, which is STRICTLY WORSE than
+    * the old (wrong) "anthropic" identity that at least yielded TOOLS. The
+    * k2/k3 coding families are tool-using reasoning models. */
+   else if (effective_provider && (strcasecmp(effective_provider, "moonshotai") == 0 ||
+                                   strcasecmp(effective_provider, "moonshot") == 0))
    {
       out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
    }

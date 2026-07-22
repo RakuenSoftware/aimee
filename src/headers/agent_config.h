@@ -93,6 +93,13 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
 void agent_routing_set_primary_turn(int on);
 int agent_routing_primary_turn(void);
 
+/* Vendor identity for model-capability lookup: `catalog_provider` when set,
+ * otherwise `provider`. Use this for EVERY model_capability_get() call that
+ * would otherwise pass an agent's provider — `provider` names the wire shape and
+ * is wrong for a third-party vendor served over another vendor's API (MiniMax,
+ * Kimi over Anthropic). Never use it for auth, headers, or request building. */
+const char *agent_catalog_provider(const agent_t *agent);
+
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);

@@ -202,6 +202,59 @@ static void agent_normalize_builtin_cost_tier(agent_t *ag)
       ag->cost_tier = 0;
 }
 
+/* Vendor (catalog) identity for capability lookup. `provider` names the WIRE
+ * SHAPE; a third-party vendor served over another vendor's wire format needs its
+ * own catalog key or every model_capability_get() misses and falls through to
+ * the heuristic under the wrong provider branch. Endpoint host is the
+ * discriminator, never a single model version — matching "MiniMax-M2" broke the
+ * moment M3 shipped. */
+static const struct
+{
+   const char *host;
+   const char *vendor;
+} g_catalog_vendor_hosts[] = {
+    {"api.minimax.", "minimax"},
+    {"api.minimaxi.", "minimax"},
+    {"api.kimi.com", "moonshotai"},
+    {"api.moonshot.", "moonshotai"},
+    {NULL, NULL},
+};
+
+/* Derive catalog_provider when the operator did not set it explicitly. Endpoint
+ * host wins; model-id family is the fallback for CLI/OAuth backends whose
+ * endpoint does not name the vendor. Leaves the field empty when the wire
+ * provider is already the vendor, so agent_catalog_provider() falls back. */
+static void agent_derive_catalog_provider(agent_t *ag)
+{
+   if (!ag || ag->catalog_provider[0])
+      return;
+
+   for (int i = 0; g_catalog_vendor_hosts[i].host; i++)
+   {
+      if (ag->endpoint[0] && strstr(ag->endpoint, g_catalog_vendor_hosts[i].host))
+      {
+         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                  g_catalog_vendor_hosts[i].vendor);
+         return;
+      }
+   }
+
+   if (ag->model[0])
+   {
+      if (strncasecmp(ag->model, "minimax", 7) == 0)
+         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
+      else if (strncasecmp(ag->model, "kimi", 4) == 0)
+         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
+   }
+}
+
+const char *agent_catalog_provider(const agent_t *ag)
+{
+   if (!ag)
+      return "";
+   return ag->catalog_provider[0] ? ag->catalog_provider : ag->provider;
+}
+
 static int agent_provider_requires_credentials(const char *provider)
 {
    return agent_provider_env_vars(provider) != NULL;
@@ -665,6 +718,18 @@ int agent_load_config(agent_config_t *cfg)
              (strstr(ag->endpoint, "api.minimax.") || strstr(ag->model, "MiniMax-M2")))
             snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
 
+         /* Catalog identity is SEPARATE from the wire provider above: rewriting
+          * `provider` for an Anthropic-wire third party would drop the
+          * anthropic-version header, the x-api-key auth coercion, and the
+          * credential env-var set. An explicit operator value always wins. */
+         v = cJSON_GetObjectItem(a, "catalog_provider");
+         if (v && cJSON_IsString(v) && v->valuestring[0])
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", v->valuestring);
+            ag->catalog_provider_explicit = 1;
+         }
+         agent_derive_catalog_provider(ag);
+
          v = cJSON_GetObjectItem(a, "cost_tier");
          if (v && cJSON_IsNumber(v))
             ag->cost_tier = v->valueint;
@@ -685,7 +750,8 @@ int agent_load_config(agent_config_t *cfg)
              * offline (same guarantees as the tools_enabled derivation below);
              * an unknown/non-reasoning model keeps the standard default. */
             model_capability_t tmc;
-            int reasoning = ag->model[0] && model_capability_get(ag->provider, ag->model, &tmc) &&
+            int reasoning = ag->model[0] &&
+                            model_capability_get(agent_catalog_provider(ag), ag->model, &tmc) &&
                             (tmc.flags & MODEL_CAP_REASONING);
             ag->timeout_ms = reasoning ? AGENT_REASONING_TIMEOUT_MS : AGENT_DEFAULT_TIMEOUT_MS;
          }
@@ -735,7 +801,8 @@ int agent_load_config(agent_config_t *cfg)
              *    ON. So embedders/rerankers registered with a known non-tool model
              *    stay off, while any real chat/code delegate is capable by default. */
             model_capability_t mc;
-            int known = ag->model[0] && model_capability_get(ag->provider, ag->model, &mc);
+            int known =
+                ag->model[0] && model_capability_get(agent_catalog_provider(ag), ag->model, &mc);
             ag->tools_enabled = (known && !(mc.flags & MODEL_CAP_TOOLS)) ? 0 : 1;
          }
 
@@ -1104,6 +1171,10 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "auth_type", ag->auth_type);
       if (strcmp(ag->provider, "openai") != 0)
          JSON_ADD_STR(a, "provider", ag->provider);
+      /* Only an operator-supplied catalog_provider round-trips; a derived value
+       * is recomputed at load so the derivation rules stay authoritative. */
+      if (ag->catalog_provider_explicit && ag->catalog_provider[0])
+         JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)
@@ -1776,7 +1847,7 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
    int override_ctx = ag->middleware.context_window;
 
    model_capability_t caps;
-   if (model_capability_get(ag->provider, ag->model, &caps) == 0)
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &caps) == 0)
    {
       if (missing_caps != 0)
          return 0;
@@ -1790,7 +1861,26 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
       caps.flags &= ~MODEL_CAP_TOOLS;
    if (required_caps && (caps.flags & required_caps) != required_caps)
       return 0;
+   /* An UNKNOWN context window (0) must not satisfy a positive min_context. The
+    * previous `effective_ctx > 0` guard made zero pass the gate, so a model whose
+    * window aimee could not establish was admitted for arbitrarily large prompts
+    * — the failure looked like success. Unproven capacity now disqualifies the
+    * agent from this (cheap) selection; the caller escalates rather than failing,
+    * so an unknown model costs more, never an outage. */
    int effective_ctx = override_ctx > 0 ? override_ctx : caps.context_window;
+   /* A tmux-CLI agent (codex / claude-oauth) often carries no resolvable model —
+    * the vendor CLI picks it — so fall back to the window its adapter declares
+    * before treating the window as unknown. Mirrors agent_meets_filter() in
+    * delegate_routing.c; without it the zero-context rule below would strand
+    * exactly the CLI-backed agents that never had a catalog model. */
+   if (effective_ctx <= 0 && ag->cli_kind[0])
+   {
+      const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);
+      if (adapter && adapter->caps.max_context_tokens > 0)
+         effective_ctx = adapter->caps.max_context_tokens;
+   }
+   if (min_context > 0 && effective_ctx <= 0)
+      return 0;
    if (min_context > 0 && effective_ctx > 0 && effective_ctx < min_context)
       return 0;
    if (caps.deprecated)

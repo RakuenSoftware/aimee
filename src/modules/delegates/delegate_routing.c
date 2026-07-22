@@ -65,7 +65,7 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
                               int drop_deprecated)
 {
    model_capability_t cap;
-   int have_cap = model_capability_get(ag->provider, ag->model, &cap);
+   int have_cap = model_capability_get(agent_catalog_provider(ag), ag->model, &cap);
    if (drop_deprecated && have_cap && cap.deprecated)
       return 0;
    unsigned effective_flags = have_cap ? cap.flags : 0;

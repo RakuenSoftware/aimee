@@ -236,6 +236,20 @@ typedef struct
    char auth_cmd[MAX_AUTH_CMD_LEN];
    char auth_type[16];
    char provider[16];
+   /* Catalog (vendor) identity for model-capability lookup, distinct from
+    * `provider` above, which names the WIRE SHAPE aimee speaks to this endpoint.
+    * A third-party vendor served over another vendor's wire format (MiniMax and
+    * Moonshot/Kimi both expose Anthropic-compatible endpoints) has
+    * provider="anthropic" but catalog_provider="minimax"/"moonshotai". Only
+    * capability lookup (model_capability_get and callers) may read this; request
+    * building, auth, and headers must keep using `provider`, which selects the
+    * anthropic-version header (agent_config.c), the x-api-key auth coercion, and
+    * the credential env-var set. Empty means "same as provider". */
+   char catalog_provider[16];
+   /* 1 when catalog_provider came from agents.json rather than derivation. Only
+    * an explicit value is re-serialized, so a save never freezes a derived guess
+    * into config where it would outlive the derivation rules. */
+   int catalog_provider_explicit;
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,

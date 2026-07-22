@@ -424,6 +424,16 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    return NULL;
 }
 
+/* Mirrors agent_config.c: the catalog (vendor) identity for capability lookup,
+ * falling back to the wire provider when unset. Stubbed here because these tests
+ * link delegate_routing.o without agent_config.o. */
+const char *agent_catalog_provider(const agent_t *agent)
+{
+   if (!agent)
+      return "";
+   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
+}
+
 int agent_has_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role)
