@@ -360,6 +360,40 @@ int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_s
    return revoked;
 }
 
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT state, revoked_at FROM kb_enrollments WHERE cert_issuer=?1 AND "
+                        "cert_serial_norm=?2",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", cert_issuer);
+   aimee_pg_bind_text(st, "?2", cert_serial_norm);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int status = 0; /* an unknown identity is not active */
+   if (step == AIMEE_PG_ROW)
+   {
+      const char *state = aimee_pg_column_text(st, 0);
+      const char *revoked_at = aimee_pg_column_text(st, 1);
+      if (state && strcmp(state, "active") == 0 && (!revoked_at || !revoked_at[0]))
+         status = 1;
+      else if (!state || (strcmp(state, "active") != 0 && strcmp(state, "revoked") != 0))
+         status = -1;
+   }
+   else if (step != AIMEE_PG_DONE)
+      status = -1;
+   aimee_pg_finalize(st);
+   return status;
+}
+
 int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
                                      const char *cert_serial_norm, char out_authority[33])
 {
