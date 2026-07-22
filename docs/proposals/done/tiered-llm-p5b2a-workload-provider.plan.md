@@ -1,6 +1,6 @@
 # P5-B2a workload identity and instance-custody provider
 
-- **State:** draft implementation plan; fail-disabled foundation for B2.
+- **State:** completed; roundtable-converged and validated locally plus CT260.
 - **Depends on:** P5-A management-client PKI profile; P5-B1c online authority;
   P7 custody/seal primitives.
 - **Followed by:** B2b primary instance enrollment/renewal state and B2c local
