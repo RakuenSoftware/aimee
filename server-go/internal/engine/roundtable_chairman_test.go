@@ -18,7 +18,7 @@ func chairmanRequest() StepRequest {
 
 func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	agents := &discussionTestAgents{respond: func(request DelegateRequest) (string, error) {
-		if request.Delegate != "codex" || request.Persona != "chairman" || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") {
+		if request.Delegate != "codex" || request.Persona != "chairman" || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") || !strings.Contains(request.Prompt, "plurality, format, or existence is never original-request drift") {
 			t.Fatalf("chairman request=%+v", request)
 		}
 		return `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":" Approve ","findings":[]}`, nil

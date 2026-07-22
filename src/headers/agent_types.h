@@ -276,6 +276,7 @@ typedef struct
    char cli_cmd[CLI_CMD_MAX]; /* CLI command, e.g. "claude" or "gemini" */
    int cli_idle_timeout_ms;   /* explicit response timeout ms; 0/-1 = no timeout */
    int session_reuse;         /* 1 = reuse CLI session across tasks */
+   int force_cli_isolation;   /* per-execution override: never reuse a CLI pane */
    int autonomous;            /* runtime global config: auto-approve provider CLI prompts */
    /* Picks the per-CLI adapter for AGENT_BACKEND_PROVIDER_CLI. Supported
     * values include "codex", "claude", "gemini", "mistral", "mistral-plan"

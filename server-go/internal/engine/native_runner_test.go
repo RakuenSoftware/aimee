@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -114,6 +115,7 @@ type scriptedReviewAgents struct {
 type repairingReviewAgents struct {
 	mu       sync.Mutex
 	requests [][]DelegateRequest
+	invalid  string
 }
 
 func (a *repairingReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
@@ -125,9 +127,10 @@ func (a *repairingReviewAgents) DelegateGroup(_ context.Context, requests []Dele
 	defer a.mu.Unlock()
 	a.requests = append(a.requests, append([]DelegateRequest(nil), requests...))
 	if len(a.requests) == 1 {
+		a.invalid = `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request\nwithout drift"},"verdict":"approve","findings":[]}`
 		return []DelegateGroupResult{{
 			Participant: "opaque-seat-token",
-			Response:    `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+			Response:    a.invalid,
 			CostUSD:     1.25,
 		}}
 	}
@@ -490,6 +493,10 @@ func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
 	}
 	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {
 		t.Fatalf("repair prompt=%q", repair.Prompt)
+	}
+	quotedInvalid, _ := json.Marshal(agents.invalid)
+	if !strings.Contains(repair.Prompt, "PREVIOUS_RESPONSE_JSON_STRING\n"+string(quotedInvalid)+"\nEND_PREVIOUS_RESPONSE_JSON_STRING") {
+		t.Fatalf("repair prompt omitted or altered complete invalid response: %q", repair.Prompt)
 	}
 }
 

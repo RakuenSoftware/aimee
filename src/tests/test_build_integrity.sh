@@ -26,7 +26,25 @@ if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
    grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
     pass "server image uses a PID 1 subreaper"
 else
-    fail "server image must install and enter through tini"
+   fail "server image must install and enter through tini"
+fi
+
+# A native crash must both produce evidence and cause the two-plane container
+# to restart. `tail --pid` deadlocks on a zombie child because the supervising
+# shell cannot reap that child until tail returns.
+if grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'aimee_verify_core_dump' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'AIMEE_CORE_SELFTEST: "1"' ../deploy/smoothnas/aimee-server.plugin.yaml &&
+   sh tests/test_server_core_storage.sh; then
+    pass "server entrypoint enables and validates persistent core dumps"
+else
+    fail "server entrypoint leaves native crash core dumps disabled after runuser"
+fi
+if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
+   sh tests/test_server_plane_supervisor.sh; then
+    pass "server plane supervisor detects zombie exits without tail --pid"
+else
+    fail "server plane supervisor can deadlock on an exited zombie child"
 fi
 
 if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
