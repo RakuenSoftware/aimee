@@ -1,6 +1,6 @@
 # P5-C2b immutable signed JWKS publication
 
-- **State:** implementation approved after adversarial plan review v3 (three panelists, no remaining findings).
+- **State:** implementation and real-PG17/KMS-HWM concurrency, crash-recovery, sanitizer, and fuzz validation complete; adversarial branch review pending.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, section 3.
 - **Depends on:** P5-C2a's enabled RSA-3072 token root, independent Ed25519 manifest root, canonical JWK codec, and pristine signed publication HWM at value 1.
 - **Followed by:** P5-C2c authenticated server-to-kb fetch and durable server cache, P5-C2d token authority, then P5-C3 action composition.
