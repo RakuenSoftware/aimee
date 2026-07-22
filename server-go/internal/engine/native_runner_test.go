@@ -51,6 +51,21 @@ type scriptedReviewAgents struct {
 	responses []string
 }
 
+type firstPanelSeatUnavailableAgents struct {
+	response string
+}
+
+func (a firstPanelSeatUnavailableAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if strings.HasSuffix(request.DurableSlot, "seat:0") {
+		return DelegateResult{}, errors.New("admission unavailable")
+	}
+	response := a.response
+	if response == "" {
+		response = `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`
+	}
+	return DelegateResult{Response: response}, nil
+}
+
 func (a *scriptedReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -540,6 +555,58 @@ func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.
 		[]panelSeat{{persona: "qa", delegate: "kimi", required: true, pinned: true}}, "review", "hash", "plan", 1)
 	if unreachable == "" || len(agents.requests) != 1 {
 		t.Fatalf("explicit pin was silently weakened: requests=%+v unreachable=%q", agents.requests, unreachable)
+	}
+}
+
+func TestRequiredPersonaCanUseSuccessfulCapacityDuplicate(t *testing.T) {
+	runner := &NativeRunner{agents: firstPanelSeatUnavailableAgents{}}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{
+		{persona: "security", delegate: "codex", required: true, ordinal: 0},
+		{persona: "security", delegate: "minimax", ordinal: 1},
+	}
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 {
+		t.Fatalf("successful duplicate did not satisfy required persona: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
+	}
+}
+
+func TestRequiredPinnedAgentCannotUseSuccessfulPersonaDuplicate(t *testing.T) {
+	runner := &NativeRunner{agents: firstPanelSeatUnavailableAgents{}}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{
+		{persona: "security", delegate: "codex", required: true, pinned: true, ordinal: 0},
+		{persona: "security", delegate: "minimax", ordinal: 1},
+	}
+	_, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable == "" || approvals != 1 || voters != 1 {
+		t.Fatalf("explicit pin was substituted: approvals=%d voters=%d unreachable=%q", approvals, voters, unreachable)
+	}
+}
+
+func TestMalformedCapacityDuplicateCannotSatisfyRequiredPersona(t *testing.T) {
+	runner := &NativeRunner{agents: firstPanelSeatUnavailableAgents{response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned"},"verdict":"approve","findings":[{"id":"contradiction","summary":"approve with finding"}]}`}}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{
+		{persona: "security", delegate: "codex", required: true, ordinal: 0},
+		{persona: "security", delegate: "minimax", ordinal: 1},
+	}
+	_, _, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable == "" || voters != 1 {
+		t.Fatalf("malformed duplicate satisfied required persona: voters=%d unreachable=%q", voters, unreachable)
+	}
+}
+
+func TestValidChangesDuplicateSatisfiesRequiredPersona(t *testing.T) {
+	runner := &NativeRunner{agents: firstPanelSeatUnavailableAgents{response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"direction is right"},"verdict":"changes","findings":[{"id":"detail","severity":"blocking","summary":"add detail","recommendation":"specify the step"}]}`}}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	seats := []panelSeat{
+		{persona: "security", delegate: "codex", required: true, ordinal: 0},
+		{persona: "security", delegate: "minimax", ordinal: 1},
+	}
+	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), req, seats, "review", "hash", "plan", 1)
+	if unreachable != "" || approvals != 0 || voters != 1 || len(feedback.Findings) != 1 {
+		t.Fatalf("valid changes did not satisfy required persona: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
 	}
 }
 
