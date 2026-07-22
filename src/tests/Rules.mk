@@ -549,6 +549,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-org-model-catalog-target \
                $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
+               $(TESTPREFIX)/unit-test-kb-mgmt-status-listener \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-token \
                $(TESTPREFIX)/unit-test-server-mgmt-endpoint \
@@ -1798,6 +1799,11 @@ $(TESTPREFIX)/unit-test-kb-mgmt-endpoint: $(OBJDIR)/tests/test_kb_mgmt_endpoint.
 $(TESTPREFIX)/unit-test-kb-mgmt-status: $(OBJDIR)/tests/test_kb_mgmt_status.o \
                                         $(OBJDIR)/kb/kb_mgmt_status.o \
                                         $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-status-listener: \
+    $(OBJDIR)/tests/test_kb_mgmt_status_listener.o \
+    $(OBJDIR)/kb/kb_mgmt_status_listener.o $(OBJDIR)/kb/kb_mgmt_status_peer.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_status.o \

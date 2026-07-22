@@ -6532,6 +6532,67 @@ BEGIN
   END IF;
 END $$;
 
+-- Primary-linearized admission for a server asking whether a named KB
+-- management certificate may authorize one composed action.  The server peer,
+-- caller certificate, registry target, and generation are read under one
+-- primary transaction snapshot.
+DROP FUNCTION IF EXISTS kb_management_action_checkpoint(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT);
+CREATE FUNCTION kb_management_action_checkpoint(
+  p_peer_issuer TEXT,p_peer_serial TEXT,p_peer_fingerprint TEXT,p_target_server TEXT,
+  p_caller_issuer TEXT,p_caller_serial TEXT,p_caller_fingerprint TEXT,p_staple_generation BIGINT
+) RETURNS TABLE(revoked BOOLEAN,generation BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE server_row public.kb_server_registry%ROWTYPE;
+        caller_row public.kb_enrollments%ROWTYPE;
+        current_generation BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery()
+     OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'management checkpoint requires primary' USING ERRCODE='25006';
+  END IF;
+  IF p_peer_issuer IS NULL OR pg_catalog.char_length(p_peer_issuer) NOT BETWEEN 1 AND 600
+     OR p_peer_serial !~ '^[0-9a-f]{1,128}$'
+     OR p_peer_fingerprint !~ '^[0-9a-f]{64}$'
+     OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
+     OR p_caller_issuer IS NULL OR pg_catalog.char_length(p_caller_issuer) NOT BETWEEN 1 AND 600
+     OR p_caller_serial !~ '^[0-9a-f]{1,128}$'
+     OR p_caller_fingerprint !~ '^[0-9a-f]{64}$'
+     OR p_staple_generation<1 THEN
+    RAISE EXCEPTION 'invalid management checkpoint input' USING ERRCODE='22023';
+  END IF;
+  SELECT r.* INTO server_row FROM public.kb_server_registry r
+   JOIN public.kb_enrollments e ON e.scope='p5-server-client'
+    AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
+    AND e.fingerprint=r.client_fingerprint
+   WHERE r.server_id=p_target_server AND r.status='active'
+    AND r.client_issuer=p_peer_issuer AND r.client_serial_norm=p_peer_serial
+    AND r.client_fingerprint=p_peer_fingerprint AND e.state='active' AND e.revoked_at=''
+    AND e.expires_at<>'' AND e.expires_at::TIMESTAMPTZ>pg_catalog.clock_timestamp()
+   FOR SHARE OF r,e;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management checkpoint server denied' USING ERRCODE='28000';
+  END IF;
+  SELECT e.* INTO caller_row FROM public.kb_enrollments e
+   WHERE e.scope='p5-kb-management' AND e.cert_issuer=p_caller_issuer
+    AND e.cert_serial_norm=p_caller_serial AND e.fingerprint=p_caller_fingerprint
+   FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'management checkpoint caller denied' USING ERRCODE='28000';
+  END IF;
+  SELECT g.generation INTO current_generation FROM public.kb_cert_revocation_generation g
+   WHERE g.singleton=1 FOR SHARE;
+  IF current_generation IS NULL THEN
+    RAISE EXCEPTION 'management checkpoint generation absent' USING ERRCODE='XX001';
+  END IF;
+  IF p_staple_generation>current_generation THEN
+    RAISE EXCEPTION 'management checkpoint generation conflict' USING ERRCODE='23505';
+  END IF;
+  RETURN QUERY SELECT
+    caller_row.state<>'active' OR caller_row.revoked_at<>'' OR caller_row.expires_at=''
+      OR caller_row.expires_at::TIMESTAMPTZ<=pg_catalog.clock_timestamp(),
+    current_generation;
+END $$;
+
 -- P5-B1 online status signing authority.  This is deliberately a separate,
 -- platform-scoped slot: it cannot name an arbitrary tenant secret and the
 -- status role receives EXECUTE only on the fixed functions below.
@@ -8136,6 +8197,8 @@ REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEX
 REVOKE ALL ON FUNCTION kb_server_registry_list(BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_snapshot(BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_action_checkpoint(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT)
+ FROM PUBLIC;
 
 -- P2b-a buffered Bedrock egress authority. Certificate instances remain the
 -- revocation/audit origin; authority_id is the renewal-stable idempotency owner.

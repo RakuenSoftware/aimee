@@ -157,6 +157,39 @@ static int sign_cb(kb_mgmt_status_t *status, void *opaque)
                                                  : KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
 }
 
+static int checkpoint_lookup_cb(const char *peer_issuer, const char *peer_serial,
+                                const char *peer_fingerprint,
+                                const kb_mgmt_checkpoint_request_t *request, int *revoked,
+                                int64_t *generation, void *opaque)
+{
+   int rc = db2_management_status_runtime_action_checkpoint(
+       opaque, peer_issuer, peer_serial, peer_fingerprint, request->target_server_id,
+       request->caller_issuer, request->caller_serial_norm, request->caller_fingerprint,
+       (int64_t)request->staple_generation, revoked, generation);
+   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_OK)
+      return KB_MGMT_STATUS_CALLBACK_OK;
+   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED)
+      return KB_MGMT_STATUS_CALLBACK_DENIED;
+   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT)
+      return KB_MGMT_STATUS_CALLBACK_CONFLICT;
+   if (rc == DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY)
+      return KB_MGMT_STATUS_CALLBACK_INTEGRITY;
+   return KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
+}
+
+static int checkpoint_sign_cb(kb_mgmt_checkpoint_t *checkpoint,
+                              const kb_mgmt_checkpoint_request_t *request, void *opaque)
+{
+   kb_mgmt_status_custody_result_t rc =
+       kb_mgmt_status_custody_sign_checkpoint(checkpoint, request, opaque);
+   if (rc == KB_MGMT_STATUS_CUSTODY_OK)
+      return KB_MGMT_STATUS_CALLBACK_OK;
+   if (rc == KB_MGMT_STATUS_CUSTODY_CONFLICT)
+      return KB_MGMT_STATUS_CALLBACK_CONFLICT;
+   return rc == KB_MGMT_STATUS_CUSTODY_INTEGRITY ? KB_MGMT_STATUS_CALLBACK_INTEGRITY
+                                                 : KB_MGMT_STATUS_CALLBACK_UNAVAILABLE;
+}
+
 static kb_mgmt_status_listener_result_t
 handle_request(size_t worker_id, const kb_mgmt_status_peer_t *peer, const char *body,
                size_t body_len, char *response, size_t response_cap, void *opaque)
@@ -188,6 +221,57 @@ handle_request(size_t worker_id, const kb_mgmt_status_peer_t *peer, const char *
    }
    OPENSSL_cleanse(&request, sizeof(request));
    OPENSSL_cleanse(&status, sizeof(status));
+   if (result != KB_MGMT_STATUS_AUTHORITY_OK)
+      OPENSSL_cleanse(response, response_cap);
+   switch (result)
+   {
+   case KB_MGMT_STATUS_AUTHORITY_OK:
+      return KB_MGMT_STATUS_LISTENER_OK;
+   case KB_MGMT_STATUS_AUTHORITY_INVALID:
+      return KB_MGMT_STATUS_LISTENER_INVALID;
+   case KB_MGMT_STATUS_AUTHORITY_DENIED:
+      return KB_MGMT_STATUS_LISTENER_DENIED;
+   case KB_MGMT_STATUS_AUTHORITY_CONFLICT:
+      return KB_MGMT_STATUS_LISTENER_CONFLICT;
+   default:
+      return KB_MGMT_STATUS_LISTENER_UNAVAILABLE;
+   }
+}
+
+static kb_mgmt_status_listener_result_t
+handle_checkpoint(size_t worker_id, const kb_mgmt_status_peer_t *peer, const char *body,
+                  size_t body_len, char *response, size_t response_cap, void *opaque)
+{
+   status_service_t *service = opaque;
+   kb_mgmt_checkpoint_request_t request;
+   kb_mgmt_checkpoint_t checkpoint;
+   memset(&request, 0, sizeof(request));
+   memset(&checkpoint, 0, sizeof(checkpoint));
+   if (!service || worker_id >= KB_MGMT_STATUS_LISTENER_WORKERS || !peer || !response)
+      return KB_MGMT_STATUS_LISTENER_UNAVAILABLE;
+   kb_mgmt_status_authority_result_t result =
+       kb_mgmt_checkpoint_request_from_json(body, body_len, &request);
+   if (result == KB_MGMT_STATUS_AUTHORITY_OK && request.staple_generation > INT64_MAX)
+      result = KB_MGMT_STATUS_AUTHORITY_INVALID;
+   if (result == KB_MGMT_STATUS_AUTHORITY_OK)
+   {
+      time_t now = time(NULL);
+      if (now <= 0)
+         result = KB_MGMT_STATUS_AUTHORITY_UNAVAILABLE;
+      else
+      {
+         status_worker_t *worker = &service->workers[worker_id];
+         result = kb_mgmt_checkpoint_authority_issue(
+             &request, peer->issuer, peer->serial_norm, peer->fingerprint, service->wire_key_id,
+             (uint64_t)now, checkpoint_lookup_cb, &worker->lookup, checkpoint_sign_cb,
+             &worker->custody, &checkpoint);
+         if (result == KB_MGMT_STATUS_AUTHORITY_OK &&
+             kb_mgmt_checkpoint_to_json(&checkpoint, response, response_cap))
+            result = KB_MGMT_STATUS_AUTHORITY_UNAVAILABLE;
+      }
+   }
+   OPENSSL_cleanse(&request, sizeof(request));
+   OPENSSL_cleanse(&checkpoint, sizeof(checkpoint));
    if (result != KB_MGMT_STATUS_AUTHORITY_OK)
       OPENSSL_cleanse(response, response_cap);
    switch (result)
@@ -464,6 +548,7 @@ int main(int argc, char **argv)
                                               .port = (uint16_t)port_value,
                                               .tls = tls,
                                               .handle = handle_request,
+                                              .handle_checkpoint = handle_checkpoint,
                                               .opaque = &service};
    if (kb_mgmt_status_listener_start(&config) != 0)
    {

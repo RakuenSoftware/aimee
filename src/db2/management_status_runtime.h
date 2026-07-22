@@ -11,6 +11,7 @@ enum
 {
    DB2_MANAGEMENT_STATUS_RUNTIME_OK = 0,
    DB2_MANAGEMENT_STATUS_RUNTIME_DENIED = 1,
+   DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT = 2,
    DB2_MANAGEMENT_STATUS_RUNTIME_ERROR = -1,
    DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY = -2,
 };
@@ -49,6 +50,11 @@ int db2_management_status_runtime_lookup(db2_management_status_runtime_t *, cons
                                          const char *target, const char *purpose,
                                          int64_t *generation, char *target_fingerprint,
                                          size_t target_fingerprint_len);
+int db2_management_status_runtime_action_checkpoint(
+    db2_management_status_runtime_t *, const char *peer_issuer, const char *peer_serial,
+    const char *peer_fingerprint, const char *target, const char *caller_issuer,
+    const char *caller_serial, const char *caller_fingerprint, int64_t staple_generation,
+    int *revoked, int64_t *generation);
 
 /* Hold the primary startup/seal snapshot transaction until startup_end. The
  * SQL facade returns the fixed registry binding and current attested version in
