@@ -1,245 +1,340 @@
-# Provider-neutral economizer safety specification
+# Provider-specific, proof-gated economizer safety specification
 
 - **State:** APPROVED
-- **Review status:** CONVERGED (`converged=1`, zero blockers)
-- **Effective:** NOT YET
-- **Version:** `aimee-economizer-safety-v1`
-- **Date:** 2026-07-21
-- **Scope:** Normative v1 behavior for all provider, platform, endpoint, model, and API shapes.
+- **Review status:** CONVERGED (`converged=true`, zero issues)
+- **Version:** `aimee-economizer-safety-v2`
+- **Date:** 2026-07-22
+- **Scope:** OpenAI GPT-5.6-family and Anthropic Claude request paths
 
 ## Decision
 
-V1 is off-only. It performs no live economization and no observation, accounting, shadow simulation,
-telemetry, diagnostics, storage, or savings reporting.
+Aimee may economize only through a provider-specific planner that proves the candidate request has a
+strictly lower cost than sending the untouched request. If the proof cannot be completed from facts
+known before dispatch, Aimee passes the request through byte-for-byte.
 
-The governing requirement is:
+This is **proof-gated**, not off-only. The previous off-only draft incorrectly treated the inability
+to guarantee lower dollars per completed task for every lossy transform as proof that no request can
+be made cheaper. Several closed cases have a mechanically provable call-level saving:
 
-> Wherever Aimee intervenes, the user's charge and the authoritative provider cost must both be
-> strictly lower than they would have been without the economizer. If that cannot be proven for the
-> individual request and its complete task lifecycle, Aimee does not intervene.
+1. reducing large, newly produced tool output before it has ever been sent or cached;
+2. reducing only the mutable suffix after a client-supplied or provider-defined explicit breakpoint;
+3. emitting a deterministic representation so repeated candidates remain byte-identical; and
+4. reducing a request below a provider's full-request long-context pricing threshold.
 
-Current OpenAI and Anthropic APIs do not expose an authoritative pre-dispatch counterfactual for the
-exact untouched request, future cache reuse, eviction, concurrent writers, later retries/recall, or
-model-visible outcome equivalence. Token estimates, returned cache counters, provider documentation,
-public prices, and cohort evidence cannot prove the required inequality for an individual future
-task. Even a passive runtime observer would add code, storage, metering, security, and reporting
-surfaces without making live intervention provable. V1 therefore contains none.
+The system distinguishes two claims:
 
-## Exact baseline
+- **provider-call saving:** the dispatched candidate has a lower conservative charge bound than the
+  untouched request for this call; and
+- **completed-task saving:** the entire task, including any follow-up, recall, retry, and output
+  effects, cost less.
 
-The baseline is the request graph produced by the reviewed no-economizer reference build:
+V2 authorizes only the first claim. It never labels a call-level estimate as completed-task savings.
+Lossy transforms remain disabled until a separately reviewed outcome and lifecycle policy exists.
 
-- the same provider-bound plaintext bytes and ordered cache-sensitive headers before TLS;
-- the same complete client parameter envelope and unknown provider extensions;
-- the same model, endpoint, account/project routing, service tier, region, and API shape;
-- the client's exact cache keys, markers, breakpoints, modes, and TTLs when supplied;
-- provider-default cache behavior only when the client supplied no cache intent;
-- the same serializer, SDK/transport policy, compression/framing, proxy, TLS/HTTP version, timeout,
-  retry policy and representation, connection reuse/0-RTT policy, request count, follow-on calls,
-  context-limit behavior, result, and error; and
-- no Aimee-created cache plan, summary, condensation, fold, compression, recall, rehydration, rescue,
-  alternate request, or retry.
+### Changes from the off-only v1 draft
 
-Provider-bound identity means the canonical plaintext request and transport policy, not randomized
-TLS ciphertext or packet coalescing. Observation is absent, so it cannot affect either.
+V1 considered generic summarization, history folding, truncation, retrieval handles, recall,
+rehydration, and rescue, then rejected all live behavior because those lossy paths could not prove
+complete-task cost or outcome equivalence. V2 keeps every one of those paths disabled. Its only
+change is to admit closed, lossless transformations whose individual provider-call inequality can be
+proved without relying on later behavior.
 
-When client cache intent is absent, Aimee is forbidden to synthesize a default cache key, marker,
-breakpoint, mode, TTL, or plan. Independent field-presence tests prove absent-in/absent-out parity.
-Contradictory client intent is passed through unchanged so the provider produces the same success or
-error as the reference build.
+## Governing invariant
 
-“Absent” means that the ingress parser's independent presence bit is false, not that a decoded value
-equals a default or zero. The same presence bit and raw value enter the pinned serializer in the
-reference and v1 builds. Serializer omission/default rules are therefore part of the byte-exact
-golden, not an Aimee interpretation.
+For an intervention to be authorized:
 
-## Threat model
+```text
+candidate_call_cost_upper_bound + safety_margin
+    < baseline_call_cost_lower_bound
+```
 
-In scope are tenant/client inputs, malformed configuration, every named configuration source,
-recognized legacy values, concurrent config attempts before startup closure, untrusted
-out-of-process plugins/MCP servers, application bugs, build/link drift, aliases, LTO, packaging
-mistakes, rolling upgrades, and process restarts.
+Both values are computed by the planner for the exact provider, model snapshot or documented model
+family, endpoint, cache mode, breakpoint layout, account-visible pricing configuration, and tokenizer
+version. Unknown facts make the proof `INDETERMINATE`, which means pass-through.
 
-The OS/kernel/hypervisor, pinned compiler/linker/scanner binaries, release-signing authority,
-production secret store, and provider/TLS implementation are trusted platform roots. Compromise of a
-private signing key, compiler binary, kernel, root account, hypervisor, provider, or a same-UID process
-with `ptrace`/`process_vm_writev` capability is a platform-security incident outside this economizer
-spec. Production out-of-process plugins run under a different UID/security domain with ptrace,
-`/proc/<pid>`, process-memory, file-descriptor, shared-memory, and network-namespace access to the
-Aimee process denied. Tests verify that sandbox boundary; the spec does not claim safety after root or
-trusted-root compromise.
+For every unknown cache or pricing axis, the planner enumerates one identical, exhaustive set of
+mutually exclusive scenarios for baseline and candidate. The inequality must hold in every scenario;
+otherwise the result is `INDETERMINATE`. It is invalid to select one cache scenario for the baseline
+and another for the candidate. Both use the same pinned model snapshot and tokenizer identifier.
 
-## Normative invariants
+The proof does not depend on a future cache hit, future reuse count, eviction time, provider-internal
+cache residency, or a post-response usage field. A future hit may improve the result but is never
+needed to authorize it.
 
-1. **No economizer request path.** Production dispatch has no branch that can reduce, rewrite,
-   summarize, fold, condense, compress, cache-plan, recall, rehydrate, rescue, or resend for the
-   economizer.
-2. **No economizer observer.** No request, response, usage object, buffer, header, event, or terminal
-   result is delivered to economizer code.
-3. **No economizer side effect.** From process start through shutdown, the economizer makes no
-   provider, network, health, discovery, pricing, tokenizer, metering, telemetry, diagnostics,
-   storage, background, retry, keepalive, plugin, MCP, or admin call and creates no thread or task.
-4. **No economizer data.** It writes no row, counter, log, trace, metric, cache key, identifier,
-   modeled value, billed value, or cross-tenant/cross-version artifact.
-5. **No savings or status surface.** No runtime or user-facing API emits economizer status,
-   `saved_tokens`, `saved_dollars`, modeled savings, hypothetical delta, cache benefit, or equivalent.
-6. **Client/default cache passthrough.** V1 neither adds nor removes cache behavior. Existing cache
-   benefits belong to the baseline and are not attributed to Aimee.
-7. **No configuration escape.** File, database, environment, CLI, admin/reload, compatibility,
-   provider alias, module toggle, debug/test flag, plugin, MCP, tool registration, FFI, JIT, dynamic
-   loading, and migration cannot enable economizer code.
-8. **Future versions inherit no authority.** A later observer, accounting adapter, shadow store,
-   cache planner, or transform requires a new separately reviewed safety version. V1 artifacts and
-   compatibility values cannot authorize it.
+## Closed live-intervention classes
 
-## Mechanical v1 contract
+### A. New tool output before first dispatch
 
-These names and constants are normative.
+A tool result may be transformed only when a task-local provenance capability proves it was produced
+by Aimee in the current turn and has never crossed the provider boundary in this task. The monotonic
+capability is consumed on serialization and invalidated by persistence, import, replay, recall,
+rehydration, process transfer, or ambiguous ownership. A missing or invalid capability is
+`INDETERMINATE`. It binds authenticated tenant, task, call, source-content digest, transform ID, and
+transform version and is consumed exactly once at dispatch selection. The transform must be
+semantically lossless under a closed, tested contract whose
+equivalence is mechanical and does not require the model to execute, infer, or follow a decoder.
 
-### Production build and dispatch
+The planner first fully serializes both alternatives without sending either. Token buckets and costs
+are computed from those final canonical provider-bound bytes, including delimiters, metadata, schema,
+and every framing byte. General summaries, omission, ranking, truncation, retrieval handles, and
+rehydration are not in this class.
 
-- `aimee_v1_dispatch_baseline` is the only production provider dispatcher.
-- `aimee_v1_serialize_once` is its only serializer and transfers the request directly to the pinned
-  production transport. There is no economizer callback or hook before, between, or after them.
-- `AIMEE_ECON_V1_BASELINE_BUILD_SHA256` content-addresses the reference binary, compiler/link flags,
-  serializer, SDK, transport, retry policy, config map, link/import maps, network-trace fixtures, and
-  byte-exact goldens.
-- `aimee-economizer-v1-denied-symbols.json` is canonical JSON containing the literal full symbol and
-  object-file names of every reducer, folder, compressor, condenser, cache mutator/planner, observer,
-  accounting adapter, shadow writer/reader, reporter, recall, rescue, resend, economizer logger,
-  economizer metric, and economizer background worker.
-- The denied-symbol artifact and baseline manifest have canonical SHA-256 digests and Ed25519
-  signatures. Only the verification public key is embedded in the binary; the signing private key is
-  held by the external trusted release authority and is unavailable to the build pipeline. CI performs exact literal comparisons
-  against pre-LTO IR call graphs plus post-LTO linker/import maps, rejects weak/alternate aliases and
-  interposable imports, and links production with symbol interposition and preload disabled.
-- The production target contains no in-process `dlopen`, native plugin/MCP loader, economizer FFI/JIT
-  import, or request/response economizer extension point. Out-of-process plugins cannot access the
-  dispatcher or transport.
-- A canonical root manifest-of-manifests pins every artifact digest, verification public key,
-  compiler/linker/scanner binary digest, scanner rule-corpus digest, build flag, and package digest.
-  The external release authority signs its digest, and an independently reproducible verification
-  job checks the final package against it.
-- `aimee_v1_assert_build` verifies the compiled baseline and denied-symbol manifest digests once
-  before accepting traffic. Failure latches `AIMEE_ECON_BUILD_INVALID` for the process lifetime;
-  every request returns that typed error before serialization until restart with a valid build.
+The initial live adapter additionally requires an explicit-only cache layout: OpenAI implicit caching
+must be disabled, and neither provider may have a cache marker or documented implicit boundary on or
+after the mutable content. Unknown cache residency is priced as full input for both alternatives.
+Every preceding cache-sensitive byte and cache state must remain identical.
 
-Any compiler, linker, SDK, serializer, transport, retry, config, manifest, or relevant build-flag
-change requires regenerated goldens/traces, new content digests, and roundtable approval of the
-release manifest. Without approval the production build contains no economizer and exposes only the
-existing baseline path.
+### B. Suffix-only reduction after an explicit breakpoint
 
-### Configuration
+The planner may transform content strictly after the furthest applicable explicit breakpoint whose
+semantics are documented for the provider and whose location is explicit in the client request. For
+requests with multiple breakpoints, every prefix ending at every marker is protected and no
+transformation may occur before a later marker. The protected region is the exact
+canonical provider-bound byte sequence from request start through the breakpoint and all framing
+that terminates it, including whitespace, delimiters, adjacent cache markers, keys, mode indicators,
+TTLs, ordered tools, images, and schemas. Every protected byte must remain identical.
 
-The only production tag is `ECON_V1_OFF=0x56310000`; `ECON_V1_COUNT=1` is statically asserted. There
-is no observe, safe, aggressive, unknown, or mutating runtime variant. Exhaustive switches compile
-with switch-enum warnings as errors and forbid a default arm.
+The economizer may not infer a hidden breakpoint, move or add a breakpoint, turn implicit caching on
+or off, or claim a cache hit. Within each exhaustive shared scenario, baseline and candidate use the
+identical cache state for the protected prefix; the suffix uses the provider bucket defined by that
+same scenario. If the candidate does not win in every scenario, the request passes through.
 
-`aimee_econ_v1_parse` is the only parser. The signed, content-addressed
-`aimee-economizer-v1-config-map.json` enumerates every configuration source. Absent, `off`, `observe`,
-`safe`, `aggressive`, all recognized legacy aliases, and either module-toggle value map to
-`ECON_V1_OFF` without an economizer log, warning, diagnostic, metric, or other side effect.
-Unknown keys, types, sources, or integers and all IO, JSON, schema, signature, or mapping failures
-latch `AIMEE_ECON_CONFIG_INVALID` before traffic. No partially parsed value is applied. Configuration
-source cardinality is the finite signed map; all sources are read once before traffic, conflicts or
-races are typed errors, and reload is disabled for this value. The canonical map is signature-
-verified at startup and the resulting sole off tag is copied into read-only memory. There is no
-per-request config read, hash, timing branch, or fault-sensitive recheck.
+The initial live adapter requires explicit-only caching and no explicit or documented implicit
+boundary within the mutable suffix. Candidate and baseline must satisfy every documented cacheability
+condition and have identical read/write/miss state at every protected breakpoint in every scenario.
+Absent authoritative residency, both protected prefixes are priced as full input.
 
-### No compatibility surface
+### C. Deterministic transforms
 
-`/v1/economizer/stats` and every economizer status/reporting route are absent from the production
-route table and OpenAPI/schema output. A request receives the ordinary route-not-found behavior from
-the content-addressed baseline router; no economizer handler or header runs. All economizer fields,
-stores, keys, roles, and interfaces are absent from the production schema and binary.
+Every enabled transform must be deterministic and versioned: identical provider-bound input and
+configuration produce identical bytes. Determinism protects future exact-prefix matching and makes
+golden tests possible. It is necessary but not sufficient; the cost inequality and an approved
+semantic contract must also pass.
 
-## Acceptance
+The live transform allowlist is empty in this specification. Each concrete transform requires its own
+contract version, provider/model/tokenizer compatibility matrix, property tests, and converged review
+before it is added. A class description by itself grants no live authority.
 
-V1 may ship only when all checks below pass against the exact release artifact:
+### D. Long-context threshold avoidance
 
-1. The signed reference-build, config-map, and denied-symbol digests match their compiled constants.
-   The independently verified root manifest-of-manifests pins the release public key, scanner/toolchain
-   binaries and rules, every child artifact, and final package.
-2. Pinned pre-LTO call-graph and post-LTO link/import scans find zero denied symbols, objects, aliases,
-   interposable imports, dynamic loaders, and economizer extension points. Source/package inventory
-   additionally proves all economizer implementation files are excluded; suspicious new request
-   mutation requires explicit manifest classification rather than name-only acceptance.
-3. Every production dispatch entrypoint reaches only `aimee_v1_dispatch_baseline` and
-   `aimee_v1_serialize_once`; the manifest has no wildcard or default entry.
-4. Byte-exact ordered-header/body goldens and transport-policy fixtures match the no-economizer
-   reference for OpenAI Responses, Chat Completions, Anthropic Messages, all other supported provider
-   shapes, streaming, tool continuations, batch/background paths, errors, context limits, and retries.
-5. Paired full-process syscall/channel traces cover sockets including DNS/UNIX/loopback, files,
-   database, shared memory/rings, `io_uring`, BPF, process/thread creation, scheduling/priority, and
-   IPC. They prove the economizer side-effect set is empty and baseline provider calls, auxiliary
-   calls, timing class, retries, results, and errors are unchanged.
-6. Cache-field presence/value matrices prove exact client passthrough and no synthesized default plan
-   for every provider shape, including OpenAI `prompt_cache_key` and Anthropic cache-control blocks.
-7. The generated Cartesian config test visits every signed source/map entry and invariant-7 surface,
-   including concurrent/partial reads, precedence conflicts, IO failure, malformed/unsigned maps, and
-   reload attempts. Every case resolves once to the sole immutable off tag or returns the typed pre-
-   traffic config error.
-8. Build/config latch tests prove invalid artifacts stop every request before serialization and cannot
-   be reset by reload, admin, environment, plugin, MCP, or compatibility paths.
-9. Filesystem, database, network, thread/task, log, trace, metric, route-table, and API-schema tests
-   prove the production economizer creates no data, side effect, endpoint, handler, or header.
-10. Upgrade tests prove current `safe` and `aggressive` installations become off before traffic and
-    cannot invoke `context_reduce`, `build_fold_view`, gateway mutation/resend,
-    `tool_condense_apply`, or economizer-owned `agent_compress_tool_result` paths.
-11. A separately built future-version test principal cannot read, import, or promote any v1 runtime
-    economizer data because no such data, key, schema, role, or interface exists. Build/config/
-    manifest artifacts are inert release evidence only; their schemas contain no authorization field,
-    and every future-version authority parser must reject their artifact types.
-12. `git diff --check`, documentation link checks, production build, unit tests, integration tests,
-    and sanitizer tests pass for the exact content-addressed release.
-13. Deployment drains every older economizer-capable process before routing traffic to v1. Mixed-
-    version serving is forbidden; fleet attestation proves all serving package digests equal the
-    approved v1 root manifest before traffic resumes.
+When authoritative local tokenization proves the untouched request is above a documented full-request
+pricing boundary and the candidate is below it, the planner applies each tier's price to the complete
+request exactly as the provider documents. It includes input, cached input, cache writes, and a
+conservative output allowance under all applicable pricing, including threshold changes.
 
-Failure of any check prevents release. There is no degraded observation mode and no runtime fallback
-that creates an alternate request.
+No intervention is authorized when either token count falls within the tokenizer uncertainty band,
+the model alias can route to incompatible pricing/tokenization, or account/platform modifiers are
+unknown. Baseline and candidate use the identical pinned snapshot and exact provider-side tokenizer
+version, and the resolved snapshot identifier is bound into the proof. Threshold avoidance requires
+a single pinned snapshot; aliases are `INDETERMINATE` even when documented routable snapshots appear
+compatible.
 
-## Current provider limitations
+## Provider separation
 
-The following facts motivate the off-only decision but authorize no runtime behavior:
+There is no provider-neutral cost formula. A shared dispatcher enforces common safety states, but
+delegates all accounting and cache semantics to one of two independent planners:
 
-- OpenAI prompt caching uses exact-prefix matching. GPT-5.6 cache writes are documented at 1.25x
-  ordinary input; returned read/write counters arrive only after the request and do not expose the
-  untouched counterfactual or future residency.
-- Anthropic caching likewise depends on exact prefixes and separately billed reads and TTL-specific
-  writes. Returned uncached/read/write buckets describe only the representation that was sent.
-- Neither API gives Headroom, RTK, or a generic addon the authoritative future breakpoint/residency,
-  reuse, eviction, recall, complete-task cost, and outcome-equivalence facts needed for a strict
-  per-task no-regret proof.
+```text
+request -> classify provider/model/API
+        -> OpenAI GPT-5.6 planner OR Anthropic Claude planner
+        -> PASS_THROUGH | INTERVENE(proof) | INDETERMINATE
+```
 
-Official sources checked on 2026-07-21:
+### OpenAI GPT-5.6 planner
+
+The OpenAI planner models:
+
+- exact-prefix cache matching;
+- `prompt_cache_key`, implicit/explicit mode, and explicit breakpoint placement;
+- ordinary input, cached input, and `cache_write_tokens` at the current documented rates;
+- the GPT-5.6-family 1.25x cache-write multiplier;
+- the documented greater-than-272K full-request input and output multipliers; and
+- every documented input, output, cached-input, cache-write, batch, and service-tier boundary; and
+- Responses and Chat Completions token accounting separately.
+
+It never treats `prompt_cache_key` as a readable cache handle. Returned `cached_tokens` and
+`cache_write_tokens` are settlement evidence for the request actually sent, not pre-dispatch proof of
+the counterfactual. With explicit mode and no explicit breakpoint, it models no cache write under the
+versioned contract pinned to the OpenAI Prompt Caching guide's **Prompt cache breakpoints** section.
+Every proof binds and validates the active local contract digest and generation. A changed, expired,
+revoked, or unavailable contract makes the proof `INDETERMINATE`.
+
+### Anthropic Claude planner
+
+The Anthropic planner models:
+
+- exact-prefix matching at `cache_control` boundaries;
+- uncached input, cache reads, and cache creation separately;
+- five-minute and one-hour cache-write prices and refresh behavior;
+- model-specific long-context thresholds and stacked pricing modifiers; and
+- Messages API and server-tool token accounting.
+
+It never moves or synthesizes `cache_control` markers. Response usage buckets settle only the sent
+request and cannot prove what the untouched alternative would have received. Every byte through each
+marker, including the immediately preceding boundary byte, encoding, Unicode normalization form,
+whitespace, and segment length, is protected from direct or indirect change.
+
+## Cost proof construction
+
+Each planner produces an immutable proof record before mutation:
+
+```text
+tenant_id, task_id, call_id, provider, endpoint, resolved_model_snapshot, tokenizer_id
+pricing_table_id, pricing_generation, contract_version_ids_by_rule
+baseline_token_buckets_lower_bound
+candidate_token_buckets_upper_bound
+candidate_cost_upper_bound_in_price_units
+baseline_cost_lower_bound_in_price_units
+safety_margin_in_price_units
+new_output_provenance_capability
+transform_id, transform_version, semantic_contract_id
+decision, reason_code
+```
+
+Both alternatives are fully serialized before counting. For each shared scenario, the baseline bound
+uses the cheapest settlement within that scenario and the candidate bound uses the most expensive
+settlement within the same scenario. The global baseline
+lower bound is the minimum baseline value across scenarios; the global candidate upper bound is the
+maximum candidate value across scenarios. Both lower and upper polarities are computed for each side
+and checked for consistency. Intervention requires a strict win in every scenario after a margin no
+smaller than the greatest of price quantization, token uncertainty priced at the scenario's maximum
+rate, and the configured percentage of baseline cost. All cost bounds and the margin use one checked
+fixed-point unit: the account billing currency at the signed pricing table's declared precision.
+
+Every provider-billed component is included for every intervention, including output. The candidate
+output upper bound uses the preserved client output limit at the most expensive applicable output
+settlement, while the baseline output lower bound is zero unless a stronger authoritative minimum is
+available. If input/cache savings cannot exceed that complete conservative output difference and the
+margin, the result is `INDETERMINATE`.
+The upper bound must be finite and derived only from a preserved client limit or documented hard
+model/API maximum. Streaming, server tools, or an unknown maximum make the proof `INDETERMINATE`.
+Only a documented hard minimum may raise the baseline output lower bound above zero.
+
+Provider pricing is a signed, versioned configuration with an expiry and revocation generation. The
+proof binds to a table current immediately before the single dispatch. Candidate selection and
+dispatch commit have one linearization point at the actual first outbound wire write: a generation-
+scoped lease atomically validates pricing, contract, tokenizer, tenant, and kill-switch generations
+while selecting the fully serialized buffer and issuing that first write.
+Invalidation before that commit selects the pristine request. Invalidation after commit cannot create
+a second dispatch. Proofs are never reused across calls or sessions. Public list prices may be used only when the
+operator explicitly confirms they are the account's applicable prices. Otherwise the planner is
+disabled for that account. Credits and volume commitments are excluded unless exposed as a stable
+marginal price suitable for per-request comparison.
+
+## Semantic safety
+
+V2 enables only transforms with a lossless, mechanically testable inverse or equivalence rule.
+Byte-for-byte identity is not required for the mutable content, but the represented information must
+be identical under the transform's declared contract. Fuzzing, round-trip tests, duplicate-key tests,
+Unicode tests, numeric edge cases, ordering tests, and maximum-size tests are release gates.
+No transform in any class may require the model to execute, infer, or follow a decoder. Compatibility
+and property tests are keyed by provider, pinned model snapshot, and exact tokenizer version.
+
+If a format's semantics depend on whitespace, ordering, duplicate keys, comments, source locations,
+or exact bytes, a transform that changes those properties is not lossless and is denied.
+
+Summarization, truncation, selective omission, embeddings, external retrieval, recall, and
+rehydration are disabled. They may save an individual call, but complete-task cost and outcome cannot
+currently be bounded without a different policy.
+
+## Runtime invariants
+
+1. The pristine request remains available until the single dispatch decision.
+2. Exactly one provider dispatch is permitted per outbound request. Classification, pricing,
+   contracts, tokenization, and planning are local-only and make zero provider preflight, dry-run,
+   cache-probe, or discovery calls. The economizer builds at most one candidate and never sends both.
+3. No byte may leave the process until the proof is final, both alternatives are fully serialized,
+   and the atomic dispatch commit selects one buffer. A failed transform, proof, serialization, or invariant check falls back before dispatch to the
+   untouched request. Once either representation is dispatched, the economizer cannot retry,
+   restore, resend, or dispatch another representation.
+4. An in-memory constant-time byte comparison must match baseline and candidate across the entire
+   protected canonical provider-bound region. Prefix digests are not persisted or logged.
+5. Client cache intent passes through exactly; no key, marker, breakpoint, mode, or TTL is invented.
+6. Unknown providers, aliases, snapshots, endpoints, pricing, tokenizers, fields, or modifiers pass
+   through unchanged.
+7. Streaming does not weaken pre-dispatch proof requirements.
+8. Tenant identity comes only from authenticated dispatcher context and is required before planner
+   selection. Planner contexts, pricing handles, contract registries, tokenizer state, provenance,
+   decisions, and proof records are tenant- and call-scoped and assert tenant again at wire commit.
+   Module-global mutable handles and shared proof caches are forbidden. Proofs are affine in-memory
+   objects tied to the two serialized buffer objects and cannot be looked up or reused. Records contain
+   no prompt content or prompt-derived digest.
+9. Statistics distinguish predicted call savings from provider-settled deltas and never report
+   completed-task savings. No task-, conversation-, or session-denominated aggregate is emitted under
+   any name. Every emitted field containing `savings` also contains `predicted_call`.
+10. A tenant-scoped kill switch atomically selects byte-identical pass-through without changing
+    client cache intent; a global switch independently disables all tenants.
+
+## Acceptance tests
+
+- Golden byte tests prove protected-prefix and cache-field identity for both providers and APIs.
+- Exact tokenizer fixtures straddle every pricing threshold by at least the configured uncertainty
+  margin; aliases and tokenizer drift fail closed.
+- Price-table fixtures cover ordinary input, reads, every write TTL, output multipliers, batch/service
+  modifiers, and unknown account pricing.
+- Adversarial tests enumerate identical scenarios for both alternatives and prove any non-win,
+  inconsistent polarity, or favorable/unfavorable scenario split passes through.
+- Bounds hard-fail to `INDETERMINATE` unless `baseline_lower <= baseline_upper` and
+  `candidate_lower <= candidate_upper` in every scenario; authorization always compares baseline
+  lower with candidate upper.
+- New-tool-output provenance tests reject previously dispatched, persisted, recalled, or ambiguous
+  content. Capabilities bind tenant, task, call, source digest, transform ID, and transform version;
+  one-shot and cross-transform reuse tests reject every mismatch.
+- Lossless transform property tests prove round trips across arbitrary valid inputs and reject
+  semantic edge cases.
+- Cache tests prove no breakpoint/key/mode/TTL synthesis or movement and no prefix mutation.
+- Retry/error tests prove at most one candidate construction and exactly one provider dispatch per
+  outbound request under every planner, serializer, transport, and response failure.
+- Preflight tests prove zero provider network calls occur between ingress and the one wire dispatch.
+- Settlement tests reconcile returned usage without retroactively changing the authorization proof.
+- Cross-tenant tests use identical requests with different prices and prove tenant A cannot read or
+  apply tenant B's proof, price handle, provenance, state, or kill switch. Tests enter through the
+  classifier and assert the selected planner, proof tenant, snapshot, and price handle all belong to
+  the requesting tenant.
+- Documentation-contract fixtures pin dated URLs, section anchors, and content digests. A changed or
+  unavailable contract disables its rule on the next proof; documentation is never fetched on-path.
+  Every provider-dependent rule has a `contract_version_id` in the proof.
+- Pricing freshness tests revoke a table between proof and dispatch and require pristine pass-through.
+- Concurrency tests race pricing, contract, tokenizer, tenant policy, and kill-switch generation
+  changes against dispatch and prove no candidate commits under a stale generation.
+- Model fixtures reject aliases with any incompatible routable snapshot and require the same exact
+  provider tokenizer version for baseline and candidate.
+- Metrics/log/UI/schema tests reject task-level, completed-task, verified-savings, total-savings, or
+  equivalent labels derived from call predictions. Cross-call aggregates, if exposed, are named
+  `sum_of_minimum_predicted_call_savings_not_task_savings`.
+- Schema tests reject every task/conversation/session aggregate, including sums of valid call
+  predictions, regardless of label, and reject any unqualified `savings` string.
+- Serialized-overhead fixtures prove token and cost bounds include all candidate framing.
+- Output fixtures cover ordinary and threshold-multiplied rates and deny live mutation whenever a
+  finite authoritative candidate output upper bound is unavailable or erases the strict win.
+- Multi-breakpoint and Unicode-normalization fixtures reject any byte or length change through every
+  protected Anthropic or OpenAI boundary.
+- Explicit-cache fixtures deny implicit mode, a boundary in the mutable suffix, cacheability changes,
+  or any protected-breakpoint state difference; unknown residency is full-priced on both sides.
+- Each concrete transform is absent until its provider/model/tokenizer contract and review are pinned.
+- Settlement reconciliation emits an incident and disables an adapter when returned usage exceeds
+  its bound; it never retroactively changes the completed call's authorization or claim.
+- Integration tests cover OpenAI Responses/Chat Completions and Anthropic Messages, sync/streaming,
+  tools, images, structured output, errors, and context boundaries.
+
+## Explicit non-claims
+
+V2 does not claim that every request is cheaper, that fewer tokens always cost less, that a cache hit
+will occur, or that call-level savings imply lower total task cost. Its guarantee is narrower and
+testable: whenever it mutates a request, the candidate's conservative provider-call cost bound is
+strictly below the untouched request's optimistic bound under the configured authoritative pricing
+contract. Otherwise it does nothing.
+
+## Sources checked 2026-07-22
 
 - https://developers.openai.com/api/docs/guides/prompt-caching
 - https://developers.openai.com/api/docs/models/gpt-5.6-sol
-- https://platform.claude.com/docs/en/api/messages/create
 - https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-- https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching
 - https://platform.claude.com/docs/en/about-claude/pricing
-
-## Requirements for any future version
-
-A future proposal must begin from zero authority and obtain separate roundtable approval. At minimum
-it must define a closed provider/platform/model/API scenario set and prove, for each individual task:
-
-```text
-candidate_user_charge_upper_bound < baseline_user_charge_lower_bound
-AND
-candidate_provider_cost_upper_bound < baseline_provider_cost_lower_bound
-```
-
-The proof must use authoritative account billing, complete request/retry/cache/recall/rescue lifecycle
-costs, exact client/default cache intent, future-write/read settlement, and model-visible outcome
-equivalence. Expected reuse, averages, token estimates, public prices, or shadow cohorts are not
-authorization. If providers never expose sufficient evidence, Aimee remains off.
 
 ## Review record
 
-Earlier drafts permitted live safe-mode transforms, then observation-only accounting and shadow.
-Repeated roundtable review found that both designs retained unprovable cost authority or unnecessary
-request, metering, storage, security, and reporting surfaces. V1 was reduced to a mechanically closed
-off-only build. The final two-round safety review converged on 2026-07-22 with zero blockers.
+The safety review converged after four remediation passes. The final two-round review returned
+`converged=true`, no concrete remaining path that violated the formal provider-call guarantee, and
+`APPROVE`. The guarantee is deliberately limited to the single accepted dispatched call; it does not
+claim future-cache, transport-failure-counterfactual, or completed-task savings.

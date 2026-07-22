@@ -1,362 +1,371 @@
-# Provider-neutral cache-aware economizer: off-only v1 implementation
+# Provider-specific, proof-gated economizer implementation proposal
 
 - **State:** APPROVED
-- **Review status:** CONVERGED (`converged=1`, zero blockers)
-- **Date:** 2026-07-21
+- **Review status:** CONVERGED (final review aligned, zero issues)
+- **Date:** 2026-07-22
 - **Normative gate:** `provider-neutral-economizer-safety-spec.md`
-- **Scope:** Remove all production economizer behavior while preserving the reviewed no-economizer
-  provider request graph byte-for-byte.
+- **Initial release:** proof infrastructure only; live transform registry empty
 
 ## Executive decision
 
-V1 does not economize and does not observe. It removes live Headroom-, RTK-, folding-, condensation-,
-compression-, cache-planning-, recall-, and rescue-style behavior from production. It also ships no
-usage adapter, shadow simulator, economizer telemetry, storage, or savings reporting.
+Replace estimated generic economizer policy with two independent local planners, an empty
+release-reviewed transform registry, and one unconditional dispatch fence. The initial implementation
+cannot mutate a provider request because the registry contains no authorized transform. It creates the
+mechanical foundation required for later, separately reviewed OpenAI and Anthropic transforms.
 
-This is the only current design that satisfies the requested rule:
+There is no runtime shadow mode, remote token-count preflight, predicted-savings report, restore and
+resend, recall, rehydration, rescue, or generic provider formula. Offline fixtures may exercise the
+planners against recorded requests and settlements, but those fixtures are not reachable from a live
+request path.
 
-> If Aimee cannot prove that an intervention strictly lowers both the user's charge and provider cost
-> for the individual complete task, it does not intervene.
+This proposal is self-contained on the normative v2 pillars: provider-specific local planners; an
+empty live transform registry until separate converged review; explicit-only initial cache layouts;
+exact protected-prefix and cache-state parity; symmetric full-price treatment of unknown residency;
+finite complete-call cost bounds; local-only planning; authenticated tenant isolation; and exactly one
+atomic provider dispatch. A conflict with the safety specification is a release-blocking error.
 
-OpenAI and Anthropic report what happened after a request. They do not expose the authoritative
-untouched counterfactual, future cache residency/reuse/eviction, concurrent writers, later recall or
-rescue, or proof that changed model-visible content produces the same completed task. A token
-reduction or favorable cohort is therefore not a no-regret cost proof.
+## Existing code audit and required disposition
 
-## Why token compressors can cost more
+| Existing surface | Disposition before release |
+|---|---|
+| `gw_economizer_measure()` | replace estimates with local provider planner call; empty registry yields pass-through |
+| `gw_buffered_mutate()` | place behind `econ_serialize_once()`; cannot mutate without reviewed registry membership |
+| pristine request buffer | retained only until the one wire commit; never used for post-send restore/resend |
+| `context_reduce()` | no production caller until a concrete transform receives separate approval |
+| `tool_condense_apply()` | disable production caller; lossy condensation is outside v2 |
+| `build_fold_view()` | disable production caller; history folding is outside v2 |
+| `agent_compress_tool_result()` | no production mutation until provenance and a transform contract are approved |
+| Anthropic cache toggling | remove economizer control; preserve client `cache_control` exactly |
+| 4xx restore/resend | remove unconditionally before proof infrastructure is enabled |
+| savings ledger/stats | remove savings deltas; retain only qualified proof inputs, decisions, and settlement incidents |
 
-### OpenAI GPT-5.6
-
-OpenAI caching requires exact prefix matches. Current GPT-5.6 documentation prices cache writes at
-1.25 times ordinary input and discounts cache reads. A compressor can reduce nominal tokens while
-changing a reusable prefix, turning a discounted read into ordinary input or a premium write.
-Returned `cached_tokens` and `cache_write_tokens` arrive after dispatch; they are not a query for the
-cache state or counterfactual cost of the request that was not sent. `prompt_cache_key` influences
-matching/routing but is not a readable cache handle.
-
-An addon cannot discover the decisive provider breakpoint or future reuse through the API. It can
-only guess from request structure, historical observations, and provider documentation.
-
-### Anthropic Claude
-
-Anthropic also requires exact-prefix matching and separately accounts for uncached input, cache
-creation, and cache reads. Creation can have different five-minute and one-hour prices, and server
-tools can add cache behavior. A changed prefix can forfeit a read or create another write.
-
-Rehydration compounds the problem: the user first pays for the reduced representation, then pays
-storage/lookup/latency and possibly another provider turn to recover omitted context. One recall can
-erase a session's nominal savings.
-
-### Shared limitation
-
-Headroom, RTK, and similar addons generally see the request, their own local state, and post-response
-usage. They do not receive all of:
-
-- pre-dispatch authoritative cache residency and exact matched prefix for both alternatives;
-- future reads, eviction, concurrent writers, and TTL refreshes;
-- exact account-contract prices, credits, platform modifiers, and late billing adjustments;
-- complete later retries, follow-on calls, recall, rehydration, and rescue; and
-- per-task proof of model-visible outcome equivalence.
-
-Without those inputs, request-token savings cannot prove lower dollars per completed task. V1 stays
-off rather than encode a probabilistic exception.
-
-## Current implementation audit
-
-The current production tree contains live economizer behavior. The implementation must regenerate
-this inventory from the final source and build artifacts, but the known starting points are:
-
-| Surface | Current behavior | Required change |
-|---|---|---|
-| `src/modules/config/config.h` | `economizer_tier` defaults to `ECON_TIER_SAFE`; safe/aggressive enable concrete levers | Replace with the sole production tag `ECON_V1_OFF` |
-| `src/posix/agent_runtime.c` | Calls `context_reduce()` and substitutes reduced messages for provider request construction | Remove the production call edge and reducer state |
-| `src/posix/agent_runtime.c` | Anthropic fallback can call `build_fold_view()` and dispatch folded history | Remove the economizer-owned fold edge |
-| `src/modules/economizer/context_reduce.c` | Orchestrates body compression and history folding using estimated economics | Exclude the object and public symbols from the production link |
-| `src/modules/economizer/gateway_mutate_wire.c` | Aggressive mode replaces gateway messages with compressed messages | Remove the live gateway mutation edge |
-| `src/modules/economizer/gateway_mutate_wire.c` | A 4xx can restore pristine messages and signal a resend | Remove the economizer-created resend path |
-| `src/server/anthropic_http.c` and `openai_chat.c` | Call `gw_economizer_measure()`, write reduction ledgers, invoke gateway mutation, and process resend actions on multiple sync/streaming paths | Remove every measurement, ledger, mutation, and resend call edge |
-| `src/posix/agent_tools.c` and `agent_tools_anchored.c` | `tool_condense_apply()` changes tool output before model dispatch | Remove production condensation calls |
-| `src/posix/agent_tools_dispatch.c` | `agent_compress_tool_result()` can replace full model-bound tool results | Remove economizer-owned callers; classify independent hard limits as baseline or typed errors |
-| `src/modules/economizer/tool_condense.c` | Condensation is enabled by safe/aggressive tiers | Exclude it from the production link |
-| Anthropic cache/config path | Economizer tier can add or remove a cache breakpoint | Remove tier coupling; exact client fields pass through, otherwise the reviewed baseline uses provider defaults |
-| `src/server/server.c` and `aimee_backend_anthropic.c` | `server_sync_economizer_runtime()` changes Anthropic cache enablement at startup/reload | Remove runtime synchronization and the economizer cache setter edge |
-| `src/server/server_main.c` | Logs the active economizer tier at startup | Remove the log and tier lookup |
-| `src/server/server_http_identity.c` | Captures bearer/session identity for gateway mutation state | Remove economizer-specific capture/accessors after proving no non-economizer consumer |
-| `src/server/agent_logging.c`, `gw_mutate_stats.c` | Persist reduction ledgers and mutation counters | Remove economizer writers, sinks, and production objects |
-| CLI/server routes, auth capabilities, headers, generated OpenAPI/help | Expose `economizer.stats` and economizer control/telemetry symbols | Remove every route, handler, capability, declaration, generated surface, and help entry; ordinary baseline route-not-found applies |
-
-Unrelated session maintenance is not silently reclassified. Each potentially model-visible compactor
-or context-limit path must be identified as either part of the content-addressed no-economizer
-baseline or an economizer-owned denied path. Ambiguous paths fail the release gate.
-
-## Target runtime
+## Architecture
 
 ```text
-ingress
-  -> reviewed no-economizer planner
-  -> aimee_v1_serialize_once
-  -> pinned production transport
-  -> provider
+authenticated request context
+        |
+        v
+local provider/model/API classifier
+        |
+        +----> OpenAI GPT-5.6 planner
+        |
+        +----> Anthropic Claude planner
+                         |
+                         v
+                empty transform registry
+                         |
+                         v
+                  PASS_THROUGH only
+                         |
+                         v
+       econ_serialize_once() + atomic first wire write
 ```
 
-There is no economizer branch before, during, or after this path. The economizer creates no provider
-call, local call, thread/task, row, counter, metric, log, trace, modeled value, or report.
+Classification, pricing lookup, contract lookup, tokenization, proof construction, and registry
+membership checks are local. They cannot open a provider connection or make a provider API call.
 
-### Baseline identity
+## Core types
 
-`aimee_v1_dispatch_baseline` is the only provider dispatcher. It owns the request, calls
-`aimee_v1_serialize_once` exactly once, and transfers directly to the pinned transport. The
-content-addressed baseline includes:
+All money uses checked fixed-point integers in the signed account price table's declared currency and
+precision. All arithmetic rejects overflow. No floating-point value can authorize mutation.
 
-- canonical plaintext provider bytes and ordered cache-sensitive headers before TLS;
-- full client parameters and unknown provider extensions;
-- model, endpoint, tier, region, and account/project routing;
-- serializer, SDK, transport, proxy, TLS/HTTP version, connection reuse/0-RTT, framing/compression,
-  timeout, retry and context-limit policies;
-- provider and auxiliary call count, follow-on behavior, results, and errors;
-- provider response status, ordered headers, raw body/stream-event bytes, terminal event selection,
-  and every usage/cache/tier field returned to the client, including OpenAI cached/write details and
-  Anthropic cache creation/read/TTL details; and
-- byte-exact request/response goldens plus full-process network traces.
+```c
+typedef enum {
+    ECON_PASS_THROUGH,
+    ECON_INTERVENE,
+    ECON_INDETERMINATE
+} econ_decision_t;
 
-Randomized TLS ciphertext, packet coalescing, and connection timing need not be byte-identical. Their
-policy and the canonical plaintext request must be identical to the reference build.
+typedef struct econ_tenant_handle econ_tenant_handle_t;
+typedef struct econ_kill_switch econ_kill_switch_t;
+typedef struct econ_cohort econ_cohort_t;
 
-### Cache behavior
+/* Opaque immutable handles; only authenticated dispatcher context can construct them. */
+struct econ_cohort_key {
+    provider_id_t provider;
+    endpoint_id_t endpoint;
+    model_snapshot_id_t model_snapshot;
+    tokenizer_id_t tokenizer;
+    pricing_table_id_t pricing_table;
+    contract_versions_t contracts;
+    uint64_t registry_generation;
+};
 
-V1 owns no cache policy.
+typedef struct {
+    uint64_t ordinary_input;
+    uint64_t cached_read_input;
+    uint64_t cache_write_input;
+    uint64_t output;
+} econ_token_buckets_t;
 
-- Client keys, markers, breakpoints, modes, TTLs, and OpenAI `prompt_cache_key` pass through exactly.
-- When client cache intent is absent, Aimee synthesizes nothing; provider-default behavior applies.
-- Contradictory client intent is not repaired, normalized, or replaced.
-- Existing provider cache benefits are baseline behavior and are not Aimee savings.
+typedef struct {
+    econ_cache_outcome_t cache_outcome;
+    econ_token_buckets_t baseline_lower_tokens;
+    econ_token_buckets_t baseline_upper_tokens;
+    econ_token_buckets_t candidate_lower_tokens;
+    econ_token_buckets_t candidate_upper_tokens;
+    money_t baseline_lower;
+    money_t baseline_upper;
+    money_t candidate_lower;
+    money_t candidate_upper;
+} econ_scenario_t;
 
-Presence/value matrices, not decoded defaults, prove absent-in/absent-out and exact passthrough for
-each API shape.
+typedef struct {
+    const econ_tenant_handle_t *tenant;
+    const econ_cohort_t *cohort;
+    const econ_kill_switch_t *kill_switch;
+    account_id_t account_id;
+    task_id_t task_id;
+    call_id_t call_id;
+    endpoint_id_t endpoint_id;
+    model_snapshot_id_t model_snapshot_id;
+    tokenizer_id_t tokenizer_id;
+    pricing_table_id_t pricing_table_id;
+    uint64_t pricing_generation;
+    contract_versions_t contract_versions;
+    transform_id_t transform_id;
+    transform_version_t transform_version;
+    buffer_identity_t pristine_buffer;
+    buffer_identity_t candidate_buffer;
+    econ_scenario_t scenarios[ECON_MAX_SCENARIOS];
+    size_t scenario_count;
+    money_t safety_margin;
+    econ_reason_t reason;
+} econ_proof_t;
+```
 
-## Mechanical build closure
+`ECON_MAX_SCENARIOS` is a release-pinned compile-time constant for each planner, with a static
+assertion equal to that planner's closed scenario enumeration. The opaque tenant handle owns immutable
+tenant-scoped planner, account, pricing, contract, tokenizer, cohort, registry-view, and kill-switch
+handles. Its accessors require the authenticated tenant identity and reject mismatches. The cohort
+has a signed generation; its key is the tuple above plus tenant identity. The tenant kill switch is an
+opaque signed-generation handle. Cohort disablement atomically increments the generation checked at
+the first wire write.
 
-The production release implements the normative fixed names and artifacts:
+`econ_proof_t` is an affine in-memory object. It is created for one call and two fully serialized
+buffer objects, consumed once by `econ_serialize_once()`, and cannot be persisted, cached, copied to
+another tenant/call, or looked up by generation. No prompt-derived digest is logged.
 
-- sole tag `ECON_V1_OFF=0x56310000` and static `ECON_V1_COUNT=1`;
-- `aimee_v1_dispatch_baseline`, `aimee_v1_serialize_once`, and `aimee_v1_assert_build`;
-- compiled `AIMEE_ECON_V1_BASELINE_BUILD_SHA256`;
-- signed `aimee-economizer-v1-denied-symbols.json` with literal full symbol/object names; and
-- signed `aimee-economizer-v1-config-map.json` covering every configuration source.
+For every scenario, authorization hard-asserts:
 
-CI compares the denied artifact to pre-LTO IR call graphs and post-LTO link/import maps. It rejects
-mutator/observer/accounting/shadow/reporting symbols and objects, alternate/weak aliases, interposable
-imports, dynamic loaders, and economizer extension points. Production disables preload/symbol
-interposition and contains no in-process native plugin/MCP loader or economizer FFI/JIT import.
+```text
+baseline_lower <= baseline_upper
+candidate_lower <= candidate_upper
+candidate_upper + safety_margin < baseline_lower
+```
 
-Manifest generation is deny-by-default, not name-only. A pinned compiler AST/IR inventory enumerates
-every source file, translation unit, function, global initializer, provider-request/response buffer
-write, cJSON mutation, serializer/transport call edge, config reader, route, worker, and storage/
-logging sink. Each entry is classified in the signed root manifest as baseline-required or denied;
-an unclassified, new, or renamed entry fails CI. The manifest is generated fresh and diffed against
-both the source inventory and prior approved release. The pinned pre-LTO IR scan is authoritative for
-semantic call edges and inlining inputs; the post-LTO scan corroborates the final package and cannot
-override a pre-LTO failure.
+Any failed assertion is `ECON_INDETERMINATE`.
+Before these comparisons, checked arithmetic must prove every token bucket, money bound, and margin is
+finite, representable, nonnegative, and free of overflow. A protected-prefix/cache-state mismatch is
+a deterministic `ECON_PASS_THROUGH`, not an arithmetic indeterminate result.
+The same checks apply symmetrically to baseline lower/upper, candidate lower/upper, and every margin
+component. A compile-time assertion proves the maximum price quantization plus the maximum priced
+token guard plus `ECON_MIN_MARGIN_PRICE_UNITS` fits in `money_t`.
 
-The baseline, denied-symbol, and config artifacts use canonical SHA-256 digests and Ed25519 release
-signatures. Only the public verification key is embedded; the external release authority keeps the
-private key outside the build pipeline. A signed root manifest pins every artifact, compiler/linker/
-scanner binary and rule corpus, build flag, and package digest, and an independent reproducible job
-verifies it. Startup verifies them before traffic. Failure latches a typed process-lifetime build or
-config error and every request fails before serialization; reload/admin/plugin paths cannot reset it.
+## Empty transform registry
 
-Any compiler, linker, SDK, serializer, transport, retry, config, or relevant build-flag change
-requires regenerated goldens/traces, a new baseline digest, and roundtable approval of the release
-manifest.
+The production registry initially contains zero entries. The only implementation in this proposal is:
 
-`aimee_v1_assert_build` also verifies the packaged link/import-map digest, absence of preload and
-interposition state, and signed runtime package digest before accepting traffic. It does not try to
-reconstruct pre-LTO semantics; those are release-gated by the authoritative signed IR result.
+- a signed registry version and generation;
+- exact membership lookup by provider, endpoint, pinned model snapshot, tokenizer, transform ID, and
+  transform version;
+- an atomic generation check at wire commit; and
+- denial when membership is absent, stale, or ambiguous.
 
-## Configuration and migration
+The signature covers the complete registry and every membership tuple, including provider, endpoint,
+pinned model snapshot, tokenizer, transform ID, and transform version—not only version counters.
 
-The compatibility input may still accept historical values, but the production runtime has one tag:
+Transform algorithms, provenance capabilities, MIME/schema rules, semantic contracts, property tests,
+and enablement are not authorized here. Each transform requires a separate proposal and converged
+review before a signed registry update. Until then, `ECON_INTERVENE` is unreachable in production.
+
+## OpenAI GPT-5.6 planner skeleton
+
+The live skeleton accepts only a pinned snapshot and a locally pinned exact tokenizer. Aliases are
+indeterminate. It parses without modifying:
+
+- Responses versus Chat Completions shape;
+- `prompt_cache_key`;
+- `prompt_cache_options.mode`;
+- every explicit breakpoint and its canonical provider-bound byte range;
+- client output limit or documented hard model/API maximum; and
+- service/batch/account pricing modifiers.
+
+Scenario buckets explicitly cover ordinary input, cached reads, 1.25x cache writes, output, no-write
+fallback, and every documented tier boundary. The GPT-5.6 boundary operator is strict `input_tokens >
+272000`. `ECON_GPT56_TOKEN_GUARD` is a finite release-pinned constant derived from the pinned
+tokenizer's documented maximum error (zero only when byte-equivalence is proven); either count with
+`abs(count - 272000) <= ECON_GPT56_TOKEN_GUARD` is indeterminate. The 2x
+input and 1.5x output rates apply to the full request in the over-boundary scenario.
+
+Each scenario fixes one cache outcome and applies it symmetrically to baseline and candidate. Unknown
+residency is full-priced ordinary input for both. Every breakpoint's read/write/miss state, including
+explicit omission, must be identical in baseline and candidate; any mismatch is pass-through. Initial
+live transforms, when separately approved, must use explicit-only mode and have no explicit or
+documented implicit cache boundary in the mutable suffix.
+
+The planner validates locally pinned provider-contract versions; these represent documented pricing
+and API semantics, not inferred cache residency. A stale contract disables the adapter.
+
+## Anthropic Claude planner skeleton
+
+The live skeleton requires an exact model snapshot and a pinned locally executed exact tokenizer.
+Remote provider token counting exists only in a separately linked offline test binary. The production
+planner target neither defines nor links a remote-count client or symbol.
+
+It parses without modifying:
+
+- ordered Messages content blocks and system blocks;
+- every `cache_control` marker and TTL;
+- block count, order, type, byte ranges, and effective marker coverage;
+- client output limit or documented hard model/API maximum; and
+- base/read/5-minute-write/1-hour-write/output prices and long-context modifiers.
+
+Residency-bearing fields are `cache_control` type and TTL, breakpoint positions, ordered block count,
+block order/type/byte ranges, and all bytes under marker coverage. Unknown values in those fields are
+full-priced symmetrically. Unknown JSON members, beta headers, and server-tool semantics are not
+residency facts and are indeterminate.
+
+Each explicit protected block and all framing through its marker must be byte-identical. A documented
+implicit boundary anywhere in the protected prefix or mutable suffix, an unknown server-tool/beta behavior, an unsupported field,
+or a cacheability change is indeterminate. Unknown residency is full-priced for both alternatives;
+other unknown semantics are not residency and remain indeterminate.
+Both alternatives use the same pinned canonical JSON serializer, including identical key ordering,
+whitespace, escaping, system/message block order, and unknown-field preservation. The protected
+serialized byte ranges—not decoded semantic objects—are compared for exact equality.
+
+## Single dispatch fence
+
+`econ_serialize_once()` becomes the sole economizer-aware path allowed to write provider bytes. It:
+
+1. receives the authenticated tenant context and pristine logical request;
+2. fully serializes pristine and, only if registry membership exists, one candidate without network IO;
+3. constructs and validates one affine proof;
+4. locks the tenant cohort's generation mutex, revalidates tenant/account, endpoint, pinned snapshot,
+   tokenizer, price table, provider contracts, cohort, registry, and kill-switch generations, consumes
+   the proof, closes the alternate buffer path, and calls the nonbuffering socket write while holding
+   the mutex;
+5. in that same atomic operation, selects exactly one fully serialized buffer and issues the first
+   write. The linearization point is the
+   first positive-byte result from that socket write. A terminal error writes no alternate buffer.
+
+Generation updates use the same mutex and therefore cannot complete between validation and the first
+positive byte. No planner or serializer operation holds the mutex before step 4.
+
+Before the first write, any failure selects pristine pass-through. After the first byte is written,
+the economizer cannot restore, resend, retry, regenerate a candidate, or write the alternate buffer.
+Ordinary client/provider retry behavior outside the economizer remains separately owned and cannot use
+the proof or transform a retry.
+
+## Tenant isolation
+
+Tenant identity comes only from authenticated dispatcher context, never request-body metadata.
+`econ_tenant_handle_t` owns planner context, account price table, contracts, tokenizer, cohort,
+registry view, proof, and `econ_kill_switch_t` as immutable tenant-scoped handles. There are no
+module-global mutable provider/account handles. Missing or mismatched tenant/account identity returns pass-through before candidate creation
+and is asserted again at the first wire write.
+
+## Configuration
 
 ```yaml
-economizer: off
+economizer:
+  mode: off | proof_gated
 ```
 
-The canonical parser maps absent, `off`, `observe`, `safe`, `aggressive`, recognized legacy aliases,
-and either module-toggle value to `ECON_V1_OFF` without an economizer warning, log, diagnostic,
-metric, or other side effect. Unknown keys/types/sources/integers or IO, JSON, schema, signature,
-and mapping failures latch `AIMEE_ECON_CONFIG_INVALID`; no partial configuration applies.
+`off` is the default and bypasses all planning with byte-identical baseline behavior. `proof_gated`
+still passes through while the signed registry is empty. Safety margin is derived mechanically as the
+maximum of three finite release-pinned values: signed-price quantization, the named tokenizer guard
+constant priced by a checked formula at the scenario's maximum rate, and
+`ECON_MIN_MARGIN_PRICE_UNITS`. It is not derived from unbounded runtime input or operator-tunable.
 
-All finite signed sources are read once before traffic; conflicts/races fail, and reload is disabled
-for this setting. The immutable signed map is verified at startup and only the sole off tag remains in
-read-only memory. There is no per-request config read/recheck, runtime default arm, boolean coercion,
-observe mode, or mutating variant.
+## Telemetry
 
-`/v1/economizer/stats` and every economizer status/reporting route are removed from the production
-route table and API schema. Requests receive the baseline router's ordinary route-not-found behavior.
+No predicted or realized savings delta is exposed. Tenant-scoped records may contain:
 
-## Implementation sequence
+- decision and reason code;
+- provider, endpoint, pinned model, tokenizer, pricing, contract, and registry versions;
+- scenario baseline-lower and candidate-upper cost bounds;
+- returned usage buckets for the sent request; and
+- a settlement-bound-exceeded incident.
 
-### Slice 0: freeze the reference
+Records contain no prompt content, prompt-derived digest, raw cache key, task/session aggregate, or
+field named `saved`, `savings`, `verified_savings`, or equivalent. A returned settlement above a bound
+does not rewrite history; it disables the affected adapter cohort and emits an incident.
+No field or derived metric may encode a baseline-versus-candidate arithmetic delta, percentage
+reduction, effective savings rate, or equivalent under another name.
 
-1. Build the current tree with the economizer explicitly off.
-2. Enumerate every production dispatch entrypoint, serializer, transport, retry/context-limit path,
-   auxiliary call, response/stream forwarding path, usage/cache field, config source, and cache field.
-3. Capture byte-exact request goldens, transport-policy fixtures, results/errors, and network traces
-   across the provider/API matrix.
-4. Produce `AIMEE_ECON_V1_BASELINE_BUILD_SHA256` and sign the canonical reference manifest.
-5. If any baseline path is ambiguous or non-reproducible, stop; do not implement an alternate path.
-6. Reproduce the complete build and `AIMEE_ECON_V1_BASELINE_BUILD_SHA256` on an independent host from
-   the pinned toolchain and source; byte/digest mismatch blocks the release.
+## Implementation slices
 
-### Slice 1: remove live behavior
+### Slice 0 — baseline and removal
 
-1. Replace the tier resolver with the sole off tag and canonical signed migration map.
-2. Remove delegate `context_reduce()` and Anthropic `build_fold_view()` call edges.
-3. Remove every `gw_economizer_measure()`, reduction-ledger, gateway-mutation, and economizer-specific
-   4xx restore/resend edge from all OpenAI and Anthropic sync/streaming paths.
-4. Remove model-bound `tool_condense_apply()` and economizer-owned
-   `agent_compress_tool_result()` calls.
-5. Remove economizer cache-marker enablement and preserve exact client/default baseline behavior.
-6. Remove startup/reload Anthropic cache synchronization, the economizer cache setter edge, tier
-   startup logging, and economizer-specific request-identity capture.
-7. Remove usage/ledger, shadow, telemetry, diagnostics, counters, background work, storage, and
-   savings fields, sinks, and production objects.
-8. Remove economizer CLI/server routes, handler/auth capability, headers, generated OpenAPI/help, and
-   stats/status schemas; verify baseline route-not-found behavior.
+1. Capture byte-exact off-mode goldens across OpenAI Responses/Chat Completions and Anthropic Messages.
+2. Remove 4xx restore/resend before enabling any new planner path.
+3. Disable production callers of lossy condensation, folding, recall, and rescue.
+4. Remove economizer cache toggling and preserve client cache intent exactly.
+5. Introduce opaque tenant/cohort/kill-switch handles and remove every module-global mutable
+   provider/account/cohort handle before the dispatch fence is added.
+6. Regenerate and explicitly reapprove goldens whenever a pinned model snapshot, tokenizer, provider
+   contract, or serializer changes; unreviewed drift blocks release.
 
-### Slice 2: close the production link
+### Slice 1 — types, registry, and fence
 
-1. Generate the literal denied-symbol/object manifest from every removed reducer, fold, compressor,
-   condenser, cache planner/mutator, observer, adapter, store, reporter, recall, rescue, resend,
-   logger, metric, and worker. Generate a deny-by-default AST/IR inventory of all files/functions/
-   initializers and provider-buffer mutations; require explicit signed baseline-or-denied
-   classification and diff it against source and the prior approved release.
-2. Exclude those objects from the production target; test code may link them only in a separately
-   named non-production binary. A packaging allow-list contains only approved production artifacts;
-   a negative fixture attempts to package each test/denied binary and must fail.
-3. Make the pinned pre-LTO AST/IR call/data-flow result the authoritative release gate. Add
-   corroborating post-LTO link/import exact scans, weak/alias/interposition checks, `.init_array`,
-   constructor/destructor, `atexit`, TLS-initializer, string-probe, and production-package inspection.
-4. Remove in-process dynamic/native economizer extension surfaces. Out-of-process plugins run under
-   a separate UID/security domain without ptrace, `/proc`, process-memory, descriptor, shared-memory,
-   or network-namespace access to Aimee. Package and integration tests assert the separate UID,
-   namespaces, mount/proc visibility, ptrace policy, descriptors, IPC/shared memory, and denied
-   connection attempts.
-5. Implement startup package/link/import digest, preload/interposition, signed-manifest, and
-   process-lifetime latch verification.
+1. Add checked money, named token buckets, scenario arrays, reason codes, and affine proof ownership.
+2. Add the signed empty registry and exact membership/generation validation.
+3. Implement `econ_serialize_once()` as the unconditional single-dispatch fence.
 
-### Slice 3: prove parity
+### Slice 2 — OpenAI local planner skeleton
 
-1. Re-run all reference byte, header, cache-presence, transport, call-count, trace, result, error,
-   response-body/header/stream, usage/cache-field, retry, context-limit, and config fixtures against
-   the exact production package.
-2. Prove no economizer filesystem/database/network/thread/log/trace/metric/API-schema side effect.
-3. Prove every current safe/aggressive configuration reaches only the off path before traffic with
-   no warning, log, diagnostic, metric, or other migration side effect.
-4. Run build, unit, integration, sanitizer, package, and documentation checks.
-5. Execute signed `aimee-economizer-v1-cutover.json`: remove old nodes from discovery, pin each
-   in-flight connection/request/retry to its old node until completion, wait for zero old in-flight
-   work, stop and attest every old process, then admit only nodes whose package digest matches v1.
-   Load balancers reject mixed digests; client retries begin only after the cutover epoch is complete.
-6. Submit the content-addressed release artifacts for final roundtable approval before enabling the
-   release in production.
+1. Parse canonical API shapes, explicit cache layout, pinned model/tokenizer, and local price contract.
+2. Enumerate symmetric ordinary/read/write/no-write/output/long-context scenarios.
+3. Implement the strict `>272000` operator and guard-band denial.
+4. Keep mutation unreachable because registry membership is empty.
 
-There are no later v1 slices for observation or live intervention.
+### Slice 3 — Anthropic local planner skeleton
 
-## Test matrix
+1. Parse canonical block layout, marker coverage, TTL, pinned model/tokenizer, and local price contract.
+2. Enumerate symmetric ordinary/read/5m-write/1h-write/output/long-context scenarios.
+3. Reject unknown fields, server-tool semantics, aliases, remote token counting, and boundary changes.
+4. Keep mutation unreachable because registry membership is empty.
 
-### Provider and API identity
+### Slice 4 — offline verification
 
-- OpenAI Responses and Chat Completions, synchronous/streaming, tools, parallel tools, reasoning,
-  structured output, metadata, service tiers, errors, retries, and context limits;
-- Anthropic Messages, synchronous/streaming, tool use/results, system blocks, cache-control blocks,
-  errors, retries, and context limits;
-- every other supported provider/platform/API entrypoint in the generated closed manifest; and
-- full feature interactions involving client cache fields and provider extensions.
+1. Exercise planners only in separately linked test binaries against recorded provider requests and usage objects.
+2. Verify bounds, drift incidents, and adapter disablement without attaching candidates to live calls.
+3. Submit each proposed transform as a separate artifact for converged review.
 
-For every cell, canonical provider plaintext, ordered cache-sensitive headers, transport policy,
-provider/auxiliary calls, result, and error match the reference.
+## Release gates
 
-### Mutation and link closure
+- Off-mode provider bytes match the frozen baseline.
+- The production registry is signed, empty, and makes `ECON_INTERVENE` unreachable.
+- Both provider planners use pinned local tokenizers and independent scenario code.
+- No provider network call occurs before the single dispatch.
+- All cache fields and protected bytes/states are unchanged.
+- Unknown residency is full-priced symmetrically; other unknown semantics are indeterminate.
+- Every cost component has a finite authoritative bound or the decision is indeterminate.
+- The actual first wire write is the generation revalidation linearization point.
+- Fault injection proves exactly one buffer can write and restore/resend is absent.
+- Cross-tenant tests reject classifier, handle, proof, registry, and kill-switch mismatches.
+- Source/link scans prove zero mutable module-global provider/account/cohort handles and zero remote
+  token-count symbols reachable from the production dispatch fence. The sole exception file names a
+  separately linked offline-test binary and its exact remote-count symbols; it is signed and reviewed
+  per release, and production artifacts may match none of its entries.
+- Cohort and kill-switch generations participate in the atomic first-wire revalidation.
+- Compile-time assertions pin scenario counts, tokenizer guard bands, and every finite margin formula.
+- No live shadow mode, savings delta, task/session aggregate, or remote token-count path exists.
+- Schema/source scans reject every baseline-minus-candidate delta or percentage-reduction field,
+  regardless of name.
+- Off mode bypasses the economizer dispatch fence and matches the frozen pre-economizer provider bytes.
+- Model, tokenizer, contract, or serializer changes require regenerated, reviewed off-mode goldens.
+- Build, unit, integration, sanitizer, and `git diff --check` tests pass.
 
-- no `context_reduce`, `build_fold_view`, `context_compress_view`, `tool_condense_apply`, gateway
-  mutator/resend, reducer, observer, shadow, or reporting symbol/object in the production package;
-- no weak/alternate alias, LTO-inlined call edge, unresolved/interposable import, native dynamic
-  loader, FFI/JIT entry, or in-process plugin/MCP path around the denied manifest;
-- addition of a dispatch entrypoint, config source, or suspicious mutator symbol fails CI; and
-- production startup rejects any manifest/build digest or signature mismatch before traffic.
+## Deferred work
 
-### Configuration and upgrade
-
-- Cartesian sources: file, database, environment, CLI, admin/reload, compatibility/provider alias,
-  module toggle, debug/test, plugin/MCP input, recognized legacy, unknown key/type/source/integer, and
-  malformed/unsigned artifacts;
-- every recognized value resolves to the sole off tag; every invalid source fails before traffic;
-- explicit fixtures cover missing/invalid/expired-or-not-yet-valid signature metadata, unknown or
-  rotated verification key, truncated/partial map, IO error, schema/version mismatch, conflicting
-  sources, concurrent startup writes, restart, and unavailable external release authority. Runtime
-  uses only local signed artifacts and never contacts that authority;
-- latches survive reload/admin/environment changes for the process lifetime; and
-- current safe/aggressive installations cannot dispatch through any former live path.
-
-### No data or reporting
-
-- no economizer rows, files, keys, schemas, roles, counters, metrics, logs, traces, timers, workers,
-  usage projections, shadow values, billing fields, or savings fields;
-- no economizer status route, handler, header, or schema remains;
-- no future-version principal can read/import/promote v1 data because none exists; and
-- no user/platform metering dimension changes relative to the reference.
-
-## Acceptance gates
-
-1. The normative off-only safety spec has converged.
-2. All signed artifact digests match compiled constants.
-3. The root manifest pins exact compiler/linker/scanner binaries, versions, flags, rule corpus, and
-   authoritative pre-LTO result; an independent host reproduces the baseline and package digests.
-4. Denied-symbol/call/data-flow/object/initializer scans and production-package allow-list inspection
-   are clean; negative test binaries cannot be packaged.
-5. Dispatch/config manifests are generated by deny-by-default source/AST inventory plus explicit
-   allow-list. They have no wildcard, default, unclassified, or untested entry.
-6. Provider request and response, usage/cache fields, transport policy, call graph, result, and error
-   parity pass every fixture.
-7. Cache intent passes through exactly and no default cache plan is synthesized.
-8. Safe/aggressive/legacy upgrades resolve silently off before traffic.
-9. No economizer data, observation, accounting, shadow, side effect, or savings report exists.
-10. Build/config failure latches stop traffic before serialization and cannot be bypassed.
-11. Plugin sandbox integration tests and signed zero-in-flight cutover/attestation pass; no mixed
-    serving digest or cross-version retry is possible.
-12. Production build, tests, sanitizers, package inspection, docs links, and `git diff --check` pass.
-
-Failure of any gate prevents release. There is no degraded observation mode or alternate request.
-
-## Future work is a different safety version
-
-No live cache policy or transform is scheduled here. A future proposal begins with no inherited
-authority and must prove for each task:
-
-```text
-candidate_user_charge_upper_bound < baseline_user_charge_lower_bound
-AND
-candidate_provider_cost_upper_bound < baseline_provider_cost_lower_bound
-```
-
-It must cover authoritative account billing, client/default cache intent, future write/read/eviction,
-all retries/follow-ons/recalls/rescues, and task-outcome equivalence. Expected values, token estimates,
-public pricing, post-response counters, and cohorts cannot authorize dispatch.
-
-## Primary sources checked 2026-07-21
-
-- OpenAI prompt caching: <https://developers.openai.com/api/docs/guides/prompt-caching>
-- OpenAI GPT-5.6: <https://developers.openai.com/api/docs/models/gpt-5.6-sol>
-- Anthropic Messages usage: <https://platform.claude.com/docs/en/api/messages/create>
-- Anthropic prompt caching: <https://platform.claude.com/docs/en/build-with-claude/prompt-caching>
-- Anthropic tool use and caching: <https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching>
-- Anthropic pricing: <https://platform.claude.com/docs/en/about-claude/pricing>
+Every concrete lossless transform, new-output provenance issuer, live registry update, and bounded
+rollout is deferred to a separate reviewed artifact. Lossy summarization, truncation, folding,
+retrieval, recall, rehydration, rescue, and complete-task savings claims remain outside v2.
 
 ## Review record
 
-Earlier revisions proposed safe live transforms and then observation-only shadow accounting.
-Roundtable review continued to find unavailable counterfactual authority and unnecessary request,
-metering, storage, security, and reporting surfaces. The current revision removes all v1 economizer
-behavior. The safety gate converged first; after verification-detail remediation, the final two-round
-implementation review converged on 2026-07-22 with zero blockers.
+Repeated implementation review removed live shadow behavior, savings claims, remote live token
+counting, generic accounting, and restore/resend. The final review found the deliverable aligned with
+the original request and all normative pillars, with zero issues.
