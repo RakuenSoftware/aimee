@@ -41,6 +41,11 @@ ulimit -s 65536 2>/dev/null || true
 # disallow changing the limit.
 ulimit -c unlimited 2>/dev/null || true
 
+. /usr/local/bin/core-storage.sh
+if ! aimee_prepare_core_storage; then
+    exit 1
+fi
+
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.

@@ -33,8 +33,9 @@ fi
 # to restart. `tail --pid` deadlocks on a zombie child because the supervising
 # shell cannot reap that child until tail returns.
 if [ "$(grep -cF 'ulimit -c unlimited' ../deploy/container/server-entrypoint.sh)" -ge 2 ] &&
-   grep -qF "runuser -u aimee -- sh -c 'ulimit -c unlimited" ../deploy/container/server-entrypoint.sh; then
-    pass "server entrypoint enables core dumps after runuser limit reset"
+   grep -qF "runuser -u aimee -- sh -c 'ulimit -c unlimited" ../deploy/container/server-entrypoint.sh &&
+   sh tests/test_server_core_storage.sh; then
+    pass "server entrypoint enables and validates persistent core dumps"
 else
     fail "server entrypoint leaves native crash core dumps disabled after runuser"
 fi
