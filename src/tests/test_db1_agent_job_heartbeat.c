@@ -442,6 +442,54 @@ static void test_backfill_agent_name_from_agent_log(void)
    printf("  PASS: test_backfill_agent_name_from_agent_log\n");
 }
 
+static void test_status_reads_do_not_run_global_agent_name_backfill(void)
+{
+   setup_db();
+   int job = db1_agent_job_create("review", "test", "", "owner");
+   assert(job > 0);
+   db1_agent_job_update(job, "done", 1, "ok");
+   db1_agent_log_insert_row_t log_row = {
+       .agent_name = "historical-agent",
+       .role = "review",
+       .success = 1,
+       .turns = 1,
+       .tool_calls = 0,
+       .confidence = 80,
+       .session_id = "test-session",
+   };
+   assert(db1_agent_log_insert(&log_row) > 0);
+
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(row.agent_name[0] == '\0');
+   db1_agent_job_free(&row);
+
+   db1_agent_job_t recent[2];
+   int count = db1_agent_job_list_recent(recent, 2, 0);
+   assert(count >= 1);
+   int found = 0;
+   for (int i = 0; i < count; i++)
+   {
+      if (recent[i].id == job)
+      {
+         found = 1;
+         assert(recent[i].agent_name[0] == '\0');
+      }
+      db1_agent_job_free(&recent[i]);
+   }
+   assert(found);
+
+   /* The historical repair remains available as an explicit maintenance
+    * operation; status polling must never run this global UPDATE. */
+   assert(db1_agent_job_backfill_agent_names_from_log() >= 1);
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strcmp(row.agent_name, "historical-agent") == 0);
+   db1_agent_job_free(&row);
+
+   teardown_db();
+   printf("  PASS: test_status_reads_do_not_run_global_agent_name_backfill\n");
+}
+
 int main(void)
 {
    printf("db1_agent_job_heartbeat:\n");
@@ -461,6 +509,7 @@ int main(void)
    test_done_update_wins_cancel_complete_race();
    test_failed_update_does_not_overwrite_cancelled();
    test_backfill_agent_name_from_agent_log();
+   test_status_reads_do_not_run_global_agent_name_backfill();
    printf("ok\n");
    return 0;
 }

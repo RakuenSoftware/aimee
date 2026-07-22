@@ -39,6 +39,9 @@ static int agent_job_stale_threshold_secs(const char *role, const char *current_
    return in_tool_threshold_secs;
 }
 
+/* Explicit historical maintenance only. This scans and may update the entire
+ * terminal job history, so status get/list hot paths must never call it. New
+ * jobs persist their routed agent through db1_agent_job_set_agent(). */
 int db1_agent_job_backfill_agent_names_from_log(void)
 {
    sqlite3 *db = db1_conn();
@@ -302,7 +305,6 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   (void)db1_agent_job_backfill_agent_names_from_log();
 
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
@@ -398,7 +400,6 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
    sqlite3 *db = db1_conn();
    if (!db)
       return -1;
-   (void)db1_agent_job_backfill_agent_names_from_log();
 
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
