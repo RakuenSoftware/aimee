@@ -325,6 +325,62 @@ BEGIN
 END
 $$;
 
+-- P5-C2a: only the dedicated offline provision role may invoke the fixed-root
+-- state machine. It receives no direct table, sequence, generic vault, or audit
+-- privilege; the owner-run functions carry the narrowly required authority.
+DO $$
+DECLARE role_name TEXT;
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_registry_guard() OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_vault_guard() OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_slot(TEXT) OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_bootstrap_resume(TEXT,TEXT) OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_bootstrap_stage(TEXT,TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA) OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_bootstrap_record_cas(TEXT,TEXT,BYTEA) OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_token_root_bootstrap_finalize(TEXT,TEXT) OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_jwks_publication_root_inspect() OWNER TO aimee_kb_owner';
+    EXECUTE 'ALTER FUNCTION kb_management_jwks_publication_root_bind(TEXT,TEXT,TEXT,BYTEA,BYTEA) OWNER TO aimee_kb_owner';
+    ALTER TABLE public.kb_management_token_root OWNER TO aimee_kb_owner;
+    ALTER TABLE public.kb_management_jwks_publication_root OWNER TO aimee_kb_owner;
+    ALTER TABLE public.kb_management_token_root_vault_permit OWNER TO aimee_kb_owner;
+    GRANT SELECT,INSERT,UPDATE ON public.kb_management_token_root,
+      public.kb_management_jwks_publication_root TO aimee_kb_owner;
+    GRANT SELECT,INSERT,DELETE ON public.kb_management_token_root_vault_permit TO aimee_kb_owner;
+  END IF;
+  FOREACH role_name IN ARRAY ARRAY['aimee_kb_runtime','aimee_kb_status',
+      'aimee_kb_status_definer','aimee_kb_status_login','aimee_kb_migrate'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL ON TABLE kb_management_token_root,kb_management_jwks_publication_root,kb_management_token_root_vault_permit FROM %I',role_name);
+      EXECUTE format('REVOKE ALL ON FUNCTION '
+        'kb_management_token_root_registry_guard(),'
+        'kb_management_token_root_vault_guard(),'
+        'kb_management_token_root_slot(TEXT),'
+        'kb_management_token_root_bootstrap_resume(TEXT,TEXT),'
+        'kb_management_token_root_bootstrap_stage(TEXT,TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),'
+        'kb_management_token_root_bootstrap_record_cas(TEXT,TEXT,BYTEA),'
+        'kb_management_token_root_bootstrap_finalize(TEXT,TEXT),'
+        'kb_management_jwks_publication_root_inspect(),'
+        'kb_management_jwks_publication_root_bind(TEXT,TEXT,TEXT,BYTEA,BYTEA) FROM %I',role_name);
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_token_roots_provision') THEN
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_token_roots_provision;
+    REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_token_roots_provision;
+    REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_token_roots_provision;
+    GRANT EXECUTE ON FUNCTION
+      kb_management_token_root_bootstrap_resume(TEXT,TEXT),
+      kb_management_token_root_bootstrap_stage(TEXT,TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BIGINT,BYTEA,
+        BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+      kb_management_token_root_bootstrap_record_cas(TEXT,TEXT,BYTEA),
+      kb_management_token_root_bootstrap_finalize(TEXT,TEXT),
+      kb_management_jwks_publication_root_inspect(),
+      kb_management_jwks_publication_root_bind(TEXT,TEXT,TEXT,BYTEA,BYTEA)
+      TO aimee_kb_token_roots_provision;
+  END IF;
+END
+$$;
+
 -- P5-C1c immutable management-action journal.  The runtime role has no table or
 -- guard access and crosses FORCE RLS only through the two fixed owner-definer
 -- functions.  The raw audit appender remains unavailable to runtime.

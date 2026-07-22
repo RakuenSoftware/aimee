@@ -568,6 +568,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1857,6 +1858,12 @@ $(TESTPREFIX)/unit-test-management-status-key-ctx: \
 $(TESTPREFIX)/unit-test-kb-mgmt-status-provision: \
     $(OBJDIR)/tests/test_kb_mgmt_status_provision.o \
     $(OBJDIR)/kb/kb_mgmt_status_provision.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision: \
+    $(OBJDIR)/tests/test_kb_mgmt_token_roots_provision.o \
+    $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
