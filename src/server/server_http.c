@@ -678,6 +678,68 @@ int route_capabilities(char *resp, int cap)
    return 200;
 }
 
+/* GET /v1/ready — readiness, deliberately distinct from /v1/health (liveness).
+ * `health` answers "this process is alive and serving HTTP"; `ready` answers
+ * "this process can serve work right now". An orchestrator restarts on a
+ * liveness failure but only drains on a readiness failure, so conflating the
+ * two would restart a healthy process during a transient dependency outage.
+ *
+ * The provider serves a snapshot sampled OFF the request path, so this route
+ * performs no dependency I/O and a wedged dependency cannot stall the listener.
+ * Until a provider is registered every dependency is `unknown` and the answer
+ * is 503: readiness fails closed, so an unsampled server is never advertised as
+ * ready. The body keeps one shape in every case (including the unregistered and
+ * provider-failed cases) so a client parsing `.ready` / `.dependencies` never
+ * has to special-case a server that has not sampled yet. */
+static server_http_ready_fn g_ready_fn = NULL;
+
+void server_http_set_ready_provider(server_http_ready_fn fn)
+{
+   g_ready_fn = fn;
+}
+
+/* The fail-closed body, used whenever no provider answered for us. */
+static int ready_unknown(char *resp, int cap, const char *reason)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":false,\"status\":\"unknown\",\"service\":\"aimee-server\","
+            "\"reason\":\"%s\",\"dependencies\":{}}",
+            reason);
+   return 503;
+}
+
+int route_ready(char *resp, int cap)
+{
+   if (cap > 0)
+      resp[0] = '\0';
+   if (!g_ready_fn)
+      return ready_unknown(resp, cap, "no readiness provider registered");
+
+   int status = g_ready_fn(resp, cap);
+
+   /* Fail closed on anything we cannot positively confirm. A provider is
+    * trusted to sample, not to define the contract, so the route validates
+    * rather than passes through:
+    *   - only 200 and 503 are legal; any other status is a bug, not a state;
+    *   - a 200 must actually carry ready:true, so a provider cannot advertise
+    *     readiness with a body that says otherwise (or with no body at all);
+    *   - a 503 must not carry ready:true, so the two halves cannot contradict.
+    * Checking resp[0] alone would catch an empty body but not a contradictory
+    * one, which is the case that actually matters here. */
+   if (status != 200 && status != 503)
+      return ready_unknown(resp, cap, "readiness provider returned an invalid status");
+   if (resp[0] == '\0')
+      return ready_unknown(resp, cap, "readiness provider wrote no body");
+
+   int says_ready = (strstr(resp, "\"ready\":true") != NULL);
+   if (status == 200 && !says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 200 without ready:true");
+   if (status == 503 && says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 503 with ready:true");
+
+   return status;
+}
+
 /* GET /v1/models — OpenAI-compatible model discovery. Always advertises the
  * local `aimee` model; when the server has registered a models provider, the
  * configured agent names are appended (the (provider,model) bindings a client

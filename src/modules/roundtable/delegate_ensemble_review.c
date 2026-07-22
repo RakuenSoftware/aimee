@@ -201,7 +201,7 @@ static void parse_review_evidence(const cJSON *item, review_evidence_t *ev)
       ev->kind = EV_NONE; /* a kind with no target is unusable -> interpretive */
 }
 
-static void capture_review_items_from_text(const char *text, const char *source,
+static void capture_review_items_from_text(const char *text, const char *source, int tool_grounded,
                                            roundtable_result_t *out)
 {
    if (!text || !out)
@@ -260,8 +260,11 @@ static void capture_review_items_from_text(const char *text, const char *source,
                   rec);
          snprintf(out->items[idx].identity_key, sizeof(out->items[idx].identity_key), "%s",
                   identity);
+         out->items[idx].tool_grounded = tool_grounded ? 1 : 0;
          parse_review_evidence(it, &out->items[idx].evidence);
       }
+      else if (tool_grounded)
+         out->items[idx].tool_grounded = 1;
       review_item_add_source(&out->items[idx], source);
    }
    cJSON_Delete(root);
@@ -279,7 +282,8 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
    out->original_request_alignment_summary[0] = '\0';
    out->original_request_alignment_sources[0] = '\0';
    for (int i = 0; i < ref_count; i++)
-      capture_review_items_from_text(results[i].response, results[i].agent_name, out);
+      capture_review_items_from_text(results[i].response, results[i].agent_name,
+                                     results[i].successful_tool_calls > 0, out);
    if (!out->original_request_alignment[0])
    {
       snprintf(out->original_request_alignment, sizeof out->original_request_alignment, "unclear");

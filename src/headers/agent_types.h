@@ -69,6 +69,15 @@ struct cJSON;
 #define AGENT_MAX_EVAL_TASKS      64
 #define AGENT_MAX_COORD_AGENTS    4
 
+/* Request-layer evidence gate: require provider tool selection until one tool
+ * has returned usable evidence, but never force tools on a text-only final turn. */
+static inline int agent_require_initial_tool_choice(int policy_enabled,
+                                                    int successful_tool_calls,
+                                                    int tools_active)
+{
+   return policy_enabled && successful_tool_calls == 0 && tools_active;
+}
+
 /* Per-call HTTP timeout for one turn of the multi-turn tool loop.
  *   agent_timeout_ms  configured per-call timeout (also the per-call cap)
  *   total_timeout_ms  whole-loop budget (typically agent_timeout_ms * N)
@@ -239,6 +248,10 @@ typedef struct
    int timeout_ms;
    int enabled;
    int tools_enabled;
+   /* Per-invocation runtime policy (never serialized): require the first
+    * tool-bearing model turn to select a tool. The tool loop clears the
+    * requirement after the first call so the model can produce final text. */
+   int require_initial_tool_call;
    int inject_respond_tool;
    int recommended_sampling;
    agent_ablation_flags_t ablation;
@@ -320,6 +333,9 @@ typedef struct
     * `review_indexed`: code_search / find_symbol / search_memory / search_docs);
     * write tools stay off regardless. */
    int use_tools;
+   /* Require at least one tool call before accepting a text-only turn. Used by
+    * evidence-gated reviews; ignored when use_tools is false. */
+   int require_initial_tool_call;
 } agent_task_t;
 
 typedef struct
@@ -353,6 +369,7 @@ typedef struct
    char error[512];
    int turns;
    int tool_calls;
+   int successful_tool_calls; /* executed calls with a non-empty, non-error result */
    int rescue_recoveries;
    int confidence;
    int abstained;

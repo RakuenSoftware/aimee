@@ -70,6 +70,10 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
                                const char *system_prompt, const char *user_prompt, int max_tokens,
                                double temperature, agent_result_t *out);
 
+/* Thread-local invocation policy used by parallel task workers. It affects only
+ * the next in-thread named tool run and must be cleared by the caller. */
+void agent_run_require_initial_tool_call(int on);
+
 /* One-shot, TOOL-FREE text generation for UI drafting: selects a single non-CLI
  * (HTTP-provider) agent (prefer `agent_name`, else default, else first enabled
  * non-CLI) and runs the plain-completion agent_execute() — no tools, no worktree,

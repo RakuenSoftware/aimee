@@ -43,6 +43,55 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
    return 2;
 }
 
+/* Stub readiness providers. These stand in for the real snapshot provider so
+ * the route's own contract can be tested without a dependency closure:
+ *   _failing  a sampled snapshot with one dependency down (503)
+ *   _ok       everything sampled and healthy (200)
+ *   _bogus    a misbehaving provider: writes nothing, returns a nonsense
+ *             status. The route must fail closed rather than pass it through. */
+static int stub_ready_failing(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":false,\"status\":\"degraded\",\"service\":\"aimee-server\","
+            "\"dependencies\":{\"db1\":\"ok\",\"kb\":\"fail\"}}");
+   return 503;
+}
+
+static int stub_ready_ok(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap,
+            "{\"ready\":true,\"status\":\"ok\",\"service\":\"aimee-server\","
+            "\"dependencies\":{\"db1\":\"ok\",\"kb\":\"ok\"}}");
+   return 200;
+}
+
+static int stub_ready_bogus(char *resp, int cap)
+{
+   (void)resp;
+   (void)cap;
+   return 0;
+}
+
+/* Providers whose status and body disagree. The route must not pass either
+ * through: a provider samples, it does not get to define the contract. */
+static int stub_ready_200_not_ready(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":false,\"status\":\"degraded\",\"dependencies\":{}}");
+   return 200;
+}
+
+static int stub_ready_503_ready(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":true,\"status\":\"ok\",\"dependencies\":{}}");
+   return 503;
+}
+
+static int stub_ready_odd_status(char *resp, int cap)
+{
+   snprintf(resp, (size_t)cap, "{\"ready\":true,\"status\":\"ok\",\"dependencies\":{}}");
+   return 418;
+}
+
 /* Dispatch-backed first-class /v1 routes in server_http.o reference
  * server_dispatch() and server_active_ctx() (server.c / server_main.c, not
  * linked into this test). Stub them for linking. */
@@ -169,6 +218,74 @@ int main(void)
       assert(st == 200);
       assert(strstr(resp, "\"status\":\"ok\""));
       assert(strstr(resp, "\"service\":\"aimee-server\""));
+   }
+
+   /* --- /v1/health stays LIVENESS: unconditionally 200, never dependency-aware.
+    * Readiness lives at /v1/ready. Pinning the exact body here keeps the
+    * liveness contract — and the aimee-kb probe symmetry it mirrors — from
+    * drifting into a readiness answer, which would make an orchestrator restart
+    * a healthy process during a transient dependency outage. --- */
+   {
+      int st = server_http_route("GET", "/v1/health", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strcmp(resp, "{\"status\":\"ok\",\"service\":\"aimee-server\"}") == 0);
+   }
+
+   /* --- GET /v1/ready is readiness, and fails closed ---
+    * Unregistered means "not sampled yet", which must never read as ready. The
+    * body keeps one shape in every case so a client parsing .ready/.dependencies
+    * never special-cases an unsampled server. */
+   {
+      /* No provider: unknown ⇒ 503, not 200 and not a bare error shape. */
+      int st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"status\":\"unknown\""));
+      assert(strstr(resp, "\"dependencies\":"));
+
+      /* A sampled snapshot with a dependency down reports 503 and names it.
+       * This is the assertion that would fail against a blind endpoint: swap in
+       * stub_ready_ok below and it breaks, which is what proves the test
+       * detects blindness rather than observing a constant. */
+      server_http_set_ready_provider(stub_ready_failing);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(strstr(resp, "\"kb\":\"fail\""));
+
+      /* Everything healthy ⇒ 200. */
+      server_http_set_ready_provider(stub_ready_ok);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"ready\":true"));
+
+      /* A misbehaving provider must not be able to advertise readiness. */
+      server_http_set_ready_provider(stub_ready_bogus);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      /* Status and body must agree. A 200 that does not say ready:true, a 503
+       * that does, and any status outside {200,503} are all provider bugs — the
+       * route replaces them with the fail-closed answer rather than forwarding a
+       * contradiction a caller would have to reconcile. */
+      server_http_set_ready_provider(stub_ready_200_not_ready);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      server_http_set_ready_provider(stub_ready_503_ready);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+      assert(!strstr(resp, "\"ready\":true"));
+
+      server_http_set_ready_provider(stub_ready_odd_status);
+      st = server_http_route("GET", "/v1/ready", NULL, 0, resp, sizeof(resp));
+      assert(st == 503);
+      assert(strstr(resp, "\"ready\":false"));
+
+      server_http_set_ready_provider(NULL);
    }
 
    /* P5-A: legacy management environment cannot enable a write route. */
@@ -827,6 +944,7 @@ int main(void)
 
       /* Public routes require no capabilities. */
       assert(server_http_route_caps("GET", "/v1/health") == 0);
+      assert(server_http_route_caps("GET", "/v1/ready") == 0);
       assert(server_http_route_caps("GET", "/v1/version") == 0);
       assert(server_http_route_caps("GET", "/v1/capabilities") == 0);
       assert(server_http_route_caps("GET", "/v1/models") == 0);

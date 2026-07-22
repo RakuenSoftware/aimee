@@ -108,12 +108,63 @@ static void test_degenerate_retry_budget(void)
    cJSON_Delete(messages);
 }
 
+static void test_required_evidence_retry_budget(void)
+{
+   cJSON *messages = cJSON_CreateArray();
+   int turn = 1;
+   int max_t = 2;
+   int retry_count = 0;
+   char err[128] = "";
+
+   assert(agent_session_retry_required_evidence(messages, &turn, &max_t, 2, &retry_count, err,
+                                                sizeof(err)) == 1);
+   assert(turn == 2);
+   assert(max_t == 3);
+   assert(retry_count == 1);
+   assert(strstr(last_content(messages), "REPOSITORY EVIDENCE REQUIRED") != NULL);
+
+   assert(agent_session_retry_required_evidence(messages, &turn, &max_t, 2, &retry_count, err,
+                                                sizeof(err)) == 1);
+   assert(turn == 3);
+   assert(max_t == 4);
+   assert(retry_count == 2);
+
+   assert(agent_session_retry_required_evidence(messages, &turn, &max_t, 2, &retry_count, err,
+                                                sizeof(err)) == 0);
+   assert(strstr(err, "without successful repository evidence") != NULL);
+   assert(cJSON_GetArraySize(messages) == 2);
+
+   cJSON_Delete(messages);
+}
+
+static void test_required_evidence_runtime_policy(void)
+{
+   assert(agent_required_evidence_keep_tools(1, 0) == 1);
+   assert(agent_required_evidence_keep_tools(1, 1) == 0);
+   assert(agent_required_evidence_keep_tools(0, 0) == 0);
+
+   /* A provider ignoring tool_choice and returning prose is rejected. */
+   assert(agent_required_evidence_reject_response(1, 0, 0, 0) == 1);
+   /* A nominal tool response emptied by policy policing is also rejected. */
+   assert(agent_required_evidence_reject_response(1, 0, 1, 0) == 1);
+   /* A real call proceeds to execution; final prose is accepted after success. */
+   assert(agent_required_evidence_reject_response(1, 0, 1, 1) == 0);
+   assert(agent_required_evidence_reject_response(1, 1, 0, 0) == 0);
+   assert(agent_required_evidence_reject_response(0, 0, 0, 0) == 0);
+
+   assert(agent_required_evidence_budget_exhausted(1, 0, 2) == 0);
+   assert(agent_required_evidence_budget_exhausted(1, 0, 3) == 1);
+   assert(agent_required_evidence_budget_exhausted(1, 1, 99) == 0);
+   assert(agent_required_evidence_budget_exhausted(0, 0, 99) == 0);
+}
+
 static void test_null_safe(void)
 {
    agent_session_append_final_message(NULL, "done");
    agent_session_append_final_instruction(NULL);
    agent_session_append_final_retry_instruction(NULL, "tool call");
    agent_session_append_degenerate_retry_instruction(NULL);
+   agent_session_append_required_evidence_instruction(NULL);
 }
 
 int main(void)
@@ -123,6 +174,8 @@ int main(void)
    test_final_tool_violation_retry_budget();
    test_degenerate_retry_instruction();
    test_degenerate_retry_budget();
+   test_required_evidence_retry_budget();
+   test_required_evidence_runtime_policy();
    test_null_safe();
    printf("test_agent_runtime_messages: ok\n");
    return 0;
