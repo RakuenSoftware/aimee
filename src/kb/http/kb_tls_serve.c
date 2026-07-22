@@ -34,9 +34,12 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
-#define KB_TLS_REQ_MAX    (1024 * 1024)
-#define KB_TLS_HEADER_MAX 16384
-#define KB_TLS_RESP_MAX   262144
+#define KB_TLS_REQ_MAX          (64 * 1024 + 1)
+#define KB_TLS_HEADER_MAX       (64 * 1024)
+#define KB_TLS_REQUEST_LINE_MAX 8192
+#define KB_TLS_URI_MAX          4096
+#define KB_TLS_HEADER_COUNT_MAX 64
+#define KB_TLS_RESP_MAX         262144
 
 static int header_name_char(unsigned char c)
 {
@@ -70,19 +73,22 @@ static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, 
       if (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r'))
          return 400;
    char *line_end = strstr(buf, "\r\n");
-   if (!line_end)
+   if (!line_end || (size_t)(line_end - buf) > KB_TLS_REQUEST_LINE_MAX)
       return 400;
-   char method[16], target[1024], version[16], extra;
+   char method[16], target[KB_TLS_URI_MAX + 1], version[16], extra;
    *line_end = '\0';
-   int fields = sscanf(buf, "%15s %1023s %15s %c", method, target, version, &extra);
+   int fields = sscanf(buf, "%15s %4096s %15s %c", method, target, version, &extra);
    *line_end = '\r';
    if (fields != 3 || strcmp(version, "HTTP/1.1") || target[0] != '/' || strstr(target, "://") ||
        strchr(target, '#'))
       return 400;
    char *p = line_end + 2;
    char *headers_end = buf + header_len - 2;
+   int header_count = 0;
    while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
    {
+      if (++header_count > KB_TLS_HEADER_COUNT_MAX)
+         return 400;
       char *e = strstr(p, "\r\n");
       if (!e || e > headers_end || p[0] == ' ' || p[0] == '\t')
          return 400;
@@ -305,7 +311,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    if (!ssl)
       return;
    SSL_set_fd(ssl, fd);
-   struct timeval io_timeout = {.tv_sec = 35, .tv_usec = 0};
+   struct timeval io_timeout = {.tv_sec = 30, .tv_usec = 0};
    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout));
    /* Handshake — REQUIRES + verifies the client cert (server ctx config). */
@@ -314,6 +320,10 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       SSL_free(ssl);
       return;
    }
+
+   /* Request heads have a shorter slowloris deadline than route/response I/O. */
+   io_timeout.tv_sec = 10;
+   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
 
    char *buf = malloc(KB_TLS_REQ_MAX);
    char *resp = malloc(KB_TLS_RESP_MAX);
@@ -324,6 +334,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    size_t declared_body = 0;
    int read_status =
        strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len, &declared_body);
+   io_timeout.tv_sec = 30;
+   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
    if (read_status)
    {
       const char *b =
@@ -339,8 +351,8 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       goto done;
    }
 
-   char method[16] = {0}, path[1024] = {0};
-   if (sscanf(buf, "%15s %1023s", method, path) < 2)
+   char method[16] = {0}, path[KB_TLS_URI_MAX + 1] = {0};
+   if (sscanf(buf, "%15s %4096s", method, path) < 2)
    {
       const char *b = "{\"error\":\"bad request\"}";
       char head[160];
@@ -363,7 +375,7 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    }
 
    /* Split query string off the path. */
-   char qs[1024] = "", cpath[1024] = "";
+   char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
    const char *qmark = strchr(path, '?');
    if (qmark)
    {
@@ -532,10 +544,12 @@ static volatile int g_mtls_running = 0;
 static pthread_t g_mtls_thread;
 static SSL_CTX *g_mtls_ctx = NULL;
 
-#define KB_MTLS_WORKERS   8
-#define KB_MTLS_QUEUE_CAP 32
-static pthread_t g_mtls_workers[KB_MTLS_WORKERS];
+#define KB_MTLS_CONNECTIONS_MAX 64
+#define KB_MTLS_QUEUE_CAP       64
+static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
 static int g_mtls_workers_started = 0;
+static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
+static int g_mtls_connections_live = 0;
 static int g_mtls_queue[KB_MTLS_QUEUE_CAP];
 static size_t g_mtls_queue_head = 0;
 static size_t g_mtls_queue_len = 0;
@@ -562,6 +576,10 @@ static void *mtls_worker_thread(void *arg)
 
       kb_tls_serve_conn(fd, g_mtls_ctx);
       close(fd);
+      pthread_mutex_lock(&g_mtls_queue_mu);
+      if (g_mtls_connections_live > 0)
+         g_mtls_connections_live--;
+      pthread_mutex_unlock(&g_mtls_queue_mu);
    }
    return NULL;
 }
@@ -570,11 +588,13 @@ static int mtls_queue_conn(int fd)
 {
    int queued = 0;
    pthread_mutex_lock(&g_mtls_queue_mu);
-   if (g_mtls_running && g_mtls_queue_len < KB_MTLS_QUEUE_CAP)
+   if (g_mtls_running && g_mtls_connections_live < g_mtls_connection_limit &&
+       g_mtls_queue_len < KB_MTLS_QUEUE_CAP)
    {
       size_t tail = (g_mtls_queue_head + g_mtls_queue_len) % KB_MTLS_QUEUE_CAP;
       g_mtls_queue[tail] = fd;
       g_mtls_queue_len++;
+      g_mtls_connections_live++;
       queued = 1;
       pthread_cond_signal(&g_mtls_queue_cv);
    }
@@ -606,6 +626,17 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
 {
    if (port < 0 || !data_dir || !data_dir[0] || !host || !host[0])
       return -1;
+
+   g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
+   const char *limit_text = getenv("AIMEE_KB_MTLS_MAX_CONNECTIONS");
+   if (limit_text && limit_text[0])
+   {
+      char *end = NULL;
+      long configured = strtol(limit_text, &end, 10);
+      if (!end || *end || configured < 1 || configured > KB_MTLS_CONNECTIONS_MAX)
+         return -1;
+      g_mtls_connection_limit = (int)configured;
+   }
 
    /* CA (persistent) + a fresh server cert signed by it. */
    char ca_dir[1024];
@@ -639,7 +670,7 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    sa.sin_addr.s_addr = htonl(INADDR_ANY); /* distributed mode: remote peers */
    sa.sin_port = htons((uint16_t)port);
    if (bind(g_mtls_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 ||
-       listen(g_mtls_listen_fd, 16) < 0)
+       listen(g_mtls_listen_fd, KB_MTLS_CONNECTIONS_MAX) < 0)
       goto fail;
 
    /* Resolve the actually-bound port (when started with 0). */
@@ -653,12 +684,23 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    pthread_mutex_lock(&g_mtls_queue_mu);
    g_mtls_queue_head = 0;
    g_mtls_queue_len = 0;
+   g_mtls_connections_live = 0;
    g_mtls_running = 1;
    pthread_mutex_unlock(&g_mtls_queue_mu);
-   for (int i = 0; i < KB_MTLS_WORKERS; i++)
+   pthread_attr_t worker_attr;
+   pthread_attr_t *worker_attr_ptr = NULL;
+   int worker_attr_initialized = pthread_attr_init(&worker_attr) == 0;
+   if (worker_attr_initialized)
    {
-      if (pthread_create(&g_mtls_workers[i], NULL, mtls_worker_thread, NULL) != 0)
+      if (pthread_attr_setstacksize(&worker_attr, 1024 * 1024) == 0)
+         worker_attr_ptr = &worker_attr;
+   }
+   for (int i = 0; i < g_mtls_connection_limit; i++)
+   {
+      if (pthread_create(&g_mtls_workers[i], worker_attr_ptr, mtls_worker_thread, NULL) != 0)
       {
+         if (worker_attr_initialized)
+            pthread_attr_destroy(&worker_attr);
          pthread_mutex_lock(&g_mtls_queue_mu);
          g_mtls_running = 0;
          pthread_cond_broadcast(&g_mtls_queue_cv);
@@ -670,6 +712,8 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
       }
       g_mtls_workers_started++;
    }
+   if (worker_attr_initialized)
+      pthread_attr_destroy(&worker_attr);
    if (pthread_create(&g_mtls_thread, NULL, mtls_listener_thread, NULL) != 0)
    {
       pthread_mutex_lock(&g_mtls_queue_mu);
@@ -681,7 +725,8 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
       g_mtls_workers_started = 0;
       goto fail;
    }
-   LOG_INFO("kb_mtls", "mTLS listening on 0.0.0.0:%d (host %s)", g_mtls_port, host);
+   LOG_INFO("kb_mtls", "mTLS listening on 0.0.0.0:%d (host %s, max connections %d)", g_mtls_port,
+            host, g_mtls_connection_limit);
    return 0;
 
 fail:
@@ -702,6 +747,18 @@ fail:
 int kb_mtls_bound_port(void)
 {
    return g_mtls_running ? g_mtls_port : 0;
+}
+
+void kb_mtls_connection_stats(int *limit_out, int *live_out, int *queued_out)
+{
+   pthread_mutex_lock(&g_mtls_queue_mu);
+   if (limit_out)
+      *limit_out = g_mtls_connection_limit;
+   if (live_out)
+      *live_out = g_mtls_connections_live;
+   if (queued_out)
+      *queued_out = (int)g_mtls_queue_len;
+   pthread_mutex_unlock(&g_mtls_queue_mu);
 }
 
 void kb_mtls_stop(void)
