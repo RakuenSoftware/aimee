@@ -1,6 +1,6 @@
 # P5-B3c distinct management listener and two-node closeout
 
-- **State:** REVIEWED — plan roundtable converged after two finding-closure passes.
+- **State:** DONE — implementation and adversarial branch review converged; production CT260→CT262 gate passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-B3a health exchange and P5-B3b production wiring.
 - **Followed by:** P5-C operator/OIDC propagation, then P5-D closeout.
