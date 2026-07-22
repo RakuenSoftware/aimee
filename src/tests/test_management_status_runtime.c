@@ -24,6 +24,7 @@ static struct aimee_pg_stmt g_stmt;
 static int g_closed, g_in_tx, g_rollbacks, g_commits, g_set_role;
 static int g_search_path, g_row_security, g_guc_failure;
 static int g_pre_ok = 1, g_post_ok = 1, g_lookup_denied, g_lookup_error, g_lookup_extra;
+static int g_lookup_policy_denied;
 static int g_lookup_malformed, g_startup_malformed;
 static unsigned g_bind_mask;
 
@@ -134,6 +135,12 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *error, size_t error_l
    return AIMEE_PG_DONE;
 }
 
+const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *stmt)
+{
+   assert(stmt == &g_stmt);
+   return g_lookup_policy_denied ? "28000" : (g_lookup_error ? "08006" : "");
+}
+
 int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *key, const char *value)
 {
    assert(stmt == &g_stmt && stmt->mode == MODE_LOOKUP && key && value);
@@ -189,14 +196,17 @@ int64_t aimee_pg_column_int64(aimee_pg_stmt_t *stmt, int column)
 const void *aimee_pg_column_blob(aimee_pg_stmt_t *stmt, int column)
 {
    assert(stmt == &g_stmt && stmt->mode == MODE_STARTUP);
-   static const unsigned char public_key[32] = {1};
-   static const unsigned char attestation[64] = {2};
-   return column == 4 ? public_key : (column == 7 ? attestation : NULL);
+   static unsigned char one_column_cache[64];
+   if (column != 4 && column != 7)
+      return NULL;
+   memset(one_column_cache, column == 4 ? 1 : 2, sizeof(one_column_cache));
+   return one_column_cache;
 }
 
 int aimee_pg_column_bytes(aimee_pg_stmt_t *stmt, int column)
 {
    assert(stmt == &g_stmt && stmt->mode == MODE_STARTUP);
+   (void)aimee_pg_column_blob(stmt, column);
    return column == 4 ? 32 : (column == 7 ? 64 : 0);
 }
 
@@ -266,6 +276,14 @@ int main(void)
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
               target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_ERROR);
    g_lookup_error = 0;
+   g_lookup_policy_denied = 1;
+   g_lookup_error = 1;
+   assert(db2_management_status_runtime_lookup(
+              &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
+              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED);
+   assert(generation == 0 && !target_fp[0]);
+   g_lookup_error = 0;
+   g_lookup_policy_denied = 0;
    g_lookup_malformed = 1;
    assert(db2_management_status_runtime_lookup(
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
@@ -286,6 +304,10 @@ int main(void)
           startup.enabled && startup.version == 2 && startup.hwm_attestation_len == 64 &&
           !strcmp(startup.custody_key_id, "kms:status") &&
           !strcmp(startup.wire_key_id, "p5-status-v1-deadbeef"));
+   for (size_t i = 0; i < sizeof(startup.public_key); ++i)
+      assert(startup.public_key[i] == 1);
+   for (size_t i = 0; i < startup.hwm_attestation_len; ++i)
+      assert(startup.hwm_attestation[i] == 2);
    assert(db2_management_status_runtime_startup_begin(&runtime, &startup) < 0);
    assert(db2_management_status_runtime_startup_end(&runtime, 1) == 0 && g_commits == 1);
 

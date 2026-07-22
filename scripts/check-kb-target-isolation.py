@@ -30,13 +30,20 @@ ALLOWED_AGENT_NAMED_SOURCES = {
     "db2/server_registry.c",
 }
 
-STATUS_AUTHORITY_PRIVATE_SOURCES = {
+STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_custody.c",
-    "kb/kb_mgmt_status_provision.c",
     "db2/management_status_key.c",
-    "db2/management_status_provision.c",
     "db2/management_status_runtime.c",
 }
+
+STATUS_PROVISIONER_PRIVATE_SOURCES = {
+    "kb/kb_mgmt_status_provision.c",
+    "db2/management_status_provision.c",
+}
+
+STATUS_AUTHORITY_PRIVATE_SOURCES = (
+    STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES | STATUS_PROVISIONER_PRIVATE_SOURCES
+)
 
 FORBIDDEN_SOURCE_PREFIXES = (
     "db1/",
@@ -144,12 +151,24 @@ def check_makefile(makefile: Path) -> list[str]:
     if not authority_sources:
         violations.append("STATUS_AUTHORITY_SRCS group is missing or empty")
     else:
-        missing = STATUS_AUTHORITY_PRIVATE_SOURCES - authority_sources
+        missing = STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES - authority_sources
         for src in sorted(missing):
             violations.append(f"STATUS_AUTHORITY_SRCS omits private source {src}")
+        for src in sorted(STATUS_PROVISIONER_PRIVATE_SOURCES & authority_sources):
+            violations.append(f"STATUS_AUTHORITY_SRCS includes offline provisioner source {src}")
         for src in authority_sources:
             if not (makefile.parent / src).exists():
                 violations.append(f"STATUS_AUTHORITY_SRCS references missing source {src}")
+
+    provisioner_objects = {
+        normalize_dependency_object(obj)
+        for obj in words(make_var(makefile, "STATUS_PROVISIONER_OBJS"))
+    }
+    expected_provisioner_objects = {
+        src.removesuffix(".c") + ".o" for src in STATUS_PROVISIONER_PRIVATE_SOURCES
+    }
+    for obj in sorted(expected_provisioner_objects - provisioner_objects):
+        violations.append(f"STATUS_PROVISIONER_OBJS omits offline provisioner object {obj}")
 
     authority_objects = {
         normalize_dependency_object(obj)

@@ -146,7 +146,7 @@ int main(void)
    g_allowed = 1;
    g_admit = 0;
    s = status();
-   assert(kb_mgmt_status_custody_sign(&s, &c) == -1);
+   assert(kb_mgmt_status_custody_sign(&s, &c) == KB_MGMT_STATUS_CUSTODY_CONFLICT);
    g_admit = 1;
    g_secret_len = 31;
    s = status();

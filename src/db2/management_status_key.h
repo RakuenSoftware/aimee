@@ -2,6 +2,7 @@
 #define AIMEE_DB2_MANAGEMENT_STATUS_KEY_H
 
 #include "org_vault_key_use.h"
+#include "management_status_runtime.h"
 
 typedef struct
 {
@@ -14,6 +15,12 @@ typedef struct
  * thread-local runtime connection. close rolls back an outstanding guard. */
 int db2_management_status_key_ctx_open(db2_management_status_key_ctx_t *, const char *conninfo,
                                        char *errbuf, size_t errlen);
+/* Borrow an already-open status-runtime connection only after its fixed login,
+ * role, search_path and row-security assertions have succeeded. The key-use
+ * context never closes the borrowed connection. Calls through the two views
+ * must remain serialized by their owning worker. */
+int db2_management_status_key_ctx_borrow_hardened(db2_management_status_key_ctx_t *,
+                                                  const db2_management_status_runtime_t *);
 void db2_management_status_key_ctx_close(db2_management_status_key_ctx_t *);
 
 typedef struct
