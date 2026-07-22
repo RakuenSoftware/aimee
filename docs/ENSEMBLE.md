@@ -72,6 +72,14 @@ but do not by themselves count as disagreement or extend discussion. The saved
 `deadline_ms` is the overall analysis-plus-discussion budget; an omitted or zero
 legacy value is normalized to 360 seconds.
 
+After deterministic synthesis, a preset may optionally require a **chairman**.
+The chairman is one configured, enabled review agent selected visibly in the
+Roundtable GUI. It receives the original request, reviewed artifact, independent
+reports, and deterministic feedback, then submits one final structured verdict.
+There is no chairman retry across the roster: an unavailable chairman, malformed
+verdict, stage mismatch, or missing original-request alignment parks the workflow
+visibly. With the chairman disabled, deterministic synthesis is final.
+
 Every review must explicitly report `original_request_alignment` as `aligned`,
 `drifted`, or `unclear`, with a comparison to the originating request. A useful
 refinement remains aligned; substituting an unrelated goal or deliverable is

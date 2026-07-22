@@ -20,6 +20,8 @@ static const char *PRESET_JSON = "{"
                                  "    { \"model\": \"glm\", \"persona\": \"\" }"
                                  "  ],"
                                  "  \"aggregator\": \"claude\","
+                                 "  \"chairman\": \"codex\","
+                                 "  \"chairman_enabled\": true,"
                                  "  \"min_successful\": 2,"
                                  "  \"max_cost_usd\": 1.5,"
                                  "  \"max_rounds\": 3,"
@@ -51,6 +53,8 @@ static void check_fields(const roundtable_preset_t *p)
    assert(strcmp(p->seats[2].model, "glm") == 0);
    assert(p->seats[2].persona[0] == '\0');
    assert(strcmp(p->aggregator, "claude") == 0);
+   assert(strcmp(p->chairman, "codex") == 0);
+   assert(p->chairman_enabled == 1);
    assert(p->min_successful == 2);
    assert(p->max_cost_usd == 1.5);
    assert(p->max_rounds == 3);
@@ -92,6 +96,12 @@ int main(void)
    const char *err = NULL;
    assert(roundtable_preset_from_json(PRESET_JSON, NULL, &p, &err) == 0);
    check_fields(&p);
+
+   roundtable_preset_t invalid;
+   const char *errmsg = NULL;
+   assert(roundtable_preset_from_json("{\"chairman_enabled\":true}", "invalid", &invalid,
+                                    &errmsg) != 0);
+   assert(errmsg && strcmp(errmsg, "chairman_enabled requires a chairman") == 0);
 
    /* url_name overrides body name */
    roundtable_preset_t p2;
