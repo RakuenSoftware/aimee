@@ -166,6 +166,9 @@ int main(void)
       /* CSS style graph now defaults on so the read-only css signals/report work
        * out of the box (the indexer populates css_rules/css_declarations). */
       assert(cfg.css_style_graph_enabled == 1);
+      /* git co-change backfill defaults on: index scan seeds co_edited edges that
+       * blast radius already reads (incremental/idempotent). */
+      assert(cfg.code_cochange_git_enabled == 1);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -327,6 +330,9 @@ int main(void)
       /* css_style_graph now defaults on; set off to prove the opt-out round-trips
        * (default-on save-guard regression class). */
       cfg.css_style_graph_enabled = 0;
+      /* code_cochange_git defaults on; set off to prove the opt-out round-trips
+       * (default-on save-guard regression class). */
+      cfg.code_cochange_git_enabled = 0;
       /* audit_worm_enabled defaults off; set on to prove the opt-in persists
        * (regression: it was allowlist-settable but had no config_save/load path,
        * so an enabled deployment silently reverted to off on restart). */
@@ -559,9 +565,10 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
-      assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
-      assert(cfg2.audit_worm_enabled == 1);       /* opt-in survives save/reload */
-      assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
+      assert(cfg2.css_style_graph_enabled == 0);   /* opt-out survives save/reload */
+      assert(cfg2.code_cochange_git_enabled == 0); /* opt-out survives save/reload */
+      assert(cfg2.audit_worm_enabled == 1);        /* opt-in survives save/reload */
+      assert(cfg2.css_render_command[0] == '\0');  /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
