@@ -194,8 +194,9 @@ management, secret, event, and streaming traffic, remains identity encoded.
 Inflated bodies are capped at
 1 MiB for responses, 64 KiB including request headers, and 50 times the wire
 size; malformed, unsupported, and over-limit encodings fail closed. The flag
-remains off until workload captures demonstrate
-a latency win rather than merely a byte-count reduction.
+remains off until workload captures demonstrate a latency win rather than merely
+a byte-count reduction. A build without zlib (including the current Windows
+thin-client job) advertises no gzip capability and stays identity encoded.
 
 ### Overview
 

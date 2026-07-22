@@ -38,7 +38,8 @@ static int g_remote_request_gzip;
 static int thinclient_gzip_enabled(void)
 {
    const char *value = getenv("AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED");
-   return value && (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+   return http_content_encoding_available() && value &&
+          (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
 }
 
 static int thinclient_gzip_route(const char *path)

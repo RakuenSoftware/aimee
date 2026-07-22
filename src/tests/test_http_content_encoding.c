@@ -7,6 +7,7 @@
 
 int main(void)
 {
+   assert(http_content_encoding_available());
    size_t input_len = 32 * 1024;
    unsigned char *input = malloc(input_len);
    assert(input);

@@ -6,6 +6,11 @@
 #include <string.h>
 #include <zlib.h>
 
+int http_content_encoding_available(void)
+{
+   return 1;
+}
+
 int http_gzip_compress(const void *input, size_t input_len, unsigned char **output,
                        size_t *output_len)
 {
