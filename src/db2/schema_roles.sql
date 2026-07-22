@@ -38,6 +38,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_status_definer') THEN
     CREATE ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_token_roots_provision') THEN
+    CREATE ROLE aimee_kb_token_roots_provision NOLOGIN NOINHERIT;
+  END IF;
 END
 $$;
 
@@ -53,10 +56,12 @@ ALTER ROLE aimee_kb_owner NOLOGIN NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSE
 -- BYPASSRLS is required for their exact enrollment/registry checks across FORCE
 -- RLS and is not inherited by the execution role.
 ALTER ROLE aimee_kb_status_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+ALTER ROLE aimee_kb_token_roots_provision NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 
 -- migrate acts as owner for DDL; runtime never does.
 GRANT aimee_kb_owner TO aimee_kb_migrate;
 GRANT aimee_kb_status TO aimee_kb_status_login;
+GRANT aimee_kb_token_roots_provision TO aimee_kb_migrate;
 
 -- Schema usage: runtime may resolve objects but NOT create them.
 GRANT USAGE ON SCHEMA public TO aimee_kb_runtime;
@@ -67,6 +72,8 @@ GRANT USAGE ON SCHEMA public TO aimee_kb_status_login;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_login;
 GRANT USAGE ON SCHEMA public TO aimee_kb_status_definer;
 REVOKE CREATE ON SCHEMA public FROM aimee_kb_status_definer;
+GRANT USAGE ON SCHEMA public TO aimee_kb_token_roots_provision;
+REVOKE CREATE ON SCHEMA public FROM aimee_kb_token_roots_provision;
 
 -- NOTE: table/sequence/function GRANTs live in schema_grants.sql, applied AFTER
 -- schema.sql (the tables must exist first). Provisioning order is:
