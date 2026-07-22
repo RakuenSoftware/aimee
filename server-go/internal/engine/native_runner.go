@@ -638,18 +638,39 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 	}
 	delegated := r.delegateGroup(ctx, req, requests)
 	outcomes := make([]outcome, len(seats))
+	repairIndexes := make([]int, 0, len(seats))
 	for i, call := range delegated {
-		parsed, err := panelResponse{}, call.Err
-		if err == nil {
-			var doc []byte
-			doc, err = extractJSONObject(call.Response)
-			if err == nil {
-				err = json.Unmarshal(doc, &parsed)
-			}
-		}
+		parsed, err := parsePanelResponse(call.Response, call.Err)
 		seat := seats[i]
 		seat.participant = call.Participant
 		outcomes[i] = outcome{seat: seat, result: parsed, cost: call.CostUSD, err: err}
+		if err != nil && call.Err == nil && strings.TrimSpace(call.Participant) != "" {
+			repairIndexes = append(repairIndexes, i)
+		}
+	}
+	if len(repairIndexes) > 0 {
+		repairs := make([]DelegateRequest, len(repairIndexes))
+		for i, outcomeIndex := range repairIndexes {
+			seat := outcomes[outcomeIndex].seat
+			repairs[i] = DelegateRequest{
+				Role:           roundtableDelegateRole,
+				Persona:        seat.persona,
+				Participant:    seat.participant,
+				Prompt:         panelResponseRepairPrompt(artifactStage),
+				Workdir:        req.WorkItem.Worktree,
+				Tools:          false,
+				DurableSlot:    panelSeatDurableSlot(req, panelRound, seat.ordinal) + ":repair:1",
+				ArtifactStage:  artifactStage,
+				ProvidedTarget: true,
+			}
+		}
+		for i, call := range r.delegateGroup(ctx, req, repairs) {
+			outcomeIndex := repairIndexes[i]
+			parsed, err := parsePanelResponse(call.Response, call.Err)
+			outcomes[outcomeIndex].cost += call.CostUSD
+			outcomes[outcomeIndex].result = parsed
+			outcomes[outcomeIndex].err = err
+		}
 	}
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifactHash}
 	reports := make([]panelSeatReport, 0, len(seats))
@@ -704,6 +725,36 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		}
 	}
 	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
+}
+
+func parsePanelResponse(response string, delegateErr error) (panelResponse, error) {
+	parsed := panelResponse{}
+	if delegateErr != nil {
+		return parsed, delegateErr
+	}
+	doc, err := extractJSONObject(response)
+	if err != nil {
+		return parsed, err
+	}
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return panelResponse{}, err
+	}
+	// A response missing its outer object can still contain a valid nested
+	// alignment or finding object. extractJSONObject correctly recovers that
+	// fragment, but it is not the roundtable report and must be repaired rather
+	// than misclassified as a semantic stage failure.
+	if parsed.ArtifactStage == "" && parsed.Verdict == "" && parsed.Findings == nil {
+		return panelResponse{}, errors.New("delegate returned a JSON fragment instead of the complete roundtable report")
+	}
+	return parsed, nil
+}
+
+func panelResponseRepairPrompt(artifactStage string) string {
+	return "Your preceding roundtable report was not valid JSON. Preserve its analysis and findings; only repair the serialization. " +
+		"Return exactly one JSON object and no prose or markdown. The required shape is " +
+		`{"artifact_stage":"` + artifactStage + `","original_request_alignment":{"status":"aligned|drifted|unclear","summary":"brief reason"},` +
+		`"verdict":"approve|changes","findings":[{"id":"stable id","severity":"foundational|blocking|suggestion|nit","location":"path or section","summary":"issue","recommendation":"action"}]}. ` +
+		"Use approve only with an empty findings array; use changes with at least one actionable finding."
 }
 
 // runPanelRound remains the focused test seam for independent analysis.

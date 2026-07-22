@@ -111,6 +111,33 @@ type scriptedReviewAgents struct {
 	responses []string
 }
 
+type repairingReviewAgents struct {
+	mu       sync.Mutex
+	requests [][]DelegateRequest
+}
+
+func (a *repairingReviewAgents) Delegate(_ context.Context, _ DelegateRequest) (DelegateResult, error) {
+	return DelegateResult{}, errors.New("unexpected direct delegation")
+}
+
+func (a *repairingReviewAgents) DelegateGroup(_ context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.requests = append(a.requests, append([]DelegateRequest(nil), requests...))
+	if len(a.requests) == 1 {
+		return []DelegateGroupResult{{
+			Participant: "opaque-seat-token",
+			Response:    `"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+			CostUSD:     1.25,
+		}}
+	}
+	return []DelegateGroupResult{{
+		Participant: "opaque-seat-token",
+		Response:    `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+		CostUSD:     0.25,
+	}}
+}
+
 type firstPanelSeatUnavailableAgents struct {
 	response string
 }
@@ -440,6 +467,29 @@ func TestPanelCapacitySeatsHaveDistinctDurableJobKeys(t *testing.T) {
 		if !wantSlots[request.DurableSlot] {
 			t.Fatalf("unexpected durable slot=%q want one of %v", request.DurableSlot, wantSlots)
 		}
+	}
+}
+
+func TestPanelRepairsMalformedJSONOnSameParticipantOnce(t *testing.T) {
+	agents := &repairingReviewAgents{}
+	runner := &NativeRunner{agents: agents}
+	req := StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate"}}
+	feedback, approvals, voters, cost, unreachable := runner.runPanelRound(context.Background(), req, []panelSeat{{persona: "architect", ordinal: 0}}, "review", "hash", "plan", 1)
+	if unreachable != "" || approvals != 1 || voters != 1 || len(feedback.Findings) != 0 || cost != 1.5 {
+		t.Fatalf("repaired panel result approvals=%d voters=%d cost=%v unreachable=%q feedback=%+v", approvals, voters, cost, unreachable, feedback)
+	}
+	if len(agents.requests) != 2 || len(agents.requests[0]) != 1 || len(agents.requests[1]) != 1 {
+		t.Fatalf("group calls=%+v", agents.requests)
+	}
+	repair := agents.requests[1][0]
+	if repair.Participant != "opaque-seat-token" || repair.Delegate != "" {
+		t.Fatalf("repair did not preserve opaque participant without rerouting: %+v", repair)
+	}
+	if repair.Tools || !repair.ProvidedTarget || repair.ArtifactStage != "plan" || !strings.HasSuffix(repair.DurableSlot, ":repair:1") {
+		t.Fatalf("repair request was not bounded serialization-only continuation: %+v", repair)
+	}
+	if !strings.Contains(repair.Prompt, "Preserve its analysis and findings") || !strings.Contains(repair.Prompt, "exactly one JSON object") {
+		t.Fatalf("repair prompt=%q", repair.Prompt)
 	}
 }
 
