@@ -211,19 +211,25 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
 fi
 
 if [ -n "$wfe_pid" ]; then
-    # POSIX sh has no portable wait -n. GNU tail's PID watcher gives us the same
-    # first-exit notification without a shell polling loop.
-    watch_dir=$(mktemp -d /tmp/aimee-plane-watch.XXXXXX)
-    watch_fifo="$watch_dir/first"
-    mkfifo "$watch_fifo"
-    ( tail -s 0.1 --pid="$server_pid" -f /dev/null; printf '%s\n' server > "$watch_fifo" ) & server_watch=$!
-    ( tail -s 0.1 --pid="$wfe_pid" -f /dev/null; printf '%s\n' wfe > "$watch_fifo" ) & wfe_watch=$!
-    IFS= read -r first < "$watch_fifo"
-    kill "$server_watch" "$wfe_watch" 2>/dev/null || true
-    wait "$server_watch" 2>/dev/null || true
-    wait "$wfe_watch" 2>/dev/null || true
-    rm -f "$watch_fifo"
-    rmdir "$watch_dir"
+    # POSIX sh has no portable wait -n. Do not use `tail --pid`: a dead child is
+    # a zombie until this parent waits for it, so tail waits forever and the
+    # container stays half-alive with its API socket gone. Track each Linux
+    # process by start time and treat Z as exited; start time also prevents PID
+    # reuse from making a replacement process look like the original plane.
+    pid_start_time() { awk '{ print $22 }' "/proc/$1/stat" 2>/dev/null || true; }
+    pid_is_live() {
+        _pid=$1 _born=$2
+        _state_born=$(awk '{ print $3 " " $22 }' "/proc/$_pid/stat" 2>/dev/null || true)
+        [ -n "$_state_born" ] || return 1
+        set -- $_state_born
+        [ "$1" != Z ] && [ "$2" = "$_born" ]
+    }
+    server_born=$(pid_start_time "$server_pid")
+    wfe_born=$(pid_start_time "$wfe_pid")
+    while pid_is_live "$server_pid" "$server_born" && pid_is_live "$wfe_pid" "$wfe_born"; do
+        sleep 0.1
+    done
+    if ! pid_is_live "$server_pid" "$server_born"; then first=server; else first=wfe; fi
     log "$first plane exited; terminating its peer so the container restarts as one unit"
     shutdown
     wait "$server_pid" 2>/dev/null || true
