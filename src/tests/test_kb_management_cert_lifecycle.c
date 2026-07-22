@@ -19,8 +19,12 @@
 #include <unistd.h>
 
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
-void db2_lease_begin(void) {}
-void db2_lease_end(void) {}
+void db2_lease_begin(void)
+{
+}
+void db2_lease_end(void)
+{
+}
 int vault_server_kek(uint8_t kek[32])
 {
    memset(kek, 0, 32);
@@ -57,9 +61,10 @@ int vault_secret_decrypt(const uint8_t dek[32], const uint8_t *aad, size_t aad_l
    return 0;
 }
 
-db2_management_client_instance_result_t db2_management_client_instance_binding_init(
-    const char *issuer, const char *subject, const uint8_t proof[32], const uint8_t custody[32],
-    db2_management_client_instance_binding_t *out)
+db2_management_client_instance_result_t
+db2_management_client_instance_binding_init(const char *issuer, const char *subject,
+                                            const uint8_t proof[32], const uint8_t custody[32],
+                                            db2_management_client_instance_binding_t *out)
 {
    if (!issuer || !subject || !proof || !custody || !out)
       return DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID;
@@ -79,26 +84,26 @@ db2_management_client_instance_result_t db2_management_client_instance_binding_i
    return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-#define DB_UNUSED(name, request_type, output_type)                                                  \
+#define DB_UNUSED(name, request_type, output_type)                                                 \
    db2_management_client_instance_result_t name(const request_type *r, output_type *o)             \
-   {                                                                                                \
-      (void)r;                                                                                      \
-      if (o)                                                                                        \
-         memset(o, 0, sizeof(*o));                                                                  \
+   {                                                                                               \
+      (void)r;                                                                                     \
+      if (o)                                                                                       \
+         memset(o, 0, sizeof(*o));                                                                 \
       return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;                                           \
    }
 DB_UNUSED(db2_management_client_instance_grant_preflight,
-          db2_management_client_grant_preflight_request_t,
-          db2_management_client_grant_preflight_t)
+          db2_management_client_grant_preflight_request_t, db2_management_client_grant_preflight_t)
 DB_UNUSED(db2_management_client_instance_begin_initial, db2_management_client_initial_request_t,
           db2_management_client_pending_t)
 DB_UNUSED(db2_management_client_instance_begin_renewal, db2_management_client_renewal_request_t,
           db2_management_client_pending_t)
 DB_UNUSED(db2_management_client_instance_activate, db2_management_client_activation_request_t,
           db2_management_client_active_t)
-db2_management_client_instance_result_t db2_management_client_instance_snapshot(
-    const char id[33], const db2_management_client_instance_binding_t *binding,
-    db2_management_client_active_t *out)
+db2_management_client_instance_result_t
+db2_management_client_instance_snapshot(const char id[33],
+                                        const db2_management_client_instance_binding_t *binding,
+                                        db2_management_client_active_t *out)
 {
    (void)id;
    (void)binding;
@@ -187,9 +192,9 @@ static kb_workload_result_t mock_copy(void *opaque, const uint8_t challenge[32],
    return KB_WORKLOAD_OK;
 }
 
-static db2_management_client_instance_result_t mock_preflight(
-    void *opaque, const db2_management_client_grant_preflight_request_t *request,
-    db2_management_client_grant_preflight_t *out)
+static db2_management_client_instance_result_t
+mock_preflight(void *opaque, const db2_management_client_grant_preflight_request_t *request,
+               db2_management_client_grant_preflight_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    memset(out, 0, sizeof(*out));
@@ -220,9 +225,9 @@ static void mock_pending_common(lifecycle_mock_t *mock, const char operation[65]
    mock->pending = 1;
 }
 
-static db2_management_client_instance_result_t mock_begin_initial(
-    void *opaque, const db2_management_client_initial_request_t *request,
-    db2_management_client_pending_t *out)
+static db2_management_client_instance_result_t
+mock_begin_initial(void *opaque, const db2_management_client_initial_request_t *request,
+                   db2_management_client_pending_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->begin_count++;
@@ -247,9 +252,9 @@ static db2_management_client_instance_result_t mock_begin_initial(
    return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t mock_begin_renewal(
-    void *opaque, const db2_management_client_renewal_request_t *request,
-    db2_management_client_pending_t *out)
+static db2_management_client_instance_result_t
+mock_begin_renewal(void *opaque, const db2_management_client_renewal_request_t *request,
+                   db2_management_client_pending_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->begin_count++;
@@ -279,9 +284,9 @@ static db2_management_client_instance_result_t mock_begin_renewal(
    return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t mock_activate(
-    void *opaque, const db2_management_client_activation_request_t *request,
-    db2_management_client_active_t *out)
+static db2_management_client_instance_result_t
+mock_activate(void *opaque, const db2_management_client_activation_request_t *request,
+              db2_management_client_active_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    mock->activate_count++;
@@ -323,9 +328,10 @@ static db2_management_client_instance_result_t mock_activate(
    return DB2_MANAGEMENT_CLIENT_INSTANCE_OK;
 }
 
-static db2_management_client_instance_result_t mock_snapshot(
-    void *opaque, const char installation[33],
-    const db2_management_client_instance_binding_t *binding, db2_management_client_active_t *out)
+static db2_management_client_instance_result_t
+mock_snapshot(void *opaque, const char installation[33],
+              const db2_management_client_instance_binding_t *binding,
+              db2_management_client_active_t *out)
 {
    lifecycle_mock_t *mock = opaque;
    (void)installation;
@@ -362,8 +368,7 @@ static db2_management_client_instance_result_t mock_snapshot(
 static int mock_crash(void *opaque, kb_management_cert_crash_point_t point)
 {
    lifecycle_mock_t *mock = opaque;
-   if (point == KB_MANAGEMENT_CERT_CRASH_BEFORE_TERMINAL_CLEAR &&
-       mock->corrupt_terminal_clear)
+   if (point == KB_MANAGEMENT_CERT_CRASH_BEFORE_TERMINAL_CLEAR && mock->corrupt_terminal_clear)
    {
       mock->corrupt_terminal_clear = 0;
       assert(fchmodat(mock->storage_fd, "pending", 0400, 0) == 0);
@@ -777,12 +782,12 @@ static void test_lifecycle_constructor_guards(void)
 #ifdef AIMEE_MANAGEMENT_CERT_TESTING
 static void test_active_identity_canonicalization(void)
 {
-   assert(kb_management_cert_identity_matches_for_test(
-       "/CN=aimee-kb-ca", "0123abcd", "cert:/CN=aimee-kb-ca:0123abcd"));
+   assert(kb_management_cert_identity_matches_for_test("/CN=aimee-kb-ca", "0123abcd",
+                                                       "cert:/CN=aimee-kb-ca:0123abcd"));
    assert(kb_management_cert_identity_matches_for_test("issuer:%name", "ab:cd%ef",
                                                        "cert:issuer%3A%25name:ab%3Acd%25ef"));
-   assert(!kb_management_cert_identity_matches_for_test(
-       "issuer:%name", "ab:cd%ef", "cert:issuer:%name:ab:cd%ef"));
+   assert(!kb_management_cert_identity_matches_for_test("issuer:%name", "ab:cd%ef",
+                                                        "cert:issuer:%name:ab:cd%ef"));
    char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
    memset(issuer, '%', sizeof(issuer) - 1);
    issuer[sizeof(issuer) - 1] = '\0';
@@ -872,9 +877,9 @@ static void test_lifecycle_orchestration(void)
    config.custodied_ca_dir = ca_dir;
    config.bundle_dir = bundle_dir;
    kb_management_cert_lifecycle_t *lifecycle = NULL;
-   assert(kb_management_cert_lifecycle_open_for_test(
-              &config, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1, dir_fd, &mock_ops, &mock,
-              &lifecycle) == KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_lifecycle_open_for_test(&config, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
+                                                     dir_fd, &mock_ops, &mock,
+                                                     &lifecycle) == KB_MANAGEMENT_CERT_OK);
 
    mock.arena_fail_step = 2;
    kb_management_cert_active_t active;
@@ -892,8 +897,7 @@ static void test_lifecycle_orchestration(void)
    assert(zeroed(&active, sizeof(active)) && mock.pending && mock.begin_count == 1);
    char first_operation[65];
    memcpy(first_operation, mock.issue.operation_id, sizeof(first_operation));
-   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
-          KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) == KB_MANAGEMENT_CERT_OK);
    assert(active.generation == 1 && mock.active && mock.begin_count == 2 &&
           mock.activate_count == 1 && !strcmp(first_operation, mock.enrollment.operation_id));
 
@@ -939,8 +943,7 @@ static void test_lifecycle_orchestration(void)
           KB_MANAGEMENT_CERT_UNAVAILABLE);
    assert(zeroed(&active, sizeof(active)) && mock.enrollment.generation == 2 &&
           mock.activate_count == activates_before + 1);
-   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
-          KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) == KB_MANAGEMENT_CERT_OK);
    assert(active.generation == 2 && mock.activate_count == activates_before + 1);
    assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) == KB_MANAGEMENT_CERT_OK);
    assert(loaded.generation == 2);
@@ -958,8 +961,7 @@ static void test_lifecycle_orchestration(void)
    mock.crash_armed = 1;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_UNAVAILABLE);
-   assert(faccessat(dir_fd, "pending", F_OK, 0) == 0 &&
-          faccessat(dir_fd, "cleanup", F_OK, 0) == 0);
+   assert(faccessat(dir_fd, "pending", F_OK, 0) == 0 && faccessat(dir_fd, "cleanup", F_OK, 0) == 0);
    mock.corrupt_terminal_clear = 1;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_INTEGRITY);
@@ -967,8 +969,7 @@ static void test_lifecycle_orchestration(void)
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_DENIED);
    mock.terminal_on_begin = 0;
-   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
-          KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) == KB_MANAGEMENT_CERT_OK);
    assert(active.generation == 3);
 
    /* Recovered renewals reject a maximal authoritative generation before the
@@ -984,16 +985,15 @@ static void test_lifecycle_orchestration(void)
           KB_MANAGEMENT_CERT_INTEGRITY);
    assert(zeroed(&active, sizeof(active)));
    mock.enrollment.generation = saved_generation;
-   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
-          KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) == KB_MANAGEMENT_CERT_OK);
 
    /* Every durability boundary is restartable without a duplicate activation
     * or a second operation coordinate. AFTER_BEGIN/AFTER_ACTIVATE are covered
     * above; cover the remaining boundaries on successive renewals. */
    const kb_management_cert_crash_point_t boundaries[] = {
        KB_MANAGEMENT_CERT_CRASH_AFTER_PREPARE, KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT,
-       KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING,
-       KB_MANAGEMENT_CERT_CRASH_AFTER_CANDIDATE, KB_MANAGEMENT_CERT_CRASH_AFTER_PROMOTE};
+       KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING, KB_MANAGEMENT_CERT_CRASH_AFTER_CANDIDATE,
+       KB_MANAGEMENT_CERT_CRASH_AFTER_PROMOTE};
    for (size_t i = 0; i < sizeof(boundaries) / sizeof(boundaries[0]); ++i)
    {
       mock.now = mock.enrollment.cert_not_after_epoch - 1200;
@@ -1067,16 +1067,15 @@ static void test_lifecycle_orchestration(void)
    memset(mock.identity.custody_anchor_id, 0x42, 32);
    fill_hex(mock.lineage, 32, '2');
    config.bundle_dir = initial_dir;
-   assert(kb_management_cert_lifecycle_open_for_test(
-              &config, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1, dir_fd, &mock_ops, &mock,
-              &lifecycle) == KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_lifecycle_open_for_test(&config, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
+                                                     dir_fd, &mock_ops, &mock,
+                                                     &lifecycle) == KB_MANAGEMENT_CERT_OK);
    mock.terminal_on_begin = DB2_MANAGEMENT_CLIENT_ISSUE_QUARANTINED;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_DENIED);
    assert(faccessat(dir_fd, "pending", F_OK, 0) != 0);
    mock.terminal_on_begin = 0;
-   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
-          KB_MANAGEMENT_CERT_OK);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) == KB_MANAGEMENT_CERT_OK);
    assert(active.generation == 1);
    kb_management_cert_lifecycle_close(lifecycle);
    remove_tree_files(initial_dir);
@@ -1337,8 +1336,8 @@ static void test_storage_open_and_protocol(void)
    uint8_t tampered_intent[4096];
    intent_cipher[0] ^= 0x5a;
    size_t tampered_intent_len = 0;
-   assert(kb_management_cert_intent_encode(&staged_intent, tampered_intent,
-                                           sizeof(tampered_intent), &tampered_intent_len) == 0);
+   assert(kb_management_cert_intent_encode(&staged_intent, tampered_intent, sizeof(tampered_intent),
+                                           &tampered_intent_len) == 0);
    intent_cipher[0] ^= 0x5a;
    char intent_name[80];
    assert(snprintf(intent_name, sizeof(intent_name), "intent.%s", pending_operation) > 0);
@@ -1349,16 +1348,16 @@ static void test_storage_open_and_protocol(void)
           close(tampered_fd) == 0);
    assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    tampered_fd = openat(storage.dir_fd, intent_name, O_WRONLY | O_TRUNC | O_CLOEXEC);
-   assert(tampered_fd >= 0 && write(tampered_fd, intent_record, intent_record_len) ==
-                                      (ssize_t)intent_record_len &&
+   assert(tampered_fd >= 0 &&
+          write(tampered_fd, intent_record, intent_record_len) == (ssize_t)intent_record_len &&
           close(tampered_fd) == 0);
    assert(linkat(storage.dir_fd, intent_name, storage.dir_fd, "intent.cleanup-linked", 0) == 0);
    assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, "intent.cleanup-linked", 0) == 0);
    assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_read(&storage, "intent", pending_operation, readback,
-                                          sizeof(readback), &readback_len) ==
-          KB_MANAGEMENT_STORAGE_MISSING);
+                                          sizeof(readback),
+                                          &readback_len) == KB_MANAGEMENT_STORAGE_MISSING);
    assert(kb_management_cert_storage_cleanup_prepare_intent(
               &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_stage(&storage, "intent", pending_operation, intent_record,

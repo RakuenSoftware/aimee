@@ -34,7 +34,8 @@ typedef struct
    db2_management_client_instance_result_t (*begin_renewal)(
        void *, const db2_management_client_renewal_request_t *, db2_management_client_pending_t *);
    db2_management_client_instance_result_t (*activate)(
-       void *, const db2_management_client_activation_request_t *, db2_management_client_active_t *);
+       void *, const db2_management_client_activation_request_t *,
+       db2_management_client_active_t *);
    db2_management_client_instance_result_t (*snapshot)(
        void *, const char[33], const db2_management_client_instance_binding_t *,
        db2_management_client_active_t *);

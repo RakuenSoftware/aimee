@@ -374,16 +374,15 @@ db2_management_client_instance_result_t db2_management_client_instance_grant_pre
    rc = first_row(st);
    db2_management_client_grant_preflight_t candidate;
    memset(&candidate, 0, sizeof(candidate));
-   int decoded = rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK && aimee_pg_column_count(st) == 3 &&
-                 copy_text_col(st, 0, candidate.installation_id,
-                               sizeof(candidate.installation_id)) == 0 &&
-                 exact_hex(candidate.installation_id, 32) &&
-                 copy_text_col(st, 1, candidate.replacement_lineage_id,
-                               sizeof(candidate.replacement_lineage_id)) == 0 &&
-                 exact_hex(candidate.replacement_lineage_id, 32) &&
-                 col_i64(st, 2, &candidate.expires_at_epoch) == 0 &&
-                 candidate.expires_at_epoch > 0 &&
-                 strcmp(candidate.installation_id, r->installation_id) == 0;
+   int decoded =
+       rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK && aimee_pg_column_count(st) == 3 &&
+       copy_text_col(st, 0, candidate.installation_id, sizeof(candidate.installation_id)) == 0 &&
+       exact_hex(candidate.installation_id, 32) &&
+       copy_text_col(st, 1, candidate.replacement_lineage_id,
+                     sizeof(candidate.replacement_lineage_id)) == 0 &&
+       exact_hex(candidate.replacement_lineage_id, 32) &&
+       col_i64(st, 2, &candidate.expires_at_epoch) == 0 && candidate.expires_at_epoch > 0 &&
+       strcmp(candidate.installation_id, r->installation_id) == 0;
    if (rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
       rc = finish_row(st, decoded);
    else
@@ -407,7 +406,8 @@ db2_management_client_instance_begin_initial(const db2_management_client_initial
       return DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID;
    aimee_pg_stmt_t *st = NULL;
    db2_management_client_instance_result_t rc = runtime_stmt(
-       "SELECT * FROM public.kb_management_instance_begin_initial(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+       "SELECT * FROM "
+       "public.kb_management_instance_begin_initial(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
        &st);
    if (rc != DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
       return rc;
@@ -417,9 +417,8 @@ db2_management_client_instance_begin_initial(const db2_management_client_initial
    if (aimee_pg_bind_text(st, "?1", r->operation_id) ||
        aimee_pg_bind_text(st, "?2", r->authority_id) ||
        aimee_pg_bind_text(st, "?3", r->installation_id) ||
-       aimee_pg_bind_text(st, "?4", r->expected_lineage_id) ||
-       bind_binding(st, &r->binding, 5) || aimee_pg_bind_text(st, "?10", csr) ||
-       aimee_pg_bind_text(st, "?11", spki))
+       aimee_pg_bind_text(st, "?4", r->expected_lineage_id) || bind_binding(st, &r->binding, 5) ||
+       aimee_pg_bind_text(st, "?10", csr) || aimee_pg_bind_text(st, "?11", spki))
    {
       aimee_pg_finalize(st);
       return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;

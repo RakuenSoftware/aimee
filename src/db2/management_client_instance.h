@@ -174,8 +174,7 @@ extern "C"
        const uint8_t custody_anchor[DB2_MANAGEMENT_CLIENT_INSTANCE_ANCHOR_LEN],
        db2_management_client_instance_binding_t *out);
 
-   db2_management_client_instance_result_t
-   db2_management_client_instance_grant_preflight(
+   db2_management_client_instance_result_t db2_management_client_instance_grant_preflight(
        const db2_management_client_grant_preflight_request_t *,
        db2_management_client_grant_preflight_t *);
    db2_management_client_instance_result_t

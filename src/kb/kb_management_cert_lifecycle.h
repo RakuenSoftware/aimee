@@ -68,8 +68,9 @@ extern "C"
 {
 #endif
 
-   kb_management_cert_result_t kb_management_cert_lifecycle_open(
-       const kb_management_cert_config_t *, kb_management_cert_lifecycle_t **);
+   kb_management_cert_result_t
+   kb_management_cert_lifecycle_open(const kb_management_cert_config_t *,
+                                     kb_management_cert_lifecycle_t **);
    kb_management_cert_result_t kb_management_cert_reconcile(kb_management_cert_lifecycle_t *,
                                                             int64_t deadline_epoch,
                                                             kb_management_cert_active_t *);

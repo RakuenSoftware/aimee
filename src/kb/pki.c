@@ -964,28 +964,28 @@ decrypt_done:
       goto failed;
 
 validate:
+{
+   X509 *cert = x509_from_pem(out->cert_pem);
+   EVP_PKEY *key = key_from_pem(out->key_pem);
+   char canonical_cert[KB_PKI_CERT_PEM_MAX] = {0};
+   char canonical_key[KB_PKI_KEY_PEM_MAX] = {0};
+   int valid = cert && key && X509_check_private_key(cert, key) == 1 &&
+               pem_from_x509(cert, canonical_cert, sizeof(canonical_cert)) == 0 &&
+               pem_from_key(key, canonical_key, sizeof(canonical_key)) == 0 &&
+               strlen(canonical_cert) == strlen(out->cert_pem) &&
+               !memcmp(canonical_cert, out->cert_pem, strlen(canonical_cert)) &&
+               strlen(canonical_key) == key_bytes &&
+               !memcmp(canonical_key, out->key_pem, key_bytes);
+   OPENSSL_cleanse(canonical_key, sizeof(canonical_key));
+   OPENSSL_cleanse(canonical_cert, sizeof(canonical_cert));
+   EVP_PKEY_free(key);
+   X509_free(cert);
+   if (!valid)
    {
-      X509 *cert = x509_from_pem(out->cert_pem);
-      EVP_PKEY *key = key_from_pem(out->key_pem);
-      char canonical_cert[KB_PKI_CERT_PEM_MAX] = {0};
-      char canonical_key[KB_PKI_KEY_PEM_MAX] = {0};
-      int valid = cert && key && X509_check_private_key(cert, key) == 1 &&
-                  pem_from_x509(cert, canonical_cert, sizeof(canonical_cert)) == 0 &&
-                  pem_from_key(key, canonical_key, sizeof(canonical_key)) == 0 &&
-                  strlen(canonical_cert) == strlen(out->cert_pem) &&
-                  !memcmp(canonical_cert, out->cert_pem, strlen(canonical_cert)) &&
-                  strlen(canonical_key) == key_bytes &&
-                  !memcmp(canonical_key, out->key_pem, key_bytes);
-      OPENSSL_cleanse(canonical_key, sizeof(canonical_key));
-      OPENSSL_cleanse(canonical_cert, sizeof(canonical_cert));
-      EVP_PKEY_free(key);
-      X509_free(cert);
-      if (!valid)
-      {
-         result = KB_PKI_CA_LOAD_INTEGRITY;
-         goto failed;
-      }
+      result = KB_PKI_CA_LOAD_INTEGRITY;
+      goto failed;
    }
+}
    OPENSSL_cleanse(buf, sizeof(buf));
    return KB_PKI_CA_LOAD_OK;
 

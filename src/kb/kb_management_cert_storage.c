@@ -618,9 +618,8 @@ kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *sto
 #else
                   named.st_uid == 0 &&
 #endif
-                  (named.st_mode & 0777) == 0600 &&
-                  named.st_nlink == 1 && opened.st_dev == named.st_dev &&
-                  opened.st_ino == named.st_ino;
+                  (named.st_mode & 0777) == 0600 && named.st_nlink == 1 &&
+                  opened.st_dev == named.st_dev && opened.st_ino == named.st_ino;
    if (close(fd) != 0)
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    if (!named_ok)
@@ -632,8 +631,8 @@ kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *sto
 
 /* cleanup is a fixed canonical binary recovery coordinate. It is deliberately
  * private to storage so lifecycle callers cannot select deletion targets. */
-#define CLEANUP_MAGIC "AMCLN001"
-#define CLEANUP_TARGETS 3
+#define CLEANUP_MAGIC      "AMCLN001"
+#define CLEANUP_TARGETS    3
 #define CLEANUP_RECORD_LEN (8 + 4 + 64 + 32 + CLEANUP_TARGETS * (1 + 64 + 32))
 enum
 {
@@ -660,8 +659,9 @@ typedef struct
 
 static int cleanup_encode(const cleanup_record_t *record, uint8_t out[CLEANUP_RECORD_LEN])
 {
-   if (!record || (record->mode != CLEANUP_PROMOTION && record->mode != CLEANUP_TERMINAL &&
-                   record->mode != CLEANUP_PREPARING) ||
+   if (!record ||
+       (record->mode != CLEANUP_PROMOTION && record->mode != CLEANUP_TERMINAL &&
+        record->mode != CLEANUP_PREPARING) ||
        record->anchor_present > 1 || record->target_count < 1 ||
        record->target_count > CLEANUP_TARGETS ||
        (record->anchor_present ? !exact_hex(record->anchor, 64) : record->anchor[0]))
@@ -695,9 +695,9 @@ static int cleanup_decode(const void *bytes, size_t len, cleanup_record_t *out)
    if (!bytes || len != CLEANUP_RECORD_LEN || !out || memcmp(bytes, CLEANUP_MAGIC, 8))
       return -1;
    const uint8_t *in = bytes;
-   if (in[11] || (in[8] != CLEANUP_PROMOTION && in[8] != CLEANUP_TERMINAL &&
-                  in[8] != CLEANUP_PREPARING) || in[9] > 1 ||
-       in[10] < 1 || in[10] > CLEANUP_TARGETS)
+   if (in[11] ||
+       (in[8] != CLEANUP_PROMOTION && in[8] != CLEANUP_TERMINAL && in[8] != CLEANUP_PREPARING) ||
+       in[9] > 1 || in[10] < 1 || in[10] > CLEANUP_TARGETS)
       return -1;
    memset(out, 0, sizeof(*out));
    out->mode = in[8];
@@ -730,8 +730,7 @@ static int cleanup_decode(const void *bytes, size_t len, cleanup_record_t *out)
       memcpy(out->target[i].operation, in + offset + 1, 64);
       out->target[i].operation[64] = 0;
       memcpy(out->target[i].digest, in + offset + 65, 32);
-      if ((out->target[i].kind != CLEANUP_INTENT &&
-           out->target[i].kind != CLEANUP_CANDIDATE) ||
+      if ((out->target[i].kind != CLEANUP_INTENT && out->target[i].kind != CLEANUP_CANDIDATE) ||
           !exact_hex(out->target[i].operation, 64))
          return -1;
    }
@@ -742,9 +741,9 @@ static int cleanup_decode(const void *bytes, size_t len, cleanup_record_t *out)
    return valid ? 0 : -1;
 }
 
-static kb_management_cert_storage_result_t read_manifest_name(
-    kb_management_cert_storage_t *storage, const char *name, kb_management_cert_manifest_t *manifest,
-    int *present, uint8_t digest[32])
+static kb_management_cert_storage_result_t
+read_manifest_name(kb_management_cert_storage_t *storage, const char *name,
+                   kb_management_cert_manifest_t *manifest, int *present, uint8_t digest[32])
 {
    uint8_t bytes[1024];
    size_t len = 0;
@@ -770,9 +769,9 @@ static kb_management_cert_storage_result_t read_manifest_name(
    return rc;
 }
 
-static kb_management_cert_storage_result_t cleanup_target_from_disk(
-    kb_management_cert_storage_t *storage, cleanup_record_t *cleanup, uint8_t kind,
-    const char operation[65], int optional)
+static kb_management_cert_storage_result_t
+cleanup_target_from_disk(kb_management_cert_storage_t *storage, cleanup_record_t *cleanup,
+                         uint8_t kind, const char operation[65], int optional)
 {
    if (cleanup->target_count >= CLEANUP_TARGETS)
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
@@ -798,8 +797,9 @@ static kb_management_cert_storage_result_t cleanup_target_from_disk(
    return rc;
 }
 
-static kb_management_cert_storage_result_t cleanup_existing(
-    kb_management_cert_storage_t *storage, uint8_t bytes[CLEANUP_RECORD_LEN], cleanup_record_t *out)
+static kb_management_cert_storage_result_t cleanup_existing(kb_management_cert_storage_t *storage,
+                                                            uint8_t bytes[CLEANUP_RECORD_LEN],
+                                                            cleanup_record_t *out)
 {
    size_t len = 0;
    kb_management_cert_storage_result_t rc =
@@ -809,8 +809,8 @@ static kb_management_cert_storage_result_t cleanup_existing(
    return rc;
 }
 
-static kb_management_cert_storage_result_t cleanup_publish(
-    kb_management_cert_storage_t *storage, const cleanup_record_t *cleanup)
+static kb_management_cert_storage_result_t cleanup_publish(kb_management_cert_storage_t *storage,
+                                                           const cleanup_record_t *cleanup)
 {
    uint8_t encoded[CLEANUP_RECORD_LEN], existing[CLEANUP_RECORD_LEN];
    cleanup_record_t decoded;
@@ -830,8 +830,8 @@ static kb_management_cert_storage_result_t cleanup_publish(
       OPENSSL_cleanse(encoded, sizeof(encoded));
       return existing_rc;
    }
-   int fd = openat(storage->dir_fd, "cleanup", O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,
-                   0600);
+   int fd =
+       openat(storage->dir_fd, "cleanup", O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0)
    {
       OPENSSL_cleanse(encoded, sizeof(encoded));
@@ -854,8 +854,7 @@ static int cleanup_target_matches_disk(kb_management_cert_storage_t *storage,
 {
    cleanup_record_t derived = {0};
    kb_management_cert_storage_result_t rc = cleanup_target_from_disk(
-       storage, &derived, cleanup->target[index].kind,
-       cleanup->target[index].operation, 0);
+       storage, &derived, cleanup->target[index].kind, cleanup->target[index].operation, 0);
    int matches = rc == KB_MANAGEMENT_STORAGE_OK && derived.target_count == 1 &&
                  derived.target[0].kind == cleanup->target[index].kind &&
                  !strcmp(derived.target[0].operation, cleanup->target[index].operation) &&
@@ -903,9 +902,10 @@ kb_management_cert_storage_cleanup_prepare_promotion(kb_management_cert_storage_
    }
    memcpy(future.operation_id, pending.operation_id, 65);
    memcpy(future.public_bundle_digest, replacement.public_bundle_digest, 32);
-   if (kb_management_cert_manifest_encode(&future, future_bytes, sizeof(future_bytes), &future_len) ||
-       EVP_Digest(future_bytes, future_len, cleanup.anchor_digest, &digest_len, EVP_sha256(), NULL) !=
-           1 ||
+   if (kb_management_cert_manifest_encode(&future, future_bytes, sizeof(future_bytes),
+                                          &future_len) ||
+       EVP_Digest(future_bytes, future_len, cleanup.anchor_digest, &digest_len, EVP_sha256(),
+                  NULL) != 1 ||
        digest_len != 32)
    {
       rc = KB_MANAGEMENT_STORAGE_UNAVAILABLE;
@@ -925,14 +925,14 @@ kb_management_cert_storage_cleanup_prepare_promotion(kb_management_cert_storage_
    if (existing_rc == KB_MANAGEMENT_STORAGE_OK && current_present &&
        !strcmp(current.operation_id, pending.operation_id))
    {
-      int replay = existing_cleanup.mode == CLEANUP_PROMOTION &&
-                   existing_cleanup.anchor_present &&
-                   !strcmp(existing_cleanup.anchor, pending.operation_id) &&
-                   CRYPTO_memcmp(existing_cleanup.anchor_digest, cleanup.anchor_digest, 32) == 0 &&
-                   (existing_cleanup.target_count == 1 || existing_cleanup.target_count == 2) &&
-                   existing_cleanup.target[existing_cleanup.target_count - 1].kind == CLEANUP_INTENT &&
-                   !strcmp(existing_cleanup.target[existing_cleanup.target_count - 1].operation,
-                           pending.operation_id);
+      int replay =
+          existing_cleanup.mode == CLEANUP_PROMOTION && existing_cleanup.anchor_present &&
+          !strcmp(existing_cleanup.anchor, pending.operation_id) &&
+          CRYPTO_memcmp(existing_cleanup.anchor_digest, cleanup.anchor_digest, 32) == 0 &&
+          (existing_cleanup.target_count == 1 || existing_cleanup.target_count == 2) &&
+          existing_cleanup.target[existing_cleanup.target_count - 1].kind == CLEANUP_INTENT &&
+          !strcmp(existing_cleanup.target[existing_cleanup.target_count - 1].operation,
+                  pending.operation_id);
       for (unsigned i = 0; replay && i < existing_cleanup.target_count; ++i)
          replay = cleanup_target_matches_disk(storage, &existing_cleanup, i);
       if (replay && existing_cleanup.target_count == 2)
@@ -943,9 +943,8 @@ kb_management_cert_storage_cleanup_prepare_promotion(kb_management_cert_storage_
          replay = existing_cleanup.target[0].kind == CLEANUP_CANDIDATE &&
                   strcmp(existing_cleanup.target[0].operation, pending.operation_id) &&
                   kb_management_cert_storage_read(
-                      storage, "candidate", existing_cleanup.target[0].operation,
-                      predecessor_bytes, sizeof(predecessor_bytes), &predecessor_len) ==
-                      KB_MANAGEMENT_STORAGE_OK &&
+                      storage, "candidate", existing_cleanup.target[0].operation, predecessor_bytes,
+                      sizeof(predecessor_bytes), &predecessor_len) == KB_MANAGEMENT_STORAGE_OK &&
                   kb_management_cert_candidate_decode(predecessor_bytes, predecessor_len,
                                                       &predecessor) == 0 &&
                   predecessor.generation != INT64_MAX &&
@@ -1006,8 +1005,7 @@ kb_management_cert_storage_cleanup_prepare_terminal(kb_management_cert_storage_t
    cleanup_record_t cleanup = {.mode = CLEANUP_TERMINAL};
    kb_management_cert_manifest_t current = {0};
    int current_present = 0;
-   rc = read_manifest_name(storage, "current", &current, &current_present,
-                           cleanup.anchor_digest);
+   rc = read_manifest_name(storage, "current", &current, &current_present, cleanup.anchor_digest);
    if (rc == KB_MANAGEMENT_STORAGE_MISSING)
       rc = KB_MANAGEMENT_STORAGE_OK;
    if (rc != KB_MANAGEMENT_STORAGE_OK)
@@ -1035,7 +1033,7 @@ terminal_done:
 
 kb_management_cert_storage_result_t
 kb_management_cert_storage_cleanup_prepare_intent(kb_management_cert_storage_t *storage,
-                                                   const void *pending_bytes, size_t pending_len)
+                                                  const void *pending_bytes, size_t pending_len)
 {
    if (!storage || storage->dir_fd < 0 || !pending_bytes || !pending_len || pending_len > 1024)
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
@@ -1048,8 +1046,8 @@ kb_management_cert_storage_cleanup_prepare_intent(kb_management_cert_storage_t *
    memcpy(cleanup.target[0].digest, pending.intent_record_digest, 32);
    kb_management_cert_manifest_t current = {0};
    int current_present = 0;
-   kb_management_cert_storage_result_t rc = read_manifest_name(
-       storage, "current", &current, &current_present, cleanup.anchor_digest);
+   kb_management_cert_storage_result_t rc =
+       read_manifest_name(storage, "current", &current, &current_present, cleanup.anchor_digest);
    if (rc == KB_MANAGEMENT_STORAGE_MISSING)
       rc = KB_MANAGEMENT_STORAGE_OK;
    if (rc == KB_MANAGEMENT_STORAGE_OK)
@@ -1068,8 +1066,9 @@ kb_management_cert_storage_cleanup_prepare_intent(kb_management_cert_storage_t *
    return rc;
 }
 
-static kb_management_cert_storage_result_t cleanup_clear_exact(
-    kb_management_cert_storage_t *storage, const uint8_t encoded[CLEANUP_RECORD_LEN])
+static kb_management_cert_storage_result_t
+cleanup_clear_exact(kb_management_cert_storage_t *storage,
+                    const uint8_t encoded[CLEANUP_RECORD_LEN])
 {
    int fd = openat(storage->dir_fd, "cleanup", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
@@ -1095,7 +1094,7 @@ static kb_management_cert_storage_result_t cleanup_clear_exact(
 
 kb_management_cert_storage_result_t
 kb_management_cert_storage_cleanup_finish_intent(kb_management_cert_storage_t *storage,
-                                                  const void *pending_bytes, size_t pending_len)
+                                                 const void *pending_bytes, size_t pending_len)
 {
    if (!storage || storage->dir_fd < 0 || !pending_bytes || !pending_len || pending_len > 1024)
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
@@ -1120,8 +1119,9 @@ kb_management_cert_storage_cleanup_finish_intent(kb_management_cert_storage_t *s
    return rc;
 }
 
-static kb_management_cert_storage_result_t cleanup_discard_target(
-    kb_management_cert_storage_t *storage, const cleanup_record_t *cleanup, unsigned index)
+static kb_management_cert_storage_result_t
+cleanup_discard_target(kb_management_cert_storage_t *storage, const cleanup_record_t *cleanup,
+                       unsigned index)
 {
    const char *kind = cleanup->target[index].kind == CLEANUP_INTENT ? "intent" : "candidate";
    char name[80];
@@ -1175,15 +1175,13 @@ static kb_management_cert_storage_result_t cleanup_discard_target(
    }
    unsigned digest_len = 0;
    uint8_t digest[32];
-   int exact = read_rc == 0 && len && valid_operation_record(
-                   kind, cleanup->target[index].operation, bytes, len) &&
-               EVP_Digest(bytes, len, digest, &digest_len, EVP_sha256(), NULL) == 1 &&
-               digest_len == 32 &&
-               CRYPTO_memcmp(digest, cleanup->target[index].digest, 32) == 0 &&
-               fstat(fd, &opened) == 0 &&
-               fstatat(storage->dir_fd, name, &named, AT_SYMLINK_NOFOLLOW) == 0 &&
-               S_ISREG(named.st_mode) && opened.st_dev == named.st_dev &&
-               opened.st_ino == named.st_ino;
+   int exact =
+       read_rc == 0 && len &&
+       valid_operation_record(kind, cleanup->target[index].operation, bytes, len) &&
+       EVP_Digest(bytes, len, digest, &digest_len, EVP_sha256(), NULL) == 1 && digest_len == 32 &&
+       CRYPTO_memcmp(digest, cleanup->target[index].digest, 32) == 0 && fstat(fd, &opened) == 0 &&
+       fstatat(storage->dir_fd, name, &named, AT_SYMLINK_NOFOLLOW) == 0 && S_ISREG(named.st_mode) &&
+       opened.st_dev == named.st_dev && opened.st_ino == named.st_ino;
    OPENSSL_cleanse(bytes, sizeof(bytes));
    OPENSSL_cleanse(digest, sizeof(digest));
    if (close(fd) != 0)
@@ -1218,9 +1216,8 @@ kb_management_cert_storage_cleanup_apply(kb_management_cert_storage_t *storage)
    if (rc == KB_MANAGEMENT_STORAGE_MISSING)
       rc = KB_MANAGEMENT_STORAGE_OK;
    if (rc != KB_MANAGEMENT_STORAGE_OK || current_present != cleanup.anchor_present ||
-       (current_present &&
-        (strcmp(current.operation_id, cleanup.anchor) ||
-         CRYPTO_memcmp(current_digest, cleanup.anchor_digest, 32))))
+       (current_present && (strcmp(current.operation_id, cleanup.anchor) ||
+                            CRYPTO_memcmp(current_digest, cleanup.anchor_digest, 32))))
    {
       OPENSSL_cleanse(&current, sizeof(current));
       return rc == KB_MANAGEMENT_STORAGE_OK ? KB_MANAGEMENT_STORAGE_INTEGRITY : rc;

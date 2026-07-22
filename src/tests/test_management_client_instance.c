@@ -37,7 +37,7 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *sql, aimee_pg_prepare_
    (void)len;
    assert(c == &mock_stmt);
    mock_stmt.mode = strstr(sql, "grant_preflight") ? MOCK_PREFLIGHT
-                    : strstr(sql, "begin_initial")   ? MOCK_PENDING_INITIAL
+                    : strstr(sql, "begin_initial") ? MOCK_PENDING_INITIAL
                     : strstr(sql, "begin_renewal") ? MOCK_PENDING_RENEW
                     : strstr(sql, "activate")      ? MOCK_ACTIVE
                     : strstr(sql, "snapshot")      ? MOCK_SNAPSHOT
@@ -93,9 +93,8 @@ int aimee_pg_column_count(aimee_pg_stmt_t *st)
 {
    if (mock_bad_shape)
       return 1;
-   return st->mode == MOCK_PREFLIGHT
-              ? 3
-              : st->mode == MOCK_MAINTENANCE
+   return st->mode == MOCK_PREFLIGHT ? 3
+          : st->mode == MOCK_MAINTENANCE
               ? 3
               : (st->mode == MOCK_SNAPSHOT ? 22 : (st->mode == MOCK_ACTIVE ? 24 : 18));
 }
@@ -317,8 +316,7 @@ static void test_runtime_facades(void)
    fill_id(initial.expected_lineage_id, 32);
    initial.binding = binding;
    db2_management_client_grant_preflight_request_t preflight = {0};
-   memcpy(preflight.installation_id, initial.installation_id,
-          sizeof(preflight.installation_id));
+   memcpy(preflight.installation_id, initial.installation_id, sizeof(preflight.installation_id));
    preflight.binding = binding;
    db2_management_client_grant_preflight_t grant;
    assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
