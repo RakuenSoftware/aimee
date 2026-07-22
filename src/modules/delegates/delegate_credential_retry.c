@@ -1,11 +1,11 @@
 /* delegate_credential_retry.c: same-request retry within a credential pool. */
 
-#include "delegate_credential_retry.h"
+#include <aimee/delegates/delegate_credential_retry.h>
 
 #include "agent_config.h" /* agent_set_request_codex_creds, *_token_present */
 #include "agent_exec.h"
 #include "config.h" /* config_output_dir */
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "vault_service.h" /* vault_service_inject_api_key, VAULT_*_CRED */
 
 #include <openssl/crypto.h> /* OPENSSL_cleanse */

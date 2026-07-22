@@ -37,19 +37,17 @@ Provider wire parsing remains owned by `translation`; final-answer assembly rema
 `response-composition`; server IR rollout, transport, and shadow controls remain outside this bounded
 delegate capability. The live bridge consumer is `src/posix/agent_ir_parse.c`.
 
-### Public-header transition
+### Public-header contract
 
-The canonical rescue header is intentionally not enrolled in `module.yaml.public_headers` yet. That field
-activates the repository's all-or-nothing public-header layout contract, while delegates still has flat
-headers consumed through `-Imodules/delegates`. During this transition,
-`scripts/check_module_source_ownership.py`, its mutation suite, and the refactor public-header baseline
-enforce the rescue header's canonical path and include spelling.
+All 19 delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer
+uses the `<aimee/delegates/...>` namespace. `src/modules/delegates/module.yaml` declares that complete
+surface in `public_headers`; `scripts/check_module_header_layout.py` rejects flat shadows, bare includes,
+missing canonical headers, or restored flat Make/CMake include roots.
 
-This debt is owned by the required-core `delegates` module and tracked by the
-`core-substrate-and-source-module-boundaries.md` proposal. Its close condition is atomic:
-move every remaining flat delegate header to `src/modules/delegates/include/aimee/delegates/`, canonicalize
-all external includes, remove the flat Make/CMake include roots, and then declare the complete public-header
-set in the descriptor. A partial descriptor claim is not permitted.
+The required-core `delegates` module owns this public surface. Adding, removing, or renaming a header must
+update the descriptor and refactor public-header baseline in the same change. There is no compatibility
+forwarding layer and no second supported flat API. The separately tracked roundtable/delegates header cycle
+is a dependency-design concern, not an exception to canonical include ownership.
 
 ## Dependencies and consumers
 

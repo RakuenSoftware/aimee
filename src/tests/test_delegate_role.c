@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "agent_types.h"
 #include <stdlib.h>   /* mkdtemp */
 #include <sys/stat.h> /* mkdir */

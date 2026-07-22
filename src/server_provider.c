@@ -15,9 +15,9 @@
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
 #include "config.h"      /* config_t / config_load for api.status, api.enable */
-#include "delegate_backend_docker.h"
-#include "delegate_backend_local.h"
-#include "delegate_backend_ssh.h"
+#include <aimee/delegates/delegate_backend_docker.h>
+#include <aimee/delegates/delegate_backend_local.h>
+#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
@@ -35,7 +35,7 @@
 #include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_config.h"
 #include "provider_catalog.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"

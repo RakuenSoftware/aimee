@@ -26,10 +26,10 @@
 #include "agent_types.h"
 #include "cJSON.h"
 #include "coord_jobs.h"
-#include "delegate_backend.h" /* run verify steps inside the delegate sandbox */
-#include "delegate_role.h"
-#include "delegate_sandbox_image.h" /* resolve the work item's sandbox image */
-#include "sandbox_learned.h"        /* learn verify's apt installs -> pre-bake next image */
+#include <aimee/delegates/delegate_backend.h> /* run verify steps inside the delegate sandbox */
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_sandbox_image.h> /* resolve the work item's sandbox image */
+#include "sandbox_learned.h" /* learn verify's apt installs -> pre-bake next image */
 #include "persona.h"
 #include "provider_catalog.h"
 #include "git_verify.h"

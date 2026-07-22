@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "delegate_backend_ssh.h"
+#include <aimee/delegates/delegate_backend_ssh.h>
 
 /* Forward decl — definition lives below the first cluster of tests
  * that use it, with the rest of the fixture-using cases. */

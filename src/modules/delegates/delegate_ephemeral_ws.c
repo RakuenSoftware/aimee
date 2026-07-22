@@ -8,7 +8,7 @@
  * `delegate-ws` symlink or a leaf symlink) is refused rather than followed —
  * closing the ancestor-symlink escape a lexical prefix check cannot prevent. */
 #define _GNU_SOURCE
-#include "delegate_ephemeral_ws.h"
+#include <aimee/delegates/delegate_ephemeral_ws.h>
 
 #include "aimee_home.h"
 #include "log.h"

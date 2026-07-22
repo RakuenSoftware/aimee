@@ -9,7 +9,7 @@
 #include "agent_protocol.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "cJSON.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_xml_fallback.h>
 
 static void free_parsed(parsed_response_t *pr)
 {

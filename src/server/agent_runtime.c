@@ -4,7 +4,7 @@
 #include "aimee_errors.h"
 #include "db1.h"
 #include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include <aimee/skills/skill_review.h>
 #include "provider_catalog.h"
 #include "db2/agent_hints.h"
@@ -20,7 +20,7 @@
 #include "agent_tools.h"
 #include "agent_tunnel.h"
 #include "config.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
 #include "model_sampling.h"

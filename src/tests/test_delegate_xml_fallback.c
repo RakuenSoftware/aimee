@@ -14,7 +14,7 @@
 #include "aimee.h"
 #include "agent_protocol.h"
 #include "cJSON.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_xml_fallback.h>
 
 /* The parser references the tool registry only on its bare-JSON/bracket rescue
  * paths (gating unknown tool names). These tests exercise the explicit

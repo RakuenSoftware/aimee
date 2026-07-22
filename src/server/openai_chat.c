@@ -35,8 +35,8 @@
 #include "economizer.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
-#include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
-#include "delegate_driver.h" /* single provider step for the Codex proxy */
+#include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
