@@ -1553,6 +1553,7 @@ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_hand
                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
                                $(OBJDIR)/tests/support/vault_service_stub.o \
+                               $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                                $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
                                $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

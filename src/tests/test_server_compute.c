@@ -1350,6 +1350,7 @@ static void test_delegate_background_handler(void)
    cJSON_AddStringToObject(req, "role", "reviewer");
    cJSON_AddStringToObject(req, "persona", "engineer");
    cJSON_AddStringToObject(req, "prompt", "run the background delegate test prompt");
+   cJSON_AddStringToObject(req, "via", "codex");
    cJSON_AddTrueToObject(req, "background");
 
    assert(handle_delegate(ctx, conn, req) == 0);
@@ -1367,6 +1368,7 @@ static void test_delegate_background_handler(void)
    assert(strcmp(job.status, "pending") == 0);
    assert(strcmp(job.role, "review") == 0);
    assert(strcmp(job.prompt, "run the background delegate test prompt") == 0);
+   assert(strcmp(job.agent_name, "codex") == 0);
 
    assert(g_submitted_fn == delegate_worker);
    assert(g_submitted_arg != NULL);
