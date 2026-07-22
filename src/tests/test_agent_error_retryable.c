@@ -34,10 +34,18 @@ int main(void)
 
    /* A hard credential/subscription failure must remain a hard health signal
     * for that agent while still allowing an unpinned delegation to try a peer. */
-   assert(agent_rc_should_try_another(-1, "HTTP 401 unauthorized") == 1);
+   assert(agent_rc_should_try_another(-1, "HTTP 401 invalid_api_key") == 1);
    assert(agent_rc_should_try_another(-1, "HTTP 403 authentication failed") == 1);
-   assert(agent_rc_should_try_another(-1, "usage limit for this billing cycle") == 1);
+   assert(agent_rc_should_try_another(-1, "reached your usage limit for this billing cycle") == 1);
    assert(agent_rc_should_try_another(-1, "provider quota exhausted") == 1);
+   assert(agent_rc_should_try_another(-1, NULL) == 0);
+   assert(agent_rc_should_try_another(AGENT_RC_AT_LIMIT, NULL) == 1);
+   /* Bare infrastructure auth statuses and benign prose must not fan out across
+    * the provider fleet. */
+   assert(agent_rc_should_try_another(-1, "HTTP 401 unauthorized") == 0);
+   assert(agent_rc_should_try_another(-1, "HTTP 403 from ingress policy") == 0);
+   assert(agent_rc_should_try_another(-1, "no usage limit configured") == 0);
+   assert(agent_rc_should_try_another(-1, "job quota exceeded") == 0);
    assert(agent_rc_should_try_another(-1, "HTTP 400 invalid request") == 0);
 
    /* Saturation is NOT a retryable provider error. agent_dispatch_one signals it

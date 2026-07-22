@@ -33,6 +33,25 @@ int agent_error_is_retryable(const char *error)
           strstr(error, "no content in final response") != NULL;
 }
 
+/* Hard provider failures that should retire the attempted agent for health
+ * purposes but allow an unpinned route to continue with another eligible peer.
+ * Match explicit credential/subscription diagnostics, not bare 401/403 status:
+ * those statuses can also come from proxies, WAFs, or route authorization. */
+static int agent_error_allows_peer_substitution(const char *error)
+{
+   if (!error || !error[0])
+      return 0;
+   return strstr(error, "authentication failed") != NULL ||
+          strstr(error, "invalid_api_key") != NULL || strstr(error, "invalid API key") != NULL ||
+          strstr(error, "incorrect API key") != NULL ||
+          strstr(error, "reached your usage limit") != NULL ||
+          strstr(error, "usage limit for this billing cycle") != NULL ||
+          strstr(error, "insufficient_quota") != NULL || strstr(error, "quota exhausted") != NULL ||
+          strstr(error, "exceeded your current quota") != NULL ||
+          strstr(error, "subscription has lapsed") != NULL ||
+          strstr(error, "payment required") != NULL;
+}
+
 /* Should a fallback/retry caller try a DIFFERENT agent for this result? Yes for a
  * saturation refusal (AGENT_RC_AT_LIMIT — the agent is momentarily at its
  * max_parallel ceiling, so a peer may be free) OR a retryable provider error. A
@@ -47,14 +66,11 @@ int agent_rc_should_try_another(int rc, const char *error)
    if (rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error))
       return 1;
 
-   /* Authentication and subscription failures are hard failures for the
-    * attempted agent, but not for an unpinned delegation. Try another enabled,
-    * role-eligible peer now; provider health still records the failed agent as
-    * a hard error, so it is not selected repeatedly during the same outage. */
-   return error &&
-          (strstr(error, "HTTP 401") != NULL || strstr(error, "HTTP 403") != NULL ||
-           strstr(error, "authentication failed") != NULL || strstr(error, "usage limit") != NULL ||
-           strstr(error, "billing cycle") != NULL || strstr(error, "quota") != NULL);
+   /* This helper is consulted only by generic routing. Explicit --via pinning
+    * disables every other agent before dispatch, so it has no substitutable
+    * peer. agent_dispatch_one records this class as a hard health error because
+    * agent_error_is_retryable deliberately remains false for it. */
+   return agent_error_allows_peer_substitution(error);
 }
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)
