@@ -96,11 +96,20 @@ extern "C"
                                   const char *authorization, char *resp_out, size_t resp_cap,
                                   int *status_out);
 
-   int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
-                                  const char *client_cert_pem, const char *client_key_pem,
-                                  const char *method, const char *path, const char *body,
-                                  const char *authorization, char *resp_out, size_t resp_cap,
-                                  int *status_out);
+   typedef struct kb_tls_client_conn kb_tls_client_conn_t;
+
+   /* Reusable one-in-flight HTTP/1.1 client primitive. request() reads one
+    * strict Content-Length-framed response exactly and reports whether the
+    * connection remains reusable. */
+   kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port,
+                                                 const char *ca_cert_pem,
+                                                 const char *client_cert_pem,
+                                                 const char *client_key_pem);
+   int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
+                                  const char *body, const char *authorization, int close_after,
+                                  char *resp_out, size_t resp_cap, int *status_out,
+                                  int *reusable_out);
+   void kb_tls_client_conn_close(kb_tls_client_conn_t *conn);
 
    /* TOFU bootstrap: fetch the kb's CA certificate from GET /v1/enroll/ca and
     * trust it ONLY if its sha256 fingerprint equals `expected_fp_hex` (the value
