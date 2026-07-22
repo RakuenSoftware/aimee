@@ -23,10 +23,17 @@ type Verifier interface {
 
 type CommandVerifier struct{ Command []string }
 
+func defaultVerifyCommand() []string {
+	// `git verify` is a key=value-style infrastructure command. Its machine
+	// format is selected with format=json; `--json` is parsed as a value-taking
+	// long flag and exits 2 before verification runs.
+	return []string{"aimee", "git", "verify", "format=json"}
+}
+
 func (v CommandVerifier) Verify(ctx context.Context, workdir string) error {
 	command := v.Command
 	if len(command) == 0 {
-		command = []string{"aimee", "git", "verify", "--json"}
+		command = defaultVerifyCommand()
 	}
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = workdir

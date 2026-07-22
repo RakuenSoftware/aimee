@@ -11,6 +11,13 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+func TestDefaultVerifyCommandUsesGitVerifyKeyValueSyntax(t *testing.T) {
+	got := strings.Join(defaultVerifyCommand(), " ")
+	if got != "aimee git verify format=json" {
+		t.Fatalf("default verifier command = %q, want supported git verify syntax", got)
+	}
+}
+
 type temporaryFailureAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest
