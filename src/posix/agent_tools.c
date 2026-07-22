@@ -928,16 +928,9 @@ char *tool_bash(const char *command, int timeout_ms)
       }
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"fork failed\",\"exit_code\":-1}");
    }
-   /* command-aware condensation (P1b): when tool-output condensation is on (economizer
-    * safe/aggressive), `rawcap` (the MAXIMUM we'll capture) rises to the 2 MB ceiling so
-    * tool_condense sees the FULL output (the old 32 KB read cap truncated the input before the
-    * lever could condense + spill it). Default-off keeps the 32 KB cap — byte-identical. Per-call
-    * config load, reused for both the cap and the condense step below (previously the load happened
-    * after allocation, so it could not influence the cap). Buffers start SMALL and grow toward
-    * rawcap only if the output actually overflows, so an `echo hi` costs ~32 KB, not 2 MB. */
-   config_t tc_cfg;
-   int tc_on = (config_load(&tc_cfg) == 0 && tool_condense_enabled(&tc_cfg));
-   size_t rawcap = tc_on ? (size_t)TOOL_CONDENSE_CEILING : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
+   /* Capture the established bounded raw result. Economizer-owned condensation and
+    * post-capture compression are deliberately absent from the production path. */
+   size_t rawcap = (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
    size_t out_cap =
        (rawcap < AGENT_TOOL_OUTPUT_RAW_MAX) ? rawcap : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
    size_t err_cap = out_cap;
@@ -1088,47 +1081,17 @@ char *tool_bash(const char *command, int timeout_ms)
    out_buf[out_len] = '\0';
    err_buf[err_len] = '\0';
 
-   /* Command-aware condensation (economizer tool condensation, safe/aggressive): for a RECOGNIZED
-    * command, deterministically condense the output (test failures kept, passes elided)
-    * and spill the full raw so the delegate can read it back. Fail-open: any miss/decline
-    * returns NULL and we fall through to the size-based agent_compress_tool_result. */
-   char *cond_out = NULL, *cond_err = NULL;
-   if (tc_on) /* reuse the config + gate resolved once at buffer-alloc (P1b) */
-   {
-      char spill_dir[3072];
-      const char *home = aimee_home(); /* captured once; not called again before use */
-      if (home && home[0] &&
-          snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) < (int)sizeof spill_dir)
-      {
-         (void)mkdir(spill_dir, 0700); /* idempotent; 0700 per-user */
-         tc_stats_t st;
-         cond_out = tool_condense_apply(&tc_cfg, command, exit_code, out_buf, spill_dir, &st);
-         if (cond_out)
-            aimee_log(LOG_INFO, "tool_condense", "bash stdout condensed %ld->%ld (%s)",
-                      st.raw_bytes, st.final_bytes, st.family);
-         cond_err = tool_condense_apply(&tc_cfg, command, exit_code, err_buf, spill_dir, NULL);
-      }
-   }
-   /* Compress output to fit token budget (#4) — the command-aware condensed form when we
-    * produced one, else the size-based fallback. */
-   char *compressed_out =
-       cond_out ? cond_out : agent_compress_tool_result(out_buf, out_len, "bash");
-   char *compressed_err =
-       cond_err ? cond_err : agent_compress_tool_result(err_buf, err_len, "bash");
-
    /* Build JSON result */
    cJSON *result = cJSON_CreateObject();
-   cJSON_AddStringToObject(result, "stdout", compressed_out);
+   cJSON_AddStringToObject(result, "stdout", out_buf);
    if (cancelled)
       cJSON_AddStringToObject(result, "stderr", "delegate cancelled during bash execution");
    else
-      cJSON_AddStringToObject(result, "stderr", compressed_err);
+      cJSON_AddStringToObject(result, "stderr", err_buf);
    cJSON_AddNumberToObject(result, "exit_code", exit_code);
    char *json = cJSON_PrintUnformatted(result);
    cJSON_Delete(result);
 
-   free(compressed_out);
-   free(compressed_err);
    free(out_buf);
    free(err_buf);
    return json;

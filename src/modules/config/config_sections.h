@@ -22,7 +22,7 @@ void config_parse_memory_maintenance_section(config_t *cfg, cJSON *root);
 void config_parse_worktree_gc_section(config_t *cfg, cJSON *root);
 void config_parse_fold_section(config_t *cfg, cJSON *root);
 void config_parse_modules_section(config_t *cfg, cJSON *root);
-void config_parse_economizer_section(config_t *cfg, cJSON *root);
+int config_parse_economizer_section(config_t *cfg, cJSON *root);
 void config_parse_autonomy_section(config_t *cfg, cJSON *root);
 void config_parse_memory_section(config_t *cfg, cJSON *root);
 void config_parse_cross_verify_section(config_t *cfg, cJSON *root);

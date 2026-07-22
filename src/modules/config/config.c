@@ -378,9 +378,8 @@ static const config_schema_entry_t config_schema[] = {
     {"search", SCHEMA_OBJECT, 0},
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
-    {"modules", SCHEMA_OBJECT, 0}, /* memory/governance/delegates/workflows/economizer toggles */
-    {"economizer", SCHEMA_STRING,
-     0}, /* off|safe|aggressive (deprecated object form still parses) */
+    {"modules", SCHEMA_OBJECT, 0},    /* memory/governance/delegates/workflows/economizer toggles */
+    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|proof_gated} */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"prompt_tier", SCHEMA_STRING, 0},
@@ -611,11 +610,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   /* Context economizer: the SINGLE control. Default SAFE (lossless: Anthropic prompt
-    * caching + deterministic tool condensation + recall-restorable history fold on
-    * OpenAI). The concrete per-tier levers are resolved by econ_preset(); there is no
-    * per-lever config surface. See docs/features/economizer.md. */
-   cfg->economizer_tier = ECON_TIER_SAFE;
+   /* Context economizer defaults OFF. proof_gated freezes pristine provider bytes
+    * behind the signed-empty-registry fence; no legacy reduction lever is live. */
+   cfg->economizer_mode = ECON_MODE_OFF;
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
@@ -979,37 +976,28 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
       cfg->memory_rewrite_enabled = accel;
 }
 
-int econ_tier(const config_t *cfg)
+int econ_mode(const config_t *cfg)
 {
    if (!cfg)
-      return ECON_TIER_OFF;
-   /* modules.economizer:false is still an authoritative hard kill over the tier. */
+      return ECON_MODE_OFF;
+   /* modules.economizer:false is an authoritative hard kill. */
    if (cfg->module_economizer == 0)
-      return ECON_TIER_OFF;
-   return cfg->economizer_tier;
+      return ECON_MODE_OFF;
+   return cfg->economizer_mode;
 }
 
-const char *econ_tier_name(int tier)
+const char *econ_mode_name(int mode)
 {
-   switch (tier)
-   {
-   case ECON_TIER_OFF:
-      return "off";
-   case ECON_TIER_AGGRESSIVE:
-      return "aggressive";
-   case ECON_TIER_SAFE:
-   default:
-      return "safe";
-   }
+   return mode == ECON_MODE_PROOF_GATED ? "proof_gated" : "off";
 }
 
-int econ_tier_parse(const char *s)
+int econ_mode_parse(const char *s)
 {
-   if (s && (strcasecmp(s, "off") == 0 || strcasecmp(s, "0") == 0 || strcasecmp(s, "false") == 0))
-      return ECON_TIER_OFF;
-   if (s && (strcasecmp(s, "aggressive") == 0 || strcasecmp(s, "aggro") == 0))
-      return ECON_TIER_AGGRESSIVE;
-   return ECON_TIER_SAFE; /* default / "safe" / unknown -> lossless */
+   if (s && strcmp(s, "off") == 0)
+      return ECON_MODE_OFF;
+   if (s && strcmp(s, "proof_gated") == 0)
+      return ECON_MODE_PROOF_GATED;
+   return -1;
 }
 
 const char *guardrails_semantic_mode_name(int mode)
@@ -1043,8 +1031,8 @@ int guardrails_semantic_mode_parse(const char *s)
 
 int econ_reduction_master_on(const config_t *cfg)
 {
-   /* Any economization at all runs unless the tier is off. */
-   return econ_tier(cfg) != ECON_TIER_OFF;
+   (void)cfg;
+   return 0;
 }
 
 int config_module_enabled(int config_tristate, int env_default)
@@ -1059,9 +1047,8 @@ int config_module_enabled(int config_tristate, int env_default)
 
 int econ_gateway_mutate_on(const config_t *cfg)
 {
-   /* The live-primary mutator is an AGGRESSIVE-tier action. (The call site additionally
-    * restricts it to OpenAI-family egress -- it never runs against Anthropic.) */
-   return econ_tier(cfg) == ECON_TIER_AGGRESSIVE ? 1 : 0;
+   (void)cfg;
+   return 0;
 }
 
 void econ_preset(const config_t *cfg, econ_preset_t *out)
@@ -1069,22 +1056,7 @@ void econ_preset(const config_t *cfg, econ_preset_t *out)
    if (!out)
       return;
    memset(out, 0, sizeof *out);
-   int tier = econ_tier(cfg);
-   if (tier == ECON_TIER_OFF)
-      return; /* verbatim passthrough: every lever off */
-   /* SAFE and AGGRESSIVE both fold history (recall-restorable, freeze-guarded ->
-    * cache-safe on Anthropic) and run deterministic tool-output condensation. */
-   out->history_fold = 1;
-   out->command_filter = 1;
-   out->freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the cache write */
-   out->gateway_session_disable_ttl_ms = 3600000; /* 1h circuit-breaker window */
-   if (tier == ECON_TIER_AGGRESSIVE)
-   {
-      /* Lossy tool-body compression + the live inbound /v1 mutation seam. Both are
-       * OpenAI-family only at their call sites -- Anthropic context is never mutated. */
-      out->compress = 1;
-      out->gateway_seam = 1;
-   }
+   (void)cfg;
 }
 
 static int config_snapshot_live(void);
@@ -1579,7 +1551,11 @@ int config_load_file(config_t *cfg)
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
    config_parse_modules_section(cfg, root);
-   config_parse_economizer_section(cfg, root);
+   if (config_parse_economizer_section(cfg, root) != 0)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
    config_parse_autonomy_section(cfg, root);
 
    config_parse_memory_section(cfg, root);

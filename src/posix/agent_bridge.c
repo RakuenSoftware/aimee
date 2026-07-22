@@ -1209,8 +1209,49 @@ int agent_http_get_stream(const char *url, const char *extra_headers, agent_http
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {
-   return agent_http_post_content_type(url, auth_header, "Content-Type: application/json", body,
-                                       response_buf, timeout_ms, extra_headers);
+   return agent_http_post_bytes(url, auth_header, body, body ? strlen(body) : 0, response_buf,
+                                timeout_ms, extra_headers);
+}
+
+int agent_http_post_bytes(const char *url, const char *auth_header, const void *body,
+                          size_t body_len, char **response_buf, int timeout_ms,
+                          const char *extra_headers)
+{
+   *response_buf = NULL;
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   aimee_log(LOG_DEBUG, "agent_http", "connecting to %s:%d (timeout %dms)", pu.host, pu.port,
+             timeout_ms);
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+   {
+      aimee_log(LOG_ERROR, "agent_http", "TCP connect failed: %s:%d", pu.host, pu.port);
+      return -1;
+   }
+
+   aimee_log(LOG_DEBUG, "agent_http", "connected; sending request to %s:%d (%zu body bytes)",
+             pu.host, pu.port, body_len);
+   if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
+                    extra_headers, "aimee/1.0", body, body_len) < 0)
+   {
+      aimee_log(LOG_ERROR, "agent_http", "send_request failed: %s:%d", pu.host, pu.port);
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status = http_read_response(&conn, response_buf, &resp_len);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+      aimee_log(LOG_ERROR, "agent_http", "read_response failed: %s:%d", pu.host, pu.port);
+   }
+   return status;
 }
 
 int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
@@ -1335,6 +1376,14 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
                            agent_http_stream_cb callback, void *userdata, int timeout_ms,
                            const char *extra_headers)
 {
+   return agent_http_post_stream_bytes(url, auth_header, body, body ? strlen(body) : 0, callback,
+                                       userdata, timeout_ms, extra_headers);
+}
+
+int agent_http_post_stream_bytes(const char *url, const char *auth_header, const void *body,
+                                 size_t body_len, agent_http_stream_cb callback, void *userdata,
+                                 int timeout_ms, const char *extra_headers)
+{
    parsed_url_t pu;
    if (parse_url(url, &pu) < 0)
       return -1;
@@ -1344,7 +1393,7 @@ int agent_http_post_stream(const char *url, const char *auth_header, const char 
       return -1;
 
    if (send_request(&conn, "POST", &pu, "Content-Type: application/json", auth_header,
-                    extra_headers, "aimee/1.0", body, body ? strlen(body) : 0) < 0)
+                    extra_headers, "aimee/1.0", body, body_len) < 0)
    {
       conn_close(&conn);
       return -1;

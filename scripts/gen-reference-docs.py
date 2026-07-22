@@ -551,7 +551,10 @@ def render_config(fields, sections, flat):
 # ENV_DESC is surfaced under "Undocumented" so a new var can never silently slip
 # the reference — keeping this gate honest is the whole point.
 
-ENV_RE = re.compile(r'getenv\(\s*"(AIMEE_[A-Z0-9_]+)"')
+# Hardened offline binaries copy environment values before clearenv(); treat
+# that local accessor exactly like getenv() so their deployment contract is
+# not silently omitted from generated reference docs.
+ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 
 # group order controls section order in the doc
 ENV_GROUP_ORDER = [
