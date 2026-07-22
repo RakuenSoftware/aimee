@@ -11,6 +11,8 @@ extern "C"
 
    typedef struct econ_provenance econ_provenance_t;
 
+#define ECON_PROVENANCE_MAX_SOURCE (16u * 1024u * 1024u)
+
    typedef struct
    {
       uint64_t tenant_id;
@@ -26,7 +28,8 @@ extern "C"
    int econ_provenance_issue_local(const econ_provenance_binding_t *binding, const void *source,
                                    size_t source_len, econ_provenance_t **out);
 
-   /* Atomically consume once. The binding and exact source bytes must match. */
+   /* Atomically consume once. The binding and exact source bytes must match.
+    * Destroy only after all concurrent consumers have joined. */
    int econ_provenance_consume(econ_provenance_t *cap, const econ_provenance_binding_t *expected,
                                const void *source, size_t source_len);
    void econ_provenance_destroy(econ_provenance_t *cap);

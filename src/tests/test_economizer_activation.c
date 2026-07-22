@@ -8,7 +8,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
+
+static void sleep_ms(long milliseconds)
+{
+   struct timespec delay = {.tv_sec = milliseconds / 1000,
+                            .tv_nsec = (milliseconds % 1000) * 1000000L};
+   while (nanosleep(&delay, &delay) != 0)
+      ;
+}
 
 static void test_json_compaction_preserves_non_whitespace_bytes(void)
 {
@@ -135,6 +143,9 @@ static void test_provenance_is_bound_and_one_shot(void)
    assert(econ_provenance_consume(cap, &binding, "{}", 2) == -1);
    assert(econ_provenance_consume(cap, &binding, source, strlen(source)) == 0);
    econ_provenance_destroy(cap);
+
+   assert(econ_provenance_issue_local(&binding, source, ECON_PROVENANCE_MAX_SOURCE + 1u, &cap) ==
+          -1);
 }
 
 typedef struct
@@ -176,8 +187,8 @@ static void test_first_write_lease_linearizes_invalidation(void)
    pthread_t thread;
    assert(pthread_create(&thread, NULL, replace_thread, &writer) == 0);
    while (!atomic_load(&writer.started))
-      usleep(1000);
-   usleep(20000);
+      sleep_ms(1);
+   sleep_ms(20);
    assert(atomic_load(&writer.finished) == 0);
    econ_dispatch_lease_end(&lease);
    pthread_join(thread, NULL);

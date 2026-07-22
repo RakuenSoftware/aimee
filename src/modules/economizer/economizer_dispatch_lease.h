@@ -34,6 +34,7 @@ extern "C"
 
    int econ_dispatch_state_create(const econ_dispatch_facts_t *initial,
                                   econ_dispatch_state_t **out);
+   /* Destroy only after all replacement callers and read leases have joined. */
    void econ_dispatch_state_destroy(econ_dispatch_state_t *state);
 
    /* Replacement takes the write lock. Generation rollback and identity change

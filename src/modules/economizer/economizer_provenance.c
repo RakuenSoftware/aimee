@@ -44,7 +44,8 @@ int econ_provenance_issue_local(const econ_provenance_binding_t *binding, const 
    if (!out)
       return -1;
    *out = NULL;
-   if (!binding_valid(binding) || (!source && source_len))
+   if (!binding_valid(binding) || (!source && source_len) ||
+       source_len > ECON_PROVENANCE_MAX_SOURCE)
       return -1;
    econ_provenance_t *cap = calloc(1, sizeof(*cap));
    if (!cap)
@@ -65,7 +66,8 @@ int econ_provenance_consume(econ_provenance_t *cap, const econ_provenance_bindin
                             const void *source, size_t source_len)
 {
    if (!cap || !binding_valid(expected) || (!source && source_len) ||
-       !binding_equal(&cap->binding, expected) || cap->source_len != source_len)
+       source_len > ECON_PROVENANCE_MAX_SOURCE || !binding_equal(&cap->binding, expected) ||
+       cap->source_len != source_len)
       return -1;
    unsigned char digest[32];
    if (digest_bytes(source, source_len, digest) != 0 ||
