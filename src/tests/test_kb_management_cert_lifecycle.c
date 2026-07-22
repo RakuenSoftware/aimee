@@ -185,6 +185,15 @@ static void test_management_leaf_profile(void)
    assert(!strcmp(verified.ca_issuer, verified.leaf_issuer));
    assert(verified.not_after_epoch - verified.not_before_epoch == 3600);
    assert(!memcmp(verified.leaf_spki_digest, material.csr_spki_digest, 32));
+   char appended[KB_PKI_CERT_PEM_MAX * 2];
+   assert(snprintf(appended, sizeof(appended), "%sjunk", leaf) > 0);
+   assert(kb_management_cert_leaf_verify(&material, appended, ca.cert_pem, &verified) != 0);
+   assert(zeroed(&verified, sizeof(verified)));
+   assert(snprintf(appended, sizeof(appended), "%s%s", leaf, leaf) > 0);
+   assert(kb_management_cert_leaf_verify(&material, appended, ca.cert_pem, &verified) != 0);
+   assert(snprintf(appended, sizeof(appended), "%sjunk", ca.cert_pem) > 0);
+   assert(kb_management_cert_leaf_verify(&material, leaf, appended, &verified) != 0);
+   assert(kb_management_cert_leaf_verify(&material, leaf, ca.cert_pem, &verified) == 0);
 
    uint8_t plain[KB_MANAGEMENT_CERT_PLAINTEXT_MAX];
    size_t plain_len = 0;
@@ -230,7 +239,80 @@ static void test_storage_rejects_oversize_and_fifo(void)
                                           &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(output_len == 0 && zeroed(output, sizeof(output)));
    assert(unlinkat(storage.dir_fd, fifo, 0) == 0);
+   assert(symlinkat("/dev/null", storage.dir_fd, fifo) == 0);
+   assert(kb_management_cert_storage_read(&storage, "intent", operation, output, sizeof(output),
+                                          &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, fifo, 0) == 0);
    close(storage.dir_fd);
+   assert(rmdir(path) == 0);
+}
+
+static void test_storage_open_and_protocol(void)
+{
+   char unsafe[] = "/tmp/aimee-p5b2c-open.XXXXXX";
+   assert(mkdtemp(unsafe));
+   kb_management_cert_storage_t rejected;
+   assert(kb_management_cert_storage_open(unsafe, &rejected) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(rmdir(unsafe) == 0);
+   if (geteuid() != 0)
+      return;
+
+   char path[] = "/root/aimee-p5b2c-storage.XXXXXX";
+   assert(mkdtemp(path));
+   assert(chmod(path, 0700) == 0);
+   char component_link[sizeof(path) + 8];
+   assert(snprintf(component_link, sizeof(component_link), "%s.link", path) > 0);
+   assert(symlink(path, component_link) == 0);
+   kb_management_cert_storage_t component_rejected;
+   assert(kb_management_cert_storage_open(component_link, &component_rejected) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlink(component_link) == 0);
+   kb_management_cert_storage_t storage, locked;
+   assert(kb_management_cert_storage_open(path, &storage) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_open(path, &locked) == KB_MANAGEMENT_STORAGE_CONFLICT);
+
+   char operation[65];
+   fill_hex(operation, 64, 'b');
+   const uint8_t record[] = {1, 2, 3, 4, 5};
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record,
+                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record,
+                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_OK);
+   const uint8_t different[] = {1, 2, 3, 4, 6};
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, different,
+                                           sizeof(different)) == KB_MANAGEMENT_STORAGE_CONFLICT);
+   uint8_t readback[32];
+   size_t readback_len = 0;
+   assert(kb_management_cert_storage_read(&storage, "candidate", operation, readback,
+                                          sizeof(readback), &readback_len) ==
+          KB_MANAGEMENT_STORAGE_OK);
+   assert(readback_len == sizeof(record) && !memcmp(readback, record, sizeof(record)));
+
+   const uint8_t manifest[] = {9, 8, 7, 6};
+   assert(kb_management_cert_storage_promote(&storage, manifest, sizeof(manifest)) ==
+          KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_current(&storage, readback, sizeof(readback),
+                                             &readback_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(readback_len == sizeof(manifest) && !memcmp(readback, manifest, sizeof(manifest)));
+
+   char planted_operation[65];
+   fill_hex(planted_operation, 64, 'c');
+   const char planted[] =
+       "candidate.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+   assert(symlinkat("/dev/null", storage.dir_fd, planted) == 0);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, record,
+                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, planted, 0) == 0);
+   assert(mkfifoat(storage.dir_fd, planted, 0600) == 0);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, record,
+                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, planted, 0) == 0);
+
+   assert(unlinkat(storage.dir_fd, "current", 0) == 0);
+   assert(unlinkat(storage.dir_fd,
+                   "candidate.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                   0) == 0);
+   kb_management_cert_storage_close(&storage);
    assert(rmdir(path) == 0);
 }
 
@@ -241,6 +323,7 @@ int main(void)
    test_key_and_csr();
    test_management_leaf_profile();
    test_storage_rejects_oversize_and_fifo();
+   test_storage_open_and_protocol();
    puts("test_kb_management_cert_lifecycle: ok");
    return 0;
 }

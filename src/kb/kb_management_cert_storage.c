@@ -38,6 +38,15 @@ static int checked_file(int fd)
           (st.st_mode & 0777) == 0600 && st.st_nlink == 1;
 }
 
+static kb_management_cert_storage_result_t open_error(int error, int missing_ok)
+{
+   if (missing_ok && error == ENOENT)
+      return KB_MANAGEMENT_STORAGE_MISSING;
+   if (error == ELOOP || error == ENOTDIR || error == EISDIR || error == ENXIO)
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+}
+
 static int open_absolute_dir(const char *path)
 {
    if (!path || path[0] != '/' || !path[1] || strnlen(path, PATH_MAX) >= PATH_MAX)
@@ -127,7 +136,7 @@ static kb_management_cert_storage_result_t read_name(kb_management_cert_storage_
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
-      return errno == ENOENT ? KB_MANAGEMENT_STORAGE_MISSING : KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+      return open_error(errno, 1);
    if (!checked_file(fd))
    {
       close(fd);
@@ -215,6 +224,64 @@ static int verify_contents(int fd, const void *bytes, size_t len)
    return same ? 0 : -1;
 }
 
+static kb_management_cert_storage_result_t replay_existing(
+    kb_management_cert_storage_t *storage, const char *name, const void *bytes, size_t len)
+{
+   int fd = openat(storage->dir_fd, name,
+                   O_RDWR | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+   if (fd < 0)
+      return open_error(errno, 0);
+   if (!checked_file(fd))
+   {
+      close(fd);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   }
+   uint8_t existing[KB_MANAGEMENT_CERT_CANDIDATE_MAX];
+   size_t used = 0;
+   while (used < sizeof(existing))
+   {
+      ssize_t n = read(fd, existing + used, sizeof(existing) - used);
+      if (n > 0)
+         used += (size_t)n;
+      else if (!n)
+         break;
+      else if (errno != EINTR)
+      {
+         OPENSSL_cleanse(existing, sizeof(existing));
+         close(fd);
+         return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+      }
+   }
+   uint8_t extra;
+   ssize_t more;
+   do
+      more = read(fd, &extra, 1);
+   while (more < 0 && errno == EINTR);
+   int exact = more == 0 && used == len && CRYPTO_memcmp(existing, bytes, len) == 0;
+   OPENSSL_cleanse(existing, sizeof(existing));
+   if (more < 0)
+   {
+      close(fd);
+      return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+   }
+   if (!used || more > 0)
+   {
+      close(fd);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   }
+   if (!exact)
+   {
+      close(fd);
+      return KB_MANAGEMENT_STORAGE_CONFLICT;
+   }
+   int sync_error = fdatasync(fd) != 0;
+   if (close(fd) != 0)
+      sync_error = 1;
+   if (!sync_error && fsync(storage->dir_fd) != 0)
+      sync_error = 1;
+   return sync_error ? KB_MANAGEMENT_STORAGE_UNAVAILABLE : KB_MANAGEMENT_STORAGE_OK;
+}
+
 kb_management_cert_storage_result_t kb_management_cert_storage_stage(
     kb_management_cert_storage_t *storage, const char *kind, const char operation[65],
     const void *bytes, size_t len)
@@ -225,18 +292,9 @@ kb_management_cert_storage_result_t kb_management_cert_storage_stage(
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0 && errno == EEXIST)
-   {
-      uint8_t existing[KB_MANAGEMENT_CERT_CANDIDATE_MAX];
-      size_t existing_len = 0;
-      kb_management_cert_storage_result_t rc =
-          read_name(storage, name, existing, sizeof(existing), &existing_len);
-      int same = rc == KB_MANAGEMENT_STORAGE_OK && existing_len == len &&
-                 CRYPTO_memcmp(existing, bytes, len) == 0;
-      OPENSSL_cleanse(existing, sizeof(existing));
-      return same ? KB_MANAGEMENT_STORAGE_OK : KB_MANAGEMENT_STORAGE_CONFLICT;
-   }
+      return replay_existing(storage, name, bytes, len);
    if (fd < 0)
-      return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+      return open_error(errno, 0);
    kb_management_cert_storage_result_t rc = KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    if (!checked_file(fd) || complete_write(fd, bytes, len) || fdatasync(fd))
       goto failed;

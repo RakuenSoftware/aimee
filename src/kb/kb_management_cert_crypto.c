@@ -256,6 +256,33 @@ static int x509_digest(X509 *cert, uint8_t out[32])
    return X509_digest(cert, EVP_sha256(), out, &n) == 1 && n == 32 ? 0 : -1;
 }
 
+static X509 *strict_x509_from_pem(const char *pem)
+{
+   size_t input_len = pem ? strnlen(pem, KB_PKI_CERT_PEM_MAX) : 0;
+   if (!input_len || input_len == KB_PKI_CERT_PEM_MAX || input_len > INT_MAX)
+      return NULL;
+   BIO *input = BIO_new_mem_buf(pem, (int)input_len);
+   X509 *cert = input ? PEM_read_bio_X509(input, NULL, NULL, NULL) : NULL;
+   int consumed = cert && BIO_ctrl_pending(input) == 0;
+   BIO *canonical = consumed ? BIO_new(BIO_s_mem()) : NULL;
+   BUF_MEM *memory = NULL;
+   int exact = canonical && PEM_write_bio_X509(canonical, cert) == 1;
+   if (exact)
+   {
+      BIO_get_mem_ptr(canonical, &memory);
+      exact = memory && memory->length == input_len &&
+              CRYPTO_memcmp(memory->data, pem, input_len) == 0;
+   }
+   BIO_free(canonical);
+   BIO_free(input);
+   if (!exact)
+   {
+      X509_free(cert);
+      cert = NULL;
+   }
+   return cert;
+}
+
 int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *material,
                                    const char *leaf_pem, const char *ca_pem,
                                    kb_management_cert_verified_t *out)
@@ -265,9 +292,8 @@ int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *mate
    memset(out, 0, sizeof(*out));
    if (!material || !leaf_pem || !ca_pem)
       return -1;
-   BIO *leaf_bio = BIO_new_mem_buf(leaf_pem, -1), *ca_bio = BIO_new_mem_buf(ca_pem, -1);
-   X509 *leaf = leaf_bio ? PEM_read_bio_X509(leaf_bio, NULL, NULL, NULL) : NULL;
-   X509 *ca = ca_bio ? PEM_read_bio_X509(ca_bio, NULL, NULL, NULL) : NULL;
+   X509 *leaf = strict_x509_from_pem(leaf_pem);
+   X509 *ca = strict_x509_from_pem(ca_pem);
    const unsigned char *kp = material->key_der;
    PKCS8_PRIV_KEY_INFO *p8 =
        d2i_PKCS8_PRIV_KEY_INFO(NULL, &kp, (long)material->key_der_len);
@@ -331,8 +357,6 @@ int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *mate
    PKCS8_PRIV_KEY_INFO_free(p8);
    X509_free(ca);
    X509_free(leaf);
-   BIO_free(ca_bio);
-   BIO_free(leaf_bio);
    if (!ok)
       memset(&v, 0, sizeof(v));
    else
