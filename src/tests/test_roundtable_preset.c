@@ -19,7 +19,7 @@ static const char *PRESET_JSON = "{"
                                  "    { \"model\": \"gpu-mid\", \"persona\": \"security\" },"
                                  "    { \"model\": \"glm\", \"persona\": \"\" }"
                                  "  ],"
-                                 "  \"aggregator\": \"claude\","
+                                 "  \"aggregator\": \"ignored-legacy-value\","
                                  "  \"chairman\": \"codex\","
                                  "  \"chairman_enabled\": true,"
                                  "  \"min_successful\": 2,"
@@ -52,7 +52,6 @@ static void check_fields(const roundtable_preset_t *p)
    assert(strcmp(p->seats[1].persona, "security") == 0);
    assert(strcmp(p->seats[2].model, "glm") == 0);
    assert(p->seats[2].persona[0] == '\0');
-   assert(strcmp(p->aggregator, "claude") == 0);
    assert(strcmp(p->chairman, "codex") == 0);
    assert(p->chairman_enabled == 1);
    assert(p->min_successful == 2);
@@ -117,6 +116,7 @@ int main(void)
    /* to_json emits a re-parseable object */
    cJSON *j = roundtable_preset_to_json(&loaded);
    assert(j != NULL);
+   assert(cJSON_GetObjectItemCaseSensitive(j, "aggregator") == NULL);
    char *text = cJSON_PrintUnformatted(j);
    cJSON_Delete(j);
    assert(text != NULL);
@@ -158,6 +158,10 @@ int main(void)
    assert(runtime.ensemble_reference_count == 3);
 
    /* apply_to_config mirrors the preset onto the live config_t */
+   config_t legacy_cfg;
+   assert(config_load(&legacy_cfg) == 0);
+   snprintf(legacy_cfg.ensemble_aggregator, sizeof legacy_cfg.ensemble_aggregator, "c-only");
+   assert(config_save(&legacy_cfg) == 0);
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);
    config_t cfg;
@@ -168,7 +172,9 @@ int main(void)
    assert(strcmp(cfg.ensemble_reference_personas[0], "reviewer") == 0);
    assert(strcmp(cfg.ensemble_reference_models[1], "gpu-mid") == 0);
    assert(strcmp(cfg.ensemble_reference_personas[1], "security") == 0);
-   assert(strcmp(cfg.ensemble_aggregator, "claude") == 0);
+   /* Applying a Go roundtable preset must not silently mutate the separate C
+    * compatibility route while that route still exists. */
+   assert(strcmp(cfg.ensemble_aggregator, "c-only") == 0);
    assert(cfg.ensemble_min_successful == 2);
    assert(cfg.roundtable_max_rounds == 3);
    assert(cfg.roundtable_converge_threshold == 2);

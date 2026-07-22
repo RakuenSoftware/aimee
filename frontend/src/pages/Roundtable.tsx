@@ -3,7 +3,7 @@ import { Button, Panel, InlineStatus } from "@rakuensoftware/smoothgui";
 
 /* Roundtable page: configure the named multi-model review panels ("roundtables")
  * aimee convenes. A preset captures required positive seat bindings (a model +
- * persona), legacy aggregator, optional chairman, guard/loop knobs, and
+ * persona), optional chairman, guard/loop knobs, and
  * authoring-pipeline caps.
  * Runtime fills all remaining eligible agent capacity; bindings never form an
  * exclusion list. Presets are
@@ -49,7 +49,6 @@ type Preset = {
   name: string;
   description: string;
   seats: Seat[];
-  aggregator: string;
   chairman: string;
   chairman_enabled: boolean;
   min_successful: number;
@@ -89,7 +88,6 @@ function emptyPreset(name: string): Preset {
     name,
     description: "",
     seats: [{ model: "", persona: "" }],
-    aggregator: "",
     chairman: "",
     chairman_enabled: false,
     min_successful: 2,
@@ -362,18 +360,7 @@ export default function Roundtable() {
                 + Add required seat
               </Button>
 
-              {/* Legacy C synthesis selector; removed with the legacy runtime. */}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 10 }}>
-                <div style={{ flex: "1 1 240px" }} title="Legacy C review-route synthesis agent; Go workflow synthesis is deterministic.">
-                  <label style={lbl}>Legacy synthesis agent</label>
-                  <input
-                    list={modelList}
-                    style={input}
-                    value={form.aggregator}
-                    onChange={(e) => patch({ aggregator: e.target.value })}
-                    placeholder="temporary C runtime setting"
-                  />
-                </div>
                 <div style={{ flex: "1 1 240px" }} title="Optional chairman that reviews deterministic synthesis and submits the final feedback.">
                   <label style={lbl}>Chairman</label>
                   <input
