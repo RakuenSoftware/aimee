@@ -121,6 +121,9 @@ typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 void server_http_keepalive_set(int enabled);
 int server_http_keepalive_peek(void);
 int server_http_keepalive_take(void);
+int server_http_keepalive_framing_valid(const char *request, size_t total);
+int server_http_keepalive_route_eligible(const char *path);
+int server_http_gzip_route_eligible(const char *path);
 void server_http_gzip_set(int enabled);
 int server_http_gzip_peek(void);
 
