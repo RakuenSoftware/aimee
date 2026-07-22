@@ -21,7 +21,12 @@
     "src/modules/audit/include/aimee/audit/audit_worm.h",
     "src/modules/audit/include/aimee/audit/audit_worm_chain.h"
   ],
-  "tests": [],
+  "tests": [
+    "src/tests/test_audit_action.c",
+    "src/tests/test_audit_ledger.c",
+    "src/tests/test_audit_worm.c",
+    "src/tests/test_audit_worm_chain.c"
+  ],
   "docs": [
     "docs/modules/audit.md"
   ]
