@@ -14,10 +14,14 @@
  *          make the readiness endpoint its own source of load.
  *   kb   — kb_client_health(). One HTTP call to aimee-kb, off the request path.
  *
- * aimee-llm is intentionally NOT sampled here. The dependency chain is
- * server -> aimee-kb -> aimee-llm; the server holds no llm configuration, and
- * llm reachability is already reflected in aimee-kb's own health. Probing it
- * from here would assert a relationship the architecture does not have.
+ * aimee-llm is intentionally NOT sampled, and this endpoint makes NO claim
+ * about it. The dependency chain is server -> aimee-kb -> aimee-llm and the
+ * server holds no llm configuration, so it has nothing to probe. Note what this
+ * does *not* mean: the kb check below reads kb_health_t.process_ok, which is
+ * aimee-kb liveness only. It is not a transitive guarantee that aimee-kb can
+ * reach aimee-llm, and readiness must not be read as one. If llm-path readiness
+ * is ever required, it belongs to aimee-kb's own readiness surface, reported
+ * through an explicit field — not inferred here.
  *
  * Fail-closed rules:
  *   - before the first sample completes, every dependency is `unknown` and the
@@ -28,8 +32,8 @@
  *
  * Tuning (env, so an operator can adjust without a rebuild; conservative
  * defaults chosen so the probe never becomes load):
- *   AIMEE_READY_INTERVAL_SECS  sampling period      (default 15, min 1)
- *   AIMEE_READY_STALE_SECS     staleness bound      (default 60, min interval)
+ *   AIMEE_READY_INTERVAL_SECS  sampling period  (default 15, range 1..3600)
+ *   AIMEE_READY_STALE_SECS     staleness bound  (default 60, range interval..86400)
  */
 #include "server_http.h"
 #include "kb_client.h"
@@ -37,6 +41,7 @@
 #include "log.h"
 #include <pthread.h>
 #include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -64,23 +69,36 @@ static int g_ready_thread_started;
 #define READY_INTERVAL_DEFAULT 15
 #define READY_STALE_DEFAULT    60
 
-static int env_int(const char *name, int dflt, int min)
+/* Parse a positive integer env override. Malformed input falls back to the
+ * documented default and says so, rather than silently becoming zero (which is
+ * what atoi() would do) — a mistyped interval should be visible, not turn into
+ * a different policy nobody chose. */
+static int env_int(const char *name, int dflt, int min, int max)
 {
    const char *v = getenv(name);
    if (!v || !v[0])
       return dflt;
-   int n = atoi(v);
-   return (n < min) ? min : n;
+
+   errno = 0;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (errno != 0 || !end || *end != '\0' || n < (long)min || n > (long)max)
+   {
+      LOG_ERROR("ready", "%s=\"%s\" is not an integer in [%d,%d]; using %d", name, v, min, max,
+                dflt);
+      return dflt;
+   }
+   return (int)n;
 }
 
 static int ready_interval_secs(void)
 {
-   return env_int("AIMEE_READY_INTERVAL_SECS", READY_INTERVAL_DEFAULT, 1);
+   return env_int("AIMEE_READY_INTERVAL_SECS", READY_INTERVAL_DEFAULT, 1, 3600);
 }
 
 static int ready_stale_secs(void)
 {
-   return env_int("AIMEE_READY_STALE_SECS", READY_STALE_DEFAULT, ready_interval_secs());
+   return env_int("AIMEE_READY_STALE_SECS", READY_STALE_DEFAULT, ready_interval_secs(), 86400);
 }
 
 static const char *dep_name(dep_state_t s)
@@ -182,14 +200,15 @@ static int ready_provider(char *resp, int cap)
                               resp, cap);
 }
 
-/* Take the first sample synchronously so a server that is already healthy does
- * not advertise `unknown` for one interval, then run the sampler in the
- * background. Registration is last: until it happens the route's own
- * fail-closed path answers 503. */
+/* Start the sampler and register the provider. The first sample is taken by the
+ * background thread, NOT here: kb_client_health() is an HTTP call, and doing it
+ * synchronously on the startup path would let an unreachable or slow aimee-kb
+ * delay — or wedge — server startup. That would contradict the whole point of
+ * sampling off the request path. The cost is that readiness reads `unknown`
+ * (503) until the first sample lands, which is the correct fail-closed answer
+ * for a server that genuinely has not checked yet. */
 void server_ready_register(void)
 {
-   server_ready_sample_now();
-
    if (!g_ready_thread_started)
    {
       if (pthread_create(&g_ready_thread, NULL, ready_sampler_main, NULL) == 0)

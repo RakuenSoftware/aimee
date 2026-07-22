@@ -716,10 +716,27 @@ int route_ready(char *resp, int cap)
       return ready_unknown(resp, cap, "no readiness provider registered");
 
    int status = g_ready_fn(resp, cap);
-   /* Fail closed: a provider that returns a nonsense status or writes no body
-    * must not be able to advertise readiness by accident. */
-   if (status <= 0 || resp[0] == '\0')
-      return ready_unknown(resp, cap, "readiness provider failed");
+
+   /* Fail closed on anything we cannot positively confirm. A provider is
+    * trusted to sample, not to define the contract, so the route validates
+    * rather than passes through:
+    *   - only 200 and 503 are legal; any other status is a bug, not a state;
+    *   - a 200 must actually carry ready:true, so a provider cannot advertise
+    *     readiness with a body that says otherwise (or with no body at all);
+    *   - a 503 must not carry ready:true, so the two halves cannot contradict.
+    * Checking resp[0] alone would catch an empty body but not a contradictory
+    * one, which is the case that actually matters here. */
+   if (status != 200 && status != 503)
+      return ready_unknown(resp, cap, "readiness provider returned an invalid status");
+   if (resp[0] == '\0')
+      return ready_unknown(resp, cap, "readiness provider wrote no body");
+
+   int says_ready = (strstr(resp, "\"ready\":true") != NULL);
+   if (status == 200 && !says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 200 without ready:true");
+   if (status == 503 && says_ready)
+      return ready_unknown(resp, cap, "readiness provider returned 503 with ready:true");
+
    return status;
 }
 
