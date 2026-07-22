@@ -102,7 +102,13 @@ func main() {
 			log.Fatal(err)
 		}
 	} else if *agentURL != "" || *agentSocket != "" {
-		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer, Store: store})
+		agents, clientErr := engine.NewHTTPAgentClient(engine.AgentHTTPConfig{
+			BaseURL: *agentURL, UnixSocket: *agentSocket, Bearer: *agentBearer, Store: store,
+			PendingTimeoutSource: func() time.Duration {
+				return time.Duration(configStore.Int("autonomy.delegate_pending_secs", 120)) * time.Second
+			},
+			CancelUnassigned: store.CancelUnassignedDelegateJob,
+		})
 		if clientErr != nil {
 			log.Fatal(clientErr)
 		}

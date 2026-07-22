@@ -50,6 +50,15 @@ func TestPolicyProjectionIncludesRuntimeConcurrencyDefault(t *testing.T) {
 	if got := values["autonomy.concurrency"]; got != 2 {
 		t.Fatalf("autonomy.concurrency default=%v, want 2", got)
 	}
+	if got := values["autonomy.delegate_pending_secs"]; got != 120 {
+		t.Fatalf("autonomy.delegate_pending_secs default=%v, want 120", got)
+	}
+	if err := store.Set("autonomy.delegate_pending_secs", 1); err == nil {
+		t.Fatal("delegate lease below minimum accepted")
+	}
+	if err := store.Set("autonomy.delegate_pending_secs", 3601); err == nil {
+		t.Fatal("delegate lease above maximum accepted")
+	}
 }
 
 func TestEditableProjectionAndStructuralConflictsFailClosed(t *testing.T) {

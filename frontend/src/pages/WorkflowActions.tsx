@@ -635,7 +635,7 @@ export default function WorkflowActions() {
 // workflows start and how far each one drives (trigger -> PR). Kept here under
 // Workflows because that is exactly what they tune. Config-backed + live; exported
 // Values saved here are the live runtime authority.
-const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool" }[] = [
+const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int" | "bool"; min?: number; max?: number }[] = [
   {
     key: "trigger.max_concurrent",
     label: "Trigger admission cap",
@@ -683,6 +683,14 @@ const RUN_POLICY_FIELDS: { key: string; label: string; help: string; kind: "int"
     label: "Concurrency",
     kind: "int",
     help: "Max autonomous runs driven concurrently per scheduler sweep. Default 2.",
+  },
+  {
+    key: "autonomy.delegate_pending_secs",
+    label: "Unassigned delegate lease (s)",
+    kind: "int",
+    min: 2,
+    max: 3600,
+    help: "Seconds an admitted delegate job may remain pending without an assigned eligible agent before it is cancelled and safely retried. Live range 2–3600; default 120.",
   },
 ];
 
@@ -739,6 +747,8 @@ function RunPolicyPanel() {
                   ) : (
                     <input
                       type="number"
+                      min={f.min}
+                      max={f.max}
                       defaultValue={Number(cfg?.[f.key] ?? 0)}
                       style={{
                         width: 90,
@@ -748,7 +758,16 @@ function RunPolicyPanel() {
                       }}
                       onBlur={(e) => {
                         const v = parseInt(e.target.value, 10);
-                        if (!Number.isNaN(v) && v !== Number(cfg?.[f.key])) save(f.key, v);
+                        const inRange =
+                          !Number.isNaN(v) &&
+                          (f.min === undefined || v >= f.min) &&
+                          (f.max === undefined || v <= f.max);
+                        if (!inRange) {
+                          setErr(`${f.label} must be between ${f.min ?? 0} and ${f.max ?? "the supported maximum"}.`);
+                          e.currentTarget.value = String(cfg?.[f.key] ?? 0);
+                          return;
+                        }
+                        if (v !== Number(cfg?.[f.key])) save(f.key, v);
                       }}
                     />
                   )}

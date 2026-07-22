@@ -146,6 +146,23 @@ func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
 	return err
 }
 
+// CancelUnassignedDelegateJob atomically reaps only a pending resource-plane job
+// that no agent has claimed. The predicate prevents a lease race from cancelling
+// work after assignment.
+func (s *Store) CancelUnassignedDelegateJob(ctx context.Context, jobID int, reason string) (bool, error) {
+	if jobID <= 0 {
+		return false, errors.New("delegate job id is required")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE agent_jobs
+SET status='cancelled',cancelled_at=datetime('now'),cancel_reason=?,updated_at=datetime('now')
+WHERE id=? AND status='pending' AND trim(agent_name)=''`, reason, jobID)
+	if err != nil {
+		return false, fmt.Errorf("cancel unassigned delegate job: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
+}
+
 func (s *Store) hasWorkItemColumn(ctx context.Context, wanted string) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(lifecycle_work_item)`)
 	if err != nil {
