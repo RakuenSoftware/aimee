@@ -10,14 +10,14 @@
 static econ_registry_key_t valid_key(void)
 {
    econ_registry_key_t key = {
-      .provider = ECON_PROVIDER_OPENAI,
-      .endpoint_id = 1,
-      .model_snapshot_id = 2,
-      .tokenizer_id = 3,
-      .pricing_table_id = 4,
-      .contract_versions = 5,
-      .transform_id = 6,
-      .transform_version = 7,
+       .provider = ECON_PROVIDER_OPENAI,
+       .endpoint_id = 1,
+       .model_snapshot_id = 2,
+       .tokenizer_id = 3,
+       .pricing_table_id = 4,
+       .contract_versions = 5,
+       .transform_id = 6,
+       .transform_version = 7,
    };
    return key;
 }

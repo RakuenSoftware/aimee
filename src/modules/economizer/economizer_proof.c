@@ -21,29 +21,26 @@ typedef struct
 } econ_registry_t;
 
 static const econ_registry_t production_registry = {
-   .generation = ECON_PRODUCTION_REGISTRY_GENERATION,
-   .entries = NULL,
-   .entry_count = 0,
+    .generation = ECON_PRODUCTION_REGISTRY_GENERATION,
+    .entries = NULL,
+    .entry_count = 0,
 };
 
 /* Signed release artifact for the initial empty registry. The verifier below
  * rejects non-empty registries until canonical tuple serialization is added by
  * a separately reviewed change. */
-static const unsigned char registry_manifest[] =
-    "AIMEE-ECONOMIZER-REGISTRY-V1\n"
-    "generation=1\n"
-    "entry_count=0\n";
+static const unsigned char registry_manifest[] = "AIMEE-ECONOMIZER-REGISTRY-V1\n"
+                                                 "generation=1\n"
+                                                 "entry_count=0\n";
 static const unsigned char registry_public_key[32] = {
-   0x58, 0x72, 0x3b, 0x81, 0x63, 0xad, 0x3c, 0xc7, 0x86, 0x71, 0xb7, 0x94, 0x93, 0xf7,
-   0xba, 0x91, 0x02, 0xff, 0xf9, 0xb8, 0x4e, 0x32, 0xec, 0x87, 0xb3, 0xee, 0x12, 0x38,
-   0xeb, 0xb6, 0x93, 0x44,
+    0x58, 0x72, 0x3b, 0x81, 0x63, 0xad, 0x3c, 0xc7, 0x86, 0x71, 0xb7, 0x94, 0x93, 0xf7, 0xba, 0x91,
+    0x02, 0xff, 0xf9, 0xb8, 0x4e, 0x32, 0xec, 0x87, 0xb3, 0xee, 0x12, 0x38, 0xeb, 0xb6, 0x93, 0x44,
 };
 static const unsigned char registry_signature[64] = {
-   0x00, 0x56, 0x8d, 0xcf, 0xb2, 0x15, 0xc7, 0x6c, 0x55, 0xe4, 0x86, 0xe4, 0xbc,
-   0x2c, 0x52, 0x4a, 0xb5, 0x86, 0x32, 0xdf, 0xaa, 0x28, 0x94, 0xba, 0x88, 0xb5,
-   0xfb, 0x0d, 0xd9, 0x0b, 0xf9, 0x64, 0x88, 0x4a, 0x2c, 0x40, 0x6d, 0x7b, 0xeb,
-   0x91, 0x00, 0x0b, 0xb2, 0x0d, 0x78, 0x74, 0x42, 0x31, 0x74, 0xb6, 0x92, 0x2c,
-   0x15, 0x3d, 0x55, 0xaf, 0x50, 0x99, 0xff, 0x67, 0xd8, 0x58, 0xa0, 0x07,
+    0x00, 0x56, 0x8d, 0xcf, 0xb2, 0x15, 0xc7, 0x6c, 0x55, 0xe4, 0x86, 0xe4, 0xbc, 0x2c, 0x52, 0x4a,
+    0xb5, 0x86, 0x32, 0xdf, 0xaa, 0x28, 0x94, 0xba, 0x88, 0xb5, 0xfb, 0x0d, 0xd9, 0x0b, 0xf9, 0x64,
+    0x88, 0x4a, 0x2c, 0x40, 0x6d, 0x7b, 0xeb, 0x91, 0x00, 0x0b, 0xb2, 0x0d, 0x78, 0x74, 0x42, 0x31,
+    0x74, 0xb6, 0x92, 0x2c, 0x15, 0x3d, 0x55, 0xaf, 0x50, 0x99, 0xff, 0x67, 0xd8, 0x58, 0xa0, 0x07,
 };
 
 static econ_proof_result_t result(econ_decision_t decision, econ_reason_t reason)
@@ -113,13 +110,12 @@ int econ_registry_signature_valid(void)
        memcmp(canonical, registry_manifest, sizeof(registry_manifest) - 1) != 0)
       return 0;
 
-   EVP_PKEY *key =
-       EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, registry_public_key,
-                                   sizeof(registry_public_key));
+   EVP_PKEY *key = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL, registry_public_key,
+                                               sizeof(registry_public_key));
    EVP_MD_CTX *ctx = key ? EVP_MD_CTX_new() : NULL;
    int ok = ctx && EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, key) == 1 &&
-            EVP_DigestVerify(ctx, registry_signature, sizeof(registry_signature),
-                             registry_manifest, sizeof(registry_manifest) - 1) == 1;
+            EVP_DigestVerify(ctx, registry_signature, sizeof(registry_signature), registry_manifest,
+                             sizeof(registry_manifest) - 1) == 1;
    EVP_MD_CTX_free(ctx);
    EVP_PKEY_free(key);
    return ok ? 1 : 0;
@@ -167,8 +163,7 @@ econ_cost_result_t econ_proof_cost_evaluate(const econ_proof_t *proof)
          return cost_result(ECON_COST_INDETERMINATE, ECON_REASON_INVALID_MONEY_BOUND);
 
       econ_money_t candidate_with_margin = 0;
-      if (money_add(scenario->candidate_upper, proof->safety_margin,
-                    &candidate_with_margin) != 0)
+      if (money_add(scenario->candidate_upper, proof->safety_margin, &candidate_with_margin) != 0)
          return cost_result(ECON_COST_INDETERMINATE, ECON_REASON_MONEY_OVERFLOW);
       if (candidate_with_margin >= scenario->baseline_lower)
          return cost_result(ECON_COST_REJECTED, ECON_REASON_NOT_STRICTLY_CHEAPER);
