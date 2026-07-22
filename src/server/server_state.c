@@ -8,10 +8,10 @@
 #include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "server.h"
 #include "dashboard.h"
-#include "render.h"               /* decision_to_json + db2_decision_log_list */
-#include "audit_ledger.h"         /* audit_ledger_read — server-incurred tool-action audit */
-#include "audit_worm.h"           /* audit_worm_verify/checkpoint — WORM audit store */
-#include "server_http_identity.h" /* server_http_identity_query — audit pagination params */
+#include "render.h"                   /* decision_to_json + db2_decision_log_list */
+#include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
+#include <aimee/audit/audit_worm.h>   /* audit_worm_verify/checkpoint — WORM audit store */
+#include "server_http_identity.h"     /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
 #include "workspace.h"

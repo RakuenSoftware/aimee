@@ -18,7 +18,7 @@
 #include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
 #include "wfe_enforce.h"     /* the enforce dial -> deny (hard) vs warn (soft) */
 #include "wfe_native_gate.h" /* wfe_native_tool_externalizes / wfe_is_shell_tool */
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 #include "trace_analysis.h"
 #include "workspace.h"
 #include "commands.h"

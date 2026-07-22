@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "audit_worm.h"
+#include <aimee/audit/audit_worm.h>
 #include "commands.h"
 
 static void audit_sub_verify(app_ctx_t *ctx, int argc, char **argv)

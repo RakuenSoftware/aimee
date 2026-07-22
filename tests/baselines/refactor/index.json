@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "c83d330f8725365332b62e70f7fdeef2cdec37b180ed91a36dd81efa2937b5b1"
+          "sha256": "c0ca603f56cebdd3bc36ec890ba5c734d99ad8f8970c2cdc3b9ca8582d5074d0"
         }
       ]
     },

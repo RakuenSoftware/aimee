@@ -12,8 +12,8 @@
 #include <stdio.h>
 
 #include "aimee.h" /* MODE_APPROVE */
-#include "audit_action.h"
-#include "audit_worm.h"
+#include <aimee/audit/audit_action.h>
+#include <aimee/audit/audit_worm.h>
 #include "config.h"
 #include "guardrails.h"
 #include "log.h"

@@ -12,8 +12,11 @@ immutable hardware/storage, or make a best-effort dual write authoritative.
 `audit_args_hash` and `audit_command_preview` produce bounded action evidence;
 `audit_ledger_read` reads legacy `tool_action` rows; `audit_worm_append`, `audit_worm_verify`,
 `audit_worm_checkpoint`, `audit_worm_seal`, and `audit_worm_read_page` form the server WORM contract.
-`audit_worm_chain.h` is the shared engine-independent canonical hash/MAC boundary also consumed by the
-KB PostgreSQL store.
+The four canonical public headers live under `src/modules/audit/include/aimee/audit/`, and consumers
+include them as `aimee/audit/<header>.h`. `audit_action.h` owns bounded governed-action evidence;
+`audit_ledger.h` owns legacy ledger reads; `audit_worm.h` owns the server store API; and
+`audit_worm_chain.h` is the shared engine-independent canonical hash/MAC boundary also consumed by
+the KB PostgreSQL store.
 
 ## Dependencies and consumers
 
@@ -84,6 +87,10 @@ stores produce the same canonical row hashes, but remain independently enabled, 
 evidence, reads, chains, checkpoints, mutation rejection, and store consumers. Current governed-action
 emission is best-effort: hashing writes a stable sentinel on failure, and WORM loss does not block the
 action while legacy logging is authoritative.
+
+The descriptor records an explicit empty test list as deferred cross-boundary ownership, tracked by
+issue #1753 across server, KB, vault, management, and storage integration tests; it does not imply
+that audit lacks live test coverage.
 
 ## Operational diagnostics
 
