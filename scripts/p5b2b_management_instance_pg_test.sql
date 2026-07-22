@@ -268,13 +268,15 @@ END $$;
 RESET ROLE;
 
 -- A past-but-well-formed grant proves preflight uses primary authoritative time.
+SELECT set_config('p5b2b.binding_expired',
+  public.kb_management_instance_binding_digest('spiffe://p5b2b.expired','expired-node',
+    repeat('8',64),repeat('9',64)),false);
 INSERT INTO public.kb_management_instance_grant(installation_id,replacement_lineage_id,team_id,
   workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
   expected_ca_issuer,expected_ca_fingerprint,creator_identity,created_at,expires_at)
 VALUES(repeat('8',32),repeat('8',32),current_setting('p5b2b.team_b')::BIGINT,
   'spiffe://p5b2b.expired','expired-node',repeat('8',64),repeat('9',64),
-  public.kb_management_instance_binding_digest('spiffe://p5b2b.expired','expired-node',
-    repeat('8',64),repeat('9',64)),current_setting('p5b2b.leaf_a_issuer'),
+  current_setting('p5b2b.binding_expired'),current_setting('p5b2b.leaf_a_issuer'),
   current_setting('p5b2b.ca_fp'),'owner:p5b2b-test',now()-interval '2 hours',
   now()-interval '1 hour');
 
@@ -300,8 +302,7 @@ BEGIN
   BEGIN
     PERFORM * FROM public.kb_management_instance_grant_preflight(repeat('8',32),
       'spiffe://p5b2b.expired','expired-node',repeat('8',64),repeat('9',64),
-      public.kb_management_instance_binding_digest('spiffe://p5b2b.expired','expired-node',
-        repeat('8',64),repeat('9',64)));
+      current_setting('p5b2b.binding_expired'));
     RAISE EXCEPTION 'expired preflight allowed';
   EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
   BEGIN
