@@ -1359,7 +1359,7 @@ paths:
                 properties:
                   id: { type: integer }
                   model_id: { type: string }
-        "400": { description: Invalid model_id, provider, or wire }
+        "400": { description: "Invalid model_id, provider, or wire" }
         "401": { description: Authentication required }
         "403": { description: Not authorized (not an org-admin) }
   /models/org/set:
@@ -1382,7 +1382,7 @@ paths:
                 enabled: { type: boolean }
       responses:
         "200": { description: Catalog entry upserted }
-        "400": { description: Invalid model_id, provider, or wire }
+        "400": { description: "Invalid model_id, provider, or wire" }
         "401": { description: Authentication required }
         "403": { description: Not authorized (not an org-admin) }
   /models/org/remove:
@@ -1427,7 +1427,7 @@ paths:
       responses:
         "200": { description: Entitlement granted }
         "401": { description: Authentication required }
-        "403": { description: Not authorized (not an org-admin), or unknown model/team }
+        "403": { description: "Not authorized (not an org-admin), or unknown model/team" }
   /models/org/unentitle:
     post:
       operationId: unentitleOrgModel
