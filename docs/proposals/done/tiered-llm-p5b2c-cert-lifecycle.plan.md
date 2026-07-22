@@ -1,6 +1,7 @@
 # P5-B2c management certificate and local bundle lifecycle
 
-- **State:** draft implementation plan.
+- **State:** completed; roundtable-converged and validated locally plus CT260 real
+  PG17, the real B2a helper/provider path, and production-profile CA leaves.
 - **Depends on:** P5-B2a workload identity/custody provider; P5-B2b primary
   management-instance lineage; P5-A management certificate profile; P7-custodied
   kb CA loading.
@@ -278,3 +279,10 @@ still match the persisted instance lineage.
 Run an adversarial plan roundtable, bake every valid minority finding, delegate the
 bounded implementation, validate locally and on CT260, then run an adversarial full
 branch roundtable to convergence before merge.
+
+Delivered validation additionally proved recovery of an already-active CT260
+candidate without re-signing or re-enrollment, restart/load, provider and primary
+outages, wrong-identity denial, candidate-header/ciphertext/current corruption,
+inclusive renewal, old-generation and revoked replay refusal, bounded two-file
+steady state, secret absence from PostgreSQL/WORM, and WORM mutation denial. The
+final full-branch convergence review reported no remaining issues.
