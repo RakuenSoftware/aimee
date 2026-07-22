@@ -2,8 +2,8 @@
 
 ## Purpose and non-goals
 
-`plugin-loader` is the optional, default-disabled implementation for manifest discovery, installed-state
-management, and dynamic-library loading at `src/modules/plugin-loader/plugin_loader.c` and
+`plugin-loader` optionally owns default-disabled manifest discovery, installed-state management,
+and dynamic-library loading at `src/modules/plugin-loader/plugin_loader.c` and
 `src/modules/plugin-loader/plugin.c`. It does not own extension types, typed registries, or the
 pre-LLM hook contract; those remain required in
 [module-runtime](module-runtime.md#purpose-and-non-goals). It does not provide runtime unload.
@@ -55,6 +55,8 @@ When selected, the module provides the `plugin` CLI command, plugin-management H
 dashboard endpoints, the GUI plugin drawer, and manifest-provided hook/tool registrations. When
 omitted, the disabled profile has none of those surfaces and the GUI hides the drawer after capability probing.
 The exact absence proof is in `docs/validation/core-modularization-slice-11.md`.
+Slice 22 records the corresponding descriptor ownership and requires that established profile proof
+to remain green.
 
 ## Data and migrations
 
@@ -86,6 +88,10 @@ environment requirements, and project gating. `unit-test-plugin` covers manifest
 context registration, and loader lifecycle behavior in `src/tests/test_plugin.c`. Missing directories are empty results;
 malformed manifests, missing environment, and individual load failures are logged and skipped.
 Allocation failure reports an error while startup continues without discovered plugins.
+
+The descriptor assigns both tests to `plugin-loader` by primary behavior. Module-runtime calls in
+`test_plugin.c` are dependency setup for plugin manifest, persistence, and lifecycle behavior;
+module-runtime's focused ownership remains `src/tests/test_plugin_c_hook.c`.
 
 ## Operational diagnostics
 

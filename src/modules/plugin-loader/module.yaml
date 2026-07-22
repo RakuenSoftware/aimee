@@ -12,5 +12,20 @@
   "enabled_by_default": false,
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/plugin-loader/plugin.c",
+    "src/modules/plugin-loader/plugin_loader.c"
+  ],
+  "public_headers": [
+    "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
+    "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h"
+  ],
+  "tests": [
+    "src/tests/test_plugin.c",
+    "src/tests/test_plugin_loader.c"
+  ],
+  "docs": [
+    "docs/modules/plugin-loader.md"
+  ]
 }

@@ -278,6 +278,23 @@
       "blast_radius": "Only optional descriptor vocabulary and module-runtime inventory change; mutation tests cover each role, order, omission, missing and nonregular files, normalization, traversal, symlink rejection, local and cross-descriptor duplicates, cross-role claims, CLI output, and unrelated docs.",
       "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-21.md", "src/modules/module-runtime/module.yaml", "src/modules/module.schema.json", "scripts/validate_module_descriptors.py", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 22,
+      "state": "present_and_verified",
+      "disposition": "Enriched the optional plugin-loader descriptor with its two sources, two public headers, two primary-behavior tests, and canonical documentation without changing build or runtime behavior.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["Make and CMake remain authoritative build-input lists until descriptor-driven generation", "twenty-four descriptors still omit ownership fields pending focused family slices", "test_plugin.c retains module-runtime setup because no behavior defect justifies a test split"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Leaving test_plugin.c unclaimed would hide live plugin.c coverage, while dual ownership or a speculative test split would weaken the one-owner boundary.",
+        "revisit": "Split mixed tests only when a reproduced maintenance or behavior defect justifies changing fixtures and build wiring."
+      },
+      "consumers": ["descriptor validation CI", "plugin-loader maintainers", "future generated-build and ownership-completion slices"],
+      "blast_radius": "Only plugin-loader ownership metadata and its explanatory documentation change; enabled and default-off profile CI continue to prove liveness and physical omission.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-22.md", "docs/modules/plugin-loader.md", "src/modules/plugin-loader/module.yaml"]
     }
   ]
 }
