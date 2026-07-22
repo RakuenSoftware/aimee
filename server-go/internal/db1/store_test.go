@@ -294,3 +294,34 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 		}
 	}
 }
+
+func TestCancelUnassignedDelegateJobIsAtomicAndAssignmentSafe(t *testing.T) {
+	store := newTestStore(t)
+	_, err := store.db.Exec(`CREATE TABLE agent_jobs (
+		id INTEGER PRIMARY KEY, agent_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+		cancelled_at TEXT DEFAULT '', cancel_reason TEXT DEFAULT '', updated_at TEXT DEFAULT '')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO agent_jobs(id,status,agent_name) VALUES
+		(41,'pending',''),(42,'pending','codex'),(43,'running','codex'),(44,'pending',' ')`); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := store.CancelUnassignedDelegateJob(t.Context(), 41, "lease expired")
+	if err != nil || !cancelled {
+		t.Fatalf("cancel pending unassigned: cancelled=%v err=%v", cancelled, err)
+	}
+	for _, id := range []int{42, 43, 44} {
+		cancelled, err = store.CancelUnassignedDelegateJob(t.Context(), id, "lease expired")
+		if err != nil || cancelled {
+			t.Fatalf("job %d assignment guard: cancelled=%v err=%v", id, cancelled, err)
+		}
+	}
+	var status, reason string
+	if err := store.db.QueryRow(`SELECT status,cancel_reason FROM agent_jobs WHERE id=41`).Scan(&status, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" || reason != "lease expired" {
+		t.Fatalf("status=%q reason=%q", status, reason)
+	}
+}
