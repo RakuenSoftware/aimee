@@ -2153,8 +2153,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    }
    bind_request_session_creds(req);
 
-   /* Give the tool-less panelists read-only access to aimee memory + the code
-    * graph by pre-loading it into their prompt (best-effort; NULL = none). */
+   /* Seed the read-only panel with aimee memory + code-graph context. Evidence-
+    * gated reviews also force each seat to make an actual read-only tool call. */
    char *rt_context = roundtable_build_aimee_context(prompt);
    opts.context = rt_context;
 
@@ -2179,6 +2179,12 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "participants_required_failed",
                            result.participants_required_failed);
+   cJSON_AddNumberToObject(resp, "participants_tool_used", result.participants_tool_used);
+   cJSON_AddNumberToObject(resp, "participant_tool_calls", result.participant_tool_calls);
+   cJSON_AddNumberToObject(resp, "participant_successful_tool_calls",
+                           result.participant_successful_tool_calls);
+   cJSON_AddBoolToObject(resp, "evidence_coverage_incomplete",
+                         result.evidence_coverage_incomplete ? 1 : 0);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    add_roundtable_arrays(resp, &result);
    delegate_roundtable_result_free(&result);

@@ -293,9 +293,15 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
 
 /* Per-thread tool-mode override for agent_run_ex; see agent_run_force_no_tools. */
 static __thread int tl_force_no_tools = 0;
+static __thread int tl_require_initial_tool_call = 0;
 void agent_run_force_no_tools(int on)
 {
    tl_force_no_tools = on ? 1 : 0;
+}
+
+void agent_run_require_initial_tool_call(int on)
+{
+   tl_require_initial_tool_call = on ? 1 : 0;
 }
 
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
@@ -546,6 +552,7 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
    agent_t local = *src; /* clone before mutating — see agent_run_named */
    agent_apply_runtime_config(&local);
+   local.require_initial_tool_call = tl_require_initial_tool_call;
    local.ablation = cfg->ablation;
    /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
     * the code it is judging is not a reviewer — the tree that passed the gate would

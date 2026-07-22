@@ -23,6 +23,12 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
    (void)creds;
 }
 static __thread atomic_int *g_request_cancel;
+static __thread int g_require_initial_tool_call;
+static atomic_int g_saw_required_tool_call;
+void agent_run_require_initial_tool_call(int on)
+{
+   g_require_initial_tool_call = on ? 1 : 0;
+}
 void agent_set_request_cancel(atomic_int *flag)
 {
    g_request_cancel = flag;
@@ -98,8 +104,12 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
    (void)max_tokens;
    (void)temperature;
    memset(out, 0, sizeof(*out));
+   if (g_require_initial_tool_call)
+      atomic_store(&g_saw_required_tool_call, 1);
    out->response = strdup("ok+tools");
    out->success = 1;
+   out->tool_calls = 1;
+   out->successful_tool_calls = 1;
    snprintf(out->agent_name, sizeof(out->agent_name), "%s", name ? name : "");
    return 0;
 }
@@ -285,10 +295,14 @@ static void test_use_tools_routes_to_tools_runner(void)
    named.user_prompt = "review this";
    named.agent = "seat-1";
    named.use_tools = 1;
+   named.require_initial_tool_call = 1;
+   atomic_store(&g_saw_required_tool_call, 0);
    agent_result_t out1;
    memset(&out1, 0, sizeof(out1));
    assert(agent_run_parallel(&cfg, &named, 1, &out1, 0) == 1);
    assert(strcmp(out1.response, "ok+tools") == 0);
+   assert(atomic_load(&g_saw_required_tool_call) == 1);
+   assert(g_require_initial_tool_call == 0); /* policy cannot bleed into the next task */
    free(out1.response);
 
    /* single-task fast path, routed BY ROLE (no agent name) */

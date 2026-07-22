@@ -228,6 +228,7 @@ void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result)
       cJSON_AddStringToObject(o, "identity_key", it->identity_key);
       cJSON_AddStringToObject(o, "sources", it->sources);
       cJSON_AddNumberToObject(o, "count", it->count);
+      cJSON_AddBoolToObject(o, "tool_grounded", it->tool_grounded ? 1 : 0);
       cJSON_AddItemToArray(items, o);
    }
    cJSON_AddItemToObject(resp, "items", items);

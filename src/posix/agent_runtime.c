@@ -593,6 +593,7 @@ native_provider_http:
 
    int turn = 0;
    int total_calls = 0;
+   int successful_tool_calls = 0;
    /* §3 fold-freeze: per-run boundary state, persisted across turns so the folded
     * prefix stays byte-identical (warm provider cache). Honored only when
     * fold_freeze_enabled; ignored otherwise. */
@@ -780,6 +781,11 @@ native_provider_http:
          final_instruction_added = 1;
       }
       cJSON *active_tools = final_text_only_turn ? NULL : tools;
+      /* Evidence-gated review can require one real repository lookup. Force
+       * provider tool selection only until the first successful tool call;
+       * leaving it required would prevent the final text turn forever. */
+      fb_agent.require_initial_tool_call = agent_require_initial_tool_choice(
+          agent->require_initial_tool_call, successful_tool_calls, active_tools != NULL);
 
       /* Context economizer (delegate seam): record a baseline + foldable-opportunity
        * ledger row, and — when reduce.history_fold is on — ACTUALLY fold the prefix
@@ -1577,6 +1583,24 @@ native_provider_http:
          }
          total_calls++;
 
+         /* An attempted lookup is not evidence. Validation/policy/directive
+          * failures never reach this branch; dispatch failures conventionally
+          * return "error:" or a JSON object containing an error member. */
+         int usable_tool_result =
+             result_str && result_str[0] && strncmp(result_str, "error", 5) != 0;
+         if (usable_tool_result && result_str[0] == '{')
+         {
+            cJSON *result_json = cJSON_Parse(result_str);
+            if (result_json)
+            {
+               if (cJSON_GetObjectItemCaseSensitive(result_json, "error"))
+                  usable_tool_result = 0;
+               cJSON_Delete(result_json);
+            }
+         }
+         if (usable_tool_result)
+            successful_tool_calls++;
+
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
             consecutive_errors++;
@@ -1764,6 +1788,7 @@ native_provider_http:
                            (end_ts.tv_nsec - loop_start.tv_nsec) / 1000000);
    out->turns = turn;
    out->tool_calls = total_calls;
+   out->successful_tool_calls = successful_tool_calls;
 
    /* Confidence estimation and abstention */
    if (out->response)
