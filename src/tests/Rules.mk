@@ -2902,10 +2902,10 @@ $(TESTPREFIX)/unit-test-economizer-wire-snapshot: \
                                   $(OBJDIR)/modules/economizer/economizer_proof.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-economizer-live-surface:
-	sh tests/test_economizer_live_surface.sh
+$(TESTPREFIX)/unit-test-economizer-live-surface: tests/test_economizer_live_surface.sh
 	@mkdir -p $(dir $@)
-	@touch $@
+	cp $< $@
+	chmod +x $@
 
 $(TESTPREFIX)/unit-test-economizer-openai: $(OBJDIR)/tests/test_economizer_openai.o \
                                   $(OBJDIR)/tests/economizer_planner_fixture.o \
