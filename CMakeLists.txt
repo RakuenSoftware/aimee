@@ -375,6 +375,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/delegate_learning.c
     ${AIMEE_SRC_DIR}/db1/interaction_events.c
     ${AIMEE_SRC_DIR}/db1/mcp_osv_cache.c
+    ${AIMEE_SRC_DIR}/db1/server_management_jti.c
     ${AIMEE_SRC_DIR}/db1/wfe_store.c
     ${AIMEE_SRC_DIR}/db1/wfe_binding.c
 )

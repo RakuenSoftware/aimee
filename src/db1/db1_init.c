@@ -139,3 +139,41 @@ int db1_txn_end(sqlite3 *db, const char *end_sql)
    pthread_mutex_unlock(&g_txn_gate);
    return ok ? 0 : -1;
 }
+
+int db1_txn_begin_nowait(sqlite3 *db, const char *begin_sql)
+{
+   if (!db || !begin_sql)
+      return -1;
+   pthread_mutex_lock(&g_txn_gate);
+
+   /* FULLMUTEX supplies a recursive connection mutex. Holding it prevents another user of this
+    * shared connection from observing the short-lived handler change. */
+   sqlite3_mutex *mutex = sqlite3_db_mutex(db);
+   sqlite3_mutex_enter(mutex);
+   int handler_off = sqlite3_busy_handler(db, NULL, NULL);
+   int begin =
+       handler_off == SQLITE_OK ? sqlite3_exec(db, begin_sql, NULL, NULL, NULL) : SQLITE_ERROR;
+   int handler_on = sqlite3_busy_handler(db, db1_busy_cb, NULL);
+   if (begin == SQLITE_OK && handler_on != SQLITE_OK)
+   {
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+      begin = SQLITE_ERROR;
+   }
+   sqlite3_mutex_leave(mutex);
+
+   if (begin != SQLITE_OK)
+   {
+      pthread_mutex_unlock(&g_txn_gate);
+      return -1;
+   }
+   return 0;
+}
+
+int db1_txn_commit_or_rollback(sqlite3 *db)
+{
+   int committed = db && sqlite3_exec(db, "COMMIT", NULL, NULL, NULL) == SQLITE_OK;
+   if (!committed && db)
+      sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+   pthread_mutex_unlock(&g_txn_gate);
+   return committed ? 0 : -1;
+}
