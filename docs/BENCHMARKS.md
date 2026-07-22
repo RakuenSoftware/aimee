@@ -183,6 +183,21 @@ enabling TLS session resumption after a socket ages out without sharing sessions
 across certificate rotation. `kb_client_mtls_tls_stats()` exposes aggregate full
 handshake and resumed-session totals.
 
+Thin-client HTTP gzip is an opt-in, bounded transport optimization controlled by
+`transport.thinclient_gzip_enabled` on the server and
+`AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED=1` on the client. Eligible buffered
+responses and, after the server advertises `Accept-Request-Encoding: gzip`,
+requests of at least 4 KiB are compressed only when the wire body is smaller.
+The initial allowlist is `/v1/responses`, `/v1/completions`, `/v1/embeddings`,
+and `/v1/messages`; every other route, including authentication, enrollment,
+management, secret, event, and streaming traffic, remains identity encoded.
+Inflated bodies are capped at
+1 MiB for responses, 64 KiB including request headers, and 50 times the wire
+size; malformed, unsupported, and over-limit encodings fail closed. The flag
+remains off until workload captures demonstrate a latency win rather than merely
+a byte-count reduction. A build without zlib (including the current Windows
+thin-client job) advertises no gzip capability and stays identity encoded.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

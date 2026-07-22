@@ -6,6 +6,7 @@
  * identically on Linux, macOS, and Windows.
  */
 #include "aimee_client.h"
+#include "http_content_encoding.h"
 #include "platform.h"
 #include "platform_net.h"
 #include <stdio.h>
@@ -29,6 +30,78 @@ typedef void aimee_tls_t;
  * suffice — aimee_client_set_remote is documented as not thread-safe. */
 static char g_remote_url[512];
 static char g_remote_token[256];
+/* Learned from an authenticated response. Request compression is deliberately
+ * withheld until the selected server advertises support, preserving rolling
+ * upgrades with older servers that would otherwise parse compressed JSON. */
+static int g_remote_request_gzip;
+
+static int thinclient_gzip_enabled(void)
+{
+   const char *value = getenv("AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED");
+   return http_content_encoding_available() && value &&
+          (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+}
+
+static int thinclient_gzip_route(const char *path)
+{
+   static const char *const allowed[] = {"/v1/responses", "/v1/completions", "/v1/embeddings",
+                                         "/v1/messages", NULL};
+   for (int i = 0; allowed[i]; i++)
+      if (strcmp(path, allowed[i]) == 0)
+         return 1;
+   return 0;
+}
+
+static int ascii_equal_ci(const char *left, const char *right, size_t n)
+{
+   for (size_t i = 0; i < n; i++)
+   {
+      unsigned char a = (unsigned char)left[i], b = (unsigned char)right[i];
+      if (a >= 'A' && a <= 'Z')
+         a = (unsigned char)(a + ('a' - 'A'));
+      if (b >= 'A' && b <= 'Z')
+         b = (unsigned char)(b + ('a' - 'A'));
+      if (a != b)
+         return 0;
+   }
+   return 1;
+}
+
+static int response_is_gzip(const char *response, size_t header_len)
+{
+   static const char name[] = "content-encoding:";
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+      if ((i == 0 || response[i - 1] == '\n') &&
+          ascii_equal_ci(response + i, name, sizeof(name) - 1))
+      {
+         const char *value = response + i + sizeof(name) - 1;
+         const char *end = memchr(value, '\n', header_len - (size_t)(value - response));
+         if (!end)
+            return 0;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         return end && (size_t)(end - value) >= 4 && ascii_equal_ci(value, "gzip", 4);
+      }
+   return 0;
+}
+
+static int response_accepts_gzip_requests(const char *response, size_t header_len)
+{
+   static const char name[] = "accept-request-encoding:";
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+      if ((i == 0 || response[i - 1] == '\n') &&
+          ascii_equal_ci(response + i, name, sizeof(name) - 1))
+      {
+         const char *value = response + i + sizeof(name) - 1;
+         const char *end = memchr(value, '\n', header_len - (size_t)(value - response));
+         if (!end)
+            return 0;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         return (size_t)(end - value) >= 4 && ascii_equal_ci(value, "gzip", 4);
+      }
+   return 0;
+}
 
 /* When set, the transport suppresses its connection-failure diagnostics on
  * stderr. `aimee remote set` uses this around the pre-pin reachability probe
@@ -43,6 +116,7 @@ void aimee_client_suppress_conn_errors(int on)
 
 void aimee_client_set_remote(const char *url, const char *token)
 {
+   g_remote_request_gzip = 0;
    if (url && *url)
       snprintf(g_remote_url, sizeof(g_remote_url), "%s", url);
    else
@@ -304,29 +378,47 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    }
 #endif
 
-   int blen = body ? (int)strlen(body) : 0;
+   int gzip_enabled = thinclient_gzip_enabled() && thinclient_gzip_route(path);
+   size_t body_len = body ? strlen(body) : 0;
+   unsigned char *compressed = NULL;
+   size_t wire_len = body_len;
+   const void *wire_body = body;
+   if (gzip_enabled && g_remote_request_gzip && body_len >= 4096 &&
+       http_gzip_compress(body, body_len, &compressed, &wire_len) == 0 &&
+       (wire_len >= body_len || (body_len > 1024 && (body_len - 1024 + 49) / 50 > wire_len)))
+   {
+      free(compressed);
+      compressed = NULL;
+      wire_len = body_len;
+   }
+   if (compressed)
+      wire_body = compressed;
    char head[1024];
    int hlen;
+   const char *accept_encoding = gzip_enabled ? "Accept-Encoding: gzip\r\n" : "";
+   const char *content_encoding = compressed ? "Content-Encoding: gzip\r\n" : "";
    if (token && *token)
       hlen = snprintf(head, sizeof(head),
                       "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
-                      "Content-Type: application/json\r\nContent-Length: %d\r\n"
+                      "Content-Type: application/json\r\n%s%sContent-Length: %zu\r\n"
                       "Connection: close\r\n\r\n",
-                      method, path, host, token, blen);
+                      method, path, host, token, accept_encoding, content_encoding, wire_len);
    else
       hlen = snprintf(head, sizeof(head),
                       "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
-                      "Content-Length: %d\r\nConnection: close\r\n\r\n",
-                      method, path, host, blen);
+                      "%s%sContent-Length: %zu\r\nConnection: close\r\n\r\n",
+                      method, path, host, accept_encoding, content_encoding, wire_len);
    if (hlen <= 0 || hlen >= (int)sizeof(head))
    {
+      free(compressed);
       platform_net_close(fd);
       return NULL;
    }
 
    if (io_write_all(fd, tls, head, (size_t)hlen) != 0 ||
-       (blen > 0 && io_write_all(fd, tls, body, (size_t)blen) != 0))
+       (wire_len > 0 && io_write_all(fd, tls, wire_body, wire_len) != 0))
    {
+      free(compressed);
 #ifdef WITH_TLS
       if (tls)
          aimee_tls_free(tls);
@@ -334,8 +426,10 @@ static char *tcp_request(const char *url, const char *token, const char *method,
       platform_net_close(fd);
       return NULL;
    }
+   free(compressed);
 
-   char *resp = read_response(fd, tls, NULL);
+   size_t resp_len = 0;
+   char *resp = read_response(fd, tls, &resp_len);
 #ifdef WITH_TLS
    if (tls)
       aimee_tls_free(tls);
@@ -353,7 +447,20 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    if (status_out)
       *status_out = status;
    char *bstart = strstr(resp, "\r\n\r\n");
-   char *out = bstart ? strdup(bstart + 4) : strdup("");
+   size_t header_len = bstart ? (size_t)(bstart + 4 - resp) : resp_len;
+   if (gzip_enabled && response_accepts_gzip_requests(resp, header_len))
+      g_remote_request_gzip = 1;
+   char *out = NULL;
+   if (bstart && response_is_gzip(resp, header_len))
+   {
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      if (http_gzip_decompress(resp + header_len, resp_len - header_len, 1u << 20, 50, &decoded,
+                               &decoded_len) == 0)
+         out = (char *)decoded;
+   }
+   else
+      out = bstart ? strdup(bstart + 4) : strdup("");
    free(resp);
    return out;
 }

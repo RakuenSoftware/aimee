@@ -1,6 +1,8 @@
 #ifndef DEC_HTTP_RETRY_H
 #define DEC_HTTP_RETRY_H 1
 
+#include <stddef.h>
+
 /* http_retry: exponential backoff with overflow-safe retries for LLM API calls.
  *
  * Retryable status codes map through failover_classify()/failover_action().
@@ -49,6 +51,11 @@ int http_retry_post_context(const char *url, const char *auth_header, const char
                             char **response_buf, int timeout_ms, const char *extra_headers,
                             int max_attempts, int base_ms, int max_ms, const char *provider,
                             const char *model, const char *session_id);
+int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, int max_attempts, int base_ms,
+                                  int max_ms, const char *provider, const char *model,
+                                  const char *session_id);
 
 /* Register a thread-local progress callback invoked after every model HTTP
  * attempt (decoupled from db1: the server side installs a callback that bumps the

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "aimee_client.h"
+#include "http_content_encoding.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 
@@ -22,51 +23,70 @@ struct mock_cfg
    int listen_fd;
    int response_status; /* e.g. 200 */
    const char *response_body;
+   int response_gzip;
+   int requests;
 };
 
 static void *mock_server(void *arg)
 {
    struct mock_cfg *cfg = (struct mock_cfg *)arg;
-   int c = accept(cfg->listen_fd, NULL, NULL);
-   if (c < 0)
-      return NULL;
-
-   /* Read the request: headers, then the Content-Length body (the client does
-    * not close its write side, so we must read exactly the advertised body). */
-   size_t len = 0;
-   size_t want = 0; /* total bytes expected once headers are parsed (0 = unknown) */
-   for (;;)
+   int requests = cfg->requests ? cfg->requests : 1;
+   for (int request = 0; request < requests; request++)
    {
-      if (len + 1 >= sizeof(g_seen_request))
-         break;
-      ssize_t n = read(c, g_seen_request + len, sizeof(g_seen_request) - 1 - len);
-      if (n <= 0)
-         break;
-      len += (size_t)n;
-      g_seen_request[len] = '\0';
-      char *hdr_end = strstr(g_seen_request, "\r\n\r\n");
-      if (hdr_end && want == 0)
-      {
-         size_t header_bytes = (size_t)(hdr_end - g_seen_request) + 4;
-         const char *cl = strstr(g_seen_request, "Content-Length:");
-         long body_len = 0;
-         if (cl)
-            body_len = strtol(cl + 15, NULL, 10);
-         want = header_bytes + (size_t)body_len;
-      }
-      if (want && len >= want)
-         break;
-   }
+      int c = accept(cfg->listen_fd, NULL, NULL);
+      if (c < 0)
+         return NULL;
+      g_seen_request[0] = '\0';
 
-   char resp[512];
-   int blen = (int)strlen(cfg->response_body);
-   int rlen = snprintf(resp, sizeof(resp),
-                       "HTTP/1.1 %d OK\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                       cfg->response_status, blen, cfg->response_body);
-   ssize_t w = write(c, resp, (size_t)rlen);
-   (void)w;
-   close(c);
+      /* Read the request: headers, then the Content-Length body (the client does
+       * not close its write side, so we must read exactly the advertised body). */
+      size_t len = 0;
+      size_t want = 0; /* total bytes expected once headers are parsed (0 = unknown) */
+      for (;;)
+      {
+         if (len + 1 >= sizeof(g_seen_request))
+            break;
+         ssize_t n = read(c, g_seen_request + len, sizeof(g_seen_request) - 1 - len);
+         if (n <= 0)
+            break;
+         len += (size_t)n;
+         g_seen_request[len] = '\0';
+         char *hdr_end = strstr(g_seen_request, "\r\n\r\n");
+         if (hdr_end && want == 0)
+         {
+            size_t header_bytes = (size_t)(hdr_end - g_seen_request) + 4;
+            const char *cl = strstr(g_seen_request, "Content-Length:");
+            long body_len = 0;
+            if (cl)
+               body_len = strtol(cl + 15, NULL, 10);
+            want = header_bytes + (size_t)body_len;
+         }
+         if (want && len >= want)
+            break;
+      }
+
+      size_t blen = strlen(cfg->response_body), wire_len = blen;
+      unsigned char *compressed = NULL;
+      const void *wire_body = cfg->response_body;
+      if (cfg->response_gzip)
+      {
+         assert(http_gzip_compress(cfg->response_body, blen, &compressed, &wire_len) == 0);
+         wire_body = compressed;
+      }
+      char resp[512];
+      int rlen = snprintf(resp, sizeof(resp),
+                          "HTTP/1.1 %d OK\r\nContent-Type: application/json\r\n"
+                          "Content-Length: %zu\r\n%sAccept-Request-Encoding: gzip\r\n"
+                          "Connection: close\r\n\r\n",
+                          cfg->response_status, wire_len,
+                          cfg->response_gzip ? "Content-Encoding: gzip\r\n" : "");
+      ssize_t w = write(c, resp, (size_t)rlen);
+      if (w == rlen)
+         w = write(c, wire_body, wire_len);
+      (void)w;
+      free(compressed);
+      close(c);
+   }
    return NULL;
 }
 
@@ -162,6 +182,41 @@ static void test_remote_active_reporting(void)
    unsetenv("AIMEE_SERVER_URL");
    assert(aimee_client_remote_active(desc, sizeof(desc)) == 0);
    PASS("remote_active reporting + default port");
+}
+
+static void test_gzip_roundtrip(void)
+{
+   char *large = malloc(8193);
+   assert(large);
+   for (int i = 0; i < 8192; i++)
+      large[i] = (char)('a' + ((i * 31 + (i / 97) * 7) % 26));
+   large[8192] = '\0';
+   struct mock_cfg cfg = {
+       .response_status = 200, .response_body = large, .response_gzip = 1, .requests = 2};
+   int port = 0;
+   pthread_t th = start_mock(&cfg, &port);
+   char url[128];
+   snprintf(url, sizeof(url), "http://127.0.0.1:%d", port);
+   setenv("AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED", "1", 1);
+   aimee_client_set_remote(url, NULL);
+
+   int status = -1;
+   char *body = aimee_client_request("POST", "/v1/responses", large, &status);
+   assert(status == 200 && body && strcmp(body, large) == 0);
+   free(body);
+   /* The first authenticated response advertises request-gzip support. */
+   body = aimee_client_request("POST", "/v1/responses", large, &status);
+   pthread_join(th, NULL);
+   close(cfg.listen_fd);
+   assert(status == 200 && body && strcmp(body, large) == 0);
+   assert(strstr(g_seen_request, "Accept-Encoding: gzip\r\n"));
+   assert(strstr(g_seen_request, "Content-Encoding: gzip\r\n"));
+
+   free(body);
+   free(large);
+   unsetenv("AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED");
+   aimee_client_set_remote(NULL, NULL);
+   PASS("negotiated gzip request and response round-trip");
 }
 
 static void test_https_unreachable_null(void)
@@ -321,6 +376,7 @@ int main(void)
    printf("test_aimee_client:\n");
    test_tcp_via_env_no_token();
    test_tcp_set_remote_with_token();
+   test_gzip_roundtrip();
    test_remote_active_reporting();
    test_https_unreachable_null();
    test_cleartext_credential_guard();

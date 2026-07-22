@@ -16,7 +16,7 @@ typedef enum
    CFG_BOOL,
    CFG_INT,
    CFG_FLOAT,
-   CFG_ECON_TIER /* int enum stored, but get/set as an "off|safe|aggressive" string */
+   CFG_ECON_MODE /* int enum stored, but get/set as "off|proof_gated" */
 } config_field_type_t;
 
 /* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.
@@ -54,8 +54,8 @@ typedef struct
    size_t size;
    int is_bool; /* 1 for bool fields */
    config_field_type_t type;
-   reload_class_t reload_class;  /* omitted -> RELOAD_HOT (0) */
-   config_field_group_t group;   /* omitted -> FGROUP_RUNTIME (0) */
+   reload_class_t reload_class; /* omitted -> RELOAD_HOT (0) */
+   config_field_group_t group;  /* omitted -> FGROUP_RUNTIME (0) */
 } config_field_t;
 
 /* Human label for the reload class, for the config.set / Settings verdict. */
