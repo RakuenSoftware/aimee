@@ -84,6 +84,7 @@ typedef struct
    agent_task_t *task;
    agent_result_t *result;
    const agent_request_creds_t *creds;
+   char cwd[MAX_PATH_LEN];
    /* Deadline path only (NULL otherwise): the worker signals completion here so a
     * straggler can be abandoned without blocking the join. */
    parallel_sync_t *sync;
@@ -99,6 +100,7 @@ static void *parallel_worker(void *arg)
     * context (thread-locals are not inherited) so the agent resolves its
     * client-held session key instead of running keyless. */
    agent_request_creds_restore(ctx->creds);
+   run_cmd_set_cwd(ctx->cwd[0] ? ctx->cwd : NULL);
    agent_set_request_cancel(&ctx->cancel);
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
    double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
@@ -117,6 +119,7 @@ static void *parallel_worker(void *arg)
                    ctx->task->max_tokens, temp, ctx->result);
    agent_run_require_initial_tool_call(0);
    agent_set_request_cancel(NULL);
+   run_cmd_set_cwd(NULL);
    if (ctx->owns_process_permit)
    {
       ctx->owns_process_permit = 0;
@@ -164,6 +167,7 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
    pthread_condattr_destroy(&attr);
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   const char *parent_cwd = run_cmd_get_cwd();
 
    struct timespec abs;
    clock_gettime(CLOCK_MONOTONIC, &abs);
@@ -192,6 +196,7 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
       ctxs[i].creds = &creds;
+      snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
       ctxs[i].sync = &sync;
       ctxs[i].done = &done[i];
       ctxs[i].owns_process_permit = 1;
@@ -297,6 +302,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
     * thread restores it (thread-locals don't cross pthread_create). */
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   const char *parent_cwd = run_cmd_get_cwd();
 
    for (int i = 0; i < task_count; i++)
    {
@@ -305,6 +311,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
       ctxs[i].creds = &creds;
+      snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
       atomic_init(&ctxs[i].cancel, 0);
    }
 
