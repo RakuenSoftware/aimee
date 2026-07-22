@@ -50,6 +50,10 @@ static unsigned g_identity_generation = 1;
 static int g_pool_waiters = 0;
 static int g_pool_connecting = 0;
 static unsigned long g_pool_borrow_exhausted_total = 0;
+static SSL_CTX *g_pool_ctx = NULL;
+static SSL_SESSION *g_pool_session = NULL;
+static unsigned long g_pool_handshakes_total = 0;
+static unsigned long g_pool_resumed_total = 0;
 
 static time_t monotonic_seconds(void)
 {
@@ -109,11 +113,27 @@ static kb_pool_entry_t *pool_borrow(int *pool_error)
          snprintf(ca, sizeof(ca), "%s", g_ca);
          snprintf(cert, sizeof(cert), "%s", g_cert);
          snprintf(key, sizeof(key), "%s", g_key);
+         if (!g_pool_ctx)
+            g_pool_ctx = kb_tls_client_ctx(ca, cert, key);
+         SSL_CTX *ctx = g_pool_ctx;
+         if (!ctx || SSL_CTX_up_ref(ctx) != 1)
+         {
+            pthread_mutex_unlock(&g_lock);
+            return NULL;
+         }
+         SSL_SESSION *session = g_pool_session;
+         if (session && SSL_SESSION_up_ref(session) != 1)
+            session = NULL;
          g_pool_connecting = 1;
          pthread_mutex_unlock(&g_lock);
-         kb_tls_client_conn_t *conn = kb_tls_client_conn_open(host, port, ca, cert, key);
+         kb_tls_client_conn_t *conn = kb_tls_client_conn_open_session(host, port, ctx, session);
+         SSL_SESSION_free(session);
+         SSL_CTX_free(ctx);
          pthread_mutex_lock(&g_lock);
          g_pool_connecting = 0;
+         g_pool_handshakes_total++;
+         if (kb_tls_client_conn_session_reused(conn))
+            g_pool_resumed_total++;
          pthread_cond_broadcast(&g_pool_cv);
          if (!conn || generation != g_identity_generation)
          {
@@ -167,6 +187,15 @@ static void pool_return(kb_pool_entry_t *entry, int reusable)
    pthread_mutex_lock(&g_lock);
    entry->requests++;
    entry->last_used_at = monotonic_seconds();
+   if (reusable)
+   {
+      SSL_SESSION *session = kb_tls_client_conn_get1_session(entry->conn);
+      if (session)
+      {
+         SSL_SESSION_free(g_pool_session);
+         g_pool_session = session;
+      }
+   }
    int idle = 0;
    for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
       if (g_pool[i].conn && !g_pool[i].busy)
@@ -227,6 +256,10 @@ static void maybe_renew(void)
          snprintf(g_cert, sizeof(g_cert), "%s", nc);
          snprintf(g_key, sizeof(g_key), "%s", nk);
          g_identity_generation++;
+         SSL_CTX_free(g_pool_ctx);
+         g_pool_ctx = NULL;
+         SSL_SESSION_free(g_pool_session);
+         g_pool_session = NULL;
          pthread_cond_broadcast(&g_pool_cv);
       }
    }
@@ -297,10 +330,24 @@ void kb_client_mtls_pool_reset(void)
 {
    pthread_mutex_lock(&g_lock);
    g_identity_generation++;
+   SSL_CTX_free(g_pool_ctx);
+   g_pool_ctx = NULL;
+   SSL_SESSION_free(g_pool_session);
+   g_pool_session = NULL;
    for (int i = 0; i < KB_POOL_TOTAL_MAX; i++)
       if (g_pool[i].conn && !g_pool[i].busy)
          pool_close_entry_locked(&g_pool[i]);
    pthread_cond_broadcast(&g_pool_cv);
+   pthread_mutex_unlock(&g_lock);
+}
+
+void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out, unsigned long *resumed_total_out)
+{
+   pthread_mutex_lock(&g_lock);
+   if (handshakes_total_out)
+      *handshakes_total_out = g_pool_handshakes_total;
+   if (resumed_total_out)
+      *resumed_total_out = g_pool_resumed_total;
    pthread_mutex_unlock(&g_lock);
 }
 

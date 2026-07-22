@@ -178,6 +178,11 @@ connection. Only one replacement handshake runs at once. Certificate rotation
 invalidates the generation, and `kb_client_mtls_pool_stats()` reports aggregate
 total/idle/busy/waiter occupancy without identity labels.
 
+Pool replacements reuse one immutable `SSL_CTX` per identity/trust generation,
+enabling TLS session resumption after a socket ages out without sharing sessions
+across certificate rotation. `kb_client_mtls_tls_stats()` exposes aggregate full
+handshake and resumed-session totals.
+
 ### Overview
 
 This document captures the current benchmark baseline for aimee’s latency-sensitive paths. The focus is the work that sits directly between a primary agent and useful execution: hook checks, memory access, session initialization, and delegate routing data.

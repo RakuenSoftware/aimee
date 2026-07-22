@@ -27,5 +27,7 @@ int kb_client_mtls_heartbeat(const char *server_id, const char *health, const ch
 void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int *waiters_out,
                                unsigned long *borrow_exhausted_total_out);
 void kb_client_mtls_pool_reset(void);
+void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out,
+                              unsigned long *resumed_total_out);
 
 #endif /* DEC_KB_CLIENT_MTLS_H */
