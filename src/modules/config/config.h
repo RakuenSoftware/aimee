@@ -1118,26 +1118,29 @@ typedef struct config
    int economizer_tier;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
-    * enabling/disabling the pipeline modules — memory (request stage), governance (response
-    * stage), delegates + workflows (orchestration hooks). Each is a TRISTATE:
+    * enabling/disabling modules — memory (request stage), governance (response stage), delegates +
+    * workflows (orchestration hooks), and optional roundtable panels. Each is a TRISTATE:
     *   -1  unspecified — the config does not set it; the resolver falls back to the module's
     *       deprecated env toggle (AIMEE_STAGE_MEMORY / _GOVERNANCE / AIMEE_ORCH_DELEGATES /
-    *       _WORKFLOWS) and then to its default-ON.
+    *       _WORKFLOWS / AIMEE_MODULE_ROUNDTABLE) and then to its descriptor default (roundtable
+    *       defaults OFF; the legacy gateway-stage modules default ON).
     *    0  user-disabled.    1  user-enabled.
     * Resolution is centralized in config_module_enabled() so the future admin/governance FORCE
     * tier (aimee-kb governance state that can pin a module on or off over the user's choice)
     * slots in at ONE site. Defaults are -1 (unspecified) so existing env-configured deployments
     * are unaffected until an operator writes the `modules:` block.
-    * CONTRIBUTORS: do NOT resolve module enablement inline at a wire site. ALWAYS call
-    * config_module_enabled(cfg->module_X, <env default>), where the env default is the module's
-    * own predicate (gw_stage_memory_enabled / gw_response_governance_enabled /
-    * gw_orch_delegates_enabled / gw_orch_workflows_enabled, reading AIMEE_STAGE_MEMORY /
-    * AIMEE_STAGE_GOVERNANCE / AIMEE_ORCH_DELEGATES / AIMEE_ORCH_WORKFLOWS). One resolver = the
-    * FORCE tier has exactly one place to extend. */
+    * CONTRIBUTORS: do not resolve module enablement inline at a wire site. For legacy gateway-stage
+    * modules, call config_module_enabled(cfg->module_X, <module env predicate>). For roundtable,
+    * call the owner-provided roundtable_module_enabled(cfg), which applies modules.roundtable,
+    * then AIMEE_MODULE_ROUNDTABLE, then the descriptor default. Keeping resolution behind one owner
+    * API leaves one place for a future FORCE tier. */
    int module_memory;
    int module_governance;
    int module_delegates;
    int module_workflows;
+   /* Optional multi-agent panel deliberation. Unspecified (-1) falls back to the
+    * roundtable-owned AIMEE_MODULE_ROUNDTABLE resolver, whose descriptor default is OFF. */
+   int module_roundtable;
    /* The economizer module toggle. econ_tier() returns ECON_TIER_OFF whenever this is
     * user-disabled (0), so the `modules:` off-switch overrides the economizer tier. */
    int module_economizer;

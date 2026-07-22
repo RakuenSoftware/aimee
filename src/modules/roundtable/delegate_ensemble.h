@@ -27,6 +27,12 @@ typedef struct
    int participants_failed; /* participants that returned no usable response (partial failure) */
 } delegate_ensemble_result_t;
 
+/* Resolve the optional roundtable module at its owner boundary. Explicit
+ * modules.roundtable config wins; an unspecified value consults
+ * AIMEE_MODULE_ROUNDTABLE; missing or invalid environment input defaults OFF. */
+int roundtable_module_enabled(const config_t *cfg);
+const char *roundtable_module_disabled_message(void);
+
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
                           delegate_ensemble_result_t *out);
 

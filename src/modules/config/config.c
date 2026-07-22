@@ -621,6 +621,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->module_governance = -1;
    cfg->module_delegates = -1;
    cfg->module_workflows = -1;
+   cfg->module_roundtable = -1;
    cfg->module_economizer = -1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */

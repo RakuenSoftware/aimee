@@ -1924,7 +1924,10 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    }
 
    config_t cfg;
-   config_load(&cfg);
+   if (config_load(&cfg) != 0)
+      return server_send_error(conn, "could not load config", NULL);
+   if (!roundtable_module_enabled(&cfg))
+      return server_send_error(conn, roundtable_module_disabled_message(), NULL);
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
@@ -2057,9 +2060,6 @@ static char *roundtable_build_aimee_context(const char *prompt)
 int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   /* Idempotent: point the replay engine at the kb_client code-index backend. */
-   if (!evidence_replay_active_backend())
-      evidence_replay_set_backend(&rt_replay_kb_backend);
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
    if (!prompt || !prompt[0])
@@ -2073,7 +2073,14 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    }
 
    config_t cfg;
-   config_load(&cfg);
+   if (config_load(&cfg) != 0)
+      return server_send_error(conn, "could not load config", NULL);
+   if (!roundtable_module_enabled(&cfg))
+      return server_send_error(conn, roundtable_module_disabled_message(), NULL);
+   /* Idempotent: point the replay engine at the kb_client code-index backend.
+    * Activation is checked first so a disabled module performs no setup work. */
+   if (!evidence_replay_active_backend())
+      evidence_replay_set_backend(&rt_replay_kb_backend);
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;

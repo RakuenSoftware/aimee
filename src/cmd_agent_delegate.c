@@ -515,7 +515,16 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          return;
       }
       config_t cfg;
-      config_load(&cfg);
+      if (config_load(&cfg) != 0)
+      {
+         fprintf(stderr, "error: could not load config\n");
+         return;
+      }
+      if (!roundtable_module_enabled(&cfg))
+      {
+         fprintf(stderr, "error: %s\n", roundtable_module_disabled_message());
+         return;
+      }
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {

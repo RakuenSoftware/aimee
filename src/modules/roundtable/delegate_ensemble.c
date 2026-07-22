@@ -43,6 +43,32 @@ _Static_assert(sizeof(((config_t *)0)->ensemble_reference_personas) /
 /* Fallback when an ad-hoc model is absent from the capability registry. */
 #define ENSEMBLE_COST_PER_TOKEN 0.000015
 
+static int roundtable_env_enabled(void)
+{
+   const char *v = getenv("AIMEE_MODULE_ROUNDTABLE");
+   if (!v || !v[0])
+      return 0;
+   if (strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0 || strcasecmp(v, "on") == 0 ||
+       strcasecmp(v, "yes") == 0)
+      return 1;
+   if (strcasecmp(v, "0") == 0 || strcasecmp(v, "false") == 0 || strcasecmp(v, "off") == 0 ||
+       strcasecmp(v, "no") == 0)
+      return 0;
+   aimee_log(LOG_WARN, "roundtable", "invalid AIMEE_MODULE_ROUNDTABLE value; defaulting off");
+   return 0;
+}
+
+int roundtable_module_enabled(const config_t *cfg)
+{
+   return config_module_enabled(cfg ? cfg->module_roundtable : -1, roundtable_env_enabled());
+}
+
+const char *roundtable_module_disabled_message(void)
+{
+   return "roundtable module is disabled; set modules.roundtable: true or "
+          "AIMEE_MODULE_ROUNDTABLE=true";
+}
+
 static void shuffle_indices(int *indices, int count)
 {
    if (!indices || count <= 1)
@@ -1458,6 +1484,8 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
       return -1;
 
    memset(out, 0, sizeof(*out));
+   if (!roundtable_module_enabled(cfg))
+      return -1;
 
    int ref_count = cfg->ensemble_reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
@@ -1635,6 +1663,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    if (!acfg || !cfg || !task || !out)
       return -1;
    memset(out, 0, sizeof(*out));
+   if (!roundtable_module_enabled(cfg))
+      return -1;
 
    int ref_count = cfg->ensemble_reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
