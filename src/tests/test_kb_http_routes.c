@@ -2605,6 +2605,29 @@ static void test_mtls_listener(void)
    assert(reusable == 0);
    kb_tls_client_conn_close(bounded);
 
+   /* A long-lived identity context can explicitly carry the negotiated session
+    * into a replacement connection. */
+   SSL_CTX *shared_client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
+   assert(shared_client_ctx);
+   kb_tls_client_conn_t *session_one =
+       kb_tls_client_conn_open_ctx("localhost", port, shared_client_ctx);
+   assert(session_one);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(reusable == 1);
+   SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
+   assert(saved_session);
+   kb_tls_client_conn_close(session_one);
+   kb_tls_client_conn_t *session_two =
+       kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
+   assert(session_two);
+   assert(kb_tls_client_conn_session_reused(session_two) == 1);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   kb_tls_client_conn_close(session_two);
+   SSL_SESSION_free(saved_session);
+   SSL_CTX_free(shared_client_ctx);
+
    /* Primary authority is consulted before dispatch. Unknown/revoked peers are
     * forbidden and an authority outage is retryable but never fail-open. */
    test_kb_enrollment_authority_set(0);
@@ -2710,6 +2733,9 @@ static void test_mtls_listener(void)
                                 &pool_exhausted);
       assert(pool_total >= 1 && pool_total <= 2 && pool_total == pool_idle && pool_busy == 0 &&
              pool_waiters == 0);
+      unsigned long pool_handshakes = 0, pool_resumed = 0;
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
       kb_client_mtls_pool_reset();
       kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
                                 &pool_exhausted);
