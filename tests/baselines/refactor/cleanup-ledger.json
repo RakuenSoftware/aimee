@@ -176,6 +176,23 @@
       "blast_radius": "No runtime surface changes; the documentation gate verifies dependencies, activation claims, and the exact debt partition.",
       "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-15.md", "docs/modules/ir.md", "docs/modules/translation.md", "docs/modules/routing.md", "docs/modules/gateway.md", "docs/modules/protocols.md", "docs/modules/delegates.md"]
+    },
+    {
+      "slice": 16,
+      "state": "present_and_verified",
+      "disposition": "Documented the five required execution-authority modules against current source, including policy, raw-secret, workspace, tool-dispatch, Git's submit-to-memory boundary, and working-tree claims with hypothesis-unverified markers preserved; three duplicated-by-adjacent-module candidates are deferred or referred for relocation, and no dead-code candidate is confirmed.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["eight module documents remain explicit status debt", "distributed execution-policy and tools source remains for focused liveness and movement slices"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds documentation and baseline accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "A second documentation schema or speculative source move would duplicate gates and overstate static reachability evidence.",
+        "revisit": "The validation record refers duplicated-by-adjacent-module candidates to later source slices with runtime liveness and behavior comparison."
+      },
+      "consumers": ["module maintainers", "technical writers", "future execution-authority source slices"],
+      "blast_radius": "No runtime surface changes; the strict module-doc gate and close-time path check constrain the slice to five docs, status, validation, and ledger accounting.",
+      "independent_review": "Technical-writing and exact-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-16.md", "docs/modules/execution-policy.md", "docs/modules/vault.md", "docs/modules/workspace.md", "docs/modules/tools.md", "docs/modules/git.md"]
     }
   ]
 }

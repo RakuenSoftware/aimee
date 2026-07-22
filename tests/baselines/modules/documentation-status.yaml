@@ -13,21 +13,21 @@
     "response-composition",
     "routing",
     "skills",
-    "translation"
+    "translation",
+    "execution-policy",
+    "vault",
+    "workspace",
+    "tools",
+    "git"
   ],
   "debt": [
     "audit",
     "benchmarks",
     "config",
     "control-web",
-    "execution-policy",
-    "git",
     "governance",
     "roundtable",
     "runtime-web",
-    "tools",
-    "vault",
-    "workflows",
-    "workspace"
+    "workflows"
   ]
 }
