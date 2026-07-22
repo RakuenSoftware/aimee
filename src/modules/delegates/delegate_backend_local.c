@@ -5,7 +5,7 @@
  * /bin/bash -c <command> in the workspace cwd with stdout/stderr
  * piped back to caller-provided buffers. */
 
-#include "delegate_backend_local.h"
+#include <aimee/delegates/delegate_backend_local.h>
 #include "util.h"
 
 #include "aimee.h" /* MAX_PATH_LEN */

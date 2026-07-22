@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
-#include "delegate_driver.h"
+#include <aimee/delegates/delegate_driver.h>
 #include "agent_types.h"
 #include "agent_tools.h"
 #include "cJSON.h"

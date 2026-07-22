@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "delegate_ephemeral_ws.h"
+#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "platform_path.h"
 #include "platform_test_util.h"
 

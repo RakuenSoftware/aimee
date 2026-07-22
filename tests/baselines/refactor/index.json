@@ -1194,6 +1194,78 @@
           "sha256": "00569d8c7378227d49e23d8c6d9f3d93e4b256ef552d1db25d3a676127a9fb41"
         },
         {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend.h",
+          "sha256": "a44e7f1ad3793a3a828784709e55e0b65ef382237ab1f46f9c577a8d640050e6"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_docker.h",
+          "sha256": "651ddcd10ef3bd8413cd7f723e90d318080f1359f692471a84e819e07a0c7655"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_local.h",
+          "sha256": "31496d42d7dd53e3d69f67ccc70c2e46d089cd877ac0fac48e6f4330f33b310a"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_backend_ssh.h",
+          "sha256": "a8b1f5044c7146ace9cb93bba35b09e95c634389ed9fb01a818441ea0f153847"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_credential_retry.h",
+          "sha256": "6bf49d5d261eddc43ce6b24a40fbfc74a8bc13d2eabc0c767ec7735b3032bb7f"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_credentials.h",
+          "sha256": "19a3eb7e3bf74829545696a68c116ef7994a463fc991e1454650fab11639ab87"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_driver.h",
+          "sha256": "5867fa6b8c715d69a4101700cfc5e30d36e854f83f4c2d180f7a0b9eb4906147"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_economics.h",
+          "sha256": "cbddf27189812b2adcfdc97199f0d6ca13c64529cd139cb192469449714b02ac"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_ephemeral_ws.h",
+          "sha256": "59767b7f7f29834a9fcbcb6685dc773b4864bf878026ff8efda0945dd88c0092"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_launch.h",
+          "sha256": "7e9d19f7e4909eb6ddb00f0dc4ae959d85c0be7d91573b2581e87f860af8fb4a"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_patch_coordinator.h",
+          "sha256": "fe0f5b87611fff9020ae141b2ba2cde3814bb9ca4addc27c9dfe0389b5f6b46a"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_plan.h",
+          "sha256": "1d869229e1cf214d4c779acfed1cf77776586aa4f6060866223eb9a204c9c72c"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_role.h",
+          "sha256": "84549d96017f42de02b9cc018c59ec4b874b3c3855745d35b8fd54e900db004f"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_run_phases.h",
+          "sha256": "8a80fb60e7194c36e0a81e4f4de6985545b8ce96dd44c6209617666065f4a3a1"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_sandbox_image.h",
+          "sha256": "f7fda56fa84aa266b1cf59047cd933c1a9cf6dd3443e32cf44881994ab90097f"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_source_authority.h",
+          "sha256": "ec268b0a70353e4b0488858b474f63d9f9acc8c7a67a2f3ab6117ad25ea066a0"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h",
+          "sha256": "3de97f29be9477a0318558fdff849b81cd84acf07ff2ba0754c138a38e1bca04"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h",
+          "sha256": "b1156d0b5da1a881603b189929deb6289d78f9c0d3564be91d394cc4f4f6610b"
+        },
+        {
           "path": "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
           "sha256": "81ffea4b320cf0df93e7e67fee923161089f247c67c4a3a5d6a10e2dbd733c6b"
         },
@@ -1252,7 +1324,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "ba89dca3429f8129c26f985d12409e8a2ce6bd5fbdff74a6a730e73ff3c838e6",
+      "sha256": "ca092b9187333b5dfbe5b3912ed9bda734bf03727bedad67b57302a2b2c2f2ed",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

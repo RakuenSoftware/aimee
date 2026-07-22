@@ -4,7 +4,7 @@
 
 #include "server.h"
 #include "db1.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "liveness.h"
 #include "cJSON.h"
 

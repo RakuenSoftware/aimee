@@ -2,7 +2,7 @@
 #include "util.h"
 #include "agent_tools.h"
 #include "aimee_home.h"
-#include "delegate_ephemeral_ws.h"
+#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "economizer.h"
 #include "log.h"
 #include "agent_tools_internal.h"

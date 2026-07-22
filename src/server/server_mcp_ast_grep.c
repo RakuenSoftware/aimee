@@ -22,8 +22,8 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "agent_pipeline.h"
-#include "delegate_economics.h"
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include "platform_path.h"
 #include "lsp.h"
 #include "server_mcp_learning.h"

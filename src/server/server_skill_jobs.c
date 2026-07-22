@@ -3,7 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_compute_impl.h"
-#include "gw_orch_delegates.h"
+#include <aimee/delegates/gw_orch_delegates.h>
 #include "config.h"
 #include "log.h"
 #include "cJSON.h"

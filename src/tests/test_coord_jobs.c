@@ -11,7 +11,7 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "db1.h"
-#include "delegate_economics.h"
+#include <aimee/delegates/delegate_economics.h>
 #include "cJSON.h"
 
 static char g_db_path[256];

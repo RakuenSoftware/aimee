@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "delegate_backend.h"
+#include <aimee/delegates/delegate_backend.h>
 
 static delegate_backend_t make_stub(const char *name)
 {

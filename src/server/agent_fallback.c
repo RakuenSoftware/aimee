@@ -1,7 +1,7 @@
 /* agent_fallback.c: Delegate fallback classification and retry helpers. */
 #include "aimee.h"
 #include "agent.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "log.h"
 #include "provider_catalog.h"
 #include <stdlib.h>

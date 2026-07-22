@@ -14,9 +14,9 @@
 #include "agent_runtime_messages.h"
 #include "agent_tools.h"
 #include "agent_tunnel.h"
-#include "delegate_driver.h"
-#include "delegate_role.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_driver.h>
+#include <aimee/delegates/delegate_role.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
 #include <aimee/gateway/gateway_delegate.h>
 #include <aimee/gateway/gateway_policy.h>
 #include "http_retry.h"

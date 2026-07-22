@@ -11,7 +11,7 @@
 #ifndef DEC_DELEGATE_BACKEND_LOCAL_H
 #define DEC_DELEGATE_BACKEND_LOCAL_H 1
 
-#include "delegate_backend.h"
+#include <aimee/delegates/delegate_backend.h>
 
 #ifdef __cplusplus
 extern "C"

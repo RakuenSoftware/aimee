@@ -202,14 +202,12 @@ in broad `src/`, `src/server/`, `src/kb/`, `src/db1/`, `src/db2/`, or global-hea
 
 ### Tracked delegates header transition
 
-Owner: required-core `delegates`. The rescue slice establishes
-`src/modules/delegates/include/aimee/delegates/aimee_ir_rescue.h`, but descriptor enrollment is deferred
-because the header-layout contract retires a module's flat include root as soon as any canonical public
-header is declared. The follow-up slice closes this debt only when every remaining flat delegate header is
-moved into the canonical namespace, all external consumers use canonical includes, the flat Make/CMake
-include roots are removed, and `src/modules/delegates/module.yaml` declares the complete public-header set.
-Until then, source-ownership mutation tests and the refactor public-header baseline enforce the rescue
-header independently. This transition must not be treated as a second supported public API.
+Owner: required-core `delegates`. Completed 2026-07-22. All 19 delegate headers now live under
+`src/modules/delegates/include/aimee/delegates/`; all consumers use canonical includes; the flat Make/CMake
+include roots are removed; and `src/modules/delegates/module.yaml` declares the complete public-header set.
+The header-layout contract, source-ownership mutation tests, and refactor public-header baseline prevent
+flat shadows or a second supported public API from returning. The pre-existing roundtable/delegates header
+cycle remains a separate dependency-design follow-up rather than being hidden inside this mechanical move.
 
 ## Review status
 
