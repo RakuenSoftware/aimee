@@ -36,6 +36,25 @@ int main(void)
    uint8_t k[VAULT_KEK_LEN];
    assert(p && p->unseal(p->ctx, NULL, 0) == 0);
    assert(p->get_kek(p->ctx, k) == 0 && k[0] == '0' && k[31] == '1');
+
+   /* The token authority closes stdio before its first custody use. Exercise
+    * the exact pipe-[0,1] collision which previously closed helper stdout. */
+   int saved_stdio[3];
+   for (int fd = 0; fd < 3; ++fd)
+   {
+      saved_stdio[fd] = fcntl(fd, F_DUPFD_CLOEXEC, 3);
+      assert(saved_stdio[fd] >= 3);
+   }
+   for (int fd = 0; fd < 3; ++fd)
+      assert(close(fd) == 0);
+   int closed_stdio_result = p->get_kek(p->ctx, k);
+   for (int fd = 0; fd < 3; ++fd)
+   {
+      assert(dup2(saved_stdio[fd], fd) == fd);
+      assert(close(saved_stdio[fd]) == 0);
+   }
+   assert(closed_stdio_result == 0 && k[0] == '0' && k[31] == '1');
+
    close(leak_fd);
    f = fopen(path, "w");
    assert(f);
