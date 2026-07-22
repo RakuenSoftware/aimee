@@ -8,6 +8,7 @@
 #include <openssl/evp.h>
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -788,6 +789,21 @@ static void remove_tree_files(const char *path)
    assert(rmdir(path) == 0);
 }
 
+static unsigned directory_file_count(int dir_fd)
+{
+   int copy = dup(dir_fd);
+   assert(copy >= 0);
+   DIR *dir = fdopendir(copy);
+   assert(dir);
+   unsigned count = 0;
+   struct dirent *entry;
+   while ((entry = readdir(dir)) != NULL)
+      if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
+         count++;
+   closedir(dir);
+   return count;
+}
+
 static void test_noncanonical_custodied_hex(void)
 {
    char dir[] = "/tmp/aimee-p5b2c-hex.XXXXXX";
@@ -919,6 +935,12 @@ static void test_lifecycle_orchestration(void)
    mock.mutate_snapshot_once = 1;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_INTEGRITY);
+   mock.crash_point = KB_MANAGEMENT_CERT_CRASH_BEFORE_TERMINAL_CLEAR;
+   mock.crash_armed = 1;
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+          KB_MANAGEMENT_CERT_UNAVAILABLE);
+   assert(faccessat(dir_fd, "pending", F_OK, 0) == 0 &&
+          faccessat(dir_fd, "cleanup", F_OK, 0) == 0);
    mock.corrupt_terminal_clear = 1;
    assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
           KB_MANAGEMENT_CERT_INTEGRITY);
@@ -950,7 +972,8 @@ static void test_lifecycle_orchestration(void)
     * or a second operation coordinate. AFTER_BEGIN/AFTER_ACTIVATE are covered
     * above; cover the remaining boundaries on successive renewals. */
    const kb_management_cert_crash_point_t boundaries[] = {
-       KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT, KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING,
+       KB_MANAGEMENT_CERT_CRASH_AFTER_PREPARE, KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT,
+       KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING,
        KB_MANAGEMENT_CERT_CRASH_AFTER_CANDIDATE, KB_MANAGEMENT_CERT_CRASH_AFTER_PROMOTE};
    for (size_t i = 0; i < sizeof(boundaries) / sizeof(boundaries[0]); ++i)
    {
@@ -994,6 +1017,20 @@ static void test_lifecycle_orchestration(void)
    assert(kb_management_cert_load_active(lifecycle, &bundle, &loaded) ==
           KB_MANAGEMENT_CERT_INTEGRITY);
    assert(zeroed(&bundle, sizeof(bundle)) && zeroed(&loaded, sizeof(loaded)));
+
+   /* Repeated renewals remain O(1): only current and its candidate survive;
+    * cleanup/pending and every superseded private record are gone. */
+   assert(directory_file_count(dir_fd) == 2);
+   assert(faccessat(dir_fd, "cleanup", F_OK, 0) != 0 && errno == ENOENT);
+   assert(faccessat(dir_fd, "pending", F_OK, 0) != 0 && errno == ENOENT);
+
+   /* A present noncanonical cleanup coordinate fails closed before any new
+    * issue can be created and is never overwritten. */
+   int cleanup_fd = openat(dir_fd, "cleanup", O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(cleanup_fd >= 0 && write(cleanup_fd, "bad", 3) == 3 && close(cleanup_fd) == 0);
+   assert(kb_management_cert_reconcile(lifecycle, mock.now + 30, &active) ==
+          KB_MANAGEMENT_CERT_INTEGRITY);
+   assert(unlinkat(dir_fd, "cleanup", 0) == 0);
 
    kb_management_cert_lifecycle_close(lifecycle);
    remove_tree_files(bundle_dir);
@@ -1270,11 +1307,47 @@ static void test_storage_open_and_protocol(void)
    size_t pending_record_len = 0;
    assert(kb_management_cert_pending_encode(&pending, pending_record, sizeof(pending_record),
                                             &pending_record_len) == 0);
-   /* Crash-safe ordering: the immutable intent is durable and discoverable
-    * before the single no-replace pending coordinate can exist. */
+   /* PREPARING is the durable O(1) coordinate for the intent->pending gap.
+    * Exact replay is accepted; no-pending apply removes an orphan intent. */
+   assert(kb_management_cert_storage_cleanup_prepare_intent(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_cleanup_prepare_intent(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_stage(&storage, "intent", pending_operation, intent_record,
+                                           intent_record_len) == KB_MANAGEMENT_STORAGE_OK);
+   uint8_t tampered_intent[4096];
+   intent_cipher[0] ^= 0x5a;
+   size_t tampered_intent_len = 0;
+   assert(kb_management_cert_intent_encode(&staged_intent, tampered_intent,
+                                           sizeof(tampered_intent), &tampered_intent_len) == 0);
+   intent_cipher[0] ^= 0x5a;
+   char intent_name[80];
+   assert(snprintf(intent_name, sizeof(intent_name), "intent.%s", pending_operation) > 0);
+   int tampered_fd = openat(storage.dir_fd, intent_name, O_WRONLY | O_TRUNC | O_CLOEXEC);
+   assert(tampered_fd >= 0 &&
+          write(tampered_fd, tampered_intent, tampered_intent_len) ==
+              (ssize_t)tampered_intent_len &&
+          close(tampered_fd) == 0);
+   assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   tampered_fd = openat(storage.dir_fd, intent_name, O_WRONLY | O_TRUNC | O_CLOEXEC);
+   assert(tampered_fd >= 0 && write(tampered_fd, intent_record, intent_record_len) ==
+                                      (ssize_t)intent_record_len &&
+          close(tampered_fd) == 0);
+   assert(linkat(storage.dir_fd, intent_name, storage.dir_fd, "intent.cleanup-linked", 0) == 0);
+   assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "intent.cleanup-linked", 0) == 0);
+   assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_read(&storage, "intent", pending_operation, readback,
+                                          sizeof(readback), &readback_len) ==
+          KB_MANAGEMENT_STORAGE_MISSING);
+   assert(kb_management_cert_storage_cleanup_prepare_intent(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_stage(&storage, "intent", pending_operation, intent_record,
                                            intent_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_cleanup_apply(&storage) == KB_MANAGEMENT_STORAGE_CONFLICT);
+   assert(kb_management_cert_storage_cleanup_finish_intent(
               &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_publish(
               &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_CONFLICT);
@@ -1297,6 +1370,20 @@ static void test_storage_open_and_protocol(void)
                                           sizeof(readback),
                                           &readback_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(readback_len == intent_record_len);
+
+   assert(symlinkat("/dev/null", storage.dir_fd, "cleanup") == 0);
+   assert(kb_management_cert_storage_cleanup_prepare_intent(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "cleanup", 0) == 0);
+   int oversized_cleanup = openat(storage.dir_fd, "cleanup", O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(oversized_cleanup >= 0);
+   uint8_t oversized_bytes[2048] = {0};
+   assert(write(oversized_cleanup, oversized_bytes, sizeof(oversized_bytes)) ==
+          (ssize_t)sizeof(oversized_bytes));
+   assert(close(oversized_cleanup) == 0);
+   assert(kb_management_cert_storage_cleanup_prepare_intent(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "cleanup", 0) == 0);
 
    assert(symlinkat("/dev/null", storage.dir_fd, "pending") == 0);
    assert(kb_management_cert_storage_pending_publish(

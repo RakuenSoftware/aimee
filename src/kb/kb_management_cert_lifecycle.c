@@ -656,6 +656,13 @@ static kb_management_cert_result_t promote_candidate(
 {
    if (!candidate_matches_active(&candidate->view, active))
       return KB_MANAGEMENT_CERT_INTEGRITY;
+   if (pending)
+   {
+      kb_management_cert_result_t prepare_rc = storage_result(
+          kb_management_cert_storage_cleanup_prepare_promotion(&lifecycle->storage));
+      if (prepare_rc != KB_MANAGEMENT_CERT_OK)
+         return prepare_rc;
+   }
    kb_management_cert_manifest_t current = {.generation = active->generation};
    memcpy(current.operation_id, active->operation_id, sizeof(current.operation_id));
    memcpy(current.public_bundle_digest, active->public_bundle_digest, 32);
@@ -679,8 +686,11 @@ static kb_management_cert_result_t promote_candidate(
        ((pending->pending.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL) !=
         (active->issue_kind == DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL)))
       return KB_MANAGEMENT_CERT_INTEGRITY;
-   return storage_result(kb_management_cert_storage_pending_clear_exact(
+   rc = storage_result(kb_management_cert_storage_pending_clear_exact(
        &lifecycle->storage, pending->encoded, pending->encoded_len));
+   if (rc != KB_MANAGEMENT_CERT_OK)
+      return rc;
+   return storage_result(kb_management_cert_storage_cleanup_apply(&lifecycle->storage));
 }
 
 static kb_management_cert_result_t begin_pending(kb_management_cert_lifecycle_t *lifecycle,
@@ -1073,12 +1083,6 @@ static kb_management_cert_result_t create_pending(
       if (lifecycle_now(lifecycle) >= deadline_epoch)
          rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    }
-   if (rc == KB_MANAGEMENT_CERT_OK)
-      rc = storage_result(kb_management_cert_storage_stage(
-          &lifecycle->storage, "intent", view.operation_id, intent->record, intent->record_len));
-   if (rc == KB_MANAGEMENT_CERT_OK &&
-       lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT))
-      rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    if (rc == KB_MANAGEMENT_CERT_OK &&
        (kb_management_cert_sha256(intent->record, intent->record_len,
                                   pending->pending.intent_record_digest) ||
@@ -1086,16 +1090,26 @@ static kb_management_cert_result_t create_pending(
                                           sizeof(pending->encoded), &pending->encoded_len)))
       rc = KB_MANAGEMENT_CERT_INTEGRITY;
    if (rc == KB_MANAGEMENT_CERT_OK)
-   {
-      if (lifecycle_now(lifecycle) >= deadline_epoch)
-         rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
-   }
+      rc = storage_result(kb_management_cert_storage_cleanup_prepare_intent(
+          &lifecycle->storage, pending->encoded, pending->encoded_len));
+   if (rc == KB_MANAGEMENT_CERT_OK &&
+       lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_AFTER_PREPARE))
+      rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
+   if (rc == KB_MANAGEMENT_CERT_OK)
+      rc = storage_result(kb_management_cert_storage_stage(
+          &lifecycle->storage, "intent", view.operation_id, intent->record, intent->record_len));
+   if (rc == KB_MANAGEMENT_CERT_OK &&
+       lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_AFTER_INTENT))
+      rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
    if (rc == KB_MANAGEMENT_CERT_OK)
       rc = storage_result(kb_management_cert_storage_pending_publish(
           &lifecycle->storage, pending->encoded, pending->encoded_len));
    if (rc == KB_MANAGEMENT_CERT_OK &&
        lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_AFTER_PENDING))
       rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
+   if (rc == KB_MANAGEMENT_CERT_OK)
+      rc = storage_result(kb_management_cert_storage_cleanup_finish_intent(
+          &lifecycle->storage, pending->encoded, pending->encoded_len));
    if (rc == KB_MANAGEMENT_CERT_OK &&
        kb_management_cert_intent_decode(intent->record, intent->record_len, &intent->view))
       rc = KB_MANAGEMENT_CERT_INTEGRITY;
@@ -1136,6 +1150,27 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
    rc = read_current(lifecycle, &current, &has_current);
    if (rc != KB_MANAGEMENT_CERT_OK)
       goto done;
+   if (!has_pending)
+   {
+      kb_management_cert_storage_result_t cleanup_sr =
+          kb_management_cert_storage_cleanup_apply(&lifecycle->storage);
+      if (cleanup_sr != KB_MANAGEMENT_STORAGE_OK && cleanup_sr != KB_MANAGEMENT_STORAGE_MISSING)
+      {
+         rc = storage_result(cleanup_sr);
+         goto done;
+      }
+   }
+   else
+   {
+      kb_management_cert_storage_result_t finish_sr =
+          kb_management_cert_storage_cleanup_finish_intent(
+              &lifecycle->storage, pending.encoded, pending.encoded_len);
+      if (finish_sr != KB_MANAGEMENT_STORAGE_OK && finish_sr != KB_MANAGEMENT_STORAGE_MISSING)
+      {
+         rc = storage_result(finish_sr);
+         goto done;
+      }
+   }
    db2_management_client_active_t active = {0};
    intent = secret_arena_alloc(arena, sizeof(*intent));
    candidate = secret_arena_alloc(arena, sizeof(*candidate));
@@ -1307,10 +1342,25 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
                   : KB_MANAGEMENT_CERT_INTEGRITY;
       else
       {
-         (void)lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_BEFORE_TERMINAL_CLEAR);
+         kb_management_cert_result_t prepare_rc = storage_result(
+             kb_management_cert_storage_cleanup_prepare_terminal(&lifecycle->storage));
+         if (prepare_rc != KB_MANAGEMENT_CERT_OK)
+         {
+            rc = prepare_rc;
+            OPENSSL_cleanse(&terminal_snapshot, sizeof(terminal_snapshot));
+            goto done_intent;
+         }
+         if (lifecycle_crash(lifecycle, KB_MANAGEMENT_CERT_CRASH_BEFORE_TERMINAL_CLEAR))
+         {
+            rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
+            OPENSSL_cleanse(&terminal_snapshot, sizeof(terminal_snapshot));
+            goto done_intent;
+         }
          kb_management_cert_result_t clear_rc = storage_result(
              kb_management_cert_storage_pending_clear_exact(
                  &lifecycle->storage, pending.encoded, pending.encoded_len));
+         if (clear_rc == KB_MANAGEMENT_CERT_OK)
+            clear_rc = storage_result(kb_management_cert_storage_cleanup_apply(&lifecycle->storage));
          rc = clear_rc == KB_MANAGEMENT_CERT_OK ? KB_MANAGEMENT_CERT_DENIED : clear_rc;
       }
       OPENSSL_cleanse(&terminal_snapshot, sizeof(terminal_snapshot));
@@ -1338,6 +1388,13 @@ static kb_management_cert_result_t reconcile_once(kb_management_cert_lifecycle_t
       db2_management_client_active_t activated = {0};
       if (lifecycle_now(lifecycle) >= deadline_epoch)
          rc = KB_MANAGEMENT_CERT_UNAVAILABLE;
+      if (rc != KB_MANAGEMENT_CERT_OK)
+      {
+         OPENSSL_cleanse(&activated, sizeof(activated));
+         goto candidate_done;
+      }
+      rc = storage_result(
+          kb_management_cert_storage_cleanup_prepare_promotion(&lifecycle->storage));
       if (rc != KB_MANAGEMENT_CERT_OK)
       {
          OPENSSL_cleanse(&activated, sizeof(activated));
