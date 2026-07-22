@@ -1004,6 +1004,15 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_curator_notify.c
     ${AIMEE_SRC_DIR}/kb/kb_curator_version.c
     ${AIMEE_SRC_DIR}/kb/kb_mining.c
+    ${AIMEE_SRC_DIR}/kb/kb_workload_provider.c
+    ${AIMEE_SRC_DIR}/kb/kb_workload_helper_posix.c
+    ${AIMEE_SRC_DIR}/kb/kb_workload_wire.c
+    ${AIMEE_SRC_DIR}/kb/kb_workload_proof.c
+    ${AIMEE_SRC_DIR}/kb/kb_workload_jwt.c
+    ${AIMEE_SRC_DIR}/kb/kb_management_cert_codec.c
+    ${AIMEE_SRC_DIR}/kb/kb_management_cert_crypto.c
+    ${AIMEE_SRC_DIR}/kb/kb_management_cert_storage.c
+    ${AIMEE_SRC_DIR}/kb/kb_management_cert_lifecycle.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
     ${AIMEE_SRC_DIR}/kb/http/kb_ingress.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_team.c
