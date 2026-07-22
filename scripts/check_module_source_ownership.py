@@ -212,6 +212,69 @@ CONTRACTS = (
         test_cmake_source="../modules/ir/aimee_ir_metrics.c",
         legacy_test_cmake_source="../server/aimee_ir_metrics.c",
     ),
+    Contract(
+        module="translation-frontend-anthropic",
+        legacy_source="src/server/aimee_frontend_anthropic.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_anthropic.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_anthropic.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_anthropic.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_anthropic.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_anthropic.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_anthropic.c",
+        legacy_test_cmake_source="../server/aimee_frontend_anthropic.c",
+    ),
+    Contract(
+        module="translation-frontend-openai",
+        legacy_source="src/server/aimee_frontend_openai.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_openai.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_openai.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_openai.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_openai.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_openai.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_openai.c",
+        legacy_test_cmake_source="../server/aimee_frontend_openai.c",
+    ),
+    Contract(
+        module="translation-frontend-responses",
+        legacy_source="src/server/aimee_frontend_responses.c",
+        legacy_header="src/headers/aimee_frontend.h",
+        canonical_source="src/modules/translation/aimee_frontend_responses.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_frontend.h",
+        canonical_include="aimee/translation/aimee_frontend.h",
+        make_source="modules/translation/aimee_frontend_responses.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_frontend_responses.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_frontend_responses.o",
+        consumers=(
+            "src/modules/translation/aimee_frontend_responses.c",
+            "src/tests/test_aimee_frontend.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("parse-to-canonical", "canonical ingress adapters"),
+        test_cmake_source="../modules/translation/aimee_frontend_responses.c",
+        legacy_test_cmake_source="../server/aimee_frontend_responses.c",
+    ),
 )
 
 LEGACY_MODULE_ROOTS = (
@@ -384,12 +447,16 @@ def validate(root: Path) -> None:
             "module-include-root", "Make module-runtime include root")
     require(makefile.count("-Imodules/ir/include") == 1,
             "module-include-root", "Make IR include root")
+    require(makefile.count("-Imodules/translation/include") == 1,
+            "module-include-root", "Make translation include root")
     require(cmake.count("set(AIMEE_PLUGIN_LOADER_INCLUDE_DIR") == 1,
             "module-include-root", "CMake plugin-loader include root")
     require(cmake.count("set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR") == 1,
             "module-include-root", "CMake module-runtime include root")
     require(cmake.count("set(AIMEE_IR_INCLUDE_DIR") == 1,
             "module-include-root", "CMake IR include root")
+    require(cmake.count("set(AIMEE_TRANSLATION_INCLUDE_DIR") == 1,
+            "module-include-root", "CMake translation include root")
 
     descriptor = json.loads(read(root, "src/modules/plugin-loader/module.yaml"))
     features = read(root, "src/headers/aimee_features.h")

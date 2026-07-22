@@ -9,13 +9,22 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
-Current translation seams include the IR-owned `aimee_ir_build_provider_body` entry point in
-`src/headers/aimee_ir_serve.h`, plus Anthropic ingress helpers, provider response parsers, and backend
-serializers under `src/server`. The target module owns provider-body conversion; the current IR-named
-symbol remains a relocation/compatibility seam until callers and installed headers migrate.
-`anthropic_http.c` still contains legacy `translate_request` and `build_provider_body` paths beside the
-typed IR path, while `openai_chat.c` has its own builder. The descriptor-only target directory records
-consolidation intent, not completed physical ownership.
+The canonical ingress adapters are
+`src/modules/translation/aimee_frontend_anthropic.c`,
+`src/modules/translation/aimee_frontend_openai.c`, and
+`src/modules/translation/aimee_frontend_responses.c`. Their public parse-to-canonical contract is
+`src/modules/translation/include/aimee/translation/aimee_frontend.h`, included through the canonical
+namespace `aimee/translation`. These adapters only map supported client/provider request shapes into the
+IR-owned `aimee_request_t`; they do not listen, dispatch, select a route, or send provider requests.
+
+Remaining translation seams include the `aimee_ir_build_provider_body` entry point in
+`src/headers/aimee_ir_serve.h`, provider response parsers, and backend serializers under `src/server`.
+The target module owns provider-body conversion; the current IR-named symbol remains a
+relocation/compatibility seam until callers and installed headers migrate. `anthropic_http.c` still
+contains legacy `translate_request` and `build_provider_body` paths beside the typed IR path, while
+`openai_chat.c` has its own builder. Backend egress adapters and the mixed `aimee_ir_serve.c` and
+`aimee_ir_stream.c` implementations remain explicitly deferred. `router_advise.c` is workflow-owned
+despite its name and is outside translation.
 
 ## Dependencies and consumers
 
@@ -73,7 +82,8 @@ mode (covered by `test_ir_legacy_parity.c`), but any mutated request must use th
 
 ## Tests and failure behavior
 
-Coverage includes `test_anthropic_ingress.c`, `test_anthropic_shape.c`, `test_openai_shape.c`,
+The descriptor owns `src/tests/test_aimee_frontend.c` as the direct contract for the three canonical
+ingress adapters. Adjacent coverage includes `test_anthropic_ingress.c`, `test_anthropic_shape.c`, `test_openai_shape.c`,
 `test_ir_crossproto_egress.c`, `test_ir_legacy_parity.c`, `test_aimee_ir_serve.c`, and backend shape tests.
 Malformed or unsupported input must return a bounded error without partial tool execution; stream mapping
 must emit one coherent terminal state and free partially built structures.

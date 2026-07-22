@@ -2,7 +2,7 @@
 #include "aimee_ir_serve.h"
 
 #include "aimee_backend.h"
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 #include "gw_stage_memory.h" /* ir_stage_memory + gw_stage_memory_enabled */
 #include "config.h"          /* config_load + config_module_enabled (modules.memory) */
 #include <aimee/ir/aimee_ir_metrics.h>

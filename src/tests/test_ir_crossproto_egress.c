@@ -11,7 +11,7 @@
 #include <stdlib.h>
 
 #include <aimee/ir/aimee_ir.h>
-#include "aimee_frontend.h"
+#include <aimee/translation/aimee_frontend.h>
 #include "aimee_backend.h"
 #include "cJSON.h"
 
