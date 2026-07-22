@@ -1,127 +1,81 @@
 # The aimee Economizer
 
-The economizer reduces LLM token **cost** without degrading the model's context.
-It has **one** user-facing control — a three-way tier — and applies a
-**provider-aware** strategy underneath, because Anthropic and OpenAI reward
-completely different economization.
+The economizer is fail-closed: it may change a provider request only when a local,
+provider-specific proof establishes a strict call-level cost reduction. If any required fact is
+unknown, the original provider body is sent unchanged.
 
 ```yaml
-economizer: safe        # off | safe | aggressive   (default: safe)
+economizer:
+  mode: off             # off | proof_gated (default: off)
 ```
 
 ```sh
-aimee config set economizer aggressive
+aimee config set economizer.mode proof_gated
 ```
 
----
+## Current release behavior
 
-## The core invariant (why this is provider-aware)
+The live transform registry is empty. Therefore both modes currently send the same pristine request:
 
-**Anthropic prompt-caches on the exact bytes of the request prefix.** A cache *read*
-is ~10× cheaper than re-sending the tokens; a cache *miss* costs the full price plus
-a one-time *write* surcharge. So on Anthropic the cheapest thing aimee can do is
-**not change the bytes** turn-over-turn.
+- `off` bypasses economizer registry validation and the snapshot allocation.
+- `proof_gated` validates the signed empty registry, then copies the final provider body into an
+  immutable wire snapshot.
 
-This gives the single rule everything else follows from:
+The snapshot's pointer and exact byte length are passed to the HTTP transport and retained for every
+ordinary retry. A retry can duplicate delivery after an ambiguous network failure, but it cannot
+rebuild, restore, or substitute a different economizer representation.
 
-> **Once content has been sent to the Anthropic API, it is frozen** — every later
-> turn must replay it **byte-identically**, or the cache misses and the "savings"
-> cost *more*. **Before** content is first sent, aimee may transform it freely.
+This release deliberately removes the previous live history folding, tool-output condensation,
+body compression, gateway mutation, and economizer-owned restore/resend behavior. Their helper code
+may remain for offline or isolated tests, but it has no production request caller. The economizer
+also does not add, remove, or move OpenAI or Anthropic cache controls.
 
-That is "freeze-on-first-send." It means aimee **can** compress, condense, or fold
-Anthropic-bound context — it just has to do it **before the first send** and then
-**freeze** the result. A tool output that is condensed the moment it is produced,
-and thereafter replayed identically, shrinks every future turn's token count *and*
-keeps the cache intact.
+## Why the planners are provider-specific
 
-OpenAI's caching is automatic and far more forgiving of prefix changes, so on the
-OpenAI family the economizer optimizes for **fewer tokens outright** rather than
-byte-stability, and can apply lossier reductions.
+OpenAI and Anthropic both reward stable cacheable prefixes, but their cache breakpoints, write/read
+prices, long-context rules, and response accounting differ. Neither API exposes enough pre-dispatch
+settlement information to let a generic compressor safely infer cache residency or hidden
+breakpoints.
 
-Cross-protocol byte-identity (an `openai-wire` client whose request is translated to
-Anthropic egress produces the *same* bytes an `anthropic-wire` client would) is
-guaranteed by the canonical IR egress and is a prerequisite for all of the above.
+The OpenAI and Anthropic planners therefore use separate signed pricing and cache-semantics
+contracts. They operate only on local evidence and fully serialized alternatives. Remote token-count
+calls, cache probes, predicted cache hits, and post-response usage fields cannot authorize a change.
 
----
+The planners can return a proof for reviewed fixtures, but they are not yet connected to a live
+transform because the production registry has no entries. A future transform needs its own lossless
+semantic contract, exact tokenizer/model compatibility, provenance rules, and converged review
+before it can enter that registry.
 
-## The three tiers
+## Configuration migration
 
-| Tier | Anthropic-bound context | OpenAI-family-bound context |
-|---|---|---|
-| **off** | no caching, no reduction — verbatim passthrough | no reduction |
-| **safe** | prompt caching **+** deterministic, freeze-on-first-send **tool-output condensation** (lossless-on-demand: the full output is recall-restorable) | `tool_condense` **+** non-destructive fold-with-recall (only where fully restorable) |
-| **aggressive** | prompt caching **+** everything in safe **+** more aggressive, still-frozen reduction (history fold + body compression) applied before first send | **+** lossy body compression **+** live `/v1` request mutation |
+The old scalar values `economizer: safe` and `economizer: aggressive`, and the old
+`economizer.enabled` / `economizer.aggressive` object, are unsupported. They are not mapped because
+either mapping could silently activate behavior the operator did not select. Replace them explicitly
+with:
 
-Rules that hold on **every** tier:
+```yaml
+economizer:
+  mode: off
+```
 
-- **Anthropic egress is always byte-deterministic.** Whatever reduction a tier
-  applies is applied *before* first send and *frozen* thereafter, so the cached
-  prefix never shifts. A reduction that cannot be frozen cache-favorably (its
-  savings over the freeze horizon do not beat the one-time cache-write cost) is
-  **not** applied — the freeze-cost guardrail decides this per conversation.
-- **Reduction never crosses providers.** OpenAI-only lossy passes never touch an
-  Anthropic-bound request, and vice-versa; the strategy is keyed on the **egress
-  provider**.
-- **off is a true bypass.** No cache markers, no condensation — the request is the
-  canonical egress of the verbatim context.
+or, to enable the proof fence for future reviewed transforms:
 
-### What "condensation" vs "fold" vs "compression" mean
+```yaml
+economizer:
+  mode: proof_gated
+```
 
-- **Tool-output condensation** — a recognized command's output (e.g. a directory
-  listing, a large file read) is replaced by a compact, deterministic summary with
-  the full body **recall-restorable on demand**. Lossless in effect; cache-safe
-  because the same output always condenses to the same bytes.
-- **History fold** — older turns are rolled into a compact skeleton. Lossy unless
-  recall-restorable. On Anthropic it is only ever applied *before first send* and
-  frozen (never re-folded into different bytes later).
-- **Body compression** — boundary-free shrinking of large tool bodies. Aggressive
-  tier only.
-- **Live gateway mutation** — applies the reduced form to the live inbound `/v1`
-  request. Aggressive tier, **OpenAI-family only.**
+An omitted setting defaults to `off`. Explicit legacy or malformed values make configuration loading
+fail instead of falling back to an active mode.
 
----
+## Claims this release does not make
 
-## Observability
+- It does not claim that generic compression, summarization, recall, or rehydration saves money.
+- It does not claim completed-task savings from a cheaper individual call.
+- It does not claim knowledge of provider cache residency or undocumented breakpoints.
+- It does not claim exactly-once delivery across transport failures.
+- It does not report hypothetical savings as realized savings.
 
-Every economization is recorded so its impact is visible, never silent:
-
-- **Ledger rows** in the token audit (`source="economizer"`, `usage_kind="avoided"`)
-  carry the tokens removed, the baseline/reduced sizes, the reason, and the
-  freeze/reuse decision — tagged with the active **`tier`**; the row's **`model`**
-  identifies the egress provider. Surfaced together at `GET /v1/economizer/stats`.
-- **Cache accounting** — `cache_read_tokens` / `cache_write_tokens` on each turn
-  show the caching payoff directly.
-- **Spend** excludes avoided tokens from the billable total and reports them as
-  `avoided $X`, so the saving is legible.
-- A conversation whose reduction was *suppressed* (guardrail said "not
-  cache-favorable") is logged, so an operator can see the economizer chose not to
-  act rather than silently doing nothing.
-
----
-
-## Choosing a tier
-
-- **off** — debugging, or a workload where you must guarantee the model sees the
-  byte-exact verbatim context and pay full price.
-- **safe** (default) — lossless. Anthropic gets prompt caching + recall-restorable
-  tool condensation; OpenAI gets recall-restorable reduction. No information is ever
-  lost to the model; cost drops with zero behavioral risk.
-- **aggressive** — maximum cost reduction. Adds lossy folding/compression and, on
-  OpenAI, live request mutation. Use when cost matters more than keeping the full
-  verbatim history addressable.
-
----
-
-## Migration from the old config
-
-The previous `reduce.*` flags and the `economizer.enabled` / `economizer.aggressive`
-two-tier switches are **removed**. Map old settings to the tier:
-
-| Old | New |
-|---|---|
-| `economizer.enabled: false` | `economizer: off` |
-| `economizer.enabled: true`, `economizer.aggressive: false` | `economizer: safe` |
-| `economizer.enabled: true`, `economizer.aggressive: true`, `reduce.gateway_mutate: true` | `economizer: aggressive` |
-
-The reduction tuning that used to live in `reduce.*` / `fold.*` / `closet.*` is now
-an internal preset selected by the tier; there are no per-lever knobs.
+The normative safety rules and implementation plan are in
+`docs/proposals/pending/provider-neutral-economizer-safety-spec.md` and
+`docs/proposals/pending/provider-neutral-cache-aware-economizer.md`.
