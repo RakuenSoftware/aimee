@@ -22,10 +22,6 @@ type e2eAgents struct {
 	codeRuns int
 }
 
-func (a *e2eAgents) EligibleAgents(_ context.Context, _ string) ([]EligibleAgent, error) {
-	return []EligibleAgent{{Name: "codex", Provider: "chatgpt", MaxParallel: 5}}, nil
-}
-
 func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	switch request.Role {
 	case "review":
@@ -58,6 +54,10 @@ func (a *e2eAgents) Delegate(_ context.Context, request DelegateRequest) (Delega
 	default:
 		return DelegateResult{}, fmt.Errorf("unexpected role %s", request.Role)
 	}
+}
+
+func (a *e2eAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
 }
 
 type passVerifier struct{}

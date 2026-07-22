@@ -802,6 +802,22 @@ int main(void)
       setenv("AIMEE_API_BEARER_TOKEN", BOOT, 1);
       assert(server_http_bootstrap_gate(1, BOOT, "GET", "/v1/config") == 0);
       unsetenv("AIMEE_API_BEARER_TOKEN");
+
+      uint32_t bootstrap_caps =
+          server_http_effective_conn_caps(1, BOOT, SERVER_REMOTE_WRITES_OFF, 1, 0);
+      assert((bootstrap_caps & CAP_SESSION_ADMIN) != 0);
+      assert((bootstrap_caps & CAP_DELEGATE) == 0);
+      assert(server_http_route_allowed_caps(1, bootstrap_caps, "POST", "/v1/api/rotate_bearer",
+                                            SERVER_REMOTE_WRITES_OFF) == 1);
+      assert(server_http_route_allowed_caps(1, CAPS_READ_ONLY | CAP_DELEGATE, "POST",
+                                            "/v1/cert/sign", SERVER_REMOTE_WRITES_OFF) == 1);
+      assert((server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "deployment-token", "POST",
+                                          "/v1/cert/sign") &
+              CAP_DELEGATE) != 0);
+      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 0, "deployment-token", "POST",
+                                         "/v1/cert/sign") == CAPS_READ_ONLY);
+      assert(server_http_enrollment_caps(CAPS_READ_ONLY, 1, 0, 1, "scope:read", "POST",
+                                         "/v1/cert/sign") == CAPS_READ_ONLY);
    }
 
    /* --- P5-B3b dedicated management transport classification. The two
@@ -1083,10 +1099,10 @@ int main(void)
       /* Privileged exec/control routes (delegate/cron/agent/provider/worktree/...)
        * are local-only over TCP unless remote_writes==full; data-plane writes need
        * only remote_writes>=data. Fail-closed at the default. */
-      const char *exec_paths[] = {"/v1/delegate/launch",     "/v1/delegate/backend_exec",
-                                  "/v1/delegate/roundtable", "/v1/cron/add",
-                                  "/v1/agent/add",           "/v1/worktree/gc",
-                                  "/v1/model/refresh",       "/v1/api/disable"};
+      const char *exec_paths[] = {"/v1/delegate/launch",   "/v1/delegate/backend_exec",
+                                  "/v1/roundtable/review", "/v1/cron/add",
+                                  "/v1/agent/add",         "/v1/worktree/gc",
+                                  "/v1/model/refresh",     "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -1098,9 +1114,9 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
-      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
+      assert(server_http_route_caps("POST", "/v1/roundtable/review") == CAP_DELEGATE);
       assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
-                                       "/v1/delegate/roundtable", SERVER_REMOTE_WRITES_FULL) == 0);
+                                       "/v1/roundtable/review", SERVER_REMOTE_WRITES_FULL) == 0);
       /* The detached-workspace plane is exempt: reachable over TCP at remote_writes=off
        * (still cap-gated -> a scoped query-only bearer is still denied). */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/runner/poll", 0) == 1);
@@ -1367,12 +1383,12 @@ int main(void)
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
       openai_runs_store_reset();
       const char *roundtable_body = "{\"prompt\":\"draft\"}";
-      assert(server_http_route("POST", "/v1/delegate/roundtable", roundtable_body,
+      assert(server_http_route("POST", "/v1/roundtable/review", roundtable_body,
                                (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
       assert(strstr(rb, "\"object\":\"op.run\""));
-      assert(strstr(rb, "\"method\":\"delegate.roundtable\""));
+      assert(strstr(rb, "\"method\":\"roundtable.review\""));
       assert(strstr(rb, "\"status\":\"queued\""));
-      for (int i = 0; i < 100 && strcmp(g_disp_method, "delegate.roundtable") != 0; i++)
+      for (int i = 0; i < 100 && strcmp(g_disp_method, "roundtable.review") != 0; i++)
          usleep(1000);
       char *large_body = malloc(9200);
       assert(large_body);
@@ -1422,17 +1438,17 @@ int main(void)
       assert(atomic_load(&g_op_context_clean) == 1);
       openai_runs_store_reset();
 
-      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
       g_test_server_ctx_available = 0;
-      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
-                                       CAP_DELEGATE, rb, sizeof(rb)) == 503);
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
+                                       rb, sizeof(rb)) == 503);
       assert(strstr(rb, "orchestration unavailable"));
       g_test_server_ctx_available = 1;
       compute_pool_close(&g_test_server_ctx.orchestration_pool);
-      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
-                                       CAP_DELEGATE, rb, sizeof(rb)) == 503);
+      assert(server_http_submit_op_run("roundtable.review", "{\"prompt\":\"draft\"}", CAP_DELEGATE,
+                                       rb, sizeof(rb)) == 503);
       assert(strstr(rb, "orchestration unavailable"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);

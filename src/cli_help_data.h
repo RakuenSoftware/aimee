@@ -169,6 +169,10 @@
     {"ensemble", "A panel of agents (mixture-of-agents, roundtable)", CLIENT_TIER_ADVANCED, 0,
      "  aggregate        Mixture-of-Agents ensemble aggregate\n"
      "  roundtable       Multi-round agent roundtable\n"},
+    {"roundtable", "Review an artifact with a configured roundtable", CLIENT_TIER_ADVANCED, 0,
+     "  review <artifact>  Run the configured roundtable review\n"
+     "                     --roundtable NAME selects a saved preset\n"
+     "                     --original-request TEXT supplies the governing request\n"},
     {"pipeline", "Roundtable authoring pipelines", CLIENT_TIER_ADVANCED, 0,
      "  start            Start an authoring pipeline from a one-line idea\n"
      "  status           Show a pipeline's state, phase, latest review digest and gate\n"

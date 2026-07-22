@@ -2941,34 +2941,26 @@ paths:
               properties:
                 prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
-  /delegate/roundtable:
+  /roundtable/review:
     post:
-      summary: Multi-round agent roundtable over ensemble.reference_models (async; poll GET /runs/{id})
+      summary: Review a complete artifact through the resolved roundtable
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [prompt]
+              required: [artifact]
               properties:
-                prompt: { type: string }
-                mode: { type: string, enum: [draft, review] }
-                turns: { type: string, enum: [parallel, sequential] }
-                rounds: { type: integer }
-                apply: { type: boolean }
-                brief:
-                  oneOf:
-                    - { type: string }
-                    - type: object
-                      properties:
-                        focus: { type: array, items: { type: string } }
-                        fixes: { type: array, items: { type: string } }
-                        invariants: { type: array, items: { type: string } }
-                        questions: { type: array, items: { type: string } }
+                artifact: { type: string }
+                original_request: { type: string }
+                artifact_stage: { type: string, enum: [intent, plan, frozen_diff] }
+                roundtable: { type: string }
+                workdir: { type: string }
+                run_id: { type: string }
       responses:
         "200":
-          description: Queued op run; poll GET /runs/{id}. Final result includes artifact, items, answered_questions, and coverage_gaps.
+          description: Completed roundtable review with structured findings and participant accounting.
           content:
             application/json:
               schema: { type: object }

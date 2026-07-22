@@ -12,7 +12,8 @@
 
 /* --- stubs for agent exec functions --- */
 
-static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails */
+static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails,
+                                 * 11=first seat fails only on the first fan-out */
 static int g_aggregator_mode = 0;
 static int g_reason_mode = 0;
 static int g_scorer_calls = 0; /* counts run_quality_scorer ("reason" + score prompt) invocations */

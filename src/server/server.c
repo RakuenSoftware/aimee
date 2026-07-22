@@ -1580,7 +1580,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
-    {"delegate.roundtable", handle_delegate_roundtable},
+    {"roundtable.review", handle_roundtable_review_proxy},
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},

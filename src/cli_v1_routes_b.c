@@ -1242,7 +1242,7 @@ static const struct
     {"delegate.backend_exec", marshal_delegate_backend_exec},
     {"delegate.launch", marshal_delegate_launch},
     {"delegate.log", marshal_delegate_log},
-    {"delegate.roundtable", marshal_delegate_roundtable},
+    {"roundtable.review", marshal_roundtable_review},
     {"delegate.sandbox_gc", marshal_delegate_sandbox_gc},
     {"delegate.status", marshal_delegate_status},
     {"dogfood.report", marshal_dogfood_report},

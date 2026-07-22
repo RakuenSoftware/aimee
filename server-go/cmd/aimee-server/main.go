@@ -140,6 +140,7 @@ func main() {
 			log.Fatal(roundtableErr)
 		}
 		nativeRunner.SetRoundtableStore(roundtables)
+		handler.SetRoundtableReviewer(nativeRunner)
 		runner = nativeRunner
 	}
 	if runner != nil {

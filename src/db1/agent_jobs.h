@@ -18,6 +18,7 @@ extern "C"
 
 #define DB1_AJ_ROLE_LEN   32
 #define DB1_AJ_AGENT_LEN  64
+#define DB1_AJ_PARTICIPANT_LEN 65
 #define DB1_AJ_STATUS_LEN 32
 #define DB1_AJ_TS_LEN     32
 
@@ -38,6 +39,7 @@ extern "C"
        * db1_agent_job_get/list_recent; free with db1_agent_job_free. */
       char *prompt;
       char agent_name[DB1_AJ_AGENT_LEN];
+      char participant_token[DB1_AJ_PARTICIPANT_LEN];
       char status[DB1_AJ_STATUS_LEN];
       char *result;
       int cursor_turn;
@@ -111,6 +113,10 @@ extern "C"
     * out->result are heap-allocated (never NULL) and must be released with
     * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
+
+   /* Resolve an unguessable participant capability to its durable delegate job.
+    * Exact-token lookup keeps agent identity behind the delegation boundary. */
+   int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_job_t *out);
 
    /* Release the heap-owned fields (prompt/result) of a job loaded by
     * db1_agent_job_get / db1_agent_job_list_recent. Idempotent and NULL-safe:
