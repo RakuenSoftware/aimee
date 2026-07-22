@@ -25,7 +25,7 @@ static const struct
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
-    {"delegate.roundtable", pt_print_delegate_roundtable},
+    {"roundtable.review", pt_print_roundtable_review},
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
     {"audit.seal", pt_print_audit},
@@ -752,7 +752,7 @@ static const struct
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
-    {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
+    {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},

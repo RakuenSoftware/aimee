@@ -685,7 +685,7 @@ static int handle_subagent_guard(void)
           "BLOCKED: the primary agent must not spawn its own sub-agents (Task/Agent/"
           "spawn_agent) — they escape this session's guardrails. Delegate instead so the child "
           "inherits the session's guardrails, memory, and KB: `aimee delegate <role> \"<task>\" "
-          "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` for a "
+          "--persona <persona>`, or `aimee roundtable review \"<task>\"` for a "
           "multi-model panel.";
       if (cli_hook_client_uses_pretool_json())
       {

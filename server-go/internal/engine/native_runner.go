@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -65,6 +66,31 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
 	return r.agents.Delegate(ctx, request)
+}
+
+func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requests []DelegateRequest) []DelegateGroupResult {
+	for i := range requests {
+		requests[i].WorkItemID = step.WorkItem.ID
+		requests[i].Stage = step.Node.ID
+		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
+	}
+	if group, ok := r.agents.(DelegateGroupClient); ok {
+		return group.DelegateGroup(ctx, requests)
+	}
+	// Lightweight test/resource-plane implementations need only implement the
+	// primitive. The fallback preserves the group contract and concurrency.
+	out := make([]DelegateGroupResult, len(requests))
+	var wg sync.WaitGroup
+	wg.Add(len(requests))
+	for i := range requests {
+		go func(i int) {
+			defer wg.Done()
+			out[i].Result, out[i].Err = r.agents.Delegate(ctx, requests[i])
+			out[i].Participant = out[i].Result.Agent
+		}(i)
+	}
+	wg.Wait()
+	return out
 }
 
 func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
@@ -469,10 +495,10 @@ type panelResponse struct {
 	Findings                 []panelFinding `json:"findings"`
 }
 type panelSeat struct {
-	persona, delegate string
-	required          bool
-	pinned            bool
-	ordinal           int
+	persona, selector, participant string
+	required                       bool
+	pinned                         bool
+	ordinal                        int
 }
 
 type panelSeatReport struct {
@@ -492,40 +518,31 @@ type panelAnalysis struct {
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
 	lenses := panelSeats(req.Node)
 	if len(lenses) == 0 {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable"}, nil
-	}
-	rosterClient, ok := r.agents.(AgentRosterClient)
-	if !ok {
-		return StepResult{Status: StepPending, PauseReason: "panel_wiring_missing", Detail: "agent resource plane does not expose the live eligible roster"}, nil
-	}
-	// gate.roundtable always dispatches the review role. A roster failure cannot
-	// safely fall back to a smaller static panel: without the live enabled-role
-	// roster, WFE cannot know either eligibility or configured capacity. Park and
-	// retry instead of silently violating the operator's UI configuration.
-	roster, err := rosterClient.EligibleAgents(ctx, roundtableDelegateRole)
-	if err != nil {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: "load eligible roundtable roster: " + err.Error()}, nil
-	}
-	roundtableAgents := make([]roundtablecfg.Agent, 0, len(roster))
-	for _, agent := range roster {
-		roundtableAgents = append(roundtableAgents, roundtablecfg.Agent{Name: agent.Name, Provider: agent.Provider, MaxParallel: agent.MaxParallel})
+		// A saved roundtable owns its exact seats and personas. Workflow-local panel
+		// metadata is only an optional lens/pin overlay; it must not be required to
+		// enter the one shared roundtable route. The direct fallback consumes only
+		// the first two lenses by contract.
+		for _, persona := range []string{"original-request", "security", "architect", "qa", "reviewer"} {
+			lenses = append(lenses, panelSeat{persona: persona, required: true})
+		}
 	}
 	lensNames := make([]string, 0, len(lenses))
 	for _, lens := range lenses {
 		lensNames = append(lensNames, lens.persona)
 	}
 	var panel roundtablecfg.Panel
+	var err error
 	if r.roundtables != nil {
-		panel, err = r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), roundtableAgents, lensNames, panelPins(req.Node))
+		panel, err = r.roundtables.Resolve(paramString(req.Node, "roundtable", ""), lensNames, panelPins(req.Node))
 	} else {
-		panel, err = roundtablecfg.ResolveDirect(roundtableAgents, lensNames, panelPins(req.Node))
+		panel, err = roundtablecfg.ResolveDirect(lensNames, panelPins(req.Node))
 	}
 	if err != nil {
 		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: err.Error()}, nil
 	}
 	seats := make([]panelSeat, 0, len(panel.Seats))
 	for _, seat := range panel.Seats {
-		seats = append(seats, panelSeat{persona: seat.Persona, delegate: seat.Agent, required: true, pinned: seat.Pinned})
+		seats = append(seats, panelSeat{persona: seat.Persona, selector: seat.Selector, required: true, pinned: seat.Pinned})
 	}
 	for i := range seats {
 		seats[i].ordinal = i
@@ -535,7 +552,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		return StepResult{}, errors.New("roundtable missing src input")
 	}
 	workdir := req.WorkItem.Worktree
-	if workdir == "" {
+	if workdir == "" && req.WorkItem.Repo != "" {
 		var err error
 		workdir, _, err = r.worktrees.Ensure(ctx, req.WorkItem, req.WorkItem.ParentID == "")
 		if err != nil {
@@ -558,31 +575,39 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	defer cancel()
 	analysis := r.runPanelAnalysis(roundtableCtx, req, seats, basePrompt, reviewed.Hash, stage, 1)
 	if analysis.Unreachable != "" {
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD}, nil
+		rt := roundtableResult(&analysis.Feedback, false, analysis, len(seats), analysis.CostUSD)
+		rt.DeadlineHit = roundtableCtx.Err() != nil
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, Roundtable: rt}, nil
 	}
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
 	if panel.Discussion {
 		var discussionErr string
 		feedback, approvals, totalCost, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
 		if discussionErr != "" {
-			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost}, nil
+			rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+			rt.DeadlineHit = roundtableCtx.Err() != nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
 	}
 	if panel.ChairmanEnabled {
 		var chairmanErr string
 		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
 		if chairmanErr != "" {
-			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost}, nil
+			rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+			rt.DeadlineHit = roundtableCtx.Err() != nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost, Roundtable: rt}, nil
 		}
 	}
 	quorum := panel.MinSuccessful
 	if approvals >= quorum && len(feedback.Findings) == 0 {
-		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost}, nil
+		rt := roundtableResult(&feedback, true, analysis, len(seats), totalCost)
+		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, Roundtable: rt}, nil
 	}
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "quorum", Persona: "panel", Severity: "blocking", Summary: "required approval quorum was not reached", Recommendation: "revise the artifact and reconvene the configured roundtable"})
 	}
-	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost}, nil
+	rt := roundtableResult(&feedback, false, analysis, len(seats), totalCost)
+	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
 }
 
 func roundtableStageGuidance(stage string) string {
@@ -614,35 +639,27 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		cost   float64
 		err    error
 	}
-	ch := make(chan outcome, len(seats))
-	for _, seat := range seats {
-		seat := seat
-		go func() {
-			// Repeated persona/agent pairs must not collide and reuse one remote
-			// result, so each capacity seat carries a distinct durable slot.
-			seatSlot := panelSeatDurableSlot(req, panelRound, seat.ordinal)
-			request := DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: seatSlot, ArtifactStage: artifactStage, ProvidedTarget: true}
-			res, err := r.delegate(ctx, req, request)
-			if err != nil && !seat.pinned && seat.delegate != "" {
-				// Capacity assignments are routing hints for this panel run, not UI
-				// pins. If the assigned subscription is temporarily unavailable,
-				// retry through ordinary live eligibility after that failed slot has
-				// released its lease. Never persist the failure as an exclusion.
-				request.Delegate = ""
-				request.RetryTag = fmt.Sprintf("eligible-fallback:%d:%s", seat.ordinal, seat.delegate)
-				res, err = r.delegate(ctx, req, request)
+	requests := make([]DelegateRequest, len(seats))
+	for i, seat := range seats {
+		// Repeated persona/agent specifications must not collide and reuse one
+		// remote result, so each capacity seat carries a distinct durable slot.
+		// Empty Delegate is deliberate: generic delegation resolves eligibility.
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: seat.persona, Delegate: seat.selector, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelSeatDurableSlot(req, panelRound, seat.ordinal), ArtifactStage: artifactStage, ProvidedTarget: true}
+	}
+	delegated := r.delegateGroup(ctx, req, requests)
+	outcomes := make([]outcome, len(seats))
+	for i, call := range delegated {
+		parsed, err := panelResponse{}, call.Err
+		if err == nil {
+			var doc []byte
+			doc, err = extractJSONObject(call.Result.Response)
+			if err == nil {
+				err = json.Unmarshal(doc, &parsed)
 			}
-			if err != nil {
-				ch <- outcome{seat: seat, err: err}
-				return
-			}
-			doc, e := extractJSONObject(res.Response)
-			var parsed panelResponse
-			if e == nil {
-				e = json.Unmarshal(doc, &parsed)
-			}
-			ch <- outcome{seat: seat, result: parsed, cost: res.CostUSD, err: e}
-		}()
+		}
+		seat := seats[i]
+		seat.participant = call.Participant
+		outcomes[i] = outcome{seat: seat, result: parsed, cost: call.Result.CostUSD, err: err}
 	}
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifactHash}
 	reports := make([]panelSeatReport, 0, len(seats))
@@ -654,8 +671,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 	}
 	var requiredFailures []requiredFailure
 	validPersona := make(map[string]bool)
-	for range seats {
-		o := <-ch
+	for _, o := range outcomes {
 		cost += o.cost
 		if o.err != nil {
 			if o.seat.required {
@@ -723,6 +739,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(unreachable, "; "), Reports: reports}
 }
 
+// runPanelRound remains the focused test seam for independent analysis.
 func (r *NativeRunner) runPanelRound(ctx context.Context, req StepRequest, seats []panelSeat, prompt, artifactHash, artifactStage string, panelRound int) (wfe.ReviewFeedback, int, int, float64, string) {
 	result := r.runPanelAnalysis(ctx, req, seats, prompt, artifactHash, artifactStage, panelRound)
 	return result.Feedback, result.Approvals, result.Voters, result.CostUSD, result.Unreachable
@@ -979,12 +996,12 @@ func panelSeats(node wfe.Node) []panelSeat {
 	pins := stringMap(panel["pins"])
 	var out []panelSeat
 	for _, p := range required {
-		delegate := pins[p]
-		out = append(out, panelSeat{persona: p, delegate: delegate, required: true, pinned: delegate != ""})
+		selector := pins[p]
+		out = append(out, panelSeat{persona: p, selector: selector, required: true, pinned: selector != ""})
 	}
 	for _, p := range eligible {
-		delegate := pins[p]
-		out = append(out, panelSeat{persona: p, delegate: delegate, pinned: delegate != ""})
+		selector := pins[p]
+		out = append(out, panelSeat{persona: p, selector: selector, pinned: selector != ""})
 	}
 	return out
 }

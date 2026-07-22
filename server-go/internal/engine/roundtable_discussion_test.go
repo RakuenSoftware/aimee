@@ -30,8 +30,8 @@ func discussionAnalysis(severity string) panelAnalysis {
 	return panelAnalysis{
 		Feedback: wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: "hash", Findings: []wfe.Finding{{ID: "direction", Persona: "architecture", Severity: severity, Summary: "the direction is wrong"}}},
 		Reports: []panelSeatReport{
-			{Seat: panelSeat{persona: "architecture", delegate: "codex", ordinal: 0}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
-			{Seat: panelSeat{persona: "reviewer", delegate: "minimax", ordinal: 1}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
+			{Seat: panelSeat{persona: "architecture", participant: "participant-a", ordinal: 0}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
+			{Seat: panelSeat{persona: "reviewer", participant: "participant-b", ordinal: 1}, Response: panelResponse{ArtifactStage: "plan", Verdict: "changes"}},
 		},
 		Voters: 2,
 	}

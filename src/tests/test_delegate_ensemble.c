@@ -122,8 +122,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       char buf[128];
       snprintf(out[i].agent_name, sizeof(out[i].agent_name), "%s",
                tasks[i].agent ? tasks[i].agent : "");
-      if ((g_parallel_mode == 9 && i == count - 1) || (g_parallel_mode == 10 && i == 0) ||
-          (g_parallel_mode == 11 && g_parallel_calls == 1 && i == 0))
+      if ((g_parallel_mode == 9 && i == count - 1) || (g_parallel_mode == 10 && i == 0))
          continue;
       if (g_parallel_mode == 2 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
@@ -135,8 +134,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
          out[i].response = strdup(
              "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
-      else if ((g_parallel_mode == 6 || g_parallel_mode == 10 || g_parallel_mode == 11) &&
-               tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+      else if ((g_parallel_mode == 6 || g_parallel_mode == 10) && tasks[i].role &&
+               strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          /* review JSON wrapped in a markdown code fence + prose, as a persona'd
@@ -1329,75 +1328,7 @@ static void test_configured_random_seats_fill_balanced_capacity(void)
    assert(strcmp(cfg.ensemble_reference_models[2], "codex") == 0);
    assert(strcmp(cfg.ensemble_reference_models[3], "minimax") == 0);
    assert(strcmp(cfg.ensemble_reference_models[4], "codex") == 0);
-   for (int i = 0; i < 5; i++)
-      assert(cfg.roundtable_random_seats[i] == 1);
    printf("  test_configured_random_seats_fill_balanced_capacity: ok\n");
-}
-
-static agent_config_t make_reseat_acfg(void)
-{
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof acfg);
-   acfg.agent_count = 4;
-   const char *names[] = {"model-a", "model-b", "model-c", "model-d"};
-   const char *providers[] = {"provider-a", "provider-b", "provider-c", "provider-d"};
-   for (int i = 0; i < acfg.agent_count; i++)
-   {
-      agent_t *ag = &acfg.agents[i];
-      ag->enabled = 1;
-      ag->max_parallel = 2;
-      snprintf(ag->name, sizeof ag->name, "%s", names[i]);
-      snprintf(ag->provider, sizeof ag->provider, "%s", providers[i]);
-      snprintf(ag->roles[0], sizeof ag->roles[0], "review");
-      ag->role_count = 1;
-   }
-   return acfg;
-}
-
-static void test_roundtable_reseats_failed_random_seat(void)
-{
-   reset_modes();
-   g_parallel_mode = 11;
-   config_t cfg = make_cfg(1, 3, 10.0);
-   cfg.roundtable_random_seats[0] = 1;
-   agent_config_t acfg = make_reseat_acfg();
-   roundtable_opts_t opts;
-   memset(&opts, 0, sizeof opts);
-   opts.mode = ROUNDTABLE_REVIEW;
-   opts.turns = ROUNDTABLE_PARALLEL;
-   opts.max_rounds = 1;
-   opts.deadline_ms = 10000;
-   roundtable_result_t result;
-   assert(delegate_roundtable_run(&acfg, &cfg, "replace a failed random seat", &opts, &result) ==
-          0);
-   assert(g_parallel_calls == 2);
-   assert(result.participants_total == 3);
-   assert(result.participants_failed == 0);
-   assert(result.participants_tool_used == 3);
-   /* Request-local reseating must not mutate the caller's shared config. */
-   assert(strcmp(cfg.ensemble_reference_models[0], "model-a") == 0);
-   delegate_roundtable_result_free(&result);
-   printf("  test_roundtable_reseats_failed_random_seat: ok\n");
-}
-
-static void test_roundtable_never_reseats_failed_pin(void)
-{
-   reset_modes();
-   g_parallel_mode = 11;
-   config_t cfg = make_cfg(1, 2, 10.0);
-   agent_config_t acfg = make_reseat_acfg();
-   roundtable_opts_t opts;
-   memset(&opts, 0, sizeof opts);
-   opts.mode = ROUNDTABLE_REVIEW;
-   opts.turns = ROUNDTABLE_PARALLEL;
-   opts.max_rounds = 1;
-   roundtable_result_t result;
-   assert(delegate_roundtable_run(&acfg, &cfg, "do not replace a pinned seat", &opts, &result) ==
-          0);
-   assert(g_parallel_calls == 1);
-   assert(result.participants_failed == 1);
-   delegate_roundtable_result_free(&result);
-   printf("  test_roundtable_never_reseats_failed_pin: ok\n");
 }
 
 static void test_panel_prioritizes_distinct_providers(void)
@@ -2021,8 +1952,6 @@ int main(void)
    test_specific_panel_pin_is_hard_requirement();
    test_implicit_panel_ignores_legacy_roster_and_caps_two();
    test_configured_random_seats_fill_balanced_capacity();
-   test_roundtable_reseats_failed_random_seat();
-   test_roundtable_never_reseats_failed_pin();
    test_panel_prioritizes_distinct_providers();
    test_panel_treats_providerless_agents_as_distinct();
    test_panel_persona_name_assignment();

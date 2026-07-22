@@ -241,14 +241,8 @@ static const struct
      * ensemble; without it the prompt fell through to the catch-all delegate
      * route, which maps positional[0] -> role and never ran the engine. */
     {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
-    {"delegate", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
-    /* `ensemble` is the umbrella verb for a panel of agents. Its aggregate (MoA
-     * fan-out + synthesis) and roundtable (review/debate panel) modes reuse the
-     * exact delegate.* server methods; the third mode is the persistent, templated
-     * turn-based session (db1 `ensembles`, agent-driven via the ensemble_* MCP
-     * tools). `delegate aggregate/roundtable` stay as back-compat aliases. */
+    {"roundtable", "review", "roundtable.review", NULL, NULL, 900000},
     {"ensemble", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
-    {"ensemble", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1760,12 +1754,12 @@ cJSON *marshal_delegate_aggregate(int argc, char **argv)
    return req;
 }
 
-cJSON *marshal_delegate_roundtable(int argc, char **argv)
+cJSON *marshal_roundtable_review(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json", "apply", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
-   cJSON *req = marshal_no_args("delegate.roundtable");
+   cJSON *req = marshal_no_args("roundtable.review");
    /* Fold --context-file / --files / --context-dir / --context preloads into the
     * prompt, mirroring marshal_delegate() so both paths ship identical payloads. */
    char *prompt = (opts.pos_count > 0 && opts.positional[0]) ? strdup(opts.positional[0]) : NULL;
@@ -1805,7 +1799,7 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
       cJSON *parsed = cJSON_Parse(brief_json);
       if (!parsed)
       {
-         fprintf(stderr, "aimee: delegate roundtable: --brief-json must be valid JSON\n");
+         fprintf(stderr, "aimee: roundtable review: --brief-json must be valid JSON\n");
          exit(1);
       }
       cJSON_DeleteItemFromObjectCaseSensitive(req, "brief");

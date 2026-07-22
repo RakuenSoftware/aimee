@@ -1388,7 +1388,7 @@ static int panel_provider_seats(const agent_config_t *acfg, const int seated[],
 }
 
 static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t *acfg,
-                                       const int seated[], const unsigned char blocked[])
+                                       const int seated[])
 {
    int best = -1;
    int best_agent_seats = 0;
@@ -1399,8 +1399,8 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if ((blocked && blocked[i]) || !ensemble_panelist_eligible(cfg, ag) ||
-          !agent_is_available_for_routing(ag) || seated[i] >= capacity)
+      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+          seated[i] >= capacity)
          continue;
       if (panel_provider_seats(acfg, seated, panel_agent_provider(ag)) == 0)
          return i;
@@ -1411,7 +1411,7 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if ((blocked && blocked[i]) || seated[i] != 0 || !ensemble_panelist_eligible(cfg, ag) ||
+      if (seated[i] != 0 || !ensemble_panelist_eligible(cfg, ag) ||
           !agent_is_available_for_routing(ag) || seated[i] >= capacity)
          continue;
       int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
@@ -1430,8 +1430,8 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
    {
       const agent_t *ag = &acfg->agents[i];
       int capacity = ag->max_parallel > 0 ? ag->max_parallel : AGENT_DEFAULT_MAX_PARALLEL;
-      if ((blocked && blocked[i]) || !ensemble_panelist_eligible(cfg, ag) ||
-          !agent_is_available_for_routing(ag) || seated[i] >= capacity)
+      if (!ensemble_panelist_eligible(cfg, ag) || !agent_is_available_for_routing(ag) ||
+          seated[i] >= capacity)
          continue;
       int provider_seats = panel_provider_seats(acfg, seated, panel_agent_provider(ag));
       if (best < 0 || seated[i] < best_agent_seats ||
@@ -1443,136 +1443,6 @@ static int ensemble_pick_balanced_seat(const config_t *cfg, const agent_config_t
       }
    }
    return best;
-}
-
-/* A provider/CLI attempt must leave enough of the roundtable deadline to replace
- * a failed $random seat. This is deliberately an engine guarantee rather than
- * an agent timeout: an agent may be configured for long implementation work,
- * while a review seat is one bounded contribution to a larger operation. */
-#define ROUNDTABLE_SEAT_ATTEMPT_MAX_MS 120000
-
-static int roundtable_retry_random_seats(agent_config_t *acfg, config_t *cfg, const char *task,
-                                         const char *artifact, const char *peer_notes,
-                                         roundtable_mode_t mode, int round, const char *brief,
-                                         const char *context, agent_result_t results[],
-                                         long deadline_abs_ms)
-{
-   unsigned char blocked[MAX_AGENTS];
-   memset(blocked, 0, sizeof blocked);
-
-   /* Never immediately retry an agent that already failed this round. Successful
-    * seats remain counted against max_parallel but may be selected again when
-    * their configured capacity permits it. */
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
-   {
-      if (results[i].response && results[i].response[0])
-         continue;
-      const agent_t *ag = agent_find(acfg, cfg->ensemble_reference_models[i]);
-      if (ag)
-      {
-         int idx = (int)(ag - acfg->agents);
-         if (idx >= 0 && idx < acfg->agent_count)
-            blocked[idx] = 1;
-      }
-   }
-
-   for (;;)
-   {
-      if (deadline_abs_ms > 0 && monotonic_ms() >= deadline_abs_ms)
-         break;
-
-      int seated[MAX_AGENTS];
-      int slots[ENSEMBLE_MAX_REFS];
-      config_t retry_cfg = *cfg;
-      memset(seated, 0, sizeof seated);
-      retry_cfg.ensemble_reference_count = 0;
-      retry_cfg.ensemble_reference_persona_count = 0;
-
-      for (int i = 0; i < cfg->ensemble_reference_count; i++)
-      {
-         if (!results[i].response || !results[i].response[0])
-            continue;
-         const agent_t *ag = agent_find(acfg, cfg->ensemble_reference_models[i]);
-         if (ag)
-         {
-            int idx = (int)(ag - acfg->agents);
-            if (idx >= 0 && idx < acfg->agent_count)
-               seated[idx]++;
-         }
-      }
-
-      for (int i = 0; i < cfg->ensemble_reference_count; i++)
-      {
-         if ((results[i].response && results[i].response[0]) || !cfg->roundtable_random_seats[i])
-            continue;
-         int idx = ensemble_pick_balanced_seat(cfg, acfg, seated, blocked);
-         if (idx < 0)
-            continue;
-         int pos = retry_cfg.ensemble_reference_count++;
-         slots[pos] = i;
-         snprintf(retry_cfg.ensemble_reference_models[pos],
-                  sizeof retry_cfg.ensemble_reference_models[pos], "%s", acfg->agents[idx].name);
-         snprintf(retry_cfg.ensemble_reference_personas[pos],
-                  sizeof retry_cfg.ensemble_reference_personas[pos], "%s",
-                  cfg->ensemble_reference_personas[i]);
-         retry_cfg.roundtable_random_seats[pos] = 1;
-         retry_cfg.ensemble_reference_persona_count++;
-         seated[idx]++;
-      }
-
-      int retry_count = retry_cfg.ensemble_reference_count;
-      if (retry_count == 0)
-         break;
-      int attempt_ms = ROUNDTABLE_SEAT_ATTEMPT_MAX_MS;
-      if (deadline_abs_ms > 0)
-      {
-         long remaining = deadline_abs_ms - monotonic_ms();
-         if (remaining <= 0)
-            break;
-         if (remaining < attempt_ms)
-            attempt_ms = (int)remaining;
-      }
-      if (attempt_ms < 1000)
-         break;
-
-      aimee_log(LOG_WARN, "roundtable.reseat",
-                "round %d: replacing %d failed $random seat%s (attempt budget %dms)", round,
-                retry_count, retry_count == 1 ? "" : "s", attempt_ms);
-      agent_result_t retry_results[ENSEMBLE_MAX_REFS];
-      memset(retry_results, 0, sizeof retry_results);
-      int rc = run_round_parallel(acfg, &retry_cfg, task, artifact, peer_notes, mode, round, brief,
-                                  context, retry_results, attempt_ms);
-      if (rc != 0)
-      {
-         for (int i = 0; i < retry_count; i++)
-            free(retry_results[i].response);
-         break;
-      }
-
-      int progress = 0;
-      for (int i = 0; i < retry_count; i++)
-      {
-         int slot = slots[i];
-         const agent_t *ag = agent_find(acfg, retry_cfg.ensemble_reference_models[i]);
-         int idx = ag ? (int)(ag - acfg->agents) : -1;
-         if (retry_results[i].response && retry_results[i].response[0])
-         {
-            free(results[slot].response);
-            results[slot] = retry_results[i];
-            memset(&retry_results[i], 0, sizeof retry_results[i]);
-            snprintf(cfg->ensemble_reference_models[slot],
-                     sizeof cfg->ensemble_reference_models[slot], "%s",
-                     retry_cfg.ensemble_reference_models[i]);
-            progress++;
-         }
-         else if (idx >= 0 && idx < acfg->agent_count)
-            blocked[idx] = 1;
-         free(retry_results[i].response);
-      }
-      if (progress == retry_count)
-         break;
-   }
-   return count_successful(results, cfg->ensemble_reference_count);
 }
 
 void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
@@ -1587,7 +1457,6 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    int seated[MAX_AGENTS];
    int n = 0;
    memset(seated, 0, sizeof seated);
-   memset(cfg->roundtable_random_seats, 0, sizeof cfg->roundtable_random_seats);
 
    for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
       if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
@@ -1605,16 +1474,14 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    {
       const char *persona =
           (i < cfg->ensemble_reference_persona_count) ? cfg->ensemble_reference_personas[i] : "";
-      int was_random = rt_seat_is_random(cfg->ensemble_reference_models[i]);
-      if (!was_random)
+      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
       {
          snprintf(models[n], sizeof models[n], "%s", cfg->ensemble_reference_models[i]);
          snprintf(personas[n], sizeof personas[n], "%s", persona);
-         cfg->roundtable_random_seats[n] = 0;
          n++;
          continue;
       }
-      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated, NULL);
+      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
       if (idx < 0)
       {
          aimee_log(LOG_WARN, "delegate.panel",
@@ -1623,7 +1490,6 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
       }
       snprintf(models[n], sizeof models[n], "%s", acfg->agents[idx].name);
       snprintf(personas[n], sizeof personas[n], "%s", persona);
-      cfg->roundtable_random_seats[n] = 1;
       seated[idx]++;
       n++;
    }
@@ -1641,7 +1507,7 @@ void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
    /* An aggregator explicitly set to "$random" resolves the same way. */
    if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
    {
-      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated, NULL);
+      int idx = ensemble_pick_balanced_seat(cfg, acfg, seated);
       if (idx >= 0)
          snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
                   acfg->agents[idx].name);
@@ -1678,7 +1544,6 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
                   "%s", name);
          snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
                   "%s", cfg->ensemble_reference_personas[i]);
-         cfg->roundtable_random_seats[n] = cfg->roundtable_random_seats[i];
       }
       n++;
    }
@@ -1724,7 +1589,6 @@ void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acf
                   "%s", name);
          snprintf(cfg->ensemble_reference_personas[n], sizeof(cfg->ensemble_reference_personas[n]),
                   "%s", cfg->ensemble_reference_personas[i]);
-         cfg->roundtable_random_seats[n] = cfg->roundtable_random_seats[i];
       }
       n++;
    }
@@ -1750,7 +1614,6 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg)
     * pins that can bypass the two-seat contract. */
    cfg->ensemble_reference_count = 0;
    cfg->ensemble_reference_persona_count = 0;
-   memset(cfg->roundtable_random_seats, 0, sizeof cfg->roundtable_random_seats);
    cfg->ensemble_aggregator[0] = '\0';
    int seated[MAX_AGENTS];
    memset(seated, 0, sizeof seated);
@@ -2047,12 +1910,6 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       return -1;
    memset(out, 0, sizeof(*out));
 
-   /* Seat resolution is request-local. Keep a mutable runtime copy so a failed
-    * $random seat can be replaced without mutating shared config or the saved
-    * roundtable preset seen by concurrent requests. */
-   config_t runtime_cfg = *cfg;
-   cfg = &runtime_cfg;
-
    int ref_count = cfg->ensemble_reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
       return -1;
@@ -2154,12 +2011,11 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
        * panelist is abandoned at the deadline instead of wedging the barrier
        * forever (floor at 5s so a near-exhausted budget still attempts the panel).
        * 0 when no deadline is configured. */
-      int panel_deadline_ms = ROUNDTABLE_SEAT_ATTEMPT_MAX_MS;
+      int panel_deadline_ms = 0;
       if (local.deadline_ms > 0)
       {
          long remaining = (long)local.deadline_ms - (monotonic_ms() - start_ms);
-         if (remaining < panel_deadline_ms)
-            panel_deadline_ms = remaining > 1000 ? (int)remaining : 1000;
+         panel_deadline_ms = remaining > 5000 ? (int)remaining : 5000;
       }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
@@ -2172,9 +2028,6 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             free(results[i].response);
          goto fail;
       }
-      long panel_deadline_abs = local.deadline_ms > 0 ? start_ms + local.deadline_ms : 0;
-      roundtable_retry_random_seats(acfg, &runtime_cfg, task, artifact, peer_notes, local.mode,
-                                    round, local.brief, local.context, results, panel_deadline_abs);
       int required_count =
           local.required_participants > 0 ? local.required_participants : ref_count;
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))

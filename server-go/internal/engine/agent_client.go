@@ -13,15 +13,19 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
 )
 
 type DelegateRequest struct {
-	Role             string
-	Persona          string
-	Delegate         string
+	Role     string
+	Persona  string
+	Delegate string
+	// Participant is an opaque handle returned by DelegateGroup. Follow-up
+	// discussion uses it for continuity without learning agent/provider details.
+	Participant      string
 	Prompt           string
 	Workdir          string
 	Tools            bool
@@ -58,6 +62,19 @@ type DelegateResult struct {
 
 type AgentClient interface {
 	Delegate(context.Context, DelegateRequest) (DelegateResult, error)
+}
+
+// DelegateGroup is the generic resource-plane contract for X independent
+// delegates with Y per-seat specifications. Callers describe roles, personas,
+// evidence and optional positive pins; delegate owns all unpinned routing.
+type DelegateGroupResult struct {
+	Participant string
+	Result      DelegateResult
+	Err         error
+}
+
+type DelegateGroupClient interface {
+	DelegateGroup(context.Context, []DelegateRequest) []DelegateGroupResult
 }
 
 type EligibleAgent struct {
@@ -100,6 +117,7 @@ const (
 var ErrDelegateUnassignedExpired = errors.New("unassigned delegate lease expired")
 var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
 var ErrDelegateNoJobID = errors.New("agent service returned no job id")
+var ErrDelegateTerminal = errors.New("delegate job reached a failed terminal state")
 
 // HTTPAgentClient talks to the agent service as a resource plane. It owns no
 // workflow state or transitions; losing it parks the Go-owned run and a later
@@ -111,6 +129,8 @@ type HTTPAgentClient struct {
 	pendingTimeout   func() time.Duration
 	cancelUnassigned func(context.Context, int, string, time.Duration) (bool, error)
 	store            *db1.Store
+	participantMu    sync.RWMutex
+	participants     map[string]string
 }
 
 func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
@@ -151,7 +171,8 @@ func NewHTTPAgentClient(cfg AgentHTTPConfig) (*HTTPAgentClient, error) {
 	}
 	return &HTTPAgentClient{baseURL: strings.TrimRight(cfg.BaseURL, "/"), bearer: cfg.Bearer,
 		client: &http.Client{Transport: transport, Timeout: cfg.RequestTimeout}, pollEvery: cfg.PollEvery,
-		pendingTimeout: timeoutSource, cancelUnassigned: cfg.CancelUnassigned, store: cfg.Store}, nil
+		pendingTimeout: timeoutSource, cancelUnassigned: cfg.CancelUnassigned, store: cfg.Store,
+		participants: make(map[string]string)}, nil
 }
 
 func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
@@ -166,6 +187,22 @@ func (c *HTTPAgentClient) delegatePendingTimeout() time.Duration {
 }
 
 func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	const maxRouteAttempts = 3
+	for attempt := 0; ; attempt++ {
+		result, err := c.delegateOnce(ctx, request)
+		if err == nil || request.Delegate != "" || request.Participant != "" ||
+			!errors.Is(err, ErrDelegateTerminal) ||
+			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
+			return result, err
+		}
+		// The request remains unpinned. A distinct durable key forces a fresh
+		// generic delegate admission, whose router can select another currently
+		// eligible agent. No failed agent is persisted as an exclusion.
+		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
+	}
+}
+
+func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if request.Role == "" || request.Persona == "" || request.Prompt == "" {
 		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
 	}
@@ -175,8 +212,17 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 	}
 	// Empty means ordinary eligibility routing. A non-empty delegate is an
 	// explicit positive pin from the workflow, never an exclusion list.
-	if request.Delegate != "" {
-		payload["via"] = request.Delegate
+	selector := request.Delegate
+	if request.Participant != "" {
+		c.participantMu.RLock()
+		selector = c.participants[request.Participant]
+		c.participantMu.RUnlock()
+		if selector == "" {
+			return DelegateResult{}, errors.New("delegate participant handle is unknown or expired")
+		}
+	}
+	if selector != "" {
+		payload["via"] = selector
 	}
 	key := delegateJobKey(request)
 	var launched struct {
@@ -298,10 +344,11 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 			if c.store != nil {
 				_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
 			}
-			if status.Result != "" {
-				return DelegateResult{}, errors.New(status.Result)
+			detail := firstNonempty(strings.TrimSpace(status.Error), strings.TrimSpace(status.Result))
+			if detail != "" {
+				return DelegateResult{}, fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail)
 			}
-			return DelegateResult{}, fmt.Errorf("delegate job %d %s", launched.JobID, status.JobStatus)
+			return DelegateResult{}, fmt.Errorf("%w: job %d %s", ErrDelegateTerminal, launched.JobID, status.JobStatus)
 		}
 		select {
 		case <-ctx.Done():
@@ -313,6 +360,27 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		case <-ticker.C:
 		}
 	}
+}
+
+func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	out := make([]DelegateGroupResult, len(requests))
+	var wg sync.WaitGroup
+	wg.Add(len(requests))
+	for i := range requests {
+		go func(i int) {
+			defer wg.Done()
+			out[i].Result, out[i].Err = c.Delegate(ctx, requests[i])
+			if out[i].Err == nil && out[i].Result.Agent != "" {
+				sum := sha256.Sum256([]byte(delegateJobKey(requests[i]) + "\x00" + out[i].Result.Agent))
+				out[i].Participant = fmt.Sprintf("participant:%x", sum[:16])
+				c.participantMu.Lock()
+				c.participants[out[i].Participant] = out[i].Result.Agent
+				c.participantMu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	return out
 }
 
 func isTerminalDelegateStatus(status string) bool {

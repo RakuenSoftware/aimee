@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -121,6 +123,84 @@ func TestHTTPAgentClientOmitsProvidedTargetByDefault(t *testing.T) {
 	}
 	if _, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review worktree"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPAgentClientGroupDelegatesEverySpecificationWithoutResolvingRandom(t *testing.T) {
+	var launches atomic.Int32
+	var mu sync.Mutex
+	var vias []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			mu.Lock()
+			vias = append(vias, fmt.Sprint(payload["via"]))
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1)})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := client.DelegateGroup(t.Context(), []DelegateRequest{
+		{Role: "review", Persona: "security", Prompt: "review artifact"},
+		{Role: "review", Persona: "qa", Prompt: "review artifact", Delegate: "codex"},
+		{Role: "review", Persona: "architect", Prompt: "review artifact"},
+	})
+	if len(results) != 3 || launches.Load() != 3 {
+		t.Fatalf("results=%d launches=%d", len(results), launches.Load())
+	}
+	for _, result := range results {
+		if result.Err != nil {
+			t.Fatal(result.Err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	sort.Strings(vias)
+	if fmt.Sprint(vias) != "[<nil> <nil> codex]" {
+		t.Fatalf("delegate group rewrote random specifications: %v", vias)
+	}
+}
+
+func TestHTTPAgentClientRetriesUnpinnedRoutingButNeverWeakensPin(t *testing.T) {
+	var launches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": launches.Add(1)})
+		case "/v1/delegate/status":
+			if launches.Load() == 1 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "failed", "error": "subscription temporarily exhausted"})
+			} else {
+				_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "done", "result": "complete", "agent_name": "minimax"})
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact"})
+	if err != nil || result.Agent != "minimax" || launches.Load() != 2 {
+		t.Fatalf("result=%+v err=%v launches=%d", result, err, launches.Load())
+	}
+
+	launches.Store(0)
+	_, err = client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review artifact", Delegate: "codex"})
+	if err == nil || launches.Load() != 1 {
+		t.Fatalf("explicit pin was substituted: err=%v launches=%d", err, launches.Load())
 	}
 }
 

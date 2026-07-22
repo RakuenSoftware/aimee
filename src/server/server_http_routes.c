@@ -1828,8 +1828,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/eval/run", NULL, RM_EXACT, "eval.run", 0, rh_dispatch_op_async},
     {"POST", "/v1/delegate/aggregate", NULL, RM_EXACT, "delegate.aggregate", 0,
      rh_dispatch_op_async},
-    {"POST", "/v1/delegate/roundtable", NULL, RM_EXACT, "delegate.roundtable", 0,
-     rh_dispatch_op_async},
+    {"POST", "/v1/roundtable/review", NULL, RM_EXACT, "roundtable.review", 0, rh_dispatch_op_async},
     {"POST", "/v1/dev/sweep", NULL, RM_EXACT, "dev.sweep", 0, rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */

@@ -1970,11 +1970,6 @@ typedef struct config
     * header (it would cycle), so the literal is kept here. */
    char ensemble_reference_models[32][128];
    int ensemble_reference_count;
-   /* Runtime-only provenance for acquired roundtable seats. A saved "$random"
-    * seat is resolved to a concrete agent before dispatch, but remains
-    * replaceable when that agent fails. Explicit agent pins are never replaced.
-    * This field is derived during runtime-panel preparation, not serialized. */
-   unsigned char roundtable_random_seats[32];
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
     * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
