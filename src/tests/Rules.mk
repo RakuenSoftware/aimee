@@ -1730,14 +1730,14 @@ $(TESTPREFIX)/unit-test-aimee-ir-serve: $(OBJDIR)/tests/test_aimee_ir_serve.o \
 
 # Slice 4: IR-delta streaming (pure — cJSON only).
 $(TESTPREFIX)/unit-test-aimee-ir-stream: $(OBJDIR)/tests/test_aimee_ir_stream.o \
-                                        $(OBJDIR)/server/aimee_ir_stream.o \
+                                        $(OBJDIR)/modules/translation/aimee_ir_stream.o \
                                         $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice P6c-stream: Bedrock ConverseStream event -> IR delta parser (pure — cJSON
 # only; links aimee_backend_bedrock.o for the shared converse_stop_reason mapping).
 $(TESTPREFIX)/unit-test-aimee-converse-stream: $(OBJDIR)/tests/test_aimee_converse_stream.o \
-                                        $(OBJDIR)/server/aimee_ir_stream.o \
+                                        $(OBJDIR)/modules/translation/aimee_ir_stream.o \
                                         $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                                         $(OBJDIR)/modules/ir/aimee_ir.o $(OBJDIR)/cJSON.o \
                                         $(OBJDIR)/text.o $(OBJDIR)/util.o
