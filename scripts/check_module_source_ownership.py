@@ -359,6 +359,28 @@ CONTRACTS = (
         test_cmake_source=None,
         legacy_test_cmake_source=None,
     ),
+    Contract(
+        module="translation-streaming",
+        legacy_source="src/server/aimee_ir_stream.c",
+        legacy_header="src/headers/aimee_ir_stream.h",
+        canonical_source="src/modules/translation/aimee_ir_stream.c",
+        canonical_header="src/modules/translation/include/aimee/translation/aimee_ir_stream.h",
+        canonical_include="aimee/translation/aimee_ir_stream.h",
+        make_source="modules/translation/aimee_ir_stream.c",
+        cmake_source=None,
+        legacy_cmake_source=None,
+        test_object="$(OBJDIR)/modules/translation/aimee_ir_stream.o",
+        legacy_test_object="$(OBJDIR)/server/aimee_ir_stream.o",
+        consumers=(
+            "src/modules/translation/aimee_ir_stream.c",
+            "src/tests/test_aimee_ir_stream.c",
+            "src/tests/test_aimee_converse_stream.c",
+        ),
+        document="docs/modules/translation.md",
+        document_markers=("Canonical streaming conversion", "bounded state"),
+        test_cmake_source="../modules/translation/aimee_ir_stream.c",
+        legacy_test_cmake_source="../server/aimee_ir_stream.c",
+    ),
 )
 
 LEGACY_MODULE_ROOTS = (
