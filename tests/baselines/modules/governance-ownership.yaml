@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "module": "governance",
+  "capabilities": {
+    "oidc-federation": "governance",
+    "sso-federation": "governance",
+    "organizational-roles": "governance",
+    "policy-authoring": "governance",
+    "policy-distribution": "governance",
+    "governance-approvals": "governance",
+    "governance-decision-records": "governance",
+    "posture-profiles": "governance",
+    "attestation-exports": "governance",
+    "agent-delegation-governance-identity": "governance",
+    "fleet-governance-records": "governance",
+    "artifact-signing": "governance",
+    "artifact-trust": "governance"
+  },
+  "forbidden_core_shadows": [
+    "execution-policy",
+    "policy.enforce",
+    "audit.ledger",
+    "vault.custody",
+    "gateway.auth",
+    "protocols.auth"
+  ],
+  "required_dependencies": [
+    "module-runtime",
+    "config",
+    "ir",
+    "gateway",
+    "protocols",
+    "vault",
+    "execution-policy",
+    "audit",
+    "routing",
+    "delegates",
+    "tools"
+  ],
+  "forbidden_dependencies_from_core": [
+    "governance"
+  ]
+}

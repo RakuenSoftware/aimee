@@ -244,6 +244,23 @@
       "blast_radius": "No runtime surface changes; close-time path checks constrain the slice to three docs, one validation record, status, and ledger accounting, while the validation matrix records tenant, custody, identity, and disabled-profile boundaries.",
       "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-19.md", "docs/modules/control-web.md", "docs/modules/governance.md", "docs/modules/runtime-web.md"]
+    },
+    {
+      "slice": 20,
+      "state": "present_and_verified",
+      "disposition": "Added the exact governance capability-ownership artifact and deterministic CI gate before descriptor enrichment or distributed governance source movement.",
+      "production": {"added": [], "deleted": [], "consolidated": ["one proposal-authored governance block projects into one machine-readable ownership artifact"]},
+      "fallbacks": ["distributed governance and OIDC production code has not moved", "broad source/header/test/docs/build/config/route/data ownership is not yet described by descriptors"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice adds repository validation and documentation only, not shipped production code.",
+        "rejected_simpler_alternative": "Starting source movement without a binding ownership contract would leave optional governance and core safety boundaries unenforced.",
+        "revisit": "Extend descriptor ownership fields in focused families, then generate build profiles before moving distributed governance code."
+      },
+      "consumers": ["descriptor validation CI", "future governance/profile/source slices", "module maintainers"],
+      "blast_radius": "The checker reads only the proposal's normative governance block, its machine-readable projection, canonical inventory, and module descriptors; mutation tests cover capability, owner, classification, dependency, alias, parser, path, ordering, and CLI failures without changing runtime behavior.",
+      "independent_review": "Technical-writing and exact-final-diff roundtable review are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-20.md", "tests/baselines/modules/governance-ownership.yaml", "scripts/check_capability_ownership.py", "scripts/tests/test_check_capability_ownership.py"]
     }
   ]
 }
