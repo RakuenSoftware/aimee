@@ -958,6 +958,22 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "invalid JSON body");
    }
+   /* config.set is normally a generic dispatch-backed route, but roundtable
+    * policy needs an HTTP-level 403 before entering the legacy NDJSON bridge.
+    * Keep the matching guard in handle_config_set as defense in depth for
+    * direct RPC callers, whose transport cannot express an HTTP status. */
+   if (strcmp(rq->op, "config.set") == 0)
+   {
+      cJSON *jkey = cJSON_GetObjectItemCaseSensitive(req, "key");
+      const char *key = cJSON_IsString(jkey) ? jkey->valuestring : NULL;
+      if (roundtable_policy_config_key(key) &&
+          !route_roundtable_mutation_authorized(server_http_identity_principal()))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403,
+                         "roundtable changes require the authenticated appliance administrator");
+      }
+   }
    /* method is server-set from the matched row, never the client body. */
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
    cJSON_AddStringToObject(req, "method", rq->op);

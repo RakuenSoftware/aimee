@@ -264,6 +264,10 @@ export default function Roundtable() {
             several named presets and pick one as the active default — the active preset drives what{" "}
             <code>aimee delegate roundtable</code> convenes.
           </p>
+          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+            Roundtable policy is read-only to agents and automation. Creating, editing, deleting, or selecting the
+            default requires an authenticated appliance-administrator action from this UI.
+          </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
             {presets.map((p) => (
               <Button

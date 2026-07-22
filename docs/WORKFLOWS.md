@@ -135,6 +135,12 @@ selection, not an exclusion rule. Failure, malformed output, wrong artifact
 stage, or missing original-request alignment parks the gate; it never triggers a
 roster-wide fallback. When disabled, deterministic synthesis is final.
 
+Roundtable presets are execution policy. Agents and automation may read and use
+them, but create, edit, delete, and default-selection operations require the
+attested `webuser:admin` appliance administrator. Generic API capabilities,
+other authenticated web users, and local Unix-socket access do not authorize
+those mutations.
+
 **Which models review the artifact** comes from the acquired roundtable preset.
 The preset the GUI edits and `roundtable.default` selects is used unless the gate
 names another preset. Its exact seats are the complete panel; required personas

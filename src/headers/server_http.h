@@ -137,6 +137,11 @@ extern "C"
    uint32_t server_http_route_caps(const char *method, const char *path);
    uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes);
 
+   /* Roundtable policy mutations require an attested interactive webuser in
+    * addition to their ordinary route capability. Exposed for policy tests. */
+   int route_roundtable_mutation_authorized(const char *principal);
+   int roundtable_policy_config_key(const char *key);
+
    /* Effective caps for a request after thin-client mTLS authentication. When
     * mTLS is enabled, bearer fallback is a query-only floor and a durable cert
     * gets the authenticated (but not full-trust) set. */
