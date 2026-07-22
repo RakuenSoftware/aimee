@@ -130,19 +130,32 @@ static int record_name(const char *kind, const char operation[65], char out[80])
    return -1;
 }
 
-static kb_management_cert_storage_result_t read_name(kb_management_cert_storage_t *storage,
-                                                     const char *name, uint8_t *out, size_t cap,
-                                                     size_t *out_len)
+static int read_alias(const kb_management_cert_storage_t *storage, uint8_t *out, size_t cap,
+                      size_t *out_len)
 {
-   if (!storage || storage->dir_fd < 0 || !name || !out || !cap || !out_len ||
-       memory_overlap(out, cap, out_len, sizeof(*out_len)) ||
-       memory_overlap(out, cap, storage, sizeof(*storage)) ||
-       memory_overlap(out_len, sizeof(*out_len), storage, sizeof(*storage)))
-      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   return memory_overlap(out, cap, out_len, out_len ? sizeof(*out_len) : 0) ||
+          memory_overlap(out, cap, storage, storage ? sizeof(*storage) : 0) ||
+          memory_overlap(out_len, out_len ? sizeof(*out_len) : 0, storage,
+                         storage ? sizeof(*storage) : 0);
+}
+
+static void clear_read_output(uint8_t *out, size_t cap, size_t *out_len)
+{
    if (out_len)
       *out_len = 0;
    if (out && cap)
       OPENSSL_cleanse(out, cap);
+}
+
+static kb_management_cert_storage_result_t read_name(kb_management_cert_storage_t *storage,
+                                                     const char *name, uint8_t *out, size_t cap,
+                                                     size_t *out_len)
+{
+   if (read_alias(storage, out, cap, out_len))
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   clear_read_output(out, cap, out_len);
+   if (!storage || storage->dir_fd < 0 || !name || !out || !cap || !out_len)
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
       return open_error(errno, 1);
@@ -186,8 +199,13 @@ kb_management_cert_storage_read(kb_management_cert_storage_t *storage, const cha
                                 const char operation[65], uint8_t *out, size_t cap, size_t *out_len)
 {
    char name[80];
-   if (record_name(kind, operation, name))
+   if (read_alias(storage, out, cap, out_len))
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   if (record_name(kind, operation, name))
+   {
+      clear_read_output(out, cap, out_len);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   }
    return read_name(storage, name, out, cap, out_len);
 }
 
@@ -396,10 +414,21 @@ kb_management_cert_storage_stage(kb_management_cert_storage_t *storage, const ch
    if (fd < 0)
       return open_error(errno, 0);
    kb_management_cert_storage_result_t rc = KB_MANAGEMENT_STORAGE_UNAVAILABLE;
-   if (!checked_file(fd) || complete_write(fd, bytes, len) || fdatasync(fd))
+   if (!checked_file(fd))
+   {
+      rc = KB_MANAGEMENT_STORAGE_INTEGRITY;
+      goto failed;
+   }
+   if (complete_write(fd, bytes, len) || fdatasync(fd))
       goto failed;
    if (verify_contents(fd, bytes, len))
    {
+      close(fd);
+      goto unlink_failed;
+   }
+   if (!checked_file(fd))
+   {
+      rc = KB_MANAGEMENT_STORAGE_INTEGRITY;
       close(fd);
       goto unlink_failed;
    }

@@ -299,7 +299,8 @@ int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *mate
    if (!out)
       return -1;
    memset(out, 0, sizeof(*out));
-   if (!material || !leaf_pem || !ca_pem)
+   if (!material || !leaf_pem || !ca_pem || !material->key_der_len ||
+       material->key_der_len > sizeof(material->key_der) || material->key_der_len > LONG_MAX)
       return -1;
    X509 *leaf = strict_x509_from_pem(leaf_pem);
    X509 *ca = strict_x509_from_pem(ca_pem);

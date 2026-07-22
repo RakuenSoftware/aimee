@@ -395,6 +395,12 @@ static void test_management_leaf_profile(void)
    assert(kb_pki_sign_kb_management_csr(&ca, material.csr_pem, 3600, leaf, sizeof(leaf)) == 0);
    kb_management_cert_verified_t verified;
    assert(kb_management_cert_leaf_verify(&material, leaf, ca.cert_pem, &verified) == 0);
+   kb_management_cert_key_material_t oversized = material;
+   oversized.key_der_len = sizeof(oversized.key_der) + 1U;
+   memset(&verified, 0xa5, sizeof(verified));
+   assert(kb_management_cert_leaf_verify(&oversized, leaf, ca.cert_pem, &verified) != 0);
+   assert(zeroed(&verified, sizeof(verified)));
+   assert(kb_management_cert_leaf_verify(&material, leaf, ca.cert_pem, &verified) == 0);
    assert(!strcmp(verified.ca_issuer, verified.leaf_issuer));
    assert(verified.not_after_epoch - verified.not_before_epoch == 3600);
    assert(!memcmp(verified.leaf_spki_digest, material.csr_spki_digest, 32));
@@ -498,6 +504,11 @@ static void test_storage_rejects_oversize_and_fifo(void)
                                           sizeof(output_alias), (size_t *)output_alias) ==
           KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(!memcmp(output_alias, output_alias_before, sizeof(output_alias)));
+   memset(output, 0xa5, sizeof(output));
+   output_len = 9;
+   assert(kb_management_cert_storage_read(&storage, NULL, operation, output, sizeof(output),
+                                          &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(output_len == 0 && zeroed(output, sizeof(output)));
    assert(kb_management_cert_storage_read(&storage, "intent", operation, output, sizeof(output),
                                           &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(output_len == 0 && zeroed(output, sizeof(output)));
@@ -699,6 +710,25 @@ static void test_storage_open_and_protocol(void)
    assert(kb_management_cert_storage_stage(&storage, "candidate", malformed_operation, valid_replay,
                                            valid_replay_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, malformed_name, 0) == 0);
+
+   char linked_operation[65];
+   fill_hex(linked_operation, 64, 'f');
+   uint8_t linked_cipher[64], linked_record[4096];
+   base_candidate(&staged_candidate, linked_operation, linked_cipher, 5);
+   size_t linked_record_len = 0;
+   assert(kb_management_cert_candidate_encode(&staged_candidate, linked_record,
+                                              sizeof(linked_record), &linked_record_len) == 0);
+   const char linked_name[] =
+       "candidate.ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+   int linked_fd = openat(storage.dir_fd, linked_name, O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(linked_fd >= 0);
+   assert(write(linked_fd, linked_record, linked_record_len) == (ssize_t)linked_record_len);
+   assert(close(linked_fd) == 0);
+   assert(linkat(storage.dir_fd, linked_name, storage.dir_fd, "candidate.linked", 0) == 0);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", linked_operation, linked_record,
+                                           linked_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "candidate.linked", 0) == 0);
+   assert(unlinkat(storage.dir_fd, linked_name, 0) == 0);
 
    assert(unlinkat(storage.dir_fd, "current", 0) == 0);
    assert(unlinkat(storage.dir_fd,
