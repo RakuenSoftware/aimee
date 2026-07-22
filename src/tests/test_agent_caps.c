@@ -199,6 +199,118 @@ void test_catalog_provider_separates_vendor_from_wire(void)
    unlink(agent_config_path());
 }
 
+/* Catalog derivation must match HOST LABELS, not a substring of the whole URL.
+ * Review found four concrete ways substring matching misfires; each is asserted
+ * here. A wrong derivation is silent — it surfaces only as wrong capability
+ * flags, timeout, and context filtering — so these are the guard rails. */
+void test_catalog_provider_host_matching_is_label_anchored(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[\n"
+         /* Uppercase host: DNS is case-insensitive, strstr was not. */
+         "{\"name\":\"upper\",\"provider\":\"anthropic\","
+         "\"endpoint\":\"https://API.KIMI.COM/coding/\",\"model\":\"some-model\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         /* Vendor domain as a PATH segment of an unrelated gateway. */
+         "{\"name\":\"pathy\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://gateway.example/v1/api.kimi.com/relay\","
+         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
+         "\"roles\":[\"review\"]},\n"
+         /* Lookalike suffix: kimi.com is a PREFIX of the host, not its domain. */
+         "{\"name\":\"lookalike\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://api.kimi.com.attacker.example/v1\","
+         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
+         "\"roles\":[\"review\"]},\n"
+         /* Userinfo must not be read as the host. */
+         "{\"name\":\"userinfo\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://api.minimax.io@gateway.example/v1\","
+         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
+         "\"roles\":[\"review\"]},\n"
+         /* Legitimate subdomain and port still derive. */
+         "{\"name\":\"sub\",\"provider\":\"anthropic\","
+         "\"endpoint\":\"https://api.minimax.io:8443/anthropic\",\"model\":\"house-model\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   assert(c.agent_count == 5);
+
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "upper")), "moonshotai") == 0);
+   /* A path segment must never select a vendor: falls back to wire provider. */
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "pathy")), "openai") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "lookalike")), "openai") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "userinfo")), "openai") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "sub")), "minimax") == 0);
+
+   printf("  PASS: test_catalog_provider_host_matching_is_label_anchored\n");
+   unlink(agent_config_path());
+}
+
+/* Gateways (OpenRouter and friends) do not carry a vendor host, so the vendor
+ * has to come from a namespaced model id. Review found "moonshotai/kimi-k2.7-code"
+ * missed while "minimax/MiniMax-M3" worked by accident. */
+void test_catalog_provider_namespaced_model_ids(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[\n"
+         "{\"name\":\"ns_moon\",\"provider\":\"openrouter\","
+         "\"endpoint\":\"https://openrouter.ai/api/v1\","
+         "\"model\":\"moonshotai/kimi-k2.7-code\",\"auth_type\":\"bearer\","
+         "\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         "{\"name\":\"ns_mini\",\"provider\":\"openrouter\","
+         "\"endpoint\":\"https://openrouter.ai/api/v1\","
+         "\"model\":\"minimax/MiniMax-M3\",\"auth_type\":\"bearer\","
+         "\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         "{\"name\":\"bare_kimi\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"kimi-k2.7-code\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         /* Undecidable alias: must NOT guess, must fall back to wire provider. */
+         "{\"name\":\"alias\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"deployment-123\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "ns_moon")), "moonshotai") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "ns_mini")), "minimax") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "bare_kimi")), "moonshotai") == 0);
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "alias")), "openai") == 0);
+
+   printf("  PASS: test_catalog_provider_namespaced_model_ids\n");
+   unlink(agent_config_path());
+}
+
+/* The moonshotai heuristic must not hand REASONING to every unknown Moonshot
+ * model: that would select the long per-call timeout and satisfy a REASONING
+ * requirement for a model nobody has verified. Only the k2/k3 families it is
+ * actually known for get it; everything else gets the tool-using floor. */
+void test_moonshot_heuristic_scopes_reasoning_to_known_families(void)
+{
+   model_capability_t cap;
+
+   assert(model_capability_get("moonshotai", "kimi-k2.7-code", &cap) != 0);
+   assert((cap.flags & MODEL_CAP_REASONING) != 0);
+   assert((cap.flags & MODEL_CAP_TOOLS) != 0);
+
+   assert(model_capability_get("moonshotai", "kimi-k3", &cap) != 0);
+   assert((cap.flags & MODEL_CAP_REASONING) != 0);
+
+   /* Unknown/future Moonshot id: tools yes, reasoning must be EARNED. */
+   assert(model_capability_get("moonshotai", "moonshot-v1-8k", &cap) != 0);
+   assert((cap.flags & MODEL_CAP_TOOLS) != 0);
+   assert((cap.flags & MODEL_CAP_REASONING) == 0);
+
+   printf("  PASS: test_moonshot_heuristic_scopes_reasoning_to_known_families\n");
+}
+
 /* An explicit operator catalog_provider always wins over derivation, and only an
  * explicit value round-trips through save (a derived guess must not be frozen
  * into config where it would outlive the derivation rules). */

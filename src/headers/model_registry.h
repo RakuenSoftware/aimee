@@ -49,6 +49,12 @@ typedef struct
    unsigned flags;
    char modalities[64];
    char knowledge_cutoff[16];
+   /* Human-facing label from the upstream registry, e.g. "GPT-5.6 Sol" for
+    * openai/gpt-5.6-sol. Empty when the source has no name (the flat snapshot
+    * schema carries none); callers fall back to model_id. Lets operator-facing
+    * surfaces that must name a specific model — roundtable seats, routing
+    * attribution — show provider+model without hand-maintained strings. */
+   char display_name[64];
    int open_weights;
    int deprecated;
 } model_capability_t;

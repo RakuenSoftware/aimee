@@ -191,15 +191,19 @@ static const ctx_window_entry_t g_ctx_windows[] = {
     {"mistral-small", 128000},
     {"mistral", 128000}, /* fallback */
 
-    /* MiniMax. Prefix matching is longest-specific-first: the bare "minimax"
-     * fallback below must stay LAST in this group, and must not claim a window
-     * for a newer family than it knows. M3 is 1M, not the 200k the old bare
-     * fallback silently reported for it. */
+    /* MiniMax. Prefix matching is first-match-wins, so the bare "minimax"
+     * fallback must stay LAST in this group. NOTE the fallback is a KNOWN
+     * UNDER-estimate for any family newer than the named entries: a future
+     * MiniMax-M4 matches "minimax" and reports 200000. That is deliberate —
+     * under-reporting a window excludes a model from routing, while
+     * over-reporting admits a prompt the model cannot hold — but it means a new
+     * family needs an entry here (or catalog data) to be routable at its real
+     * size. Same applies to the "kimi" fallback below. */
     {"MiniMax-M3", 1000000},
     {"minimax-m3", 1000000},
     {"MiniMax-M2", 200000},
     {"minimax-m2", 200000},
-    {"minimax", 200000}, /* fallback: oldest known family, never a newer one */
+    {"minimax", 200000}, /* fallback: oldest known family; under-estimates newer ones */
 
     /* Moonshot / Kimi */
     {"kimi-k3", 1048576},
@@ -319,12 +323,18 @@ static int model_capability_get_heuristic(const char *provider, const char *mode
    /* Moonshot/Kimi. Required once an agent's CATALOG identity resolves to
     * "moonshotai": without this branch the heuristic falls through with flags
     * == 0 whenever the models.dev cache is cold, which is STRICTLY WORSE than
-    * the old (wrong) "anthropic" identity that at least yielded TOOLS. The
-    * k2/k3 coding families are tool-using reasoning models. */
+    * the old (wrong) "anthropic" identity that at least yielded TOOLS.
+    * REASONING is granted only to the k2/k3 families it is actually known for —
+    * an unknown or future Moonshot id gets the tool-using floor and must earn
+    * REASONING from catalog data, since over-granting it here would select the
+    * long per-call timeout and satisfy a REASONING capability requirement for a
+    * model nobody has verified. */
    else if (effective_provider && (strcasecmp(effective_provider, "moonshotai") == 0 ||
                                    strcasecmp(effective_provider, "moonshot") == 0))
    {
-      out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
+      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
+      if (model_has_prefix(semantic_id, "kimi-k2") || model_has_prefix(semantic_id, "kimi-k3"))
+         out->flags |= MODEL_CAP_REASONING;
    }
 
    /* Output-token ceiling inferred when the model isn't in the static table.

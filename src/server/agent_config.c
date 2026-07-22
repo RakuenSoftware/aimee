@@ -205,47 +205,126 @@ static void agent_normalize_builtin_cost_tier(agent_t *ag)
 /* Vendor (catalog) identity for capability lookup. `provider` names the WIRE
  * SHAPE; a third-party vendor served over another vendor's wire format needs its
  * own catalog key or every model_capability_get() misses and falls through to
- * the heuristic under the wrong provider branch. Endpoint host is the
- * discriminator, never a single model version — matching "MiniMax-M2" broke the
- * moment M3 shipped. */
+ * the heuristic under the wrong provider branch. */
+
+/* Registrable vendor domains. Matching is on HOST LABELS, never a substring of
+ * the whole URL: "https://api.kimi.com.attacker.example/v1" contains
+ * "api.kimi.com" but its host is not under kimi.com, and a path or query segment
+ * must never select a vendor. */
 static const struct
 {
-   const char *host;
+   const char *domain;
    const char *vendor;
-} g_catalog_vendor_hosts[] = {
-    {"api.minimax.", "minimax"},
-    {"api.minimaxi.", "minimax"},
-    {"api.kimi.com", "moonshotai"},
-    {"api.moonshot.", "moonshotai"},
+} g_catalog_vendor_domains[] = {
+    {"minimax.io", "minimax"},    {"minimaxi.com", "minimax"}, {"minimax.com", "minimax"},
+    {"kimi.com", "moonshotai"},   {"moonshot.cn", "moonshotai"}, {"moonshot.ai", "moonshotai"},
     {NULL, NULL},
 };
 
-/* Derive catalog_provider when the operator did not set it explicitly. Endpoint
- * host wins; model-id family is the fallback for CLI/OAuth backends whose
- * endpoint does not name the vendor. Leaves the field empty when the wire
- * provider is already the vendor, so agent_catalog_provider() falls back. */
+/* Vendor namespaces as they appear in gateway/OpenRouter model ids
+ * ("moonshotai/kimi-k2.7-code"). */
+static const struct
+{
+   const char *ns;
+   const char *vendor;
+} g_catalog_vendor_namespaces[] = {
+    {"minimax", "minimax"},   {"moonshotai", "moonshotai"}, {"moonshot", "moonshotai"},
+    {"kimi", "moonshotai"},   {NULL, NULL},
+};
+
+/* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
+ * Returns 0 when no host could be parsed. */
+static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
+{
+   if (!endpoint || !endpoint[0] || !out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+
+   const char *p = strstr(endpoint, "://");
+   p = p ? p + 3 : endpoint;
+
+   /* Userinfo (user:pass@host) must not be mistaken for the host, but only when
+    * the '@' precedes the authority's end. */
+   const char *authority_end = p + strcspn(p, "/?#");
+   const char *at = memchr(p, '@', (size_t)(authority_end - p));
+   if (at)
+      p = at + 1;
+
+   size_t n = strcspn(p, ":/?#");
+   if (n == 0 || n >= out_len)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      out[i] = (char)tolower((unsigned char)p[i]);
+   out[n] = '\0';
+
+   /* Tolerate a trailing dot (fully-qualified form). */
+   if (n > 1 && out[n - 1] == '.')
+      out[n - 1] = '\0';
+   return out[0] ? 1 : 0;
+}
+
+/* 1 when host is `domain` itself or a subdomain of it. Label-anchored, so
+ * "kimi.com.evil.example" does NOT match "kimi.com". */
+static int host_is_within_domain(const char *host, const char *domain)
+{
+   size_t hl = strlen(host), dl = strlen(domain);
+   if (hl == dl)
+      return strcmp(host, domain) == 0;
+   if (hl < dl + 1)
+      return 0;
+   return host[hl - dl - 1] == '.' && strcmp(host + hl - dl, domain) == 0;
+}
+
+/* Derive catalog_provider when the operator did not set it explicitly. Host
+ * domain wins; a vendor-namespaced or vendor-prefixed model id is the fallback
+ * for gateways and CLI/OAuth backends whose endpoint does not name the vendor.
+ * Leaves the field empty when the wire provider is already the vendor (or when
+ * nothing is recognisable), so agent_catalog_provider() falls back and the
+ * caller can tell "derived nothing" from "derived something". */
 static void agent_derive_catalog_provider(agent_t *ag)
 {
    if (!ag || ag->catalog_provider[0])
       return;
 
-   for (int i = 0; g_catalog_vendor_hosts[i].host; i++)
+   char host[256];
+   if (agent_endpoint_host(ag->endpoint, host, sizeof(host)))
    {
-      if (ag->endpoint[0] && strstr(ag->endpoint, g_catalog_vendor_hosts[i].host))
+      for (int i = 0; g_catalog_vendor_domains[i].domain; i++)
       {
-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
-                  g_catalog_vendor_hosts[i].vendor);
-         return;
+         if (host_is_within_domain(host, g_catalog_vendor_domains[i].domain))
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_vendor_domains[i].vendor);
+            return;
+         }
       }
    }
 
-   if (ag->model[0])
+   if (!ag->model[0])
+      return;
+
+   /* Namespaced gateway id: "<vendor>/<model>". */
+   const char *slash = strchr(ag->model, '/');
+   if (slash && slash > ag->model)
    {
-      if (strncasecmp(ag->model, "minimax", 7) == 0)
-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
-      else if (strncasecmp(ag->model, "kimi", 4) == 0)
-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
+      size_t nlen = (size_t)(slash - ag->model);
+      for (int i = 0; g_catalog_vendor_namespaces[i].ns; i++)
+      {
+         const char *ns = g_catalog_vendor_namespaces[i].ns;
+         if (strlen(ns) == nlen && strncasecmp(ag->model, ns, nlen) == 0)
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_vendor_namespaces[i].vendor);
+            return;
+         }
+      }
    }
+
+   /* Bare vendor-family model id. */
+   if (strncasecmp(ag->model, "minimax", 7) == 0)
+      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
+   else if (strncasecmp(ag->model, "kimi", 4) == 0)
+      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
 }
 
 const char *agent_catalog_provider(const agent_t *ag)
@@ -714,9 +793,23 @@ int agent_load_config(agent_config_t *cfg)
             snprintf(ag->provider, sizeof(ag->provider), "%s", v->valuestring);
          if (!ag->provider[0])
             snprintf(ag->provider, sizeof(ag->provider), "%s", "openai");
-         if (strcmp(ag->provider, "openai") == 0 &&
-             (strstr(ag->endpoint, "api.minimax.") || strstr(ag->model, "MiniMax-M2")))
-            snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
+         /* Legacy OpenAI-wire MiniMax normalisation. This rewrites the WIRE
+          * provider (so it changes auth and credential env-var selection), which
+          * makes a false positive worse than a catalog misderivation — it used
+          * substring matching over the whole endpoint, so a gateway with
+          * "api.minimax." anywhere in its path or userinfo was rewritten. Match
+          * the host's domain labels, and a model FAMILY rather than the literal
+          * "MiniMax-M2" (which stopped matching the moment M3 shipped). */
+         if (strcmp(ag->provider, "openai") == 0)
+         {
+            char lhost[256];
+            int minimax_host = agent_endpoint_host(ag->endpoint, lhost, sizeof(lhost)) &&
+                               (host_is_within_domain(lhost, "minimax.io") ||
+                                host_is_within_domain(lhost, "minimaxi.com") ||
+                                host_is_within_domain(lhost, "minimax.com"));
+            if (minimax_host || strncasecmp(ag->model, "minimax", 7) == 0)
+               snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
+         }
 
          /* Catalog identity is SEPARATE from the wire provider above: rewriting
           * `provider` for an Anthropic-wire third party would drop the
@@ -1864,9 +1957,16 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
    /* An UNKNOWN context window (0) must not satisfy a positive min_context. The
     * previous `effective_ctx > 0` guard made zero pass the gate, so a model whose
     * window aimee could not establish was admitted for arbitrarily large prompts
-    * — the failure looked like success. Unproven capacity now disqualifies the
-    * agent from this (cheap) selection; the caller escalates rather than failing,
-    * so an unknown model costs more, never an outage. */
+    * — the failure looked like success.
+    *
+    * This predicate FAILS CLOSED: an agent with unprovable capacity is dropped
+    * from the candidate set, and when it was the last candidate the caller gets
+    * NULL. There is deliberately no escalation-to-primary here yet — that is a
+    * routing-layer policy, not a per-agent predicate, and it must land before
+    * model_meta_capability_routing is enabled by default, or an operator who
+    * turns the flag on can lose a route they previously had. The flag defaults
+    * OFF, so this is inert until then. Escape hatches meanwhile: a per-agent
+    * middleware.context_window override, or a catalog entry. */
    int effective_ctx = override_ctx > 0 ? override_ctx : caps.context_window;
    /* A tmux-CLI agent (codex / claude-oauth) often carries no resolvable model —
     * the vendor CLI picks it — so fall back to the window its adapter declares

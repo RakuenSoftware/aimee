@@ -239,6 +239,62 @@ Two observations that matter for §3:
   capability flags cannot express competence, and that Slice 2 needs a real measured axis
   rather than another boolean.
 
+### 2.10 CORRECTION: aimee downloads models.dev but cannot read it
+
+§0 and §2.6 of earlier drafts asserted "aimee already ingests models.dev". That is **false**,
+verified 2026-07-22. It downloads it and the reader cannot parse what was downloaded.
+
+**Format mismatch.** `models_dev_refresh()` (`src/models_dev.c:58-113`) shells out to
+`curl -s -o <cache> https://models.dev/api.json` and atomically renames the result. No
+transform. The live api.json is NESTED:
+
+```json
+{"minimax": {"models": {"MiniMax-M3": {"limit": {"context": 1000000},
+                                        "cost": {"input": 0.3, "output": 1.2}}}}}
+```
+
+But the reader (`src/models_dev_cache.c:78-84`, `fill_cap_from_json` at `:14-45`) expects a
+FLAT dict keyed `"provider/model"` with camelCase fields:
+
+```json
+{"anthropic/claude-opus-4-7": {"contextWindow": 200000, "maxTokens": 32000,
+                               "inputCost": 15.0, "outputCost": 75.0, "tools": true}}
+```
+
+`cJSON_GetObjectItemCaseSensitive(root, "minimax/MiniMax-M3")` against a nested root returns
+NULL. **The downloaded cache can never resolve a single model.** Consistent with
+`models_dev_capability_get()` being an explicit stub returning 0
+(`models_dev.c:115-122`, comment: "full ingestion from models.dev cache is future work").
+
+**The bundled snapshot is flat but stale and tiny.** `data/models_dev_snapshot.json` has **10
+entries**: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `gpt-4o`, and
+six others. **Not one live fleet model.** `claude-opus-4-8` — the operator's primary — is
+absent, as are `gpt-5.6-*`, `MiniMax-M3`, and `kimi-k2.7-code`.
+
+So for every model in the live fleet, `models_dev_cache_lookup()` returns 0 from both sources,
+and every capability resolution falls through to the static `g_capabilities` table or
+`model_capability_get_heuristic()`.
+
+### 2.10.1 What this means for the slices
+
+- **Slice 0 remains correct and delivered.** It made the heuristic and the static prefix table
+  resolve under the right vendor identity, which is exactly why its tests assert heuristic and
+  static values rather than catalog values.
+- **`cost_in_per_mtok` / `cost_out_per_mtok` are 0 for every live model.** They are populated
+  only from the static table or operator overrides. **Slice 0b's price lint therefore has no
+  data and cannot be built as specified.**
+- **`MODEL_CAP_REASONING` is never set from catalog data at all** — `fill_cap_from_json` reads
+  `tools`, `vision`, `pdf`, `deprecated` and no reasoning key. Today it comes solely from
+  per-vendor heuristic branches.
+- §0's promise ("aimee auto-detects models, costs, and capabilities") is blocked on this, not
+  only on the join key. Fixing the join key was necessary and insufficient.
+
+**New Slice 0b-pre (blocks 0b and 0c): make models.dev ingestion actually work.** Preferred
+shape: teach the reader BOTH schemas — flat key first (preserves the bundled snapshot and
+`model_overrides.json`, which share the flat format), then a nested traversal for the
+downloaded api.json — and capture `reasoning`/`tool_call` while there. This avoids rewriting
+downloaded bytes, keeps the atomic-rename download, and leaves the override format untouched.
+
 ## 3. Design
 
 ### 3.1 Capability becomes a total predicate

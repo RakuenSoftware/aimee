@@ -10,6 +10,11 @@
 
 #define MODELS_DEV_MAX_SIZE (8 * 1024 * 1024)
 
+/* Defined below: resolves provider/model against the NESTED live api.json shape
+ * after the flat key lookup misses. */
+static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
+                                 model_capability_t *out);
+
 static void fill_cap_from_json(cJSON *entry, const char *provider, const char *model_id,
                                model_capability_t *out)
 {
@@ -78,8 +83,111 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
    if (!entry)
-      return 0;
+      return lookup_in_nested_json(root, provider, model_id, out);
    fill_cap_from_json(entry, provider, model_id, out);
+   return 1;
+}
+
+/* ---- models.dev live api.json (NESTED) ----------------------------------
+ *
+ * Two on-disk schemas must both resolve:
+ *
+ *  FLAT   {"provider/model": {"contextWindow":…, "inputCost":…}}
+ *         - data/models_dev_snapshot.json (bundled) and model_overrides.json.
+ *
+ *  NESTED {"provider": {"models": {"model": {"limit":{"context":…},
+ *                                            "cost":{"input":…}, …}}}}
+ *         - exactly what https://models.dev/api.json serves, which
+ *           models_dev_refresh() curls verbatim into the cache with no
+ *           transform. Before this reader existed the downloaded cache could
+ *           never resolve a single model: the flat key lookup returned NULL
+ *           against a nested root, so every capability fell through to the
+ *           heuristic and every price stayed 0.
+ *
+ * Reading both keeps the atomic-rename download and leaves the override format
+ * untouched, instead of rewriting bytes we did not author. */
+static void fill_cap_from_nested(cJSON *entry, const char *provider, const char *model_id,
+                                 model_capability_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   snprintf(out->provider, sizeof(out->provider), "%s", provider);
+   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+
+   cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
+   if (cJSON_IsObject(limit))
+   {
+      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(limit, "context");
+      if (cJSON_IsNumber(tmp))
+         out->context_window = (int)tmp->valuedouble;
+      tmp = cJSON_GetObjectItemCaseSensitive(limit, "output");
+      if (cJSON_IsNumber(tmp))
+         out->max_output = (int)tmp->valuedouble;
+   }
+
+   cJSON *cost = cJSON_GetObjectItemCaseSensitive(entry, "cost");
+   if (cJSON_IsObject(cost))
+   {
+      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(cost, "input");
+      if (cJSON_IsNumber(tmp))
+         out->cost_in_per_mtok = tmp->valuedouble;
+      tmp = cJSON_GetObjectItemCaseSensitive(cost, "output");
+      if (cJSON_IsNumber(tmp))
+         out->cost_out_per_mtok = tmp->valuedouble;
+   }
+
+   /* models.dev spells tool use "tool_call". REASONING has no flat-schema
+    * equivalent at all, so before this it could only ever come from a
+    * per-vendor heuristic branch. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "tool_call")))
+      out->flags |= MODEL_CAP_TOOLS;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "reasoning")))
+      out->flags |= MODEL_CAP_REASONING;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "open_weights")))
+      out->open_weights = 1;
+
+   cJSON *modalities = cJSON_GetObjectItemCaseSensitive(entry, "modalities");
+   if (cJSON_IsObject(modalities))
+   {
+      cJSON *input = cJSON_GetObjectItemCaseSensitive(modalities, "input");
+      cJSON *m;
+      cJSON_ArrayForEach(m, input)
+      {
+         const char *s = cJSON_GetStringValue(m);
+         if (!s)
+            continue;
+         if (strcmp(s, "image") == 0)
+            out->flags |= MODEL_CAP_VISION;
+         else if (strcmp(s, "pdf") == 0)
+            out->flags |= MODEL_CAP_PDF;
+         else if (strcmp(s, "audio") == 0)
+            out->flags |= MODEL_CAP_AUDIO;
+      }
+   }
+
+   /* A model the upstream registry still lists is not deprecated unless it says
+    * so; absent key means live. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "deprecated")))
+      out->deprecated = 1;
+
+   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+   if (name && name[0])
+      snprintf(out->display_name, sizeof(out->display_name), "%s", name);
+}
+
+/* Resolve provider/model against a NESTED root. Returns 1 on hit. */
+static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
+                                 model_capability_t *out)
+{
+   cJSON *prov = cJSON_GetObjectItemCaseSensitive(root, provider);
+   if (!cJSON_IsObject(prov))
+      return 0;
+   cJSON *models = cJSON_GetObjectItemCaseSensitive(prov, "models");
+   if (!cJSON_IsObject(models))
+      return 0;
+   cJSON *entry = cJSON_GetObjectItemCaseSensitive(models, model_id);
+   if (!cJSON_IsObject(entry))
+      return 0;
+   fill_cap_from_nested(entry, provider, model_id, out);
    return 1;
 }
 
