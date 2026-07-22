@@ -533,6 +533,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
                 $(TESTPREFIX)/unit-test-kb-workload-jwt \
                 $(TESTPREFIX)/unit-test-kb-workload-helper-posix \
                 $(TESTPREFIX)/unit-test-kb-workload-provider
+TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1782,6 +1783,11 @@ $(TESTPREFIX)/unit-test-management-status-runtime: \
     $(OBJDIR)/tests/test_management_status_runtime.o \
     $(OBJDIR)/db2/management_status_runtime.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-management-client-instance: \
+    $(OBJDIR)/tests/test_management_client_instance.o \
+    $(OBJDIR)/db2/management_client_instance.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-kb-workload-wire: $(OBJDIR)/tests/test_kb_workload_wire.o \
                                             $(OBJDIR)/kb/kb_workload_wire.o
