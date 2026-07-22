@@ -1,8 +1,13 @@
 {
   "schema_version": 1,
   "substantive": [
+    "kb-synthesis",
+    "learning",
+    "memory",
     "module-runtime",
-    "plugin-loader"
+    "plugin-loader",
+    "response-composition",
+    "skills"
   ],
   "debt": [
     "audit",
@@ -15,15 +20,10 @@
     "git",
     "governance",
     "ir",
-    "kb-synthesis",
-    "learning",
-    "memory",
     "protocols",
-    "response-composition",
     "roundtable",
     "routing",
     "runtime-web",
-    "skills",
     "tools",
     "translation",
     "vault",
