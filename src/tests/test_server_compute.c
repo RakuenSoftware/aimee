@@ -1286,6 +1286,16 @@ static void test_delegate_status_handler(void)
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "done") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "role")->valuestring, "code") == 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "agent_name")->valuestring, "codex") == 0);
+   assert(cJSON_GetObjectItem(g_last_response, "participant") == NULL);
+   db1_agent_job_t issued;
+   assert(db1_agent_job_get(job_id, &issued) == 0);
+   assert(strlen(issued.participant_token) == 64);
+   db1_agent_job_t continued;
+   assert(db1_agent_job_get_by_participant(issued.participant_token, &continued) == 0);
+   assert(continued.id == job_id && strcmp(continued.agent_name, "codex") == 0);
+   db1_agent_job_free(&continued);
+   assert(db1_agent_job_get_by_participant(
+              "0000000000000000000000000000000000000000000000000000000000000000", &continued) != 0);
    assert(cJSON_GetObjectItem(g_last_response, "cursor_turn")->valueint == 3);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "result")->valuestring, "ok") == 0);
    cJSON_Delete(req);
@@ -1346,6 +1356,8 @@ static void test_delegate_background_handler(void)
    assert(g_last_response != NULL);
    cJSON *jid = cJSON_GetObjectItem(g_last_response, "job_id");
    assert(cJSON_IsNumber(jid));
+   cJSON *participant = cJSON_GetObjectItem(g_last_response, "participant");
+   assert(cJSON_IsString(participant) && strlen(participant->valuestring) == 64);
    int job_id = jid->valueint;
    assert(job_id > 0);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "job_status")->valuestring, "pending") == 0);

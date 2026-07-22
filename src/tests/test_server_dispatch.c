@@ -959,9 +959,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "delegate.aggregate");
 }
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "delegate.roundtable");
+   return stub_handler(conn, "roundtable.review");
 }
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1635,10 +1635,10 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "delegate.status") == 0);
    cJSON_Delete(json);
 
-   json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}",
-                        strlen("{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}"));
-   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.roundtable") == 0);
-   assert(strcmp(g_last_handler, "delegate.roundtable") == 0);
+   json = dispatch_json(ctx, conn, "{\"method\":\"roundtable.review\",\"prompt\":\"draft\"}",
+                        strlen("{\"method\":\"roundtable.review\",\"prompt\":\"draft\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "roundtable.review") == 0);
+   assert(strcmp(g_last_handler, "roundtable.review") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"delegate.launch\"}",

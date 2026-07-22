@@ -659,6 +659,7 @@ void delegate_worker(void *arg)
    cJSON *jprovided_target = cJSON_GetObjectItemCaseSensitive(req, "provided_target");
    cJSON *jtier = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
+   cJSON *jparticipant = cJSON_GetObjectItemCaseSensitive(req, "participant");
    cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(req, "provider");
    cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
@@ -683,6 +684,7 @@ void delegate_worker(void *arg)
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "toolset"));
    int tier_override = cJSON_IsNumber(jtier) ? (int)jtier->valuedouble : -1;
    const char *via_name = cJSON_IsString(jvia) ? jvia->valuestring : NULL;
+   const char *participant = cJSON_IsString(jparticipant) ? jparticipant->valuestring : NULL;
    cJSON *jacp_cmd = cJSON_GetObjectItemCaseSensitive(req, "acp_command");
    cJSON *jacp_args = cJSON_GetObjectItemCaseSensitive(req, "acp_args");
    const char *acp_command =
@@ -743,6 +745,32 @@ void delegate_worker(void *arg)
       delegation_compute_error(cctx, "failed to load agent config");
       compute_ctx_free(cctx);
       return;
+   }
+   /* A participant is a delegate-service continuation token. Resolve it here,
+    * behind the generic delegation boundary, so coordinators never learn or
+    * retain the concrete agent identity. The durable job row survives service
+    * restarts and therefore makes discussion continuity restart-safe. */
+   char participant_agent[MAX_AGENT_NAME] = "";
+   if (participant && participant[0])
+   {
+      if (via_name && via_name[0])
+      {
+         delegation_compute_error(cctx, "invalid delegate participant continuation");
+         compute_ctx_free(cctx);
+         return;
+      }
+      db1_agent_job_t prior;
+      memset(&prior, 0, sizeof(prior));
+      if (db1_agent_job_get_by_participant(participant, &prior) != 0 || !prior.agent_name[0])
+      {
+         db1_agent_job_free(&prior);
+         delegation_compute_error(cctx, "delegate participant continuation is unknown");
+         compute_ctx_free(cctx);
+         return;
+      }
+      snprintf(participant_agent, sizeof(participant_agent), "%s", prior.agent_name);
+      db1_agent_job_free(&prior);
+      via_name = participant_agent;
    }
    /* Inline --acp <cmd>: synthesize an ephemeral kind:acp agent and route to it
     * by name, exactly like --via. The external ACP agent runs its own model, so
@@ -1781,12 +1809,6 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    return cctx;
 }
 
-static int roundtable_run_cancel_requested(void *ctx)
-{
-   const char *run_id = (const char *)ctx;
-   return run_id && run_id[0] && openai_runs_store_cancel_requested(run_id);
-}
-
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    compute_ctx_t *cctx = create_compute_ctx(ctx, conn, req);
@@ -1907,6 +1929,13 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "job_id", job_id);
+   db1_agent_job_t job;
+   if (db1_agent_job_get(job_id, &job) == 0)
+   {
+      if (job.participant_token[0])
+         cJSON_AddStringToObject(resp, "participant", job.participant_token);
+      db1_agent_job_free(&job);
+   }
    cJSON_AddStringToObject(resp, "job_status", "pending");
    return server_send_ok(conn, resp);
 }
@@ -1975,221 +2004,6 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
    cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
-   return server_send_ok(conn, resp);
-}
-
-/* Replay-verification backend (Part A): the roundtable runs server-side, where the
- * code index is reached over the kb socket via kb_client (the server itself is
- * AIMEE_DB2_DISABLED). Installed lazily so the verifier engine — which references
- * no index/kb symbol — stays linkable in every binary. */
-static int rt_replay_project_count(void)
-{
-   project_info_t tmp[1];
-   int n = kb_client_index_list(tmp, 1);
-   return n < 0 ? 0 : n; /* >0 = at least one indexed project (enough to ground) */
-}
-
-static const replay_backend_t rt_replay_kb_backend = {
-    .find_symbol = kb_client_index_find,
-    .find_callers = kb_client_index_find_callers,
-    .code_search = kb_client_index_code_search,
-    .project_count = rt_replay_project_count,
-};
-
-/* Assemble the read-only aimee context injected into every roundtable panelist
- * prompt. Panelists run with NO tools, so — unlike a normal delegate, which
- * reaches aimee memory and the code graph through tools mid-run — they can only
- * see them if the context is pre-loaded. Combines aimee memory recall (graph-code
- * fusion on, so code-graph-fused memory flows in) with the same code-index and
- * structural-graph snippets a regular delegate is seeded with. Best-effort and
- * fail-open: returns a heap string the caller frees, or NULL when nothing is
- * available (recall disabled/empty and kb unreachable). */
-static char *roundtable_build_aimee_context(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return NULL;
-   dstr_t s;
-   dstr_init(&s);
-
-   config_t cfg;
-   if (config_load(&cfg) == 0 && cfg.memory_recall_enabled)
-   {
-      int limit = cfg.memory_recall_limit_tokens_turn > 0 ? cfg.memory_recall_limit_tokens_turn : 0;
-      char *env = kb_client_memory_recall_json_ex(prompt, limit, 0 /* not session start */, "on");
-      cJSON *j = env ? cJSON_Parse(env) : NULL;
-      free(env);
-      cJSON *recall = j ? cJSON_GetObjectItemCaseSensitive(j, "recall") : NULL;
-      if (recall)
-      {
-         /* Same six recall sections the primary agent gets, in priority order. */
-         static const char *const sections[][2] = {{"identity", "Identity"},
-                                                   {"preferences", "Preferences"},
-                                                   {"active_context", "Active Context"},
-                                                   {"open_commitments", "Open Commitments"},
-                                                   {"reminders", "Reminders"},
-                                                   {"directives", "Directives"}};
-         int any = 0;
-         for (int si = 0; si < (int)(sizeof(sections) / sizeof(sections[0])); si++)
-         {
-            cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[si][0]);
-            if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) <= 0)
-               continue;
-            if (!any)
-            {
-               dstr_append_str(&s, "## Aimee memory\n");
-               any = 1;
-            }
-            dstr_appendf(&s, "### %s\n", sections[si][1]);
-            cJSON *it = NULL;
-            cJSON_ArrayForEach(it, arr)
-            {
-               const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(it, "text"));
-               if (text && text[0])
-                  dstr_appendf(&s, "- %s\n", text);
-            }
-         }
-         if (any)
-            dstr_append_char(&s, '\n');
-      }
-      cJSON_Delete(j);
-   }
-
-   /* Code graph: the same code-index search + structural neighborhood a normal
-    * delegate is seeded with. delegate_inject_graph_context is itself gated by
-    * delegate_graph_context_enabled and both helpers fail open (NULL on a miss). */
-   char *code = delegate_inject_code_context(prompt);
-   if (code)
-   {
-      dstr_append_str(&s, code);
-      free(code);
-   }
-   char *graph = delegate_inject_graph_context(prompt, NULL);
-   if (graph)
-   {
-      dstr_append_str(&s, graph);
-      free(graph);
-   }
-
-   if (s.len == 0)
-   {
-      dstr_free(&s);
-      return NULL;
-   }
-   return dstr_steal(&s);
-}
-
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Idempotent: point the replay engine at the kb_client code-index backend. */
-   if (!evidence_replay_active_backend())
-      evidence_replay_set_backend(&rt_replay_kb_backend);
-   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   if (!prompt || !prompt[0])
-      return server_send_error(conn, "missing prompt", NULL);
-   if (strlen(prompt) < 20)
-   {
-      char errmsg[88];
-      snprintf(errmsg, sizeof(errmsg), "roundtable prompt too short (%zu chars, min 20)",
-               strlen(prompt));
-      return server_send_error(conn, errmsg, NULL);
-   }
-
-   config_t cfg;
-   config_load(&cfg);
-   cJSON *jrt = cJSON_GetObjectItemCaseSensitive(req, "roundtable");
-   if (jrt && !cJSON_IsString(jrt))
-      return server_send_error(conn, "roundtable must name a saved preset", NULL);
-   const char *requested_roundtable = cJSON_IsString(jrt) ? jrt->valuestring : NULL;
-   char preset_err[256];
-   int acquired = roundtable_preset_resolve_runtime(requested_roundtable, &cfg, NULL, 0, preset_err,
-                                                    sizeof preset_err);
-   if (acquired < 0)
-      return server_send_error(conn, preset_err, NULL);
-   roundtable_opts_t opts;
-   memset(&opts, 0, sizeof(opts));
-   opts.mode = ROUNDTABLE_DRAFT;
-   opts.turns = ROUNDTABLE_PARALLEL;
-   /* A roundtable has one independent analysis phase. Discussion cycles are a
-    * separate, issue-driven phase and must never be expressed as panel rounds. */
-   opts.max_rounds = 1;
-   opts.deadline_ms = cfg.roundtable_deadline_ms;
-   opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
-   cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
-   if (cJSON_IsString(jrun) && jrun->valuestring && jrun->valuestring[0])
-   {
-      opts.cancel_requested = roundtable_run_cancel_requested;
-      opts.cancel_ctx = jrun->valuestring;
-   }
-   normalized_roundtable_brief_t brief;
-   char brief_err[128];
-   brief_err[0] = '\0';
-   if (normalize_roundtable_brief(req, &brief, brief_err, sizeof(brief_err)) != 0)
-      return server_send_error(conn, brief_err[0] ? brief_err : "invalid brief", NULL);
-   opts.brief = brief.rendered;
-   opts.brief_truncated = brief.truncated;
-   opts.questions = brief.question_ptrs;
-   opts.question_count = brief.question_count;
-   cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
-   if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
-      opts.mode = ROUNDTABLE_REVIEW;
-   cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
-   if (cJSON_IsBool(japply))
-      opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
-
-   agent_config_t acfg;
-   memset(&acfg, 0, sizeof(acfg));
-   if (agent_load_config(&acfg) != 0)
-   {
-      free(brief.rendered);
-      return server_send_error(conn, "could not load agents.json", NULL);
-   }
-   char pin_err[256] = "no enabled review agent is currently available";
-   if (prepare_roundtable_panel(req, &cfg, &acfg, pin_err, sizeof pin_err) != 0)
-   {
-      free(brief.rendered);
-      return server_send_error(conn, pin_err, NULL);
-   }
-   bind_request_session_creds(req);
-
-   /* Seed the read-only panel with aimee memory + code-graph context. Evidence-
-    * gated reviews also force each seat to make an actual read-only tool call. */
-   char *rt_context = roundtable_build_aimee_context(prompt);
-   opts.context = rt_context;
-
-   roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
-   if (rc != 0)
-   {
-      free(rt_context);
-      free(brief.rendered);
-      return server_send_error(conn, "roundtable run failed (no enabled agents in agents.json?)",
-                               NULL);
-   }
-
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
-   cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
-   cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
-   cJSON_AddNumberToObject(resp, "participants_required_failed",
-                           result.participants_required_failed);
-   cJSON_AddNumberToObject(resp, "participants_tool_used", result.participants_tool_used);
-   cJSON_AddNumberToObject(resp, "participant_tool_calls", result.participant_tool_calls);
-   cJSON_AddNumberToObject(resp, "participant_successful_tool_calls",
-                           result.participant_successful_tool_calls);
-   cJSON_AddBoolToObject(resp, "evidence_coverage_incomplete",
-                         result.evidence_coverage_incomplete ? 1 : 0);
-   cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
-   add_roundtable_arrays(resp, &result);
-   delegate_roundtable_result_free(&result);
-   free(rt_context);
-   free(brief.rendered);
    return server_send_ok(conn, resp);
 }
 

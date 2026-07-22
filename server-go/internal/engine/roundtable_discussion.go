@@ -31,10 +31,10 @@ type discussionResponse struct {
 }
 
 type discussionTranscriptReport struct {
-	Seat     int           `json:"seat"`
-	Agent    string        `json:"agent"`
-	Persona  string        `json:"persona"`
-	Analysis panelResponse `json:"analysis"`
+	Seat        int           `json:"seat"`
+	Participant string        `json:"participant,omitempty"`
+	Persona     string        `json:"persona"`
+	Analysis    panelResponse `json:"analysis"`
 }
 
 // runPanelDiscussion has exactly one mandatory cycle. It extends only while a
@@ -62,7 +62,7 @@ func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, 
 	}
 	reports := make([]discussionTranscriptReport, 0, len(analysis.Reports))
 	for _, report := range analysis.Reports {
-		reports = append(reports, discussionTranscriptReport{Seat: report.Seat.ordinal, Agent: report.Seat.delegate, Persona: report.Seat.persona, Analysis: report.Response})
+		reports = append(reports, discussionTranscriptReport{Seat: report.Seat.ordinal, Participant: report.Seat.participant, Persona: report.Seat.persona, Analysis: report.Response})
 	}
 
 	totalCost := analysis.CostUSD
@@ -144,22 +144,22 @@ func (r *NativeRunner) runDiscussionCycle(ctx context.Context, req StepRequest, 
 		cost     float64
 		err      error
 	}
-	ch := make(chan outcome, len(reports))
-	for _, report := range reports {
-		report := report
-		go func() {
-			request := DelegateRequest{Role: roundtableDelegateRole, Persona: report.Seat.persona, Delegate: report.Seat.delegate, Prompt: prompt, Workdir: req.WorkItem.Worktree, DurableSlot: panelDiscussionDurableSlot(req, cycle, report.Seat.ordinal), ArtifactStage: artifactStage, ProvidedTarget: true}
-			res, err := r.delegate(ctx, req, request)
-			var parsed discussionResponse
+	requests := make([]DelegateRequest, len(reports))
+	for i, report := range reports {
+		requests[i] = DelegateRequest{Role: roundtableDelegateRole, Persona: report.Seat.persona, Participant: report.Seat.participant, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelDiscussionDurableSlot(req, cycle, report.Seat.ordinal), ArtifactStage: artifactStage, ProvidedTarget: true}
+	}
+	delegated := r.delegateGroup(ctx, req, requests)
+	outcomes := make([]outcome, len(delegated))
+	for i, call := range delegated {
+		parsed, err := discussionResponse{}, call.Err
+		if err == nil {
+			var doc []byte
+			doc, err = extractJSONObject(call.Response)
 			if err == nil {
-				var doc []byte
-				doc, err = extractJSONObject(res.Response)
-				if err == nil {
-					err = json.Unmarshal(doc, &parsed)
-				}
+				err = json.Unmarshal(doc, &parsed)
 			}
-			ch <- outcome{response: parsed, cost: res.CostUSD, err: err}
-		}()
+		}
+		outcomes[i] = outcome{response: parsed, cost: call.CostUSD, err: err}
 	}
 	votes := make(map[string][2]int)
 	successful := 0
@@ -168,13 +168,7 @@ func (r *NativeRunner) runDiscussionCycle(ctx context.Context, req StepRequest, 
 	for _, issue := range issues {
 		requiredIDs[issue.ID] = true
 	}
-	for range reports {
-		var out outcome
-		select {
-		case out = <-ch:
-		case <-ctx.Done():
-			return votes, 0, cost
-		}
+	for _, out := range outcomes {
 		cost += out.cost
 		if out.err != nil {
 			continue

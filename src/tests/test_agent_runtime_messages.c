@@ -157,11 +157,13 @@ static void test_required_evidence_runtime_policy(void)
    assert(agent_required_evidence_budget_exhausted(1, 1, 99) == 0);
    assert(agent_required_evidence_budget_exhausted(0, 0, 99) == 0);
 
-   assert(agent_required_evidence_needs_fallback(1, 0, 1, 1, 0) == 1);
-   assert(agent_required_evidence_needs_fallback(1, 1, 1, 1, 0) == 0);
-   assert(agent_required_evidence_needs_fallback(1, 0, 0, 1, 0) == 0);
-   assert(agent_required_evidence_needs_fallback(1, 0, 1, 0, 0) == 0);
-   assert(agent_required_evidence_needs_fallback(1, 0, 1, 1, 1) == 0);
+   /* ChatGPT sometimes returns an empty/unrecognized native tool response even
+    * when the gateway did not identify a denied Task/Agent call. Either zero-call
+    * shape gets the same bounded bootstrap. */
+   assert(agent_required_evidence_needs_fallback(1, 0, 1, 0) == 1);
+   assert(agent_required_evidence_needs_fallback(1, 1, 1, 0) == 0);
+   assert(agent_required_evidence_needs_fallback(1, 0, 0, 0) == 0);
+   assert(agent_required_evidence_needs_fallback(1, 0, 1, 1) == 0);
 }
 
 static void test_repository_evidence_message(void)

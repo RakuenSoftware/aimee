@@ -629,13 +629,18 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           tools,
           mcp_tool_new(
               "roundtable_review",
-              "Run the multi-agent roundtable in review mode against caller-provided diff "
-              "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
-              "describe items_round while artifact is artifact_round (the best round); "
-              "compare those fields before assuming the findings match the artifact.",
+              "Review a supplied artifact with the configured Go roundtable. Every seat is an "
+              "ordinary delegate request; the result is returned after synthesis.",
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
+                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
+                          "original request used to detect goal drift.\"},"
+                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                          "artifact; defaults to frozen_diff.\"},"
+                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                          "available to delegate tools.\"},"
                           "\"brief\":{\"description\":\"Optional directed review brief as a string "
                           "or object with focus/fixes/invariants/questions string arrays.\","
                           "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","

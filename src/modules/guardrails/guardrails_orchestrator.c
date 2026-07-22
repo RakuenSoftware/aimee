@@ -1617,7 +1617,7 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       snprintf(msg_buf, msg_len,
                "BLOCKED: sub-agent tools (Task, Agent, spawn_agent, …) are outside aimee's "
                "guardrail model. Delegate instead: `aimee delegate <role> \"<task>\" "
-               "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` "
+               "--persona <persona>`, or `aimee roundtable review \"<task>\"` "
                "for a multi-model panel. aimee delegates run on the cheapest capable model, are "
                "cost-tracked, see the shared memory + KB, and inherit this session's guardrails.");
       audit_log("subagent_blocked",

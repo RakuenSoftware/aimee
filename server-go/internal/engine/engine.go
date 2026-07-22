@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -33,14 +34,15 @@ type StepRequest struct {
 }
 
 type StepResult struct {
-	Status       StepStatus          `json:"status"`
-	ArtifactType string              `json:"artifact_type,omitempty"`
-	Artifact     string              `json:"artifact,omitempty"`
-	ContentHash  string              `json:"content_hash,omitempty"`
-	Feedback     *wfe.ReviewFeedback `json:"feedback,omitempty"`
-	PauseReason  string              `json:"pause_reason,omitempty"`
-	Detail       string              `json:"detail,omitempty"`
-	CostUSD      float64             `json:"cost_usd,omitempty"`
+	Status       StepStatus               `json:"status"`
+	ArtifactType string                   `json:"artifact_type,omitempty"`
+	Artifact     string                   `json:"artifact,omitempty"`
+	ContentHash  string                   `json:"content_hash,omitempty"`
+	Feedback     *wfe.ReviewFeedback      `json:"feedback,omitempty"`
+	PauseReason  string                   `json:"pause_reason,omitempty"`
+	Detail       string                   `json:"detail,omitempty"`
+	CostUSD      float64                  `json:"cost_usd,omitempty"`
+	Roundtable   *roundtablecfg.RunResult `json:"roundtable,omitempty"`
 }
 
 type Runner interface {

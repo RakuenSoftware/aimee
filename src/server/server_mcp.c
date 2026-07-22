@@ -35,6 +35,7 @@
 #include "server_mcp_gateway.h"
 #include "server_http.h"
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
+#include "wfe_roundtable_proxy.h"
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -117,6 +118,21 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
       return server_send_error(conn, "out of memory", NULL);
    cJSON_AddStringToObject(body, "prompt", diff->valuestring);
    cJSON_AddStringToObject(body, "mode", "review");
+   for (const char *const *field =
+            (const char *const[]){"original_request", "artifact_stage", "workdir", NULL};
+        *field; field++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, *field);
+      if (!value)
+         continue;
+      if (!cJSON_IsString(value) || !value->valuestring || !value->valuestring[0])
+      {
+         cJSON_Delete(body);
+         return server_send_error(
+             conn, "roundtable_review evidence fields must be non-empty strings", NULL);
+      }
+      cJSON_AddStringToObject(body, *field, value->valuestring);
+   }
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
    if (brief)
    {
@@ -146,39 +162,9 @@ static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
       cJSON_AddStringToObject(body, "roundtable", roundtable->valuestring);
    }
 
-   char *line = cJSON_PrintUnformatted(body);
+   int rc = wfe_roundtable_proxy(conn, body);
    cJSON_Delete(body);
-   if (!line)
-      return server_send_error(conn, "out of memory", NULL);
-
-   char respbuf[8192];
-   int st = server_http_submit_op_run("delegate.roundtable", line, conn->capabilities, respbuf,
-                                      sizeof(respbuf));
-   free(line);
-   if (st < 200 || st >= 300)
-   {
-      cJSON *err = cJSON_Parse(respbuf);
-      cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
-      const char *text =
-          cJSON_IsString(msg) ? msg->valuestring : "could not queue roundtable_review";
-      int rc = server_send_error(conn, text, NULL);
-      cJSON_Delete(err);
-      return rc;
-   }
-
-   cJSON *snap = cJSON_Parse(respbuf);
-   if (!snap)
-      return server_send_error(conn, "could not parse queued run", NULL);
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(snap, "id");
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(snap, "status");
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "run_id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "object", "op.run");
-   cJSON_AddStringToObject(resp, "method", "delegate.roundtable");
-   cJSON_AddStringToObject(resp, "status", cJSON_IsString(status) ? status->valuestring : "queued");
-   cJSON_Delete(snap);
-   return server_send_ok(conn, resp);
+   return rc;
 }
 cJSON *tool_get_help(cJSON *args)
 {

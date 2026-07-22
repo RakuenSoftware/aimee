@@ -14,7 +14,7 @@ extern "C"
 #endif
 
    /* Parse a roundtable child-run result payload (the object produced by
-    * handle_delegate_roundtable: artifact/converged/items[]/... ) into a
+    * Go roundtable transport: artifact/converged/items[]/... ) into a
     * captured envelope. is_draft selects draft vs review interpretation.
     * Returns 0 always; the envelope's present/parse_ok/has_error fields record
     * what happened (an empty payload -> present=0). */
