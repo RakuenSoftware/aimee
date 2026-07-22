@@ -118,8 +118,7 @@ static int canonical_time(const char *value, int64_t *out)
    uint64_t n = 0;
    for (const unsigned char *p = (const unsigned char *)value; *p; ++p)
    {
-      if (*p < '0' || *p > '9' ||
-          n > (uint64_t)(KB_MGMT_JWKS_TIME_MAX - (*p - '0')) / 10)
+      if (*p < '0' || *p > '9' || n > (uint64_t)(KB_MGMT_JWKS_TIME_MAX - (*p - '0')) / 10)
          return -1;
       n = n * 10 + (uint64_t)(*p - '0');
    }
