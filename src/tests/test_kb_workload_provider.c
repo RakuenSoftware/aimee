@@ -247,6 +247,8 @@ int main(void)
 
    cfg = config();
    assert(kb_workload_provider_open(&cfg, &provider) == KB_WORKLOAD_OK && provider);
+   assert(kb_workload_provider_kind(NULL) == KB_WORKLOAD_PROVIDER_NONE);
+   assert(kb_workload_provider_kind(provider) == KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1);
    assert(g_jwks_open_count == 1); /* constructor probe */
    unsigned char challenge[32] = {1}, binding[32] = {2};
    kb_workload_identity_t identity;

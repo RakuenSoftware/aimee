@@ -45,6 +45,14 @@ extern "C"
       KB_PKI_CSR_KB_MANAGEMENT_CLIENT = 3
    } kb_pki_csr_profile_t;
 
+   typedef enum
+   {
+      KB_PKI_CA_LOAD_OK = 0,
+      KB_PKI_CA_LOAD_UNAVAILABLE,
+      KB_PKI_CA_LOAD_INTEGRITY,
+      KB_PKI_CA_LOAD_INVALID
+   } kb_pki_ca_load_result_t;
+
    /* Generate a fresh self-signed CA (RSA-2048, CN "aimee-kb-ca", ~10 year
     * validity, basicConstraints CA:TRUE) into *out. Returns 0 on success, -1 on
     * error (RNG / OpenSSL failure or PEM overflow). */
@@ -152,6 +160,11 @@ extern "C"
     * emitted. These APIs are used by production enrollment/TLS paths. */
    int kb_pki_ca_save_custodied(const char *dir, const kb_pki_ca_t *ca);
    int kb_pki_ca_load_custodied(const char *dir, kb_pki_ca_t *out);
+   /* Typed variant for security-sensitive lifecycle callers. Missing or I/O/
+    * KEK-provider failure is UNAVAILABLE; malformed, noncanonical, or
+    * authentication/key-pair mismatch is INTEGRITY. Output is cleared on all
+    * failures. The legacy entry point above maps every non-OK result to -1. */
+   kb_pki_ca_load_result_t kb_pki_ca_load_custodied_ex(const char *dir, kb_pki_ca_t *out);
    int kb_pki_ca_load_or_create_custodied(const char *dir, kb_pki_ca_t *out, int *created);
 
 #ifdef __cplusplus
