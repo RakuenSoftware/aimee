@@ -63,10 +63,11 @@ int ensemble_validate_panel_pins(const config_t *cfg, const agent_config_t *acfg
                                  size_t err_n);
 
 /* Replace each "$random" seat in ensemble.reference_models with a concretely
- * picked review-capable agent (excluding already-seated models for diversity);
- * drop a $random seat that cannot be filled. Pinned seats pass through. Called
- * first by ensemble_filter_panel_authorization so downstream filters see real
- * agents. Exposed for tests. */
+ * picked review-capable agent while retaining its replaceable provenance in
+ * roundtable_random_seats. Selection fills provider/model diversity first, then
+ * reuses agents within max_parallel capacity. Pinned seats pass through and are
+ * never replaceable. Called first by ensemble_filter_panel_authorization so
+ * downstream filters see real agents. Exposed for tests. */
 void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg);
 
 /* Drop unauthorized/ineligible configured agents (e.g. an unauthorized claude)
@@ -90,8 +91,8 @@ void ensemble_fill_implicit_panel(config_t *cfg, const agent_config_t *acfg);
 /* Single C compatibility route while orchestration moves to Go. Resolve a
  * named/default saved preset as an exact panel, or construct the bounded
  * two-seat fallback when no preset exists. */
-int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg,
-                                   const agent_config_t *acfg, char *err, size_t err_n);
+int ensemble_prepare_runtime_panel(const char *requested, config_t *cfg, const agent_config_t *acfg,
+                                   char *err, size_t err_n);
 
 /* Persona name for panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set (any mode), else a mode default
