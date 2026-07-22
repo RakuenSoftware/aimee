@@ -8574,3 +8574,308 @@ REVOKE ALL ON FUNCTION org_egress_dispatch_owner_guard(BIGINT,TEXT,BIGINT) FROM 
 REVOKE ALL ON FUNCTION org_egress_budget_settle_overage(TEXT,TEXT,NUMERIC) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_dispatch_settle(BIGINT,TEXT,BIGINT,TEXT,INT,BIGINT,BIGINT,BIGINT,BIGINT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
+
+-- ============================================================================
+-- P5-C1c PRIMARY/WORM MANAGEMENT-ACTION JOURNAL.  Admission records the exact
+-- authorized token/certificate tuple before later slices may sign or dispatch.
+-- Both records are append-only: an intent without an outcome is deliberately
+-- unresolved and must never be interpreted as permission to retry a remote side
+-- effect.  No endpoint, request/response body, JWT, or private material enters
+-- either structured table or the audit detail.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS kb_management_action_intent (
+  correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  actor_identity TEXT NOT NULL CHECK (char_length(actor_identity) BETWEEN 1 AND 576),
+  capability TEXT NOT NULL CHECK (capability='remote_writes'),
+  target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
+  request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[0-9a-f]{64}$'),
+  token_issuer TEXT NOT NULL CHECK (char_length(token_issuer) BETWEEN 1 AND 255),
+  audience TEXT NOT NULL CHECK (audience=target_server_id),
+  kid TEXT NOT NULL CHECK (kid ~ '^[A-Za-z0-9._-]{1,64}$'),
+  issued_at BIGINT NOT NULL CHECK (issued_at BETWEEN 0 AND 9007199254740991),
+  expires_at BIGINT NOT NULL CHECK (expires_at>issued_at AND expires_at-issued_at BETWEEN 1 AND 90
+                                    AND expires_at<=9007199254740991),
+  installation_id TEXT NOT NULL CHECK (installation_id ~ '^[0-9a-f]{32}$'),
+  installation_generation BIGINT NOT NULL CHECK (installation_generation>=1),
+  installation_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  local_cert_issuer TEXT NOT NULL CHECK (char_length(local_cert_issuer) BETWEEN 1 AND 511),
+  local_cert_serial_norm TEXT NOT NULL CHECK (local_cert_serial_norm ~ '^[0-9a-f]{1,79}$'),
+  local_cert_fingerprint TEXT NOT NULL CHECK (local_cert_fingerprint ~ '^[0-9a-f]{64}$'),
+  target_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  target_mgmt_issuer TEXT NOT NULL CHECK (char_length(target_mgmt_issuer) BETWEEN 1 AND 511),
+  target_mgmt_serial_norm TEXT NOT NULL CHECK (target_mgmt_serial_norm ~ '^[0-9a-f]{1,79}$'),
+  target_mgmt_fingerprint TEXT NOT NULL CHECK (target_mgmt_fingerprint ~ '^[0-9a-f]{64}$'),
+  revocation_generation BIGINT NOT NULL CHECK (revocation_generation>=1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(correlation_id,team_id)
+);
+
+CREATE TABLE IF NOT EXISTS kb_management_action_outcome (
+  correlation_id TEXT PRIMARY KEY,
+  team_id BIGINT NOT NULL,
+  result TEXT NOT NULL CHECK (result IN ('succeeded','denied','failed','indeterminate')),
+  result_class TEXT NOT NULL CHECK (result_class IN
+    ('remote_success','remote_denied','remote_failure','transport_ambiguous',
+     'protocol_failure','local_failure')),
+  status_code INTEGER CHECK (status_code IS NULL OR status_code BETWEEN 100 AND 599),
+  response_sha256 TEXT CHECK (response_sha256 IS NULL OR response_sha256 ~ '^[0-9a-f]{64}$'),
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  FOREIGN KEY(correlation_id,team_id)
+    REFERENCES kb_management_action_intent(correlation_id,team_id),
+  CHECK ((result='succeeded' AND result_class='remote_success') OR
+         (result='denied' AND result_class='remote_denied') OR
+         (result='failed' AND result_class IN
+            ('remote_failure','protocol_failure','local_failure')) OR
+         (result='indeterminate' AND result_class='transport_ambiguous'))
+);
+
+ALTER TABLE kb_management_action_intent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_action_intent FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_action_outcome ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_action_outcome FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS kb_management_action_intent_owner_only ON kb_management_action_intent;
+CREATE POLICY kb_management_action_intent_owner_only ON kb_management_action_intent
+  USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+DROP POLICY IF EXISTS kb_management_action_outcome_owner_only ON kb_management_action_outcome;
+CREATE POLICY kb_management_action_outcome_owner_only ON kb_management_action_outcome
+  USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+
+CREATE OR REPLACE FUNCTION kb_management_action_worm_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  RAISE EXCEPTION 'management action journal is immutable' USING ERRCODE='55000';
+END $$;
+DROP TRIGGER IF EXISTS kb_management_action_intent_update_guard ON kb_management_action_intent;
+CREATE TRIGGER kb_management_action_intent_update_guard BEFORE UPDATE ON kb_management_action_intent
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_action_intent_delete_guard ON kb_management_action_intent;
+CREATE TRIGGER kb_management_action_intent_delete_guard BEFORE DELETE ON kb_management_action_intent
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_action_intent_truncate_guard ON kb_management_action_intent;
+CREATE TRIGGER kb_management_action_intent_truncate_guard BEFORE TRUNCATE ON kb_management_action_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_action_outcome_update_guard ON kb_management_action_outcome;
+CREATE TRIGGER kb_management_action_outcome_update_guard BEFORE UPDATE ON kb_management_action_outcome
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_action_outcome_delete_guard ON kb_management_action_outcome;
+CREATE TRIGGER kb_management_action_outcome_delete_guard BEFORE DELETE ON kb_management_action_outcome
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_action_outcome_truncate_guard ON kb_management_action_outcome;
+CREATE TRIGGER kb_management_action_outcome_truncate_guard BEFORE TRUNCATE ON kb_management_action_outcome
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
+
+DROP FUNCTION IF EXISTS kb_management_action_intent_start(
+  TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT);
+CREATE FUNCTION kb_management_action_intent_start(
+  p_correlation_id TEXT,p_jti TEXT,p_team_id BIGINT,p_target_server_id TEXT,
+  p_capability TEXT,p_request_sha256 TEXT,p_token_issuer TEXT,p_kid TEXT,
+  p_ttl_seconds INTEGER,p_installation_id TEXT
+) RETURNS TABLE(replayed BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,
+  actor_identity TEXT,capability TEXT,target_server_id TEXT,request_sha256 TEXT,
+  token_issuer TEXT,audience TEXT,kid TEXT,issued_at BIGINT,expires_at BIGINT,
+  installation_id TEXT,installation_generation BIGINT,installation_enrollment_id BIGINT,
+  local_cert_issuer TEXT,local_cert_serial_norm TEXT,local_cert_fingerprint TEXT,
+  target_enrollment_id BIGINT,target_mgmt_issuer TEXT,target_mgmt_serial_norm TEXT,
+  target_mgmt_fingerprint TEXT,revocation_generation BIGINT,created_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE
+  v_actor TEXT:=pg_catalog.current_setting('aimee.principal',true);
+  v_team TEXT:=pg_catalog.current_setting('aimee.team',true);
+  a public.kb_management_action_intent%ROWTYPE;
+  r public.kb_server_registry%ROWTYPE;
+  te public.kb_enrollments%ROWTYPE;
+  i public.kb_management_instance%ROWTYPE;
+  q public.kb_management_instance_issue%ROWTYPE;
+  le public.kb_enrollments%ROWTYPE;
+  v_rev BIGINT; v_iat BIGINT; v_detail TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR p_team_id IS NULL OR
+     p_target_server_id IS NULL OR p_capability IS NULL OR p_request_sha256 IS NULL OR
+     p_token_issuer IS NULL OR p_kid IS NULL OR p_ttl_seconds IS NULL OR
+     p_installation_id IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR
+     p_team_id<1 OR p_target_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR
+     p_capability<>'remote_writes' OR p_request_sha256 !~ '^[0-9a-f]{64}$' OR
+     char_length(p_token_issuer) NOT BETWEEN 1 AND 255 OR
+     p_token_issuer ~ '[[:cntrl:]]' OR p_kid !~ '^[A-Za-z0-9._-]{1,64}$' OR
+     p_ttl_seconds NOT BETWEEN 1 AND 90 OR p_installation_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'invalid management action intent' USING ERRCODE='22023';
+  END IF;
+  IF v_actor IS NULL OR char_length(v_actor) NOT BETWEEN 1 AND 576 OR
+     v_actor ~ '[[:cntrl:]]' OR v_team IS NULL OR v_team !~ '^[1-9][0-9]{0,18}$' OR
+     v_team::NUMERIC<>p_team_id::NUMERIC THEN
+    RAISE EXCEPTION 'management action scope denied' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id,1345462851));
+  SELECT x.* INTO a FROM public.kb_management_action_intent x
+    WHERE x.correlation_id=p_correlation_id;
+  IF a.correlation_id IS NOT NULL THEN
+    IF ROW(a.jti,a.team_id,a.actor_identity,a.capability,a.target_server_id,a.request_sha256,
+           a.token_issuer,a.audience,a.kid,a.expires_at-a.issued_at,a.installation_id)
+       IS DISTINCT FROM
+       ROW(p_jti,p_team_id,v_actor,p_capability,p_target_server_id,p_request_sha256,
+           p_token_issuer,p_target_server_id,p_kid,p_ttl_seconds,p_installation_id) THEN
+      RAISE EXCEPTION 'management action intent replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,a.correlation_id,a.jti,a.team_id,a.actor_identity,a.capability,
+      a.target_server_id,a.request_sha256,a.token_issuer,a.audience,a.kid,a.issued_at,a.expires_at,
+      a.installation_id,a.installation_generation,a.installation_enrollment_id,
+      a.local_cert_issuer,a.local_cert_serial_norm,a.local_cert_fingerprint,
+      a.target_enrollment_id,a.target_mgmt_issuer,a.target_mgmt_serial_norm,
+      a.target_mgmt_fingerprint,a.revocation_generation,
+      extract(epoch FROM a.created_at)::BIGINT;
+    RETURN;
+  END IF;
+
+  IF NOT (v_actor='owner' OR EXISTS(SELECT 1 FROM public.kb_admin_grant g
+            WHERE g.identity_key=v_actor AND g.revoked_at='') OR
+          EXISTS(SELECT 1 FROM public.kb_team_lead l
+            WHERE l.identity_key=v_actor AND l.team=p_team_id AND l.revoked_at='')) THEN
+    RAISE EXCEPTION 'management action not authorized' USING ERRCODE='42501';
+  END IF;
+  -- Global acquisition order: target registry before local management instance.
+  SELECT x.* INTO r FROM public.kb_server_registry x
+    WHERE x.server_id=p_target_server_id FOR SHARE;
+  IF r.server_id IS NULL OR r.team_id<>p_team_id OR r.status<>'active' THEN
+    RAISE EXCEPTION 'target management authority denied' USING ERRCODE='28000';
+  END IF;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+    WHERE x.installation_id=p_installation_id FOR SHARE;
+  IF i.installation_id IS NULL OR i.team_id<>p_team_id OR i.state<>'active' OR
+     i.current_generation<1 OR i.current_enrollment_id IS NULL THEN
+    RAISE EXCEPTION 'local management authority denied' USING ERRCODE='28000';
+  END IF;
+
+  SELECT x.* INTO te FROM public.kb_enrollments x
+    WHERE x.scope='p5-server-management' AND x.cert_issuer=r.mgmt_issuer AND
+      x.cert_serial_norm=r.mgmt_serial_norm AND x.fingerprint=r.mgmt_fingerprint FOR SHARE;
+  SELECT x.* INTO q FROM public.kb_management_instance_issue x
+    WHERE x.installation_id=i.installation_id AND x.generation=i.current_generation FOR SHARE;
+  SELECT x.* INTO le FROM public.kb_enrollments x
+    WHERE x.id=i.current_enrollment_id FOR SHARE;
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x
+    WHERE x.singleton=1 FOR SHARE;
+  IF te.id IS NULL OR te.state<>'active' OR te.revoked_at<>'' OR
+     NULLIF(te.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR
+     te.cert_issuer<>r.mgmt_issuer OR te.cert_serial_norm<>r.mgmt_serial_norm OR
+     te.fingerprint<>r.mgmt_fingerprint OR
+     q.operation_id IS NULL OR q.state<>'active' OR q.generation<>i.current_generation OR
+     q.enrollment_id<>i.current_enrollment_id OR
+     q.cert_not_before IS NULL OR q.cert_not_after IS NULL OR
+     q.cert_not_before>pg_catalog.now() OR q.cert_not_after<=pg_catalog.now() OR
+     q.cert_issuer IS DISTINCT FROM le.cert_issuer OR
+     q.cert_serial_norm IS DISTINCT FROM le.cert_serial_norm OR
+     q.cert_fingerprint IS DISTINCT FROM le.fingerprint OR
+     le.id IS NULL OR le.scope<>'p5-kb-management' OR le.authority_id<>i.authority_id OR
+     le.state<>'active' OR le.revoked_at<>'' OR
+     NULLIF(le.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now() OR v_rev IS NULL THEN
+    RAISE EXCEPTION 'management certificate authority denied' USING ERRCODE='28000';
+  END IF;
+
+  v_iat:=pg_catalog.floor(extract(epoch FROM pg_catalog.statement_timestamp()))::BIGINT;
+  INSERT INTO public.kb_management_action_intent(
+    correlation_id,jti,team_id,actor_identity,capability,target_server_id,request_sha256,
+    token_issuer,audience,kid,issued_at,expires_at,installation_id,installation_generation,
+    installation_enrollment_id,local_cert_issuer,local_cert_serial_norm,local_cert_fingerprint,
+    target_enrollment_id,target_mgmt_issuer,target_mgmt_serial_norm,target_mgmt_fingerprint,
+    revocation_generation)
+  VALUES(p_correlation_id,p_jti,p_team_id,v_actor,p_capability,p_target_server_id,
+    p_request_sha256,p_token_issuer,p_target_server_id,p_kid,v_iat,v_iat+p_ttl_seconds,
+    i.installation_id,i.current_generation,le.id,le.cert_issuer,le.cert_serial_norm,le.fingerprint,
+    te.id,r.mgmt_issuer,r.mgmt_serial_norm,r.mgmt_fingerprint,v_rev)
+  RETURNING * INTO a;
+  v_detail:=pg_catalog.json_build_object(
+    'correlation_id',a.correlation_id,'team_id',a.team_id,'target_server_id',a.target_server_id,
+    'capability',a.capability,'jti',a.jti,'request_sha256',a.request_sha256,'kid',a.kid,
+    'local_cert_issuer',a.local_cert_issuer,'local_cert_serial_norm',a.local_cert_serial_norm,
+    'local_cert_fingerprint',a.local_cert_fingerprint,'target_mgmt_issuer',a.target_mgmt_issuer,
+    'target_mgmt_serial_norm',a.target_mgmt_serial_norm,
+    'target_mgmt_fingerprint',a.target_mgmt_fingerprint)::TEXT;
+  PERFORM public.kb_audit_worm_append('kb',v_actor,
+    'management.action.intent',a.correlation_id,'allow',v_detail);
+  RETURN QUERY SELECT FALSE,a.correlation_id,a.jti,a.team_id,a.actor_identity,a.capability,
+    a.target_server_id,a.request_sha256,a.token_issuer,a.audience,a.kid,a.issued_at,a.expires_at,
+    a.installation_id,a.installation_generation,a.installation_enrollment_id,
+    a.local_cert_issuer,a.local_cert_serial_norm,a.local_cert_fingerprint,
+    a.target_enrollment_id,a.target_mgmt_issuer,a.target_mgmt_serial_norm,
+    a.target_mgmt_fingerprint,a.revocation_generation,
+    extract(epoch FROM a.created_at)::BIGINT;
+END $$;
+
+DROP FUNCTION IF EXISTS kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT);
+CREATE FUNCTION kb_management_action_outcome_append(
+  p_correlation_id TEXT,p_result TEXT,p_result_class TEXT,p_status_code INTEGER,
+  p_response_sha256 TEXT
+) RETURNS TABLE(replayed BOOLEAN,correlation_id TEXT,team_id BIGINT,result TEXT,
+  result_class TEXT,status_code INTEGER,response_sha256 TEXT,completed_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_actor TEXT:=pg_catalog.current_setting('aimee.principal',true);
+  v_team TEXT:=pg_catalog.current_setting('aimee.team',true);
+  a public.kb_management_action_intent%ROWTYPE;
+  o public.kb_management_action_outcome%ROWTYPE; v_detail TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_correlation_id IS NULL OR p_result IS NULL OR p_result_class IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR
+     p_result NOT IN ('succeeded','denied','failed','indeterminate') OR
+     p_result_class NOT IN ('remote_success','remote_denied','remote_failure',
+       'transport_ambiguous','protocol_failure','local_failure') OR
+     NOT ((p_result='succeeded' AND p_result_class='remote_success') OR
+          (p_result='denied' AND p_result_class='remote_denied') OR
+          (p_result='failed' AND p_result_class IN
+             ('remote_failure','protocol_failure','local_failure')) OR
+          (p_result='indeterminate' AND p_result_class='transport_ambiguous')) OR
+     (p_status_code IS NOT NULL AND p_status_code NOT BETWEEN 100 AND 599) OR
+     (p_response_sha256 IS NOT NULL AND p_response_sha256 !~ '^[0-9a-f]{64}$') THEN
+    RAISE EXCEPTION 'invalid management action outcome' USING ERRCODE='22023';
+  END IF;
+  IF v_actor IS NULL OR v_actor='' OR v_team IS NULL OR v_team !~ '^[1-9][0-9]{0,18}$' THEN
+    RAISE EXCEPTION 'management action scope denied' USING ERRCODE='42501';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_correlation_id,1345462852));
+  SELECT x.* INTO a FROM public.kb_management_action_intent x
+    WHERE x.correlation_id=p_correlation_id FOR SHARE;
+  IF a.correlation_id IS NULL OR a.team_id::NUMERIC<>v_team::NUMERIC OR
+     a.actor_identity<>v_actor THEN
+    RAISE EXCEPTION 'management action outcome denied' USING ERRCODE='42501';
+  END IF;
+  SELECT x.* INTO o FROM public.kb_management_action_outcome x
+    WHERE x.correlation_id=p_correlation_id FOR UPDATE;
+  IF o.correlation_id IS NOT NULL THEN
+    IF ROW(o.result,o.result_class,o.status_code,o.response_sha256)
+       IS DISTINCT FROM ROW(p_result,p_result_class,p_status_code,p_response_sha256) THEN
+      RAISE EXCEPTION 'management action outcome replay conflict' USING ERRCODE='23505';
+    END IF;
+    RETURN QUERY SELECT TRUE,o.correlation_id,o.team_id,o.result,o.result_class,
+      o.status_code,o.response_sha256,extract(epoch FROM o.completed_at)::BIGINT;
+    RETURN;
+  END IF;
+  INSERT INTO public.kb_management_action_outcome(
+    correlation_id,team_id,result,result_class,status_code,response_sha256)
+  VALUES(a.correlation_id,a.team_id,p_result,p_result_class,p_status_code,p_response_sha256)
+  RETURNING * INTO o;
+  v_detail:=pg_catalog.json_build_object('correlation_id',o.correlation_id,
+    'team_id',o.team_id,'result',o.result,'result_class',o.result_class,
+    'status_code',o.status_code,'response_sha256',o.response_sha256)::TEXT;
+  PERFORM public.kb_audit_worm_append('kb',v_actor,
+    'management.action.outcome',o.correlation_id,o.result,v_detail);
+  RETURN QUERY SELECT FALSE,o.correlation_id,o.team_id,o.result,o.result_class,
+    o.status_code,o.response_sha256,extract(epoch FROM o.completed_at)::BIGINT;
+END $$;
+
+REVOKE ALL ON TABLE kb_management_action_intent,kb_management_action_outcome FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_action_worm_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_action_intent_start(
+  TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;

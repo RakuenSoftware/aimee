@@ -325,6 +325,49 @@ BEGIN
 END
 $$;
 
+-- P5-C1c immutable management-action journal.  The runtime role has no table or
+-- guard access and crosses FORCE RLS only through the two fixed owner-definer
+-- functions.  The raw audit appender remains unavailable to runtime.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RETURN;
+  END IF;
+
+  ALTER TABLE public.kb_management_action_intent OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_action_outcome OWNER TO aimee_kb_owner;
+  EXECUTE 'ALTER FUNCTION public.kb_management_action_worm_guard() OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+
+  GRANT SELECT,UPDATE ON public.kb_server_registry TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_management_instance,
+    public.kb_management_instance_issue,public.kb_enrollments,
+    public.kb_cert_revocation_generation,public.kb_admin_grant,
+    public.kb_team_lead,public.kb_team_membership,public.kb_audit_event TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_owner;
+
+  REVOKE ALL ON TABLE public.kb_management_action_intent,
+    public.kb_management_action_outcome FROM PUBLIC;
+  REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
+    public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+    public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    REVOKE ALL ON TABLE public.kb_management_action_intent,
+      public.kb_management_action_outcome FROM aimee_kb_runtime;
+    REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
+      public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+      FROM aimee_kb_runtime;
+    GRANT EXECUTE ON FUNCTION
+      public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
+      public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT)
+      TO aimee_kb_runtime;
+  END IF;
+END
+$$;
+
 -- P5-B2b management-instance lineage.  The broad compatibility grants near the
 -- top of this file must never expose the primary-only lineage tables.  Runtime
 -- crosses FORCE RLS only through the six fixed owner-definer entry points;
