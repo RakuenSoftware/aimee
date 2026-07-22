@@ -3,7 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "config.h"
 #include "cJSON.h"
 #include "dstr.h"

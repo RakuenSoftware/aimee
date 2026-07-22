@@ -113,6 +113,14 @@ CONTRACTS = (
     ),
 )
 
+LEGACY_MODULE_ROOTS = (
+    (
+        "skills",
+        "src/modules/skill",
+        ("CMakeLists.txt", "src/Makefile", "src/tests/Rules.mk"),
+    ),
+)
+
 
 class CheckError(ValueError):
     pass
@@ -134,6 +142,30 @@ def source_files(root: Path):
     for path in (root / "src").rglob("*"):
         if path.is_file() and path.suffix in {".c", ".h"}:
             yield path.relative_to(root).as_posix()
+
+
+def validate_legacy_module_root(
+    root: Path,
+    module: str,
+    legacy_root: str,
+    build_files: tuple[str, ...],
+) -> None:
+    """Reject a retired module directory and its exact build-path spelling."""
+    legacy_path = Path(legacy_root)
+    require(
+        not legacy_path.is_absolute()
+        and len(legacy_path.parts) > 1
+        and legacy_path.parts[0] == "src"
+        and ".." not in legacy_path.parts,
+        "legacy-root-format",
+        f"{module}: expected a normalized path beneath src/: {legacy_root}",
+    )
+    require(not (root / legacy_root).exists(), "legacy-module-root",
+            f"{module}: {legacy_root}")
+    build_root = Path(*legacy_path.parts[1:]).as_posix().rstrip("/") + "/"
+    for relative in build_files:
+        require(build_root not in read(root, relative), "legacy-build-root",
+                f"{module}: {build_root} in {relative}")
 
 
 def validate_contract(root: Path, contract: Contract, makefile: str, cmake: str, rules: str) -> None:
@@ -188,6 +220,9 @@ def validate(root: Path) -> None:
     rules = read(root, "src/tests/Rules.mk")
     for contract in CONTRACTS:
         validate_contract(root, contract, makefile, cmake, rules)
+
+    for module, legacy_root, build_files in LEGACY_MODULE_ROOTS:
+        validate_legacy_module_root(root, module, legacy_root, build_files)
 
     source = "\n".join(read(root, relative) for relative in source_files(root))
     for symbol in (
@@ -250,7 +285,12 @@ def main() -> int:
     except CheckError as exc:
         print(f"module-source-ownership: ERROR {exc}", file=sys.stderr)
         return 1
-    print(f"module-source-ownership: ok ({len(CONTRACTS)} contracts)")
+    legacy_count = len(LEGACY_MODULE_ROOTS)
+    legacy_label = "root" if legacy_count == 1 else "roots"
+    print(
+        "module-source-ownership: ok "
+        f"({len(CONTRACTS)} contracts, {legacy_count} legacy {legacy_label})"
+    )
     return 0
 
 

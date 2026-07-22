@@ -1,5 +1,5 @@
 /* skill_rollback.c: restore project skills from local snapshots */
-#include "skill.h"
+#include <aimee/skills/skill.h>
 
 #include <ctype.h>
 #include <dirent.h>

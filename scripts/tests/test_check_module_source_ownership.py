@@ -62,6 +62,36 @@ class ModuleSourceOwnershipTests(unittest.TestCase):
                     "legacy-path-removed",
                 )
 
+    def test_legacy_skills_root_and_build_paths_are_rejected(self) -> None:
+        contract = checker.CONTRACTS[0]
+        module, legacy_root, build_files = checker.LEGACY_MODULE_ROOTS[0]
+        self.assertEqual(module, "skills")
+        self.assert_rejected(
+            contract,
+            lambda root, value: (root / legacy_root).mkdir(parents=True),
+            "legacy-module-root",
+        )
+        for relative in build_files:
+            with self.subTest(relative=relative):
+                self.assert_rejected(
+                    contract,
+                    lambda root, value, path=relative: (root / path).write_text(
+                        (root / path).read_text() + "\nmodules/skill/skill.c\n"
+                    ),
+                    "legacy-build-root",
+                )
+
+    def test_legacy_root_must_be_normalized_beneath_src(self) -> None:
+        for legacy_root in ("modules/skill", "/src/modules/skill", "src/../modules/skill"):
+            with self.subTest(legacy_root=legacy_root):
+                with self.assertRaisesRegex(checker.CheckError, "rule=legacy-root-format"):
+                    checker.validate_legacy_module_root(
+                        REPO,
+                        "skills",
+                        legacy_root,
+                        ("src/Makefile",),
+                    )
+
     def test_build_and_test_drift_is_rejected_for_every_contract(self) -> None:
         for contract in checker.CONTRACTS:
             with self.subTest(contract=contract.module):

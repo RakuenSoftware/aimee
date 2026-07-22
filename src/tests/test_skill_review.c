@@ -5,8 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "skill_review.h"
-#include "skill.h"
+#include <aimee/skills/skill_review.h>
+#include <aimee/skills/skill.h>
 
 /* ── skill_review_should_fire ────────────────────────────────────────────── */
 

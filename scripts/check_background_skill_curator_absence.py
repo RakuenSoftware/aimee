@@ -13,6 +13,10 @@ DELETED = (
     "src/modules/skill/skill_curator.c",
     "src/modules/skill/skill_curator.h",
 )
+CANONICAL_DELETED = (
+    "src/modules/skills/skill_curator.c",
+    "src/modules/skills/include/aimee/skills/skill_curator.h",
+)
 FORBIDDEN = (
     "skill_curator_maybe",
     "skill_curator_metrics",
@@ -59,7 +63,7 @@ def product_files(root: Path):
 
 def validate(root: Path) -> None:
     require((root / ".git").exists() or (root / ".git").is_file(), "config-root", str(root))
-    for rel in DELETED:
+    for rel in (*DELETED, *CANONICAL_DELETED):
         require(not (root / rel).exists(), "deleted-file", f"retired file exists: {rel}")
 
     for path in product_files(root):
