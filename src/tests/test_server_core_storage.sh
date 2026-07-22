@@ -8,6 +8,11 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 pattern_file="$tmp/core_pattern"
 core_dir="$tmp/cores"
 
+if aimee_is_elf_core /bin/sh; then
+    echo "core-storage: accepted an ELF executable as ET_CORE" >&2
+    exit 1
+fi
+
 AIMEE_REQUIRE_PERSISTENT_CORES=1 aimee_enable_core_dumps
 if (
     ulimit -c 0
@@ -77,21 +82,8 @@ host_pattern=$(cat /proc/sys/kernel/core_pattern 2>/dev/null || true)
 case "$host_pattern" in
     ''|\|*|/*) echo "core-storage: actual crash check skipped for host pattern: $host_pattern" ;;
     *)
-        (
-            cd "$tmp"
-            ulimit -c unlimited
-            sh -c 'kill -SEGV $$' >/dev/null 2>&1 || true
-        )
-        # core_uses_pid may append .PID even when the pattern contains no token.
-        # shellcheck disable=SC2086 # expansion is intentional for the probe
-        set -- "$tmp"/$host_pattern "$tmp"/$host_pattern.*
-        if [ ! -f "$1" ] && { [ "$#" -lt 2 ] || [ ! -f "$2" ]; }; then
-            echo "core-storage: controlled SIGSEGV produced no core ($host_pattern)" >&2
-            exit 1
-        fi
-        for produced in "$@"; do
-            [ -f "$produced" ] && { echo "core-storage: controlled SIGSEGV produced $produced"; rm -f "$produced"; break; }
-        done
+        # The production verifier performs the real crash and expands kernel
+        # tokens with its captured PID; do not duplicate that logic in the test.
         AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_SELFTEST=1 aimee_verify_core_dump
         ;;
 esac

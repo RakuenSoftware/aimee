@@ -10,6 +10,16 @@ aimee_core_pattern_has_pid() {
     printf '%s' "$_pid_conversions" | grep -q '%p'
 }
 
+aimee_is_elf_core() {
+    [ -f "$1" ] || return 1
+    _elf_magic=$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')
+    [ "$_elf_magic" = 7f454c46 ] || return 1
+    # e_type is the native-endian 16-bit field at ELF header offset 16;
+    # a kernel core is ET_CORE (4), unlike ET_EXEC/ET_DYN binaries.
+    _elf_type=$(od -An -tu2 -j16 -N2 "$1" 2>/dev/null | tr -d ' \n')
+    [ "$_elf_type" = 4 ]
+}
+
 aimee_enable_core_dumps() {
     _required=${AIMEE_REQUIRE_PERSISTENT_CORES:-0}
     if ! ulimit -c unlimited 2>/dev/null; then
@@ -165,8 +175,7 @@ aimee_verify_core_dump() {
             "$_core_dir" >&2
         return 1
     fi
-    _magic=$(od -An -tx1 -N4 "$_produced" 2>/dev/null | tr -d ' \n')
-    if [ "$_magic" != 7f454c46 ]; then
+    if ! aimee_is_elf_core "$_produced"; then
         printf '[server-entrypoint] fatal: controlled SIGSEGV output is not an ELF core: %s\n' \
             "$_produced" >&2
         return 1
