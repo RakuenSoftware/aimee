@@ -983,6 +983,18 @@ check-latency-slo:
 test-latency-slo:
 	@python3 ../tests/test_latency_slo.py
 
+# Validate the detailed transport_benchmark.v1 capture contract. Conversion to
+# latency_slo.v1 is explicit so incomplete instrumentation cannot silently count
+# as promotion evidence.
+check-transport-artifact:
+	@test -n "$(TRANSPORT_ARTIFACT_INPUT)" || \
+	  (echo "TRANSPORT_ARTIFACT_INPUT is required (transport_benchmark.v1 JSON artifact)" >&2; exit 2)
+	@python3 ../benchmarks/transport/artifact.py "$(TRANSPORT_ARTIFACT_INPUT)" \
+	  $(if $(LATENCY_SLO_OUTPUT),--emit-slo "$(LATENCY_SLO_OUTPUT)",)
+
+test-transport-artifact:
+	@python3 ../tests/test_transport_artifact.py
+
 memory-retrieval-eval-check: $(TESTPREFIX)/unit-test-memory-retrieval-eval
 	$< --corpus ../tests/eval/memory_retrieval_corpus.json --baseline ../tests/eval/memory_retrieval_baseline.json
 
