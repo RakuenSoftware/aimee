@@ -126,6 +126,9 @@ echo "== P4b rate shared-window-not-N× concurrency gate (genuinely parallel con
 echo "== P9a telemetry export + content-free ingest correctness + isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p9_telemetry_rls_test.sql"
 
+echo "== P5-C2b signed JWKS publication authority assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c2b-jwks-publication-pg17-test.sql"
+
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
 echo "== P1 RLS gate: PASSED =="
