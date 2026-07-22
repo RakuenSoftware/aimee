@@ -1,3 +1,4 @@
+#include "kb/kb_management_cert_binding.h"
 #include "kb/kb_management_cert_codec.h"
 #include "kb/kb_management_cert_crypto.h"
 #include "kb/kb_management_cert_storage.h"
@@ -91,8 +92,11 @@ static void test_record_codecs(void)
           decoded.provider_kind == KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 &&
           decoded.ciphertext_len == sizeof(cipher) &&
           !memcmp(decoded.ciphertext, cipher, sizeof(cipher)));
-   assert(kb_management_cert_intent_decode(encoded, n - 1, &decoded) != 0);
-   assert(zeroed(&decoded, sizeof(decoded)));
+   for (size_t i = 0; i < n; ++i)
+   {
+      assert(kb_management_cert_intent_decode(encoded, i, &decoded) != 0);
+      assert(zeroed(&decoded, sizeof(decoded)));
+   }
    uint8_t alias[256];
    memset(alias, 0x5a, sizeof(alias));
    uint8_t alias_before[sizeof(alias)];
@@ -118,9 +122,11 @@ static void test_record_codecs(void)
    memset(candidate.public_bundle_digest, 12, 32);
    memcpy(candidate.custody_binding_digest, intent.custody_binding_digest, 32);
    strcpy(candidate.issuer, "/CN=aimee-kb-ca");
+   strcpy(candidate.ca_issuer, "/CN=aimee-kb-ca");
    strcpy(candidate.serial_norm, "01abcdef");
    memset(candidate.fingerprint, 13, 32);
    memset(candidate.spki_digest, 14, 32);
+   memset(candidate.ca_fingerprint, 15, 32);
    candidate.not_before_epoch = 1000;
    candidate.not_after_epoch = 4600;
    candidate.ciphertext = cipher;
@@ -130,7 +136,14 @@ static void test_record_codecs(void)
    assert(kb_management_cert_candidate_decode(encoded, n, &candidate_out) == 0);
    assert(!strcmp(candidate_out.authority_id, candidate.authority_id) &&
           candidate_out.provider_kind == candidate.provider_kind &&
-          !strcmp(candidate_out.issuer, candidate.issuer));
+          !strcmp(candidate_out.issuer, candidate.issuer) &&
+          !strcmp(candidate_out.ca_issuer, candidate.ca_issuer) &&
+          !memcmp(candidate_out.ca_fingerprint, candidate.ca_fingerprint, 32));
+   for (size_t i = 0; i < n; ++i)
+   {
+      assert(kb_management_cert_candidate_decode(encoded, i, &candidate_out) != 0);
+      assert(zeroed(&candidate_out, sizeof(candidate_out)));
+   }
    encoded[n] = 0;
    assert(kb_management_cert_candidate_decode(encoded, n + 1, &candidate_out) != 0);
 
@@ -144,6 +157,135 @@ static void test_record_codecs(void)
           !memcmp(manifest_out.public_bundle_digest, manifest.public_bundle_digest, 32));
    assert(kb_management_cert_manifest_decode(NULL, n, &manifest_out) != 0);
    assert(zeroed(&manifest_out, sizeof(manifest_out)));
+
+   kb_management_cert_pending_manifest_t pending = {.generation = 7,
+                                                    .issue_kind = KB_MANAGEMENT_CERT_ISSUE_INITIAL};
+   memcpy(pending.installation_id, intent.installation_id, 33);
+   memcpy(pending.lineage_id, intent.lineage_id, 33);
+   memcpy(pending.operation_id, intent.operation_id, 65);
+   memcpy(pending.authority_id, intent.authority_id, 33);
+   memset(pending.binding_digest, 0x31, 32);
+   memset(pending.intent_record_digest, 0x32, 32);
+   assert(kb_management_cert_pending_encode(&pending, encoded, sizeof(encoded), &n) == 0);
+   kb_management_cert_pending_manifest_t pending_out;
+   assert(kb_management_cert_pending_decode(encoded, n, &pending_out) == 0);
+   assert(pending_out.issue_kind == KB_MANAGEMENT_CERT_ISSUE_INITIAL &&
+          !memcmp(pending_out.intent_record_digest, pending.intent_record_digest, 32));
+   for (size_t i = 0; i < n; ++i)
+   {
+      assert(kb_management_cert_pending_decode(encoded, i, &pending_out) != 0);
+      assert(zeroed(&pending_out, sizeof(pending_out)));
+   }
+   encoded[n] = 0;
+   assert(kb_management_cert_pending_decode(encoded, n + 1, &pending_out) != 0);
+   assert(zeroed(&pending_out, sizeof(pending_out)));
+   pending.issue_kind = (kb_management_cert_issue_kind_t)3;
+   assert(kb_management_cert_pending_encode(&pending, encoded, sizeof(encoded), &n) != 0);
+}
+
+static void base_binding(kb_management_cert_intent_binding_t *v)
+{
+   memset(v, 0, sizeof(*v));
+   fill_hex(v->installation_id, 32, '1');
+   fill_hex(v->lineage_id, 32, '2');
+   fill_hex(v->operation_id, 64, '3');
+   fill_hex(v->authority_id, 32, '4');
+   fill_hex(v->storage_id, 32, '5');
+   v->generation = INT64_C(0x0102030405060708);
+   v->provider_kind = KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1;
+   strcpy(v->workload_issuer, "https://issuer.example");
+   strcpy(v->workload_subject, "spiffe://example/kb");
+   memset(v->binding_digest, 0x06, 32);
+   memset(v->proof_anchor, 0x07, 32);
+   memset(v->custody_anchor, 0x08, 32);
+   memset(v->csr_digest, 0x09, 32);
+   memset(v->csr_spki_digest, 0x0a, 32);
+   memset(v->nonce, 0x0b, 32);
+}
+
+static void assert_digest(const uint8_t digest[32], const char expected[65])
+{
+   static const char hex[] = "0123456789abcdef";
+   for (size_t i = 0; i < 32; ++i)
+   {
+      assert(expected[2 * i] == hex[digest[i] >> 4]);
+      assert(expected[2 * i + 1] == hex[digest[i] & 15]);
+   }
+   assert(expected[64] == 0);
+}
+
+static void test_binding_transcripts(void)
+{
+   uint8_t transcript[KB_MANAGEMENT_CERT_TRANSCRIPT_MAX], digest[32], changed[32];
+   size_t n = 0;
+   char installation[33];
+   fill_hex(installation, 32, '1');
+   assert(kb_management_cert_attest_transcript(installation, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
+                                               transcript, sizeof(transcript), &n) == 0);
+   assert(n == strlen("aimee.p5.management-attest.v1") + 4 + 32 + 4);
+   assert(!memcmp(transcript, "aimee.p5.management-attest.v1", 29));
+   assert(transcript[29] == 0 && transcript[30] == 0 && transcript[31] == 0 &&
+          transcript[32] == 32);
+   assert(kb_management_cert_attest_binding(installation, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
+                                            digest) == 0);
+   assert_digest(digest, "f5855d045ab7b08f080829ecc54c00088b4d367aacd05e3118060b1175ff32fa");
+
+   kb_management_cert_intent_binding_t intent;
+   base_binding(&intent);
+   assert(kb_management_cert_intent_transcript(&intent, transcript, sizeof(transcript), &n) == 0);
+   assert(n > 400 && !memcmp(transcript, "aimee.p5.management-key-intent-custody.v1", 41));
+   assert(kb_management_cert_intent_binding(&intent, digest) == 0);
+   assert_digest(digest, "8d8e376e5364b59f1f4dbddb41baa439c5b140e460a16b283ea49428432bd9b2");
+   intent.authority_id[0] = '6';
+   assert(kb_management_cert_intent_binding(&intent, changed) == 0);
+   assert(CRYPTO_memcmp(digest, changed, 32) != 0);
+   intent.authority_id[0] = '4';
+   intent.csr_spki_digest[0] ^= 1;
+   assert(kb_management_cert_intent_binding(&intent, changed) == 0);
+   assert(CRYPTO_memcmp(digest, changed, 32) != 0);
+   intent.csr_spki_digest[0] ^= 1;
+   kb_management_cert_intent_binding_t intent_before = intent;
+   assert(kb_management_cert_intent_binding(&intent, intent.binding_digest) != 0);
+   assert(!memcmp(&intent, &intent_before, sizeof(intent)));
+
+   kb_management_cert_candidate_binding_t candidate = {0};
+   candidate.intent = intent;
+   strcpy(candidate.ca_issuer, "/CN=aimee-kb-ca");
+   strcpy(candidate.leaf_issuer, "/CN=aimee-kb-ca");
+   strcpy(candidate.leaf_serial_norm, "01abcdef");
+   memset(candidate.ca_fingerprint, 0x0c, 32);
+   memset(candidate.leaf_fingerprint, 0x0d, 32);
+   memset(candidate.leaf_spki_digest, 0x0e, 32);
+   candidate.not_before_epoch = 1000;
+   candidate.not_after_epoch = 4600;
+   memset(candidate.public_bundle_digest, 0x0f, 32);
+   assert(kb_management_cert_candidate_binding(&candidate, digest) == 0);
+   assert_digest(digest, "c5fd7ec116dd78a74fdc66f0d9b57af2c6203355cb39b34c0f6c196b00ed67ae");
+   candidate.ca_fingerprint[0] ^= 1;
+   assert(kb_management_cert_candidate_binding(&candidate, changed) == 0);
+   assert(CRYPTO_memcmp(digest, changed, 32) != 0);
+   candidate.ca_fingerprint[0] ^= 1;
+   candidate.intent.operation_id[0] = '7';
+   assert(kb_management_cert_candidate_binding(&candidate, changed) == 0);
+   assert(CRYPTO_memcmp(digest, changed, 32) != 0);
+
+   size_t alias_len = 77;
+   uint8_t alias_before[sizeof(intent)];
+   memcpy(alias_before, &intent, sizeof(intent));
+   assert(kb_management_cert_intent_transcript(&intent, (uint8_t *)&intent, sizeof(intent),
+                                               &alias_len) != 0);
+   assert(alias_len == 77 && !memcmp(&intent, alias_before, sizeof(intent)));
+   memset(transcript, 0xa5, sizeof(transcript));
+   n = 1;
+   intent.provider_kind = KB_WORKLOAD_PROVIDER_NONE;
+   assert(kb_management_cert_intent_transcript(&intent, transcript, sizeof(transcript), &n) != 0);
+   assert(n == 0 && zeroed(transcript, sizeof(transcript)));
+   transcript[0] = 0x5a;
+   n = 19;
+   assert(kb_management_cert_attest_transcript(installation, KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1,
+                                               transcript, KB_MANAGEMENT_CERT_TRANSCRIPT_MAX + 1U,
+                                               &n) != 0);
+   assert(transcript[0] == 0x5a && n == 19);
 }
 
 static void test_key_and_csr(void)
@@ -172,6 +314,21 @@ static void test_key_and_csr(void)
    assert(zeroed(&secret, sizeof(secret)));
 }
 
+static size_t noncanonical_sequence(const uint8_t *der, size_t len, uint8_t *out, size_t cap)
+{
+   if (!der || len < 4 || der[0] != 0x30 || (der[1] & 0x80) == 0)
+      return 0;
+   size_t length_octets = der[1] & 0x7f;
+   if (!length_octets || length_octets > 3 || len + 1 > cap)
+      return 0;
+   out[0] = 0x30;
+   out[1] = (uint8_t)(0x80 | (length_octets + 1));
+   out[2] = 0; /* BER-valid, deliberately non-minimal length encoding. */
+   memcpy(out + 3, der + 2, length_octets);
+   memcpy(out + 3 + length_octets, der + 2 + length_octets, len - 2 - length_octets);
+   return len + 1;
+}
+
 static void test_management_leaf_profile(void)
 {
    kb_pki_ca_t ca;
@@ -197,20 +354,47 @@ static void test_management_leaf_profile(void)
 
    uint8_t plain[KB_MANAGEMENT_CERT_PLAINTEXT_MAX];
    size_t plain_len = 0;
-   assert(kb_management_cert_bundle_encode(material.key_der, material.key_der_len,
-                                           verified.leaf_der, verified.leaf_der_len,
-                                           verified.ca_der, verified.ca_der_len, plain,
-                                           sizeof(plain), &plain_len) == 0);
+   assert(kb_management_cert_bundle_encode(
+              material.key_der, material.key_der_len, verified.leaf_der, verified.leaf_der_len,
+              verified.ca_der, verified.ca_der_len, plain, sizeof(plain), &plain_len) == 0);
    kb_management_cert_bundle_view_t view;
    assert(kb_management_cert_bundle_decode(plain, plain_len, &view) == 0);
    kb_management_cert_bundle_t pem;
-   assert(kb_management_cert_bundle_to_pem(view.key_der, view.key_der_len, view.leaf_der,
-                                           view.leaf_der_len, view.ca_der, view.ca_der_len,
-                                           &pem) == 0);
+   kb_management_cert_verified_t persisted;
+   assert(kb_management_cert_bundle_verify(plain, plain_len, &persisted, &pem) == 0);
    assert(strstr(pem.key_pem, "BEGIN PRIVATE KEY") && strstr(pem.leaf_pem, "BEGIN CERTIFICATE"));
+   assert(!memcmp(persisted.ca_fingerprint, verified.ca_fingerprint, 32) &&
+          !memcmp(persisted.leaf_fingerprint, verified.leaf_fingerprint, 32));
+   uint8_t expected_bundle_digest[32];
+   assert(kb_management_cert_sha256(plain, plain_len, expected_bundle_digest) == 0);
+   assert(!memcmp(persisted.public_bundle_digest, expected_bundle_digest, 32));
    kb_management_cert_bundle_clear(&pem);
+
+   uint8_t noncanonical[4097], malformed[KB_MANAGEMENT_CERT_PLAINTEXT_MAX];
+   size_t noncanonical_len =
+       noncanonical_sequence(view.key_der, view.key_der_len, noncanonical, sizeof(noncanonical));
+   assert(noncanonical_len > 0);
+   size_t malformed_len = 0;
+   assert(kb_management_cert_bundle_encode(noncanonical, noncanonical_len, view.leaf_der,
+                                           view.leaf_der_len, view.ca_der, view.ca_der_len,
+                                           malformed, sizeof(malformed), &malformed_len) == 0);
+   memset(&persisted, 0xa5, sizeof(persisted));
+   memset(&pem, 0xa5, sizeof(pem));
+   assert(kb_management_cert_bundle_verify(malformed, malformed_len, &persisted, &pem) != 0);
+   assert(zeroed(&persisted, sizeof(persisted)) && zeroed(&pem, sizeof(pem)));
+
+   noncanonical_len =
+       noncanonical_sequence(view.leaf_der, view.leaf_der_len, noncanonical, sizeof(noncanonical));
+   assert(noncanonical_len > 0);
+   assert(kb_management_cert_bundle_encode(view.key_der, view.key_der_len, noncanonical,
+                                           noncanonical_len, view.ca_der, view.ca_der_len,
+                                           malformed, sizeof(malformed), &malformed_len) == 0);
+   assert(kb_management_cert_bundle_verify(malformed, malformed_len, &persisted, &pem) != 0);
+   assert(zeroed(&persisted, sizeof(persisted)) && zeroed(&pem, sizeof(pem)));
    OPENSSL_cleanse(&ca, sizeof(ca));
    OPENSSL_cleanse(plain, sizeof(plain));
+   OPENSSL_cleanse(malformed, sizeof(malformed));
+   OPENSSL_cleanse(noncanonical, sizeof(noncanonical));
    kb_management_cert_key_material_clear(&material);
 }
 
@@ -230,8 +414,7 @@ static void test_storage_rejects_oversize_and_fifo(void)
                     "candidate.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     F_OK, 0) != 0);
 
-   const char fifo[] =
-       "intent.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+   const char fifo[] = "intent.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
    assert(mkfifoat(storage.dir_fd, fifo, 0600) == 0);
    uint8_t output[32];
    size_t output_len = 9;
@@ -284,16 +467,76 @@ static void test_storage_open_and_protocol(void)
    uint8_t readback[32];
    size_t readback_len = 0;
    assert(kb_management_cert_storage_read(&storage, "candidate", operation, readback,
-                                          sizeof(readback), &readback_len) ==
-          KB_MANAGEMENT_STORAGE_OK);
+                                          sizeof(readback),
+                                          &readback_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(readback_len == sizeof(record) && !memcmp(readback, record, sizeof(record)));
 
    const uint8_t manifest[] = {9, 8, 7, 6};
    assert(kb_management_cert_storage_promote(&storage, manifest, sizeof(manifest)) ==
           KB_MANAGEMENT_STORAGE_OK);
-   assert(kb_management_cert_storage_current(&storage, readback, sizeof(readback),
-                                             &readback_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_current(&storage, readback, sizeof(readback), &readback_len) ==
+          KB_MANAGEMENT_STORAGE_OK);
    assert(readback_len == sizeof(manifest) && !memcmp(readback, manifest, sizeof(manifest)));
+
+   memset(readback, 0xa5, sizeof(readback));
+   readback_len = 9;
+   assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
+                                                  &readback_len) == KB_MANAGEMENT_STORAGE_MISSING);
+   assert(readback_len == 0 && zeroed(readback, sizeof(readback)));
+
+   char pending_operation[65];
+   fill_hex(pending_operation, 64, 'd');
+   const uint8_t intent_record[] = {0x51, 0x52, 0x53, 0x54};
+   const uint8_t pending_record[] = {0x61, 0x62, 0x63, 0x64, 0x65};
+   /* Crash-safe ordering: the immutable intent is durable and discoverable
+    * before the single no-replace pending coordinate can exist. */
+   assert(kb_management_cert_storage_stage(&storage, "intent", pending_operation, intent_record,
+                                           sizeof(intent_record)) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_CONFLICT);
+   assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
+                                                  &readback_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(readback_len == sizeof(pending_record) &&
+          !memcmp(readback, pending_record, sizeof(pending_record)));
+   const uint8_t wrong_pending[] = {0x61, 0x62, 0x63, 0x64, 0x66};
+   assert(kb_management_cert_storage_pending_clear_exact(
+              &storage, wrong_pending, sizeof(wrong_pending)) == KB_MANAGEMENT_STORAGE_CONFLICT);
+   assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
+                                                  &readback_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_pending_clear_exact(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_pending_clear_exact(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_MISSING);
+   assert(kb_management_cert_storage_read(&storage, "intent", pending_operation, readback,
+                                          sizeof(readback),
+                                          &readback_len) == KB_MANAGEMENT_STORAGE_OK);
+   assert(readback_len == sizeof(intent_record));
+
+   assert(symlinkat("/dev/null", storage.dir_fd, "pending") == 0);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_pending_clear_exact(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
+   assert(mkfifoat(storage.dir_fd, "pending", 0600) == 0);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
+   int planted_fd = openat(storage.dir_fd, "pending", O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(planted_fd >= 0);
+   assert(write(planted_fd, pending_record, sizeof(pending_record)) ==
+          (ssize_t)sizeof(pending_record));
+   assert(close(planted_fd) == 0);
+   assert(linkat(storage.dir_fd, "pending", storage.dir_fd, "pending.extra", 0) == 0);
+   assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
+                                                  &readback_len) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "pending.extra", 0) == 0);
+   assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
 
    char planted_operation[65];
    fill_hex(planted_operation, 64, 'c');
@@ -312,6 +555,9 @@ static void test_storage_open_and_protocol(void)
    assert(unlinkat(storage.dir_fd,
                    "candidate.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                    0) == 0);
+   assert(unlinkat(storage.dir_fd,
+                   "intent.dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                   0) == 0);
    kb_management_cert_storage_close(&storage);
    assert(rmdir(path) == 0);
 }
@@ -320,6 +566,7 @@ int main(void)
 {
    test_plaintext_codecs();
    test_record_codecs();
+   test_binding_transcripts();
    test_key_and_csr();
    test_management_leaf_profile();
    test_storage_rejects_oversize_and_fifo();

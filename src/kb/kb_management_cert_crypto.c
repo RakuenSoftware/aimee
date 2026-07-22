@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "kb_management_cert_crypto.h"
+#include "kb_management_cert_codec.h"
 
 #include <openssl/asn1.h>
 #include <openssl/crypto.h>
@@ -8,6 +9,8 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include <limits.h>
+#include <stdint.h>
 #include <string.h>
 #include <time.h>
 
@@ -16,6 +19,14 @@ static const char management_oid[] = "1.3.6.1.4.1.55555.5.1";
 static const unsigned char management_marker[] = "aimee-p5-kb-management-v1";
 
 static int exact_csr_cn(X509_REQ *);
+
+static int memory_overlap(const void *a, size_t an, const void *b, size_t bn)
+{
+   if (!a || !b || !an || !bn)
+      return 0;
+   uintptr_t ap = (uintptr_t)a, bp = (uintptr_t)b;
+   return ap < bp ? bp - ap < an : ap - bp < bn;
+}
 
 int kb_management_cert_sha256(const void *p, size_t n, uint8_t out[32])
 {
@@ -142,8 +153,7 @@ static int exact_cn(X509 *cert)
    X509_NAME *name = X509_get_subject_name(cert);
    int count = X509_NAME_entry_count(name), cn_count = 0;
    for (int i = 0; i < count; ++i)
-      if (OBJ_obj2nid(X509_NAME_ENTRY_get_object(X509_NAME_get_entry(name, i))) ==
-          NID_commonName)
+      if (OBJ_obj2nid(X509_NAME_ENTRY_get_object(X509_NAME_get_entry(name, i))) == NID_commonName)
          cn_count++;
    char value[64];
    int n = X509_NAME_get_text_by_NID(name, NID_commonName, value, sizeof(value));
@@ -156,8 +166,7 @@ static int exact_csr_cn(X509_REQ *csr)
    X509_NAME *name = X509_REQ_get_subject_name(csr);
    int count = X509_NAME_entry_count(name), cn_count = 0;
    for (int i = 0; i < count; ++i)
-      if (OBJ_obj2nid(X509_NAME_ENTRY_get_object(X509_NAME_get_entry(name, i))) ==
-          NID_commonName)
+      if (OBJ_obj2nid(X509_NAME_ENTRY_get_object(X509_NAME_get_entry(name, i))) == NID_commonName)
          cn_count++;
    char value[64];
    int n = X509_NAME_get_text_by_NID(name, NID_commonName, value, sizeof(value));
@@ -270,8 +279,8 @@ static X509 *strict_x509_from_pem(const char *pem)
    if (exact)
    {
       BIO_get_mem_ptr(canonical, &memory);
-      exact = memory && memory->length == input_len &&
-              CRYPTO_memcmp(memory->data, pem, input_len) == 0;
+      exact =
+          memory && memory->length == input_len && CRYPTO_memcmp(memory->data, pem, input_len) == 0;
    }
    BIO_free(canonical);
    BIO_free(input);
@@ -295,25 +304,22 @@ int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *mate
    X509 *leaf = strict_x509_from_pem(leaf_pem);
    X509 *ca = strict_x509_from_pem(ca_pem);
    const unsigned char *kp = material->key_der;
-   PKCS8_PRIV_KEY_INFO *p8 =
-       d2i_PKCS8_PRIV_KEY_INFO(NULL, &kp, (long)material->key_der_len);
+   PKCS8_PRIV_KEY_INFO *p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &kp, (long)material->key_der_len);
    EVP_PKEY *key = p8 ? EVP_PKCS82PKEY(p8) : NULL;
    EVP_PKEY *leaf_key = leaf ? X509_get_pubkey(leaf) : NULL;
    EVP_PKEY *ca_key = ca ? X509_get_pubkey(ca) : NULL;
    X509_STORE *store = X509_STORE_new();
    X509_STORE_CTX *ctx = X509_STORE_CTX_new();
    int verified = store && ctx && ca && leaf && X509_STORE_add_cert(store, ca) == 1 &&
-                  X509_STORE_CTX_init(ctx, store, leaf, NULL) == 1 &&
-                  X509_verify_cert(ctx) == 1;
+                  X509_STORE_CTX_init(ctx, store, leaf, NULL) == 1 && X509_verify_cert(ctx) == 1;
    kb_management_cert_verified_t v = {0};
    int leaf_n = leaf ? i2d_X509(leaf, NULL) : -1, ca_n = ca ? i2d_X509(ca, NULL) : -1;
    int64_t not_before = 0, not_after = 0;
    unsigned char *p;
    int ok = verified && key && kp == material->key_der + material->key_der_len && leaf_key &&
-            ca_key && EVP_PKEY_eq(key, leaf_key) == 1 &&
-            X509_verify(leaf, ca_key) == 1 && exact_cn(leaf) && exact_extensions(leaf) &&
-            leaf_n > 0 && (size_t)leaf_n <= sizeof(v.leaf_der) && ca_n > 0 &&
-            (size_t)ca_n <= sizeof(v.ca_der);
+            ca_key && EVP_PKEY_eq(key, leaf_key) == 1 && X509_verify(leaf, ca_key) == 1 &&
+            exact_cn(leaf) && exact_extensions(leaf) && leaf_n > 0 &&
+            (size_t)leaf_n <= sizeof(v.leaf_der) && ca_n > 0 && (size_t)ca_n <= sizeof(v.ca_der);
    if (verified)
    {
       struct tm before_tm = {0}, after_tm = {0};
@@ -342,8 +348,7 @@ int kb_management_cert_leaf_verify(const kb_management_cert_key_material_t *mate
            name_text(X509_get_issuer_name(leaf), v.leaf_issuer, sizeof(v.leaf_issuer)) == 0 &&
            !strcmp(v.ca_issuer, v.leaf_issuer) &&
            serial_text(leaf, v.leaf_serial_norm, sizeof(v.leaf_serial_norm)) == 0 &&
-           x509_digest(ca, v.ca_fingerprint) == 0 &&
-           x509_digest(leaf, v.leaf_fingerprint) == 0 &&
+           x509_digest(ca, v.ca_fingerprint) == 0 && x509_digest(leaf, v.leaf_fingerprint) == 0 &&
            der_digest_pubkey(leaf_key, v.leaf_spki_digest) == 0 &&
            CRYPTO_memcmp(v.leaf_spki_digest, material->csr_spki_digest, 32) == 0;
       v.not_before_epoch = not_before;
@@ -399,6 +404,111 @@ int kb_management_cert_bundle_to_pem(const uint8_t *key, size_t key_len, const u
    }
    *out = v;
    OPENSSL_cleanse(&v, sizeof(v));
+   return 0;
+}
+
+static EVP_PKEY *strict_private_key_der(const uint8_t *der, size_t len)
+{
+   if (!der || !len || len > LONG_MAX)
+      return NULL;
+   const unsigned char *p = der;
+   PKCS8_PRIV_KEY_INFO *p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, (long)len);
+   EVP_PKEY *key = p8 && p == der + len ? EVP_PKCS82PKEY(p8) : NULL;
+   int encoded_len = p8 ? i2d_PKCS8_PRIV_KEY_INFO(p8, NULL) : -1;
+   unsigned char *canonical = encoded_len > 0 ? OPENSSL_malloc((size_t)encoded_len) : NULL;
+   unsigned char *q = canonical;
+   int canonical_ok = canonical && (size_t)encoded_len == len &&
+                      i2d_PKCS8_PRIV_KEY_INFO(p8, &q) == encoded_len &&
+                      CRYPTO_memcmp(canonical, der, len) == 0;
+   EVP_PKEY_CTX *ctx = key ? EVP_PKEY_CTX_new(key, NULL) : NULL;
+   int valid = canonical_ok && EVP_PKEY_is_a(key, "RSA") == 1 && EVP_PKEY_get_bits(key) == 2048 &&
+               ctx && EVP_PKEY_private_check(ctx) == 1 && EVP_PKEY_public_check(ctx) == 1;
+   EVP_PKEY_CTX_free(ctx);
+   if (canonical)
+      OPENSSL_clear_free(canonical, (size_t)encoded_len);
+   PKCS8_PRIV_KEY_INFO_free(p8);
+   if (!valid)
+   {
+      EVP_PKEY_free(key);
+      key = NULL;
+   }
+   return key;
+}
+
+static X509 *strict_x509_der(const uint8_t *der, size_t len)
+{
+   if (!der || !len || len > LONG_MAX)
+      return NULL;
+   const unsigned char *p = der;
+   X509 *cert = d2i_X509(NULL, &p, (long)len);
+   int encoded_len = cert && p == der + len ? i2d_X509(cert, NULL) : -1;
+   unsigned char *canonical = encoded_len > 0 ? OPENSSL_malloc((size_t)encoded_len) : NULL;
+   unsigned char *q = canonical;
+   int exact = canonical && (size_t)encoded_len == len && i2d_X509(cert, &q) == encoded_len &&
+               CRYPTO_memcmp(canonical, der, len) == 0;
+   if (canonical)
+      OPENSSL_clear_free(canonical, (size_t)encoded_len);
+   if (!exact)
+   {
+      X509_free(cert);
+      cert = NULL;
+   }
+   return cert;
+}
+
+int kb_management_cert_bundle_verify(const uint8_t *plain, size_t plain_len,
+                                     kb_management_cert_verified_t *verified,
+                                     kb_management_cert_bundle_t *pem)
+{
+   if (!plain || !plain_len || plain_len > KB_MANAGEMENT_CERT_PLAINTEXT_MAX || !verified || !pem ||
+       memory_overlap(plain, plain_len, verified, sizeof(*verified)) ||
+       memory_overlap(plain, plain_len, pem, sizeof(*pem)) ||
+       memory_overlap(verified, sizeof(*verified), pem, sizeof(*pem)))
+      return -1;
+   if (verified)
+      memset(verified, 0, sizeof(*verified));
+   if (pem)
+      kb_management_cert_bundle_clear(pem);
+
+   kb_management_cert_bundle_view_t view = {0};
+   if (kb_management_cert_bundle_decode(plain, plain_len, &view))
+      return -1;
+   EVP_PKEY *key = strict_private_key_der(view.key_der, view.key_der_len);
+   X509 *leaf = strict_x509_der(view.leaf_der, view.leaf_der_len);
+   X509 *ca = strict_x509_der(view.ca_der, view.ca_der_len);
+   EVP_PKEY *leaf_key = leaf ? X509_get_pubkey(leaf) : NULL;
+   kb_management_cert_key_material_t material = {0};
+   kb_management_cert_verified_t derived = {0};
+   kb_management_cert_bundle_t canonical = {0};
+   int ok = key && leaf && ca && leaf_key && EVP_PKEY_eq(key, leaf_key) == 1 &&
+            view.key_der_len <= sizeof(material.key_der) &&
+            (memcpy(material.key_der, view.key_der, view.key_der_len), 1) &&
+            (material.key_der_len = view.key_der_len) > 0 &&
+            der_digest_pubkey(leaf_key, material.csr_spki_digest) == 0 &&
+            kb_management_cert_bundle_to_pem(view.key_der, view.key_der_len, view.leaf_der,
+                                             view.leaf_der_len, view.ca_der, view.ca_der_len,
+                                             &canonical) == 0 &&
+            kb_management_cert_leaf_verify(&material, canonical.leaf_pem, canonical.ca_pem,
+                                           &derived) == 0 &&
+            derived.leaf_der_len == view.leaf_der_len && derived.ca_der_len == view.ca_der_len &&
+            CRYPTO_memcmp(derived.leaf_der, view.leaf_der, view.leaf_der_len) == 0 &&
+            CRYPTO_memcmp(derived.ca_der, view.ca_der, view.ca_der_len) == 0 &&
+            kb_management_cert_sha256(plain, plain_len, derived.public_bundle_digest) == 0;
+   EVP_PKEY_free(leaf_key);
+   X509_free(ca);
+   X509_free(leaf);
+   EVP_PKEY_free(key);
+   kb_management_cert_key_material_clear(&material);
+   if (!ok)
+   {
+      OPENSSL_cleanse(&derived, sizeof(derived));
+      kb_management_cert_bundle_clear(&canonical);
+      return -1;
+   }
+   *verified = derived;
+   *pem = canonical;
+   OPENSSL_cleanse(&derived, sizeof(derived));
+   kb_management_cert_bundle_clear(&canonical);
    return 0;
 }
 

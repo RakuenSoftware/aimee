@@ -461,6 +461,7 @@ KB_SRCS += kb/kb_bedrock_egress.c kb/kb_egress_admission.c kb/kb_vault_key_use.c
 KB_SRCS += kb/kb_workload_provider.c kb/kb_workload_helper_posix.c kb/kb_workload_wire.c \
            kb/kb_workload_proof.c kb/kb_workload_jwt.c
 KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
+           kb/kb_management_cert_binding.c \
            kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 

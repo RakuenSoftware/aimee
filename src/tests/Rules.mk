@@ -1794,6 +1794,7 @@ $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle: \
     $(OBJDIR)/tests/test_kb_management_cert_lifecycle.o \
     $(OBJDIR)/kb/kb_management_cert_codec.o \
     $(OBJDIR)/kb/kb_management_cert_crypto.o \
+    $(OBJDIR)/kb/kb_management_cert_binding.o \
     $(OBJDIR)/kb/kb_management_cert_lifecycle.o \
     $(OBJDIR)/kb/kb_management_cert_storage.o \
     $(OBJDIR)/kb/pki.o \

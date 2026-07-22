@@ -21,6 +21,7 @@ static const uint8_t bundle_magic[] = "aimee.p5.management-bundle.v1";
 static const uint8_t intent_magic[] = "aimee.p5.management-intent-record.v1";
 static const uint8_t candidate_magic[] = "aimee.p5.management-candidate.v1";
 static const uint8_t manifest_magic[] = "aimee.p5.management-current.v1";
+static const uint8_t pending_magic[] = "aimee.p5.management-pending.v1";
 
 static int put(writer_t *w, const void *p, size_t n)
 {
@@ -150,8 +151,8 @@ static int encode_fields(const uint8_t *magic, size_t magic_len, const void *a, 
    *out_len = 0;
    if (cap)
       memset(out, 0, cap);
-   if (!a || !b || (c_len && !c) || !a_len || !b_len || a_len > UINT32_MAX ||
-       b_len > UINT32_MAX || c_len > UINT32_MAX)
+   if (!a || !b || (c_len && !c) || !a_len || !b_len || a_len > UINT32_MAX || b_len > UINT32_MAX ||
+       c_len > UINT32_MAX)
       return -1;
    size_t total = magic_len;
    if (add_size(&total, 4) || add_size(&total, a_len) || add_size(&total, 4) ||
@@ -173,16 +174,16 @@ static int encode_fields(const uint8_t *magic, size_t magic_len, const void *a, 
 int kb_management_cert_key_intent_encode(const void *key, size_t key_len, const void *csr,
                                          size_t csr_len, uint8_t *out, size_t cap, size_t *out_len)
 {
-   return encode_fields(key_magic, sizeof(key_magic) - 1, key, key_len, csr, csr_len, NULL, 0,
-                        out, cap, out_len);
+   return encode_fields(key_magic, sizeof(key_magic) - 1, key, key_len, csr, csr_len, NULL, 0, out,
+                        cap, out_len);
 }
 
 static int decode_fields(const uint8_t *magic, size_t magic_len, const void *input, size_t len,
                          const uint8_t **a, size_t *a_len, const uint8_t **b, size_t *b_len,
                          const uint8_t **c, size_t *c_len)
 {
-   if (!input || !len || len > KB_MANAGEMENT_CERT_PLAINTEXT_MAX || !a || !a_len || !b ||
-       !b_len || (!!c != !!c_len))
+   if (!input || !len || len > KB_MANAGEMENT_CERT_PLAINTEXT_MAX || !a || !a_len || !b || !b_len ||
+       (!!c != !!c_len))
       return -1;
    reader_t r = {input, len};
    uint32_t n;
@@ -230,8 +231,8 @@ int kb_management_cert_bundle_decode(const void *input, size_t len,
       return -1;
    memset(out, 0, sizeof(*out));
    kb_management_cert_bundle_view_t v = {0};
-   if (decode_fields(bundle_magic, sizeof(bundle_magic) - 1, input, len, &v.key_der,
-                     &v.key_der_len, &v.leaf_der, &v.leaf_der_len, &v.ca_der, &v.ca_der_len))
+   if (decode_fields(bundle_magic, sizeof(bundle_magic) - 1, input, len, &v.key_der, &v.key_der_len,
+                     &v.leaf_der, &v.leaf_der_len, &v.ca_der, &v.ca_der_len))
       return -1;
    *out = v;
    return 0;
@@ -247,12 +248,12 @@ int kb_management_cert_intent_encode(const kb_management_cert_intent_view_t *v, 
    *out_len = 0;
    if (cap)
       memset(out, 0, cap);
-   if (!exact_hex(v->installation_id, 32) ||
-       !exact_hex(v->lineage_id, 32) || !exact_hex(v->operation_id, 64) ||
-       !exact_hex(v->authority_id, 32) || !exact_hex(v->storage_id, 32) || v->generation < 1 ||
+   if (!exact_hex(v->installation_id, 32) || !exact_hex(v->lineage_id, 32) ||
+       !exact_hex(v->operation_id, 64) || !exact_hex(v->authority_id, 32) ||
+       !exact_hex(v->storage_id, 32) || v->generation < 1 ||
        v->provider_kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
-       v->provider_kind > KB_WORKLOAD_PROVIDER_PKCS11_V1 || !v->ciphertext ||
-       !v->ciphertext_len || v->ciphertext_len > KB_WORKLOAD_WRAP_CAP)
+       v->provider_kind > KB_WORKLOAD_PROVIDER_PKCS11_V1 || !v->ciphertext || !v->ciphertext_len ||
+       v->ciphertext_len > KB_WORKLOAD_WRAP_CAP)
       return -1;
    size_t total = sizeof(intent_magic) - 1 + 32 + 32 + 64 + 32 + 32 + 8 + 4 + 32 * 5 + 4;
    if (add_size(&total, v->ciphertext_len))
@@ -261,13 +262,12 @@ int kb_management_cert_intent_encode(const kb_management_cert_intent_view_t *v, 
       return -1;
    writer_t w = {out, cap};
    if (put(&w, intent_magic, sizeof(intent_magic) - 1) || put(&w, v->installation_id, 32) ||
-       put(&w, v->lineage_id, 32) || put(&w, v->operation_id, 64) ||
-       put(&w, v->authority_id, 32) || put(&w, v->storage_id, 32) ||
-       put_u64(&w, (uint64_t)v->generation) || put_u32(&w, (uint32_t)v->provider_kind) ||
-       put(&w, v->nonce, 32) || put(&w, v->binding_digest, 32) ||
-       put(&w, v->csr_digest, 32) || put(&w, v->csr_spki_digest, 32) ||
-       put(&w, v->custody_binding_digest, 32) || put_u32(&w, (uint32_t)v->ciphertext_len) ||
-       put(&w, v->ciphertext, v->ciphertext_len))
+       put(&w, v->lineage_id, 32) || put(&w, v->operation_id, 64) || put(&w, v->authority_id, 32) ||
+       put(&w, v->storage_id, 32) || put_u64(&w, (uint64_t)v->generation) ||
+       put_u32(&w, (uint32_t)v->provider_kind) || put(&w, v->nonce, 32) ||
+       put(&w, v->binding_digest, 32) || put(&w, v->csr_digest, 32) ||
+       put(&w, v->csr_spki_digest, 32) || put(&w, v->custody_binding_digest, 32) ||
+       put_u32(&w, (uint32_t)v->ciphertext_len) || put(&w, v->ciphertext, v->ciphertext_len))
    {
       return -1;
    }
@@ -292,16 +292,16 @@ int kb_management_cert_intent_decode(const void *input, size_t len,
        copy_fixed(&r, v.installation_id, 32) || copy_fixed(&r, v.lineage_id, 32) ||
        copy_fixed(&r, v.operation_id, 64) || copy_fixed(&r, v.authority_id, 32) ||
        copy_fixed(&r, v.storage_id, 32) || get_u64(&r, &generation) || generation < 1 ||
-       generation > INT64_MAX || get_u32(&r, &kind) ||
-       kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 || kind > KB_WORKLOAD_PROVIDER_PKCS11_V1)
+       generation > INT64_MAX || get_u32(&r, &kind) || kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
+       kind > KB_WORKLOAD_PROVIDER_PKCS11_V1)
       return -1;
    v.generation = (int64_t)generation;
    v.provider_kind = (kb_workload_provider_kind_t)kind;
 #define INTENT_TAKE32(field) (get(&r, &p, 32) || (memcpy((field), p, 32), 0))
-   if (INTENT_TAKE32(v.nonce) || INTENT_TAKE32(v.binding_digest) ||
-       INTENT_TAKE32(v.csr_digest) || INTENT_TAKE32(v.csr_spki_digest) ||
-       INTENT_TAKE32(v.custody_binding_digest) || get_u32(&r, &cipher_len) || !cipher_len ||
-       cipher_len > KB_WORKLOAD_WRAP_CAP || get(&r, &p, cipher_len) || r.left)
+   if (INTENT_TAKE32(v.nonce) || INTENT_TAKE32(v.binding_digest) || INTENT_TAKE32(v.csr_digest) ||
+       INTENT_TAKE32(v.csr_spki_digest) || INTENT_TAKE32(v.custody_binding_digest) ||
+       get_u32(&r, &cipher_len) || !cipher_len || cipher_len > KB_WORKLOAD_WRAP_CAP ||
+       get(&r, &p, cipher_len) || r.left)
       return -1;
 #undef INTENT_TAKE32
    v.ciphertext = p;
@@ -310,8 +310,8 @@ int kb_management_cert_intent_decode(const void *input, size_t len,
    return 0;
 }
 
-int kb_management_cert_candidate_encode(const kb_management_cert_candidate_view_t *v,
-                                        uint8_t *out, size_t cap, size_t *out_len)
+int kb_management_cert_candidate_encode(const kb_management_cert_candidate_view_t *v, uint8_t *out,
+                                        size_t cap, size_t *out_len)
 {
    if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
        overlap(out, cap, v->ciphertext, v->ciphertext_len) ||
@@ -320,40 +320,42 @@ int kb_management_cert_candidate_encode(const kb_management_cert_candidate_view_
    *out_len = 0;
    if (cap)
       memset(out, 0, cap);
-   size_t issuer_len = 0, serial_len = 0;
-   if (!exact_hex(v->installation_id, 32) ||
-       !exact_hex(v->lineage_id, 32) || !exact_hex(v->operation_id, 64) ||
-       !exact_hex(v->authority_id, 32) || !exact_hex(v->storage_id, 32) || v->generation < 1 ||
+   size_t issuer_len = 0, ca_issuer_len = 0, serial_len = 0;
+   if (!exact_hex(v->installation_id, 32) || !exact_hex(v->lineage_id, 32) ||
+       !exact_hex(v->operation_id, 64) || !exact_hex(v->authority_id, 32) ||
+       !exact_hex(v->storage_id, 32) || v->generation < 1 ||
        v->provider_kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
        v->provider_kind > KB_WORKLOAD_PROVIDER_PKCS11_V1 ||
        !printable(v->issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &issuer_len) ||
+       !printable(v->ca_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &ca_issuer_len) ||
        !printable(v->serial_norm, DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX, &serial_len) ||
        !exact_hex(v->serial_norm, serial_len) || v->not_before_epoch < 1 ||
        v->not_after_epoch <= v->not_before_epoch || !v->ciphertext || !v->ciphertext_len ||
        v->ciphertext_len > KB_WORKLOAD_WRAP_CAP || issuer_len > UINT16_MAX ||
-       serial_len > UINT16_MAX)
+       ca_issuer_len > UINT16_MAX || serial_len > UINT16_MAX)
       return -1;
-   size_t total = sizeof(candidate_magic) - 1 + 32 + 32 + 64 + 32 + 32 + 8 + 4 + 32 * 8 + 2;
-   if (add_size(&total, issuer_len) || add_size(&total, 2) || add_size(&total, serial_len) ||
-       add_size(&total, 8 + 8 + 4) || add_size(&total, v->ciphertext_len))
+   size_t total = sizeof(candidate_magic) - 1 + 32 + 32 + 64 + 32 + 32 + 8 + 4 + 32 * 9 + 2;
+   if (add_size(&total, issuer_len) || add_size(&total, 2) || add_size(&total, ca_issuer_len) ||
+       add_size(&total, 2) || add_size(&total, serial_len) || add_size(&total, 8 + 8 + 4) ||
+       add_size(&total, v->ciphertext_len))
       return -1;
    if (total > cap || total > KB_MANAGEMENT_CERT_CANDIDATE_MAX)
       return -1;
    writer_t w = {out, cap};
-   int bad = put(&w, candidate_magic, sizeof(candidate_magic) - 1) ||
-             put(&w, v->installation_id, 32) || put(&w, v->lineage_id, 32) ||
-             put(&w, v->operation_id, 64) || put(&w, v->authority_id, 32) ||
-             put(&w, v->storage_id, 32) || put_u64(&w, (uint64_t)v->generation) ||
-             put_u32(&w, (uint32_t)v->provider_kind) || put(&w, v->nonce, 32) ||
-             put(&w, v->binding_digest, 32) || put(&w, v->csr_digest, 32) ||
-             put(&w, v->csr_spki_digest, 32) || put(&w, v->public_bundle_digest, 32) ||
-             put(&w, v->custody_binding_digest, 32) || put(&w, v->fingerprint, 32) ||
-             put(&w, v->spki_digest, 32) || put_u16(&w, (uint16_t)issuer_len) ||
-             put(&w, v->issuer, issuer_len) || put_u16(&w, (uint16_t)serial_len) ||
-             put(&w, v->serial_norm, serial_len) || put_u64(&w, (uint64_t)v->not_before_epoch) ||
-             put_u64(&w, (uint64_t)v->not_after_epoch) ||
-             put_u32(&w, (uint32_t)v->ciphertext_len) ||
-             put(&w, v->ciphertext, v->ciphertext_len);
+   int bad =
+       put(&w, candidate_magic, sizeof(candidate_magic) - 1) || put(&w, v->installation_id, 32) ||
+       put(&w, v->lineage_id, 32) || put(&w, v->operation_id, 64) || put(&w, v->authority_id, 32) ||
+       put(&w, v->storage_id, 32) || put_u64(&w, (uint64_t)v->generation) ||
+       put_u32(&w, (uint32_t)v->provider_kind) || put(&w, v->nonce, 32) ||
+       put(&w, v->binding_digest, 32) || put(&w, v->csr_digest, 32) ||
+       put(&w, v->csr_spki_digest, 32) || put(&w, v->public_bundle_digest, 32) ||
+       put(&w, v->custody_binding_digest, 32) || put(&w, v->fingerprint, 32) ||
+       put(&w, v->spki_digest, 32) || put(&w, v->ca_fingerprint, 32) ||
+       put_u16(&w, (uint16_t)issuer_len) || put(&w, v->issuer, issuer_len) ||
+       put_u16(&w, (uint16_t)ca_issuer_len) || put(&w, v->ca_issuer, ca_issuer_len) ||
+       put_u16(&w, (uint16_t)serial_len) || put(&w, v->serial_norm, serial_len) ||
+       put_u64(&w, (uint64_t)v->not_before_epoch) || put_u64(&w, (uint64_t)v->not_after_epoch) ||
+       put_u32(&w, (uint32_t)v->ciphertext_len) || put(&w, v->ciphertext, v->ciphertext_len);
    if (bad)
    {
       return -1;
@@ -389,8 +391,8 @@ int kb_management_cert_candidate_decode(const void *input, size_t len,
    if (exact_magic(&r, candidate_magic, sizeof(candidate_magic) - 1) ||
        copy_fixed(&r, v.installation_id, 32) || copy_fixed(&r, v.lineage_id, 32) ||
        copy_fixed(&r, v.operation_id, 64) || copy_fixed(&r, v.authority_id, 32) ||
-       copy_fixed(&r, v.storage_id, 32) || get_u64(&r, &epoch) || epoch < 1 ||
-       epoch > INT64_MAX || get_u32(&r, &kind) || kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
+       copy_fixed(&r, v.storage_id, 32) || get_u64(&r, &epoch) || epoch < 1 || epoch > INT64_MAX ||
+       get_u32(&r, &kind) || kind < KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1 ||
        kind > KB_WORKLOAD_PROVIDER_PKCS11_V1)
       return -1;
    v.generation = (int64_t)epoch;
@@ -398,7 +400,8 @@ int kb_management_cert_candidate_decode(const void *input, size_t len,
 #define TAKE32(field) (get(&r, &p, 32) || (memcpy((field), p, 32), 0))
    if (TAKE32(v.nonce) || TAKE32(v.binding_digest) || TAKE32(v.csr_digest) ||
        TAKE32(v.csr_spki_digest) || TAKE32(v.public_bundle_digest) ||
-       TAKE32(v.custody_binding_digest) || TAKE32(v.fingerprint) || TAKE32(v.spki_digest))
+       TAKE32(v.custody_binding_digest) || TAKE32(v.fingerprint) || TAKE32(v.spki_digest) ||
+       TAKE32(v.ca_fingerprint))
       return -1;
 #undef TAKE32
    if (get_u16(&r, &n16) || !n16 || n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
@@ -408,8 +411,14 @@ int kb_management_cert_candidate_decode(const void *input, size_t len,
    v.issuer[n16] = 0;
    size_t checked;
    if (!printable(v.issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) || checked != n16 ||
-       get_u16(&r, &n16) || !n16 || n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX ||
+       get_u16(&r, &n16) || !n16 || n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX ||
        get(&r, &p, n16))
+      return -1;
+   memcpy(v.ca_issuer, p, n16);
+   v.ca_issuer[n16] = 0;
+   if (!printable(v.ca_issuer, DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX, &checked) ||
+       checked != n16 || get_u16(&r, &n16) || !n16 ||
+       n16 > DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX || get(&r, &p, n16))
       return -1;
    memcpy(v.serial_norm, p, n16);
    v.serial_norm[n16] = 0;
@@ -437,8 +446,7 @@ int kb_management_cert_manifest_encode(const kb_management_cert_manifest_t *v, u
    *out_len = 0;
    if (cap)
       memset(out, 0, cap);
-   if (cap < total || !exact_hex(v->operation_id, 64) ||
-       v->generation < 1)
+   if (cap < total || !exact_hex(v->operation_id, 64) || v->generation < 1)
       return -1;
    writer_t w = {out, cap};
    if (put(&w, manifest_magic, sizeof(manifest_magic) - 1) || put(&w, v->operation_id, 64) ||
@@ -466,6 +474,62 @@ int kb_management_cert_manifest_decode(const void *input, size_t len,
       return -1;
    v.generation = (int64_t)generation;
    memcpy(v.public_bundle_digest, p, 32);
+   *out = v;
+   return 0;
+}
+
+int kb_management_cert_pending_encode(const kb_management_cert_pending_manifest_t *v, uint8_t *out,
+                                      size_t cap, size_t *out_len)
+{
+   const size_t total = sizeof(pending_magic) - 1 + 32 + 32 + 64 + 32 + 8 + 4 + 32 + 32;
+   if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
+       overlap(out, cap, out_len, sizeof(*out_len)))
+      return -1;
+   *out_len = 0;
+   if (cap)
+      memset(out, 0, cap);
+   if (cap < total || !exact_hex(v->installation_id, 32) || !exact_hex(v->lineage_id, 32) ||
+       !exact_hex(v->operation_id, 64) || !exact_hex(v->authority_id, 32) || v->generation < 1 ||
+       (v->issue_kind != KB_MANAGEMENT_CERT_ISSUE_INITIAL &&
+        v->issue_kind != KB_MANAGEMENT_CERT_ISSUE_RENEWAL))
+      return -1;
+   writer_t w = {out, cap};
+   if (put(&w, pending_magic, sizeof(pending_magic) - 1) || put(&w, v->installation_id, 32) ||
+       put(&w, v->lineage_id, 32) || put(&w, v->operation_id, 64) || put(&w, v->authority_id, 32) ||
+       put_u64(&w, (uint64_t)v->generation) || put_u32(&w, (uint32_t)v->issue_kind) ||
+       put(&w, v->binding_digest, 32) || put(&w, v->intent_record_digest, 32))
+      return -1;
+   *out_len = total;
+   return 0;
+}
+
+int kb_management_cert_pending_decode(const void *input, size_t len,
+                                      kb_management_cert_pending_manifest_t *out)
+{
+   const size_t exact_len = sizeof(pending_magic) - 1 + 32 + 32 + 64 + 32 + 8 + 4 + 32 + 32;
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (!input || len != exact_len)
+      return -1;
+   reader_t r = {input, len};
+   kb_management_cert_pending_manifest_t v = {0};
+   uint64_t generation;
+   uint32_t kind;
+   const uint8_t *p;
+   if (exact_magic(&r, pending_magic, sizeof(pending_magic) - 1) ||
+       copy_fixed(&r, v.installation_id, 32) || copy_fixed(&r, v.lineage_id, 32) ||
+       copy_fixed(&r, v.operation_id, 64) || copy_fixed(&r, v.authority_id, 32) ||
+       get_u64(&r, &generation) || generation < 1 || generation > INT64_MAX || get_u32(&r, &kind) ||
+       (kind != KB_MANAGEMENT_CERT_ISSUE_INITIAL && kind != KB_MANAGEMENT_CERT_ISSUE_RENEWAL) ||
+       get(&r, &p, 32))
+      return -1;
+   v.generation = (int64_t)generation;
+   v.issue_kind = (kb_management_cert_issue_kind_t)kind;
+   memcpy(v.binding_digest, p, 32);
+   if (get(&r, &p, 32) || r.left)
+      return -1;
+   memcpy(v.intent_record_digest, p, 32);
    *out = v;
    return 0;
 }

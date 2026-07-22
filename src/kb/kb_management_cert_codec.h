@@ -57,7 +57,10 @@ typedef struct
    uint8_t csr_spki_digest[32];
    uint8_t public_bundle_digest[32];
    uint8_t custody_binding_digest[32];
+   /* issuer remains the leaf issuer for source compatibility. */
    char issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   char ca_issuer[DB2_MANAGEMENT_CLIENT_INSTANCE_TEXT_MAX + 1];
+   uint8_t ca_fingerprint[32];
    char serial_norm[DB2_MANAGEMENT_CLIENT_INSTANCE_SERIAL_MAX + 1];
    uint8_t fingerprint[32];
    uint8_t spki_digest[32];
@@ -66,6 +69,24 @@ typedef struct
    const uint8_t *ciphertext;
    size_t ciphertext_len;
 } kb_management_cert_candidate_view_t;
+
+typedef enum
+{
+   KB_MANAGEMENT_CERT_ISSUE_INITIAL = 1,
+   KB_MANAGEMENT_CERT_ISSUE_RENEWAL = 2
+} kb_management_cert_issue_kind_t;
+
+typedef struct
+{
+   char installation_id[33];
+   char lineage_id[33];
+   char operation_id[65];
+   char authority_id[33];
+   int64_t generation;
+   kb_management_cert_issue_kind_t issue_kind;
+   uint8_t binding_digest[32];
+   uint8_t intent_record_digest[32];
+} kb_management_cert_pending_manifest_t;
 
 typedef struct
 {
@@ -91,5 +112,9 @@ int kb_management_cert_candidate_decode(const void *, size_t,
 int kb_management_cert_manifest_encode(const kb_management_cert_manifest_t *, uint8_t *, size_t,
                                        size_t *);
 int kb_management_cert_manifest_decode(const void *, size_t, kb_management_cert_manifest_t *);
+int kb_management_cert_pending_encode(const kb_management_cert_pending_manifest_t *, uint8_t *,
+                                      size_t, size_t *);
+int kb_management_cert_pending_decode(const void *, size_t,
+                                      kb_management_cert_pending_manifest_t *);
 
 #endif

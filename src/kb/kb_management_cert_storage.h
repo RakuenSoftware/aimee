@@ -19,15 +19,26 @@ typedef struct
 } kb_management_cert_storage_t;
 
 kb_management_cert_storage_result_t kb_management_cert_storage_open(const char *,
-                                                                     kb_management_cert_storage_t *);
+                                                                    kb_management_cert_storage_t *);
 void kb_management_cert_storage_close(kb_management_cert_storage_t *);
-kb_management_cert_storage_result_t kb_management_cert_storage_stage(
-    kb_management_cert_storage_t *, const char *, const char[65], const void *, size_t);
-kb_management_cert_storage_result_t kb_management_cert_storage_read(
-    kb_management_cert_storage_t *, const char *, const char[65], uint8_t *, size_t, size_t *);
-kb_management_cert_storage_result_t kb_management_cert_storage_promote(
-    kb_management_cert_storage_t *, const void *, size_t);
-kb_management_cert_storage_result_t kb_management_cert_storage_current(
-    kb_management_cert_storage_t *, uint8_t *, size_t, size_t *);
+kb_management_cert_storage_result_t kb_management_cert_storage_stage(kb_management_cert_storage_t *,
+                                                                     const char *, const char[65],
+                                                                     const void *, size_t);
+kb_management_cert_storage_result_t kb_management_cert_storage_read(kb_management_cert_storage_t *,
+                                                                    const char *, const char[65],
+                                                                    uint8_t *, size_t, size_t *);
+kb_management_cert_storage_result_t
+kb_management_cert_storage_promote(kb_management_cert_storage_t *, const void *, size_t);
+kb_management_cert_storage_result_t
+kb_management_cert_storage_current(kb_management_cert_storage_t *, uint8_t *, size_t, size_t *);
+/* pending is a single O(1) recovery coordinate, not an immutable operation record. */
+kb_management_cert_storage_result_t
+kb_management_cert_storage_pending_publish(kb_management_cert_storage_t *, const void *, size_t);
+kb_management_cert_storage_result_t
+kb_management_cert_storage_pending_read(kb_management_cert_storage_t *, uint8_t *, size_t,
+                                        size_t *);
+kb_management_cert_storage_result_t
+kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *, const void *,
+                                               size_t);
 
 #endif
