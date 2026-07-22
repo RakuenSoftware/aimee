@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS server_management_jti (
 );
 CREATE INDEX IF NOT EXISTS idx_server_management_jti_expiry
   ON server_management_jti(expires_at,jti);
+CREATE TABLE IF NOT EXISTS server_management_jwks_cache (
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  generation INTEGER NOT NULL CHECK(generation=1),
+  valid_from INTEGER NOT NULL CHECK(valid_from>=0),
+  valid_until INTEGER NOT NULL CHECK(valid_until>valid_from),
+  jwks_bytes BLOB NOT NULL CHECK(length(jwks_bytes) BETWEEN 1 AND 1023),
+  envelope_bytes BLOB NOT NULL CHECK(length(envelope_bytes) BETWEEN 1 AND 3071),
+  envelope_sha256 BLOB NOT NULL CHECK(length(envelope_sha256)=32),
+  manifest_sha256 BLOB NOT NULL CHECK(length(manifest_sha256)=32),
+  trust_bundle_sha256 BLOB NOT NULL CHECK(length(trust_bundle_sha256)=32),
+  fetched_at INTEGER NOT NULL CHECK(fetched_at>=0)
+);
 CREATE TABLE IF NOT EXISTS token_audit ( id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL DEFAULT '', delegation_id TEXT NOT NULL DEFAULT '', project_name TEXT NOT NULL DEFAULT '', tool_name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', requested_model TEXT NOT NULL DEFAULT '', stop_reason TEXT NOT NULL DEFAULT '', usage_kind TEXT NOT NULL DEFAULT 'realized', agent_log_id INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL DEFAULT '', idempotency_key TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, principal TEXT NOT NULL DEFAULT '', served_model TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0, metadata TEXT NOT NULL DEFAULT '', prompt_tokens INTEGER NOT NULL DEFAULT 0, completion_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, cache_read_tokens INTEGER NOT NULL DEFAULT 0, estimated_cost_usd REAL NOT NULL DEFAULT 0.0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS model_catalog ( provider TEXT NOT NULL, model TEXT NOT NULL, context_window INTEGER NOT NULL DEFAULT 0, pricing_tier INTEGER NOT NULL DEFAULT 0, tool_support INTEGER NOT NULL DEFAULT 0, streaming_support INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL DEFAULT (datetime('now')), metadata_json TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (provider, model));
 CREATE TABLE IF NOT EXISTS model_pricing ( model TEXT PRIMARY KEY, cost_in_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_in_per_mtok >= 0), cost_out_per_mtok REAL NOT NULL DEFAULT 0 CHECK (cost_out_per_mtok >= 0), updated_at TEXT NOT NULL DEFAULT (datetime('now')));

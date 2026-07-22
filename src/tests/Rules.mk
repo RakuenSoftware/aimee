@@ -574,6 +574,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1877,6 +1878,16 @@ $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication: \
     $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-mgmt-jwks-cache: \
+    $(OBJDIR)/tests/test_server_mgmt_jwks_cache.o \
+    $(OBJDIR)/server/server_mgmt_jwks_cache.o \
+    $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
+    $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o \
+    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o \
+    $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-management-status-runtime: \
@@ -4602,6 +4613,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/pki.o \
                      $(OBJDIR)/kb/http/kb_tls.o \
                      $(OBJDIR)/kb/http/kb_tls_serve.o \
+                     $(OBJDIR)/db2/management_jwks_runtime.o \
                      $(OBJDIR)/modules/kb_client/kb_client_mtls.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/shared/kb_paths.o \

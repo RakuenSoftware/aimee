@@ -8069,6 +8069,54 @@ BEGIN
     c.hwm1_attestation_digest=g.hwm1_attestation_digest AND c.seal_epoch=g.seal_epoch;
 END $$;
 
+-- P5-C2c online public-artifact reader.  The TLS-derived certificate tuple is
+-- the sole identity input.  This is intentionally distinct from the offline
+-- publisher reader: runtime receives neither staged state nor publication,
+-- custody, signing, or HWM authority.
+CREATE OR REPLACE FUNCTION kb_management_jwks_runtime_fetch(
+  p_issuer TEXT,p_serial TEXT,p_fingerprint TEXT)
+RETURNS TABLE(generation SMALLINT,candidate_id TEXT,valid_from BIGINT,valid_until BIGINT,
+ envelope_bytes BYTEA,envelope_sha256 BYTEA,manifest_sha256 BYTEA,jwks_sha256 BYTEA,
+ payload_sha256 BYTEA,hwm2_attestation_digest BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE n INTEGER; t BIGINT;
+BEGIN
+  IF p_issuer IS NULL OR pg_catalog.char_length(p_issuer) NOT BETWEEN 1 AND 600
+     OR p_serial IS NULL OR p_serial !~ '^[0-9a-f]{1,128}$'
+     OR p_fingerprint IS NULL OR p_fingerprint !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'management JWKS fetch: invalid certificate identity' USING ERRCODE='22023';
+  END IF;
+  SELECT pg_catalog.count(*) INTO n FROM public.kb_server_registry r
+   JOIN public.kb_enrollments e ON e.scope='p5-server-client'
+    AND e.cert_issuer=r.client_issuer AND e.cert_serial_norm=r.client_serial_norm
+    AND e.fingerprint=r.client_fingerprint
+   WHERE r.status='active' AND r.client_issuer=p_issuer AND r.client_serial_norm=p_serial
+    AND r.client_fingerprint=p_fingerprint AND e.state='active' AND e.revoked_at=''
+    AND e.expires_at<>'' AND e.expires_at::TIMESTAMPTZ>pg_catalog.clock_timestamp();
+  IF n<>1 THEN
+    RAISE EXCEPTION 'management JWKS fetch: certificate denied' USING ERRCODE='28000';
+  END IF;
+  PERFORM public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-jwks-publication-v1',0));
+  t := pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::BIGINT;
+  RETURN QUERY SELECT g.generation,g.candidate_id,g.valid_from,g.valid_until,g.envelope_bytes,
+   g.envelope_sha256,g.manifest_sha256,g.jwks_sha256,g.payload_sha256,g.hwm2_attestation_digest
+   FROM public.kb_management_jwks_publication_generation g
+   JOIN public.kb_management_jwks_publication_registry r ON r.singleton=1 AND
+    r.current_generation=g.generation AND r.candidate_id=g.candidate_id AND
+    r.manifest_sha256=g.manifest_sha256 AND r.envelope_sha256=g.envelope_sha256 AND
+    r.hwm2_attestation_digest=g.hwm2_attestation_digest
+   JOIN public.kb_management_jwks_publication_candidate c ON c.generation=g.generation AND
+    c.candidate_id=g.candidate_id AND c.phase='final' AND
+    c.previous_manifest_sha256=g.previous_manifest_sha256 AND c.jwks_bytes=g.jwks_bytes AND
+    c.payload_bytes=g.payload_bytes AND c.envelope_bytes=g.envelope_bytes AND
+    c.signature=g.signature AND c.manifest_public_digest=g.manifest_public_digest AND
+    c.token_public_digest=g.token_public_digest AND c.token_jwk_digest=g.token_jwk_digest AND
+    c.publication_identity_digest=g.publication_identity_digest AND
+    c.hwm1_attestation_digest=g.hwm1_attestation_digest AND c.seal_epoch=g.seal_epoch
+   WHERE g.generation=1 AND g.valid_from<=t AND t<g.valid_until;
+END $$;
+
 REVOKE ALL ON TABLE kb_management_jwks_publication_candidate,
  kb_management_jwks_publication_generation,kb_management_jwks_publication_registry,
  kb_management_jwks_manifest_key_use_intent,kb_management_jwks_publication_permit FROM PUBLIC;
@@ -8079,7 +8127,8 @@ REVOKE ALL ON FUNCTION kb_management_jwks_publication_guard(),
  kb_management_jwks_publication_stage(BIGINT,TEXT,BIGINT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,TEXT,BYTEA,BYTEA,TEXT,BYTEA,BYTEA,BYTEA,BIGINT),
  kb_management_jwks_publication_record_cas(BIGINT,TEXT,BYTEA),
  kb_management_jwks_publication_finalize(BIGINT,TEXT),
- kb_management_jwks_publication_final() FROM PUBLIC;
+ kb_management_jwks_publication_final(),
+ kb_management_jwks_runtime_fetch(TEXT,TEXT,TEXT) FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
