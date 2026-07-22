@@ -63,7 +63,13 @@ int agent_rc_should_try_another(int rc, const char *error)
 {
    if (rc == 0)
       return 0;
-   if (rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error))
+   if (rc == AGENT_RC_AT_LIMIT)
+      return 1;
+   /* agent_dispatch_one currently has exactly one provider-failure rc. Do not
+    * silently reinterpret a future control/result code as peer-substitutable. */
+   if (rc != -1)
+      return 0;
+   if (agent_error_is_retryable(error))
       return 1;
 
    /* This helper is consulted only by generic routing. Explicit --via pinning

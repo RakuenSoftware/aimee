@@ -387,7 +387,11 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
          return 0;
       }
       if (cfg->route_pinned)
+      {
+         free(out->response);
+         out->response = NULL;
          break;
+      }
       /* At-limit or a real failure: either way skip this agent and try the next
        * (health already recorded by agent_dispatch_one for a real failure). */
       if (ntried < MAX_AGENTS)
@@ -641,8 +645,9 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
       }
    }
 
-   rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
-                                     enforce_writes, out, rc);
+   if (!cfg->route_pinned)
+      rc = agent_try_same_tier_fallback(cfg, &ag, role, system_prompt, user_prompt, max_tokens,
+                                        enforce_writes, out, rc);
 
    /* health is recorded per-turn inside agent_dispatch_one (main + fallbacks +
     * same-tier), so no final record_success here. */
