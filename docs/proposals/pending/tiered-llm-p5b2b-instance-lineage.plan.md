@@ -105,11 +105,16 @@ only:
   `pending|active|expired|quarantined` state. Unique constraints cover operation id,
   `(installation_id,generation)`, certificate issuer+serial and fingerprint.
 
-The runtime role receives no direct table privilege. The offline grant functions
-remain executable only by `aimee_kb_owner`; PUBLIC and `aimee_kb_runtime` are
-explicitly revoked. All three tables use FORCE RLS
-with no runtime direct policy; only fixed definer functions cross them. Definer
-functions set `search_path=pg_catalog,pg_temp` and fully qualify public objects.
+The runtime role receives no direct table or sequence privilege. The offline grant
+functions remain executable only through the owner/migration provisioning path;
+PUBLIC and `aimee_kb_runtime` are explicitly revoked. All three tables use FORCE
+RLS. Because the existing `aimee_kb_owner` is intentionally `NOLOGIN
+NOBYPASSRLS`, each table has one GUC-free owner policy with exact
+`USING (current_user = 'aimee_kb_owner')` and the identical `WITH CHECK`. This is
+not a runtime or tenant policy: broad/default runtime grants are explicitly revoked
+for these objects, and the runtime crosses them only through fixed definer
+functions owned by `aimee_kb_owner`. No new `BYPASSRLS` role is introduced.
+Definer functions set `search_path=pg_catalog,pg_temp` and fully qualify public objects.
 Table-owner-proof triggers forbid DELETE and post-consumption/post-activation
 mutation. A pending issue may change only once to active, expired or quarantined and
 fill the fixed certificate/activation columns; an active issue changes no column.
@@ -199,8 +204,12 @@ Unit tests cover transcript/digest vectors, typed bounds, output clearing, statu
 mapping, replay flag and target isolation. ASAN/UBSAN/leak gates cover the adapter
 and transcript codec. Build/link gates prove KB-only closure and no HTTP route.
 
-A real PG17 runtime-role script covers schema/grant sync; FORCE-RLS/no direct table
-access; exact initial grant/begin/activate replay and mismatch; expired/revoked
+A real PG17 runtime-role script covers schema/grant sync; the exact three owner-only
+policy expressions; `relrowsecurity` plus `relforcerowsecurity`; zero runtime/PUBLIC
+table and sequence ACLs after broad/default grants are applied; direct runtime
+SELECT/INSERT/UPDATE/DELETE denial; definer access through only the granted fixed
+functions; owner/migration provisioning access; exact initial grant/begin/activate
+replay and mismatch; expired/revoked
 grant; two nodes on one team; shared custody/tuple/installation substitution;
 concurrent initial/renewal; renew-too-early; validity/overlap bounds; leaf-SPKI and
 CA-pin mismatch; revoke between begin/activate; old-id changed tuple denial;
