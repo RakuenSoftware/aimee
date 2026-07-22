@@ -114,7 +114,7 @@ func (s *Scheduler) fill(ctx context.Context) {
 			}
 		}
 	}
-	for reason, backoff := range map[string]time.Duration{"runner_unavailable": 5 * time.Second, "ci_pending": 15 * time.Second, "merge_pending": 15 * time.Second, "panel_unreachable": 60 * time.Second, pauseReasonPanelCapacity: 15 * time.Second} {
+	for reason, backoff := range map[string]time.Duration{"runner_unavailable": 5 * time.Second, "ci_pending": 15 * time.Second, "merge_pending": 15 * time.Second, "panel_unreachable": 60 * time.Second} {
 		if resumed, err := s.db.ResumeTransient(ctx, reason, backoff); err != nil {
 			s.log.Error("resume transient workflows", "reason", reason, "error", err)
 		} else if resumed > 0 {

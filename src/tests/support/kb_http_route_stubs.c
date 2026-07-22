@@ -8,6 +8,22 @@
 #include "db2/server_registry.h"
 #include <stdio.h>
 
+/* kb_tls_serve links the primary-authoritative per-request enrollment seam.
+ * Route tests do not provision DB2 enrollment state, so model an active peer. */
+static int g_enrollment_authority = 1;
+
+void test_kb_enrollment_authority_set(int status)
+{
+   g_enrollment_authority = status;
+}
+
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   (void)cert_issuer;
+   (void)cert_serial_norm;
+   return g_enrollment_authority;
+}
+
 int kb_http_telemetry_token_route(const char *method, const char *path, const char *query_string,
                                   const char *body, const char *presented, char *out_buf,
                                   int out_cap)

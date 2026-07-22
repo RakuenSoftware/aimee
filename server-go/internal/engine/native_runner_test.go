@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
@@ -44,6 +45,32 @@ type noRosterAgents struct{}
 
 func (noRosterAgents) Delegate(context.Context, DelegateRequest) (DelegateResult, error) {
 	return DelegateResult{}, errors.New("unexpected delegate call")
+}
+
+type concurrentPanelAgents struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (a *concurrentPanelAgents) EligibleAgents(context.Context, string) ([]EligibleAgent, error) {
+	return []EligibleAgent{
+		{Name: "codex", Provider: "openai", MaxParallel: 10},
+		{Name: "minimax", Provider: "minimax", MaxParallel: 4},
+	}, nil
+}
+
+func (a *concurrentPanelAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	select {
+	case a.started <- struct{}{}:
+	case <-ctx.Done():
+		return DelegateResult{}, ctx.Err()
+	}
+	select {
+	case <-a.release:
+		return DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+	case <-ctx.Done():
+		return DelegateResult{}, ctx.Err()
+	}
 }
 
 func (a *temporaryFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
@@ -412,21 +439,43 @@ func TestPanelCapacityRoundsHaveDistinctDurableJobKeys(t *testing.T) {
 	}
 }
 
-func TestPanelAdmissionIsControlPlaneWide(t *testing.T) {
-	release, admitted := tryAcquirePanelAdmission()
-	if !admitted {
-		t.Fatal("first panel was not admitted")
+func TestRoundtablesAreNotSerializedByProcessWideAdmission(t *testing.T) {
+	agents := &concurrentPanelAgents{started: make(chan struct{}, 4), release: make(chan struct{})}
+	runner := &NativeRunner{agents: agents}
+	artifact := wfe.Artifact{Type: "plan", Content: []byte("complete plan")}
+	artifact.Hash = wfe.Hash(artifact.Content)
+	node := wfe.Node{ID: "gate", Block: "gate.roundtable", Params: map[string]any{"panel": map[string]any{
+		"required": []any{"security", "qa"},
+	}}}
+	errCh := make(chan error, 2)
+	for _, id := range []string{"wi_one", "wi_two"} {
+		id := id
+		go func() {
+			result, err := runner.roundtable(context.Background(), StepRequest{
+				WorkItem: db1.WorkItem{ID: id, Worktree: "/worktree"},
+				Node:     node, Proposal: "fix the scheduler", Inputs: map[string]wfe.Artifact{"src": artifact},
+			})
+			if err == nil && result.Status != StepAdvanced {
+				err = errors.New("roundtable did not advance")
+			}
+			errCh <- err
+		}()
 	}
-	if _, admitted = tryAcquirePanelAdmission(); admitted {
-		t.Fatal("overlapping full-capacity panel was admitted")
+	deadline := time.After(2 * time.Second)
+	for started := 0; started < 4; started++ {
+		select {
+		case <-agents.started:
+		case <-deadline:
+			close(agents.release)
+			t.Fatalf("only %d/4 seats started; a process-wide panel admission cap serialized the roundtables", started)
+		}
 	}
-	release()
-	release() // The successful acquisition returns an idempotent release closure.
-	release, admitted = tryAcquirePanelAdmission()
-	if !admitted {
-		t.Fatal("panel capacity was not released")
+	close(agents.release)
+	for range 2 {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
 	}
-	release()
 }
 
 func TestPanelCapacityAssignmentFallsBackWithoutWeakeningExplicitPin(t *testing.T) {

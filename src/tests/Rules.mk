@@ -545,6 +545,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-token \
+               $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
                $(TESTPREFIX)/unit-test-kb-mgmt-status-authority \
@@ -1794,6 +1795,12 @@ $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_sta
 $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_token.o \
                                            $(OBJDIR)/server/server_mgmt_token.o \
                                            $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
+                                       $(OBJDIR)/kb/kb_mgmt_token.o \
+                                       $(OBJDIR)/server/server_mgmt_token.o \
+                                       $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-management-jti: \
