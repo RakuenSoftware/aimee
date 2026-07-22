@@ -58,9 +58,9 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
    const char *deleg_id = delegation_active_id();
    int have_session = aimee_sid && aimee_sid[0] && session_id_override_active();
    int reuse = 0;
-   char *sess_name = cli_session_make_execution_name(agent->name, agent->session_reuse, aimee_sid,
-                                                     have_session, deleg_id,
-                                                     agent->force_cli_isolation, &reuse);
+   char *sess_name =
+       cli_session_make_execution_name(agent->name, agent->session_reuse, aimee_sid, have_session,
+                                       deleg_id, agent->force_cli_isolation, &reuse);
    if (!sess_name)
    {
       snprintf(out->error, sizeof(out->error), "out of memory");

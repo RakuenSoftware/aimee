@@ -457,10 +457,8 @@ static void test_execution_name_preserves_primary_reuse(void)
    free(shared);
    free(want);
 
-   char *isolated =
-       cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, &reuse);
-   char *isolated_again =
-       cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, NULL);
+   char *isolated = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, &reuse);
+   char *isolated_again = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, NULL);
    assert(isolated && isolated_again && reuse == 0);
    assert(strcmp(isolated, isolated_again) != 0);
    free(isolated);
