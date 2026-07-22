@@ -2386,6 +2386,7 @@ static void mtls_tcp_request(int port, SSL_CTX *client_ctx, const char *req, cha
  * and serves /v1 with the scope taken from the client cert. */
 static void test_mtls_listener(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    /* Production passes kb_default_config_dir() as the listener data_dir, and the
     * bootstrap endpoints (/v1/enroll/ca, /renew) read the CA from there — so use
     * the same dir here. Clean any leftover CA so the listener makes a fresh one. */
@@ -2443,6 +2444,20 @@ static void test_mtls_listener(void)
       fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
+
+   /* Primary authority is consulted before dispatch. Unknown/revoked peers are
+    * forbidden and an authority outage is retryable but never fail-open. */
+   test_kb_enrollment_authority_set(0);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(-1);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "503 Service Unavailable"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(1);
    /* the dialer's request carries the client cert's scope (project:beta): a
     * cross-scope request is denied. */
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET",

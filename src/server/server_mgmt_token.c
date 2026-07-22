@@ -15,7 +15,7 @@
 #define TOKEN_WIRE_MAX    8192u
 #define TOKEN_HEADER_MAX  1024u
 #define TOKEN_PAYLOAD_MAX 4096u
-#define TOKEN_SIG_MAX     512u
+#define TOKEN_SIG_MAX     1024u
 #define JWKS_MAX          65536u
 #define JSON_INT_MAX      INT64_C(9007199254740991)
 

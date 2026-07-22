@@ -143,6 +143,8 @@ const config_field_t config_fields[] = {
      CFG_STRING},
     {"css_style_graph_enabled", offsetof(config_t, css_style_graph_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"code_cochange_git_enabled", offsetof(config_t, code_cochange_git_enabled), sizeof(int), 0,
+     CFG_BOOL},
     {"wfe_live_forge_enabled", offsetof(config_t, wfe_live_forge_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"wfe_proposals_autoscan_enabled", offsetof(config_t, wfe_proposals_autoscan_enabled),
