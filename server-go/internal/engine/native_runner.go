@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -54,7 +55,14 @@ type NativeRunner struct {
 	forge     Forge
 }
 
-const roundtableDelegateRole = "review"
+const (
+	roundtableDelegateRole   = "review"
+	pauseReasonPanelCapacity = "panel_capacity"
+)
+
+// A roundtable consumes the complete live review roster, so admission belongs
+// to the Go control plane rather than to any workflow or runner instance.
+var fullPanelAdmission = make(chan struct{}, 1)
 
 func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request DelegateRequest) (DelegateResult, error) {
 	request.WorkItemID = step.WorkItem.ID
@@ -519,6 +527,11 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	if maxRounds < 1 {
 		maxRounds = 1
 	}
+	release, admitted := tryAcquirePanelAdmission()
+	if !admitted {
+		return StepResult{Status: StepPending, PauseReason: pauseReasonPanelCapacity, Detail: "another full-capacity roundtable is active"}, nil
+	}
+	defer release()
 	var totalCost float64
 	var prior string
 	for round := 1; round <= maxRounds; round++ {
@@ -545,6 +558,23 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		prior = string(encoded)
 	}
 	return StepResult{}, errors.New("roundtable exhausted without a verdict")
+}
+
+func tryAcquirePanelAdmission() (func(), bool) {
+	select {
+	case fullPanelAdmission <- struct{}{}:
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				select {
+				case <-fullPanelAdmission:
+				default:
+				}
+			})
+		}, true
+	default:
+		return nil, false
+	}
 }
 
 func roundtableStageGuidance(stage string) string {

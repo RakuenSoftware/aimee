@@ -476,6 +476,23 @@ func TestFillPanelCapacityRepeatsAllRequiredLensesWithoutWeakeningThem(t *testin
 	}
 }
 
+func TestPanelAdmissionIsControlPlaneWide(t *testing.T) {
+	release, admitted := tryAcquirePanelAdmission()
+	if !admitted {
+		t.Fatal("first panel was not admitted")
+	}
+	if _, admitted = tryAcquirePanelAdmission(); admitted {
+		t.Fatal("overlapping full-capacity panel was admitted")
+	}
+	release()
+	release() // The successful acquisition returns an idempotent release closure.
+	release, admitted = tryAcquirePanelAdmission()
+	if !admitted {
+		t.Fatal("panel capacity was not released")
+	}
+	release()
+}
+
 func TestFillPanelCapacityCyclesEveryConfiguredLensInMixedPanel(t *testing.T) {
 	seats, err := fillPanelCapacity([]panelSeat{
 		{persona: "security", required: true},
