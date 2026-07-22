@@ -7096,6 +7096,476 @@ REVOKE ALL ON FUNCTION kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT
 REVOKE ALL ON FUNCTION kb_management_status_key_use_guard(BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_status_key_startup_status() FROM PUBLIC;
 
+-- P5-C2a offline management-token trust roots. These platform-scoped rows are
+-- deliberately outside tenant RLS: they have no online ACL at all and are
+-- reachable only through the owner provisioner's fixed functions below.
+CREATE TABLE IF NOT EXISTS kb_management_token_root (
+  root_kind TEXT PRIMARY KEY CHECK (root_kind IN ('token','manifest')),
+  bootstrap_id TEXT NOT NULL UNIQUE CHECK (bootstrap_id ~ '^[0-9a-f]{64}$'),
+  custody_key_id TEXT NOT NULL UNIQUE CHECK (char_length(custody_key_id) BETWEEN 1 AND 600),
+  wire_id TEXT NOT NULL UNIQUE CHECK (char_length(wire_id) BETWEEN 1 AND 64),
+  public_key BYTEA NOT NULL,
+  public_exponent BYTEA NOT NULL,
+  public_digest BYTEA NOT NULL CHECK (octet_length(public_digest)=32),
+  jwk_digest BYTEA NOT NULL CHECK (octet_length(jwk_digest)=32),
+  current_version BIGINT NOT NULL DEFAULT 1 CHECK (current_version IN (1,2)),
+  initial_seal_epoch BIGINT NOT NULL CHECK (initial_seal_epoch>0),
+  v1_envelope_digest BYTEA NOT NULL CHECK (octet_length(v1_envelope_digest)=32),
+  v2_envelope_digest BYTEA NOT NULL CHECK (octet_length(v2_envelope_digest)=32),
+  hwm2_attestation_digest BYTEA,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK ((root_kind='token' AND octet_length(public_key)=384 AND get_byte(public_key,0)<>0
+          AND public_exponent=decode('010001','hex')
+          AND wire_id='p5-token-v1-'||substr(encode(sha256(convert_to(
+            'aimee.p5.token.public.v1'||chr(10),'UTF8')||int4send(384)||public_key
+            ||int4send(3)||public_exponent),'hex'),1,32)
+          AND jwk_digest=sha256(convert_to('{"kty":"RSA","kid":"'||wire_id
+            ||'","use":"sig","alg":"RS256","n":"'
+            ||rtrim(replace(replace(replace(encode(public_key,'base64'),chr(10),''),'+','-'),'/','_'),'=')
+            ||'","e":"AQAB"}','UTF8')))
+      OR (root_kind='manifest' AND octet_length(public_key)=32 AND public_exponent=''::bytea
+          AND wire_id='p5-jwks-root-v1-'||substr(encode(sha256(public_key),'hex'),1,32)
+          AND jwk_digest=decode(repeat('00',32),'hex'))),
+  CHECK (public_digest=sha256(public_key)),
+  CHECK ((enabled AND current_version=2 AND octet_length(hwm2_attestation_digest)=32)
+      OR (NOT enabled AND current_version=1 AND hwm2_attestation_digest IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_root (
+  singleton SMALLINT PRIMARY KEY CHECK (singleton=1),
+  custody_key_id TEXT NOT NULL UNIQUE CHECK (char_length(custody_key_id) BETWEEN 1 AND 600),
+  helper TEXT NOT NULL CHECK (char_length(helper) BETWEEN 1 AND 128),
+  verifier_domain TEXT NOT NULL CHECK (char_length(verifier_domain) BETWEEN 1 AND 128),
+  identity_digest BYTEA NOT NULL CHECK (octet_length(identity_digest)=32),
+  hwm1_attestation BYTEA NOT NULL CHECK (octet_length(hwm1_attestation) BETWEEN 1 AND 512),
+  hwm1_attestation_digest BYTEA NOT NULL CHECK (octet_length(hwm1_attestation_digest)=32),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (hwm1_attestation_digest=sha256(hwm1_attestation))
+);
+
+-- A root bootstrap is the only code path allowed to touch the two reserved
+-- platform vault slots.  The permit is transaction/backend-bound and has no
+-- non-owner ACL, so setting a caller-controlled GUC cannot forge authority in
+-- one of the generic owner-definer vault functions.
+CREATE TABLE IF NOT EXISTS kb_management_token_root_vault_permit (
+  backend_pid INTEGER NOT NULL,
+  transaction_id BIGINT NOT NULL,
+  root_kind TEXT NOT NULL CHECK (root_kind IN ('token','manifest')),
+  PRIMARY KEY (backend_pid,transaction_id,root_kind)
+);
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_registry_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  IF TG_OP='TRUNCATE' OR TG_OP='DELETE' THEN
+    RAISE EXCEPTION 'management token root: immutable' USING ERRCODE='55000';
+  END IF;
+  IF OLD.enabled OR NEW.root_kind<>OLD.root_kind OR NEW.bootstrap_id<>OLD.bootstrap_id
+     OR NEW.custody_key_id<>OLD.custody_key_id OR NEW.wire_id<>OLD.wire_id
+     OR NEW.public_key<>OLD.public_key OR NEW.public_digest<>OLD.public_digest
+     OR NEW.public_exponent<>OLD.public_exponent OR NEW.jwk_digest<>OLD.jwk_digest
+     OR NEW.initial_seal_epoch<>OLD.initial_seal_epoch OR NEW.created_at<>OLD.created_at
+     OR NEW.v1_envelope_digest<>OLD.v1_envelope_digest
+     OR NEW.v2_envelope_digest<>OLD.v2_envelope_digest
+     OR NOT NEW.enabled OR OLD.current_version<>1 OR NEW.current_version<>2
+     OR OLD.hwm2_attestation_digest IS NOT NULL
+     OR octet_length(NEW.hwm2_attestation_digest)<>32 THEN
+    RAISE EXCEPTION 'management token root: invalid transition' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_management_token_root_no_update ON kb_management_token_root;
+CREATE TRIGGER kb_management_token_root_no_update BEFORE UPDATE ON kb_management_token_root
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_root_registry_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_no_delete ON kb_management_token_root;
+CREATE TRIGGER kb_management_token_root_no_delete BEFORE DELETE ON kb_management_token_root
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_root_registry_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_no_truncate ON kb_management_token_root;
+CREATE TRIGGER kb_management_token_root_no_truncate BEFORE TRUNCATE ON kb_management_token_root
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_token_root_registry_guard();
+
+DROP TRIGGER IF EXISTS kb_management_jwks_publication_root_no_update ON kb_management_jwks_publication_root;
+CREATE TRIGGER kb_management_jwks_publication_root_no_update BEFORE UPDATE ON kb_management_jwks_publication_root
+  FOR EACH ROW EXECUTE FUNCTION kb_worm_block();
+DROP TRIGGER IF EXISTS kb_management_jwks_publication_root_no_delete ON kb_management_jwks_publication_root;
+CREATE TRIGGER kb_management_jwks_publication_root_no_delete BEFORE DELETE ON kb_management_jwks_publication_root
+  FOR EACH ROW EXECUTE FUNCTION kb_worm_block();
+DROP TRIGGER IF EXISTS kb_management_jwks_publication_root_no_truncate ON kb_management_jwks_publication_root;
+CREATE TRIGGER kb_management_jwks_publication_root_no_truncate BEFORE TRUNCATE ON kb_management_jwks_publication_root
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_worm_block();
+
+-- Once either fixed root is active, its two ciphertext versions and activation
+-- history cannot be rewritten through the generic owner tables. This trigger is
+-- intentionally slot-specific and does not alter ordinary vault rotation.
+CREATE OR REPLACE FUNCTION kb_management_token_root_vault_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_old_kind TEXT; v_new_kind TEXT;
+BEGIN
+  IF TG_OP='TRUNCATE' THEN
+    IF EXISTS (SELECT 1 FROM public.kb_management_token_root)
+       OR EXISTS (SELECT 1 FROM public.org_vault_secret WHERE
+         (principal='org:p5-token' AND agent='management' AND cred='rs256') OR
+         (principal='org:p5-jwks-manifest' AND agent='management' AND cred='ed25519'))
+       OR EXISTS (SELECT 1 FROM public.org_vault_current WHERE
+         (principal='org:p5-token' AND agent='management' AND cred='rs256') OR
+         (principal='org:p5-jwks-manifest' AND agent='management' AND cred='ed25519'))
+       OR EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE
+         (principal='org:p5-token' AND agent='management' AND cred='rs256') OR
+         (principal='org:p5-jwks-manifest' AND agent='management' AND cred='ed25519')) THEN
+      RAISE EXCEPTION 'management token root vault slots: generic truncate denied' USING ERRCODE='55000';
+    END IF;
+    RETURN NULL;
+  END IF;
+
+  IF TG_OP IN ('UPDATE','DELETE') THEN
+    v_old_kind:=CASE
+      WHEN OLD.principal='org:p5-token' AND OLD.agent='management' AND OLD.cred='rs256' THEN 'token'
+      WHEN OLD.principal='org:p5-jwks-manifest' AND OLD.agent='management' AND OLD.cred='ed25519' THEN 'manifest'
+      ELSE NULL END;
+  END IF;
+  IF TG_OP IN ('INSERT','UPDATE') THEN
+    v_new_kind:=CASE
+      WHEN NEW.principal='org:p5-token' AND NEW.agent='management' AND NEW.cred='rs256' THEN 'token'
+      WHEN NEW.principal='org:p5-jwks-manifest' AND NEW.agent='management' AND NEW.cred='ed25519' THEN 'manifest'
+      ELSE NULL END;
+  END IF;
+
+  -- Bootstrap never deletes a reserved row.  Treat deletion as WORM even while
+  -- a transaction permit exists.
+  IF TG_OP='DELETE' AND v_old_kind IS NOT NULL THEN
+    RAISE EXCEPTION 'management token root vault slot: deletion denied' USING ERRCODE='55000';
+  END IF;
+
+  IF v_old_kind IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.kb_management_token_root_vault_permit p
+       WHERE p.backend_pid=pg_catalog.pg_backend_pid()
+         AND p.transaction_id=pg_catalog.txid_current() AND p.root_kind=v_old_kind) THEN
+    RAISE EXCEPTION 'management token root vault slot: bootstrap authorization required'
+      USING ERRCODE='55000';
+  END IF;
+  IF v_new_kind IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.kb_management_token_root_vault_permit p
+       WHERE p.backend_pid=pg_catalog.pg_backend_pid()
+         AND p.transaction_id=pg_catalog.txid_current() AND p.root_kind=v_new_kind) THEN
+    RAISE EXCEPTION 'management token root vault slot: bootstrap authorization required'
+      USING ERRCODE='55000';
+  END IF;
+
+  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_management_token_root_secret_guard ON org_vault_secret;
+CREATE TRIGGER kb_management_token_root_secret_guard BEFORE INSERT OR UPDATE OR DELETE ON org_vault_secret
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_root_vault_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_secret_truncate_guard ON org_vault_secret;
+CREATE TRIGGER kb_management_token_root_secret_truncate_guard BEFORE TRUNCATE ON org_vault_secret
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_token_root_vault_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_current_guard ON org_vault_current;
+CREATE TRIGGER kb_management_token_root_current_guard BEFORE INSERT OR UPDATE OR DELETE ON org_vault_current
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_root_vault_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_current_truncate_guard ON org_vault_current;
+CREATE TRIGGER kb_management_token_root_current_truncate_guard BEFORE TRUNCATE ON org_vault_current
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_token_root_vault_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_rotation_guard ON org_vault_rotation;
+CREATE TRIGGER kb_management_token_root_rotation_guard BEFORE INSERT OR UPDATE OR DELETE ON org_vault_rotation
+  FOR EACH ROW EXECUTE FUNCTION kb_management_token_root_vault_guard();
+DROP TRIGGER IF EXISTS kb_management_token_root_rotation_truncate_guard ON org_vault_rotation;
+CREATE TRIGGER kb_management_token_root_rotation_truncate_guard BEFORE TRUNCATE ON org_vault_rotation
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_token_root_vault_guard();
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_slot(
+  p_kind TEXT, OUT principal TEXT, OUT cred TEXT, OUT bootstrap_domain TEXT)
+LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  CASE p_kind
+    WHEN 'token' THEN principal:='org:p5-token'; cred:='rs256';
+      bootstrap_domain:='aimee-p5-token-root-bootstrap-v1|';
+    WHEN 'manifest' THEN principal:='org:p5-jwks-manifest'; cred:='ed25519';
+      bootstrap_domain:='aimee-p5-jwks-manifest-root-bootstrap-v1|';
+    ELSE RAISE EXCEPTION 'management token root: invalid kind' USING ERRCODE='22023';
+  END CASE;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_bootstrap_resume(
+  p_kind TEXT,p_custody_key_id TEXT)
+RETURNS TABLE(phase TEXT,bootstrap_id TEXT,wire_id TEXT,public_key BYTEA,public_digest BYTEA,
+  jwk_digest BYTEA,seal_epoch BIGINT,rotation_id BIGINT,v1_wrapped_dek BYTEA,v1_nonce BYTEA,
+  v1_ciphertext BYTEA,v1_tag BYTEA,hwm1_attestation BYTEA,v2_wrapped_dek BYTEA,
+  v2_nonce BYTEA,v2_ciphertext BYTEA,v2_tag BYTEA,hwm2_attestation BYTEA,
+  v1_envelope_digest BYTEA,v2_envelope_digest BYTEA)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_principal TEXT; v_cred TEXT; v_domain TEXT; v_epoch BIGINT;
+        k public.kb_management_token_root%ROWTYPE;
+        r public.org_vault_rotation%ROWTYPE; s1 public.org_vault_secret%ROWTYPE;
+        s2 public.org_vault_secret%ROWTYPE; v_current BIGINT;
+BEGIN
+  IF char_length(COALESCE(p_custody_key_id,'')) NOT BETWEEN 1 AND 600 THEN
+    RAISE EXCEPTION 'management token root resume: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO v_principal,v_cred,v_domain FROM public.kb_management_token_root_slot(p_kind);
+  v_epoch:=public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-token-roots-v1',0));
+  SELECT * INTO k FROM public.kb_management_token_root WHERE root_kind=p_kind FOR UPDATE;
+  IF NOT FOUND THEN
+    IF EXISTS (SELECT 1 FROM public.org_vault_secret WHERE principal=v_principal AND agent='management' AND cred=v_cred)
+       OR EXISTS (SELECT 1 FROM public.org_vault_current WHERE principal=v_principal AND agent='management' AND cred=v_cred)
+       OR EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE
+          (principal=v_principal AND agent='management' AND cred=v_cred) OR key_id=p_custody_key_id) THEN
+      RAISE EXCEPTION 'management token root resume: partial empty state' USING ERRCODE='40001';
+    END IF;
+    RETURN QUERY SELECT 'empty'::TEXT,
+      encode(sha256(convert_to(v_domain||p_custody_key_id,'UTF8')),'hex'),NULL::TEXT,
+      NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,v_epoch,NULL::BIGINT,
+      NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,
+      NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+    RETURN;
+  END IF;
+  IF k.custody_key_id<>p_custody_key_id OR (NOT k.enabled AND k.initial_seal_epoch<>v_epoch) THEN
+    RAISE EXCEPTION 'management token root resume: binding mismatch' USING ERRCODE='40001';
+  END IF;
+  SELECT * INTO r FROM public.org_vault_rotation WHERE key_id=k.custody_key_id
+    AND principal=v_principal AND team_id IS NULL AND agent='management' AND cred=v_cred
+    AND from_version=1 AND to_version=2 FOR UPDATE;
+  SELECT * INTO s1 FROM public.org_vault_secret WHERE principal=v_principal AND team_id IS NULL
+    AND agent='management' AND cred=v_cred AND version=1;
+  SELECT * INTO s2 FROM public.org_vault_secret WHERE principal=v_principal AND team_id IS NULL
+    AND agent='management' AND cred=v_cred AND version=2;
+  SELECT c.version INTO v_current FROM public.org_vault_current c WHERE c.principal=v_principal
+    AND c.agent='management' AND c.cred=v_cred;
+  IF r.id IS NULL OR s1.id IS NULL OR s2.id IS NULL OR v_current IS NULL
+     OR octet_length(s1.hwm_attestation) NOT BETWEEN 1 AND 512
+     OR k.bootstrap_id<>encode(sha256(convert_to(v_domain||k.custody_key_id,'UTF8')),'hex')
+     OR k.public_digest<>sha256(k.public_key)
+     OR (NOT k.enabled AND (k.current_version<>1 OR v_current<>1 OR r.state NOT IN ('staged','activating')))
+     OR (k.enabled AND (k.current_version<>2 OR v_current<>2 OR r.state<>'activated'
+       OR octet_length(s2.hwm_attestation) NOT BETWEEN 1 AND 512
+       OR k.hwm2_attestation_digest<>sha256(s2.hwm_attestation))) THEN
+    RAISE EXCEPTION 'management token root resume: inconsistent state' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT CASE WHEN k.enabled THEN 'final' WHEN r.state='activating' THEN 'cas_done'
+      ELSE 'staged' END,k.bootstrap_id,k.wire_id,k.public_key,k.public_digest,k.jwk_digest,
+    CASE WHEN k.enabled THEN v_epoch ELSE k.initial_seal_epoch END,r.id,
+    s1.wrapped_dek,s1.nonce,s1.ciphertext,s1.tag,s1.hwm_attestation,
+    s2.wrapped_dek,s2.nonce,s2.ciphertext,s2.tag,s2.hwm_attestation,
+    k.v1_envelope_digest,k.v2_envelope_digest;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_bootstrap_stage(
+  p_kind TEXT,p_bootstrap_id TEXT,p_custody_key_id TEXT,p_wire_id TEXT,p_public_key BYTEA,
+  p_public_digest BYTEA,p_jwk_digest BYTEA,p_seal_epoch BIGINT,p_hwm1 BYTEA,
+  p_v1_wrapped BYTEA,p_v1_nonce BYTEA,p_v1_ciphertext BYTEA,p_v1_tag BYTEA,
+  p_v2_wrapped BYTEA,p_v2_nonce BYTEA,p_v2_ciphertext BYTEA,p_v2_tag BYTEA,
+  p_v1_digest BYTEA,p_v2_digest BYTEA) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_principal TEXT; v_cred TEXT; v_domain TEXT; v_epoch BIGINT;
+BEGIN
+  SELECT * INTO v_principal,v_cred,v_domain FROM public.kb_management_token_root_slot(p_kind);
+  IF p_bootstrap_id IS NULL OR p_wire_id IS NULL OR p_public_key IS NULL
+     OR p_public_digest IS NULL OR p_jwk_digest IS NULL OR p_seal_epoch IS NULL
+     OR p_hwm1 IS NULL OR p_v1_wrapped IS NULL OR p_v1_nonce IS NULL
+     OR p_v1_ciphertext IS NULL OR p_v1_tag IS NULL OR p_v2_wrapped IS NULL
+     OR p_v2_nonce IS NULL OR p_v2_ciphertext IS NULL OR p_v2_tag IS NULL
+     OR p_v1_digest IS NULL OR p_v2_digest IS NULL
+     OR p_bootstrap_id<>encode(sha256(convert_to(v_domain||p_custody_key_id,'UTF8')),'hex')
+     OR char_length(COALESCE(p_custody_key_id,'')) NOT BETWEEN 1 AND 600
+     OR char_length(COALESCE(p_wire_id,'')) NOT BETWEEN 1 AND 64
+     OR p_public_digest<>sha256(p_public_key) OR octet_length(p_public_digest)<>32
+     OR octet_length(p_jwk_digest)<>32 OR octet_length(p_hwm1) NOT BETWEEN 1 AND 512
+     OR octet_length(p_v1_wrapped)<>40 OR octet_length(p_v1_nonce)<>12
+     OR octet_length(p_v1_ciphertext) NOT BETWEEN 1 AND 4096 OR octet_length(p_v1_tag)<>16
+     OR octet_length(p_v2_wrapped)<>40 OR octet_length(p_v2_nonce)<>12
+     OR octet_length(p_v2_ciphertext) NOT BETWEEN 1 AND 4096 OR octet_length(p_v2_tag)<>16
+     OR octet_length(p_v1_digest)<>32 OR octet_length(p_v2_digest)<>32
+     OR (p_kind='token' AND (octet_length(p_public_key)<>384 OR get_byte(p_public_key,0)=0
+       OR p_wire_id<>'p5-token-v1-'||substr(encode(sha256(convert_to('aimee.p5.token.public.v1'||chr(10),'UTF8')
+          ||int4send(384)||p_public_key||int4send(3)||decode('010001','hex')),'hex'),1,32)
+       OR p_jwk_digest<>sha256(convert_to('{"kty":"RSA","kid":"'||p_wire_id
+          ||'","use":"sig","alg":"RS256","n":"'
+          ||rtrim(replace(replace(replace(encode(p_public_key,'base64'),chr(10),''),'+','-'),'/','_'),'=')
+          ||'","e":"AQAB"}','UTF8'))))
+     OR (p_kind='manifest' AND (octet_length(p_public_key)<>32
+       OR p_wire_id<>'p5-jwks-root-v1-'||substr(encode(sha256(p_public_key),'hex'),1,32)
+       OR p_jwk_digest<>decode(repeat('00',32),'hex'))) THEN
+    RAISE EXCEPTION 'management token root stage: invalid input' USING ERRCODE='22023';
+  END IF;
+  v_epoch:=public.org_vault_control_require_open();
+  IF v_epoch<>p_seal_epoch THEN RAISE EXCEPTION 'management token root stage: seal changed' USING ERRCODE='40001'; END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-token-roots-v1',0));
+  IF EXISTS (SELECT 1 FROM public.kb_management_token_root WHERE root_kind=p_kind)
+     OR EXISTS (SELECT 1 FROM public.org_vault_secret WHERE principal=v_principal AND agent='management' AND cred=v_cred)
+     OR EXISTS (SELECT 1 FROM public.org_vault_current WHERE principal=v_principal AND agent='management' AND cred=v_cred)
+     OR EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE
+       (principal=v_principal AND agent='management' AND cred=v_cred) OR key_id=p_custody_key_id) THEN
+    RAISE EXCEPTION 'management token root stage: existing state' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO public.kb_management_token_root_vault_permit
+    VALUES(pg_catalog.pg_backend_pid(),pg_catalog.txid_current(),p_kind);
+  INSERT INTO public.org_vault_secret(principal,team_id,agent,cred,version,wrapped_dek,nonce,ciphertext,tag,hwm_attestation)
+    VALUES(v_principal,NULL,'management',v_cred,1,p_v1_wrapped,p_v1_nonce,p_v1_ciphertext,p_v1_tag,p_hwm1),
+          (v_principal,NULL,'management',v_cred,2,p_v2_wrapped,p_v2_nonce,p_v2_ciphertext,p_v2_tag,NULL);
+  INSERT INTO public.org_vault_current VALUES(v_principal,'management',v_cred,1,public.pg_now_text());
+  INSERT INTO public.org_vault_rotation(key_id,principal,team_id,agent,cred,from_version,to_version,state)
+    VALUES(p_custody_key_id,v_principal,NULL,'management',v_cred,1,2,'staged');
+  INSERT INTO public.kb_management_token_root(root_kind,bootstrap_id,custody_key_id,wire_id,
+    public_key,public_exponent,public_digest,jwk_digest,current_version,initial_seal_epoch,
+    v1_envelope_digest,v2_envelope_digest)
+    VALUES(p_kind,p_bootstrap_id,p_custody_key_id,p_wire_id,p_public_key,
+      CASE WHEN p_kind='token' THEN decode('010001','hex') ELSE ''::bytea END,
+      p_public_digest,p_jwk_digest,1,p_seal_epoch,p_v1_digest,p_v2_digest);
+  PERFORM public.kb_audit_worm_append('kb','management-token-roots-bootstrap',
+    'management.token_root.bootstrap.stage',p_custody_key_id,'allow',
+    json_build_object('root_kind',p_kind,'bootstrap_id',p_bootstrap_id,'seal_epoch',p_seal_epoch,
+      'public_digest',encode(p_public_digest,'hex'),'v1_envelope_digest',encode(p_v1_digest,'hex'),
+      'v2_envelope_digest',encode(p_v2_digest,'hex'))::text);
+  DELETE FROM public.kb_management_token_root_vault_permit
+   WHERE backend_pid=pg_catalog.pg_backend_pid() AND transaction_id=pg_catalog.txid_current()
+     AND root_kind=p_kind;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_bootstrap_record_cas(
+  p_kind TEXT,p_bootstrap_id TEXT,p_hwm2 BYTEA) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_principal TEXT; v_cred TEXT; v_domain TEXT; v_epoch BIGINT;
+        k public.kb_management_token_root%ROWTYPE; v_rows BIGINT;
+BEGIN
+  IF p_bootstrap_id IS NULL OR p_hwm2 IS NULL
+     OR octet_length(p_hwm2) NOT BETWEEN 1 AND 512 THEN
+    RAISE EXCEPTION 'management token root CAS: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO v_principal,v_cred,v_domain FROM public.kb_management_token_root_slot(p_kind);
+  v_epoch:=public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-token-roots-v1',0));
+  SELECT * INTO k FROM public.kb_management_token_root WHERE root_kind=p_kind FOR UPDATE;
+  IF k.bootstrap_id IS NULL OR k.bootstrap_id<>p_bootstrap_id OR k.enabled
+     OR k.initial_seal_epoch<>v_epoch THEN
+    RAISE EXCEPTION 'management token root CAS: state mismatch' USING ERRCODE='40001';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.org_vault_secret WHERE principal=v_principal AND agent='management'
+       AND cred=v_cred AND version=2 AND hwm_attestation=p_hwm2)
+     AND EXISTS (SELECT 1 FROM public.org_vault_rotation WHERE key_id=k.custody_key_id
+       AND principal=v_principal AND agent='management' AND cred=v_cred AND state='activating') THEN
+    RETURN;
+  END IF;
+  INSERT INTO public.kb_management_token_root_vault_permit
+    VALUES(pg_catalog.pg_backend_pid(),pg_catalog.txid_current(),p_kind);
+  UPDATE public.org_vault_secret SET hwm_attestation=p_hwm2 WHERE principal=v_principal
+    AND agent='management' AND cred=v_cred AND version=2 AND hwm_attestation IS NULL;
+  GET DIAGNOSTICS v_rows=ROW_COUNT;
+  IF v_rows<>1 THEN RAISE EXCEPTION 'management token root CAS: replay mismatch' USING ERRCODE='23505'; END IF;
+  UPDATE public.org_vault_rotation SET state='activating',hwm_attestation=p_hwm2,updated_at=public.pg_now_text()
+    WHERE key_id=k.custody_key_id AND principal=v_principal AND agent='management' AND cred=v_cred
+      AND from_version=1 AND to_version=2 AND state='staged';
+  GET DIAGNOSTICS v_rows=ROW_COUNT;
+  IF v_rows<>1 THEN RAISE EXCEPTION 'management token root CAS: rotation mismatch' USING ERRCODE='40001'; END IF;
+  DELETE FROM public.kb_management_token_root_vault_permit
+   WHERE backend_pid=pg_catalog.pg_backend_pid() AND transaction_id=pg_catalog.txid_current()
+     AND root_kind=p_kind;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_root_bootstrap_finalize(
+  p_kind TEXT,p_bootstrap_id TEXT) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_principal TEXT; v_cred TEXT; v_domain TEXT; k public.kb_management_token_root%ROWTYPE;
+        v_hwm2 BYTEA; v_epoch BIGINT; v_rows BIGINT;
+BEGIN
+  SELECT * INTO v_principal,v_cred,v_domain FROM public.kb_management_token_root_slot(p_kind);
+  IF p_bootstrap_id IS NULL THEN
+    RAISE EXCEPTION 'management token root finalize: invalid input' USING ERRCODE='22023';
+  END IF;
+  v_epoch:=public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-token-roots-v1',0));
+  SELECT * INTO k FROM public.kb_management_token_root WHERE root_kind=p_kind FOR UPDATE;
+  IF k.bootstrap_id IS NULL OR k.bootstrap_id<>p_bootstrap_id OR NOT k.enabled
+     AND k.initial_seal_epoch<>v_epoch THEN
+    RAISE EXCEPTION 'management token root finalize: state mismatch' USING ERRCODE='40001';
+  END IF;
+  IF k.enabled THEN RETURN; END IF;
+  SELECT s.hwm_attestation INTO STRICT v_hwm2 FROM public.org_vault_secret s
+   WHERE s.principal=v_principal AND s.team_id IS NULL
+     AND s.agent='management' AND s.cred=v_cred AND s.version=2 FOR UPDATE;
+  IF octet_length(v_hwm2) NOT BETWEEN 1 AND 512 OR NOT EXISTS (
+      SELECT 1 FROM public.org_vault_rotation r WHERE r.key_id=k.custody_key_id
+       AND r.principal=v_principal AND r.agent='management' AND r.cred=v_cred
+       AND r.from_version=1 AND r.to_version=2 AND r.state='activating'
+       AND r.hwm_attestation=v_hwm2) THEN
+    RAISE EXCEPTION 'management token root finalize: CAS not recorded' USING ERRCODE='40001';
+  END IF;
+  INSERT INTO public.kb_management_token_root_vault_permit
+    VALUES(pg_catalog.pg_backend_pid(),pg_catalog.txid_current(),p_kind);
+  UPDATE public.org_vault_current SET version=2,updated_at=public.pg_now_text()
+    WHERE principal=v_principal AND agent='management' AND cred=v_cred AND version=1;
+  GET DIAGNOSTICS v_rows=ROW_COUNT;
+  IF v_rows<>1 THEN RAISE EXCEPTION 'management token root finalize: current mismatch' USING ERRCODE='40001'; END IF;
+  UPDATE public.org_vault_rotation SET state='activated',updated_at=public.pg_now_text()
+    WHERE key_id=k.custody_key_id AND principal=v_principal AND team_id IS NULL
+      AND agent='management' AND cred=v_cred AND from_version=1 AND to_version=2
+      AND state='activating' AND hwm_attestation=v_hwm2;
+  GET DIAGNOSTICS v_rows=ROW_COUNT;
+  IF v_rows<>1 THEN RAISE EXCEPTION 'management token root finalize: rotation mismatch' USING ERRCODE='40001'; END IF;
+  UPDATE public.kb_management_token_root SET current_version=2,enabled=true,
+    hwm2_attestation_digest=sha256(v_hwm2) WHERE root_kind=p_kind AND NOT enabled;
+  GET DIAGNOSTICS v_rows=ROW_COUNT;
+  IF v_rows<>1 THEN RAISE EXCEPTION 'management token root finalize: registry mismatch' USING ERRCODE='40001'; END IF;
+  PERFORM public.kb_audit_worm_append('kb','management-token-roots-bootstrap',
+    'management.token_root.bootstrap.activate',k.custody_key_id,'allow',
+    json_build_object('root_kind',p_kind,'bootstrap_id',p_bootstrap_id,
+      'hwm2_attestation_digest',encode(sha256(v_hwm2),'hex'))::text);
+  DELETE FROM public.kb_management_token_root_vault_permit
+   WHERE backend_pid=pg_catalog.pg_backend_pid() AND transaction_id=pg_catalog.txid_current()
+     AND root_kind=p_kind;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_jwks_publication_root_inspect()
+RETURNS SETOF kb_management_jwks_publication_root LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp AS $$ SELECT * FROM public.kb_management_jwks_publication_root WHERE singleton=1 $$;
+
+CREATE OR REPLACE FUNCTION kb_management_jwks_publication_root_bind(
+  p_custody_key_id TEXT,p_helper TEXT,p_verifier_domain TEXT,p_identity_digest BYTEA,p_hwm1 BYTEA)
+RETURNS VOID LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE x public.kb_management_jwks_publication_root%ROWTYPE;
+BEGIN
+  IF p_identity_digest IS NULL OR p_hwm1 IS NULL
+     OR char_length(COALESCE(p_custody_key_id,'')) NOT BETWEEN 1 AND 600
+     OR char_length(COALESCE(p_helper,'')) NOT BETWEEN 1 AND 128
+     OR char_length(COALESCE(p_verifier_domain,'')) NOT BETWEEN 1 AND 128
+     OR octet_length(p_identity_digest)<>32 OR octet_length(p_hwm1) NOT BETWEEN 1 AND 512 THEN
+    RAISE EXCEPTION 'management JWKS publication root: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_require_open();
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('kb-management-token-roots-v1',0));
+  IF (SELECT count(*) FROM public.kb_management_token_root WHERE enabled AND current_version=2)<>2 THEN
+    RAISE EXCEPTION 'management JWKS publication root: roots not final' USING ERRCODE='40001';
+  END IF;
+  SELECT * INTO x FROM public.kb_management_jwks_publication_root WHERE singleton=1 FOR UPDATE;
+  IF FOUND THEN
+    IF x.custody_key_id=p_custody_key_id AND x.helper=p_helper
+       AND x.verifier_domain=p_verifier_domain AND x.identity_digest=p_identity_digest
+       AND x.hwm1_attestation=p_hwm1 THEN RETURN; END IF;
+    RAISE EXCEPTION 'management JWKS publication root: replay mismatch' USING ERRCODE='23505';
+  END IF;
+  INSERT INTO public.kb_management_jwks_publication_root VALUES
+    (1,p_custody_key_id,p_helper,p_verifier_domain,p_identity_digest,p_hwm1,sha256(p_hwm1),now());
+  PERFORM public.kb_audit_worm_append('kb','management-token-roots-bootstrap',
+    'management.jwks.publication_root.bind',p_custody_key_id,'allow',
+    json_build_object('helper',p_helper,'verifier_domain',p_verifier_domain,
+      'identity_digest',encode(p_identity_digest,'hex'),
+      'hwm1_attestation_digest',encode(sha256(p_hwm1),'hex'))::text);
+END $$;
+
+REVOKE ALL ON TABLE kb_management_token_root,kb_management_jwks_publication_root,
+  kb_management_token_root_vault_permit FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_token_root_registry_guard(),
+  kb_management_token_root_vault_guard(),
+  kb_management_token_root_slot(TEXT),
+  kb_management_token_root_bootstrap_resume(TEXT,TEXT),
+  kb_management_token_root_bootstrap_stage(TEXT,TEXT,TEXT,TEXT,BYTEA,BYTEA,BYTEA,BIGINT,BYTEA,
+    BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA),
+  kb_management_token_root_bootstrap_record_cas(TEXT,TEXT,BYTEA),
+  kb_management_token_root_bootstrap_finalize(TEXT,TEXT),
+  kb_management_jwks_publication_root_inspect(),
+  kb_management_jwks_publication_root_bind(TEXT,TEXT,TEXT,BYTEA,BYTEA) FROM PUBLIC;
+
 REVOKE ALL ON FUNCTION kb_server_registry_pending(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_finalize(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_server_registry_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
