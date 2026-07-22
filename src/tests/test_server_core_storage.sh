@@ -22,6 +22,11 @@ if (
     echo "core-storage: accepted an immutable zero core-size limit" >&2
     exit 1
 fi
+(
+    ulimit -c 0
+    ulimit -Hc 0
+    AIMEE_REQUIRE_PERSISTENT_CORES=0 aimee_enable_core_dumps 2>/dev/null
+)
 
 printf '%s/core.%%e.%%p\n' "$core_dir" > "$pattern_file"
 AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
@@ -38,6 +43,8 @@ if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     echo "core-storage: accepted a non-persistent absolute core_pattern" >&2
     exit 1
 fi
+AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
+    AIMEE_REQUIRE_PERSISTENT_CORES=0 aimee_prepare_core_storage 2>/dev/null
 
 printf '|/usr/bin/collector %%p\n' > "$pattern_file"
 if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
@@ -45,6 +52,8 @@ if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     echo "core-storage: accepted an unverifiable external core collector" >&2
     exit 1
 fi
+AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
+    AIMEE_REQUIRE_PERSISTENT_CORES=0 aimee_prepare_core_storage 2>/dev/null
 
 printf 'core.%%p\n' > "$pattern_file"
 if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
@@ -52,6 +61,9 @@ if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
     echo "core-storage: required mode accepted a relative core_pattern" >&2
     exit 1
 fi
+AIMEE_HOME=/not-the-current-directory AIMEE_CORE_DIR="$core_dir" \
+    AIMEE_CORE_PATTERN_FILE="$pattern_file" AIMEE_REQUIRE_PERSISTENT_CORES=0 \
+    aimee_prepare_core_storage 2>/dev/null
 
 printf '%s/../outside/core.%%p\n' "$core_dir" > "$pattern_file"
 if AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_PATTERN_FILE="$pattern_file" \
@@ -84,7 +96,7 @@ case "$host_pattern" in
     *)
         # The production verifier performs the real crash and expands kernel
         # tokens with its captured PID; do not duplicate that logic in the test.
-        AIMEE_CORE_DIR="$core_dir" AIMEE_CORE_SELFTEST=1 aimee_verify_core_dump
+        AIMEE_CORE_DIR="$tmp/core-alias/" AIMEE_CORE_SELFTEST=1 aimee_verify_core_dump
         ;;
 esac
 

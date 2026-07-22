@@ -33,6 +33,7 @@ aimee_enable_core_dumps() {
         printf '[server-entrypoint] %s: effective core-size resource limit is zero\n' \
             "$([ "$_required" = 1 ] && printf fatal || printf warning)" >&2
         [ "$_required" = 1 ] && return 1
+        return 0
     fi
 }
 
@@ -108,6 +109,7 @@ aimee_prepare_core_storage() {
                 "$([ "$_required" = 1 ] && printf fatal || printf warning)" \
                 "$_core_dir" "$_core_pattern" >&2
             [ "$_required" = 1 ] && return 1
+            return 0
             ;;
         *)
             # A relative pattern is resolved from the process cwd. The image's
@@ -125,6 +127,7 @@ aimee_prepare_core_storage() {
                     "${PWD:-unknown}" "$_core_pattern" >&2
                 [ "$_required" = 1 ] && return 1
             fi
+            return 0
             ;;
     esac
 }
@@ -137,6 +140,13 @@ aimee_verify_core_dump() {
     _core_dir=${AIMEE_CORE_DIR:-/mnt/media/cores}
     _pattern_file=${AIMEE_CORE_PATTERN_FILE:-/proc/sys/kernel/core_pattern}
     _core_pattern=$(cat "$_pattern_file" 2>/dev/null) || return 1
+    _core_dir=$(readlink -f "$_core_dir" 2>/dev/null) || return 1
+    case "$_core_pattern" in
+        /*)
+            _pattern_parent=$(readlink -f "$(dirname "$_core_pattern")" 2>/dev/null) || return 1
+            _core_pattern="$_pattern_parent/$(basename "$_core_pattern")"
+            ;;
+    esac
     if ! aimee_core_pattern_has_pid "$_core_pattern"; then
             if [ "$(cat /proc/sys/kernel/core_uses_pid 2>/dev/null || printf 0)" = 1 ]; then
                 _core_pattern="$_core_pattern.%p"
