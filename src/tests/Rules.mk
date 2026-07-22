@@ -566,6 +566,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
                 $(TESTPREFIX)/unit-test-kb-workload-helper-posix \
                 $(TESTPREFIX)/unit-test-kb-workload-provider
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
+TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
@@ -1868,6 +1869,11 @@ $(TESTPREFIX)/unit-test-management-client-instance: \
     $(OBJDIR)/tests/test_management_client_instance.o \
     $(OBJDIR)/db2/management_client_instance.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-management-action-journal: \
+    $(OBJDIR)/tests/test_management_action_journal.o \
+    $(OBJDIR)/db2/management_action_journal.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle: \
     $(OBJDIR)/tests/test_kb_management_cert_lifecycle.o \
