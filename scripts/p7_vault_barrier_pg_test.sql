@@ -130,6 +130,7 @@ DECLARE expected TEXT[] := ARRAY[
   'kb_management_jwks_publication_root_bind',
   'kb_management_jwks_publication_roots',
   'kb_management_jwks_publication_stage',
+  'kb_management_jwks_runtime_fetch',
   'kb_management_status_key_admit','kb_management_status_key_bootstrap_finalize',
   'kb_management_status_key_bootstrap_prepare_activation',
   'kb_management_status_key_bootstrap_resume','kb_management_status_key_bootstrap_stage',
@@ -264,6 +265,15 @@ BEGIN
   END IF;
 END $$;
 
+INSERT INTO kb_server_registry(server_id,cert_cn,mgmt_cert_cn,team_id,endpoint,status,
+ client_issuer,client_serial_norm,client_fingerprint)
+VALUES('p7-jwks-reader','p7-jwks-reader-client','p7-jwks-reader-mgmt',970721,
+ 'https://p7-jwks-reader.invalid','active','p7-jwks-reader-issuer','01',repeat('c',64));
+INSERT INTO kb_enrollments(scope,fingerprint,serial,state,expires_at,revoked_at,legacy,
+ cert_issuer,cert_serial_norm,authority_id)
+VALUES('p5-server-client',repeat('c',64),'01','active','2999-01-01 00:00:00+00','',0,
+ 'p7-jwks-reader-issuer','01',repeat('c',32));
+
 UPDATE kb_vault_control SET sealed=true,maintenance_kind='reseal',maintenance_id='op-guard'
  WHERE singleton=1;
 
@@ -291,6 +301,8 @@ SELECT p7_expect_sealed($q$SELECT * FROM org_vault_key_use_admit('owner',970721,
 SELECT p7_expect_sealed($q$SELECT * FROM kb_management_jwks_publication_inspect()$q$);
 SELECT p7_expect_sealed($q$SELECT * FROM kb_management_jwks_publication_roots()$q$);
 SELECT p7_expect_sealed($q$SELECT * FROM kb_management_jwks_publication_final()$q$);
+SELECT p7_expect_sealed($q$SELECT * FROM kb_management_jwks_runtime_fetch(
+ 'p7-jwks-reader-issuer','01',repeat('c',64))$q$);
 SELECT p7_expect_sealed($q$SELECT kb_management_jwks_manifest_key_admit(repeat('a',64),1,repeat('b',64),'custody','manifest',decode(repeat('01',32),'hex'),'\x01')$q$);
 SELECT p7_expect_sealed($q$SELECT kb_management_jwks_publication_record_cas(1,repeat('b',64),'\x01')$q$);
 SELECT p7_expect_sealed($q$SELECT kb_management_jwks_publication_finalize(1,repeat('b',64))$q$);

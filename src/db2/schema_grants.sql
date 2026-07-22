@@ -414,7 +414,7 @@ BEGIN
   FOREACH role_name IN ARRAY ARRAY['aimee_kb_runtime','aimee_kb_status',
     'aimee_kb_status_definer','aimee_kb_status_login','aimee_kb_status_authority',
     'aimee_kb_status_provision','aimee_kb_token_roots_provision',
-    'aimee_kb_migrate','aimee_kb_jwks_publish'] LOOP
+    'aimee_kb_migrate','aimee_kb_jwks_publish','aimee_kb_jwks_runtime_definer'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
       EXECUTE format('REVOKE ALL ON TABLE '
        'kb_management_jwks_publication_candidate,kb_management_jwks_publication_generation,'
@@ -427,7 +427,8 @@ BEGIN
        'kb_management_jwks_publication_stage(BIGINT,TEXT,BIGINT,BIGINT,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,BYTEA,TEXT,BYTEA,BYTEA,TEXT,BYTEA,BYTEA,BYTEA,BIGINT),'
        'kb_management_jwks_publication_record_cas(BIGINT,TEXT,BYTEA),'
        'kb_management_jwks_publication_finalize(BIGINT,TEXT),'
-       'kb_management_jwks_publication_final() FROM %I',role_name);
+       'kb_management_jwks_publication_final(),'
+       'kb_management_jwks_runtime_fetch(TEXT,TEXT,TEXT) FROM %I',role_name);
     END IF;
   END LOOP;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_jwks_publish') THEN
@@ -442,6 +443,43 @@ BEGIN
       public.kb_management_jwks_publication_finalize(BIGINT,TEXT),
       public.kb_management_jwks_publication_final() TO aimee_kb_jwks_publish;
   END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    GRANT EXECUTE ON FUNCTION public.kb_management_jwks_runtime_fetch(TEXT,TEXT,TEXT)
+      TO aimee_kb_runtime;
+  END IF;
+END
+$$;
+
+-- P5-C2c online JWKS reader.  A dedicated non-login definer is the only role
+-- allowed to cross FORCE RLS for the certificate tuple.  It has read-only
+-- access to the exact join closure and invokes (but does not own) the existing
+-- vault barrier helper.  Runtime can execute only the fixed facade and is not a
+-- member of this role.
+DO $$
+DECLARE role_name TEXT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_jwks_runtime_definer') THEN
+    RAISE EXCEPTION 'aimee_kb_jwks_runtime_definer role is required';
+  END IF;
+  EXECUTE 'ALTER FUNCTION public.kb_management_jwks_runtime_fetch(TEXT,TEXT,TEXT) OWNER TO aimee_kb_jwks_runtime_definer';
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_jwks_runtime_definer;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_jwks_runtime_definer;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_jwks_runtime_definer;
+  GRANT SELECT ON public.kb_server_registry,public.kb_enrollments,
+    public.kb_management_jwks_publication_candidate,
+    public.kb_management_jwks_publication_generation,
+    public.kb_management_jwks_publication_registry TO aimee_kb_jwks_runtime_definer;
+  GRANT EXECUTE ON FUNCTION public.org_vault_control_require_open()
+    TO aimee_kb_jwks_runtime_definer;
+  FOREACH role_name IN ARRAY ARRAY['aimee_kb_owner','aimee_kb_status',
+    'aimee_kb_status_definer','aimee_kb_status_login','aimee_kb_status_authority',
+    'aimee_kb_status_provision','aimee_kb_token_roots_provision',
+    'aimee_kb_migrate','aimee_kb_jwks_publish'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION '
+        'public.kb_management_jwks_runtime_fetch(TEXT,TEXT,TEXT) FROM %I',role_name);
+    END IF;
+  END LOOP;
 END
 $$;
 
