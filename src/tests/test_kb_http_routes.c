@@ -2067,6 +2067,8 @@ static void test_enroll_route(void)
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", tmp);
    remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", tmp);
+   remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", tmp);
    rmdir(p);
    snprintf(p, sizeof(p), "%s/kb-enroll-tokens", tmp);
@@ -2160,6 +2162,8 @@ static void test_enroll_redeem_route(void)
    snprintf(p, sizeof(p), "%s/kb-ca/ca.pem", cfg);
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", cfg);
+   remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", cfg);
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", cfg);
    rmdir(p);
@@ -2335,6 +2339,8 @@ static void test_mtls_serve(void)
       remove(p);
       snprintf(p, sizeof(p), "%s/ca-key.pem", cadir);
       remove(p);
+      snprintf(p, sizeof(p), "%s/ca-key.vault", cadir);
+      remove(p);
       rmdir(cadir);
    }
 
@@ -2388,6 +2394,8 @@ static void test_mtls_listener(void)
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca.pem", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
+   remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
@@ -2520,6 +2528,8 @@ static void test_mtls_listener(void)
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca.pem", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
+   remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);

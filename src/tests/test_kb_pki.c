@@ -207,7 +207,66 @@ static void cleanup_dir(const char *dir)
    remove(p);
    snprintf(p, sizeof(p), "%s/ca-key.pem", dir);
    remove(p);
+   snprintf(p, sizeof(p), "%s/ca-key.vault", dir);
+   remove(p);
    rmdir(dir);
+}
+
+static int all_zero(const void *p, size_t n)
+{
+   const unsigned char *bytes = p;
+   unsigned char any = 0;
+   for (size_t i = 0; i < n; ++i)
+      any |= bytes[i];
+   return any == 0;
+}
+
+static void test_custodied_load_status(const kb_pki_ca_t *ca)
+{
+   char dir[256], path[512];
+   snprintf(dir, sizeof(dir), "/tmp/aimee_ca_typed_%d", (int)getpid());
+   cleanup_dir(dir);
+   kb_pki_ca_t loaded;
+   memset(&loaded, 0xa5, sizeof(loaded));
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_UNAVAILABLE);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_load_custodied_ex(NULL, &loaded) == KB_PKI_CA_LOAD_INVALID);
+   assert(all_zero(&loaded, sizeof(loaded)));
+
+   /* Legacy plaintext input remains compatible, but is now validated as an
+    * exact certificate/private-key pair by the typed loader. */
+   assert(kb_pki_ca_save(dir, ca) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_OK);
+   assert(!strcmp(loaded.cert_pem, ca->cert_pem));
+   snprintf(path, sizeof(path), "%s/ca-key.pem", dir);
+   FILE *key_file = fopen(path, "ab");
+   static const unsigned char nul_junk[] = {0, 'j', 'u', 'n', 'k'};
+   assert(key_file && fwrite(nul_junk, 1, sizeof(nul_junk), key_file) == sizeof(nul_junk) &&
+          fclose(key_file) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_save(dir, ca) == 0);
+
+   /* A present encrypted record is authoritative. Malformed bytes are
+    * integrity failure and may not fall back to the legacy key. */
+   snprintf(path, sizeof(path), "%s/ca-key.vault", dir);
+   FILE *file = fopen(path, "wb");
+   assert(file && fwrite("bad\n", 1, 4, file) == 4 && fclose(file) == 0);
+   memset(&loaded, 0xa5, sizeof(loaded));
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(kb_pki_ca_load_custodied(dir, &loaded) == -1);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   assert(unlink(path) == 0);
+
+   /* Checked reads reject a symlinked public certificate as persisted-state
+    * corruption rather than following it. */
+   snprintf(path, sizeof(path), "%s/ca.pem", dir);
+   assert(unlink(path) == 0 && symlink("/dev/null", path) == 0);
+   assert(kb_pki_ca_load_custodied_ex(dir, &loaded) == KB_PKI_CA_LOAD_INTEGRITY);
+   assert(all_zero(&loaded, sizeof(loaded)));
+   cleanup_dir(dir);
+   printf("  custodied_load_status: ok\n");
 }
 
 static void test_persistence(const kb_pki_ca_t *ca)
@@ -488,6 +547,7 @@ int main(void)
    test_fingerprint(&ca);
    test_issue_and_verify(&ca);
    test_persistence(&ca);
+   test_custodied_load_status(&ca);
    test_load_or_create();
    test_sign_csr(&ca);
    test_role_csr_profiles(&ca);

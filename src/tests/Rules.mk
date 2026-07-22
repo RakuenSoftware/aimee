@@ -534,6 +534,7 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-workload-wire \
                 $(TESTPREFIX)/unit-test-kb-workload-helper-posix \
                 $(TESTPREFIX)/unit-test-kb-workload-provider
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
 	@# Point the run's HOME at a throwaway dir so a test that does NOT isolate its
 	@# own environment defaults to $$th/.config/aimee, never the developer's real
@@ -1788,6 +1789,32 @@ $(TESTPREFIX)/unit-test-management-client-instance: \
     $(OBJDIR)/tests/test_management_client_instance.o \
     $(OBJDIR)/db2/management_client_instance.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-management-cert-lifecycle: \
+    $(OBJDIR)/tests/test_kb_management_cert_lifecycle.o \
+    $(OBJDIR)/kb/kb_management_cert_codec.o \
+    $(OBJDIR)/kb/kb_management_cert_crypto.o \
+    $(OBJDIR)/kb/kb_management_cert_binding.o \
+    $(OBJDIR)/tests/p5b2c/kb_management_cert_lifecycle.o \
+    $(OBJDIR)/tests/p5b2c/kb_management_cert_storage.o \
+    $(OBJDIR)/kb/pki.o \
+    $(OBJDIR)/kb/kb_workload_provider.o \
+    $(OBJDIR)/kb/kb_workload_helper_posix.o \
+    $(OBJDIR)/kb/kb_workload_wire.o \
+    $(OBJDIR)/kb/kb_workload_proof.o \
+    $(OBJDIR)/kb/kb_workload_jwt.o \
+    $(OBJDIR)/modules/aws/aws_sts.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(OBJDIR)/tests/test_kb_management_cert_lifecycle.o: C_FLAGS += -DAIMEE_MANAGEMENT_CERT_TESTING
+
+$(OBJDIR)/tests/p5b2c/kb_management_cert_lifecycle.o: kb/kb_management_cert_lifecycle.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -DAIMEE_MANAGEMENT_CERT_TESTING -o $@ $<
+
+$(OBJDIR)/tests/p5b2c/kb_management_cert_storage.o: kb/kb_management_cert_storage.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -DAIMEE_MANAGEMENT_CERT_TESTING -o $@ $<
 
 $(TESTPREFIX)/unit-test-kb-workload-wire: $(OBJDIR)/tests/test_kb_workload_wire.o \
                                             $(OBJDIR)/kb/kb_workload_wire.o
