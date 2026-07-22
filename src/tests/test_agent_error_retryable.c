@@ -31,6 +31,14 @@ int main(void)
    assert(agent_error_is_retryable("HTTP 401 unauthorized") == 0);
    assert(agent_error_is_retryable("model refused the request") == 0);
 
+   /* A hard credential/subscription failure must remain a hard health signal
+    * for that agent while still allowing an unpinned delegation to try a peer. */
+   assert(agent_rc_should_try_another(-1, "HTTP 401 unauthorized") == 1);
+   assert(agent_rc_should_try_another(-1, "HTTP 403 authentication failed") == 1);
+   assert(agent_rc_should_try_another(-1, "usage limit for this billing cycle") == 1);
+   assert(agent_rc_should_try_another(-1, "provider quota exhausted") == 1);
+   assert(agent_rc_should_try_another(-1, "HTTP 400 invalid request") == 0);
+
    /* Saturation is NOT a retryable provider error. agent_dispatch_one signals it
     * out-of-band via AGENT_RC_AT_LIMIT and callers key off that rc (never this
     * string), so the "at concurrency limit" message must stay non-retryable — else

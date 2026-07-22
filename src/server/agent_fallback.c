@@ -43,7 +43,17 @@ int agent_rc_should_try_another(int rc, const char *error)
 {
    if (rc == 0)
       return 0;
-   return rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error);
+   if (rc == AGENT_RC_AT_LIMIT || agent_error_is_retryable(error))
+      return 1;
+
+   /* Authentication and subscription failures are hard failures for the
+    * attempted agent, but not for an unpinned delegation. Try another enabled,
+    * role-eligible peer now; provider health still records the failed agent as
+    * a hard error, so it is not selected repeatedly during the same outage. */
+   return error && (strstr(error, "HTTP 401") != NULL || strstr(error, "HTTP 403") != NULL ||
+                    strstr(error, "authentication failed") != NULL ||
+                    strstr(error, "usage limit") != NULL ||
+                    strstr(error, "billing cycle") != NULL || strstr(error, "quota") != NULL);
 }
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)

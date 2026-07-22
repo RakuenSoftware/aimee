@@ -222,6 +222,12 @@ int agent_dispatch_one(const agent_t *ag, const agent_network_t *net, const char
 {
    if (!ag || !out)
       return -1;
+   /* The durable row must describe the agent actually attempted, including a
+    * fallback peer. The CLI creates the row before routing, so its configured
+    * default is only a placeholder until dispatch reaches this choke point. */
+   int durable_job_id = agent_get_durable_job_id();
+   if (durable_job_id > 0)
+      db1_agent_job_set_agent(durable_job_id, ag->name);
    /* Own `out` from the first instruction, exactly like the executors: memset it so
     * EVERY early-return path (at-limit, bad-precondition) leaves a clean result —
     * out->response == NULL — and a caller that frees out->response after a non-zero
