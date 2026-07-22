@@ -27,6 +27,29 @@ components:
       properties:
         status: { type: string, example: ok }
         service: { type: string, example: aimee-server }
+    ReadyResponse:
+      type: object
+      properties:
+        ready: { type: boolean, example: true }
+        status:
+          type: string
+          description: "ok when every dependency sampled ok; degraded when one failed; unknown when not sampled yet or the sample is stale"
+          enum: [ok, degraded, unknown]
+        service: { type: string, example: aimee-server }
+        sampled_at:
+          type: integer
+          nullable: true
+          description: "Epoch seconds when the snapshot was taken; null before the first sample"
+        age_seconds:
+          type: integer
+          nullable: true
+          description: "Age of the snapshot in seconds; null before the first sample"
+        dependencies:
+          type: object
+          description: "Per-dependency state; each value is ok, fail, or unknown"
+          properties:
+            db1: { type: string, example: ok }
+            kb: { type: string, example: ok }
     VersionResponse:
       type: object
       properties:
@@ -272,6 +295,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /ready:
+    get:
+      summary: Readiness probe
+      description: >
+        Reports whether the server can serve work right now, with per-dependency
+        state. Distinct from /health, which is liveness only and always returns
+        200 while the process is up. An orchestrator should restart on a
+        /health failure but only drain on a /ready failure. The answer comes
+        from a snapshot sampled on a background interval, so this route performs
+        no dependency I/O. It fails closed: before the first sample, past the
+        staleness bound, or when any dependency failed, the answer is 503.
+      security: []
+      responses:
+        "200":
+          description: Every dependency sampled ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+        "503":
+          description: "Not ready: a dependency failed, or state is unknown because no sample has completed or the snapshot is stale"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
   /management/action:
     post:
       summary: Execute an authenticated management control-plane action
