@@ -325,6 +325,111 @@ BEGIN
 END
 $$;
 
+-- P5-C2d dedicated online token authority.  The LOGIN runtime receives only
+-- four fixed entry points.  A separate non-login function owner crosses FORCE
+-- RLS with the exact read/lock/insert closure needed by those functions; ordinary kb,
+-- publisher, provisioner, status and migration roles receive no authority.
+DO $$
+DECLARE role_name TEXT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles
+      WHERE rolname='aimee_kb_token_authority_definer') OR
+     NOT EXISTS (SELECT 1 FROM pg_roles
+      WHERE rolname='aimee_kb_token_authority_runtime') OR
+     NOT EXISTS (SELECT 1 FROM pg_roles
+      WHERE rolname='aimee_kb_token_authority_store_owner') THEN
+    RAISE EXCEPTION 'management token authority roles are required';
+  END IF;
+
+  ALTER TABLE public.kb_management_token_key_use_intent OWNER TO aimee_kb_token_authority_store_owner;
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_key_use_worm_guard() OWNER TO aimee_kb_token_authority_store_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_snapshot(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_admit(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_use(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_readback(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_finalize(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_token_authority_definer;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_token_authority_definer;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_token_authority_definer;
+  GRANT EXECUTE ON FUNCTION public.kb_management_token_authority_snapshot(TEXT,TEXT)
+    TO aimee_kb_token_authority_definer;
+  GRANT SELECT ON public.kb_management_action_intent,
+    public.kb_management_action_outcome,public.kb_team_membership,
+    public.kb_admin_grant,public.kb_team_lead,public.kb_server_registry,
+    public.kb_enrollments,public.kb_management_instance,
+    public.kb_management_instance_issue,public.kb_cert_revocation_generation,
+    public.kb_management_jwks_publication_registry,
+    public.kb_management_jwks_publication_generation,
+    public.kb_management_jwks_publication_candidate,
+    public.kb_management_token_root,public.org_vault_current,
+    public.org_vault_secret,public.org_vault_rotation,public.kb_vault_control,
+    public.kb_management_token_key_use_intent TO aimee_kb_token_authority_definer;
+  -- PostgreSQL requires UPDATE privilege on at least one column of each table
+  -- named by SELECT ... FOR SHARE.  Grant only an identity/key column; the
+  -- authority has no generic SQL seam and every actual mutation remains outside
+  -- its fixed functions (the key-use table is additionally WORM-triggered).
+  GRANT UPDATE(correlation_id) ON public.kb_management_action_intent,
+    public.kb_management_action_outcome,public.kb_management_token_key_use_intent
+    TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(id) ON public.kb_team_membership,public.kb_admin_grant,
+    public.kb_team_lead,public.kb_enrollments,public.org_vault_secret,
+    public.org_vault_rotation TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(server_id) ON public.kb_server_registry TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(installation_id) ON public.kb_management_instance
+    TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(operation_id) ON public.kb_management_instance_issue
+    TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(singleton) ON public.kb_cert_revocation_generation,
+    public.kb_management_jwks_publication_registry,public.kb_vault_control
+    TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(generation) ON public.kb_management_jwks_publication_generation,
+    public.kb_management_jwks_publication_candidate TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(root_kind) ON public.kb_management_token_root
+    TO aimee_kb_token_authority_definer;
+  GRANT UPDATE(principal) ON public.org_vault_current TO aimee_kb_token_authority_definer;
+  GRANT INSERT ON public.kb_management_token_key_use_intent
+    TO aimee_kb_token_authority_definer;
+  GRANT EXECUTE ON FUNCTION
+    public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_token_authority_definer;
+
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_token_authority_runtime;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_token_authority_runtime;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_token_authority_runtime;
+  GRANT EXECUTE ON FUNCTION
+    public.kb_management_token_authority_admit(TEXT,TEXT),
+    public.kb_management_token_authority_use(TEXT,TEXT),
+    public.kb_management_token_authority_readback(TEXT,TEXT),
+    public.kb_management_token_authority_finalize(TEXT,TEXT)
+    TO aimee_kb_token_authority_runtime;
+
+  REVOKE ALL ON TABLE public.kb_management_token_key_use_intent FROM PUBLIC;
+  REVOKE ALL ON FUNCTION public.kb_management_token_key_use_worm_guard(),
+    public.kb_management_token_authority_snapshot(TEXT,TEXT),
+    public.kb_management_token_authority_admit(TEXT,TEXT),
+    public.kb_management_token_authority_use(TEXT,TEXT),
+    public.kb_management_token_authority_readback(TEXT,TEXT),
+    public.kb_management_token_authority_finalize(TEXT,TEXT) FROM PUBLIC;
+
+  FOREACH role_name IN ARRAY ARRAY['aimee_kb_runtime','aimee_kb_status',
+    'aimee_kb_status_definer','aimee_kb_status_login','aimee_kb_status_authority',
+    'aimee_kb_status_provision','aimee_kb_token_roots_provision','aimee_kb_jwks_publish',
+    'aimee_kb_jwks_runtime_definer','aimee_kb_migrate'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
+      EXECUTE format('REVOKE ALL ON TABLE public.kb_management_token_key_use_intent FROM %I',role_name);
+      EXECUTE format('REVOKE ALL ON FUNCTION '
+        'public.kb_management_token_key_use_worm_guard(),'
+        'public.kb_management_token_authority_snapshot(TEXT,TEXT),'
+        'public.kb_management_token_authority_admit(TEXT,TEXT),'
+        'public.kb_management_token_authority_use(TEXT,TEXT),'
+        'public.kb_management_token_authority_readback(TEXT,TEXT),'
+        'public.kb_management_token_authority_finalize(TEXT,TEXT) FROM %I',role_name);
+    END IF;
+  END LOOP;
+END
+$$;
+
 -- P5-C2a: only the dedicated offline provision role may invoke the fixed-root
 -- state machine. It receives no direct table, sequence, generic vault, or audit
 -- privilege; the owner-run functions carry the narrowly required authority.

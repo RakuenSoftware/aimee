@@ -573,6 +573,8 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-management-client-instance
 TEST_TARGETS += $(TESTPREFIX)/unit-test-management-action-journal
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-management-cert-lifecycle
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority
+TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-mgmt-jwks-cache
 unit-tests: p1-rls-gate-check $(BINARY) $(TEST_TARGETS)
@@ -1871,6 +1873,18 @@ $(TESTPREFIX)/unit-test-kb-mgmt-token-roots-provision: \
     $(OBJDIR)/tests/test_kb_mgmt_token_roots_provision.o \
     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
     $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-token-authority: \
+    $(OBJDIR)/tests/test_kb_mgmt_token_authority.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority.o $(OBJDIR)/kb/kb_mgmt_token.o \
+    $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+    $(OBJDIR)/modules/vault/vault_crypto.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-mgmt-token-authority-ipc: \
+    $(OBJDIR)/tests/test_kb_mgmt_token_authority_ipc.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-mgmt-jwks-publication: \

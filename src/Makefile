@@ -20,6 +20,7 @@ KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
 KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
 KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
 KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
+KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
 WEBCHAT = ../aimee-webchat$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
@@ -469,6 +470,7 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
            kb/kb_management_runtime.c
+KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes
@@ -487,6 +489,21 @@ STATUS_AUTHORITY_VAULT_OBJS = $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_custody_kms.o \
                               $(OBJDIR)/modules/vault/vault_store.o
+
+# P5-C2d online token authority.  The private database adapter, protected
+# signer, and daemon never enter ordinary KB/server/publisher/provisioner
+# targets; ordinary KB links only the bounded IPC client object above.
+TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_daemon.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_service.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority.o \
+                       $(OBJDIR)/kb/kb_vault_protected_use.o \
+                       $(OBJDIR)/kb/kb_mgmt_token.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                       $(OBJDIR)/db2/management_token_authority.o \
+                       $(OBJDIR)/db2/db_postgres.o
+TOKEN_AUTHORITY_VAULT_OBJS = $(STATUS_AUTHORITY_VAULT_OBJS)
 .PHONY: status-authority-core status-authority-package-check
 status-authority-package-check:
 	cd .. && python3 scripts/check-status-authority-packaging.py
@@ -689,12 +706,12 @@ GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
+ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
@@ -1128,6 +1145,19 @@ $(KB_JWKS_PUBLISHER): $(JWKS_PUBLISHER_OBJS) $(JWKS_PUBLISHER_VAULT_OBJS) \
 $(KB_STATUS_AUTHORITY): $(STATUS_AUTHORITY_OBJS) $(STATUS_AUTHORITY_VAULT_OBJS) \
                         $(STATUS_PROVISIONER_PLATFORM_OBJS) $(OBJDIR)/cJSON.o \
                         $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
+	$(AIMEE_RUNTIME_MUTATION_GUARD)
+	$(CC) -o $@ $^ $(L_KB)
+
+.PHONY: token-authority-core token-authority-isolation-check
+token-authority-isolation-check:
+	cd .. && python3 scripts/check-token-authority-isolation.py
+	cd .. && python3 scripts/check-token-authority-isolation.py --plant-test
+
+token-authority-core: token-authority-isolation-check $(KB_TOKEN_AUTHORITY)
+
+$(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
+                       $(STATUS_PROVISIONER_PLATFORM_OBJS) $(OBJDIR)/cJSON.o \
+                       $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
