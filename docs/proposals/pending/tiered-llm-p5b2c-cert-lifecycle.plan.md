@@ -88,7 +88,12 @@ For initial issuance or renewal:
    `aimee.p5.management-key-intent.v1` plaintext, wrap it through B2a with a separate
    fresh challenge and a binding over installation, lineage, generation, operation
    id, authority id, B2b binding digest, both CSR digests, provider kind, fresh nonce and storage
-   id, and durably stage it with the candidate-file protocol. Only after file and
+   id, and durably stage it as a distinct immutable `intent.<operation-id>` record.
+   Its strict outer header carries those exact public fields, the custody-binding
+   digest, ciphertext length and ciphertext; the wrapped plaintext is the key/CSR
+   intent only. It uses the same checked create/reread/sync protocol as a candidate
+   but is a different record type and can never be overwritten or promoted as the
+   final bundle. Only after file and
    directory sync may B2c call `begin_initial` or `begin_renewal` with that operation
    id. Exact replay unwraps the key-intent capsule and reproduces the same CSR and
    digests; it never generates a new key for a persisted pending intent. Missing or
@@ -120,8 +125,9 @@ For initial issuance or renewal:
    literal issuer/subject and both anchors must still match the initial attestation,
    and must recompute the same B2b binding digest. B2a independently verifies the
    current JWT, proof, time and transcript on every call.
-6. Durably stage one immutable candidate file under a name derived only from the
-   operation id. Its strict public header contains magic/version, installation,
+6. Durably stage one immutable `candidate.<operation-id>` file. It is separate from
+   and cannot alias the key-intent record for the same operation. Its strict public
+   header contains a distinct magic/version, installation,
    lineage, generation, operation id, nonce, storage id, public certificate
    metadata/digests, custody-binding digest, ciphertext length and ciphertext.
    Create with `openat(O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600)`, immediately
