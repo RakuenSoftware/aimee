@@ -196,6 +196,7 @@ static char *post_go_roundtable(const char *body, int *status)
 int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 {
    cJSON *payload = cJSON_CreateObject();
+   cJSON *artifact = cJSON_GetObjectItemCaseSensitive(request, "artifact");
    cJSON *prompt = cJSON_GetObjectItemCaseSensitive(request, "prompt");
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(request, "brief");
    cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
@@ -203,12 +204,14 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
    cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
    cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
-   if (!payload || !cJSON_IsString(prompt))
+   const char *artifact_text = cJSON_IsString(artifact) ? artifact->valuestring
+                                                       : (cJSON_IsString(prompt) ? prompt->valuestring : NULL);
+   if (!payload || !artifact_text)
    {
       cJSON_Delete(payload);
       return server_send_error(conn, "roundtable artifact is required", NULL);
    }
-   cJSON_AddStringToObject(payload, "artifact", prompt->valuestring);
+   cJSON_AddStringToObject(payload, "artifact", artifact_text);
    cJSON_AddStringToObject(payload, "artifact_stage",
                            cJSON_IsString(stage) ? stage->valuestring : "frozen_diff");
    if (cJSON_IsString(original))
