@@ -18,12 +18,12 @@
     "vault",
     "workspace",
     "tools",
-    "git"
+    "git",
+    "config",
+    "audit"
   ],
   "debt": [
-    "audit",
     "benchmarks",
-    "config",
     "control-web",
     "governance",
     "roundtable",
