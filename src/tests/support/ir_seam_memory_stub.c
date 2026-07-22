@@ -7,7 +7,7 @@
  * -> 0) with an inert transform, and config_load reports "no config" so enablement
  * falls to that env default. With memory off the seam is a no-op and every byte-exact
  * assertion in those suites is unchanged. */
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "config.h"
 #include <string.h>
 

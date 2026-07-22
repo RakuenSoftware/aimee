@@ -1,6 +1,6 @@
 /* aimee_ir.c -- lifecycle + accessors for the canonical IR. See aimee_ir.h.
  * Pure: depends only on cJSON + libc, so it unit-tests standalone. */
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 
 #include "cJSON.h"
 

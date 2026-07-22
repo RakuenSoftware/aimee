@@ -2,7 +2,7 @@
 
 #include "aimee.h"
 #include "agent.h"
-#include "aimee_ir.h"
+#include <aimee/ir/aimee_ir.h>
 #include "cli_session.h"
 #include "log.h"
 #include <ctype.h>

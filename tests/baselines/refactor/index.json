@@ -235,7 +235,7 @@
         },
         {
           "path": "src/headers/aimee_backend.h",
-          "sha256": "3eda5c992dda89dedafdf1d23157363397f6da8df2b60596f9ad831511debd39"
+          "sha256": "86a4acd8749649f1c5da8d3c0d0d66af5fee282350ad1391097bf6fb79366b84"
         },
         {
           "path": "src/headers/aimee_client.h",
@@ -251,35 +251,27 @@
         },
         {
           "path": "src/headers/aimee_frontend.h",
-          "sha256": "14412adac62ee99cf9cac28d75b16deab10f6b6d6c80aeb11273574893ac7c0e"
+          "sha256": "34cbb77336a259320d64308af440671b483c68629e310538d918c8def26d2eaa"
         },
         {
           "path": "src/headers/aimee_home.h",
           "sha256": "8f9acc32111f2127d3ee4e2815f4a23c9056fcae43d93e92a34ee5e6bc6d28e3"
         },
         {
-          "path": "src/headers/aimee_ir.h",
-          "sha256": "af9499c7c1f2773b27d527372970af4b103c9fb7d8874022e1f8d23cc1d91ab7"
-        },
-        {
-          "path": "src/headers/aimee_ir_metrics.h",
-          "sha256": "ecdb764ef5e8df48a24ab75b0b90a306f239680d2f42abd428dd5c908987010c"
-        },
-        {
           "path": "src/headers/aimee_ir_rescue.h",
-          "sha256": "8af4ec0877d4e0080bdf57a106c7c0fbd8eb8046d8b3e23ec75906ccfc6a41a2"
+          "sha256": "75e149a1e101d923ff15585de9d049bbeae781367085fb8ca2c5fd39fc91bd91"
         },
         {
           "path": "src/headers/aimee_ir_serve.h",
-          "sha256": "9741537d7a6fb7dfdedcf10e1250099127f8faf05b3541ac22a6b46c578a3f58"
+          "sha256": "8ffbf658df61febe20f61fa60e3831288b02ab713214a85b997ed4b5925b1c26"
         },
         {
           "path": "src/headers/aimee_ir_shadow.h",
-          "sha256": "90d6ee376ae0f51ba001b89d904ce7a560a64ac1c78a92a3261cdd7a7043747d"
+          "sha256": "dcc59ee8d19bb39cac1658e8fbc0c241fbbd6e97335d4755a4ae02b3d0870c56"
         },
         {
           "path": "src/headers/aimee_ir_stream.h",
-          "sha256": "d4c59bb107aed47a8aa2da62071121f3a8efed61129d13916c1d104180713717"
+          "sha256": "7d5577d0b89fb6dd54cedd7504eac52d4b2dafeb44a5b448aaac8c9fec6dcef2"
         },
         {
           "path": "src/headers/aimee_tls.h",
@@ -1226,6 +1218,14 @@
           "sha256": "27e7d8888e88408c91821c7a49db28ede28872b7c2f624eb3d0ce3b09020c30f"
         },
         {
+          "path": "src/modules/ir/include/aimee/ir/aimee_ir.h",
+          "sha256": "af9499c7c1f2773b27d527372970af4b103c9fb7d8874022e1f8d23cc1d91ab7"
+        },
+        {
+          "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
+          "sha256": "43229ea4c671e324f45b60504ef6967ffaa06bd8807502527f47b5a963bd78c9"
+        },
+        {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
           "sha256": "c421c6372e0469631fc37a1845815766e6bfa2acf23e94d41126ca14447ac8a0"
         },
@@ -1252,7 +1252,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "7469cee26e9479b9a733548cff0a78816dfc7a0d6427b308c5ee4e3754344506",
+      "sha256": "938e59967ee9d47c34d1d8e0b591eb1de88b3eddc53122b769e63cd1274ec2c4",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

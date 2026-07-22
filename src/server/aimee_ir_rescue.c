@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "agent_protocol.h"
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "cJSON.h"
 #include "delegate_xml_fallback.h"
 

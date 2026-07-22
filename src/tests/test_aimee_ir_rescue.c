@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "aimee_ir_rescue.h"
 #include "cJSON.h"
 

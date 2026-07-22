@@ -7,7 +7,7 @@
 #ifndef DEC_AIMEE_IR_METRICS_H
 #define DEC_AIMEE_IR_METRICS_H 1
 
-#include "aimee_ir.h" /* aimee_wire_t */
+#include <aimee/ir/aimee_ir.h> /* aimee_wire_t */
 
 typedef enum
 {

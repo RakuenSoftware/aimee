@@ -6,9 +6,9 @@
 #include "aimee.h"
 #include "agent.h"
 #include "aimee_ir_shadow.h"
-#include "aimee_backend.h"  /* anthropic_backend_parse / openai_backend_parse */
-#include "aimee_ir.h"       /* aimee_response_t + block accessors */
-#include "tool_call_args.h" /* assistant_message arg normalize/sanitize */
+#include "aimee_backend.h"     /* anthropic_backend_parse / openai_backend_parse */
+#include <aimee/ir/aimee_ir.h> /* aimee_response_t + block accessors */
+#include "tool_call_args.h"    /* assistant_message arg normalize/sanitize */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
