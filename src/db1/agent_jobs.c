@@ -440,6 +440,28 @@ int db1_agent_job_cancel_by_id(int job_id, const char *reason)
    return changed;
 }
 
+int db1_agent_job_cancel_nonterminal_on_restart(const char *reason)
+{
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   static const char *sql =
+       "UPDATE agent_jobs SET status = 'cancelled', cancelled_at = datetime('now'),"
+       " cancel_reason = ?, result = CASE WHEN result = '' THEN 'cancelled: ' || ? ELSE result END,"
+       " updated_at = datetime('now') WHERE status IN ('pending', 'running')";
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   const char *cancel_reason = (reason && reason[0]) ? reason : "orphaned by server restart";
+   sqlite3_bind_text(stmt, 1, cancel_reason, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 2, cancel_reason, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : -1;
+   sqlite3_finalize(stmt);
+   return changed;
+}
+
 int db1_agent_job_cancel_stale(int threshold_seconds, const char *reason)
 {
    sqlite3 *db = db1_conn();
