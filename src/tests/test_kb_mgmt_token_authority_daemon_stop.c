@@ -5,10 +5,12 @@
 #include "kb_mgmt_token_authority_ipc.h"
 
 #include <assert.h>
+#ifdef NDEBUG
+#error "P5-C2d regression tests require active assertions"
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <string.h>
@@ -26,6 +28,10 @@ static int core_disabled;
 static int dump_disabled;
 static int no_new_privs;
 static int accepted;
+static int polled;
+static int read_requests;
+static int issue_calls;
+static int responses;
 static volatile sig_atomic_t saw_sigterm;
 
 static uid_t test_getuid(void)
@@ -40,7 +46,6 @@ static uid_t test_geteuid(void)
 
 static int test_getsockopt(int fd, int level, int option, void *value, socklen_t *length)
 {
-   (void)fd;
    assert(level == SOL_SOCKET);
    if (option == SO_ACCEPTCONN)
    {
@@ -52,7 +57,7 @@ static int test_getsockopt(int fd, int level, int option, void *value, socklen_t
    assert(option == SO_PEERCRED && *length >= sizeof(struct ucred));
    struct ucred *creator = value;
    memset(creator, 0, sizeof(*creator));
-   creator->uid = 0;
+   creator->uid = fd == 3 ? 0 : 1001;
    *length = sizeof(*creator);
    return 0;
 }
@@ -103,11 +108,11 @@ static int test_close(int fd)
 
 static int test_poll(struct pollfd *fds, nfds_t count, int timeout)
 {
-   (void)fds;
    assert(count == 1 && timeout == 250);
-   struct timespec pause = {.tv_nsec = 10000000};
-   nanosleep(&pause, NULL);
-   return 0;
+   assert(!polled && fds[0].fd == 3 && fds[0].events == POLLIN);
+   polled = 1;
+   fds[0].revents = POLLIN;
+   return 1;
 }
 
 static int test_accept4(int fd, struct sockaddr *address, socklen_t *length, int flags)
@@ -115,10 +120,9 @@ static int test_accept4(int fd, struct sockaddr *address, socklen_t *length, int
    (void)fd;
    (void)address;
    (void)length;
-   (void)flags;
+   assert(fd == 3 && flags == SOCK_CLOEXEC && !accepted);
    accepted = 1;
-   errno = EAGAIN;
-   return -1;
+   return 4;
 }
 
 #define accept4    test_accept4
@@ -146,22 +150,23 @@ static int test_accept4(int fd, struct sockaddr *address, socklen_t *length, int
 int kb_mgmt_token_authority_ipc_read_request(int fd, uint32_t timeout_ms, char correlation_id[65],
                                              char jti[65])
 {
-   (void)fd;
-   (void)timeout_ms;
-   (void)correlation_id;
-   (void)jti;
-   return -1;
+   assert(fd == 4 && timeout_ms == 1000 && !read_requests);
+   ++read_requests;
+   memset(correlation_id, 'a', 64);
+   correlation_id[64] = 0;
+   memset(jti, 'b', 64);
+   jti[64] = 0;
+   return 0;
 }
 
 int kb_mgmt_token_authority_ipc_write_response(int fd, uint32_t timeout_ms,
                                                kb_mgmt_token_authority_ipc_result_t status,
                                                const kb_mgmt_token_authority_output_t *out)
 {
-   (void)fd;
-   (void)timeout_ms;
-   (void)status;
-   (void)out;
-   return -1;
+   assert(fd == 4 && timeout_ms == 1000 && status == KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE &&
+          out && out->jwt_len == 0 && out->jwt[0] == 0 && !responses);
+   ++responses;
+   return 0;
 }
 
 int kb_mgmt_token_authority_ipc_socket_matches(int fd, const char *path, gid_t gid, mode_t mode)
@@ -177,10 +182,15 @@ static kb_mgmt_token_authority_ipc_result_t issue(const char *correlation_id, co
                                                   kb_mgmt_token_authority_output_t *out,
                                                   void *opaque)
 {
-   (void)correlation_id;
-   (void)jti;
-   (void)out;
+   assert(correlation_id && correlation_id[0] == 'a' && strlen(correlation_id) == 64);
+   assert(jti && jti[0] == 'b' && strlen(jti) == 64);
+   assert(out && out->jwt_len == 0 && !issue_calls);
    (void)opaque;
+   ++issue_calls;
+   /* SIGTERM is delivered synchronously to this daemon/issue thread. The
+    * handler sets only sig_atomic state; serve_one must finish its response,
+    * after which daemon_run observes the stop and does not accept again. */
+   assert(raise(SIGTERM) == 0);
    return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
 }
 
@@ -188,26 +198,6 @@ static void stop_handler(int signal_number)
 {
    saw_sigterm = signal_number == SIGTERM;
    kb_mgmt_token_authority_daemon_request_stop();
-}
-
-static void *run_daemon(void *opaque)
-{
-   int *result = opaque;
-   static const int preserved[] = {3, 5};
-   kb_mgmt_token_authority_daemon_config_t config = {
-       .listen_fd = 3,
-       .socket_path = KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH,
-       .authority_uid = authority_uid,
-       .kb_uid = 1001,
-       .socket_gid = 1003,
-       .socket_mode = 0660,
-       .timeout_ms = 1000,
-       .preserve_fds = preserved,
-       .preserve_fd_count = 2,
-       .issue = issue,
-   };
-   *result = kb_mgmt_token_authority_daemon_run(&config);
-   return NULL;
 }
 
 int main(void)
@@ -237,13 +227,8 @@ int main(void)
    action.sa_handler = stop_handler;
    sigemptyset(&action.sa_mask);
    assert(sigaction(SIGTERM, &action, NULL) == 0);
-   int daemon_result = -1;
-   pthread_t thread;
-   assert(pthread_create(&thread, NULL, run_daemon, &daemon_result) == 0);
-   struct timespec pause = {.tv_nsec = 30000000};
-   nanosleep(&pause, NULL);
-   assert(raise(SIGTERM) == 0);
-   assert(pthread_join(thread, NULL) == 0);
-   assert(daemon_result == 0 && !accepted && saw_sigterm);
+   assert(kb_mgmt_token_authority_daemon_run(&config) == 0);
+   assert(polled == 1 && accepted == 1 && read_requests == 1 && issue_calls == 1 &&
+          responses == 1 && saw_sigterm);
    return 0;
 }

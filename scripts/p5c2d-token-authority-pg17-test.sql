@@ -21,7 +21,8 @@ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members am
        WHERE am.roleid IN (definer_oid,runtime_oid,store_oid)
-          OR am.member IN (definer_oid,runtime_oid,store_oid)) OR
+          OR am.member IN (definer_oid,runtime_oid,store_oid)
+          OR am.grantor IN (definer_oid,runtime_oid,store_oid)) OR
      (SELECT relowner<>store_oid FROM pg_class
        WHERE oid='public.kb_management_token_key_use_intent'::regclass) THEN
     RAISE EXCEPTION 'P5-C2d definer inheritance escaped';

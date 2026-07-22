@@ -112,8 +112,13 @@ BEGIN
               'aimee_kb_token_authority_runtime','aimee_kb_token_authority_store_owner')
         OR member.rolname IN ('aimee_kb_token_authority_definer',
               'aimee_kb_token_authority_runtime','aimee_kb_token_authority_store_owner')
+     ORDER BY CASE WHEN member.rolname IN ('aimee_kb_token_authority_definer',
+              'aimee_kb_token_authority_runtime','aimee_kb_token_authority_store_owner')
+              THEN 0 ELSE 1 END,granted.rolname,member.rolname
   LOOP
-    EXECUTE format('REVOKE %I FROM %I',edge.granted_role,edge.member_role);
+    -- CASCADE also removes memberships delegated by an authority role through
+    -- ADMIN OPTION; a plain REVOKE can fail on or leave that dependent graph.
+    EXECUTE format('REVOKE %I FROM %I CASCADE',edge.granted_role,edge.member_role);
   END LOOP;
 END
 $$;

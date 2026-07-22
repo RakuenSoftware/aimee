@@ -23,9 +23,9 @@ that accepts only correlation id and JTI and returns either one bounded JWT or a
 daemon runs as a dedicated unprivileged `aimee-token-authority` OS identity which is never shared
 with kb, owns its private configuration and vault/HWM descriptors, and listens on an absolute,
 root-owned Unix socket with a fixed group and mode. The client requires the listener's kernel
-`SO_PEERCRED` UID (root for root-created socket activation, which is outside the threat boundary,
-or the authority UID for an authority-created listener), and the daemon admits only the configured
-kb service UID verified with `SO_PEERCRED`; frames are length-delimited, one request is processed at a time, and
+`SO_PEERCRED` UID of the root-created socket-activation listener (root is outside the threat
+boundary; authority-created listeners are rejected), and the daemon admits only the configured kb
+service UID verified with `SO_PEERCRED`; frames are length-delimited, one request is processed at a time, and
 token bytes never enter argv or environment. The authority sets `PR_SET_DUMPABLE=0`, disables core
 dumps, closes every non-allowlisted descriptor, and cannot be ptraced or inspected through `/proc`
 by the ordinary unprivileged kb identity. No public or production API accepts a signing input, digest, PEM,
@@ -192,7 +192,7 @@ Keep `/v1/management/action` unconditionally 503.
 
 Implementation validation found and fixed two integration-only boundary defects. A root-created
 socket-activation listener reports root as the kernel listener peer even after the daemon drops to
-its dedicated UID, so the client now checks the configured listener creator UID while the daemon
+its dedicated UID, so the client now requires that root listener credential while the daemon
 still authenticates the kb UID independently. Provisioning encrypts the token root under the P5
 token-root AAD domain rather than the generic tenant-vault domain, so the shared leaf codec now
 owns that byte-exact encoding and the authority uses an explicit-AAD protected path with no legacy
@@ -228,6 +228,13 @@ and 1, making the helper child's `dup2(write_fd, 1)` a no-op before cleanup clos
 Both KMS helper paths now create CLOEXEC pipes, raise both endpoints above stdio before `fork`, and
 check the remap. Permanent decrypt and signed-HWM regressions close all three stdio descriptors
 before provider use and prove the helper still returns exactly its bounded response.
+
+The final remediation review also hardened recovery and its tests: role-edge repair uses
+dependency-safe `REVOKE ... CASCADE` ordering so delegated `ADMIN OPTION` graphs cannot abort
+idempotent provisioning, and PG17 proves no authority role survives as granted role, member, or
+grantor. Regression builds explicitly undefine `NDEBUG` and fail compilation if assertions are
+disabled. The signal test now delivers SIGTERM on the daemon thread during an accepted in-flight
+issue and proves the response is completed before the listener exits without another accept.
 
 Explicitly revoke EXECUTE on every new SECURITY DEFINER function from PUBLIC and every unrelated
 role before granting the authority role, and assert the full closure in PG17. The ordinary

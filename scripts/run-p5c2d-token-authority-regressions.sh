@@ -6,7 +6,9 @@ scratch=$(mktemp -d /tmp/aimee-p5c2d-regressions.XXXXXX)
 trap 'rm -rf -- "$scratch"' EXIT HUP INT TERM
 
 compiler=${CC:-cc}
-common="${CFLAGS:-} -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -I$repo_dir/src/headers -I$repo_dir/src/kb"
+# Keep -UNDEBUG after inherited flags: these regression binaries intentionally
+# use assert for syscall transcript checks and must never compile into no-ops.
+common="${CFLAGS:-} -UNDEBUG -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -I$repo_dir/src/headers -I$repo_dir/src/kb"
 
 # shellcheck disable=SC2086
 $compiler $common "$repo_dir/src/tests/test_kb_mgmt_token_authority_client_commit.c" \

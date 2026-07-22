@@ -5,6 +5,9 @@
 #include "kb_mgmt_token_authority_ipc.h"
 
 #include <assert.h>
+#ifdef NDEBUG
+#error "P5-C2d regression tests require active assertions"
+#endif
 #include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
