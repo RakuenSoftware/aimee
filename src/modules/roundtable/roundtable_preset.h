@@ -1,7 +1,7 @@
 /* roundtable_preset.h: server-owned registry of NAMED roundtable presets.
  *
  * A preset captures positive must-use seats (paired model+persona), the
- * legacy aggregator, optional chairman, guard/loop knobs, and authoring
+ * optional chairman, guard/loop knobs, and authoring
  * pipeline knobs — so the web GUI can maintain several named configurations and
  * pick which one is "active". Selecting a preset active copies its values into
  * the live config_t ensemble_* and roundtable_* fields (the runtime source of truth,
@@ -43,7 +43,6 @@ typedef struct
    rt_preset_seat_t seats[RT_PRESET_MAX_SEATS];
    int seat_count;
 
-   char aggregator[RT_PRESET_MODEL_MAX];
    char chairman[RT_PRESET_MODEL_MAX];
    int chairman_enabled;
    int min_successful;
