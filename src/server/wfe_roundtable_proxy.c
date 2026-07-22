@@ -28,7 +28,7 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 #include <unistd.h>
 
 #define GO_ROUNDTABLE_IO_TIMEOUT_SECS 420
-#define GO_ROUNDTABLE_MAX_RESPONSE (16u * 1024u * 1024u)
+#define GO_ROUNDTABLE_MAX_RESPONSE    (16u * 1024u * 1024u)
 
 static int write_all(int fd, const char *data, size_t size)
 {
@@ -204,8 +204,9 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
    cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
    cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
-   const char *artifact_text = cJSON_IsString(artifact) ? artifact->valuestring
-                                                       : (cJSON_IsString(prompt) ? prompt->valuestring : NULL);
+   const char *artifact_text = cJSON_IsString(artifact)
+                                   ? artifact->valuestring
+                                   : (cJSON_IsString(prompt) ? prompt->valuestring : NULL);
    if (!payload || !artifact_text)
    {
       cJSON_Delete(payload);

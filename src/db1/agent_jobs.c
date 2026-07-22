@@ -50,9 +50,11 @@ int db1_agent_job_create(const char *role, const char *prompt, const char *agent
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "INSERT INTO agent_jobs (role, prompt, agent_name, participant_token, status,"
-                            " heartbeat_at, created_at, updated_at)"
-                            " VALUES (?, ?, ?, lower(hex(randomblob(32))), 'pending', '', datetime('now'), datetime('now'))";
+   static const char *sql =
+       "INSERT INTO agent_jobs (role, prompt, agent_name, participant_token, status,"
+       " heartbeat_at, created_at, updated_at)"
+       " VALUES (?, ?, ?, lower(hex(randomblob(32))), 'pending', '', datetime('now'), "
+       "datetime('now'))";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -264,12 +266,12 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql =
-       "SELECT id, role, prompt, agent_name, participant_token, status, result, COALESCE(cursor, ''),"
-       " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
-       " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
-       " created_at, updated_at"
-       " FROM agent_jobs WHERE id = ?";
+   static const char *sql = "SELECT id, role, prompt, agent_name, participant_token, status, "
+                            "result, COALESCE(cursor, ''),"
+                            " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
+                            " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
+                            " created_at, updated_at"
+                            " FROM agent_jobs WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, job_id);
@@ -306,8 +308,8 @@ int db1_agent_job_get_by_participant(const char *participant_token, db1_agent_jo
    if (!db)
       return -1;
    sqlite3_stmt *stmt = NULL;
-   if (sqlite3_prepare_v2(db, "SELECT id FROM agent_jobs WHERE participant_token = ?", -1,
-                          &stmt, NULL) != SQLITE_OK)
+   if (sqlite3_prepare_v2(db, "SELECT id FROM agent_jobs WHERE participant_token = ?", -1, &stmt,
+                          NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_text(stmt, 1, participant_token, -1, SQLITE_TRANSIENT);
    int job_id = sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) : 0;

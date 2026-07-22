@@ -1295,8 +1295,7 @@ static void test_delegate_status_handler(void)
    assert(continued.id == job_id && strcmp(continued.agent_name, "codex") == 0);
    db1_agent_job_free(&continued);
    assert(db1_agent_job_get_by_participant(
-              "0000000000000000000000000000000000000000000000000000000000000000",
-              &continued) != 0);
+              "0000000000000000000000000000000000000000000000000000000000000000", &continued) != 0);
    assert(cJSON_GetObjectItem(g_last_response, "cursor_turn")->valueint == 3);
    assert(strcmp(cJSON_GetObjectItem(g_last_response, "result")->valuestring, "ok") == 0);
    cJSON_Delete(req);
