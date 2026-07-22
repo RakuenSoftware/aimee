@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -307,6 +308,74 @@ func TestHTTPAgentClientAcceptsNonemptyPartialResult(t *testing.T) {
 	result, err := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", acceptPartial: true})
 	if err != nil || result.Response != "commit already created" || result.Agent != "minimax" || !result.Partial {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestHTTPAgentClientRejectsLaunchWithoutJobID(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var launches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		launches.Add(1)
+		if r.URL.Path != "/v1/delegate/run" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "no\neligible\tcapacity"})
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name    string
+		store   *db1.Store
+		request DelegateRequest
+	}{
+		{name: "durable", store: store, request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}},
+		{name: "without durable mapping", request: DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, clientErr := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: tc.store})
+			if clientErr != nil {
+				t.Fatal(clientErr)
+			}
+			_, callErr := client.Delegate(t.Context(), tc.request)
+			if !errors.Is(callErr, ErrDelegateNoJobID) || !strings.Contains(callErr.Error(), `no\x0aeligible\x09capacity`) {
+				t.Fatalf("launch error=%v", callErr)
+			}
+		})
+	}
+	request := DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review",
+		WorkItemID: "wi_no_capacity", Stage: "gate", ExecutionVersion: "v1"}
+	if jobID, lookupErr := store.DelegateJob(t.Context(), delegateJobKey(request)); !errors.Is(lookupErr, sql.ErrNoRows) {
+		t.Fatalf("invalid launch mapping job=%d err=%v", jobID, lookupErr)
+	}
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, retryErr := client.Delegate(t.Context(), request); !errors.Is(retryErr, ErrDelegateNoJobID) {
+			t.Fatalf("retry error=%v", retryErr)
+		}
+	}
+	// Two subtests above and two explicit retries must each reach the resource
+	// plane; no invalid durable mapping may short-circuit a later attempt.
+	if launches.Load() != 4 {
+		t.Fatalf("launches=%d, want 4", launches.Load())
+	}
+	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer emptyServer.Close()
+	emptyClient, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: emptyServer.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = emptyClient.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review"})
+	if !errors.Is(err, ErrDelegateNoJobID) || !strings.Contains(err.Error(), "empty launch response") {
+		t.Fatalf("empty launch error=%v", err)
 	}
 }
 

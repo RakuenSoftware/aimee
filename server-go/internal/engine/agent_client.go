@@ -99,6 +99,7 @@ const (
 
 var ErrDelegateUnassignedExpired = errors.New("unassigned delegate lease expired")
 var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
+var ErrDelegateNoJobID = errors.New("agent service returned no job id")
 
 // HTTPAgentClient talks to the agent service as a resource plane. It owns no
 // workflow state or transitions; losing it parks the Go-owned run and a later
@@ -191,14 +192,30 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		if err := c.doJSONKey(ctx, http.MethodPost, "/v1/delegate/run", payload, &launched, key); err != nil {
 			return DelegateResult{}, err
 		}
+		// Validate before SaveDelegateJob: a phantom mapping would make every
+		// retry replay an invalid launch instead of recovering when capacity returns.
+		if launched.JobID <= 0 {
+			detail := strings.TrimSpace(safeDiagnostic(launched.Error))
+			if detail == "" {
+				detail = "empty launch response"
+			} else {
+				var printable strings.Builder
+				for _, r := range detail {
+					if r < ' ' || r == 0x7f {
+						_, _ = fmt.Fprintf(&printable, `\x%02x`, r)
+						continue
+					}
+					printable.WriteRune(r)
+				}
+				detail = printable.String()
+			}
+			return DelegateResult{}, fmt.Errorf("%w: %s", ErrDelegateNoJobID, detail)
+		}
 		if c.store != nil && request.WorkItemID != "" {
 			if err := c.store.SaveDelegateJob(ctx, key, launched.JobID); err != nil {
 				return DelegateResult{}, err
 			}
 		}
-	}
-	if launched.JobID <= 0 {
-		return DelegateResult{}, fmt.Errorf("agent service returned no job id: %s", launched.Error)
 	}
 	ticker := time.NewTicker(c.pollEvery)
 	defer ticker.Stop()
