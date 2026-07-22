@@ -352,7 +352,7 @@ BEGIN
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_expire_quarantine(INTEGER) OWNER TO aimee_kb_owner';
 
   -- The definer needs only the existing rows touched by activation/replacement.
-  GRANT SELECT ON public.kb_team TO aimee_kb_owner;
+  GRANT SELECT ON public.kb_admin_grant TO aimee_kb_owner;
   GRANT SELECT,INSERT,UPDATE ON public.kb_enrollments TO aimee_kb_owner;
   GRANT SELECT,INSERT ON public.kb_team_membership TO aimee_kb_owner;
   GRANT SELECT,UPDATE ON public.kb_cert_revocation_generation TO aimee_kb_owner;

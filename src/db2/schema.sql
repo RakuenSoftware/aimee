@@ -1803,6 +1803,17 @@ $$;
 DROP POLICY IF EXISTS p_member_self ON kb_team_membership;
 CREATE POLICY p_member_self ON kb_team_membership
   FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
+-- P5-B2b's fixed owner-definer may inspect and create only canonical certificate
+-- memberships.  This is deliberately GUC-free; runtime still has no direct table
+-- privilege and reaches it only through the fixed activation facade.
+DROP POLICY IF EXISTS p_member_management_definer_read ON kb_team_membership;
+CREATE POLICY p_member_management_definer_read ON kb_team_membership
+  FOR SELECT
+  USING (current_user='aimee_kb_owner' AND identity_key LIKE 'cert:%');
+DROP POLICY IF EXISTS p_member_management_definer_insert ON kb_team_membership;
+CREATE POLICY p_member_management_definer_insert ON kb_team_membership
+  FOR INSERT
+  WITH CHECK (current_user='aimee_kb_owner' AND identity_key LIKE 'cert:%' AND is_default=0);
 DROP POLICY IF EXISTS p_projmember_self ON kb_project_membership;
 CREATE POLICY p_projmember_self ON kb_project_membership
   FOR SELECT USING (identity_key = current_setting('aimee.principal', true));
@@ -1846,7 +1857,7 @@ CREATE POLICY p_project_member ON kb_project
 CREATE OR REPLACE FUNCTION kb_principal_is_admin() RETURNS boolean
 LANGUAGE sql STABLE AS $$
   SELECT current_setting('aimee.principal', true) = 'owner'
-      OR EXISTS (SELECT 1 FROM kb_admin_grant
+      OR EXISTS (SELECT 1 FROM public.kb_admin_grant
                  WHERE identity_key = current_setting('aimee.principal', true)
                    AND revoked_at = '');
 $$;
@@ -7136,6 +7147,10 @@ CREATE TABLE IF NOT EXISTS kb_management_instance_grant (
   expires_at TIMESTAMPTZ NOT NULL DEFAULT (now()+interval '24 hours'),
   consumed_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ,
+  CHECK ((replaces_installation_id IS NULL AND replacement_operation_id IS NULL AND
+          replacement_lineage_id=installation_id) OR
+         (replaces_installation_id IS NOT NULL AND replacement_operation_id IS NOT NULL AND
+          replacement_lineage_id<>installation_id)),
   CHECK (expires_at>created_at),
   CHECK ((state='pending' AND consumed_at IS NULL AND revoked_at IS NULL) OR
          (state='consumed' AND consumed_at IS NOT NULL AND revoked_at IS NULL) OR
@@ -7148,6 +7163,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_live_binding
   ON kb_management_instance_grant(binding_digest) WHERE state IN ('pending','consumed');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_pending_lineage
   ON kb_management_instance_grant(replacement_lineage_id) WHERE state='pending';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_mi_grant_one_successor
+  ON kb_management_instance_grant(replaces_installation_id)
+  WHERE replaces_installation_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS kb_management_instance (
   installation_id TEXT PRIMARY KEY REFERENCES kb_management_instance_grant(installation_id),
@@ -7408,14 +7426,16 @@ BEGIN
       extract(epoch FROM g.expires_at)::BIGINT,extract(epoch FROM g.consumed_at)::BIGINT;
     RETURN;
   END IF;
-  PERFORM 1 FROM public.kb_team t WHERE t.id=p_team_id FOR KEY SHARE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'management grant team denied' USING ERRCODE='28000'; END IF;
-  INSERT INTO public.kb_management_instance_grant(installation_id,replacement_lineage_id,team_id,
-    workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
-    expected_ca_issuer,expected_ca_fingerprint,creator_identity)
-  VALUES(p_installation_id,p_installation_id,p_team_id,p_workload_issuer,p_workload_subject,
-    p_proof_anchor,p_custody_anchor,v_digest,p_expected_ca_issuer,p_expected_ca_fingerprint,
-    p_creator_identity) RETURNING * INTO g;
+  BEGIN
+    INSERT INTO public.kb_management_instance_grant(installation_id,replacement_lineage_id,team_id,
+      workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
+      expected_ca_issuer,expected_ca_fingerprint,creator_identity)
+    VALUES(p_installation_id,p_installation_id,p_team_id,p_workload_issuer,p_workload_subject,
+      p_proof_anchor,p_custody_anchor,v_digest,p_expected_ca_issuer,p_expected_ca_fingerprint,
+      p_creator_identity) RETURNING * INTO g;
+  EXCEPTION WHEN foreign_key_violation THEN
+    RAISE EXCEPTION 'management grant team denied' USING ERRCODE='28000';
+  END;
   PERFORM public.kb_audit_worm_append('management-instance',p_installation_id,
     'management.grant.create',p_creator_identity,'allow','state=pending');
   RETURN QUERY SELECT FALSE,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
@@ -7466,16 +7486,24 @@ BEGIN
   SELECT x.* INTO g FROM public.kb_management_instance_grant x
    WHERE x.replacement_operation_id=p_replacement_operation_id FOR UPDATE;
   IF FOUND THEN
+    SELECT x.* INTO e FROM public.kb_enrollments x WHERE x.id=p_old_enrollment_id FOR UPDATE;
+    SELECT x.* INTO i FROM public.kb_management_instance x
+     WHERE x.installation_id=p_old_installation_id FOR UPDATE;
     IF ROW(g.replacement_lineage_id,g.replaces_installation_id,g.installation_id,g.team_id,
            g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest,
            g.expected_ca_issuer,g.expected_ca_fingerprint,g.creator_identity)
        IS DISTINCT FROM ROW(p_replacement_lineage_id,p_old_installation_id,p_new_installation_id,
            p_team_id,p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,v_digest,
-           p_expected_ca_issuer,p_expected_ca_fingerprint,p_creator_identity) THEN
+           p_expected_ca_issuer,p_expected_ca_fingerprint,p_creator_identity) OR
+       i.installation_id IS NULL OR i.state<>'replaced' OR
+       i.current_generation<>p_old_generation OR i.current_enrollment_id<>p_old_enrollment_id OR
+       i.replacement_lineage_id<>p_replacement_lineage_id OR i.team_id<>p_team_id OR
+       e.id IS NULL OR e.scope<>'p5-kb-management' OR e.state<>'revoked' OR e.revoked_at='' OR
+       e.cert_issuer<>p_old_cert_issuer OR e.cert_serial_norm<>p_old_cert_serial_norm OR
+       e.fingerprint<>p_old_cert_fingerprint OR e.authority_id<>i.authority_id THEN
       RAISE EXCEPTION 'management replacement replay conflict' USING ERRCODE='23505';
     END IF;
-    SELECT x.state INTO old_instance_state FROM public.kb_management_instance x
-     WHERE x.installation_id=p_old_installation_id;
+    old_instance_state:=i.state;
     SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x WHERE x.singleton=1;
     RETURN QUERY SELECT TRUE,g.replacement_operation_id,g.replacement_lineage_id,
       g.replaces_installation_id,g.installation_id,g.team_id,g.workload_issuer,g.workload_subject,
@@ -7576,8 +7604,6 @@ BEGIN
                           v_digest) THEN
     RAISE EXCEPTION 'initial management grant denied' USING ERRCODE='28000';
   END IF;
-  PERFORM 1 FROM public.kb_team t WHERE t.id=g.team_id FOR KEY SHARE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'management grant team denied' USING ERRCODE='28000'; END IF;
   INSERT INTO public.kb_management_instance(installation_id,replacement_lineage_id,authority_id,
     team_id,workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
     expected_ca_issuer,expected_ca_fingerprint)
@@ -7802,8 +7828,6 @@ BEGIN
        NULLIF(e.expires_at,'')::TIMESTAMPTZ<=pg_catalog.now())) THEN
     RAISE EXCEPTION 'management activation stale' USING ERRCODE='28000';
   END IF;
-  PERFORM 1 FROM public.kb_team t WHERE t.id=i.team_id FOR KEY SHARE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'management activation team denied' USING ERRCODE='28000'; END IF;
   IF EXISTS(SELECT 1 FROM public.kb_enrollments x WHERE
       (x.cert_issuer=p_leaf_issuer AND x.cert_serial_norm=p_leaf_serial_norm) OR
        x.fingerprint=p_leaf_fingerprint) THEN
