@@ -68,7 +68,11 @@ entire lifetime, so upgrade overlap cannot create a second process-local authori
 Every reconcile begins with a fresh B2a attestation and constructs the exact B2b
 binding from verified issuer, subject, proof anchor and custody anchor. A change in
 any component is terminal integrity, never implicit replacement or re-enrollment.
-Operation ids, bundle nonces and storage ids are independent OS-CSPRNG values.
+Operation ids, bundle nonces and storage ids are independent OS-CSPRNG values. An
+initial issue also chooses a fresh 128-bit authority id before begin and persists it
+inside the wrapped key-intent header/binding; renewal reuses the exact authority id
+from the active B2b snapshot. A replacement installation receives a fresh authority
+id rather than inheriting the replaced instance's enrollment authority.
 
 For initial issuance or renewal:
 
@@ -83,7 +87,7 @@ For initial issuance or renewal:
    encode the private-key DER and CSR DER in a distinct
    `aimee.p5.management-key-intent.v1` plaintext, wrap it through B2a with a separate
    fresh challenge and a binding over installation, lineage, generation, operation
-   id, B2b binding digest, both CSR digests, provider kind, fresh nonce and storage
+   id, authority id, B2b binding digest, both CSR digests, provider kind, fresh nonce and storage
    id, and durably stage it with the candidate-file protocol. Only after file and
    directory sync may B2c call `begin_initial` or `begin_renewal` with that operation
    id. Exact replay unwraps the key-intent capsule and reproduces the same CSR and
