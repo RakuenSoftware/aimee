@@ -42,6 +42,11 @@ static void test_plaintext_codecs(void)
    assert(kb_management_cert_key_intent_decode(encoded, n, &intent) == 0);
    assert(intent.key_der_len == sizeof(key) && !memcmp(intent.key_der, key, sizeof(key)));
    assert(intent.csr_der_len == sizeof(csr) && !memcmp(intent.csr_der, csr, sizeof(csr)));
+   uint8_t encoded_before[sizeof(encoded)];
+   memcpy(encoded_before, encoded, sizeof(encoded));
+   assert(kb_management_cert_key_intent_decode(
+              encoded, n, (kb_management_cert_key_intent_view_t *)encoded) != 0);
+   assert(!memcmp(encoded, encoded_before, sizeof(encoded)));
    assert(kb_management_cert_key_intent_decode(encoded, n - 1, &intent) != 0);
    assert(zeroed(&intent, sizeof(intent)));
    encoded[n] = 0;
@@ -76,6 +81,36 @@ static void base_intent(kb_management_cert_intent_view_t *v, uint8_t cipher[64])
    memset(v->csr_spki_digest, 9, sizeof(v->csr_spki_digest));
    memset(v->custody_binding_digest, 10, sizeof(v->custody_binding_digest));
    memset(cipher, 11, 64);
+   v->ciphertext = cipher;
+   v->ciphertext_len = 64;
+}
+
+static void base_candidate(kb_management_cert_candidate_view_t *v, const char operation[65],
+                           uint8_t cipher[64], uint8_t cipher_byte)
+{
+   memset(v, 0, sizeof(*v));
+   fill_hex(v->installation_id, 32, '1');
+   fill_hex(v->lineage_id, 32, '2');
+   memcpy(v->operation_id, operation, 65);
+   fill_hex(v->authority_id, 32, '4');
+   fill_hex(v->storage_id, 32, '5');
+   v->generation = 7;
+   v->provider_kind = KB_WORKLOAD_PROVIDER_KMS_SPIFFE_V1;
+   memset(v->nonce, 6, 32);
+   memset(v->binding_digest, 7, 32);
+   memset(v->csr_digest, 8, 32);
+   memset(v->csr_spki_digest, 9, 32);
+   memset(v->public_bundle_digest, 10, 32);
+   memset(v->custody_binding_digest, 11, 32);
+   strcpy(v->issuer, "/CN=aimee-kb-ca");
+   strcpy(v->ca_issuer, "/CN=aimee-kb-ca");
+   strcpy(v->serial_norm, "01abcdef");
+   memset(v->fingerprint, 12, 32);
+   memset(v->spki_digest, 13, 32);
+   memset(v->ca_fingerprint, 14, 32);
+   v->not_before_epoch = 1000;
+   v->not_after_epoch = 4600;
+   memset(cipher, cipher_byte, 64);
    v->ciphertext = cipher;
    v->ciphertext_len = 64;
 }
@@ -179,8 +214,18 @@ static void test_record_codecs(void)
    encoded[n] = 0;
    assert(kb_management_cert_pending_decode(encoded, n + 1, &pending_out) != 0);
    assert(zeroed(&pending_out, sizeof(pending_out)));
+   uint8_t pending_before_bytes[sizeof(encoded)];
+   memcpy(pending_before_bytes, encoded, sizeof(encoded));
+   assert(kb_management_cert_pending_decode(encoded, n,
+                                            (kb_management_cert_pending_manifest_t *)encoded) != 0);
+   assert(!memcmp(encoded, pending_before_bytes, sizeof(encoded)));
    pending.issue_kind = (kb_management_cert_issue_kind_t)3;
    assert(kb_management_cert_pending_encode(&pending, encoded, sizeof(encoded), &n) != 0);
+   pending.issue_kind = KB_MANAGEMENT_CERT_ISSUE_INITIAL;
+   kb_management_cert_pending_manifest_t pending_before = pending;
+   assert(kb_management_cert_pending_encode(&pending, encoded, sizeof(encoded),
+                                            (size_t *)&pending.generation) != 0);
+   assert(!memcmp(&pending, &pending_before, sizeof(pending)));
 }
 
 static void base_binding(kb_management_cert_intent_binding_t *v)
@@ -286,6 +331,11 @@ static void test_binding_transcripts(void)
                                                transcript, KB_MANAGEMENT_CERT_TRANSCRIPT_MAX + 1U,
                                                &n) != 0);
    assert(transcript[0] == 0x5a && n == 19);
+   base_binding(&intent);
+   intent_before = intent;
+   assert(kb_management_cert_intent_transcript(&intent, transcript, sizeof(transcript),
+                                               (size_t *)&intent.generation) != 0);
+   assert(!memcmp(&intent, &intent_before, sizeof(intent)));
 }
 
 static void test_key_and_csr(void)
@@ -307,6 +357,12 @@ static void test_key_and_csr(void)
    assert(zeroed(&recovered, sizeof(recovered)));
    kb_management_cert_key_material_clear(&generated);
    assert(zeroed(&generated, sizeof(generated)));
+
+   uint8_t hash_alias[64], hash_alias_before[64];
+   memset(hash_alias, 0x5a, sizeof(hash_alias));
+   memcpy(hash_alias_before, hash_alias, sizeof(hash_alias));
+   assert(kb_management_cert_sha256(hash_alias, sizeof(hash_alias), hash_alias) != 0);
+   assert(!memcmp(hash_alias, hash_alias_before, sizeof(hash_alias)));
 
    kb_management_cert_bundle_t secret;
    memset(&secret, 0xa5, sizeof(secret));
@@ -382,6 +438,10 @@ static void test_management_leaf_profile(void)
    memset(&pem, 0xa5, sizeof(pem));
    assert(kb_management_cert_bundle_verify(malformed, malformed_len, &persisted, &pem) != 0);
    assert(zeroed(&persisted, sizeof(persisted)) && zeroed(&pem, sizeof(pem)));
+   memset(&persisted, 0xa5, sizeof(persisted));
+   memset(&pem, 0xa5, sizeof(pem));
+   assert(kb_management_cert_bundle_verify((const uint8_t *)&persisted, 16, &persisted, &pem) != 0);
+   assert(zeroed(&persisted, sizeof(persisted)) && zeroed(&pem, sizeof(pem)));
 
    noncanonical_len =
        noncanonical_sequence(view.leaf_der, view.leaf_der_len, noncanonical, sizeof(noncanonical));
@@ -410,6 +470,14 @@ static void test_storage_rejects_oversize_and_fifo(void)
    assert(kb_management_cert_storage_stage(&storage, "candidate", operation, &byte,
                                            KB_MANAGEMENT_CERT_CANDIDATE_MAX + 1U) ==
           KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_stage(&storage, NULL, operation, &byte, 1) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, &byte, 1) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_pending_publish(&storage, &byte, 1) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_promote(&storage, &byte, 1) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(faccessat(storage.dir_fd,
                     "candidate.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     F_OK, 0) != 0);
@@ -418,6 +486,18 @@ static void test_storage_rejects_oversize_and_fifo(void)
    assert(mkfifoat(storage.dir_fd, fifo, 0600) == 0);
    uint8_t output[32];
    size_t output_len = 9;
+   kb_management_cert_storage_t storage_before = storage;
+   assert(kb_management_cert_storage_read(&storage, "intent", operation, (uint8_t *)&storage,
+                                          sizeof(storage),
+                                          &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(!memcmp(&storage, &storage_before, sizeof(storage)) && output_len == 9);
+   uint64_t output_alias[4], output_alias_before[4];
+   memset(output_alias, 0x5a, sizeof(output_alias));
+   memcpy(output_alias_before, output_alias, sizeof(output_alias));
+   assert(kb_management_cert_storage_read(&storage, "intent", operation, (uint8_t *)output_alias,
+                                          sizeof(output_alias), (size_t *)output_alias) ==
+          KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(!memcmp(output_alias, output_alias_before, sizeof(output_alias)));
    assert(kb_management_cert_storage_read(&storage, "intent", operation, output, sizeof(output),
                                           &output_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(output_len == 0 && zeroed(output, sizeof(output)));
@@ -456,27 +536,42 @@ static void test_storage_open_and_protocol(void)
 
    char operation[65];
    fill_hex(operation, 64, 'b');
-   const uint8_t record[] = {1, 2, 3, 4, 5};
-   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record,
-                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_OK);
-   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record,
-                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_OK);
-   const uint8_t different[] = {1, 2, 3, 4, 6};
+   uint8_t candidate_cipher[64], record[4096];
+   kb_management_cert_candidate_view_t staged_candidate;
+   base_candidate(&staged_candidate, operation, candidate_cipher, 1);
+   size_t record_len = 0;
+   assert(kb_management_cert_candidate_encode(&staged_candidate, record, sizeof(record),
+                                              &record_len) == 0);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record, record_len) ==
+          KB_MANAGEMENT_STORAGE_OK);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", operation, record, record_len) ==
+          KB_MANAGEMENT_STORAGE_OK);
+   uint8_t different_cipher[64], different[4096];
+   base_candidate(&staged_candidate, operation, different_cipher, 2);
+   size_t different_len = 0;
+   assert(kb_management_cert_candidate_encode(&staged_candidate, different, sizeof(different),
+                                              &different_len) == 0);
    assert(kb_management_cert_storage_stage(&storage, "candidate", operation, different,
-                                           sizeof(different)) == KB_MANAGEMENT_STORAGE_CONFLICT);
-   uint8_t readback[32];
+                                           different_len) == KB_MANAGEMENT_STORAGE_CONFLICT);
+   uint8_t readback[1024];
    size_t readback_len = 0;
    assert(kb_management_cert_storage_read(&storage, "candidate", operation, readback,
                                           sizeof(readback),
                                           &readback_len) == KB_MANAGEMENT_STORAGE_OK);
-   assert(readback_len == sizeof(record) && !memcmp(readback, record, sizeof(record)));
+   assert(readback_len == record_len && !memcmp(readback, record, record_len));
 
-   const uint8_t manifest[] = {9, 8, 7, 6};
-   assert(kb_management_cert_storage_promote(&storage, manifest, sizeof(manifest)) ==
+   kb_management_cert_manifest_t current = {.generation = 1};
+   memcpy(current.operation_id, operation, sizeof(current.operation_id));
+   memset(current.public_bundle_digest, 9, sizeof(current.public_bundle_digest));
+   uint8_t manifest[1024];
+   size_t manifest_len = 0;
+   assert(kb_management_cert_manifest_encode(&current, manifest, sizeof(manifest), &manifest_len) ==
+          0);
+   assert(kb_management_cert_storage_promote(&storage, manifest, manifest_len) ==
           KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_current(&storage, readback, sizeof(readback), &readback_len) ==
           KB_MANAGEMENT_STORAGE_OK);
-   assert(readback_len == sizeof(manifest) && !memcmp(readback, manifest, sizeof(manifest)));
+   assert(readback_len == manifest_len && !memcmp(readback, manifest, manifest_len));
 
    memset(readback, 0xa5, sizeof(readback));
    readback_len = 9;
@@ -486,70 +581,124 @@ static void test_storage_open_and_protocol(void)
 
    char pending_operation[65];
    fill_hex(pending_operation, 64, 'd');
-   const uint8_t intent_record[] = {0x51, 0x52, 0x53, 0x54};
-   const uint8_t pending_record[] = {0x61, 0x62, 0x63, 0x64, 0x65};
+   uint8_t intent_cipher[64], intent_record[4096];
+   kb_management_cert_intent_view_t staged_intent;
+   base_intent(&staged_intent, intent_cipher);
+   memcpy(staged_intent.operation_id, pending_operation, sizeof(staged_intent.operation_id));
+   size_t intent_record_len = 0;
+   assert(kb_management_cert_intent_encode(&staged_intent, intent_record, sizeof(intent_record),
+                                           &intent_record_len) == 0);
+   kb_management_cert_pending_manifest_t pending = {.generation = 1,
+                                                    .issue_kind = KB_MANAGEMENT_CERT_ISSUE_INITIAL};
+   fill_hex(pending.installation_id, 32, '1');
+   fill_hex(pending.lineage_id, 32, '2');
+   memcpy(pending.operation_id, pending_operation, sizeof(pending.operation_id));
+   fill_hex(pending.authority_id, 32, '4');
+   memset(pending.binding_digest, 0x61, 32);
+   assert(kb_management_cert_sha256(intent_record, intent_record_len,
+                                    pending.intent_record_digest) == 0);
+   uint8_t pending_record[1024];
+   size_t pending_record_len = 0;
+   assert(kb_management_cert_pending_encode(&pending, pending_record, sizeof(pending_record),
+                                            &pending_record_len) == 0);
    /* Crash-safe ordering: the immutable intent is durable and discoverable
     * before the single no-replace pending coordinate can exist. */
    assert(kb_management_cert_storage_stage(&storage, "intent", pending_operation, intent_record,
-                                           sizeof(intent_record)) == KB_MANAGEMENT_STORAGE_OK);
+                                           intent_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_publish(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_OK);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_publish(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_CONFLICT);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_CONFLICT);
    assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
                                                   &readback_len) == KB_MANAGEMENT_STORAGE_OK);
-   assert(readback_len == sizeof(pending_record) &&
-          !memcmp(readback, pending_record, sizeof(pending_record)));
-   const uint8_t wrong_pending[] = {0x61, 0x62, 0x63, 0x64, 0x66};
+   assert(readback_len == pending_record_len &&
+          !memcmp(readback, pending_record, pending_record_len));
+   uint8_t wrong_pending[1024];
+   memcpy(wrong_pending, pending_record, pending_record_len);
+   wrong_pending[pending_record_len - 1] ^= 1;
    assert(kb_management_cert_storage_pending_clear_exact(
-              &storage, wrong_pending, sizeof(wrong_pending)) == KB_MANAGEMENT_STORAGE_CONFLICT);
+              &storage, wrong_pending, pending_record_len) == KB_MANAGEMENT_STORAGE_CONFLICT);
    assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
                                                   &readback_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_clear_exact(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_OK);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_OK);
    assert(kb_management_cert_storage_pending_clear_exact(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_MISSING);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_MISSING);
    assert(kb_management_cert_storage_read(&storage, "intent", pending_operation, readback,
                                           sizeof(readback),
                                           &readback_len) == KB_MANAGEMENT_STORAGE_OK);
-   assert(readback_len == sizeof(intent_record));
+   assert(readback_len == intent_record_len);
 
    assert(symlinkat("/dev/null", storage.dir_fd, "pending") == 0);
    assert(kb_management_cert_storage_pending_publish(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(kb_management_cert_storage_pending_clear_exact(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
    assert(mkfifoat(storage.dir_fd, "pending", 0600) == 0);
    assert(kb_management_cert_storage_pending_publish(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
    int planted_fd = openat(storage.dir_fd, "pending", O_WRONLY | O_CREAT | O_EXCL, 0600);
    assert(planted_fd >= 0);
-   assert(write(planted_fd, pending_record, sizeof(pending_record)) ==
-          (ssize_t)sizeof(pending_record));
+   const uint8_t malformed_pending[] = {0x61, 0x62, 0x63};
+   assert(write(planted_fd, malformed_pending, sizeof(malformed_pending)) ==
+          (ssize_t)sizeof(malformed_pending));
+   assert(close(planted_fd) == 0);
+   assert(kb_management_cert_storage_pending_publish(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_pending_clear_exact(
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
+   planted_fd = openat(storage.dir_fd, "pending", O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(planted_fd >= 0);
+   assert(write(planted_fd, pending_record, pending_record_len) == (ssize_t)pending_record_len);
    assert(close(planted_fd) == 0);
    assert(linkat(storage.dir_fd, "pending", storage.dir_fd, "pending.extra", 0) == 0);
    assert(kb_management_cert_storage_pending_read(&storage, readback, sizeof(readback),
                                                   &readback_len) ==
           KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(kb_management_cert_storage_pending_publish(
-              &storage, pending_record, sizeof(pending_record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+              &storage, pending_record, pending_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, "pending.extra", 0) == 0);
    assert(unlinkat(storage.dir_fd, "pending", 0) == 0);
 
    char planted_operation[65];
    fill_hex(planted_operation, 64, 'c');
+   uint8_t planted_cipher[64], planted_record[4096];
+   base_candidate(&staged_candidate, planted_operation, planted_cipher, 3);
+   size_t planted_record_len = 0;
+   assert(kb_management_cert_candidate_encode(&staged_candidate, planted_record,
+                                              sizeof(planted_record), &planted_record_len) == 0);
    const char planted[] =
        "candidate.cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
    assert(symlinkat("/dev/null", storage.dir_fd, planted) == 0);
-   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, record,
-                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, planted_record,
+                                           planted_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, planted, 0) == 0);
    assert(mkfifoat(storage.dir_fd, planted, 0600) == 0);
-   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, record,
-                                           sizeof(record)) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", planted_operation, planted_record,
+                                           planted_record_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
    assert(unlinkat(storage.dir_fd, planted, 0) == 0);
+
+   char malformed_operation[65];
+   fill_hex(malformed_operation, 64, 'e');
+   uint8_t malformed_cipher[64], valid_replay[4096];
+   base_candidate(&staged_candidate, malformed_operation, malformed_cipher, 4);
+   size_t valid_replay_len = 0;
+   assert(kb_management_cert_candidate_encode(&staged_candidate, valid_replay, sizeof(valid_replay),
+                                              &valid_replay_len) == 0);
+   const char malformed_name[] =
+       "candidate.eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+   int malformed_fd = openat(storage.dir_fd, malformed_name, O_WRONLY | O_CREAT | O_EXCL, 0600);
+   assert(malformed_fd >= 0);
+   const uint8_t malformed_record[] = {1, 2, 3};
+   assert(write(malformed_fd, malformed_record, sizeof(malformed_record)) ==
+          (ssize_t)sizeof(malformed_record));
+   assert(close(malformed_fd) == 0);
+   assert(kb_management_cert_storage_stage(&storage, "candidate", malformed_operation, valid_replay,
+                                           valid_replay_len) == KB_MANAGEMENT_STORAGE_INTEGRITY);
+   assert(unlinkat(storage.dir_fd, malformed_name, 0) == 0);
 
    assert(unlinkat(storage.dir_fd, "current", 0) == 0);
    assert(unlinkat(storage.dir_fd,

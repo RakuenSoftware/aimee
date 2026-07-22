@@ -30,7 +30,7 @@ static int memory_overlap(const void *a, size_t an, const void *b, size_t bn)
 
 int kb_management_cert_sha256(const void *p, size_t n, uint8_t out[32])
 {
-   if (!out)
+   if (!out || memory_overlap(p, n, out, 32))
       return -1;
    memset(out, 0, 32);
    unsigned int len = 0;
@@ -460,15 +460,15 @@ int kb_management_cert_bundle_verify(const uint8_t *plain, size_t plain_len,
                                      kb_management_cert_verified_t *verified,
                                      kb_management_cert_bundle_t *pem)
 {
+   if (verified)
+      memset(verified, 0, sizeof(*verified));
+   if (pem)
+      kb_management_cert_bundle_clear(pem);
    if (!plain || !plain_len || plain_len > KB_MANAGEMENT_CERT_PLAINTEXT_MAX || !verified || !pem ||
        memory_overlap(plain, plain_len, verified, sizeof(*verified)) ||
        memory_overlap(plain, plain_len, pem, sizeof(*pem)) ||
        memory_overlap(verified, sizeof(*verified), pem, sizeof(*pem)))
       return -1;
-   if (verified)
-      memset(verified, 0, sizeof(*verified));
-   if (pem)
-      kb_management_cert_bundle_clear(pem);
 
    kb_management_cert_bundle_view_t view = {0};
    if (kb_management_cert_bundle_decode(plain, plain_len, &view))

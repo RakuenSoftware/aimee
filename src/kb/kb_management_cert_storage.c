@@ -24,6 +24,14 @@ static int exact_hex(const char *s, size_t n)
    return 1;
 }
 
+static int memory_overlap(const void *a, size_t an, const void *b, size_t bn)
+{
+   if (!a || !b || !an || !bn)
+      return 0;
+   uintptr_t ap = (uintptr_t)a, bp = (uintptr_t)b;
+   return ap < bp ? bp - ap < an : ap - bp < bn;
+}
+
 static int checked_dir(int fd)
 {
    struct stat st;
@@ -116,8 +124,8 @@ void kb_management_cert_storage_close(kb_management_cert_storage_t *storage)
 
 static int record_name(const char *kind, const char operation[65], char out[80])
 {
-   if ((!strcmp(kind, "intent") && exact_hex(operation, 64)) ||
-       (!strcmp(kind, "candidate") && exact_hex(operation, 64)))
+   if (kind && ((!strcmp(kind, "intent") && exact_hex(operation, 64)) ||
+                (!strcmp(kind, "candidate") && exact_hex(operation, 64))))
       return snprintf(out, 80, "%s.%s", kind, operation) == (int)(strlen(kind) + 1 + 64) ? 0 : -1;
    return -1;
 }
@@ -126,12 +134,15 @@ static kb_management_cert_storage_result_t read_name(kb_management_cert_storage_
                                                      const char *name, uint8_t *out, size_t cap,
                                                      size_t *out_len)
 {
+   if (!storage || storage->dir_fd < 0 || !name || !out || !cap || !out_len ||
+       memory_overlap(out, cap, out_len, sizeof(*out_len)) ||
+       memory_overlap(out, cap, storage, sizeof(*storage)) ||
+       memory_overlap(out_len, sizeof(*out_len), storage, sizeof(*storage)))
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
    if (out_len)
       *out_len = 0;
    if (out && cap)
       OPENSSL_cleanse(out, cap);
-   if (!storage || storage->dir_fd < 0 || !name || !out || !cap || !out_len)
-      return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
       return open_error(errno, 1);
@@ -222,23 +233,24 @@ static int verify_contents(int fd, const void *bytes, size_t len)
    return same ? 0 : -1;
 }
 
-/* 1 exact, 0 well-formed byte mismatch, -1 I/O failure. */
-static int compare_contents(int fd, const void *bytes, size_t len)
+/* 0 complete, 1 oversize, -1 I/O failure. */
+static int read_small_contents(int fd, uint8_t out[1024], size_t *out_len)
 {
-   if (len > 1024 || lseek(fd, 0, SEEK_SET) < 0)
+   if (!out || !out_len || lseek(fd, 0, SEEK_SET) < 0)
       return -1;
-   uint8_t existing[1024];
+   *out_len = 0;
+   OPENSSL_cleanse(out, 1024);
    size_t used = 0;
-   while (used < len)
+   while (used < 1024)
    {
-      ssize_t n = read(fd, existing + used, len - used);
+      ssize_t n = read(fd, out + used, 1024 - used);
       if (n > 0)
          used += (size_t)n;
       else if (!n)
          break;
       else if (errno != EINTR)
       {
-         OPENSSL_cleanse(existing, sizeof(existing));
+         OPENSSL_cleanse(out, 1024);
          return -1;
       }
    }
@@ -249,17 +261,24 @@ static int compare_contents(int fd, const void *bytes, size_t len)
    while (more < 0 && errno == EINTR);
    if (more < 0)
    {
-      OPENSSL_cleanse(existing, sizeof(existing));
+      OPENSSL_cleanse(out, 1024);
       return -1;
    }
-   int exact = used == len && more == 0 && CRYPTO_memcmp(existing, bytes, len) == 0;
-   OPENSSL_cleanse(existing, sizeof(existing));
-   return exact;
+   if (more > 0)
+   {
+      OPENSSL_cleanse(out, 1024);
+      return 1;
+   }
+   *out_len = used;
+   return 0;
 }
 
+static int valid_operation_record(const char *, const char[65], const void *, size_t);
+
 static kb_management_cert_storage_result_t replay_existing(kb_management_cert_storage_t *storage,
-                                                           const char *name, const void *bytes,
-                                                           size_t len)
+                                                           const char *name, const char *kind,
+                                                           const char operation[65],
+                                                           const void *bytes, size_t len)
 {
    int fd = openat(storage->dir_fd, name, O_RDWR | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
@@ -290,14 +309,15 @@ static kb_management_cert_storage_result_t replay_existing(kb_management_cert_st
    do
       more = read(fd, &extra, 1);
    while (more < 0 && errno == EINTR);
-   int exact = more == 0 && used == len && CRYPTO_memcmp(existing, bytes, len) == 0;
+   int valid = more == 0 && used && valid_operation_record(kind, operation, existing, used);
+   int exact = valid && used == len && CRYPTO_memcmp(existing, bytes, len) == 0;
    OPENSSL_cleanse(existing, sizeof(existing));
    if (more < 0)
    {
       close(fd);
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    }
-   if (!used || more > 0)
+   if (!valid)
    {
       close(fd);
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
@@ -315,15 +335,50 @@ static kb_management_cert_storage_result_t replay_existing(kb_management_cert_st
    return sync_error ? KB_MANAGEMENT_STORAGE_UNAVAILABLE : KB_MANAGEMENT_STORAGE_OK;
 }
 
-static kb_management_cert_storage_result_t
-inspect_existing_no_replace(kb_management_cert_storage_t *storage, const char *name)
+static int valid_operation_record(const char *kind, const char operation[65], const void *bytes,
+                                  size_t len)
 {
-   int fd = openat(storage->dir_fd, name, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
-   if (fd < 0)
-      return open_error(errno, 0);
-   int valid = checked_file(fd);
-   close(fd);
-   return valid ? KB_MANAGEMENT_STORAGE_CONFLICT : KB_MANAGEMENT_STORAGE_INTEGRITY;
+   if (!kind || !operation || !bytes || !len)
+      return 0;
+   if (!strcmp(kind, "intent"))
+   {
+      kb_management_cert_intent_view_t intent;
+      return kb_management_cert_intent_decode(bytes, len, &intent) == 0 &&
+             !strcmp(intent.operation_id, operation);
+   }
+   if (!strcmp(kind, "candidate"))
+   {
+      kb_management_cert_candidate_view_t candidate;
+      return kb_management_cert_candidate_decode(bytes, len, &candidate) == 0 &&
+             !strcmp(candidate.operation_id, operation);
+   }
+   return 0;
+}
+
+static int valid_pending_record(const void *bytes, size_t len)
+{
+   kb_management_cert_pending_manifest_t pending;
+   return kb_management_cert_pending_decode(bytes, len, &pending) == 0;
+}
+
+static int valid_current_record(const void *bytes, size_t len)
+{
+   kb_management_cert_manifest_t current;
+   return kb_management_cert_manifest_decode(bytes, len, &current) == 0;
+}
+
+static kb_management_cert_storage_result_t
+inspect_existing_pending(kb_management_cert_storage_t *storage)
+{
+   uint8_t existing[1024];
+   size_t len = 0;
+   kb_management_cert_storage_result_t rc =
+       read_name(storage, "pending", existing, sizeof(existing), &len);
+   if (rc == KB_MANAGEMENT_STORAGE_OK)
+      rc = valid_pending_record(existing, len) ? KB_MANAGEMENT_STORAGE_CONFLICT
+                                               : KB_MANAGEMENT_STORAGE_INTEGRITY;
+   OPENSSL_cleanse(existing, sizeof(existing));
+   return rc;
 }
 
 kb_management_cert_storage_result_t
@@ -332,11 +387,12 @@ kb_management_cert_storage_stage(kb_management_cert_storage_t *storage, const ch
 {
    char name[80];
    if (!storage || storage->dir_fd < 0 || record_name(kind, operation, name) || !bytes || !len ||
-       len > KB_MANAGEMENT_CERT_CANDIDATE_MAX)
+       len > KB_MANAGEMENT_CERT_CANDIDATE_MAX ||
+       !valid_operation_record(kind, operation, bytes, len))
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0 && errno == EEXIST)
-      return replay_existing(storage, name, bytes, len);
+      return replay_existing(storage, name, kind, operation, bytes, len);
    if (fd < 0)
       return open_error(errno, 0);
    kb_management_cert_storage_result_t rc = KB_MANAGEMENT_STORAGE_UNAVAILABLE;
@@ -379,7 +435,8 @@ kb_management_cert_storage_result_t
 kb_management_cert_storage_promote(kb_management_cert_storage_t *storage, const void *bytes,
                                    size_t len)
 {
-   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024)
+   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024 ||
+       !valid_current_record(bytes, len))
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    char suffix[33], name[48];
    if (random_hex(suffix) || snprintf(name, sizeof(name), "current.tmp.%s", suffix) != 44)
@@ -387,13 +444,26 @@ kb_management_cert_storage_promote(kb_management_cert_storage_t *storage, const 
    int fd = openat(storage->dir_fd, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0)
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
-   if (!checked_file(fd) || complete_write(fd, bytes, len) || fdatasync(fd) ||
-       verify_contents(fd, bytes, len))
+   if (!checked_file(fd))
+   {
+      close(fd);
+      unlinkat(storage->dir_fd, name, 0);
+      fsync(storage->dir_fd);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   }
+   if (complete_write(fd, bytes, len) || fdatasync(fd) || verify_contents(fd, bytes, len))
    {
       close(fd);
       unlinkat(storage->dir_fd, name, 0);
       fsync(storage->dir_fd);
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
+   }
+   if (!checked_file(fd))
+   {
+      close(fd);
+      unlinkat(storage->dir_fd, name, 0);
+      fsync(storage->dir_fd);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
    }
    if (close(fd) || renameat(storage->dir_fd, name, storage->dir_fd, "current") ||
        fsync(storage->dir_fd))
@@ -416,12 +486,13 @@ kb_management_cert_storage_result_t
 kb_management_cert_storage_pending_publish(kb_management_cert_storage_t *storage, const void *bytes,
                                            size_t len)
 {
-   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024)
+   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024 ||
+       !valid_pending_record(bytes, len))
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd =
        openat(storage->dir_fd, "pending", O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
    if (fd < 0 && errno == EEXIST)
-      return inspect_existing_no_replace(storage, "pending");
+      return inspect_existing_pending(storage);
    if (fd < 0)
       return open_error(errno, 0);
    if (!checked_file(fd))
@@ -462,7 +533,8 @@ kb_management_cert_storage_result_t
 kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *storage,
                                                const void *bytes, size_t len)
 {
-   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024)
+   if (!storage || storage->dir_fd < 0 || !bytes || !len || len > 1024 ||
+       !valid_pending_record(bytes, len))
       return KB_MANAGEMENT_STORAGE_INTEGRITY;
    int fd = openat(storage->dir_fd, "pending", O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
    if (fd < 0)
@@ -478,12 +550,22 @@ kb_management_cert_storage_pending_clear_exact(kb_management_cert_storage_t *sto
       close(fd);
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    }
-   int exact = compare_contents(fd, bytes, len);
-   if (exact < 0)
+   uint8_t existing[1024];
+   size_t existing_len = 0;
+   int read_rc = read_small_contents(fd, existing, &existing_len);
+   if (read_rc < 0)
    {
       close(fd);
       return KB_MANAGEMENT_STORAGE_UNAVAILABLE;
    }
+   if (read_rc > 0 || !valid_pending_record(existing, existing_len))
+   {
+      OPENSSL_cleanse(existing, sizeof(existing));
+      close(fd);
+      return KB_MANAGEMENT_STORAGE_INTEGRITY;
+   }
+   int exact = existing_len == len && CRYPTO_memcmp(existing, bytes, len) == 0;
+   OPENSSL_cleanse(existing, sizeof(existing));
    if (!exact)
    {
       close(fd);

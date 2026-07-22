@@ -148,6 +148,10 @@ static int encode_fields(const uint8_t *magic, size_t magic_len, const void *a, 
    if (!out || !out_len || overlap(out, cap, a, a_len) || overlap(out, cap, b, b_len) ||
        (c && overlap(out, cap, c, c_len)) || overlap(out, cap, out_len, sizeof(*out_len)))
       return -1;
+   if (overlap(out_len, sizeof(*out_len), a, a_len) ||
+       overlap(out_len, sizeof(*out_len), b, b_len) ||
+       (c && overlap(out_len, sizeof(*out_len), c, c_len)))
+      return -1;
    *out_len = 0;
    if (cap)
       memset(out, 0, cap);
@@ -205,7 +209,7 @@ static int decode_fields(const uint8_t *magic, size_t magic_len, const void *inp
 int kb_management_cert_key_intent_decode(const void *input, size_t len,
                                          kb_management_cert_key_intent_view_t *out)
 {
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    kb_management_cert_key_intent_view_t v = {0};
@@ -227,7 +231,7 @@ int kb_management_cert_bundle_encode(const void *key, size_t key_len, const void
 int kb_management_cert_bundle_decode(const void *input, size_t len,
                                      kb_management_cert_bundle_view_t *out)
 {
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    kb_management_cert_bundle_view_t v = {0};
@@ -243,7 +247,9 @@ int kb_management_cert_intent_encode(const kb_management_cert_intent_view_t *v, 
 {
    if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
        overlap(out, cap, v->ciphertext, v->ciphertext_len) ||
-       overlap(out, cap, out_len, sizeof(*out_len)))
+       overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)) ||
+       overlap(out_len, sizeof(*out_len), v->ciphertext, v->ciphertext_len))
       return -1;
    *out_len = 0;
    if (cap)
@@ -278,7 +284,7 @@ int kb_management_cert_intent_encode(const kb_management_cert_intent_view_t *v, 
 int kb_management_cert_intent_decode(const void *input, size_t len,
                                      kb_management_cert_intent_view_t *out)
 {
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    if (!input || len > KB_MANAGEMENT_CERT_CANDIDATE_MAX)
@@ -315,7 +321,9 @@ int kb_management_cert_candidate_encode(const kb_management_cert_candidate_view_
 {
    if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
        overlap(out, cap, v->ciphertext, v->ciphertext_len) ||
-       overlap(out, cap, out_len, sizeof(*out_len)))
+       overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)) ||
+       overlap(out_len, sizeof(*out_len), v->ciphertext, v->ciphertext_len))
       return -1;
    *out_len = 0;
    if (cap)
@@ -377,7 +385,7 @@ static int copy_fixed(reader_t *r, char *out, size_t n)
 int kb_management_cert_candidate_decode(const void *input, size_t len,
                                         kb_management_cert_candidate_view_t *out)
 {
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    if (!input || len > KB_MANAGEMENT_CERT_CANDIDATE_MAX)
@@ -441,7 +449,8 @@ int kb_management_cert_manifest_encode(const kb_management_cert_manifest_t *v, u
 {
    size_t total = sizeof(manifest_magic) - 1 + 64 + 8 + 32;
    if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
-       overlap(out, cap, out_len, sizeof(*out_len)))
+       overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)))
       return -1;
    *out_len = 0;
    if (cap)
@@ -459,7 +468,7 @@ int kb_management_cert_manifest_encode(const kb_management_cert_manifest_t *v, u
 int kb_management_cert_manifest_decode(const void *input, size_t len,
                                        kb_management_cert_manifest_t *out)
 {
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    if (!input || !len)
@@ -483,7 +492,8 @@ int kb_management_cert_pending_encode(const kb_management_cert_pending_manifest_
 {
    const size_t total = sizeof(pending_magic) - 1 + 32 + 32 + 64 + 32 + 8 + 4 + 32 + 32;
    if (!v || !out || !out_len || overlap(out, cap, v, sizeof(*v)) ||
-       overlap(out, cap, out_len, sizeof(*out_len)))
+       overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)))
       return -1;
    *out_len = 0;
    if (cap)
@@ -507,7 +517,7 @@ int kb_management_cert_pending_decode(const void *input, size_t len,
                                       kb_management_cert_pending_manifest_t *out)
 {
    const size_t exact_len = sizeof(pending_magic) - 1 + 32 + 32 + 64 + 32 + 8 + 4 + 32 + 32;
-   if (!out)
+   if (!out || overlap(input, len, out, sizeof(*out)))
       return -1;
    memset(out, 0, sizeof(*out));
    if (!input || len != exact_len)

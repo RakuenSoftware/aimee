@@ -117,6 +117,8 @@ int kb_management_cert_attest_transcript(const char installation_id[33],
    binding_writer_t w;
    if (overlap(out, cap, installation_id, 33) || overlap(out, cap, out_len, sizeof(*out_len)))
       return -1;
+   if (overlap(out_len, sizeof(*out_len), installation_id, 33))
+      return -1;
    if (begin_output(out, cap, out_len, &w))
       return -1;
    if (!exact_hex(installation_id, 32) || !valid_kind(kind) ||
@@ -153,7 +155,8 @@ int kb_management_cert_intent_transcript(const kb_management_cert_intent_binding
                                          size_t cap, size_t *out_len)
 {
    binding_writer_t w;
-   if (overlap(out, cap, v, sizeof(*v)) || overlap(out, cap, out_len, sizeof(*out_len)))
+   if (overlap(out, cap, v, sizeof(*v)) || overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)))
       return -1;
    if (begin_output(out, cap, out_len, &w))
       return -1;
@@ -167,7 +170,8 @@ int kb_management_cert_candidate_transcript(const kb_management_cert_candidate_b
 {
    binding_writer_t w;
    size_t ca_issuer_len = 0, leaf_issuer_len = 0, serial_len = 0;
-   if (overlap(out, cap, v, sizeof(*v)) || overlap(out, cap, out_len, sizeof(*out_len)))
+   if (overlap(out, cap, v, sizeof(*v)) || overlap(out, cap, out_len, sizeof(*out_len)) ||
+       overlap(out_len, sizeof(*out_len), v, sizeof(*v)))
       return -1;
    if (begin_output(out, cap, out_len, &w))
       return -1;
