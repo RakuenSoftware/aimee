@@ -55,6 +55,12 @@ BEGIN
   END LOOP;
 END $$;
 
+-- Earlier full-gate slices intentionally exercise sealed maintenance states.
+-- This fixture begins from the post-operator-unseal state required by C2b.
+UPDATE kb_vault_control
+   SET sealed=false,maintenance_kind='',maintenance_id='',updated_at=pg_now_text()
+ WHERE singleton=1;
+
 -- Seed exact C2a-final roots and manifest v2 custody.  The C2a gate separately
 -- proves its bootstrap; this fixture isolates the C2b authority transitions.
 INSERT INTO kb_management_token_root_vault_permit VALUES
