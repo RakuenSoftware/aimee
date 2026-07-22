@@ -7,6 +7,7 @@
 
 enum
 {
+   MOCK_PREFLIGHT,
    MOCK_PENDING_INITIAL,
    MOCK_PENDING_RENEW,
    MOCK_ACTIVE,
@@ -35,7 +36,8 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *sql, aimee_pg_prepare_
    (void)err;
    (void)len;
    assert(c == &mock_stmt);
-   mock_stmt.mode = strstr(sql, "begin_initial")   ? MOCK_PENDING_INITIAL
+   mock_stmt.mode = strstr(sql, "grant_preflight") ? MOCK_PREFLIGHT
+                    : strstr(sql, "begin_initial")   ? MOCK_PENDING_INITIAL
                     : strstr(sql, "begin_renewal") ? MOCK_PENDING_RENEW
                     : strstr(sql, "activate")      ? MOCK_ACTIVE
                     : strstr(sql, "snapshot")      ? MOCK_SNAPSHOT
@@ -91,7 +93,9 @@ int aimee_pg_column_count(aimee_pg_stmt_t *st)
 {
    if (mock_bad_shape)
       return 1;
-   return st->mode == MOCK_MAINTENANCE
+   return st->mode == MOCK_PREFLIGHT
+              ? 3
+              : st->mode == MOCK_MAINTENANCE
               ? 3
               : (st->mode == MOCK_SNAPSHOT ? 22 : (st->mode == MOCK_ACTIVE ? 24 : 18));
 }
@@ -103,6 +107,8 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *st, int col)
 {
    static const char hex32[] = "0123456789abcdef0123456789abcdef";
    static const char hex64[] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+   if (st->mode == MOCK_PREFLIGHT)
+      return col < 2 ? hex32 : "2000000000";
    if (st->mode == MOCK_MAINTENANCE)
       return col == 0 ? "1" : (col == 1 ? "2" : "0");
    if (st->mode == MOCK_PENDING_INITIAL || st->mode == MOCK_PENDING_RENEW)
@@ -308,12 +314,23 @@ static void test_runtime_facades(void)
    fill_id(initial.operation_id, 64);
    fill_id(initial.authority_id, 32);
    fill_id(initial.installation_id, 32);
+   fill_id(initial.expected_lineage_id, 32);
    initial.binding = binding;
+   db2_management_client_grant_preflight_request_t preflight = {0};
+   memcpy(preflight.installation_id, initial.installation_id,
+          sizeof(preflight.installation_id));
+   preflight.binding = binding;
+   db2_management_client_grant_preflight_t grant;
+   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
+          DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
+   assert(!strcmp(grant.installation_id, preflight.installation_id) &&
+          !strcmp(grant.replacement_lineage_id, preflight.installation_id) &&
+          grant.expires_at_epoch == 2000000000 && mock_bind_count == 6);
    db2_management_client_pending_t pending;
    assert(db2_management_client_instance_begin_initial(&initial, &pending) ==
           DB2_MANAGEMENT_CLIENT_INSTANCE_OK);
    assert(pending.generation == 1 && pending.issue_kind == DB2_MANAGEMENT_CLIENT_ISSUE_INITIAL &&
-          !pending.has_previous && mock_bind_count == 10);
+          !pending.has_previous && mock_bind_count == 11);
 
    db2_management_client_renewal_request_t renewal = {0};
    fill_id(renewal.operation_id, 64);
@@ -355,12 +372,20 @@ static void test_runtime_facades(void)
           maintenance.quarantined_issues == 0 && mock_bind_count == 1);
 
    mock_sqlstate = "40001";
+   memset(&grant, 0xa5, sizeof(grant));
+   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
+          DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
+   assert(all_zero(&grant, sizeof(grant)));
    memset(&pending, 0xa5, sizeof(pending));
    assert(db2_management_client_instance_begin_initial(&initial, &pending) ==
           DB2_MANAGEMENT_CLIENT_INSTANCE_RETRY);
    assert(all_zero(&pending, sizeof(pending)));
    mock_sqlstate = NULL;
    mock_bad_shape = 1;
+   memset(&grant, 0xa5, sizeof(grant));
+   assert(db2_management_client_instance_grant_preflight(&preflight, &grant) ==
+          DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);
+   assert(all_zero(&grant, sizeof(grant)));
    memset(&active, 0xa5, sizeof(active));
    assert(db2_management_client_instance_snapshot(initial.installation_id, &binding, &active) ==
           DB2_MANAGEMENT_CLIENT_INSTANCE_INTEGRITY);

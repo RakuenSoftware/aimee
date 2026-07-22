@@ -353,6 +353,48 @@ static db2_management_client_instance_result_t pending_call(aimee_pg_stmt_t *st,
    return rc;
 }
 
+db2_management_client_instance_result_t db2_management_client_instance_grant_preflight(
+    const db2_management_client_grant_preflight_request_t *r,
+    db2_management_client_grant_preflight_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!r || !out || !exact_hex(r->installation_id, 32) || !binding_valid(&r->binding))
+      return DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID;
+   aimee_pg_stmt_t *st = NULL;
+   db2_management_client_instance_result_t rc = runtime_stmt(
+       "SELECT * FROM public.kb_management_instance_grant_preflight(?1,?2,?3,?4,?5,?6)", &st);
+   if (rc != DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
+      return rc;
+   if (aimee_pg_bind_text(st, "?1", r->installation_id) || bind_binding(st, &r->binding, 2))
+   {
+      aimee_pg_finalize(st);
+      return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;
+   }
+   rc = first_row(st);
+   db2_management_client_grant_preflight_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   int decoded = rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK && aimee_pg_column_count(st) == 3 &&
+                 copy_text_col(st, 0, candidate.installation_id,
+                               sizeof(candidate.installation_id)) == 0 &&
+                 exact_hex(candidate.installation_id, 32) &&
+                 copy_text_col(st, 1, candidate.replacement_lineage_id,
+                               sizeof(candidate.replacement_lineage_id)) == 0 &&
+                 exact_hex(candidate.replacement_lineage_id, 32) &&
+                 col_i64(st, 2, &candidate.expires_at_epoch) == 0 &&
+                 candidate.expires_at_epoch > 0 &&
+                 strcmp(candidate.installation_id, r->installation_id) == 0;
+   if (rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
+      rc = finish_row(st, decoded);
+   else
+      aimee_pg_finalize(st);
+   if (rc == DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
+      *out = candidate;
+   else
+      memset(out, 0, sizeof(*out));
+   return rc;
+}
+
 db2_management_client_instance_result_t
 db2_management_client_instance_begin_initial(const db2_management_client_initial_request_t *r,
                                              db2_management_client_pending_t *out)
@@ -360,11 +402,12 @@ db2_management_client_instance_begin_initial(const db2_management_client_initial
    if (out)
       memset(out, 0, sizeof(*out));
    if (!r || !out || !exact_hex(r->operation_id, 64) || !exact_hex(r->authority_id, 32) ||
-       !exact_hex(r->installation_id, 32) || !binding_valid(&r->binding))
+       !exact_hex(r->installation_id, 32) || !exact_hex(r->expected_lineage_id, 32) ||
+       !binding_valid(&r->binding))
       return DB2_MANAGEMENT_CLIENT_INSTANCE_INVALID;
    aimee_pg_stmt_t *st = NULL;
    db2_management_client_instance_result_t rc = runtime_stmt(
-       "SELECT * FROM public.kb_management_instance_begin_initial(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+       "SELECT * FROM public.kb_management_instance_begin_initial(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
        &st);
    if (rc != DB2_MANAGEMENT_CLIENT_INSTANCE_OK)
       return rc;
@@ -373,8 +416,10 @@ db2_management_client_instance_begin_initial(const db2_management_client_initial
    hex_encode(r->csr_spki_digest, spki);
    if (aimee_pg_bind_text(st, "?1", r->operation_id) ||
        aimee_pg_bind_text(st, "?2", r->authority_id) ||
-       aimee_pg_bind_text(st, "?3", r->installation_id) || bind_binding(st, &r->binding, 4) ||
-       aimee_pg_bind_text(st, "?9", csr) || aimee_pg_bind_text(st, "?10", spki))
+       aimee_pg_bind_text(st, "?3", r->installation_id) ||
+       aimee_pg_bind_text(st, "?4", r->expected_lineage_id) ||
+       bind_binding(st, &r->binding, 5) || aimee_pg_bind_text(st, "?10", csr) ||
+       aimee_pg_bind_text(st, "?11", spki))
    {
       aimee_pg_finalize(st);
       return DB2_MANAGEMENT_CLIENT_INSTANCE_UNAVAILABLE;

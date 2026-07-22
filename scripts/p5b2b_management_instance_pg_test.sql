@@ -163,8 +163,22 @@ BEGIN
   IF has_function_privilege('aimee_kb_runtime',
       'public.kb_management_instance_grant_create(text,bigint,text,text,text,text,text,text,text,text)','EXECUTE') OR
      NOT has_function_privilege('aimee_kb_runtime',
+      'public.kb_management_instance_grant_preflight(text,text,text,text,text,text)','EXECUTE') OR
+     NOT has_function_privilege('aimee_kb_runtime',
       'public.kb_management_instance_snapshot(text,text,text,text,text,text)','EXECUTE') THEN
     RAISE EXCEPTION 'runtime facade ACL mismatch';
+  END IF;
+  SELECT count(*) INTO n
+    FROM pg_catalog.pg_proc p,
+         LATERAL pg_catalog.aclexplode(COALESCE(
+           p.proacl,pg_catalog.acldefault('f',p.proowner))) a
+   WHERE p.oid='public.kb_management_instance_grant_preflight(text,text,text,text,text,text)'::REGPROCEDURE
+     AND a.grantee=0 AND a.privilege_type='EXECUTE';
+  IF n<>0 THEN RAISE EXCEPTION 'PUBLIC preflight execute privilege'; END IF;
+  IF to_regprocedure(
+      'public.kb_management_instance_begin_initial(text,text,text,text,text,text,text,text,text,text)')
+      IS NOT NULL THEN
+    RAISE EXCEPTION 'legacy begin_initial overload remains installed';
   END IF;
   IF NOT has_function_privilege('aimee_kb_migrate',
       'public.kb_management_instance_grant_create(text,bigint,text,text,text,text,text,text,text,text)','EXECUTE') THEN
@@ -253,29 +267,86 @@ BEGIN
 END $$;
 RESET ROLE;
 
+-- A past-but-well-formed grant proves preflight uses primary authoritative time.
+INSERT INTO public.kb_management_instance_grant(installation_id,replacement_lineage_id,team_id,
+  workload_issuer,workload_subject,proof_anchor,custody_anchor,binding_digest,
+  expected_ca_issuer,expected_ca_fingerprint,creator_identity,created_at,expires_at)
+VALUES(repeat('8',32),repeat('8',32),current_setting('p5b2b.team_b')::BIGINT,
+  'spiffe://p5b2b.expired','expired-node',repeat('8',64),repeat('9',64),
+  public.kb_management_instance_binding_digest('spiffe://p5b2b.expired','expired-node',
+    repeat('8',64),repeat('9',64)),current_setting('p5b2b.leaf_a_issuer'),
+  current_setting('p5b2b.ca_fp'),'owner:p5b2b-test',now()-interval '2 hours',
+  now()-interval '1 hour');
+
 SET ROLE aimee_kb_runtime;
 DO $$
 DECLARE r RECORD;
 BEGIN
+  SELECT * INTO r FROM public.kb_management_instance_grant_preflight(repeat('1',32),
+    current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
+    current_setting('p5b2b.proof_a'),current_setting('p5b2b.custody_a'),
+    current_setting('p5b2b.binding_a'));
+  IF r.installation_id<>repeat('1',32) OR r.replacement_lineage_id<>repeat('1',32) OR
+     r.expires_at_epoch<=extract(epoch FROM now())::BIGINT THEN
+    RAISE EXCEPTION 'grant preflight result mismatch';
+  END IF;
+  BEGIN
+    PERFORM * FROM public.kb_management_instance_grant_preflight(repeat('1',32),
+      current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_b'),
+      current_setting('p5b2b.proof_b'),current_setting('p5b2b.custody_b'),
+      current_setting('p5b2b.binding_b'));
+    RAISE EXCEPTION 'wrong-binding preflight allowed';
+  EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
+  BEGIN
+    PERFORM * FROM public.kb_management_instance_grant_preflight(repeat('8',32),
+      'spiffe://p5b2b.expired','expired-node',repeat('8',64),repeat('9',64),
+      public.kb_management_instance_binding_digest('spiffe://p5b2b.expired','expired-node',
+        repeat('8',64),repeat('9',64)));
+    RAISE EXCEPTION 'expired preflight allowed';
+  EXCEPTION WHEN invalid_authorization_specification THEN NULL; END;
+  BEGIN
+    PERFORM * FROM public.kb_management_instance_begin_initial(repeat('9',64),repeat('1',32),
+      repeat('1',32),repeat('9',32),current_setting('p5b2b.issuer'),
+      current_setting('p5b2b.subject_a'),current_setting('p5b2b.proof_a'),
+      current_setting('p5b2b.custody_a'),current_setting('p5b2b.binding_a'),repeat('5',64),
+      current_setting('p5b2b.leaf_a_spki'));
+    RAISE EXCEPTION 'changed-lineage begin allowed';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
   SELECT * INTO r FROM public.kb_management_instance_begin_initial(repeat('a',64),repeat('1',32),
-    repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
+    repeat('1',32),repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
     current_setting('p5b2b.proof_a'),current_setting('p5b2b.custody_a'),
     current_setting('p5b2b.binding_a'),repeat('5',64),current_setting('p5b2b.leaf_a_spki'));
   IF r.replayed OR r.generation<>1 OR r.issue_state<>'pending' THEN RAISE EXCEPTION 'initial begin mismatch'; END IF;
   SELECT * INTO r FROM public.kb_management_instance_begin_initial(repeat('a',64),repeat('1',32),
-    repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
+    repeat('1',32),repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
     current_setting('p5b2b.proof_a'),current_setting('p5b2b.custody_a'),
     current_setting('p5b2b.binding_a'),repeat('5',64),current_setting('p5b2b.leaf_a_spki'));
   IF NOT r.replayed THEN RAISE EXCEPTION 'initial begin replay missed'; END IF;
   BEGIN
+    PERFORM * FROM public.kb_management_instance_begin_initial(repeat('9',64),repeat('9',32),
+      repeat('1',32),repeat('1',32),current_setting('p5b2b.issuer'),
+      current_setting('p5b2b.subject_a'),current_setting('p5b2b.proof_a'),
+      current_setting('p5b2b.custody_a'),current_setting('p5b2b.binding_a'),repeat('9',64),
+      current_setting('p5b2b.leaf_a_spki'));
+    RAISE EXCEPTION 'other operation consumed grant';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  BEGIN
     PERFORM * FROM public.kb_management_instance_begin_initial(repeat('a',64),repeat('1',32),
-      repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
+      repeat('1',32),repeat('9',32),current_setting('p5b2b.issuer'),
+      current_setting('p5b2b.subject_a'),current_setting('p5b2b.proof_a'),
+      current_setting('p5b2b.custody_a'),current_setting('p5b2b.binding_a'),repeat('5',64),
+      current_setting('p5b2b.leaf_a_spki'));
+    RAISE EXCEPTION 'replay changed lineage allowed';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  BEGIN
+    PERFORM * FROM public.kb_management_instance_begin_initial(repeat('a',64),repeat('1',32),
+      repeat('1',32),repeat('1',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_a'),
       current_setting('p5b2b.proof_a'),current_setting('p5b2b.custody_a'),
       current_setting('p5b2b.binding_a'),repeat('6',64),current_setting('p5b2b.leaf_a_spki'));
     RAISE EXCEPTION 'initial begin mismatch replayed';
   EXCEPTION WHEN unique_violation THEN NULL; END;
   PERFORM * FROM public.kb_management_instance_begin_initial(repeat('b',64),repeat('2',32),
-    repeat('2',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_b'),
+    repeat('2',32),repeat('2',32),current_setting('p5b2b.issuer'),current_setting('p5b2b.subject_b'),
     current_setting('p5b2b.proof_b'),current_setting('p5b2b.custody_b'),
     current_setting('p5b2b.binding_b'),repeat('6',64),current_setting('p5b2b.leaf_b_spki'));
 END $$;
@@ -434,7 +505,7 @@ END $$;
 -- retains A's immutable lineage root.
 SET ROLE aimee_kb_runtime;
 SELECT * FROM public.kb_management_instance_begin_initial(repeat('e',64),repeat('3',32),
-  repeat('3',32),current_setting('p5b2b.issuer'),'kb-node-c',repeat('5',64),repeat('6',64),
+  repeat('3',32),repeat('1',32),current_setting('p5b2b.issuer'),'kb-node-c',repeat('5',64),repeat('6',64),
   current_setting('p5b2b.binding_c'),repeat('7',64),repeat('9',64));
 SELECT * FROM public.kb_management_instance_activate(repeat('e',64),repeat('3',32),
   current_setting('p5b2b.issuer'),'kb-node-c',repeat('5',64),repeat('6',64),

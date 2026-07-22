@@ -47,9 +47,23 @@ typedef enum
 
 typedef struct
 {
+   char installation_id[33];
+   db2_management_client_instance_binding_t binding;
+} db2_management_client_grant_preflight_request_t;
+
+typedef struct
+{
+   char installation_id[33];
+   char replacement_lineage_id[33];
+   int64_t expires_at_epoch;
+} db2_management_client_grant_preflight_t;
+
+typedef struct
+{
    char operation_id[DB2_MANAGEMENT_CLIENT_INSTANCE_ID_HEX + 1];
    char authority_id[33];
    char installation_id[33];
+   char expected_lineage_id[33];
    db2_management_client_instance_binding_t binding;
    uint8_t csr_digest[32];
    uint8_t csr_spki_digest[32];
@@ -160,6 +174,10 @@ extern "C"
        const uint8_t custody_anchor[DB2_MANAGEMENT_CLIENT_INSTANCE_ANCHOR_LEN],
        db2_management_client_instance_binding_t *out);
 
+   db2_management_client_instance_result_t
+   db2_management_client_instance_grant_preflight(
+       const db2_management_client_grant_preflight_request_t *,
+       db2_management_client_grant_preflight_t *);
    db2_management_client_instance_result_t
    db2_management_client_instance_begin_initial(const db2_management_client_initial_request_t *,
                                                 db2_management_client_pending_t *);

@@ -7550,8 +7550,45 @@ BEGIN
     extract(epoch FROM g.created_at)::BIGINT,extract(epoch FROM g.expires_at)::BIGINT,NULL::BIGINT;
 END $$;
 
+CREATE OR REPLACE FUNCTION kb_management_instance_grant_preflight(
+  p_installation_id TEXT,p_workload_issuer TEXT,p_workload_subject TEXT,
+  p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT
+) RETURNS TABLE(installation_id TEXT,replacement_lineage_id TEXT,expires_at_epoch BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE g public.kb_management_instance_grant%ROWTYPE; v_digest TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_installation_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'invalid management grant preflight' USING ERRCODE='22023';
+  END IF;
+  v_digest:=public.kb_management_instance_binding_digest(
+    p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor);
+  IF p_binding_digest IS DISTINCT FROM v_digest THEN
+    RAISE EXCEPTION 'management binding mismatch' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_installation_id,1345462850));
+  SELECT x.* INTO g FROM public.kb_management_instance_grant x
+   WHERE x.installation_id=p_installation_id FOR SHARE;
+  IF g.installation_id IS NULL OR g.state<>'pending' OR g.expires_at<=pg_catalog.now() OR
+     ROW(g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest)
+     IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
+                          v_digest) THEN
+    RAISE EXCEPTION 'management grant preflight denied' USING ERRCODE='28000';
+  END IF;
+  RETURN QUERY SELECT g.installation_id,g.replacement_lineage_id,
+    extract(epoch FROM g.expires_at)::BIGINT;
+END $$;
+
+-- The expected-lineage argument is an intentional ABI break.  Remove the old
+-- overload on upgrades so no caller can bypass the lineage fence.
+DROP FUNCTION IF EXISTS kb_management_instance_begin_initial(
+  TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT);
 CREATE OR REPLACE FUNCTION kb_management_instance_begin_initial(
-  p_operation_id TEXT,p_authority_id TEXT,p_installation_id TEXT,p_workload_issuer TEXT,
+  p_operation_id TEXT,p_authority_id TEXT,p_installation_id TEXT,p_expected_lineage_id TEXT,
+  p_workload_issuer TEXT,
   p_workload_subject TEXT,p_proof_anchor TEXT,p_custody_anchor TEXT,p_binding_digest TEXT,
   p_csr_digest TEXT,p_csr_spki_digest TEXT
 ) RETURNS TABLE(replayed BOOLEAN,installation_id TEXT,replacement_lineage_id TEXT,
@@ -7567,7 +7604,8 @@ BEGIN
     RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
   END IF;
   IF p_operation_id !~ '^[0-9a-f]{64}$' OR p_authority_id !~ '^[0-9a-f]{32}$' OR
-     p_installation_id !~ '^[0-9a-f]{32}$' OR p_csr_digest !~ '^[0-9a-f]{64}$' OR
+     p_installation_id !~ '^[0-9a-f]{32}$' OR p_expected_lineage_id !~ '^[0-9a-f]{32}$' OR
+     p_csr_digest !~ '^[0-9a-f]{64}$' OR
      p_csr_spki_digest !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'invalid initial management issue' USING ERRCODE='22023';
   END IF;
@@ -7580,10 +7618,13 @@ BEGIN
   SELECT x.* INTO q FROM public.kb_management_instance_issue x
    WHERE x.operation_id=p_operation_id FOR UPDATE;
   IF FOUND THEN
-    SELECT x.* INTO i FROM public.kb_management_instance x WHERE x.installation_id=q.installation_id;
-    IF q.installation_id<>p_installation_id OR q.issue_kind<>'initial' OR q.generation<>1 OR
+    SELECT x.* INTO i FROM public.kb_management_instance x
+     WHERE x.installation_id=q.installation_id FOR UPDATE;
+    IF i.installation_id IS NULL OR q.installation_id<>p_installation_id OR
+       q.issue_kind<>'initial' OR q.generation<>1 OR
        q.previous_enrollment_id IS NOT NULL OR q.csr_digest<>p_csr_digest OR
        q.csr_spki_digest<>p_csr_spki_digest OR i.authority_id<>p_authority_id OR
+       i.replacement_lineage_id<>p_expected_lineage_id OR
        ROW(i.workload_issuer,i.workload_subject,i.proof_anchor,i.custody_anchor,i.binding_digest)
        IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
                             v_digest) THEN
@@ -7598,10 +7639,17 @@ BEGIN
   END IF;
   SELECT x.* INTO g FROM public.kb_management_instance_grant x
    WHERE x.installation_id=p_installation_id FOR UPDATE;
-  IF g.installation_id IS NULL OR g.state<>'pending' OR g.expires_at<=pg_catalog.now() OR
+  IF g.installation_id IS NULL OR g.state IN ('revoked','expired') OR
+     g.expires_at<=pg_catalog.now() OR
      ROW(g.workload_issuer,g.workload_subject,g.proof_anchor,g.custody_anchor,g.binding_digest)
      IS DISTINCT FROM ROW(p_workload_issuer,p_workload_subject,p_proof_anchor,p_custody_anchor,
                           v_digest) THEN
+    RAISE EXCEPTION 'initial management grant denied' USING ERRCODE='28000';
+  END IF;
+  IF g.state='consumed' OR g.replacement_lineage_id<>p_expected_lineage_id THEN
+    RAISE EXCEPTION 'initial management grant conflict' USING ERRCODE='23505';
+  END IF;
+  IF g.state<>'pending' THEN
     RAISE EXCEPTION 'initial management grant denied' USING ERRCODE='28000';
   END IF;
   INSERT INTO public.kb_management_instance(installation_id,replacement_lineage_id,authority_id,

@@ -327,7 +327,7 @@ $$;
 
 -- P5-B2b management-instance lineage.  The broad compatibility grants near the
 -- top of this file must never expose the primary-only lineage tables.  Runtime
--- crosses FORCE RLS only through the five fixed owner-definer entry points;
+-- crosses FORCE RLS only through the six fixed owner-definer entry points;
 -- offline grant and replacement provisioning remains migration-only.
 DO $$
 BEGIN
@@ -345,7 +345,8 @@ BEGIN
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
-  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_grant_preflight(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_owner';
@@ -371,7 +372,8 @@ BEGIN
     public.kb_management_instance_binding_digest(TEXT,TEXT,TEXT,TEXT),
     public.kb_management_instance_grant_create(TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
-    public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_grant_preflight(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
     public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
     public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
@@ -390,7 +392,8 @@ BEGIN
       public.kb_management_instance_replacement_grant_create(TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
       FROM aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
-      public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_grant_preflight(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
+      public.kb_management_instance_begin_initial(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
       public.kb_management_instance_begin_renewal(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT),
       public.kb_management_instance_activate(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BIGINT),
       public.kb_management_instance_snapshot(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
