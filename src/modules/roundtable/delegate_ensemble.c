@@ -1845,9 +1845,9 @@ static char *assemble_review_artifact(const roundtable_result_t *out)
       dstr_appendf(&s, " _(sources: %s)_", out->original_request_alignment_sources);
    dstr_append_str(&s, "\n");
    dstr_appendf(&s,
-                "\n## Repository evidence coverage\n\n%d/%d responding seats used read-only "
+                "\n## Repository evidence coverage\n\n%d/%d configured seats used read-only "
                 "Aimee tools successfully (%d successful of %d attempted call%s).\n",
-                out->participants_tool_used, out->participants_total - out->participants_failed,
+                out->participants_tool_used, out->participants_total,
                 out->participant_successful_tool_calls, out->participant_tool_calls,
                 out->participant_tool_calls == 1 ? "" : "s");
    if (out->evidence_coverage_incomplete)
@@ -2095,9 +2095,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             if (results[i].successful_tool_calls > 0)
                out->participants_tool_used++;
          }
-         int responding = count_successful(results, ref_count);
          out->evidence_coverage_incomplete |=
-             cfg->roundtable_require_evidence && out->participants_tool_used < responding;
+             cfg->roundtable_require_evidence && out->participants_tool_used < ref_count;
          if (out->evidence_coverage_incomplete)
             out->degraded = 1;
       }
