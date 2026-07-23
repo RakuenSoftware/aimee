@@ -3,6 +3,7 @@
 #include "agent_jobs.h"
 #include "db1_internal.h"
 
+#include <math.h>
 #include <sqlite3.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -67,13 +68,14 @@ int db1_agent_job_create(const char *role, const char *prompt, const char *agent
    return id;
 }
 
-void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result)
+static int agent_job_write(int job_id, const char *status, int cursor_turn, const char *result,
+                           int has_cost, double cost_usd)
 {
    if (job_id <= 0 || !status)
-      return;
+      return -1;
    sqlite3 *db = db1_conn();
    if (!db)
-      return;
+      return -1;
 
    sqlite3_stmt *stmt = NULL;
    /* Don't let progress updates overwrite a 'cancelled' status — cmd_cancel
@@ -81,12 +83,19 @@ void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const
     * to 'running' on its next per-turn update. Allow final success to win a
     * cancel/complete race so a delegate that finished while a cancellation was
     * being issued still records its result instead of leaving contradictory
-    * job status and agent-log rows. */
+    * job status and agent-log rows.
+    *
+    * Cost is written in the same statement as the terminal status: a poller that
+    * observes a terminal job must never be able to read the default zero and
+    * commit it durably as measured spend. */
    static const char *sql =
-       "UPDATE agent_jobs SET status = ?, cursor = ?, result = ?, updated_at = datetime('now')"
-       " WHERE id = ? AND (status != 'cancelled' OR ? = 'done')";
+       "UPDATE agent_jobs SET status = ?4, cursor = ?5, result = ?6,"
+       " cost_usd = CASE WHEN ?1 THEN ?2 ELSE cost_usd END,"
+       " cost_known = CASE WHEN ?1 THEN 1 ELSE cost_known END,"
+       " updated_at = datetime('now')"
+       " WHERE id = ?3 AND (status != 'cancelled' OR ?4 = 'done')";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
-      return;
+      return -1;
 
    char cursor[32];
    snprintf(cursor, sizeof(cursor), "%d", cursor_turn);
@@ -112,14 +121,31 @@ void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const
       }
    }
 
-   sqlite3_bind_text(stmt, 1, status, -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 2, cursor, -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 3, result_text, -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 4, job_id);
-   sqlite3_bind_text(stmt, 5, status, -1, SQLITE_TRANSIENT);
-   (void)sqlite3_step(stmt);
+   sqlite3_bind_int(stmt, 1, has_cost ? 1 : 0);
+   sqlite3_bind_double(stmt, 2, cost_usd);
+   sqlite3_bind_int(stmt, 3, job_id);
+   sqlite3_bind_text(stmt, 4, status, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 5, cursor, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 6, result_text, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
    free(capped);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
+void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result)
+{
+   (void)agent_job_write(job_id, status, cursor_turn, result, 0, 0.0);
+}
+
+int db1_agent_job_complete(int job_id, const char *status, int cursor_turn, const char *result,
+                           int has_cost, double cost_usd)
+{
+   /* Rejects negatives, NaN and infinities: a non-finite cost would propagate
+    * into cum_cost_usd and permanently corrupt budget accounting. */
+   if (has_cost && (!isfinite(cost_usd) || cost_usd < 0.0))
+      return -1;
+   return agent_job_write(job_id, status, cursor_turn, result, has_cost, cost_usd);
 }
 
 void db1_agent_job_set_agent(int job_id, const char *agent_name)
@@ -270,7 +296,7 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
                             "result, COALESCE(cursor, ''),"
                             " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
                             " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
-                            " created_at, updated_at"
+                            " COALESCE(cost_usd, 0), COALESCE(cost_known, 0), created_at, updated_at"
                             " FROM agent_jobs WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
@@ -291,8 +317,10 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
       db1_copy_col_text(out->heartbeat_at, sizeof(out->heartbeat_at), stmt, 9);
       db1_copy_col_text(out->current_tool, sizeof(out->current_tool), stmt, 10);
       out->api_call_count = sqlite3_column_int(stmt, 11);
-      db1_copy_col_text(out->created_at, sizeof(out->created_at), stmt, 12);
-      db1_copy_col_text(out->updated_at, sizeof(out->updated_at), stmt, 13);
+      out->cost_usd = sqlite3_column_double(stmt, 12);
+      out->cost_known = sqlite3_column_int(stmt, 13);
+      db1_copy_col_text(out->created_at, sizeof(out->created_at), stmt, 14);
+      db1_copy_col_text(out->updated_at, sizeof(out->updated_at), stmt, 15);
       rc = 0;
    }
    sqlite3_finalize(stmt);
@@ -384,8 +412,8 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
    static const char *sql =
        "SELECT id, role, prompt, agent_name, status, result, COALESCE(cursor, ''),"
        " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
-       " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
-       " created_at, updated_at"
+       " COALESCE(current_tool, ''), COALESCE(api_call_count, 0), COALESCE(cost_usd, 0),"
+       " COALESCE(cost_known, 0), created_at, updated_at"
        " FROM agent_jobs ORDER BY id DESC LIMIT ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
@@ -407,8 +435,10 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
       db1_copy_col_text(o->heartbeat_at, sizeof(o->heartbeat_at), stmt, 8);
       db1_copy_col_text(o->current_tool, sizeof(o->current_tool), stmt, 9);
       o->api_call_count = sqlite3_column_int(stmt, 10);
-      db1_copy_col_text(o->created_at, sizeof(o->created_at), stmt, 11);
-      db1_copy_col_text(o->updated_at, sizeof(o->updated_at), stmt, 12);
+      o->cost_usd = sqlite3_column_double(stmt, 11);
+      o->cost_known = sqlite3_column_int(stmt, 12);
+      db1_copy_col_text(o->created_at, sizeof(o->created_at), stmt, 13);
+      db1_copy_col_text(o->updated_at, sizeof(o->updated_at), stmt, 14);
       n++;
    }
    sqlite3_finalize(stmt);

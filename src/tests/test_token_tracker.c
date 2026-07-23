@@ -68,6 +68,23 @@ static void test_openai_cache_pricing(void)
    PASS("cost: openai prompt-cache read priced (0.5x input), writes free");
 }
 
+static void test_cost_ceiling_boundaries(void)
+{
+   int cap = 0, total = 0;
+   assert(token_cost_ceiling("gpt-4o", 0.01, 100, 0, &cap, &total) == 1);
+   assert(cap > 0);
+   assert(total == cap + 100);
+   int bounded = 0;
+   assert(token_cost_ceiling("gpt-4o", 0.01, 100, 7, &bounded, &total) == 1);
+   assert(bounded == 7);
+   assert(token_cost_ceiling("some-unknown-model-xyz", 1.0, 0, 0, &cap, &total) == -1);
+   assert(token_cost_ceiling("minimax-m2", 1.0, 100, 11, &cap, &total) == 0);
+   assert(cap == 11);
+   assert(token_cost_ceiling("gpt-4o", -1.0, 0, 0, &cap, &total) == -1);
+   assert(token_cost_ceiling("gpt-4o", 0.01, 10000000, 0, &cap, &total) == -1);
+   assert(token_cost_ceiling("gpt-4o", 0.000000001, 0, 0, &cap, &total) == -1);
+}
+
 static void test_openai_model(void)
 {
    /* gpt-4o: $2.50 input, $10.00 output per million */
@@ -348,6 +365,7 @@ static void test_db1_pricing_authoritative(void)
 
 int main(void)
 {
+   test_cost_ceiling_boundaries();
    printf("token_tracker: unit tests\n");
    test_registry_overrides_base_keeps_cache();
    test_cost_shaped_reward();

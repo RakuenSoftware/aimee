@@ -623,6 +623,39 @@ func TestConfiguredRoundtableChairmanFailureIsVisiblyDegraded(t *testing.T) {
 	}
 }
 
+type budgetExhaustionAgents struct{ chairmanCalls int }
+
+func (a *budgetExhaustionAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		a.chairmanCalls++
+	}
+	return DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, CostUSD: request.MaxCostUSD}, nil
+}
+
+func (a *budgetExhaustionAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func TestRoundtableDoesNotLaunchChairmanAfterCostExhaustion(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"codex","chairman_enabled":true}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := &budgetExhaustionAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete plan")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Block: "gate.roundtable"}, Proposal: "implement it", Inputs: map[string]wfe.Artifact{"src": reviewed}, CostLimitUSD: 1})
+	if err != nil || result.Status != StepPending || result.PauseReason != "roundtable_chairman" || agents.chairmanCalls != 0 {
+		t.Fatalf("result=%+v chairman_calls=%d err=%v", result, agents.chairmanCalls, err)
+	}
+}
+
 func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",

@@ -1,6 +1,7 @@
 /* token_tracker.c: token usage normalisation and cost estimation */
 #include "token_tracker.h"
 #include <ctype.h>
+#include <limits.h>
 #include <string.h>
 
 /* --- Pricing table (USD per million tokens) ---
@@ -227,6 +228,45 @@ double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int
           (double)usage->output_tokens * out_mtok / 1e6 +
           (double)usage->cache_write_tokens * cw_mtok / 1e6 +
           (double)usage->cache_read_tokens * cr_mtok / 1e6;
+}
+
+int token_cost_ceiling(const char *model, double max_cost_usd, int conservative_input_tokens,
+                       int existing_output_limit, int *out_output_tokens,
+                       int *out_total_tokens)
+{
+   if (!out_output_tokens || !out_total_tokens || !model || !model[0] || max_cost_usd <= 0.0 ||
+       conservative_input_tokens < 0)
+      return -1;
+   token_usage_t input_unit = {.input_tokens = 1,
+                               .cache_write_tokens = 1,
+                               .cache_read_tokens = 1};
+   token_usage_t output_unit = {.output_tokens = 1};
+   int priced = 0;
+   double input_unit_cost = token_estimate_cost_ex(model, &input_unit, &priced);
+   if (!priced)
+      return -1;
+   double output_unit_cost = token_estimate_cost_ex(model, &output_unit, NULL);
+   if (input_unit_cost <= 0.0 && output_unit_cost <= 0.0)
+   {
+      *out_output_tokens = existing_output_limit;
+      *out_total_tokens = existing_output_limit;
+      return 0;
+   }
+   double input_cost = input_unit_cost * (double)conservative_input_tokens;
+   if (input_cost >= max_cost_usd || output_unit_cost <= 0.0)
+      return -1;
+   double raw = (max_cost_usd - input_cost) / output_unit_cost;
+   if (raw < 1.0)
+      return -1;
+   int ceiling = raw > (double)INT_MAX ? INT_MAX : (int)raw;
+   *out_output_tokens = existing_output_limit > 0 && existing_output_limit < ceiling
+                            ? existing_output_limit
+                            : ceiling;
+   if (conservative_input_tokens > INT_MAX - *out_output_tokens)
+      *out_total_tokens = INT_MAX;
+   else
+      *out_total_tokens = conservative_input_tokens + *out_output_tokens;
+   return 1;
 }
 
 const char *token_billable_model(const char *provider_model, const char *served_model,
