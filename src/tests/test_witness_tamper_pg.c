@@ -34,6 +34,8 @@
 #include "db2/db2_witness_checkpoint.h"
 #include "db2/db2_witness_emit.h"
 #include "db2/db_postgres.h"
+#include "kb/kb_vault_policy.h"
+#include "kb/kb_witness_cadence.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 
@@ -248,6 +250,66 @@ int main(void)
    }
    printf("witness_tamper_pg: scenario 2 OK (coherent rewrite exposed by comparison with the "
           "retained copy)\n");
+
+   /* -----------------------------------------------------------------------
+    * Scenario 3: a retained checkpoint signed by a key this kb cannot derive.
+    * A kb holding evidence it cannot verify must refuse to start. Both halves are
+    * asserted: coverage is clean beforehand, so the failure below is caused by the
+    * foreign key and not by the check being broken in general. */
+   {
+      uint8_t cur_pub[32], cur_id[16];
+      assert(vault_witness_signer_identity(cur_pub, cur_id) == 0);
+      int64_t unknown = -1;
+      char sample[64] = "";
+      int cov = db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
+                                                       sizeof sample);
+      if (cov != 0)
+      {
+         fprintf(stderr, "SCENARIO 3 FAILED: anchor coverage check itself failed on an honest "
+                         "store (returned %d) — the check is broken, not the store\n",
+                 cov);
+         return 1;
+      }
+      if (unknown != 0)
+      {
+         fprintf(stderr, "SCENARIO 3 FAILED: honest store reported %lld unknown signers\n",
+                 (long long)unknown);
+         return 1;
+      }
+      /* The checkpoint table is WORM too; the attacker has already defeated it. */
+      assert(exec_sql(conn, "ALTER TABLE kb_vault_witness_checkpoint DISABLE TRIGGER USER") == 0);
+      assert(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
+                            "SET signer_key_id = decode(repeat('be',16),'hex')") == 0);
+      if (db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
+                                                 sizeof sample) != 0 ||
+          unknown < 1)
+      {
+         fprintf(stderr, "SCENARIO 3 FAILED: foreign signer_key_id not reported (unknown=%lld)\n",
+                 (long long)unknown);
+         return 1;
+      }
+      /* And the boot gate itself must refuse, with an operator-actionable reason. */
+      char err[512] = "";
+      if (kb_vault_live_keys_allowed())
+      {
+         if (kb_witness_boot_check(err, sizeof err) == 0)
+         {
+            fprintf(stderr, "SCENARIO 3 FAILED: boot check passed with unverifiable evidence\n");
+            return 1;
+         }
+         printf("witness_tamper_pg: boot refused: %s\n", err);
+      }
+      else
+      {
+         /* A dev kb with no live keys witnesses nothing that gates a real key, so
+          * the boot gate deliberately does not apply. Say so rather than silently
+          * reporting a pass this environment never exercised. */
+         printf("witness_tamper_pg: boot gate not exercised (no live keys in this env); "
+                "coverage check itself verified: unknown=%lld sample=%s\n",
+                (long long)unknown, sample);
+      }
+      printf("witness_tamper_pg: scenario 3 OK (unverifiable checkpoint detected)\n");
+   }
 
    db2_shutdown();
    printf("witness_tamper_pg: PASSED\n");

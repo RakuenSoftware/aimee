@@ -30,7 +30,35 @@ int kb_witness_boot_check(char *err, size_t errlen)
       return -1;
    }
    OPENSSL_cleanse(pub, sizeof pub);
+
+   /* Anchor coverage: every retained checkpoint must name a key this kb can
+    * actually verify with. Holding evidence it cannot check is exactly the state a
+    * key-holding kb must refuse to start in, so both "a foreign key id is present"
+    * and "the check could not be run" fail closed — "could not verify" is not
+    * "verified". */
+   int64_t unknown = 0;
+   char sample[64] = "";
+   int cov = db2_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, sample,
+                                                    sizeof sample);
    OPENSSL_cleanse(key_id, sizeof key_id);
+   if (cov != 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen,
+                  "witness anchor coverage could not be checked; a key-holding kb refuses to "
+                  "start unable to confirm it can verify its own retained checkpoints");
+      return -1;
+   }
+   if (unknown > 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen,
+                  "%lld retained witness checkpoint(s) are signed by a key this kb cannot derive "
+                  "(e.g. signer_key_id %s); it cannot verify its own evidence and refuses to "
+                  "start. This means a database from another install, or tampering.",
+                  (long long)unknown, sample[0] ? sample : "unknown");
+      return -1;
+   }
    return 0;
 }
 

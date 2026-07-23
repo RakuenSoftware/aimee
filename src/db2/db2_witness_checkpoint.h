@@ -1,6 +1,7 @@
 #ifndef AIMEE_DB2_WITNESS_CHECKPOINT_H
 #define AIMEE_DB2_WITNESS_CHECKPOINT_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* P7-witness-e2: the checkpoint producer. Ties the SQL surface (leaf scan +
@@ -36,6 +37,24 @@ typedef enum
  * modes so the cadence can raise the right integrity alert. This function commits
  * or rolls back its own transaction. */
 db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq);
+
+/* Boot anchor coverage: count retained checkpoints whose signer_key_id is NOT the
+ * supplied (currently derivable) key id, and hex-render one offending id into
+ * `sample` for the operator's error message.
+ *
+ * A key-holding kb that holds a checkpoint it cannot attribute to a key it can
+ * verify with has evidence it cannot check, which is the state the umbrella says
+ * it must never start in. There is no historical-anchor file yet because nothing
+ * rotates the server KEK, so any foreign key id today means either a restored
+ * database from another install or tampering — both of which must stop startup
+ * rather than be silently tolerated. When KEK rotation lands it brings the
+ * historical anchor set with it and this check widens to consult it.
+ *
+ * Returns 0 on success (with *out_unknown set, possibly 0), -1 if the check could
+ * not be performed at all — which the caller must also treat as fail-closed, since
+ * "could not verify" is not "verified". */
+int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_len,
+                                           int64_t *out_unknown, char *sample, size_t sample_cap);
 
 #ifdef __cplusplus
 }

@@ -401,3 +401,44 @@ rollback:
    free(snap.buf);
    return rc;
 }
+
+int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_len,
+                                           int64_t *out_unknown, char *sample, size_t sample_cap)
+{
+   if (sample && sample_cap)
+      sample[0] = '\0';
+   if (out_unknown)
+      *out_unknown = 0;
+   if (!key_id || key_id_len != VAULT_WITNESS_SIGNER_KEY_ID_LEN || !out_unknown)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[CP_ERR];
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          /* No min(bytea) in PostgreSQL, so pick a
+                                           * sample via array_agg rather than an
+                                           * aggregate over the bytea itself. */
+                                          "SELECT count(*), "
+                                          "encode((array_agg(signer_key_id ORDER BY seq))[1],'hex') "
+                                          "FROM kb_vault_witness_checkpoint WHERE signer_key_id <> ?1",
+                                          err, sizeof err);
+   if (!st)
+      return -1;
+   if (aimee_pg_bind_blob(st, "?1", key_id, (int)key_id_len) != 0)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+   int rc = -1;
+   if (aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+   {
+      *out_unknown = aimee_pg_column_int64(st, 0);
+      const char *hex = aimee_pg_column_text(st, 1);
+      if (sample && sample_cap && hex)
+         snprintf(sample, sample_cap, "%s", hex);
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
