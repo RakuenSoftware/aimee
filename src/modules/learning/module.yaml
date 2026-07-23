@@ -9,5 +9,24 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/learning/learning_bundle.c",
+    "src/modules/learning/learning_evidence.c",
+    "src/modules/learning/learning_implicit.c",
+    "src/modules/learning/learning_router.c"
+  ],
+  "private_headers": [
+    "src/modules/learning/learning.h",
+    "src/modules/learning/learning_bundle.h",
+    "src/modules/learning/learning_evidence.h",
+    "src/modules/learning/learning_implicit.h"
+  ],
+  "tests": [
+    "src/tests/test_learning_bundle.c",
+    "src/tests/test_learning_metrics.c"
+  ],
+  "docs": [
+    "docs/modules/learning.md"
+  ]
 }

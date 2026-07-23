@@ -571,6 +571,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains governance-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising private_headers set-equality on a real declared module.",
       "independent_review": "The scoping roundtable required declaration and latching be separate acts; slice 40 declared and this slice latches. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-41.md", "docs/modules/governance.md", "src/modules/governance/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 42,
+      "state": "present_and_verified",
+      "disposition": "Declared the learning descriptor's four sources, four module-root private headers, two direct tests, and document without setting ownership_complete, the declaration half of the pair for the second Class B module, and settled two questions governance did not raise: a de-facto public header that stays privately declared, and a CMake source asymmetry.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["learning.h is a de-facto public contract included repository-wide including by aimee.h, but is declared private because it sits at the module root; promoting it under include/aimee/learning would move the file and rewrite every include site and is deferred to a separate header-layout slice", "CMake compiles three of the four sources and omits learning_bundle.c whose callers are entirely server/kb/db2/config-side, the same intentional thin-client boundary recorded for gateway and audit, not drift", "test_learning_synth.c and test_learning_version.c carry the learning name but are KB tests of kb/kb_learning_synth.c and kb/kb_learning_version.c and are not claimed", "DB2 learning persistence and the KB synthesis lane remain outside the module root as physical-ownership debt"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Declaring learning.h as a public header was rejected because the layout checker requires public headers under the canonical include tree, which would force a file move and repository-wide include rewrites into an ownership-metadata slice.",
+        "revisit": "Slice 43 latches learning; a separate header-layout slice may relocate learning.h under the canonical include tree and declare it public."
+      },
+      "consumers": ["cmd_learning and cmd_rules", "server and KB learning routes", "config and delegates layers", "the learning latch slice", "remaining Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains two learning rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: declare learning.h private with the public-contract tension recorded and relocation deferred, classify the synth and version tests as KB tests, and document the learning_bundle.c CMake omission as an intentional boundary. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-42.md", "docs/modules/learning.md", "src/modules/learning/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }
