@@ -675,6 +675,30 @@ int vault_is_sealed(void)
    return custody_is_sealed_unlocked();
 }
 
+vault_custody_local_status_t vault_custody_selected_local_status(void)
+{
+   if (g_fork_child_invalid || ensure_atfork() != 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+
+   /* Provider binding is startup-only.  g_hwm_mu nevertheless makes the
+    * pointer snapshot race-free for tests and rejects a concurrent rebind
+    * instead of allowing an operator status request to block behind it. */
+   if (pthread_mutex_trylock(&g_hwm_mu) != 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+   const vault_custody_provider_t *provider = g_custody;
+   int (*status_fn)(void *, unsigned) = provider ? provider->local_status : NULL;
+   void *ctx = provider ? provider->ctx : NULL;
+   pthread_mutex_unlock(&g_hwm_mu);
+
+   if (!status_fn)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+   int status = status_fn(ctx, 50);
+   return status >= VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED &&
+                  status <= VAULT_CUSTODY_LOCAL_MALFORMED
+              ? (vault_custody_local_status_t)status
+              : VAULT_CUSTODY_LOCAL_MALFORMED;
+}
+
 int vault_unseal(const void *params, size_t len)
 {
    if (g_fork_child_invalid || g_owned_guard || g_owned_use || ensure_atfork() != 0)

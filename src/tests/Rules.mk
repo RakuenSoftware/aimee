@@ -343,6 +343,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-vault-store \
                $(TESTPREFIX)/unit-test-vault-seam \
+               $(TESTPREFIX)/unit-test-vault-local-status \
+               $(TESTPREFIX)/unit-test-vault-operator-status-runtime \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-status \
+               $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock \
                $(TESTPREFIX)/unit-test-vault-maintenance-guard \
                $(TESTPREFIX)/unit-test-kb-vault-key-use \
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
@@ -3733,6 +3737,28 @@ $(TESTPREFIX)/unit-test-vault-seam: $(OBJDIR)/tests/test_vault_seam.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-local-status: $(OBJDIR)/tests/test_vault_local_status.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-operator-status-runtime: \
+                              $(OBJDIR)/tests/test_vault_operator_status_runtime.o \
+                              $(OBJDIR)/db2/vault_operator_status_runtime.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpq -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-status: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock: \
+                              $(OBJDIR)/tests/test_kb_vault_tpm_runtime_lock.o \
+                              $(OBJDIR)/kb/kb_vault_tpm_runtime_lock.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-vault-maintenance-guard: \
                               $(OBJDIR)/tests/test_vault_maintenance_guard.o \

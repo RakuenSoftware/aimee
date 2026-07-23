@@ -114,8 +114,15 @@ static int rotate(void *v, const char *a, int *b, int *c, char *d, size_t e, cha
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"pkcs11", &g,   get_kek, rotate, sealed, unseal,
-                                           seal,     NULL, NULL,    NULL,   NULL};
+static const vault_custody_provider_t p = {
+    .name = "pkcs11",
+    .ctx = &g,
+    .get_kek = get_kek,
+    .rotate = rotate,
+    .is_sealed = sealed,
+    .unseal = unseal,
+    .seal = seal,
+};
 #else
 static int fail(void *v, uint8_t k[VAULT_KEK_LEN])
 {
@@ -152,8 +159,14 @@ static int rot(void *v, const char *a, int *b, int *c, char *d, size_t e, char *
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"pkcs11", NULL, fail, rot,  yes, no,
-                                           no_seal,  NULL, NULL, NULL, NULL};
+static const vault_custody_provider_t p = {
+    .name = "pkcs11",
+    .get_kek = fail,
+    .rotate = rot,
+    .is_sealed = yes,
+    .unseal = no,
+    .seal = no_seal,
+};
 #endif
 const vault_custody_provider_t *vault_custody_pkcs11_provider(void)
 {

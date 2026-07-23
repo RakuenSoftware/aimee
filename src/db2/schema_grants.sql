@@ -325,6 +325,194 @@ BEGIN
 END
 $$;
 
+-- P7-reseal-d3a dedicated operator-status authority.  The login role cannot
+-- inherit this capability implicitly; the runtime must prove its posture and
+-- execute the fixed SET ROLE before using the single discovery facade.
+DO $p7_d3a_orchestrator_grants$
+DECLARE
+  role_name TEXT;
+  schema_name TEXT;
+  fn RECORD;
+  edge RECORD;
+  owned RECORD;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_vault_orchestrator') THEN
+    CREATE ROLE aimee_kb_vault_orchestrator NOLOGIN NOINHERIT NOBYPASSRLS
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_vault_orchestrator_login') THEN
+    CREATE ROLE aimee_kb_vault_orchestrator_login LOGIN NOINHERIT NOBYPASSRLS
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+  END IF;
+  ALTER ROLE aimee_kb_vault_orchestrator NOLOGIN NOINHERIT NOBYPASSRLS
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+  ALTER ROLE aimee_kb_vault_orchestrator_login LOGIN NOINHERIT NOBYPASSRLS
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+
+  -- Ownership would bypass ACL cleanup.  Repair any drift before reducing both
+  -- principals to the same database CONNECT-only posture.
+  IF (SELECT owner.rolname FROM pg_catalog.pg_database d
+       JOIN pg_catalog.pg_roles owner ON owner.oid=d.datdba
+      WHERE d.datname=current_database()) IN
+       ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login') THEN
+    EXECUTE format('ALTER DATABASE %I OWNER TO aimee_kb_owner',current_database());
+  END IF;
+  EXECUTE format('REVOKE ALL ON DATABASE %I FROM aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',
+                 current_database());
+  EXECUTE format('REVOKE CREATE,TEMPORARY ON DATABASE %I FROM PUBLIC',current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',
+                 current_database());
+  -- Strip latent direct grants from every schema, including pg_catalog. These
+  -- REVOKEs affect only the dedicated roles; PUBLIC catalog access is untouched.
+  -- NOINHERIT does not make such grants harmless: they would become usable if a
+  -- future search_path or role transition changed.
+  FOR schema_name IN
+    SELECT n.nspname FROM pg_catalog.pg_namespace n
+  LOOP
+    IF (SELECT owner.rolname FROM pg_catalog.pg_namespace n
+         JOIN pg_catalog.pg_roles owner ON owner.oid=n.nspowner
+        WHERE n.nspname=schema_name) IN
+         ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login') THEN
+      EXECUTE format('ALTER SCHEMA %I OWNER TO aimee_kb_owner',schema_name);
+    END IF;
+    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',schema_name);
+    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',schema_name);
+    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',schema_name);
+    EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA %I FROM aimee_kb_vault_orchestrator, aimee_kb_vault_orchestrator_login',schema_name);
+  END LOOP;
+  FOR owned IN
+    SELECT c.oid::pg_catalog.regclass AS object_name,c.relkind
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner
+     WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+       AND owner.rolname IN
+         ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')
+       AND c.relkind IN ('r','p','f','S','v','m','c')
+  LOOP
+    IF owned.relkind='S' THEN
+      EXECUTE format('ALTER SEQUENCE %s OWNER TO aimee_kb_owner',owned.object_name);
+    ELSIF owned.relkind='v' THEN
+      EXECUTE format('ALTER VIEW %s OWNER TO aimee_kb_owner',owned.object_name);
+    ELSIF owned.relkind='m' THEN
+      EXECUTE format('ALTER MATERIALIZED VIEW %s OWNER TO aimee_kb_owner',owned.object_name);
+    ELSIF owned.relkind='c' THEN
+      EXECUTE format('ALTER TYPE %s OWNER TO aimee_kb_owner',owned.object_name);
+    ELSE
+      EXECUTE format('ALTER TABLE %s OWNER TO aimee_kb_owner',owned.object_name);
+    END IF;
+  END LOOP;
+  FOR owned IN
+    SELECT p.oid::pg_catalog.regprocedure AS object_name,p.prokind
+      FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+      JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
+     WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+       AND p.prokind IN ('f','w','p') AND owner.rolname IN
+         ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')
+  LOOP
+    IF owned.prokind='p' THEN
+      EXECUTE format('ALTER PROCEDURE %s OWNER TO aimee_kb_owner',owned.object_name);
+    ELSE
+      EXECUTE format('ALTER FUNCTION %s OWNER TO aimee_kb_owner',owned.object_name);
+    END IF;
+  END LOOP;
+  -- Index ownership follows its table.  Any remaining class/procedure kind is
+  -- unsupported drift and must stop provisioning rather than retain authority.
+  IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_class c
+       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner
+        WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+          AND owner.rolname IN
+            ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')) OR
+     EXISTS (
+       SELECT 1 FROM pg_catalog.pg_proc p
+       JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
+        WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+          AND owner.rolname IN
+            ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')) THEN
+    RAISE EXCEPTION 'P7_D3A_UNSUPPORTED_OWNERSHIP_DRIFT' USING ERRCODE='55000';
+  END IF;
+  REVOKE USAGE ON SCHEMA public FROM PUBLIC;
+  FOR edge IN
+    SELECT granted.rolname AS granted_role,member.rolname AS member_role
+      FROM pg_catalog.pg_auth_members membership
+      JOIN pg_catalog.pg_roles granted ON granted.oid=membership.roleid
+      JOIN pg_catalog.pg_roles member ON member.oid=membership.member
+     WHERE member.rolname IN
+       ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')
+        OR granted.rolname IN
+       ('aimee_kb_vault_orchestrator','aimee_kb_vault_orchestrator_login')
+  LOOP
+    EXECUTE format('REVOKE %I FROM %I CASCADE',edge.granted_role,edge.member_role);
+  END LOOP;
+  GRANT aimee_kb_vault_orchestrator TO aimee_kb_vault_orchestrator_login;
+
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_vault_orchestrator;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_vault_orchestrator;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_vault_orchestrator;
+  REVOKE ALL ON SCHEMA public FROM aimee_kb_vault_orchestrator;
+
+  -- The private schema makes schema USAGE part of the one-function capability;
+  -- PUBLIC, the authenticator, and unrelated runtimes cannot resolve anything
+  -- in it.  Pin both ownership and future-function defaults to the migration
+  -- owner so a re-apply cannot reopen EXECUTE through PostgreSQL's PUBLIC
+  -- function default.
+  ALTER SCHEMA aimee_kb_vault_orchestrator_api OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_control OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_rewrap_operation OWNER TO aimee_kb_owner;
+  ALTER FUNCTION
+    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
+    OWNER TO aimee_kb_owner;
+  -- The SECURITY DEFINER resolves only explicitly-qualified public relations.
+  -- PUBLIC schema usage is revoked globally above, so grant the function owner
+  -- the resolution privilege it needs without exposing it to the capability.
+  GRANT USAGE ON SCHEMA public TO aimee_kb_owner;
+  -- PostgreSQL row-locking SELECTs also require UPDATE authority.
+  GRANT SELECT,UPDATE ON TABLE public.kb_vault_control,
+    public.kb_vault_rewrap_operation TO aimee_kb_owner;
+  REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
+  REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api
+    FROM aimee_kb_vault_orchestrator_login,aimee_kb_runtime;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_vault_orchestrator_api
+    FROM aimee_kb_vault_orchestrator_login,aimee_kb_runtime,
+         aimee_kb_vault_orchestrator;
+  -- A per-schema REVOKE cannot override PostgreSQL's global PUBLIC EXECUTE
+  -- default.  Close this owner's future-function default globally; application
+  -- execution grants in this provisioning file are explicit.
+  ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+  GRANT USAGE ON SCHEMA aimee_kb_vault_orchestrator_api
+    TO aimee_kb_vault_orchestrator;
+
+  REVOKE ALL ON TABLE public.kb_vault_control,
+    public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
+    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM PUBLIC;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+    REVOKE ALL ON TABLE public.kb_vault_control,
+      public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
+      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM aimee_kb_runtime;
+  END IF;
+
+  FOR fn IN
+    SELECT p.oid::regprocedure AS signature
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='public' AND p.proname LIKE 'org_vault_rewrap_%'
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC',fn.signature);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION %s FROM aimee_kb_runtime',fn.signature);
+    END IF;
+  END LOOP;
+  GRANT EXECUTE ON FUNCTION
+    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
+    TO aimee_kb_vault_orchestrator;
+END
+$p7_d3a_orchestrator_grants$;
+
 -- P5-C2d dedicated online token authority.  The LOGIN runtime receives only
 -- four fixed entry points.  A separate non-login function owner crosses FORCE
 -- RLS with the exact read/lock/insert closure needed by those functions; ordinary kb,

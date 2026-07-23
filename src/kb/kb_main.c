@@ -37,7 +37,10 @@
 #include "db2/vault_pg.h"        /* vault_pg_backend + vault_store_set_backend (kb vault bind) */
 #include "kb/kb_vault_policy.h"  /* kb_vault_policy_select (custody selection, P7 §3) */
 #include "kb/kb_management_runtime.h"
+#include "kb_vault_operator_status.h"
+#include "kb_vault_tpm_runtime_lock.h"
 #include "db2/kb_audit_worm.h"
+#include "db2/vault_operator_status_runtime.h"
 #include "vault_server_key.h" /* startup durable seal-epoch synchronization */
 #include <signal.h>
 #include <stdint.h>
@@ -54,6 +57,94 @@
 #endif
 
 static kb_service_ctx_t g_ctx;
+
+_Static_assert((int)DB2_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_SEALED_IDLE,
+               "vault operator state wire mismatch");
+_Static_assert((int)DB2_VAULT_OPERATION_RECOVERY_REQUIRED ==
+                   (int)KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED,
+               "vault operator operation wire mismatch");
+_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE ==
+                   (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+               "vault operator remediation wire mismatch");
+
+static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_status_t *out)
+{
+   (void)opaque;
+   if (!out)
+      return -1;
+   switch (vault_custody_selected_local_status())
+   {
+      case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
+         *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+         return 0;
+      case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
+         *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+         return 0;
+      case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
+         *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
+         return 0;
+      case VAULT_CUSTODY_LOCAL_MALFORMED:
+         *out = DB2_VAULT_PROVIDER_MALFORMED;
+         return 0;
+   }
+   return -1;
+}
+
+static int kb_vault_operator_project(kb_vault_operator_status_t *out, void *opaque)
+{
+   db2_vault_operator_runtime_t *runtime = opaque;
+   db2_vault_operator_status_t status;
+   int rc = db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL,
+                                               &status);
+   if (rc == DB2_VAULT_OPERATOR_UNAVAILABLE || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->state = (kb_vault_operator_state_t)status.state;
+   out->operation_state = (kb_vault_operator_operation_state_t)status.snapshot.operation_state;
+   out->remediation = (kb_vault_operator_remediation_t)status.remediation;
+   out->flags = status.snapshot.operation_present ? 1u : 0u;
+   out->seal_epoch = (uint64_t)status.snapshot.seal_epoch;
+   out->control_fence = (uint64_t)status.snapshot.control_fence;
+   out->old_generation = (uint64_t)status.snapshot.old_generation;
+   out->new_generation = (uint64_t)status.snapshot.new_generation;
+   out->last_opened_fence = (uint64_t)status.snapshot.last_opened_fence;
+   memcpy(out->operation_id, status.snapshot.operation_id, sizeof(out->operation_id));
+   return kb_vault_operator_status_validate(out) ? 0 : -1;
+}
+
+static int kb_vault_operator_status_equal(const db2_vault_operator_status_t *a,
+                                          const db2_vault_operator_status_t *b)
+{
+   return a && b && a->state == b->state && a->remediation == b->remediation &&
+          a->provider == b->provider && db2_vault_operator_snapshot_equal(&a->snapshot,
+                                                                          &b->snapshot);
+}
+
+static int kb_cmd_vault(int argc, char **argv)
+{
+   int json = 0;
+   if (argc < 3 || argc > 4 || strcmp(argv[2], "status") != 0 ||
+       (argc == 4 && strcmp(argv[3], "--json") != 0))
+   {
+      fputs("Usage: aimee-kb vault status [--json]\n", stderr);
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   }
+   if (argc == 4)
+      json = 1;
+
+   kb_vault_operator_status_t status;
+   kb_vault_operator_client_result_t result = kb_vault_operator_status_client(&status);
+   if (result == KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE)
+   {
+      fputs("aimee-kb vault status: operator status service unavailable\n", stderr);
+      return result;
+   }
+   char output[768];
+   if (kb_vault_operator_status_format(&status, json, output, sizeof(output)) < 0)
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   fputs(output, stdout);
+   return result;
+}
 
 #define AIMEE_DB2_BOOTSTRAP_DB  "aimee_shared"
 #define AIMEE_DB2_BOOTSTRAP_URL "postgres:///aimee_shared"
@@ -1217,6 +1308,8 @@ int main(int argc, char **argv)
       return kb_cmd_rate(argc, argv);
    if (argc > 1 && strcmp(argv[1], "telemetry") == 0)
       return kb_cmd_telemetry(argc, argv);
+   if (argc > 1 && strcmp(argv[1], "vault") == 0)
+      return kb_cmd_vault(argc, argv);
 
    log_level_t log_level = LOG_INFO;
    int bootstrap_db2 = 0;
@@ -1256,6 +1349,7 @@ int main(int argc, char **argv)
          static const char *usage =
              "Usage: aimee-kb [options]\n"
              "       aimee-kb enroll --host=HOST --port=N [--scope=SCOPE]\n"
+             "       aimee-kb vault status [--json]\n"
              "                       Mint a one-time enrollment connection string for a client\n"
              "  --socket=PATH        (deprecated, ignored) Unix socket path\n"
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
@@ -1284,6 +1378,39 @@ int main(int argc, char **argv)
 
    config_t kb_cfg;
    config_load(&kb_cfg);
+
+   /* P7-D3a is an all-or-none service-manager contract. The listener fd and
+    * pathname are fixed in the wire module; only activation and the dedicated
+    * primary Postgres credential are environment-backed. */
+   const char *vault_operator_enable = getenv("AIMEE_KB_VAULT_OPERATOR_ENABLED");
+   const char *vault_orchestrator_url = getenv("AIMEE_KB_VAULT_ORCHESTRATOR_URL");
+   int vault_operator_enabled = vault_operator_enable &&
+                                strcmp(vault_operator_enable, "1") == 0;
+   const char *vault_tpm2_effective_tcti = NULL;
+   const char *vault_tpm2_effective_nv_index = NULL;
+   kb_vault_tpm_runtime_identity(kb_cfg.vault_tpm2_tcti, kb_cfg.vault_tpm2_nv_index,
+                                 &vault_tpm2_effective_tcti,
+                                 &vault_tpm2_effective_nv_index);
+   if ((vault_operator_enable && !vault_operator_enabled) ||
+       (vault_operator_enabled != (vault_orchestrator_url && vault_orchestrator_url[0])))
+   {
+      fputs("aimee-kb: incomplete or invalid vault operator configuration\n", stderr);
+      agent_http_cleanup();
+      return 1;
+   }
+   if (vault_operator_enabled && strcmp(kb_cfg.vault_custody, "tpm2") != 0)
+   {
+      fputs("aimee-kb: vault operator status requires TPM2 custody\n", stderr);
+      agent_http_cleanup();
+      return 1;
+   }
+   kb_vault_tpm_runtime_lock_t *vault_tpm_runtime_lock = NULL;
+   db2_vault_operator_runtime_t vault_operator_runtime;
+   memset(&vault_operator_runtime, 0, sizeof(vault_operator_runtime));
+   int vault_operator_runtime_opened = 0;
+   kb_vault_operator_service_t *vault_operator_service = NULL;
+   db2_vault_operator_status_t vault_operator_startup_before;
+   memset(&vault_operator_startup_before, 0, sizeof(vault_operator_startup_before));
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
@@ -1385,6 +1512,28 @@ int main(int argc, char **argv)
     * custody + seal/unseal before any key-holding activation on a hardened tier. */
    vault_store_set_backend(&vault_pg_backend);
 
+   /* Every TPM2-custodied daemon takes the same NV-index singleton, including
+    * deployments where D3 operator status is disabled. This closes the mixed
+    * enabled/disabled race before custody initialization or any listener. */
+   if (strcmp(kb_cfg.vault_custody, "tpm2") == 0)
+   {
+      char lock_error[192] = "";
+      if (kb_vault_tpm_runtime_lock_acquire(vault_tpm2_effective_tcti,
+                                            vault_tpm2_effective_nv_index,
+                                            &vault_tpm_runtime_lock, lock_error,
+                                            sizeof(lock_error)) != KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK)
+      {
+         fprintf(stderr, "aimee-kb: %s; refusing to start\n",
+                 lock_error[0] ? lock_error : "TPM runtime singleton validation failed");
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
    /* Select the custody provider for the vault's server KEK (P10/P7 slice 3b).
     * `file` (default) keeps today's self-unsealing behavior; `mock` binds the
     * test/dev seal-barrier anchor; tpm2/pkcs11/kms are declared but unimplemented
@@ -1396,9 +1545,56 @@ int main(int argc, char **argv)
       {
          fprintf(stderr, "aimee-kb: %s\n", custody_err);
          db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
+   }
+
+   if (vault_operator_enabled)
+   {
+      char operator_error[256] = "";
+      if (kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          vault_seal() != 0)
+      {
+         fputs("aimee-kb: cannot establish sealed D3 operator startup state\n", stderr);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+#if defined(AIMEE_P7_D3_INTEGRATION_TEST_OVERRIDE)
+      LOG_WARN("kb.vault", "P7-D3 integration-only loopback TPM override is ACTIVE");
+      if (db2_kb_audit_append("integration", "aimee-kb", "vault.tpm.test_override", "p7-d3",
+                              "allow", "integration-only build flag active") != 0)
+      {
+         fputs("aimee-kb: cannot WORM-audit P7-D3 test override; refusing to start\n", stderr);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+#endif
+      if (db2_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
+                                          operator_error, sizeof(operator_error)) !=
+              DB2_VAULT_OPERATOR_OK ||
+          db2_vault_operator_runtime_status(&vault_operator_runtime,
+                                             kb_vault_operator_provider_status, NULL,
+                                             &vault_operator_startup_before) !=
+              DB2_VAULT_OPERATOR_OK ||
+          kb_vault_operator_startup_mode(
+              (kb_vault_operator_state_t)vault_operator_startup_before.state) < 0)
+      {
+         fprintf(stderr, "aimee-kb: vault operator authority/status unavailable: %s\n",
+                 operator_error[0] ? operator_error : "initial status failed");
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+      vault_operator_runtime_opened = 1;
    }
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
@@ -1406,7 +1602,10 @@ int main(int argc, char **argv)
    if (fusion_probe_query)
    {
       int rc = kb_run_fusion_probe(fusion_probe_query);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return rc;
    }
@@ -1444,9 +1643,64 @@ int main(int argc, char **argv)
       {
          (void)vault_seal();
          fprintf(stderr, "aimee-kb: %s; refusing to start\n", startup_error);
+         if (vault_operator_runtime_opened)
+            db2_vault_operator_runtime_close(&vault_operator_runtime);
          db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
+      }
+   }
+
+   if (vault_operator_enabled)
+   {
+      db2_vault_operator_status_t startup_after;
+      memset(&startup_after, 0, sizeof(startup_after));
+      if (db2_vault_operator_runtime_status(&vault_operator_runtime,
+                                             kb_vault_operator_provider_status, NULL,
+                                             &startup_after) != DB2_VAULT_OPERATOR_OK ||
+          !kb_vault_operator_status_equal(&vault_operator_startup_before, &startup_after) ||
+          kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) < 0 ||
+          kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+              KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+          !(vault_operator_service = kb_vault_operator_service_start(
+                KB_VAULT_OPERATOR_LISTEN_FD, kb_vault_operator_project,
+                &vault_operator_runtime)))
+      {
+         fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n",
+               stderr);
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+
+      /* D3a has no unseal/finalize mutation and therefore normally arrives here
+       * sealed.  In every non-operational state the fixed local STATUS socket is
+       * the entire serving surface: do not initialize HTTP, mTLS, management,
+       * indexing, egress recovery, or general worker machinery. */
+      if (kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) > 0)
+      {
+         LOG_INFO("kb.vault", "vault operator STATUS-only mode active (state=%d)",
+                  (int)startup_after.state);
+         g_ctx.start_time = (uint64_t)time(NULL);
+         g_ctx.running = 1;
+         while (g_ctx.running)
+         {
+            struct timespec pause = {.tv_sec = 0, .tv_nsec = 200L * 1000L * 1000L};
+            (void)nanosleep(&pause, NULL);
+         }
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         embedder_probe_unregister();
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 0;
       }
    }
 
@@ -1458,7 +1712,12 @@ int main(int argc, char **argv)
                               "integration-only build flag active") != 0)
       {
          fprintf(stderr, "aimee-kb: cannot WORM-audit P2b test override; refusing to start\n");
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         if (vault_operator_runtime_opened)
+            db2_vault_operator_runtime_close(&vault_operator_runtime);
          db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
          agent_http_cleanup();
          return 1;
       }
@@ -1478,7 +1737,12 @@ int main(int argc, char **argv)
 
    if (kb_service_init(&g_ctx) != 0)
    {
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
    }
@@ -1492,7 +1756,13 @@ int main(int argc, char **argv)
    int http_port = http_port_override >= 0 ? http_port_override : kb_cfg.kb_api_http_port;
    if (http_port <= 0)
    {
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       fprintf(stderr,
               "aimee-kb: HTTP is the only transport; set --http-port=N or kb_api_http_port\n");
@@ -1510,11 +1780,31 @@ int main(int argc, char **argv)
    /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
    kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
+   if (vault_tpm_runtime_lock &&
+       kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
+           KB_VAULT_TPM_RUNTIME_LOCK_OK)
+   {
+      fputs("aimee-kb: TPM runtime singleton lost before listener activation\n", stderr);
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      agent_http_cleanup();
+      return 1;
+   }
    if (kb_management_runtime_start() != 0)
    {
       fprintf(stderr, "aimee-kb: invalid management runtime configuration; refusing to start\n");
       kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 1;
    }
@@ -1527,7 +1817,12 @@ int main(int argc, char **argv)
                http_port);
       kb_management_runtime_stop();
       kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
       agent_http_cleanup();
       return 0;
    }
@@ -1592,9 +1887,14 @@ int main(int argc, char **argv)
    kb_http_stop();
    kb_management_runtime_stop();
    kb_service_shutdown(&g_ctx);
+   kb_vault_operator_service_stop(vault_operator_service);
+   vault_operator_service = NULL;
+   if (vault_operator_runtime_opened)
+      db2_vault_operator_runtime_close(&vault_operator_runtime);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
    embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
    db2_shutdown();
+   kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
    agent_http_cleanup();
    return rc == 0 ? 0 : 1;
 }
