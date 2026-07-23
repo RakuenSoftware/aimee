@@ -47,6 +47,25 @@ extern "C"
     * written). Never mutates config: this reports, it does not re-tier. */
    int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max);
 
+   /* Effective $/Mtok for an agent across the three billed axes — cached read,
+    * input, output — resolving the operator override first and the model catalog
+    * second. This is the single source of truth for "what does this agent cost
+    * us": the catalog publishes a LIST price, which is not what every deployment
+    * pays (subscription seats, committed-use discounts, self-hosted compute,
+    * reselling gateways).
+    *
+    * Each axis resolves independently, so an operator may pin only one. Returns
+    * 1 when input AND output are known, 0 otherwise; a caller must treat 0 as
+    * "no price evidence" and never as free.
+    *
+    * `cached_per_mtok` is OPTIONAL and set to 0 when neither the operator nor the
+    * catalog publishes one — many providers do not. It is reported separately
+    * rather than folded into input because cache reads are typically an order of
+    * magnitude cheaper, so a caching workload's real cost is not approximated by
+    * the input rate. Any parameter may be NULL. */
+   int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
+                            double *cached_per_mtok);
+
 #ifdef __cplusplus
 }
 #endif

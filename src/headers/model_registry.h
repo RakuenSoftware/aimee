@@ -46,6 +46,10 @@ typedef struct
    int max_output;
    double cost_in_per_mtok;
    double cost_out_per_mtok;
+   /* Cache-read price ($/Mtok). Typically an order of magnitude below input, so
+    * it dominates real spend on any prompt-caching workload and cannot be
+    * approximated by the input rate. 0 = the source published none. */
+   double cost_cache_read_per_mtok;
    unsigned flags;
    char modalities[64];
    char knowledge_cutoff[16];

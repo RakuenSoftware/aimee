@@ -5,26 +5,48 @@
 #include "model_registry.h"
 #include <string.h>
 
-/* Resolve an agent's published price. Returns 0 when the catalog has no price,
- * which is the normal case for a model the registry does not know — treated as
- * "no evidence", never as "free". */
-static int agent_catalog_price(const agent_t *ag, double *in_out, double *out_out)
+/* Effective $/Mtok for an agent: operator override first, catalog second. The
+ * catalog publishes a LIST price, which is not what every deployment pays —
+ * subscription seats, committed-use discounts, self-hosted compute, and
+ * reselling gateways all diverge from it. Each axis resolves independently so an
+ * operator may pin only one. Returns 1 only when BOTH axes are known; the
+ * capability struct cannot tell "free" from "absent", so a partially known price
+ * must never enter a comparison as though the missing half were zero. */
+int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
+                         double *cached_per_mtok)
 {
-   if (!ag || !ag->model[0])
+   if (!agent)
       return 0;
-   model_capability_t cap;
-   if (!model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
+
+   double in_price = agent->price_in_per_mtok;
+   double out_price = agent->price_out_per_mtok;
+   double cached_price = agent->price_cached_per_mtok;
+
+   if (in_price <= 0.0 || out_price <= 0.0 || cached_price <= 0.0)
+   {
+      model_capability_t cap;
+      if (agent->model[0] &&
+          model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
+      {
+         if (in_price <= 0.0)
+            in_price = cap.cost_in_per_mtok;
+         if (out_price <= 0.0)
+            out_price = cap.cost_out_per_mtok;
+         if (cached_price <= 0.0)
+            cached_price = cap.cost_cache_read_per_mtok;
+      }
+   }
+
+   /* Cached is optional: many providers publish none, and its absence must not
+    * make an otherwise-priced agent look unpriced. */
+   if (cached_per_mtok)
+      *cached_per_mtok = cached_price > 0.0 ? cached_price : 0.0;
+   if (in_price <= 0.0 || out_price <= 0.0)
       return 0;
-   /* BOTH axes must be present. The capability struct cannot distinguish "free"
-    * from "absent" — a missing, null, or non-numeric price simply stays 0.0 — so
-    * a partially published entry would otherwise enter the comparison with its
-    * missing axis treated as known-zero and manufacture a conflict. Requiring
-    * both keeps the stated policy that absent data is no evidence; the cost is
-    * that a genuinely zero-priced model is skipped, which is the safe direction. */
-   if (cap.cost_in_per_mtok <= 0.0 || cap.cost_out_per_mtok <= 0.0)
-      return 0;
-   *in_out = cap.cost_in_per_mtok;
-   *out_out = cap.cost_out_per_mtok;
+   if (in_per_mtok)
+      *in_per_mtok = in_price;
+   if (out_per_mtok)
+      *out_per_mtok = out_price;
    return 1;
 }
 
@@ -61,7 +83,9 @@ static int agent_price_eligible(const agent_t *ag, double *in_out, double *out_o
 {
    if (!ag || !ag->enabled || agent_is_price_exempt(ag))
       return 0;
-   return agent_catalog_price(ag, in_out, out_out);
+   /* Operator override first, then catalog: the lint must judge tiers against
+    * what this deployment actually pays, not a list price it may not be on. */
+   return agent_resolved_price(ag, in_out, out_out, NULL);
 }
 
 int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max)

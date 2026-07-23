@@ -257,6 +257,16 @@ typedef struct
     * the check applies. A REASON is required rather than a bare boolean so an
     * exemption cannot silently hide a genuinely mis-tiered agent. */
    char tier_price_exempt[128];
+   /* Operator price override, US dollars per million tokens. 0 = unset, meaning
+    * "resolve from the model catalog". Set when the catalog price is not what
+    * this deployment actually pays: a flat-rate or subscription seat whose
+    * marginal token cost differs from the published API rate, negotiated or
+    * committed-use pricing, a self-hosted model whose real cost is compute, or a
+    * gateway that resells at its own margin. Both axes are independent, so a
+    * deployment may override only one. */
+   double price_in_per_mtok;
+   double price_out_per_mtok;
+   double price_cached_per_mtok;
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,

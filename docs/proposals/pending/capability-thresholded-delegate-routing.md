@@ -350,6 +350,61 @@ yet chosen:
 This is a behavioural consequence of an already-committed change and must be resolved before
 these commits are relied on in production.
 
+### 2.12 Pricing: resolved by default, operator-overridable, three axes
+
+Operator direction, 2026-07-23: default to catalog-resolved pricing and let the operator set
+their own in the GUI/CLI. Implemented as `agent_resolved_price()` — override first, catalog
+second, per axis — which is now the single source of truth for "what does this agent cost us".
+
+This supersedes `tier_price_exempt` as the primary mechanism for the subscription case. Stating
+the real marginal price is strictly more informative than opting out of the comparison: the
+lint keeps working, and the number is visible to anything else that wants it.
+
+**Three billed axes, not one.** Prices are cached-read / input / output per million tokens.
+Cache read is roughly an order of magnitude below input, so on any prompt-caching workload it
+dominates real spend and cannot be approximated by the input rate. Verified against the live
+catalog 2026-07-23:
+
+| model | in | out | cached |
+|---|---|---|---|
+| `minimax/MiniMax-M3` | 0.30 | 1.20 | **0.060** |
+| `moonshotai/kimi-k2.7-code` | 0.95 | 4.00 | **0.190** |
+| `anthropic/claude-haiku-4-5` | 1.00 | 5.00 | **0.100** |
+| `anthropic/claude-opus-4-8` | 5.00 | 25.00 | **0.500** |
+| `openai/gpt-5.6-luna` | 1.00 | 6.00 | **0.100** |
+| `openai/gpt-5.6-sol` | 5.00 | 30.00 | **0.500** |
+
+Cached price is OPTIONAL: many providers publish none, and its absence must never make an
+otherwise-priced agent look unpriced, nor be read as free. It is reported separately and
+omitted from JSON entirely when unknown.
+
+Surfaces: `aimee agent --price-in/--price-out/--price-cached`, persisted in agents.json, and
+emitted by `aimee agent list --json` alongside `price_overridden` so the GUI can show whether a
+figure is the operator's or the catalog's.
+
+### 2.12.1 The catalog encodes CONTEXT-BAND pricing — unexploited
+
+While adding the cached axis, the live catalog turned out to publish per-context-band prices,
+which is exactly the §2.11 price cliff in machine-readable form:
+
+```json
+"openai/gpt-5.6-sol": {"cost": {"input": 5, "output": 30, "cache_read": 0.5,
+  "tiers": [{"input": 10, "output": 45, "cache_read": 1,
+             "tier": {"type": "context", "size": 272000}}]}}
+"minimax/MiniMax-M3": {"cost": {"input": 0.3, ...,
+  "context_over_200k": {"input": 0.6, "output": 2.4, "cache_read": 0.12}}}
+```
+
+So `gpt-5.6-sol` **doubles** to $10/$45 above 272k, and MiniMax-M3 doubles above 200k. This
+confirms the operator's constraint is not a preference but a real billing cliff, and it means
+price is a function of (model, context band), not one number per model.
+
+Not yet consumed: `model_capability_t` holds a single price triple. Implications for later
+slices — a routing decision that pushes a packet across a band changes the price by 2x, so any
+cost comparison must know which band the packet lands in; and §7's economizer interaction is
+sharper, since a context-reducing transform that crosses a band downward is a genuine, provable
+saving of exactly the kind v2 authorises (its class 4, "long-context threshold avoidance").
+
 ## 3. Design
 
 ### 3.1 Capability becomes a total predicate

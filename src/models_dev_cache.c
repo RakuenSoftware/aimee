@@ -57,6 +57,8 @@ static void fill_cap_from_json(cJSON *entry, const char *provider, const char *m
    (void)json_double_checked(tmp, &out->cost_in_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "outputCost");
    (void)json_double_checked(tmp, &out->cost_out_per_mtok);
+   tmp = cJSON_GetObjectItemCaseSensitive(entry, "cacheReadCost");
+   (void)json_double_checked(tmp, &out->cost_cache_read_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "tools");
    if (cJSON_IsTrue(tmp))
       out->flags |= MODEL_CAP_TOOLS;
@@ -153,6 +155,8 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char 
                                 &out->cost_in_per_mtok);
       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "output"),
                                 &out->cost_out_per_mtok);
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "cache_read"),
+                                &out->cost_cache_read_per_mtok);
    }
 
    /* models.dev spells tool use "tool_call". REASONING has no flat-schema

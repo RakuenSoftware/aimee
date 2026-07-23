@@ -74,7 +74,8 @@ static void seed_priced_catalog(void)
                       "\"testvendor/dear\":  {\"contextWindow\":100000,\"inputCost\":10.0,"
                       "                      \"outputCost\":50.0,\"tools\":true},"
                       "\"testvendor/cheap\": {\"contextWindow\":100000,\"inputCost\":1.0,"
-                      "                      \"outputCost\":5.0,\"tools\":true},"
+                      "                      \"outputCost\":5.0,\"cacheReadCost\":0.1,"
+                      "                      \"tools\":true},"
                       "\"testvendor/ambig_a\":{\"contextWindow\":100000,\"inputCost\":9.0,"
                       "                      \"outputCost\":1.0,\"tools\":true},"
                       "\"testvendor/ambig_b\":{\"contextWindow\":100000,\"inputCost\":1.0,"
@@ -311,6 +312,108 @@ static void test_non_competing_roles_not_flagged(void)
    printf("  PASS: test_non_competing_roles_not_flagged\n");
 }
 
+/* Operator pricing beats the catalog. The published rate is a LIST price and is
+ * not what every deployment pays: a subscription seat, committed-use discount,
+ * self-hosted compute, or a reselling gateway all differ. Overriding is the
+ * mechanism for saying what this deployment actually pays. */
+static void test_operator_price_override_wins(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);  /* catalog 10 / 50 */
+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1); /* catalog 1 / 5  */
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   /* On catalog prices this is a genuine contradiction. */
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+
+   /* The operator declares the tier-0 agent is actually near-free to them (a
+    * flat-rate seat). The tiers now agree with real cost, so no finding. */
+   cfg.agents[0].price_in_per_mtok = 0.10;
+   cfg.agents[0].price_out_per_mtok = 0.20;
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   double pin = 0.0, pout = 0.0, pcached = 0.0;
+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
+   assert(pin == 0.10 && pout == 0.20);
+
+   /* An override can also CREATE a finding the catalog would not: a gateway
+    * reselling the cheap model at a markup. */
+   memset(&cfg.agents[0].price_in_per_mtok, 0, sizeof(double));
+   cfg.agents[0].price_in_per_mtok = 0.0;
+   cfg.agents[0].price_out_per_mtok = 0.0;
+   cfg.agents[1].price_in_per_mtok = 100.0;
+   cfg.agents[1].price_out_per_mtok = 500.0;
+   /* Now tier-1 is dearer, which is CONSISTENT with its higher tier: no finding. */
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   printf("  PASS: test_operator_price_override_wins\n");
+}
+
+/* Each axis resolves independently: an operator may pin only one and let the
+ * catalog answer the other. */
+static void test_price_override_per_axis(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "a", "testvendor", "dear", 0); /* catalog 10 / 50 */
+
+   double pin = 0.0, pout = 0.0, pcached = 0.0;
+   cfg.agents[0].price_in_per_mtok = 2.0; /* pin input only */
+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
+   assert(pin == 2.0);   /* operator */
+   assert(pout == 50.0); /* catalog  */
+
+   /* An unpriced model with only one axis pinned is still "no evidence": the
+    * catalog cannot supply the other, so both axes are not known. */
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "unknown", "anthropic", "totally-unknown-model-zzz", 0);
+   cfg.agents[0].price_in_per_mtok = 3.0;
+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 0);
+
+   /* Pinning both makes an otherwise unpriced model fully priced — the path a
+    * self-hosted or gateway model takes. */
+   cfg.agents[0].price_out_per_mtok = 9.0;
+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
+   assert(pin == 3.0 && pout == 9.0);
+
+   printf("  PASS: test_price_override_per_axis\n");
+}
+
+/* Cache-read price is a THIRD billed axis and is reported separately: it is
+ * typically an order of magnitude below input, so a caching workload's real
+ * cost is not approximated by the input rate. It is optional — many providers
+ * publish none — and its absence must not make an otherwise-priced agent look
+ * unpriced. */
+static void test_cached_price_axis(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "cheap", "testvendor", "cheap", 0); /* catalog publishes cache_read */
+   add_agent(&cfg, "dear", "testvendor", "dear", 1);   /* catalog publishes none */
+
+   double pin = 0.0, pout = 0.0, pcached = -1.0;
+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
+   assert(pin == 1.0 && pout == 5.0);
+   assert(pcached == 0.1);
+
+   /* No published cache rate -> 0, and the agent is still fully priced. */
+   pcached = -1.0;
+   assert(agent_resolved_price(&cfg.agents[1], &pin, &pout, &pcached) == 1);
+   assert(pcached == 0.0);
+
+   /* An operator may pin the cache rate alone; input/output still resolve from
+    * the catalog. */
+   cfg.agents[1].price_cached_per_mtok = 0.5;
+   assert(agent_resolved_price(&cfg.agents[1], &pin, &pout, &pcached) == 1);
+   assert(pcached == 0.5 && pin == 10.0 && pout == 50.0);
+
+   /* Every out-parameter is optional. */
+   assert(agent_resolved_price(&cfg.agents[0], NULL, NULL, NULL) == 1);
+
+   printf("  PASS: test_cached_price_axis\n");
+}
+
 int main(void)
 {
    printf("agent_tier_lint:\n");
@@ -324,6 +427,9 @@ int main(void)
    test_equal_axis_dominance_is_flagged();
    test_partial_price_data_is_not_compared();
    test_non_competing_roles_not_flagged();
+   test_operator_price_override_wins();
+   test_price_override_per_axis();
+   test_cached_price_axis();
    test_guards();
    printf("agent_tier_lint: all tests passed\n");
    return 0;

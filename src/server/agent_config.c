@@ -909,6 +909,18 @@ int agent_load_config(agent_config_t *cfg)
          if (v && cJSON_IsString(v))
             snprintf(ag->tier_price_exempt, sizeof(ag->tier_price_exempt), "%s", v->valuestring);
 
+         /* Operator price override ($/Mtok); absent or negative leaves it unset
+          * so the catalog answers. */
+         v = cJSON_GetObjectItem(a, "price_in_per_mtok");
+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+            ag->price_in_per_mtok = v->valuedouble;
+         v = cJSON_GetObjectItem(a, "price_out_per_mtok");
+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+            ag->price_out_per_mtok = v->valuedouble;
+         v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+            ag->price_cached_per_mtok = v->valuedouble;
+
          v = cJSON_GetObjectItem(a, "max_tokens");
          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
 
@@ -1352,6 +1364,12 @@ int agent_save_config(const agent_config_t *cfg)
          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
       if (ag->tier_price_exempt[0])
          JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
+      if (ag->price_in_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_in_per_mtok", ag->price_in_per_mtok);
+      if (ag->price_out_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
+      if (ag->price_cached_per_mtok > 0.0)
+         cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)

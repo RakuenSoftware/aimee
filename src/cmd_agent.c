@@ -4,6 +4,7 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "agent_tier_lint.h" /* agent_resolved_price */
 #include "agent_tunnel.h"
 #include "commands.h"
 #include "hardware_probe.h"
@@ -388,7 +389,30 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
          cJSON_AddStringToObject(obj, "model", ag->model);
          cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
          cJSON_AddStringToObject(obj, "provider", ag->provider);
+         /* Vendor identity used for capability/price lookup, which differs from
+          * `provider` (the wire shape) for a third-party model served over
+          * another vendor's API. Surfaced so the GUI can show provider+model. */
+         cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
          cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
+         /* Effective price ($/Mtok): operator override when set, else catalog.
+          * Emitted only when BOTH axes resolve, so a consumer never reads an
+          * unknown price as free. `price_overridden` tells the GUI whether the
+          * operator pinned it or it came from the catalog. */
+         {
+            double pin = 0.0, pout = 0.0, pcached = 0.0;
+            if (agent_resolved_price(ag, &pin, &pout, &pcached))
+            {
+               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
+               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
+               /* Omitted entirely when unpublished, so a consumer cannot mistake
+                * an absent cache rate for a free one. */
+               if (pcached > 0.0)
+                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
+            }
+            cJSON_AddBoolToObject(obj, "price_overridden",
+                                  ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                                      ag->price_cached_per_mtok > 0.0);
+         }
          cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
          cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
          cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
@@ -422,9 +446,22 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s\n", ag->name,
+         double pin = 0.0, pout = 0.0, pcached = 0.0;
+         char price[96] = "";
+         if (agent_resolved_price(ag, &pin, &pout, &pcached))
+         {
+            char cached[32] = "";
+            if (pcached > 0.0)
+               snprintf(cached, sizeof(cached), " cached=$%.2f", pcached);
+            snprintf(price, sizeof(price), " in=$%.2f out=$%.2f%s%s", pin, pout, cached,
+                     (ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                      ag->price_cached_per_mtok > 0.0)
+                         ? " *"
+                         : "");
+         }
+         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s%s\n", ag->name,
                 ag->enabled ? "ON" : "OFF", ag->cost_tier, ag->max_parallel, ag->model,
-                ag->endpoint, ag->tools_enabled ? " [tools]" : "");
+                ag->endpoint, ag->tools_enabled ? " [tools]" : "", price);
       }
    }
 }
@@ -768,6 +805,14 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag_set_roles_csv(ag, argv[++i]);
       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
          ag->cost_tier = atoi(argv[++i]);
+      /* Price overrides ($/Mtok). Only meaningful when this deployment does not
+       * pay the published catalog rate. */
+      else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
+         ag->price_in_per_mtok = atof(argv[++i]);
+      else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
+         ag->price_out_per_mtok = atof(argv[++i]);
+      else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
+         ag->price_cached_per_mtok = atof(argv[++i]);
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
       else if (strcmp(argv[i], "--max-turns") == 0 && i + 1 < argc)

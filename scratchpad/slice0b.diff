@@ -1,0 +1,1260 @@
+diff --git a/src/Makefile b/src/Makefile
+index a897dbd2..62816a25 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -297,7 +297,7 @@ CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/conf
+             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
+             compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
+             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
+-            model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c plugin.c \
++            model_registry.c models_dev.c models_dev_cache.c agent_tier_lint.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c plugin.c \
+             plugin_ctx.c plugin_loader.c modules/memory/memory_provider.c plugin_c_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
+             modules/workflows/wfe_iface.c modules/workflows/wfe_def.c modules/workflows/wfe_validate.c modules/workflows/wfe_canonical.c modules/workflows/wfe_custom.c modules/workflows/wfe_manager_artifacts.c modules/workflows/wfe_externalization.c modules/workflows/wfe_native_gate.c modules/workflows/wfe_enforce.c modules/workflows/wfe_deliver.c modules/workflows/wfe_advance.c modules/workflows/wfe_advance_exec.c modules/workflows/wfe_block_resolve.c modules/workflows/wfe_bind_ingress.c modules/workflows/wfe_router.c modules/workflows/wfe_router_catalog.c modules/workflows/wfe_autonomous_route.c \
+             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
+diff --git a/src/agent_tier_lint.c b/src/agent_tier_lint.c
+new file mode 100644
+index 00000000..48492ea9
+--- /dev/null
++++ b/src/agent_tier_lint.c
+@@ -0,0 +1,85 @@
++/* agent_tier_lint.c: cost_tier vs catalog price consistency check. */
++#include "aimee.h" /* MAX_PATH_LEN, used by agent_types.h */
++#include "agent_tier_lint.h"
++#include "agent_config.h"
++#include "model_registry.h"
++#include <string.h>
++
++/* Resolve an agent's published price. Returns 0 when the catalog has no price,
++ * which is the normal case for a model the registry does not know — treated as
++ * "no evidence", never as "free". */
++static int agent_catalog_price(const agent_t *ag, double *in_out, double *out_out)
++{
++   if (!ag || !ag->model[0])
++      return 0;
++   model_capability_t cap;
++   if (!model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
++      return 0;
++   if (cap.cost_in_per_mtok <= 0.0 && cap.cost_out_per_mtok <= 0.0)
++      return 0;
++   *in_out = cap.cost_in_per_mtok;
++   *out_out = cap.cost_out_per_mtok;
++   return 1;
++}
++
++static int agent_is_price_exempt(const agent_t *ag)
++{
++   return ag && ag->tier_price_exempt[0] != '\0';
++}
++
++static int agent_price_eligible(const agent_t *ag, double *in_out, double *out_out)
++{
++   if (!ag || !ag->enabled || agent_is_price_exempt(ag))
++      return 0;
++   return agent_catalog_price(ag, in_out, out_out);
++}
++
++int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max)
++{
++   if (!cfg)
++      return 0;
++
++   int found = 0;
++   for (int i = 0; i < cfg->agent_count; i++)
++   {
++      const agent_t *a = &cfg->agents[i];
++      double a_in = 0.0, a_out = 0.0;
++      if (!agent_price_eligible(a, &a_in, &a_out))
++         continue;
++
++      for (int j = 0; j < cfg->agent_count; j++)
++      {
++         if (i == j)
++            continue;
++         const agent_t *b = &cfg->agents[j];
++         double b_in = 0.0, b_out = 0.0;
++         if (!agent_price_eligible(b, &b_in, &b_out))
++            continue;
++
++         /* a is configured cheaper than b ... */
++         if (a->cost_tier >= b->cost_tier)
++            continue;
++         /* ... but costs more on BOTH axes. Requiring both keeps the check free
++          * of any invented input/output exchange rate: a pair where the axes
++          * disagree has no single correct ordering and is not a defect. */
++         if (!(a_in > b_in && a_out > b_out))
++            continue;
++
++         if (out && found < max)
++         {
++            agent_tier_conflict_t *c = &out[found];
++            memset(c, 0, sizeof(*c));
++            snprintf(c->cheaper_tier_agent, sizeof(c->cheaper_tier_agent), "%s", a->name);
++            snprintf(c->costlier_tier_agent, sizeof(c->costlier_tier_agent), "%s", b->name);
++            c->cheaper_tier = a->cost_tier;
++            c->costlier_tier = b->cost_tier;
++            c->cheaper_tier_in = a_in;
++            c->cheaper_tier_out = a_out;
++            c->costlier_tier_in = b_in;
++            c->costlier_tier_out = b_out;
++         }
++         found++;
++      }
++   }
++   return found;
++}
+diff --git a/src/cmd_doctor.c b/src/cmd_doctor.c
+index a2a035fc..5c35daa9 100644
+--- a/src/cmd_doctor.c
++++ b/src/cmd_doctor.c
+@@ -17,6 +17,7 @@
+ #include "cJSON.h"
+ #include <unistd.h>
+ #include <sys/stat.h>
++#include "agent_tier_lint.h"
+ #include <dirent.h>
+ #include <time.h>
+ 
+@@ -324,6 +325,44 @@ static void check_agents(check_result_t *r)
+    }
+ }
+ 
++/* cost_tier IS the ordering agent_route() minimises, so a tier that disagrees
++ * with published price means cheapest-first routing is not minimising cost. */
++static void check_agent_tier_prices(check_result_t *r)
++{
++   r->name = "Agent tiers";
++
++   agent_config_t acfg;
++   if (agent_load_config(&acfg) != 0)
++   {
++      r->status = CHECK_OK;
++      snprintf(r->message, sizeof(r->message), "no agents configured");
++      return;
++   }
++
++   agent_tier_conflict_t conflicts[AGENT_TIER_LINT_MAX];
++   int n = agent_tier_price_conflicts(&acfg, conflicts, AGENT_TIER_LINT_MAX);
++   if (n <= 0)
++   {
++      r->status = CHECK_OK;
++      snprintf(r->message, sizeof(r->message), "cost_tier ordering agrees with catalog price");
++      return;
++   }
++
++   const agent_tier_conflict_t *c = &conflicts[0];
++   r->status = CHECK_WARN;
++   snprintf(r->message, sizeof(r->message),
++            "%d tier/price contradiction%s: '%s' is tier %d ($%.2f/$%.2f per Mtok) but '%s' is "
++            "tier %d ($%.2f/$%.2f)",
++            n, n == 1 ? "" : "s", c->cheaper_tier_agent, c->cheaper_tier, c->cheaper_tier_in,
++            c->cheaper_tier_out, c->costlier_tier_agent, c->costlier_tier, c->costlier_tier_in,
++            c->costlier_tier_out);
++   snprintf(r->remediation, sizeof(r->remediation),
++            "Routing minimises cost_tier, so it currently prefers the more expensive model. Set "
++            "'%s' to a higher cost_tier than '%s', or set tier_price_exempt with a reason if its "
++            "billing is not per-token.",
++            c->cheaper_tier_agent, c->costlier_tier_agent);
++}
++
+ static void check_hardware(check_result_t *r)
+ {
+    r->name = "Hardware";
+@@ -938,6 +977,7 @@ char *doctor_checks_json(void)
+    check_server(&checks[n++]);
+    check_config(&checks[n++], &cfg);
+    check_agents(&checks[n++]);
++   check_agent_tier_prices(&checks[n++]);
+    check_hardware(&checks[n++]);
+    check_provider_catalog(&checks[n++]);
+    check_hooks(&checks[n++]);
+@@ -1069,6 +1109,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
+    check_server(&checks[n++]);
+    check_config(&checks[n++], &cfg);
+    check_agents(&checks[n++]);
++   check_agent_tier_prices(&checks[n++]);
+    check_hardware(&checks[n++]);
+    check_provider_catalog(&checks[n++]);
+    check_hooks(&checks[n++]);
+diff --git a/src/headers/agent_tier_lint.h b/src/headers/agent_tier_lint.h
+new file mode 100644
+index 00000000..cc480f19
+--- /dev/null
++++ b/src/headers/agent_tier_lint.h
+@@ -0,0 +1,54 @@
++/* agent_tier_lint.h: detect agents whose configured cost_tier contradicts the
++ * catalog's published price.
++ *
++ * agent_route() minimises cost_tier, so that integer IS the cheapness ordering
++ * the router optimises. It is hand-entered per agent and nothing has ever
++ * checked it against what the models actually cost. A tier that disagrees with
++ * price means "cheapest-first" routing is not minimising cost at all — it is
++ * minimising an unverified integer. */
++#ifndef AIMEE_AGENT_TIER_LINT_H
++#define AIMEE_AGENT_TIER_LINT_H 1
++
++#include "agent_types.h"
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++#define AGENT_TIER_LINT_MAX 32
++
++   typedef struct
++   {
++      char cheaper_tier_agent[MAX_AGENT_NAME]; /* lower cost_tier ... */
++      char costlier_tier_agent[MAX_AGENT_NAME];
++      int cheaper_tier;
++      int costlier_tier;
++      /* ... but these prices say the opposite ($/Mtok). */
++      double cheaper_tier_in, cheaper_tier_out;
++      double costlier_tier_in, costlier_tier_out;
++   } agent_tier_conflict_t;
++
++   /* Find enabled agent pairs where the configured tier ordering contradicts the
++    * catalog price ordering.
++    *
++    * A pair is reported ONLY when the contradiction is unambiguous: the
++    * lower-tier agent is more expensive on BOTH input and output price. If input
++    * and output disagree about which model is cheaper there is no single correct
++    * ordering, and inventing an exchange rate between them would be exactly the
++    * scalarisation this design rejects — so those pairs are left alone.
++    *
++    * Agents with no resolvable catalog price (price 0) are skipped: absent data
++    * is not evidence of a wrong tier. Agents carrying a tier_price_exempt reason
++    * are skipped too — a subscription or flat-rate plan can make per-token price
++    * the wrong basis for that agent.
++    *
++    * Returns the number of conflicts found (may exceed `max`; at most `max` are
++    * written). Never mutates config: this reports, it does not re-tier. */
++   int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* AIMEE_AGENT_TIER_LINT_H */
+diff --git a/src/headers/agent_types.h b/src/headers/agent_types.h
+index 2c124834..1f3fb0c2 100644
+--- a/src/headers/agent_types.h
++++ b/src/headers/agent_types.h
+@@ -250,6 +250,13 @@ typedef struct
+     * an explicit value is re-serialized, so a save never freezes a derived guess
+     * into config where it would outlive the derivation rules. */
+    int catalog_provider_explicit;
++   /* Operator reason this agent's cost_tier is exempt from the catalog-price
++    * consistency check (agent_tier_lint). A subscription or flat-rate plan can
++    * make per-token price the wrong basis for its tier — e.g. a ChatGPT/codex
++    * OAuth seat whose marginal cost is not the published API price. Empty means
++    * the check applies. A REASON is required rather than a bare boolean so an
++    * exemption cannot silently hide a genuinely mis-tiered agent. */
++   char tier_price_exempt[128];
+    char roles[MAX_AGENT_ROLES][32];
+    int role_count;
+    /* Personas this agent may be dispatched AS (delegate identities: engineer,
+diff --git a/src/headers/model_registry.h b/src/headers/model_registry.h
+index a0e3ed9e..b2d05bf7 100644
+--- a/src/headers/model_registry.h
++++ b/src/headers/model_registry.h
+@@ -49,6 +49,12 @@ typedef struct
+    unsigned flags;
+    char modalities[64];
+    char knowledge_cutoff[16];
++   /* Human-facing label from the upstream registry, e.g. "GPT-5.6 Sol" for
++    * openai/gpt-5.6-sol. Empty when the source has no name (the flat snapshot
++    * schema carries none); callers fall back to model_id. Lets operator-facing
++    * surfaces that must name a specific model — roundtable seats, routing
++    * attribution — show provider+model without hand-maintained strings. */
++   char display_name[64];
+    int open_weights;
+    int deprecated;
+ } model_capability_t;
+diff --git a/src/model_registry.c b/src/model_registry.c
+index 79913eba..5f559a1d 100644
+--- a/src/model_registry.c
++++ b/src/model_registry.c
+@@ -191,15 +191,19 @@ static const ctx_window_entry_t g_ctx_windows[] = {
+     {"mistral-small", 128000},
+     {"mistral", 128000}, /* fallback */
+ 
+-    /* MiniMax. Prefix matching is longest-specific-first: the bare "minimax"
+-     * fallback below must stay LAST in this group, and must not claim a window
+-     * for a newer family than it knows. M3 is 1M, not the 200k the old bare
+-     * fallback silently reported for it. */
++    /* MiniMax. Prefix matching is first-match-wins, so the bare "minimax"
++     * fallback must stay LAST in this group. NOTE the fallback is a KNOWN
++     * UNDER-estimate for any family newer than the named entries: a future
++     * MiniMax-M4 matches "minimax" and reports 200000. That is deliberate —
++     * under-reporting a window excludes a model from routing, while
++     * over-reporting admits a prompt the model cannot hold — but it means a new
++     * family needs an entry here (or catalog data) to be routable at its real
++     * size. Same applies to the "kimi" fallback below. */
+     {"MiniMax-M3", 1000000},
+     {"minimax-m3", 1000000},
+     {"MiniMax-M2", 200000},
+     {"minimax-m2", 200000},
+-    {"minimax", 200000}, /* fallback: oldest known family, never a newer one */
++    {"minimax", 200000}, /* fallback: oldest known family; under-estimates newer ones */
+ 
+     /* Moonshot / Kimi */
+     {"kimi-k3", 1048576},
+@@ -319,12 +323,18 @@ static int model_capability_get_heuristic(const char *provider, const char *mode
+    /* Moonshot/Kimi. Required once an agent's CATALOG identity resolves to
+     * "moonshotai": without this branch the heuristic falls through with flags
+     * == 0 whenever the models.dev cache is cold, which is STRICTLY WORSE than
+-    * the old (wrong) "anthropic" identity that at least yielded TOOLS. The
+-    * k2/k3 coding families are tool-using reasoning models. */
++    * the old (wrong) "anthropic" identity that at least yielded TOOLS.
++    * REASONING is granted only to the k2/k3 families it is actually known for —
++    * an unknown or future Moonshot id gets the tool-using floor and must earn
++    * REASONING from catalog data, since over-granting it here would select the
++    * long per-call timeout and satisfy a REASONING capability requirement for a
++    * model nobody has verified. */
+    else if (effective_provider && (strcasecmp(effective_provider, "moonshotai") == 0 ||
+                                    strcasecmp(effective_provider, "moonshot") == 0))
+    {
+-      out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
++      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
++      if (model_has_prefix(semantic_id, "kimi-k2") || model_has_prefix(semantic_id, "kimi-k3"))
++         out->flags |= MODEL_CAP_REASONING;
+    }
+ 
+    /* Output-token ceiling inferred when the model isn't in the static table.
+diff --git a/src/models_dev_cache.c b/src/models_dev_cache.c
+index 02b6b571..12a045a2 100644
+--- a/src/models_dev_cache.c
++++ b/src/models_dev_cache.c
+@@ -10,6 +10,11 @@
+ 
+ #define MODELS_DEV_MAX_SIZE (8 * 1024 * 1024)
+ 
++/* Defined below: resolves provider/model against the NESTED live api.json shape
++ * after the flat key lookup misses. */
++static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
++                                 model_capability_t *out);
++
+ static void fill_cap_from_json(cJSON *entry, const char *provider, const char *model_id,
+                                model_capability_t *out)
+ {
+@@ -78,11 +83,114 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
+    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
+    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!entry)
+-      return 0;
++      return lookup_in_nested_json(root, provider, model_id, out);
+    fill_cap_from_json(entry, provider, model_id, out);
+    return 1;
+ }
+ 
++/* ---- models.dev live api.json (NESTED) ----------------------------------
++ *
++ * Two on-disk schemas must both resolve:
++ *
++ *  FLAT   {"provider/model": {"contextWindow":…, "inputCost":…}}
++ *         - data/models_dev_snapshot.json (bundled) and model_overrides.json.
++ *
++ *  NESTED {"provider": {"models": {"model": {"limit":{"context":…},
++ *                                            "cost":{"input":…}, …}}}}
++ *         - exactly what https://models.dev/api.json serves, which
++ *           models_dev_refresh() curls verbatim into the cache with no
++ *           transform. Before this reader existed the downloaded cache could
++ *           never resolve a single model: the flat key lookup returned NULL
++ *           against a nested root, so every capability fell through to the
++ *           heuristic and every price stayed 0.
++ *
++ * Reading both keeps the atomic-rename download and leaves the override format
++ * untouched, instead of rewriting bytes we did not author. */
++static void fill_cap_from_nested(cJSON *entry, const char *provider, const char *model_id,
++                                 model_capability_t *out)
++{
++   memset(out, 0, sizeof(*out));
++   snprintf(out->provider, sizeof(out->provider), "%s", provider);
++   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
++
++   cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
++   if (cJSON_IsObject(limit))
++   {
++      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(limit, "context");
++      if (cJSON_IsNumber(tmp))
++         out->context_window = (int)tmp->valuedouble;
++      tmp = cJSON_GetObjectItemCaseSensitive(limit, "output");
++      if (cJSON_IsNumber(tmp))
++         out->max_output = (int)tmp->valuedouble;
++   }
++
++   cJSON *cost = cJSON_GetObjectItemCaseSensitive(entry, "cost");
++   if (cJSON_IsObject(cost))
++   {
++      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(cost, "input");
++      if (cJSON_IsNumber(tmp))
++         out->cost_in_per_mtok = tmp->valuedouble;
++      tmp = cJSON_GetObjectItemCaseSensitive(cost, "output");
++      if (cJSON_IsNumber(tmp))
++         out->cost_out_per_mtok = tmp->valuedouble;
++   }
++
++   /* models.dev spells tool use "tool_call". REASONING has no flat-schema
++    * equivalent at all, so before this it could only ever come from a
++    * per-vendor heuristic branch. */
++   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "tool_call")))
++      out->flags |= MODEL_CAP_TOOLS;
++   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "reasoning")))
++      out->flags |= MODEL_CAP_REASONING;
++   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "open_weights")))
++      out->open_weights = 1;
++
++   cJSON *modalities = cJSON_GetObjectItemCaseSensitive(entry, "modalities");
++   if (cJSON_IsObject(modalities))
++   {
++      cJSON *input = cJSON_GetObjectItemCaseSensitive(modalities, "input");
++      cJSON *m;
++      cJSON_ArrayForEach(m, input)
++      {
++         const char *s = cJSON_GetStringValue(m);
++         if (!s)
++            continue;
++         if (strcmp(s, "image") == 0)
++            out->flags |= MODEL_CAP_VISION;
++         else if (strcmp(s, "pdf") == 0)
++            out->flags |= MODEL_CAP_PDF;
++         else if (strcmp(s, "audio") == 0)
++            out->flags |= MODEL_CAP_AUDIO;
++      }
++   }
++
++   /* A model the upstream registry still lists is not deprecated unless it says
++    * so; absent key means live. */
++   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "deprecated")))
++      out->deprecated = 1;
++
++   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
++   if (name && name[0])
++      snprintf(out->display_name, sizeof(out->display_name), "%s", name);
++}
++
++/* Resolve provider/model against a NESTED root. Returns 1 on hit. */
++static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
++                                 model_capability_t *out)
++{
++   cJSON *prov = cJSON_GetObjectItemCaseSensitive(root, provider);
++   if (!cJSON_IsObject(prov))
++      return 0;
++   cJSON *models = cJSON_GetObjectItemCaseSensitive(prov, "models");
++   if (!cJSON_IsObject(models))
++      return 0;
++   cJSON *entry = cJSON_GetObjectItemCaseSensitive(models, model_id);
++   if (!cJSON_IsObject(entry))
++      return 0;
++   fill_cap_from_nested(entry, provider, model_id, out);
++   return 1;
++}
++
+ static int list_from_json(cJSON *root, model_capability_t *out, int max, unsigned required_flags,
+                           int open_weights_only)
+ {
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index fb333a51..b315d0bb 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -205,46 +205,155 @@ static void agent_normalize_builtin_cost_tier(agent_t *ag)
+ /* Vendor (catalog) identity for capability lookup. `provider` names the WIRE
+  * SHAPE; a third-party vendor served over another vendor's wire format needs its
+  * own catalog key or every model_capability_get() misses and falls through to
+- * the heuristic under the wrong provider branch. Endpoint host is the
+- * discriminator, never a single model version — matching "MiniMax-M2" broke the
+- * moment M3 shipped. */
++ * the heuristic under the wrong provider branch. */
++
++/* Registrable vendor domains. Matching is on HOST LABELS, never a substring of
++ * the whole URL: "https://api.kimi.com.attacker.example/v1" contains
++ * "api.kimi.com" but its host is not under kimi.com, and a path or query segment
++ * must never select a vendor. */
+ static const struct
+ {
+-   const char *host;
++   const char *domain;
+    const char *vendor;
+-} g_catalog_vendor_hosts[] = {
+-    {"api.minimax.", "minimax"},
+-    {"api.minimaxi.", "minimax"},
+-    {"api.kimi.com", "moonshotai"},
+-    {"api.moonshot.", "moonshotai"},
++} g_catalog_vendor_domains[] = {
++    {"minimax.io", "minimax"},    {"minimaxi.com", "minimax"}, {"minimax.com", "minimax"},
++    {"kimi.com", "moonshotai"},   {"moonshot.cn", "moonshotai"}, {"moonshot.ai", "moonshotai"},
+     {NULL, NULL},
+ };
+ 
+-/* Derive catalog_provider when the operator did not set it explicitly. Endpoint
+- * host wins; model-id family is the fallback for CLI/OAuth backends whose
+- * endpoint does not name the vendor. Leaves the field empty when the wire
+- * provider is already the vendor, so agent_catalog_provider() falls back. */
++/* Wire/CLI provider names that are NOT catalog vendor keys. aimee names some
++ * providers after the CLI or product ("claude" for the Claude CLI/OAuth seat,
++ * "chatgpt"/"codex" for the Codex seat) while models.dev keys the vendor
++ * ("anthropic", "openai"). Without this map the primary agent resolves NO
++ * capability flags at all and an 8192 output ceiling. */
++static const struct
++{
++   const char *wire;
++   const char *vendor;
++} g_catalog_provider_aliases[] = {
++    {"claude", "anthropic"}, {"chatgpt", "openai"}, {"codex", "openai"}, {NULL, NULL},
++};
++
++/* Vendor namespaces as they appear in gateway/OpenRouter model ids
++ * ("moonshotai/kimi-k2.7-code"). */
++static const struct
++{
++   const char *ns;
++   const char *vendor;
++} g_catalog_vendor_namespaces[] = {
++    {"minimax", "minimax"},   {"moonshotai", "moonshotai"}, {"moonshot", "moonshotai"},
++    {"kimi", "moonshotai"},   {NULL, NULL},
++};
++
++/* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
++ * Returns 0 when no host could be parsed. */
++static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
++{
++   if (!endpoint || !endpoint[0] || !out || out_len == 0)
++      return 0;
++   out[0] = '\0';
++
++   const char *p = strstr(endpoint, "://");
++   p = p ? p + 3 : endpoint;
++
++   /* Userinfo (user:pass@host) must not be mistaken for the host, but only when
++    * the '@' precedes the authority's end. */
++   const char *authority_end = p + strcspn(p, "/?#");
++   const char *at = memchr(p, '@', (size_t)(authority_end - p));
++   if (at)
++      p = at + 1;
++
++   size_t n = strcspn(p, ":/?#");
++   if (n == 0 || n >= out_len)
++      return 0;
++   for (size_t i = 0; i < n; i++)
++      out[i] = (char)tolower((unsigned char)p[i]);
++   out[n] = '\0';
++
++   /* Tolerate a trailing dot (fully-qualified form). */
++   if (n > 1 && out[n - 1] == '.')
++      out[n - 1] = '\0';
++   return out[0] ? 1 : 0;
++}
++
++/* 1 when host is `domain` itself or a subdomain of it. Label-anchored, so
++ * "kimi.com.evil.example" does NOT match "kimi.com". */
++static int host_is_within_domain(const char *host, const char *domain)
++{
++   size_t hl = strlen(host), dl = strlen(domain);
++   if (hl == dl)
++      return strcmp(host, domain) == 0;
++   if (hl < dl + 1)
++      return 0;
++   return host[hl - dl - 1] == '.' && strcmp(host + hl - dl, domain) == 0;
++}
++
++/* Derive catalog_provider when the operator did not set it explicitly. Host
++ * domain wins; a vendor-namespaced or vendor-prefixed model id is the fallback
++ * for gateways and CLI/OAuth backends whose endpoint does not name the vendor.
++ * Leaves the field empty when the wire provider is already the vendor (or when
++ * nothing is recognisable), so agent_catalog_provider() falls back and the
++ * caller can tell "derived nothing" from "derived something". */
+ static void agent_derive_catalog_provider(agent_t *ag)
+ {
+    if (!ag || ag->catalog_provider[0])
+       return;
+ 
+-   for (int i = 0; g_catalog_vendor_hosts[i].host; i++)
++   char host[256];
++   if (agent_endpoint_host(ag->endpoint, host, sizeof(host)))
+    {
+-      if (ag->endpoint[0] && strstr(ag->endpoint, g_catalog_vendor_hosts[i].host))
++      for (int i = 0; g_catalog_vendor_domains[i].domain; i++)
+       {
+-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+-                  g_catalog_vendor_hosts[i].vendor);
+-         return;
++         if (host_is_within_domain(host, g_catalog_vendor_domains[i].domain))
++         {
++            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
++                     g_catalog_vendor_domains[i].vendor);
++            return;
++         }
+       }
+    }
+ 
+-   if (ag->model[0])
++   if (!ag->model[0])
++      return;
++
++   /* Namespaced gateway id: "<vendor>/<model>". */
++   const char *slash = strchr(ag->model, '/');
++   if (slash && slash > ag->model)
++   {
++      size_t nlen = (size_t)(slash - ag->model);
++      for (int i = 0; g_catalog_vendor_namespaces[i].ns; i++)
++      {
++         const char *ns = g_catalog_vendor_namespaces[i].ns;
++         if (strlen(ns) == nlen && strncasecmp(ag->model, ns, nlen) == 0)
++         {
++            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
++                     g_catalog_vendor_namespaces[i].vendor);
++            return;
++         }
++      }
++   }
++
++   /* Bare vendor-family model id. */
++   if (strncasecmp(ag->model, "minimax", 7) == 0)
++   {
++      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
++      return;
++   }
++   if (strncasecmp(ag->model, "kimi", 4) == 0)
++   {
++      snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
++      return;
++   }
++
++   /* Last: the agent's own provider may be a wire/CLI name rather than a vendor. */
++   for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
+    {
+-      if (strncasecmp(ag->model, "minimax", 7) == 0)
+-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
+-      else if (strncasecmp(ag->model, "kimi", 4) == 0)
+-         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
++      if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
++      {
++         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
++                  g_catalog_provider_aliases[i].vendor);
++         return;
++      }
+    }
+ }
+ 
+@@ -714,9 +823,23 @@ int agent_load_config(agent_config_t *cfg)
+             snprintf(ag->provider, sizeof(ag->provider), "%s", v->valuestring);
+          if (!ag->provider[0])
+             snprintf(ag->provider, sizeof(ag->provider), "%s", "openai");
+-         if (strcmp(ag->provider, "openai") == 0 &&
+-             (strstr(ag->endpoint, "api.minimax.") || strstr(ag->model, "MiniMax-M2")))
+-            snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
++         /* Legacy OpenAI-wire MiniMax normalisation. This rewrites the WIRE
++          * provider (so it changes auth and credential env-var selection), which
++          * makes a false positive worse than a catalog misderivation — it used
++          * substring matching over the whole endpoint, so a gateway with
++          * "api.minimax." anywhere in its path or userinfo was rewritten. Match
++          * the host's domain labels, and a model FAMILY rather than the literal
++          * "MiniMax-M2" (which stopped matching the moment M3 shipped). */
++         if (strcmp(ag->provider, "openai") == 0)
++         {
++            char lhost[256];
++            int minimax_host = agent_endpoint_host(ag->endpoint, lhost, sizeof(lhost)) &&
++                               (host_is_within_domain(lhost, "minimax.io") ||
++                                host_is_within_domain(lhost, "minimaxi.com") ||
++                                host_is_within_domain(lhost, "minimax.com"));
++            if (minimax_host || strncasecmp(ag->model, "minimax", 7) == 0)
++               snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
++         }
+ 
+          /* Catalog identity is SEPARATE from the wire provider above: rewriting
+           * `provider` for an Anthropic-wire third party would drop the
+@@ -734,6 +857,10 @@ int agent_load_config(agent_config_t *cfg)
+          if (v && cJSON_IsNumber(v))
+             ag->cost_tier = v->valueint;
+ 
++         v = cJSON_GetObjectItem(a, "tier_price_exempt");
++         if (v && cJSON_IsString(v))
++            snprintf(ag->tier_price_exempt, sizeof(ag->tier_price_exempt), "%s", v->valuestring);
++
+          v = cJSON_GetObjectItem(a, "max_tokens");
+          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
+ 
+@@ -1175,6 +1302,8 @@ int agent_save_config(const agent_config_t *cfg)
+        * is recomputed at load so the derivation rules stay authoritative. */
+       if (ag->catalog_provider_explicit && ag->catalog_provider[0])
+          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
++      if (ag->tier_price_exempt[0])
++         JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
+ 
+       cJSON *roles = cJSON_CreateArray();
+       for (int j = 0; j < ag->role_count; j++)
+@@ -1864,9 +1993,16 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
+    /* An UNKNOWN context window (0) must not satisfy a positive min_context. The
+     * previous `effective_ctx > 0` guard made zero pass the gate, so a model whose
+     * window aimee could not establish was admitted for arbitrarily large prompts
+-    * — the failure looked like success. Unproven capacity now disqualifies the
+-    * agent from this (cheap) selection; the caller escalates rather than failing,
+-    * so an unknown model costs more, never an outage. */
++    * — the failure looked like success.
++    *
++    * This predicate FAILS CLOSED: an agent with unprovable capacity is dropped
++    * from the candidate set, and when it was the last candidate the caller gets
++    * NULL. There is deliberately no escalation-to-primary here yet — that is a
++    * routing-layer policy, not a per-agent predicate, and it must land before
++    * model_meta_capability_routing is enabled by default, or an operator who
++    * turns the flag on can lose a route they previously had. The flag defaults
++    * OFF, so this is inert until then. Escape hatches meanwhile: a per-agent
++    * middleware.context_window override, or a catalog entry. */
+    int effective_ctx = override_ctx > 0 ? override_ctx : caps.context_window;
+    /* A tmux-CLI agent (codex / claude-oauth) often carries no resolvable model —
+     * the vendor CLI picks it — so fall back to the window its adapter declares
+diff --git a/src/tests/Rules.mk b/src/tests/Rules.mk
+index c62ca8e9..5f5455d3 100644
+--- a/src/tests/Rules.mk
++++ b/src/tests/Rules.mk
+@@ -370,7 +370,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
+                $(TESTPREFIX)/unit-test-prompts \
+                $(TESTPREFIX)/unit-test-cmd-session \
+                $(TESTPREFIX)/unit-test-model-registry \
+-               $(TESTPREFIX)/unit-test-models-dev \
++               $(TESTPREFIX)/unit-test-models-dev $(TESTPREFIX)/unit-test-agent-tier-lint \
+                $(TESTPREFIX)/unit-test-p3b-spend \
+                $(TESTPREFIX)/unit-test-model-provider \
+                $(TESTPREFIX)/unit-test-delegate-driver \
+@@ -3957,6 +3957,13 @@ $(TESTPREFIX)/unit-test-model-registry: $(OBJDIR)/tests/test_model_registry.o \
+                                 $(OBJDIR)/cJSON.o
+ 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+ 
++$(TESTPREFIX)/unit-test-agent-tier-lint: $(OBJDIR)/tests/test_agent_tier_lint.o \
++                                $(OBJDIR)/agent_tier_lint.o \
++                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
++                                $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
++                                $(OBJDIR)/cJSON.o
++	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
++
+ $(TESTPREFIX)/unit-test-models-dev: $(OBJDIR)/tests/test_models_dev.o \
+                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                                 $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
+diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
+index 1dab4345..95741c82 100644
+--- a/src/tests/test_agent.c
++++ b/src/tests/test_agent.c
+@@ -34,6 +34,10 @@ void test_catalog_provider_separates_vendor_from_wire(void);
+ void test_catalog_provider_explicit_round_trip(void);
+ void test_unknown_context_window_does_not_pass_min_context(void);
+ void test_context_window_table_covers_live_vendors(void);
++void test_catalog_provider_host_matching_is_label_anchored(void);
++void test_catalog_provider_namespaced_model_ids(void);
++void test_moonshot_heuristic_scopes_reasoning_to_known_families(void);
++void test_catalog_provider_maps_cli_provider_names(void);
+ 
+ /* Defined in test_agent_responses.c (split out to keep this file under the
+  * 2000-line hard limit); called from main() below. */
+@@ -3172,6 +3176,10 @@ int main(void)
+    test_catalog_provider_explicit_round_trip();
+    test_unknown_context_window_does_not_pass_min_context();
+    test_context_window_table_covers_live_vendors();
++   test_catalog_provider_host_matching_is_label_anchored();
++   test_catalog_provider_namespaced_model_ids();
++   test_moonshot_heuristic_scopes_reasoning_to_known_families();
++   test_catalog_provider_maps_cli_provider_names();
+    test_agent_config_cache_detects_same_mtime_rewrite();
+    test_agent_adapter_registry();
+    test_agent_config_deletion_guard();
+diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
+index ce1a9e13..e9517e72 100644
+--- a/src/tests/test_agent_caps.c
++++ b/src/tests/test_agent_caps.c
+@@ -199,6 +199,167 @@ void test_catalog_provider_separates_vendor_from_wire(void)
+    unlink(agent_config_path());
+ }
+ 
++/* Catalog derivation must match HOST LABELS, not a substring of the whole URL.
++ * Review found four concrete ways substring matching misfires; each is asserted
++ * here. A wrong derivation is silent — it surfaces only as wrong capability
++ * flags, timeout, and context filtering — so these are the guard rails. */
++void test_catalog_provider_host_matching_is_label_anchored(void)
++{
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[\n"
++         /* Uppercase host: DNS is case-insensitive, strstr was not. */
++         "{\"name\":\"upper\",\"provider\":\"anthropic\","
++         "\"endpoint\":\"https://API.KIMI.COM/coding/\",\"model\":\"some-model\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
++         /* Vendor domain as a PATH segment of an unrelated gateway. */
++         "{\"name\":\"pathy\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://gateway.example/v1/api.kimi.com/relay\","
++         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
++         "\"roles\":[\"review\"]},\n"
++         /* Lookalike suffix: kimi.com is a PREFIX of the host, not its domain. */
++         "{\"name\":\"lookalike\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://api.kimi.com.attacker.example/v1\","
++         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
++         "\"roles\":[\"review\"]},\n"
++         /* Userinfo must not be read as the host. */
++         "{\"name\":\"userinfo\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://api.minimax.io@gateway.example/v1\","
++         "\"model\":\"house-model\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
++         "\"roles\":[\"review\"]},\n"
++         /* Legitimate subdomain and port still derive. */
++         "{\"name\":\"sub\",\"provider\":\"anthropic\","
++         "\"endpoint\":\"https://api.minimax.io:8443/anthropic\",\"model\":\"house-model\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
++         "]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) == 0);
++   assert(c.agent_count == 5);
++
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "upper")), "moonshotai") == 0);
++   /* A path segment must never select a vendor: falls back to wire provider. */
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "pathy")), "openai") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "lookalike")), "openai") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "userinfo")), "openai") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "sub")), "minimax") == 0);
++
++   printf("  PASS: test_catalog_provider_host_matching_is_label_anchored\n");
++   unlink(agent_config_path());
++}
++
++/* Gateways (OpenRouter and friends) do not carry a vendor host, so the vendor
++ * has to come from a namespaced model id. Review found "moonshotai/kimi-k2.7-code"
++ * missed while "minimax/MiniMax-M3" worked by accident. */
++void test_catalog_provider_namespaced_model_ids(void)
++{
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[\n"
++         "{\"name\":\"ns_moon\",\"provider\":\"openrouter\","
++         "\"endpoint\":\"https://openrouter.ai/api/v1\","
++         "\"model\":\"moonshotai/kimi-k2.7-code\",\"auth_type\":\"bearer\","
++         "\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
++         "{\"name\":\"ns_mini\",\"provider\":\"openrouter\","
++         "\"endpoint\":\"https://openrouter.ai/api/v1\","
++         "\"model\":\"minimax/MiniMax-M3\",\"auth_type\":\"bearer\","
++         "\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
++         "{\"name\":\"bare_kimi\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"kimi-k2.7-code\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
++         /* Undecidable alias: must NOT guess, must fall back to wire provider. */
++         "{\"name\":\"alias\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"deployment-123\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
++         "]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "ns_moon")), "moonshotai") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "ns_mini")), "minimax") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "bare_kimi")), "moonshotai") == 0);
++   assert(strcmp(agent_catalog_provider(agent_find(&c, "alias")), "openai") == 0);
++
++   printf("  PASS: test_catalog_provider_namespaced_model_ids\n");
++   unlink(agent_config_path());
++}
++
++/* aimee names some providers after the CLI or product rather than the vendor:
++ * the Claude OAuth/CLI seat is provider "claude", the Codex seat is "chatgpt".
++ * models.dev keys those vendors "anthropic" and "openai". Unmapped, the PRIMARY
++ * agent resolved no capability flags at all, a 200k context against a real 1M,
++ * and an 8192 output ceiling against a real 128k. */
++void test_catalog_provider_maps_cli_provider_names(void)
++{
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[\n"
++         "{\"name\":\"claude\",\"provider\":\"claude\",\"endpoint\":\"\","
++         "\"model\":\"claude-opus-4-8\",\"auth_type\":\"none\",\"roles\":[\"review\"]},\n"
++         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"model\":\"gpt-5.6-sol\",\"auth_type\":\"codex-oauth\","
++         "\"roles\":[\"review\"]}\n"
++         "]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) == 0);
++   const agent_t *cl = agent_find(&c, "claude");
++   const agent_t *cx = agent_find(&c, "codex");
++   assert(cl && cx);
++
++   /* Wire provider untouched — it still selects auth and CLI behaviour. */
++   assert(strcmp(cl->provider, "claude") == 0);
++   assert(strcmp(cx->provider, "chatgpt") == 0);
++   /* Catalog identity is the vendor. */
++   assert(strcmp(agent_catalog_provider(cl), "anthropic") == 0);
++   assert(strcmp(agent_catalog_provider(cx), "openai") == 0);
++
++   /* Capability now resolves. The output ceiling is the sharpest symptom: an
++    * unmapped provider fell back to the non-reasoning 8192 default. */
++   model_capability_t cap;
++   assert(model_capability_get(agent_catalog_provider(cl), cl->model, &cap) != 0);
++   assert(cap.flags & MODEL_CAP_REASONING);
++   assert(cap.context_window == 200000 || cap.context_window >= 1000000);
++   assert(model_max_output(agent_catalog_provider(cl), cl->model) > 8192);
++
++   assert(model_capability_get(agent_catalog_provider(cx), cx->model, &cap) != 0);
++   assert(cap.flags & MODEL_CAP_REASONING);
++   assert(model_max_output(agent_catalog_provider(cx), cx->model) > 8192);
++
++   printf("  PASS: test_catalog_provider_maps_cli_provider_names\n");
++   unlink(agent_config_path());
++}
++
++/* The moonshotai heuristic must not hand REASONING to every unknown Moonshot
++ * model: that would select the long per-call timeout and satisfy a REASONING
++ * requirement for a model nobody has verified. Only the k2/k3 families it is
++ * actually known for get it; everything else gets the tool-using floor. */
++void test_moonshot_heuristic_scopes_reasoning_to_known_families(void)
++{
++   model_capability_t cap;
++
++   assert(model_capability_get("moonshotai", "kimi-k2.7-code", &cap) != 0);
++   assert((cap.flags & MODEL_CAP_REASONING) != 0);
++   assert((cap.flags & MODEL_CAP_TOOLS) != 0);
++
++   assert(model_capability_get("moonshotai", "kimi-k3", &cap) != 0);
++   assert((cap.flags & MODEL_CAP_REASONING) != 0);
++
++   /* Unknown/future Moonshot id: tools yes, reasoning must be EARNED. */
++   assert(model_capability_get("moonshotai", "moonshot-v1-8k", &cap) != 0);
++   assert((cap.flags & MODEL_CAP_TOOLS) != 0);
++   assert((cap.flags & MODEL_CAP_REASONING) == 0);
++
++   printf("  PASS: test_moonshot_heuristic_scopes_reasoning_to_known_families\n");
++}
++
+ /* An explicit operator catalog_provider always wins over derivation, and only an
+  * explicit value round-trips through save (a derived guess must not be frozen
+  * into config where it would outlive the derivation rules). */
+diff --git a/src/tests/test_agent_tier_lint.c b/src/tests/test_agent_tier_lint.c
+new file mode 100644
+index 00000000..843eaabd
+--- /dev/null
++++ b/src/tests/test_agent_tier_lint.c
+@@ -0,0 +1,233 @@
++/* test_agent_tier_lint.c: cost_tier vs catalog price consistency. */
++#include <assert.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++#include <sys/stat.h>
++#include <unistd.h>
++
++#include "aimee.h"
++#include "agent_config.h"
++#include "agent_tier_lint.h"
++#include "model_registry.h"
++
++/* Mirrors agent_config.c. Stubbed so this test links only the registry, not the
++ * whole agent-config layer. */
++const char *agent_catalog_provider(const agent_t *agent)
++{
++   if (!agent)
++      return "";
++   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
++}
++
++/* Seed a real priced catalog. Without this the static table prices nothing for
++ * the fixture models and every meaningful assertion below SKIPs — a green run
++ * that proves nothing. models_dev_cache_lookup() reads $HOME/.cache/aimee on
++ * every call, so pointing HOME at a temp dir gives deterministic prices. */
++static char g_tmp_home[256];
++
++static void seed_priced_catalog(void)
++{
++   snprintf(g_tmp_home, sizeof(g_tmp_home), "/tmp/test-tier-lint-XXXXXX");
++   assert(mkdtemp(g_tmp_home) != NULL);
++
++   char dir[512], path[600];
++   snprintf(dir, sizeof(dir), "%s/.cache", g_tmp_home);
++   mkdir(dir, 0755);
++   snprintf(dir, sizeof(dir), "%s/.cache/aimee", g_tmp_home);
++   mkdir(dir, 0755);
++   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
++
++   /* DEAR is more expensive than CHEAP on BOTH axes: the unambiguous case the
++    * lint is specified to flag. AMBIG_* invert between axes, which must NOT be
++    * flagged (no exchange rate is invented). */
++   const char *json = "{"
++                      "\"testvendor/dear\":  {\"contextWindow\":100000,\"inputCost\":10.0,"
++                      "                      \"outputCost\":50.0,\"tools\":true},"
++                      "\"testvendor/cheap\": {\"contextWindow\":100000,\"inputCost\":1.0,"
++                      "                      \"outputCost\":5.0,\"tools\":true},"
++                      "\"testvendor/ambig_a\":{\"contextWindow\":100000,\"inputCost\":9.0,"
++                      "                      \"outputCost\":1.0,\"tools\":true},"
++                      "\"testvendor/ambig_b\":{\"contextWindow\":100000,\"inputCost\":1.0,"
++                      "                      \"outputCost\":9.0,\"tools\":true}"
++                      "}";
++   FILE *f = fopen(path, "w");
++   assert(f);
++   fputs(json, f);
++   fclose(f);
++
++   setenv("HOME", g_tmp_home, 1);
++
++   /* Fail loudly if the seed did not take: a silent miss would restore exactly
++    * the vacuous-skip problem this exists to remove. */
++   model_capability_t c;
++   assert(model_capability_get("testvendor", "dear", &c) != 0);
++   assert(c.cost_in_per_mtok == 10.0 && c.cost_out_per_mtok == 50.0);
++   assert(model_capability_get("testvendor", "cheap", &c) != 0);
++   assert(c.cost_in_per_mtok == 1.0);
++}
++
++/* Prices come from the capability catalog. With a cold models.dev cache the
++ * static table is the source, so these fixtures pin models the static table
++ * knows and assert on the RELATIVE ordering rather than absolute dollars. */
++static void add_agent(agent_config_t *cfg, const char *name, const char *provider,
++                      const char *model, int tier)
++{
++   agent_t *a = &cfg->agents[cfg->agent_count++];
++   memset(a, 0, sizeof(*a));
++   snprintf(a->name, sizeof(a->name), "%s", name);
++   snprintf(a->provider, sizeof(a->provider), "%s", provider);
++   snprintf(a->model, sizeof(a->model), "%s", model);
++   a->cost_tier = tier;
++   a->enabled = 1;
++   a->tools_enabled = 1;
++   snprintf(a->roles[0], sizeof(a->roles[0]), "%s", "review");
++   a->role_count = 1;
++}
++
++/* A priced pair whose tier ordering contradicts both price axes is the whole
++ * point of the check: routing minimises cost_tier, so it would prefer the more
++ * expensive model believing it to be cheaper. */
++static void test_detects_inverted_tier(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++
++   /* The expensive model is configured at the CHEAPEST tier. */
++   add_agent(&cfg, "expensive_at_tier0", "testvendor", "dear", 0);
++   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   int n = agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX);
++   assert(n == 1);
++   assert(strcmp(out[0].cheaper_tier_agent, "expensive_at_tier0") == 0);
++   assert(strcmp(out[0].costlier_tier_agent, "cheap_at_tier1") == 0);
++   assert(out[0].cheaper_tier == 0 && out[0].costlier_tier == 1);
++   assert(out[0].cheaper_tier_in > out[0].costlier_tier_in);
++
++   /* Correcting the tiers clears the finding. */
++   cfg.agents[0].cost_tier = 1;
++   cfg.agents[1].cost_tier = 0;
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_detects_inverted_tier\n");
++}
++
++/* An exemption must be honoured — a subscription seat's marginal cost is not
++ * the published per-token price — but it requires a stated reason so it cannot
++ * silently mask a genuinely mis-tiered agent. */
++static void test_exemption_suppresses(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++
++   add_agent(&cfg, "subscription", "testvendor", "dear", 0);
++   add_agent(&cfg, "metered", "testvendor", "cheap", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
++
++   snprintf(cfg.agents[0].tier_price_exempt, sizeof(cfg.agents[0].tier_price_exempt), "%s",
++            "flat-rate subscription; marginal token cost is not the API price");
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_exemption_suppresses\n");
++}
++
++/* Absent price data is NOT evidence of a wrong tier. A model the catalog does
++ * not price must never produce a finding, or the check would fire on every
++ * unknown model an operator adds. */
++static void test_unpriced_model_is_not_a_finding(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "unknown_a", "anthropic", "totally-unknown-model-aaa", 0);
++   add_agent(&cfg, "unknown_b", "anthropic", "totally-unknown-model-bbb", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_unpriced_model_is_not_a_finding\n");
++}
++
++/* A disabled agent is not routable, so its tier cannot mis-route anything. */
++static void test_disabled_agent_ignored(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++
++   add_agent(&cfg, "expensive_at_tier0", "testvendor", "dear", 0);
++   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
++   cfg.agents[0].enabled = 0;
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_disabled_agent_ignored\n");
++}
++
++/* Equal tiers express no ordering, so they cannot contradict a price. */
++static void test_equal_tiers_never_conflict(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "a", "testvendor", "dear", 2);
++   add_agent(&cfg, "b", "testvendor", "cheap", 2);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_equal_tiers_never_conflict\n");
++}
++
++/* NULL config and a zero-capacity output buffer must not crash, and the count
++ * must still be reported so a caller can size a buffer. */
++static void test_guards(void)
++{
++   agent_tier_conflict_t out[1];
++   assert(agent_tier_price_conflicts(NULL, out, 1) == 0);
++
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   assert(agent_tier_price_conflicts(&cfg, NULL, 0) == 0);
++
++   printf("  PASS: test_guards\n");
++}
++
++/* When input and output prices disagree about which model is cheaper there is
++ * no single correct ordering. Flagging it would require inventing an
++ * input/output exchange rate — the scalarisation this design rejects — so an
++ * ambiguous pair must stay silent regardless of tier. */
++static void test_ambiguous_price_axes_not_flagged(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   /* ambig_a: $9 in / $1 out. ambig_b: $1 in / $9 out. */
++   add_agent(&cfg, "a_at_tier0", "testvendor", "ambig_a", 0);
++   add_agent(&cfg, "b_at_tier1", "testvendor", "ambig_b", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   /* ...and the reverse tier assignment is equally not a defect. */
++   cfg.agents[0].cost_tier = 1;
++   cfg.agents[1].cost_tier = 0;
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_ambiguous_price_axes_not_flagged\n");
++}
++
++int main(void)
++{
++   printf("agent_tier_lint:\n");
++   seed_priced_catalog();
++   test_detects_inverted_tier();
++   test_exemption_suppresses();
++   test_unpriced_model_is_not_a_finding();
++   test_disabled_agent_ignored();
++   test_equal_tiers_never_conflict();
++   test_ambiguous_price_axes_not_flagged();
++   test_guards();
++   printf("agent_tier_lint: all tests passed\n");
++   return 0;
++}
+diff --git a/src/tests/test_models_dev.c b/src/tests/test_models_dev.c
+index e242d53d..268f0bb9 100644
+--- a/src/tests/test_models_dev.c
++++ b/src/tests/test_models_dev.c
+@@ -47,6 +47,77 @@ static void test_cache_lookup_hit(void)
+    rmdir(tmpdir);
+ }
+ 
++/* The LIVE https://models.dev/api.json schema is NESTED, and models_dev_refresh()
++ * curls it into the cache verbatim with no transform. Before the reader learned
++ * this shape the downloaded cache resolved NOTHING — the flat "provider/model"
++ * key lookup returned NULL against a nested root — so every capability fell
++ * through to the heuristic and every price stayed 0. Uses the real field names
++ * and real values for two live fleet models. */
++static void test_cache_lookup_nested_api_schema(void)
++{
++   char tmpdir[256];
++   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-models-dev-nested-XXXXXX");
++   assert(mkdtemp(tmpdir) != NULL);
++
++   char cache_parent[512], cache_dir[512], cache_path[512];
++   snprintf(cache_parent, sizeof(cache_parent), "%s/.cache", tmpdir);
++   snprintf(cache_dir, sizeof(cache_dir), "%s/.cache/aimee", tmpdir);
++   snprintf(cache_path, sizeof(cache_path), "%s/models_dev.json", cache_dir);
++   mkdir(cache_parent, 0755);
++   mkdir(cache_dir, 0755);
++
++   const char *json =
++       "{\"minimax\": {\"name\": \"MiniMax\", \"models\": {"
++       "  \"MiniMax-M3\": {\"name\": \"MiniMax M3\","
++       "    \"limit\": {\"context\": 1000000, \"output\": 128000},"
++       "    \"cost\": {\"input\": 0.3, \"output\": 1.2},"
++       "    \"tool_call\": true, \"reasoning\": true,"
++       "    \"modalities\": {\"input\": [\"text\", \"image\"]}}}},"
++       " \"openai\": {\"models\": {"
++       "  \"gpt-5.6-sol\": {\"name\": \"GPT-5.6 Sol\","
++       "    \"limit\": {\"context\": 1050000, \"output\": 128000},"
++       "    \"cost\": {\"input\": 5.0, \"output\": 30.0},"
++       "    \"tool_call\": true, \"reasoning\": true}}}}";
++   FILE *f = fopen(cache_path, "w");
++   assert(f);
++   fputs(json, f);
++   fclose(f);
++
++   setenv("HOME", tmpdir, 1);
++
++   model_capability_t caps;
++   memset(&caps, 0, sizeof(caps));
++   assert(models_dev_cache_lookup("minimax", "MiniMax-M3", &caps) == 1);
++   assert(caps.context_window == 1000000);
++   assert(caps.max_output == 128000);
++   assert(caps.cost_in_per_mtok == 0.3);
++   assert(caps.cost_out_per_mtok == 1.2);
++   assert(caps.flags & MODEL_CAP_TOOLS);
++   /* REASONING has no flat-schema equivalent; the nested reader is the only
++    * source of it, and it is what selects the long per-call timeout. */
++   assert(caps.flags & MODEL_CAP_REASONING);
++   assert(caps.flags & MODEL_CAP_VISION);
++   assert(strcmp(caps.display_name, "MiniMax M3") == 0);
++   assert(!caps.deprecated);
++
++   /* Price is the whole point of reading this schema: it is the only source of
++    * a real cost basis, and it is 0 for every model without it. */
++   memset(&caps, 0, sizeof(caps));
++   assert(models_dev_cache_lookup("openai", "gpt-5.6-sol", &caps) == 1);
++   assert(caps.cost_in_per_mtok == 5.0);
++   assert(caps.cost_out_per_mtok == 30.0);
++   assert(strcmp(caps.display_name, "GPT-5.6 Sol") == 0);
++
++   /* A provider present but a model absent must still miss cleanly. */
++   memset(&caps, 0, sizeof(caps));
++   assert(models_dev_cache_lookup("minimax", "MiniMax-M99", &caps) == 0);
++
++   unlink(cache_path);
++   rmdir(cache_dir);
++   rmdir(cache_parent);
++   rmdir(tmpdir);
++}
++
+ static void test_cache_lookup_miss(void)
+ {
+    model_capability_t caps;
+@@ -73,6 +144,8 @@ int main(void)
+    printf("models_dev: ");
+    test_cache_lookup_hit();
+    printf("cache_hit OK, ");
++   test_cache_lookup_nested_api_schema();
++   printf("nested_api OK, ");
+    test_cache_lookup_miss();
+    printf("cache_miss OK, ");
+    test_cache_lookup_null_guard();
