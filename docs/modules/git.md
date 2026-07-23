@@ -16,7 +16,7 @@ is `memory.repository-record.ingest.v1`: Git is submit-only, while [memory](memo
 redaction acceptance, persistence, embedding, reranking, and code intelligence.
 
 The descriptor declares this module's twenty-six sources, eighteen module-root headers, fourteen
-direct tests, and this document; it does not yet set `ownership_complete`. All eighteen headers are
+direct tests, and this document; it sets `ownership_complete: true`. All eighteen headers are
 declared as `private_headers` because they live at the module root rather than under
 `src/modules/git/include/aimee/git/`, the layout the header-layout checker treats as private; sixteen
 pair with a source, and two have no paired source — `git_verify_internal.h` (the verify-family seam)
@@ -26,8 +26,10 @@ tools) and omits the fourteen credential, OAuth, ops, forge-vault, host, org-rep
 that are server/kb-side, the same intentional thin-client boundary recorded for gateway, learning,
 workspace, vault, and config. This descriptor's `ownership_complete` latch is independent of the
 separate `git-core-contract` governance, which bounds git's core capability rather than its file
-ownership. `docs/validation/core-modularization-slice-50.md` records the audit; latching follows in a
-separate slice so the completeness audit does not review declarations authored in the same change.
+ownership. `docs/validation/core-modularization-slice-50.md` records the declaration audit and
+`docs/validation/core-modularization-slice-51.md` the completeness audit; the two were split so the
+latch reviews declarations merged on their own first. Adding a new module-local source or module-root
+header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 

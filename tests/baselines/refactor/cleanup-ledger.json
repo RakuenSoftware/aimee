@@ -724,6 +724,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains fourteen git rows including three CTest-only rows.",
       "independent_review": "The slice-decision roundtable confirmed all three scoping decisions and caught a header-count arithmetic error (sixteen paired plus two unpaired equals eighteen, not seventeen plus two), which is corrected in the written declaration. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-50.md", "docs/modules/git.md", "src/modules/git/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
+    },
+    {
+      "slice": 51,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the git descriptor against the declarations slice 50 authored and reviewed on their own, the latch half of the pair for the sixth Class B module, exercising the source and private_headers set-equality checks against the largest declared sets in the program, twenty-six sources and eighteen headers.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The latch asserts the descriptor covers the module root as it stands, twenty-six sources and eighteen headers, not that the root-level src/forge_app_token.c or the server/kb git-facing code outside the module root has been moved in", "CMake compiles twelve of the twenty-six sources and omits the fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, vault, and config", "The latch is independent of the git-core-contract governance, which bounds git's core capability rather than its file ownership and is untouched"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining three Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may relocate git headers under a canonical include tree."
+      },
+      "consumers": ["descriptor-envelope and module-inventory CI", "the remaining Class B declaration and latch slices", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains git-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures against the largest declared sets in the program.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 50 and caught the header-count arithmetic corrected there; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-51.md", "docs/modules/git.md", "src/modules/git/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }
