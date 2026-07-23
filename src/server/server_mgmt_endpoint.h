@@ -86,8 +86,7 @@ int server_mgmt_endpoint_dispatch(const server_mgmt_endpoint_request_t *,
                                   server_mgmt_endpoint_result_t *);
 int server_mgmt_endpoint_render(const server_mgmt_endpoint_result_t *, char *, size_t);
 
-/* Dependency seam for the strict checkpoint client delivered by the authority
- * packet. The server packet's weak fail-closed implementation never authorizes. */
+/* Production strict status-authority checkpoint client. */
 server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
     const server_mgmt_endpoint_request_t *, const server_mgmt_token_claims_t *, uint64_t,
     const char *staple_digest);

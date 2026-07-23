@@ -149,14 +149,3 @@ int server_mgmt_endpoint_render(const server_mgmt_endpoint_result_t *r, char *ou
                     r->effect);
    return n >= 0 && (size_t)n < cap ? n : -1;
 }
-
-__attribute__((weak)) server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
-    const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *claims,
-    uint64_t generation, const char *staple_digest)
-{
-   (void)rq;
-   (void)claims;
-   (void)generation;
-   (void)staple_digest;
-   return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
-}

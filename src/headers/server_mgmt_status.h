@@ -39,5 +39,6 @@ server_mgmt_nonce_result_t server_mgmt_nonce_consume_purpose(
     const char *purpose, uint64_t now, int signature_and_shape_valid);
 
 int server_mgmt_status_hwm(uint64_t *generation);
+int server_mgmt_status_hwm_advance(uint64_t generation);
 
 #endif

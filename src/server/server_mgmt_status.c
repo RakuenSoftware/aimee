@@ -188,3 +188,19 @@ int server_mgmt_status_hwm(uint64_t *generation)
    sqlite3_finalize(q);
    return rc;
 }
+
+int server_mgmt_status_hwm_advance(uint64_t generation)
+{
+   sqlite3 *db = db1_conn();
+   sqlite3_stmt *q = NULL;
+   if (!db || generation > INT64_MAX ||
+       sqlite3_prepare_v2(db,
+                         "UPDATE server_mgmt_status_hwm SET generation=?1 "
+                         "WHERE singleton=1 AND generation<=?1",
+                         -1, &q, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int64(q, 1, (sqlite3_int64)generation);
+   int rc = sqlite3_step(q) == SQLITE_DONE && sqlite3_changes(db) == 1 ? 0 : -1;
+   sqlite3_finalize(q);
+   return rc;
+}

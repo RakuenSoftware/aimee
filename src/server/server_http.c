@@ -13,6 +13,7 @@
 #include "server.h"            /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"        /* native TLS termination (phase 1b) */
+#include "server_mgmt_checkpoint_client.h"
 #include "pki.h"               /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
@@ -2432,6 +2433,17 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
          pthread_mutex_unlock(&g_listener_lifecycle_lock);
          return SERVER_HTTP_START_MGMT_FATAL;
       }
+      if (server_mgmt_checkpoint_client_start(&management) != 0)
+      {
+         server_http_management_set_error("management checkpoint client");
+         close_listener_fd(&g_management_tls_fd);
+         close_listener_fd(&g_tls_fd);
+         close_listener_fd(&g_tcp_fd);
+         close_listener_fd(&g_listen_fd);
+         unlink(uds_path);
+         pthread_mutex_unlock(&g_listener_lifecycle_lock);
+         return SERVER_HTTP_START_MGMT_FATAL;
+      }
    }
 
    atomic_store(&g_running, 1);
@@ -2465,6 +2477,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       }
       close_listener_fd(&g_tls_fd);
       close_listener_fd(&g_management_tls_fd);
+      server_mgmt_checkpoint_client_stop();
       unlink(uds_path);
       pthread_mutex_unlock(&g_listener_lifecycle_lock);
       return listener_failure;
@@ -2507,5 +2520,6 @@ void server_http_stop(void)
    close_listener_fd(&g_tcp_fd);
    close_listener_fd(&g_tls_fd);
    close_listener_fd(&g_management_tls_fd);
+   server_mgmt_checkpoint_client_stop();
    pthread_mutex_unlock(&g_listener_lifecycle_lock);
 }

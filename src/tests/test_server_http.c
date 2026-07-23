@@ -42,6 +42,25 @@ int audit_worm_append(const char *role, const char *principal, const char *actio
    return 0;
 }
 
+server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
+    const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *claims,
+    uint64_t generation, const char *digest)
+{
+   (void)rq;
+   (void)claims;
+   (void)generation;
+   (void)digest;
+   return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
+}
+
+int server_mgmt_checkpoint_client_start(const server_http_management_config_t *config)
+{
+   (void)config;
+   return 0;
+}
+
+void server_mgmt_checkpoint_client_stop(void) {}
+
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
 {
@@ -888,7 +907,7 @@ int main(void)
       setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-v1", 1);
       setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
-      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test/v1/management/status", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test", 1);
       setenv("AIMEE_SERVER_MGMT_STATUS_CA_FILE", "/etc/aimee/management/kb-ca.pem", 1);
       setenv("AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
@@ -899,7 +918,7 @@ int main(void)
       assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled && mc.port == 9443);
       assert(strcmp(mc.bind, "127.0.0.1") == 0);
       assert(strcmp(mc.cert, "/etc/aimee/management/server.pem") == 0);
-      assert(strcmp(mc.status_endpoint, "https://kb.test/v1/management/status") == 0);
+      assert(strcmp(mc.status_endpoint, "https://kb.test") == 0);
       unsetenv("AIMEE_SERVER_MGMT_BIND");
       assert(server_http_management_config_from_env(&mc) == 0 && mc.enabled);
       assert(strcmp(mc.bind, "127.0.0.1") == 0);
@@ -917,6 +936,9 @@ int main(void)
       setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/../server.key", 1);
       assert(server_http_management_config_from_env(&mc) == -1);
       setenv("AIMEE_SERVER_MGMT_TLS_KEY", "/etc/aimee/management/server.key", 1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test/v1/management/status", 1);
+      assert(server_http_management_config_from_env(&mc) == -1);
+      setenv("AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "https://kb.test", 1);
       setenv("AIMEE_SERVER_ID", "bad/server", 1);
       assert(server_http_management_config_from_env(&mc) == -1);
       setenv("AIMEE_SERVER_ID", "p5b3c-server", 1);

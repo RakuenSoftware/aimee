@@ -41,6 +41,9 @@ kb_mgmt_client_send_result_t
 kb_mgmt_client_session_action_deadline(kb_mgmt_client_session_t *, const char *body,
                                        const char *extra_headers, uint64_t deadline_millis,
                                        char *resp, size_t cap, int *status);
+int kb_mgmt_client_session_checkpoint_deadline(kb_mgmt_client_session_t *, const char *body,
+                                                uint64_t deadline_millis, char *resp, size_t cap,
+                                                int *status);
 void kb_mgmt_client_session_close(kb_mgmt_client_session_t *);
 
 int kb_mgmt_client_request(const char *endpoint, const char *ca, const char *client_cert,

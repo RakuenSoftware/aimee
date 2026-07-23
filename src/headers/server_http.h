@@ -48,6 +48,8 @@ extern "C"
       char status_secondary_leaf_pin[65];
       char status_client_cert[SERVER_HTTP_MGMT_PATH_MAX];
       char status_client_key[SERVER_HTTP_MGMT_PATH_MAX];
+      char status_key_id[65];
+      char status_public_key[65];
    } server_http_management_config_t;
 
    /* Parse the all-or-none dedicated-management listener environment packet.

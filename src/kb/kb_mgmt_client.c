@@ -269,8 +269,9 @@ static int session_request_deadline(kb_mgmt_client_session_t *s, const char *met
       return -1;
    int n = snprintf(req, req_cap,
                     "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
-                    "Content-Length: %zu\r\nConnection: keep-alive\r\n\r\n%s",
-                    method, path, s->endpoint.host_header, headers, blen, b);
+                    "Content-Length: %zu\r\nConnection: %s\r\n\r\n%s",
+                    method, path, s->endpoint.host_header, headers, blen,
+                    strict_action ? "close" : "keep-alive", b);
    int rc = -1;
    if (n <= 0 || (size_t)n >= req_cap || (strict_action && (size_t)n >= 8192U))
       goto done;
@@ -317,6 +318,7 @@ static int session_request_deadline(kb_mgmt_client_session_t *s, const char *met
          size_t exact = (size_t)(end + 4 - raw) + content_length;
          int status = response_status(raw, end);
          if (status < 0 || (!strcmp(path, "/v1/management/challenge") && !reusable) ||
+             (!strcmp(path, "/v1/management/action-checkpoint") && reusable) ||
              total != exact || memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
              monotonic_ms() >= deadline)
             break;
@@ -334,6 +336,14 @@ done:
    if (rc != 0)
       kb_mgmt_client_session_close(s);
    return rc;
+}
+
+int kb_mgmt_client_session_checkpoint_deadline(kb_mgmt_client_session_t *s, const char *body,
+                                                uint64_t deadline, char *resp, size_t cap,
+                                                int *status_out)
+{
+   return session_request_deadline(s, "POST", "/v1/management/action-checkpoint", body, NULL,
+                                   deadline, resp, cap, status_out, 1, NULL);
 }
 
 int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const char *method,

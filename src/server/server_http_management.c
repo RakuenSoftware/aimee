@@ -1,5 +1,6 @@
 #include "server_http_internal.h"
 #include "server_mgmt_endpoint.h"
+#include "kb_mgmt_endpoint.h"
 #include "kb_mgmt_status.h"
 
 #include <arpa/inet.h>
@@ -221,9 +222,7 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       g_management_start_error = "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE";
    else if (checkpoint_present != sizeof(checkpoint_names) / sizeof(checkpoint_names[0]))
       g_management_start_error = "management checkpoint packet";
-   else if (!checkpoint_endpoint || strncmp(checkpoint_endpoint, "https://", 8) ||
-            !checkpoint_endpoint[8] || strchr(checkpoint_endpoint + 8, '@') ||
-            strchr(checkpoint_endpoint + 8, '#'))
+   else if (kb_mgmt_endpoint_validate(checkpoint_endpoint) != 0)
       g_management_start_error = checkpoint_names[0];
    else if (!management_absolute_path(checkpoint_ca))
       g_management_start_error = checkpoint_names[1];
@@ -253,6 +252,8 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
             checkpoint_secondary ? checkpoint_secondary : "");
    snprintf(out->status_client_cert, sizeof(out->status_client_cert), "%s", checkpoint_cert);
    snprintf(out->status_client_key, sizeof(out->status_client_key), "%s", checkpoint_key);
+   snprintf(out->status_key_id, sizeof(out->status_key_id), "%s", status_key_id);
+   snprintf(out->status_public_key, sizeof(out->status_public_key), "%s", status_public);
    return 0;
 }
 
