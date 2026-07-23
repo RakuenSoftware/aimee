@@ -109,6 +109,10 @@ int main(void)
    server_mgmt_action_t a;
    const char *valid = "{\"agent\":\"a-1\",\"action\":\"agent.disable\"}";
    assert(server_mgmt_action_parse(valid, strlen(valid), &a) == 0);
+   const char *nul_action = "{\"action\":\"agent.enable\\u0000junk\",\"agent\":\"alpha\"}";
+   const char *nul_agent = "{\"action\":\"agent.enable\",\"agent\":\"alpha\\u0000other\"}";
+   assert(server_mgmt_action_parse(nul_action, strlen(nul_action), &a) != 0);
+   assert(server_mgmt_action_parse(nul_agent, strlen(nul_agent), &a) != 0);
    assert(!strcmp(a.canonical, "{\"action\":\"agent.disable\",\"agent\":\"a-1\"}"));
    assert(strlen(a.digest) == 64);
    const char *bad[] = {"{}", "{\"action\":\"agent.enable\"}",

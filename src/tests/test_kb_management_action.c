@@ -332,6 +332,12 @@ int main(void)
    assert(kb_management_action_body_parse(
        "{\"action\":\"agent.enable\",\"agent\":\"a\",\"agent\":\"b\"}", 54, &a));
    assert(kb_management_action_body_parse("{\"action\":\"agent.run\",\"agent\":\"a\"}", 35, &a));
+   const char *nul_action = "{\"action\":\"agent.enable\\u0000junk\",\"agent\":\"alpha\"}";
+   const char *nul_agent = "{\"action\":\"agent.enable\",\"agent\":\"alpha\\u0000other\"}";
+   assert(kb_management_action_body_parse(nul_action, strlen(nul_action), &a));
+   assert(kb_management_action_body_parse(nul_agent, strlen(nul_agent), &a));
+   const char *literal_escape = "{\"action\":\"agent.enable\",\"agent\":\"alpha\\\\u0000\"}";
+   assert(kb_management_action_body_parse(literal_escape, strlen(literal_escape), &a));
    db2_management_action_outcome_operation_t decoded = {0};
    const char *reversed = "{\"effect\":\"applied\",\"result\":\"succeeded\"}";
    assert(kb_management_action_response_parse(reversed, strlen(reversed), 200, &decoded));

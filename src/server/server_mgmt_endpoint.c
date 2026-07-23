@@ -14,10 +14,32 @@ static int lower_hex_sha256(const char *bytes, size_t n, char out[65])
    return 0;
 }
 
+static int has_json_nul_escape(const char *s, size_t n)
+{
+   int in_string = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (!in_string)
+      {
+         if (s[i] == '"')
+            in_string = 1;
+      }
+      else if (s[i] == '"')
+         in_string = 0;
+      else if (s[i] == '\\' && i + 1 < n)
+      {
+         if (s[i + 1] == 'u' && i + 5 < n && !memcmp(s + i + 2, "0000", 4))
+            return 1;
+         i++;
+      }
+   }
+   return 0;
+}
+
 int server_mgmt_action_parse(const char *body, size_t body_len, server_mgmt_action_t *out)
 {
    if (!body || !out || body_len < 2 || body_len > SERVER_MGMT_ACTION_BODY_MAX ||
-       memchr(body, '\0', body_len))
+       memchr(body, '\0', body_len) || has_json_nul_escape(body, body_len))
       return -1;
    memset(out, 0, sizeof(*out));
    const char *end = NULL;

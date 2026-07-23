@@ -22,6 +22,28 @@ static int token(const char *s, size_t max)
    return 1;
 }
 
+static int has_json_nul_escape(const char *s, size_t n)
+{
+   int in_string = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (!in_string)
+      {
+         if (s[i] == '"')
+            in_string = 1;
+      }
+      else if (s[i] == '"')
+         in_string = 0;
+      else if (s[i] == '\\' && i + 1 < n)
+      {
+         if (s[i + 1] == 'u' && i + 5 < n && !memcmp(s + i + 2, "0000", 4))
+            return 1;
+         i++;
+      }
+   }
+   return 0;
+}
+
 static void hex32(const uint8_t in[32], char out[65])
 {
    static const char h[] = "0123456789abcdef";
@@ -35,7 +57,8 @@ static void hex32(const uint8_t in[32], char out[65])
 
 static cJSON *parse_exact(const char *raw, size_t len, size_t max)
 {
-   if (!raw || len < 2 || len > max || memchr(raw, 0, len) || raw[0] != '{' || raw[len - 1] != '}')
+   if (!raw || len < 2 || len > max || memchr(raw, 0, len) || has_json_nul_escape(raw, len) ||
+       raw[0] != '{' || raw[len - 1] != '}')
       return NULL;
    const char *end = NULL;
    cJSON *j = cJSON_ParseWithLengthOpts(raw, len, &end, 0);
