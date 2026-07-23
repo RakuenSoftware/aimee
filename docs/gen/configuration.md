@@ -283,7 +283,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`routing`** — _Capability-gated delegate routing: whether to gate seat choice on capability before cost, and whether to prefer free local seats._ Keys: `enabled`, `prefer_local`
 - **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
-- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
 - **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`telemetry`** — `metrics_token`

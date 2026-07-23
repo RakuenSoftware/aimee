@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include "web_search.h"
 #include "web_egress.h"
@@ -75,6 +76,32 @@ int db1_web_page_put(const char *url, const char *body, const char *pin)
 void db1_web_page_drop(const char *url)
 {
    (void)url;
+}
+
+/* Dedup keys pages by the cache's canonical form, so the fusion path reaches
+ * this even with the cache itself stubbed out. Stubbed identically to the real
+ * one for the shapes this suite uses: scheme and host lowercased, everything
+ * after kept verbatim. Enough for "two different URLs stay two results", which
+ * is all this suite asks of it -- the canonical rules have their own suite. */
+int db1_web_page_canonical_url(const char *url, char *out, size_t out_len)
+{
+   if (!url || !out || out_len == 0)
+      return -1;
+   const char *sep = strstr(url, "://");
+   if (!sep)
+      return -1;
+   size_t n = 0;
+   for (const char *p = url; *p && n + 1 < out_len; p++)
+   {
+      /* lowercase through the authority, then copy verbatim */
+      int in_authority = (p <= sep + 2) || !strchr("/?#", *p);
+      const char *slash = strchr(sep + 3, '/');
+      if (slash && p >= slash)
+         in_authority = 0;
+      out[n++] = in_authority ? (char)tolower((unsigned char)*p) : *p;
+   }
+   out[n] = '\0';
+   return 0;
 }
 
 int web_egress_addr_blocked(const struct sockaddr *sa)

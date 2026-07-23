@@ -200,7 +200,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0])
+       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -213,6 +213,10 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
          if (cfg->search_tavily_api_key[0])
             cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
+         if (cfg->search_backends[0])
+            cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
+         if (cfg->search_fetch_pages >= 0)
+            cJSON_AddBoolToObject(sr, "fetch_pages", cfg->search_fetch_pages ? 1 : 0);
       }
    }
 

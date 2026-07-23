@@ -58,6 +58,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(OBJDIR)/code_outline.o $(OBJDIR)/posix/agent_tools_anchored.o \
                              $(OBJDIR)/posix/web_read.o \
                              $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                              $(OBJDIR)/server/token_tracker.o \
                              $(OBJDIR)/server/process_mgr.o \
                              $(OBJDIR)/modules/lsp/lsp_manager.o $(OBJDIR)/modules/lsp/lsp_client.o \
@@ -163,6 +164,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-web-egress \
                $(TESTPREFIX)/unit-test-web-page-cache \
                $(TESTPREFIX)/unit-test-web-search-fusion \
+               $(TESTPREFIX)/unit-test-web-search-fuse \
+               $(TESTPREFIX)/unit-test-web-search-breaker \
                $(TESTPREFIX)/unit-test-kb-rrf-purity \
                $(TESTPREFIX)/unit-test-wfe-deliver \
                $(TESTPREFIX)/unit-test-wfe-manager-flow \
@@ -1669,14 +1672,29 @@ $(TESTPREFIX)/unit-test-wfe-manager-artifacts: $(OBJDIR)/tests/test_wfe_manager_
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OBJDIR)/kb/kb_rrf.o
+$(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OBJDIR)/rrf.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
 
 $(TESTPREFIX)/unit-test-web-search-fusion: $(OBJDIR)/tests/test_web_search_fusion.o \
                                     $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                                     $(OBJDIR)/posix/web_read.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/posix/web_read.o \
+                                    $(OBJDIR)/rrf.o \
+                                    $(OBJDIR)/db1/web_page_cache.o $(OBJDIR)/db1/db1_init.o \
+                                    $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/db1_write.o \
+                                    $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+
+$(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
+                                    $(OBJDIR)/server/web_search_breaker.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 $(TESTPREFIX)/unit-test-web-page-cache: $(OBJDIR)/tests/test_web_page_cache.o \
@@ -2461,8 +2479,6 @@ $(TESTPREFIX)/unit-test-dstr: $(OBJDIR)/tests/test_dstr.o $(OBJDIR)/dstr.o
 # The aimee-client test compiles its in-process TLS mock only in WITH_TLS builds.
 $(OBJDIR)/tests/test_aimee_client.o: C_FLAGS += $(TLS_FLAGS)
 $(OBJDIR)/tests/test_kb_graph.o: C_FLAGS += -Ikb
-$(OBJDIR)/tests/test_kb_rrf.o: C_FLAGS += -Ikb
-$(OBJDIR)/tests/test_kb_rrf_purity.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_kb_graph_analytics.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_cite_tracker.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_reflect.o: C_FLAGS += -Ikb
@@ -2476,7 +2492,7 @@ $(TESTPREFIX)/unit-test-kb-graph: $(OBJDIR)/tests/test_kb_graph.o \
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 # Reciprocal Rank Fusion core (§5 hybrid retrieval scoring model). Pure: no DB.
-$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/kb/kb_rrf.o
+$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/rrf.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
 
 # Graph analytics: degree-centrality hub ranking (§4). Pure: no DB.
@@ -3058,6 +3074,7 @@ $(TESTPREFIX)/unit-test-skill-review: $(OBJDIR)/tests/test_skill_review.o \
 
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/web_search.o $(TEST_CORE_OBJS) \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                             $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o
@@ -4866,7 +4883,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
                      $(OBJDIR)/kb/http/kb_http_code_graphfb.o $(OBJDIR)/kb/lessons_reflect.o \
                                     $(OBJDIR)/kb/lessons_session_capture.o $(OBJDIR)/kb/lessons_cite_tracker.o \
-                     $(OBJDIR)/kb/kb_rrf.o \
+                     $(OBJDIR)/rrf.o \
                      $(OBJDIR)/kb/kb_graph_analytics.o \
                      $(OBJDIR)/kb/prompt_sanitizer.o \
                      $(OBJDIR)/kb/http/kb_http_pdf.o \

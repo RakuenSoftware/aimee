@@ -1059,11 +1059,27 @@ typedef struct config
     * search_max_results: default result count (0 = use WEB_SEARCH_DEFAULT_MAX_RESULTS = 5)
     * search_searxng_url: required when backend = "searxng", e.g. "https://searxng.example.com"
     * search_tavily_api_key: required when backend = "tavily"
+    * search_backends: optional comma-separated list enabling multi-engine fanout
+    * search_fetch_pages: -1 unset (default on), 0 off, 1 on
     */
    char search_backend[32];
    int search_max_results;
    char search_searxng_url[512];
    char search_tavily_api_key[256];
+   /* search_backends: optional comma-separated engine list for multi-engine
+    * fanout, e.g. "duckduckgo,searxng". When empty, search_backend is used
+    * alone. Engines missing their required credential are skipped rather than
+    * failing the search, so listing an engine you have not configured yet
+    * degrades to the ones you have.
+    *
+    * Fanout is OFF unless this is set: it multiplies latency and outbound
+    * requests, and a default install has exactly one usable engine
+    * (duckduckgo) so it would buy nothing. */
+   char search_backends[256];
+   /* search_fetch_pages: fetch the top results and return extracted page text
+    * instead of only engine snippets. 0 = off, 1 = on, -1/unset = built-in
+    * default (on). See WEB_SEARCH_FETCH_PAGES_DEFAULT. */
+   int search_fetch_pages;
 
    /* Tool result compaction settings.
     * compact_enabled: 0 = off, 1 = on (default when unset).
