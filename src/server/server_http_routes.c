@@ -334,9 +334,9 @@ static int mgmt_hex_key(const char *hex, unsigned char key[32])
    return 0;
 }
 
-static server_mgmt_read_result_t
-management_read_status(void *ctx, const server_mgmt_read_request_t *rq,
-                       server_mgmt_read_status_proof_t *proof)
+static server_mgmt_read_result_t management_read_status(void *ctx,
+                                                        const server_mgmt_read_request_t *rq,
+                                                        server_mgmt_read_status_proof_t *proof)
 {
    (void)ctx;
    const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
@@ -372,11 +372,9 @@ management_read_status(void *ctx, const server_mgmt_read_request_t *rq,
    server_mgmt_nonce_result_t consumed = server_mgmt_nonce_consume_purpose(
        &st, rq->peer, rq->server_id, "management.read.v1", (uint64_t)rq->now, valid);
    if (consumed != SERVER_MGMT_NONCE_OK)
-      return consumed == SERVER_MGMT_NONCE_STORAGE
-                 ? SERVER_MGMT_READ_UNAVAILABLE
-             : consumed == SERVER_MGMT_NONCE_NOT_FOUND ||
-                       consumed == SERVER_MGMT_NONCE_EXPIRED ||
-                       consumed == SERVER_MGMT_NONCE_ROLLBACK
+      return consumed == SERVER_MGMT_NONCE_STORAGE ? SERVER_MGMT_READ_UNAVAILABLE
+             : consumed == SERVER_MGMT_NONCE_NOT_FOUND || consumed == SERVER_MGMT_NONCE_EXPIRED ||
+                     consumed == SERVER_MGMT_NONCE_ROLLBACK
                  ? SERVER_MGMT_READ_CONFLICT
                  : SERVER_MGMT_READ_INTEGRITY;
    if (!SHA256((const unsigned char *)rq->staple, rq->staple_len, digest))
@@ -389,8 +387,8 @@ management_read_status(void *ctx, const server_mgmt_read_request_t *rq,
 }
 
 static server_mgmt_read_result_t management_read_token(void *ctx,
-                                                        const server_mgmt_read_request_t *rq,
-                                                        server_mgmt_token_claims_t *claims)
+                                                       const server_mgmt_read_request_t *rq,
+                                                       server_mgmt_token_claims_t *claims)
 {
    (void)ctx;
    const char *path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
@@ -399,18 +397,31 @@ static server_mgmt_read_result_t management_read_token(void *ctx,
    if (!path || server_mgmt_jwks_trust_bundle_load(path, trust, sizeof(trust), &trust_len) != 0)
       return SERVER_MGMT_READ_UNAVAILABLE;
    server_mgmt_token_result_t rc = server_mgmt_token_verify_read_claims_cached(
-       rq->jwt, rq->jwt_len, trust, trust_len, rq->expected_issuer, rq->server_id,
-       rq->peer->issuer, rq->peer->serial_norm, rq->peer->fingerprint, rq->now,
-       kb_client_mtls_management_jwks_fetch, NULL, claims);
+       rq->jwt, rq->jwt_len, trust, trust_len, rq->expected_issuer, rq->server_id, rq->peer->issuer,
+       rq->peer->serial_norm, rq->peer->fingerprint, rq->now, kb_client_mtls_management_jwks_fetch,
+       NULL, claims);
    OPENSSL_cleanse(trust, sizeof(trust));
    return rc == SERVER_MGMT_TOKEN_OK ? SERVER_MGMT_READ_OK : SERVER_MGMT_READ_INTEGRITY;
 }
 
-static int management_read_load(void *ctx, server_mgmt_read_agent_t *out, size_t cap,
-                                size_t *count)
+static int management_read_load(void *ctx, server_mgmt_read_agent_t *out, size_t cap, size_t *count)
 {
    (void)ctx;
    return server_mgmt_read_load_agents(out, cap, count);
+}
+
+static int64_t management_read_publication_generation(int64_t now)
+{
+   const char *path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   char trust[SERVER_MGMT_JWKS_BUNDLE_MAX];
+   size_t trust_len = 0;
+   int64_t generation = 0;
+   if (!path || server_mgmt_jwks_trust_bundle_load(path, trust, sizeof(trust), &trust_len) != 0 ||
+       server_mgmt_jwks_cache_current_generation(trust, trust_len, now, &generation) !=
+           SERVER_MGMT_JWKS_CACHE_OK)
+      generation = 0;
+   OPENSSL_cleanse(trust, sizeof(trust));
+   return generation;
 }
 
 static server_mgmt_read_result_t
@@ -432,9 +443,10 @@ management_read_checkpoint(void *ctx, const server_mgmt_read_request_t *rq,
    };
    server_mgmt_checkpoint_result_t rc = server_mgmt_checkpoint_client_verify(
        &checkpoint, claims, proof->revocation_generation, proof->staple_sha256);
-   return rc == SERVER_MGMT_CHECKPOINT_OK       ? SERVER_MGMT_READ_OK
-          : rc == SERVER_MGMT_CHECKPOINT_DENIED ? SERVER_MGMT_READ_FORBIDDEN
-                                                : SERVER_MGMT_READ_UNAVAILABLE;
+   return rc == SERVER_MGMT_CHECKPOINT_OK          ? SERVER_MGMT_READ_OK
+          : rc == SERVER_MGMT_CHECKPOINT_DENIED    ? SERVER_MGMT_READ_FORBIDDEN
+          : rc == SERVER_MGMT_CHECKPOINT_INTEGRITY ? SERVER_MGMT_READ_INTEGRITY
+                                                   : SERVER_MGMT_READ_UNAVAILABLE;
 }
 
 static int management_read_error(server_mgmt_read_result_t result, char *resp, int cap)
@@ -444,22 +456,21 @@ static int management_read_error(server_mgmt_read_result_t result, char *resp, i
    if (RAND_bytes(random, sizeof(random)) != 1 ||
        mgmt_b64url(random, sizeof(random), correlation, sizeof(correlation)) != 0)
       memset(correlation, 'A', sizeof(correlation) - 1), correlation[sizeof(correlation) - 1] = 0;
-   int status = result == SERVER_MGMT_READ_FORBIDDEN ? 403
-                : result == SERVER_MGMT_READ_CONFLICT ? 409
+   int status = result == SERVER_MGMT_READ_FORBIDDEN   ? 403
+                : result == SERVER_MGMT_READ_CONFLICT  ? 409
                 : result == SERVER_MGMT_READ_INTEGRITY ? 502
                                                        : 503;
-   const char *code = result == SERVER_MGMT_READ_FORBIDDEN ? "forbidden"
-                      : result == SERVER_MGMT_READ_CONFLICT ? "conflict"
+   const char *code = result == SERVER_MGMT_READ_FORBIDDEN   ? "forbidden"
+                      : result == SERVER_MGMT_READ_CONFLICT  ? "conflict"
                       : result == SERVER_MGMT_READ_INTEGRITY ? "integrity"
                                                              : "unavailable";
-   const char *message = result == SERVER_MGMT_READ_FORBIDDEN ? "Forbidden."
-                         : result == SERVER_MGMT_READ_CONFLICT ? "Request conflict."
-                         : result == SERVER_MGMT_READ_INTEGRITY
-                             ? "Integrity verification failed."
-                             : "Service unavailable.";
+   const char *message = result == SERVER_MGMT_READ_FORBIDDEN   ? "Forbidden."
+                         : result == SERVER_MGMT_READ_CONFLICT  ? "Request conflict."
+                         : result == SERVER_MGMT_READ_INTEGRITY ? "Integrity verification failed."
+                                                                : "Service unavailable.";
    snprintf(resp, (size_t)cap,
-            "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}",
-            code, message, correlation);
+            "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}", code,
+            message, correlation);
    return status;
 }
 
@@ -474,6 +485,8 @@ static int rh_management_read_agents(const route_req_t *rq, char *resp, int cap)
    const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
    const char *jwt = server_http_identity_bearer();
    const char *staple = server_http_identity_status_staple();
+   int64_t now = (int64_t)time(NULL);
+   int64_t publication_generation = management_read_publication_generation(now);
    server_mgmt_read_request_t request = {
        .jwt = jwt,
        .jwt_len = strlen(jwt),
@@ -485,11 +498,11 @@ static int rh_management_read_agents(const route_req_t *rq, char *resp, int cap)
        .local_issuer = local ? local->issuer : NULL,
        .local_serial = local ? local->serial_norm : NULL,
        .local_fingerprint = local ? local->fingerprint : NULL,
-       .publication_generation = 1,
-       .now = (int64_t)time(NULL),
+       .publication_generation = publication_generation > 0 ? (uint64_t)publication_generation : 0,
+       .now = now,
    };
    server_mgmt_read_deps_t deps = {
-       management_read_status, management_read_token, management_jti,
+       management_read_status, management_read_token,      management_jti,
        management_read_load,   management_read_checkpoint, NULL,
    };
    size_t response_len = 0;
@@ -523,8 +536,8 @@ static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, in
       return err_json(resp, cap, 503, "management challenge unavailable");
    if (!strcmp(purpose, "management.read.v1"))
       snprintf(resp, (size_t)cap,
-               "{\"nonce\":\"%s\",\"purpose\":\"management.read.v1\",\"expires_at\":%llu}",
-               enc, (unsigned long long)expiry);
+               "{\"nonce\":\"%s\",\"purpose\":\"management.read.v1\",\"expires_at\":%llu}", enc,
+               (unsigned long long)expiry);
    else
       snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
                (unsigned long long)expiry);
@@ -552,9 +565,8 @@ static int rh_management_read_challenge(const route_req_t *rq, char *resp, int c
    if (status == 200)
       server_http_keepalive_set(1);
    else
-      status = management_read_error(status == 401 ? SERVER_MGMT_READ_FORBIDDEN
-                                                   : SERVER_MGMT_READ_UNAVAILABLE,
-                                     resp, cap);
+      status = management_read_error(
+          status == 401 ? SERVER_MGMT_READ_FORBIDDEN : SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
    return status;
 }
 
@@ -1893,8 +1905,7 @@ static const http_route_t g_v1_routes[] = {
      rh_management_read_challenge},
     {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
-    {"GET", "/v1/management/read/agents", NULL, RM_EXACT, NULL, 0,
-     rh_management_read_agents},
+    {"GET", "/v1/management/read/agents", NULL, RM_EXACT, NULL, 0, rh_management_read_agents},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},

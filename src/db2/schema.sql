@@ -6506,7 +6506,8 @@ BEGIN
      OR p_serial !~ '^[0-9a-f]{1,128}$'
      OR p_fingerprint !~ '^[0-9a-f]{64}$'
      OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
-     OR p_purpose NOT IN ('management.health.v1','management.action.v1') THEN
+     OR p_purpose NOT IN
+       ('management.health.v1','management.action.v1','management.read.v1') THEN
     RAISE EXCEPTION 'invalid management status input' USING ERRCODE='22023';
   END IF;
   RETURN QUERY SELECT g.generation,r.mgmt_fingerprint

@@ -367,6 +367,65 @@ paths:
         "401": { description: Dedicated management-client certificate required }
         "429": { description: Outstanding challenge capacity reached }
         "503": { description: Management action verification is not configured }
+  /management/read/challenge:
+    post:
+      summary: Issue a nonce for a bounded management read
+      description: >
+        Requires the dedicated kb management-client mTLS profile. The nonce is
+        short-lived, single-use, same-connection bound, and purpose-separated as
+        management.read.v1.
+      responses:
+        "200":
+          description: Management-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/agents:
+    get:
+      summary: Return the bounded management agent projection
+      description: >
+        Requires a nonce-bound status proof and a remote_reads JWT on the same
+        pinned mTLS connection. The response contains only the frozen safe fields.
+      responses:
+        "200":
+          description: Bounded agent projection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_id, team, agents]
+                additionalProperties: false
+                properties:
+                  server_id: { type: string }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  agents:
+                    type: array
+                    maxItems: 16
+                    items:
+                      type: object
+                      required: [name, provider, model, enabled, delegate_available, primary_only, max_parallel]
+                      additionalProperties: false
+                      properties:
+                        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,63}$' }
+                        provider: { type: string, pattern: '^[A-Za-z0-9._-]{1,15}$' }
+                        model: { type: string, maxLength: 127 }
+                        enabled: { type: boolean }
+                        delegate_available: { type: boolean }
+                        primary_only: { type: boolean }
+                        max_parallel: { type: integer, minimum: 0, maximum: 1024 }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
   /management/challenge:
     post:
       summary: Issue a nonce for a read-only management health check

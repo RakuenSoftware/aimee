@@ -1010,17 +1010,35 @@ int main(void)
                                                          strlen(action_challenge)) == 1);
       assert(server_http_management_action_framing_valid("POST", "/v1/management/action", action,
                                                          strlen(action)) == 1);
-      assert(server_http_management_read_framing_valid(
-                 "POST", "/v1/management/read/challenge", read_challenge,
-                 strlen(read_challenge)) == 1);
-      assert(server_http_management_read_framing_valid(
-                 "GET", "/v1/management/read/agents", read_agents, strlen(read_agents)) == 1);
+      assert(server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                       read_challenge,
+                                                       strlen(read_challenge)) == 1);
+      assert(server_http_management_read_framing_valid("GET", "/v1/management/read/agents",
+                                                       read_agents, strlen(read_agents)) == 1);
       char read_with_type[1024];
-      snprintf(read_with_type, sizeof(read_with_type),
-               "%.*sContent-Type: application/json\r\n\r\n", (int)(strlen(read_agents) - 2),
-               read_agents);
+      snprintf(read_with_type, sizeof(read_with_type), "%.*sContent-Type: application/json\r\n\r\n",
+               (int)(strlen(read_agents) - 2), read_agents);
+      assert(!server_http_management_read_framing_valid("GET", "/v1/management/read/agents",
+                                                        read_with_type, strlen(read_with_type)));
+      const char read_empty_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: \r\n"
+          "Connection: keep-alive\r\n\r\n";
+      const char read_bad_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: +0\r\n"
+          "Connection: keep-alive\r\n\r\n";
+      const char read_overflow_length[] =
+          "POST /v1/management/read/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 184467440737095516160\r\n"
+          "Connection: keep-alive\r\n\r\n";
       assert(!server_http_management_read_framing_valid(
-          "GET", "/v1/management/read/agents", read_with_type, strlen(read_with_type)));
+          "POST", "/v1/management/read/challenge", read_empty_length, strlen(read_empty_length)));
+      assert(!server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                        read_bad_length, strlen(read_bad_length)));
+      assert(!server_http_management_read_framing_valid("POST", "/v1/management/read/challenge",
+                                                        read_overflow_length,
+                                                        strlen(read_overflow_length)));
       const char closing_challenge[] =
           "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
           "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";

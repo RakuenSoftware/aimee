@@ -47,6 +47,10 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bu
                                                             size_t trust_bundle_len, int64_t now,
                                                             char *jwks_out, size_t jwks_cap,
                                                             size_t *jwks_len);
+server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_current_generation(const char *trust_bundle,
+                                                                          size_t trust_bundle_len,
+                                                                          int64_t now,
+                                                                          int64_t *generation);
 
 typedef int (*server_mgmt_jwks_fetch_fn)(void *ctx, char *envelope_out, size_t envelope_cap,
                                          size_t *envelope_len);

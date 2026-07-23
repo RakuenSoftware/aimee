@@ -448,7 +448,13 @@ int server_http_management_action_framing_valid(const char *method, const char *
          cl++;
          body_len = 0;
          for (size_t i = 0; i < vn; i++)
+         {
+            if (v[i] < '0' || v[i] > '9' || body_len > (SIZE_MAX - (size_t)(v[i] - '0')) / 10)
+               return 0;
             body_len = body_len * 10 + (size_t)(v[i] - '0');
+         }
+         if (!vn)
+            return 0;
       }
       else if (n == 10 && !strncasecmp(line, "Connection", n))
       {
@@ -514,7 +520,13 @@ int server_http_management_read_framing_valid(const char *method, const char *pa
          cl++;
          body_len = 0;
          for (size_t i = 0; i < vn; ++i)
+         {
+            if (v[i] < '0' || v[i] > '9' || body_len > (SIZE_MAX - (size_t)(v[i] - '0')) / 10)
+               return 0;
             body_len = body_len * 10 + (size_t)(v[i] - '0');
+         }
+         if (!vn)
+            return 0;
       }
       else if (n == 10 && !strncasecmp(line, "Connection", n))
       {
@@ -540,8 +552,7 @@ int server_http_management_read_framing_valid(const char *method, const char *pa
    }
    int challenge = !strcmp(path, "/v1/management/read/challenge");
    return host == 1 && cl == 1 && body_len == 0 && conn == 1 &&
-          (challenge ? ct == 1 && auth == 0 && staple == 0
-                     : ct == 0 && auth == 1 && staple == 1);
+          (challenge ? ct == 1 && auth == 0 && staple == 0 : ct == 0 && auth == 1 && staple == 1);
 }
 
 int server_http_management_framing_valid(const char *method, const char *path, const char *request,

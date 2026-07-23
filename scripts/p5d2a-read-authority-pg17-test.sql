@@ -1,3 +1,16 @@
+INSERT INTO public.kb_team_membership(identity_key,team,is_default)
+VALUES('cert:/CN=p5c2d-local-ca:11',97522,0);
+
+SET LOCAL ROLE aimee_kb_status;
+DO $$ DECLARE r RECORD; BEGIN
+  SELECT * INTO STRICT r FROM public.kb_management_status_lookup(
+    '/CN=p5c2d-local-ca','11',repeat('1',64),'srv-p5c2d','management.read.v1');
+  IF r.revocation_generation<1 OR r.target_mgmt_fingerprint<>repeat('2',64) THEN
+    RAISE EXCEPTION 'P5-D2a read-purpose status admission mismatch';
+  END IF;
+END $$;
+RESET ROLE;
+
 SET LOCAL ROLE aimee_kb_runtime;
 DO $$ DECLARE r RECORD; BEGIN
   PERFORM set_config('aimee.principal','oidc:https%3A%25issuer:p5c2d-lead',true);

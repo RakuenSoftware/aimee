@@ -164,6 +164,9 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
                                          size_t cap, char digest[65])
 {
    kb_mgmt_status_t staple;
+   const char *purpose = claims && !strcmp(claims->capability, "remote_reads")
+                             ? "management.read.v1"
+                             : "management.action.v1";
    char nonce[48], issuer[808];
    size_t serial_len =
        rq && rq->peer ? strnlen(rq->peer->serial_norm, sizeof(rq->peer->serial_norm)) : 0;
@@ -187,14 +190,14 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
        b64url((const unsigned char *)rq->peer->issuer, issuer_len, issuer, sizeof(issuer)))
       return -1;
    int n = snprintf(out, cap,
-                    "{\"version\":\"1\",\"purpose\":\"management.action.v1\",\"nonce\":\"%s\","
+                    "{\"version\":\"1\",\"purpose\":\"%s\",\"nonce\":\"%s\","
                     "\"caller_issuer_b64\":\"%s\",\"caller_serial\":\"%s\","
                     "\"caller_fingerprint\":\"%s\",\"target\":\"%s\","
                     "\"staple_generation\":\"%llu\",\"staple_sha256\":\"%s\","
                     "\"correlation_id\":\"%s\",\"jti\":\"%s\",\"request_sha256\":\"%s\"}",
-                    nonce, issuer, rq->peer->serial_norm, rq->peer->fingerprint, rq->server_id,
-                    (unsigned long long)generation, staple_digest, claims->correlation_id,
-                    claims->jti, claims->request_sha256);
+                    purpose, nonce, issuer, rq->peer->serial_norm, rq->peer->fingerprint,
+                    rq->server_id, (unsigned long long)generation, staple_digest,
+                    claims->correlation_id, claims->jti, claims->request_sha256);
    unsigned char raw[32];
    if (n < 0 || (size_t)n >= cap || (size_t)n > KB_MGMT_CHECKPOINT_JSON_MAX ||
        !SHA256((const unsigned char *)out, (size_t)n, raw))
@@ -244,7 +247,7 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify_with(
    int tr =
        transport(transport_ctx, m, request, now_ms + 5000, response, sizeof(response), &status);
    if (tr == -2)
-      return SERVER_MGMT_CHECKPOINT_DENIED;
+      return SERVER_MGMT_CHECKPOINT_INTEGRITY;
    if (tr != 0)
       return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
    if (status != 200)
@@ -255,8 +258,10 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify_with(
                              : status == 503 ? "{\"error\":\"unavailable\"}"
                                              : NULL;
       if (!expected || strcmp(response, expected))
-         return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
-      return status == 503 ? SERVER_MGMT_CHECKPOINT_UNAVAILABLE : SERVER_MGMT_CHECKPOINT_DENIED;
+         return SERVER_MGMT_CHECKPOINT_INTEGRITY;
+      return status == 503   ? SERVER_MGMT_CHECKPOINT_UNAVAILABLE
+             : status == 403 ? SERVER_MGMT_CHECKPOINT_DENIED
+                             : SERVER_MGMT_CHECKPOINT_INTEGRITY;
    }
    kb_mgmt_checkpoint_t checkpoint;
    uint64_t hwm = 0;
@@ -267,7 +272,9 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify_with(
        strcmp(checkpoint.key_id, m->key_id) ||
        kb_mgmt_checkpoint_verify_signature(&checkpoint, m->public_key) != 0 ||
        CRYPTO_memcmp(checkpoint.request_sha256, request_digest, 64) != 0 ||
-       checkpoint.generation != generation || checkpoint.revoked)
+       checkpoint.generation != generation)
+      return SERVER_MGMT_CHECKPOINT_INTEGRITY;
+   if (checkpoint.revoked)
       return SERVER_MGMT_CHECKPOINT_DENIED;
    if (server_mgmt_status_hwm_advance(checkpoint.generation) != 0)
       return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
