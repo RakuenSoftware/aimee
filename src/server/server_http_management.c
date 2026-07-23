@@ -6,11 +6,76 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+
+static pthread_mutex_t g_management_action_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_management_action_idle = PTHREAD_COND_INITIALIZER;
+static unsigned g_management_action_active;
+/* Direct route unit tests run without a listener. A real listener start resets
+ * this state, while stop closes the gate before it tears down any dependency. */
+static int g_management_action_stopping;
+extern int g_remote_writes;
+
+int server_http_remote_writes(void)
+{
+   return g_remote_writes;
+}
+
+int server_http_management_action_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int ok = !g_management_action_stopping;
+   if (ok)
+      g_management_action_active++;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return ok ? 0 : -1;
+}
+
+int server_http_management_action_allowed(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int allowed = !g_management_action_stopping;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return allowed;
+}
+
+void server_http_management_action_end(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   if (g_management_action_active)
+      g_management_action_active--;
+   if (!g_management_action_active)
+      pthread_cond_broadcast(&g_management_action_idle);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_start(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 0;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_shutdown_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_stop_and_wait(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   while (g_management_action_active)
+      pthread_cond_wait(&g_management_action_idle, &g_management_action_lock);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
 
 int server_http_management_health_route(const char *method, const char *path)
 {

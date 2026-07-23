@@ -43,6 +43,36 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+#define SHTTP_RATE_WINDOW_SECS 60
+
+int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
+{
+   if (!st || limit_per_min <= 0)
+      return 0;
+   if (now - st->window_start >= SHTTP_RATE_WINDOW_SECS || now < st->window_start)
+   {
+      st->window_start = now;
+      st->count = 0;
+   }
+   if (st->count < limit_per_min)
+   {
+      st->count++;
+      return 0;
+   }
+   int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
+   return retry > 0 ? retry : 1;
+}
+
+void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)
+{
+   if (!buf || n == 0)
+      return;
+   if (provided && provided[0])
+      snprintf(buf, n, "%s", provided);
+   else
+      snprintf(buf, n, "%d-%lu", pid, seq);
+}
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>

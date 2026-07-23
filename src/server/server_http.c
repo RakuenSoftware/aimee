@@ -281,36 +281,6 @@ int server_http_bootstrap_gate(int is_tcp, const char *live_bearer, const char *
    return 1;    /* refuse: enrollment required */
 }
 
-#define SHTTP_RATE_WINDOW_SECS 60
-
-int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
-{
-   if (!st || limit_per_min <= 0)
-      return 0; /* limiting disabled */
-   if (now - st->window_start >= SHTTP_RATE_WINDOW_SECS || now < st->window_start)
-   {
-      st->window_start = now;
-      st->count = 0;
-   }
-   if (st->count < limit_per_min)
-   {
-      st->count++;
-      return 0;
-   }
-   int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
-   return retry > 0 ? retry : 1;
-}
-
-void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)
-{
-   if (!buf || n == 0)
-      return;
-   if (provided && provided[0])
-      snprintf(buf, n, "%s", provided);
-   else
-      snprintf(buf, n, "%d-%lu", pid, seq);
-}
-
 /* The declarative /v1 route registry (server_http_routes.inc, included below)
  * is the single source of truth for dispatch, per-route capabilities, and the
  * OpenAPI path inventory. server_http_route_caps and server_http_route are thin
@@ -1116,69 +1086,7 @@ static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) 
 static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
-static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
-static pthread_mutex_t g_management_action_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_management_action_idle = PTHREAD_COND_INITIALIZER;
-static unsigned g_management_action_active;
-/* Direct route unit tests run without a listener. A real listener start resets
- * this state, while stop closes the gate before it tears down any dependency. */
-static int g_management_action_stopping;
-
-int server_http_management_action_begin(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   int ok = !g_management_action_stopping;
-   if (ok)
-      g_management_action_active++;
-   pthread_mutex_unlock(&g_management_action_lock);
-   return ok ? 0 : -1;
-}
-
-int server_http_management_action_allowed(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   int allowed = !g_management_action_stopping;
-   pthread_mutex_unlock(&g_management_action_lock);
-   return allowed;
-}
-
-void server_http_management_action_end(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   if (g_management_action_active)
-      g_management_action_active--;
-   if (!g_management_action_active)
-      pthread_cond_broadcast(&g_management_action_idle);
-   pthread_mutex_unlock(&g_management_action_lock);
-}
-
-void server_http_management_actions_start(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   g_management_action_stopping = 0;
-   pthread_mutex_unlock(&g_management_action_lock);
-}
-
-void server_http_management_actions_shutdown_begin(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   g_management_action_stopping = 1;
-   pthread_mutex_unlock(&g_management_action_lock);
-}
-
-void server_http_management_actions_stop_and_wait(void)
-{
-   pthread_mutex_lock(&g_management_action_lock);
-   g_management_action_stopping = 1;
-   while (g_management_action_active)
-      pthread_cond_wait(&g_management_action_idle, &g_management_action_lock);
-   pthread_mutex_unlock(&g_management_action_lock);
-}
-
-int server_http_remote_writes(void)
-{
-   return g_remote_writes;
-}
+int g_remote_writes = 0; /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock =
     PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
