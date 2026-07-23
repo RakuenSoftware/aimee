@@ -15,6 +15,22 @@ worktree creation at line 1175, manifests and handles,
 `ws_scope_*` containment. The duplicated worktree declarations in `guardrails.h` are a
 compatibility/ownership seam to consolidate, not a second workspace implementation.
 
+The descriptor declares this module's eleven sources, eleven module-root headers, eleven direct
+tests, and this document; it does not yet set `ownership_complete`. All eleven headers are declared as
+`private_headers` because they live at the module root rather than under
+`src/modules/workspace/include/aimee/workspace/`, the layout the header-layout checker treats as
+private; `workspace_provider.h` is the provider dispatch interface and has no paired source, while
+`cli_workspace_serve.c` has no paired header. Three sources — `workspace_provider_container.c`,
+`workspace_provider_detached.c`, and `workspace_runner_queue.c` — have no external includer but are
+live module-internal units: the container and detached providers are selected through
+`workspace_provider.h` by `workspace_turn.c` and `cli_workspace_serve.c`, and the runner queue is
+consumed through `workspace_runner_registry.h`. Make compiles all eleven sources; CMake compiles the
+four the thin `aimee` client reaches (`cli_workspace_serve.c`, `workspace.c`, `workspace_manifest.c`,
+`workspace_provider_detached.c`) and omits the seven server/runner-side units, the same intentional
+thin-client boundary recorded for gateway and learning. `docs/validation/core-modularization-slice-44.md`
+records the audit; latching follows in a separate slice so the completeness audit does not review
+declarations authored in the same change.
+
 ## Dependencies and consumers
 
 - `config`: supplies workspace registrations, provider metadata, mirrors, and sandbox overrides.
@@ -83,10 +99,16 @@ session/delegate worktrees and registries; locking outside Git/worktree primitiv
 
 ## Tests and failure behavior
 
-`test_workspace.c`, handle, manifest, mirror, provider, detached/container, runner queue/registry,
-scope, and turn suites cover the implementation. Invalid or foreign roots, traversal/symlink escape,
-missing runner, drift, provider mismatch, and dirty cleanup must surface explicitly. A failed isolated
-binding must never retry through the shared host provider.
+The descriptor's eleven direct tests are `test_workspace.c`, `test_workspace_handle.c`,
+`test_workspace_manifest.c`, `test_workspace_mirror.c`, `test_workspace_provider.c`,
+`test_workspace_provider_container.c`, `test_workspace_provider_detached.c`,
+`test_workspace_runner_queue.c`, `test_workspace_runner_registry.c`, `test_workspace_scope.c`, and
+`test_workspace_turn.c`, covering the implementation. `test_workspace_memory.c` carries the workspace
+name and links `workspace.o` but is a memory test: its subject `memory_auto_tag_workspace` is defined
+in `src/modules/memory/memory_core.c`, so it exercises memory's workspace-scoped tagging and is not
+claimed here, the same way learning does not claim the KB `test_learning_synth.c`. Invalid or foreign
+roots, traversal/symlink escape, missing runner, drift, provider mismatch, and dirty cleanup must
+surface explicitly. A failed isolated binding must never retry through the shared host provider.
 
 ## Operational diagnostics
 
