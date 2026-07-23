@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "tool_egress.h"         /* authoritative built-in egress declaration */
 #include "wfe_externalization.h" /* wfe_is_externalization_tool */
 
 static int eq_ci(const char *a, const char *b)
@@ -36,6 +37,10 @@ int wfe_is_shell_tool(const char *tool_name)
 
 static int name_is_web_tool(const char *tool_name)
 {
+   /* Declaration first; authoritative for built-ins (see tool_egress.h). The
+    * list below covers non-built-in spellings only and is non-authoritative. */
+   if (tool_egress_is_external(tool_name))
+      return 1;
    static const char *const web[] = {"webfetch", "websearch",    "web_fetch", "web_search", "fetch",
                                      "browse",   "http_request", "web_read",  "webread"};
    for (size_t i = 0; i < sizeof(web) / sizeof(web[0]); i++)

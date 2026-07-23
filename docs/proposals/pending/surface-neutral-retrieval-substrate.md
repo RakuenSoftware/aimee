@@ -227,9 +227,21 @@ earned-trust source.
 ## Out of scope, with preconditions
 
 Each item was in Revision 1 and is removed. Per the review, "filed separately" is
-an assertion until records exist, so the binding statement is: **each item below
-must be filed as its own record, with the stated classification, before this
-proposal is accepted for implementation.** None needs to be *implemented* here.
+an assertion until records exist. **All records now exist and the precondition is
+discharged.** Status:
+
+| Item | Classification | Record | Status |
+|---|---|---|---|
+| S1 native page reader ungated | security, high | this proposal, Part 1 | **fixed** (stopgap deny-list entry); durable gate is Slice 1 |
+| S3 search-result trust fencing | security, medium | — | **fixed** |
+| Session-history search defect | correctness, medium | — | **fixed** |
+| S2 search egress policy | security, medium | [search-egress-policy-split.md](search-egress-policy-split.md) | filed |
+| Result caching | enhancement | [retrieval-result-cache-schema.md](retrieval-result-cache-schema.md) | filed |
+| Per-query grouping key | enhancement, blocking | [per-query-grouping-key-for-ranking.md](per-query-grouping-key-for-ranking.md) | filed |
+
+The three marked **fixed** were each reproduced red in stock code, fixed, and
+covered by regression tests on a live build. Their descriptions are retained
+below as the rationale for scoping them out of the retrieval work.
 
 - **Search-result trust fencing (S3)** — *security, medium*.
   `web_search_format_results` (`src/server/web_search.c:429-465`) emits
