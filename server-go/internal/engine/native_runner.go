@@ -563,17 +563,12 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		roundtableCtx, cancel = context.WithTimeout(ctx, time.Duration(panel.DeadlineMS)*time.Millisecond)
 	}
 	defer cancel()
-	phaseCount := 1
-	if panel.Discussion {
-		phaseCount++
-	}
-	if panel.ChairmanEnabled {
-		phaseCount++
-	}
-	analysisCtx, analysisCancel := roundtablePhaseContext(roundtableCtx, panel.DeadlineMS, phaseCount)
-	analysis := r.runPanelAnalysis(analysisCtx, req, seats, basePrompt, reviewed.Hash, stage, 1)
-	deadlineHit := errors.Is(analysisCtx.Err(), context.DeadlineExceeded)
-	analysisCancel()
+	// The configured deadline is one work-conserving budget for the complete
+	// roundtable. Do not divide it into equal phase slices: provider latency is
+	// heterogeneous, and doing so can cancel a healthy slow seat long before the
+	// configured deadline even when ample total budget remains.
+	analysis := r.runPanelAnalysis(roundtableCtx, req, seats, basePrompt, reviewed.Hash, stage, 1)
+	deadlineHit := errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 	// A configured minimum is the roundtable's explicit degraded-operation
 	// contract. Every seat was attempted and remains visible in the result, but
 	// one unavailable seat must not discard a usable quorum. Park only when the
@@ -587,10 +582,8 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	discussionFailed := 0
 	if panel.Discussion {
 		var discussionErr string
-		discussionCtx, discussionCancel := roundtablePhaseContext(roundtableCtx, panel.DeadlineMS, phaseCount)
-		feedback, approvals, totalCost, discussionFailed, discussionErr = r.runPanelDiscussion(discussionCtx, req, panel, analysis, stage)
-		deadlineHit = deadlineHit || errors.Is(discussionCtx.Err(), context.DeadlineExceeded)
-		discussionCancel()
+		feedback, approvals, totalCost, discussionFailed, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
+		deadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 		if discussionErr != "" {
 			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
 			rt.Degraded = rt.Degraded || discussionFailed > 0
@@ -600,10 +593,8 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	}
 	if panel.ChairmanEnabled {
 		var chairmanErr string
-		chairmanCtx, chairmanCancel := roundtablePhaseContext(roundtableCtx, panel.DeadlineMS, phaseCount)
-		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(chairmanCtx, req, panel, analysis, feedback, totalCost, stage)
-		deadlineHit = deadlineHit || errors.Is(chairmanCtx.Err(), context.DeadlineExceeded)
-		chairmanCancel()
+		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
+		deadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 		if chairmanErr != "" {
 			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
 			// The chairman is configured roundtable participation even though it
@@ -628,17 +619,6 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	rt.Degraded = rt.Degraded || discussionFailed > 0
 	rt.DeadlineHit = deadlineHit
 	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
-}
-
-func roundtablePhaseContext(parent context.Context, deadlineMS, phaseCount int) (context.Context, context.CancelFunc) {
-	if deadlineMS <= 0 || phaseCount <= 1 {
-		return parent, func() {}
-	}
-	budget := time.Duration(deadlineMS) * time.Millisecond / time.Duration(phaseCount)
-	if budget < time.Millisecond {
-		budget = time.Millisecond
-	}
-	return context.WithTimeout(parent, budget)
 }
 
 func roundtableStageGuidance(stage string) string {

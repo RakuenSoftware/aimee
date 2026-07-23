@@ -129,11 +129,12 @@ new durable execution version. Work-item cost and turn caps remain the safety
 backstops, while operator and convergence parks are never auto-resumed.
 Strict majority is measured over successful seats returning a complete valid
 ballot in that cycle; abstentions remain in the denominator but do not alone
-extend discussion. The preset's `deadline_ms` covers analysis and discussion
-together, with zero/omitted legacy values normalized to 360 seconds.
-That overall budget is divided evenly among enabled analysis, Discussion, and
-Chairman phases so a slow seat cannot consume the time required by a later
-configured phase.
+extend discussion. The preset's `deadline_ms` covers analysis, Discussion, and
+Chairman together, with zero/omitted legacy values normalized to 360 seconds.
+That deadline is one work-conserving budget: the runtime waits for every analysis
+seat to return, fail, or reach the configured deadline instead of silently
+dividing it into much shorter phase slices. Later phases receive the remaining
+time, and the configured deadline remains the hard bound for the whole table.
 The compatibility proxy uses the acquired preset deadline plus bounded
 transport grace, so its socket timeout cannot preempt valid configured work.
 An unavailable independent-analysis seat remains visible as degraded

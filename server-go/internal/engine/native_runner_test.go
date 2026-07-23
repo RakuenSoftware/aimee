@@ -147,6 +147,8 @@ type firstPanelSeatUnavailableAgents struct {
 
 type deadlineSeatAgents struct{}
 
+type slowHealthySeatAgents struct{}
+
 type deadlineDiscussionAgents struct{}
 
 type chairmanFailureAgents struct{}
@@ -160,6 +162,23 @@ func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest)
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
 		<-ctx.Done()
 		return DelegateResult{}, ctx.Err()
+	}
+	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
+func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+		return DelegateResult{Response: `{"positions":[]}`}, nil
+	}
+	if request.Persona == "chairman" {
+		return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+	}
+	if strings.HasSuffix(request.DurableSlot, "seat:0") {
+		select {
+		case <-time.After(70 * time.Millisecond):
+		case <-ctx.Done():
+			return DelegateResult{}, ctx.Err()
+		}
 	}
 	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
 }
@@ -240,6 +259,10 @@ func (a firstPanelSeatUnavailableAgents) DelegateGroup(ctx context.Context, requ
 }
 
 func (a deadlineSeatAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func (a slowHealthySeatAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	return testDelegateGroup(ctx, requests, a.Delegate)
 }
 
@@ -438,7 +461,7 @@ func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestConfiguredRoundtableReservesDownstreamPhasesAfterSeatDeadline(t *testing.T) {
+func TestConfiguredRoundtableUsesOverallDeadlineWithoutCancellingSlowHealthySeat(t *testing.T) {
 	dir := t.TempDir()
 	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":1,"discussion":true,"chairman":"codex","chairman_enabled":true,"deadline_ms":120}`
 	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
@@ -448,7 +471,7 @@ func TestConfiguredRoundtableReservesDownstreamPhasesAfterSeatDeadline(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := &NativeRunner{agents: deadlineSeatAgents{}, roundtables: store}
+	runner := &NativeRunner{agents: slowHealthySeatAgents{}, roundtables: store}
 	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
 	reviewed.Hash = wfe.Hash(reviewed.Content)
 	started := time.Now()
@@ -463,11 +486,11 @@ func TestConfiguredRoundtableReservesDownstreamPhasesAfterSeatDeadline(t *testin
 	if elapsed := time.Since(started); elapsed >= time.Second {
 		t.Fatalf("roundtable did not bound the slow seat: %s", elapsed)
 	}
-	if result.Status != StepAdvanced || result.Roundtable == nil || !result.Roundtable.Approved || !result.Roundtable.Degraded || !result.Roundtable.DeadlineHit {
+	if result.Status != StepAdvanced || result.Roundtable == nil || !result.Roundtable.Approved || result.Roundtable.Degraded || result.Roundtable.DeadlineHit {
 		t.Fatalf("result=%+v", result)
 	}
-	if result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != 1 || result.Roundtable.ParticipantsFailed != 1 {
-		t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
+	if result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != 2 || result.Roundtable.ParticipantsFailed != 0 {
+		t.Fatalf("slow healthy participation was not preserved: %+v", result.Roundtable)
 	}
 }
 
