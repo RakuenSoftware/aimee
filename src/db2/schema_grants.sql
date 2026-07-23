@@ -55,6 +55,15 @@ BEGIN
     org_vault_rewrap_abort(TEXT,BIGINT,TEXT),
     org_vault_rewrap_recovery_required(TEXT,BIGINT,TEXT)
     FROM aimee_kb_runtime;
+  -- P7-witness-e1: the evidence store and its append/digest helpers are runtime-
+  -- invisible in E1; E2 grants the exact append it needs when it wires the caller.
+  REVOKE ALL ON TABLE kb_vault_witness_shard, kb_vault_witness_log,
+    kb_vault_witness_checkpoint FROM aimee_kb_runtime;
+  REVOKE ALL ON FUNCTION org_vault_witness_worm_block(),
+    org_vault_witness_genesis(TEXT,TEXT),
+    org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
+    org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA)
+    FROM aimee_kb_runtime;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
   ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_kb_runtime;

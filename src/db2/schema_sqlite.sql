@@ -452,6 +452,11 @@ CREATE TABLE IF NOT EXISTS kb_vault_rewrap_worm (  operation_id TEXT NOT NULL RE
 -- D3b sealed-to-open acknowledgement (sqlite shim: columns only).  The WORM
 -- triggers and authoritative mutation functions remain PostgreSQL-only.
 CREATE TABLE IF NOT EXISTS kb_vault_open_event (  event_id TEXT PRIMARY KEY,  event_kind TEXT NOT NULL,  operation_id TEXT REFERENCES kb_vault_rewrap_operation(operation_id),  request_id TEXT NOT NULL UNIQUE,  actor TEXT NOT NULL,  operation_fence INTEGER,  opened_epoch INTEGER NOT NULL UNIQUE,  opened_fence INTEGER NOT NULL UNIQUE,  row_hash BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(event_kind,operation_id));
+-- P7-witness-e1 evidence store (sqlite shim: columns only; WORM triggers, digest
+-- and append functions remain PostgreSQL-only).
+CREATE TABLE IF NOT EXISTS kb_vault_witness_shard (  tenant TEXT NOT NULL,  provider TEXT NOT NULL,  seq INTEGER NOT NULL DEFAULT 0,  head_hash BLOB NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(tenant,provider));
+CREATE TABLE IF NOT EXISTS kb_vault_witness_log (  tenant TEXT NOT NULL,  provider TEXT NOT NULL,  shard_seq INTEGER NOT NULL,  source_kind INTEGER NOT NULL,  source_id TEXT NOT NULL,  source_hash BLOB NOT NULL,  has_source_pred INTEGER NOT NULL,  source_pred_hash BLOB NOT NULL,  witness_pred_hash BLOB NOT NULL,  record_hash BLOB NOT NULL,  request_id TEXT NOT NULL DEFAULT '',  principal TEXT NOT NULL DEFAULT '',  provider_cred TEXT NOT NULL DEFAULT '',  group_id TEXT NOT NULL DEFAULT '',  event_ts TEXT NOT NULL,  seal_epoch INTEGER NOT NULL,  fencing_token INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(tenant,provider,shard_seq));
+CREATE TABLE IF NOT EXISTS kb_vault_witness_checkpoint (  seq INTEGER PRIMARY KEY,  root BLOB NOT NULL,  has_predecessor INTEGER NOT NULL,  predecessor_digest BLOB NOT NULL,  shard_count INTEGER NOT NULL,  leaf_snapshot BLOB NOT NULL,  leaf_snapshot_digest BLOB NOT NULL,  signer_key_id BLOB NOT NULL,  sig_alg INTEGER NOT NULL,  sig_version INTEGER NOT NULL,  signature BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
 
 -- P2a org model catalog + entitlement (sqlite shim mirror of schema.sql: columns
 -- only; RLS, the SECURITY DEFINER catalog CRUD + org_catalog_entitled(), and the WORM

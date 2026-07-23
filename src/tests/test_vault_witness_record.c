@@ -45,6 +45,59 @@ static vault_witness_record_t first_fixture(void)
    return r;
 }
 
+/* The canonical parity fixture shared with the SQL side (scripts/p7_witness_pg_test.sql
+ * and org_vault_witness_record_digest). Both must reproduce these exact bytes; if
+ * either the C preimage or the SQL packing drifts, this pinned vector fails. */
+static vault_witness_record_t parity_fixture(void)
+{
+   vault_witness_record_t r;
+   memset(&r, 0, sizeof r);
+   r.source = VAULT_WITNESS_SRC_AUDIT;
+   snprintf(r.source_id, sizeof r.source_id, "42");
+   snprintf(r.tenant, sizeof r.tenant, "acme");
+   snprintf(r.provider, sizeof r.provider, "anthropic");
+   snprintf(r.request_id, sizeof r.request_id, "req-1");
+   snprintf(r.principal, sizeof r.principal, "team-7");
+   snprintf(r.provider_cred, sizeof r.provider_cred, "anthropic:default");
+   snprintf(r.group_id, sizeof r.group_id, "g1");
+   snprintf(r.timestamp, sizeof r.timestamp, "2026-07-23T12:00:00Z");
+   memset(r.source_hash, 0x01, 32);
+   r.has_source_pred = 1;
+   memset(r.source_pred_hash, 0x02, 32);
+   memset(r.witness_pred_hash, 0x03, 32);
+   r.seal_epoch = 5;
+   r.fencing_token = 6;
+   r.shard_seq = 3;
+   r.is_first_in_shard = 0;
+   return r;
+}
+
+static void hex32(const uint8_t *b, char *out)
+{
+   static const char d[] = "0123456789abcdef";
+   for (int i = 0; i < 32; i++)
+   {
+      out[i * 2] = d[b[i] >> 4];
+      out[i * 2 + 1] = d[b[i] & 0xF];
+   }
+   out[64] = '\0';
+}
+
+static void test_pinned_digest_vector(void)
+{
+   vault_witness_record_t r = parity_fixture();
+   uint8_t d[32];
+   char hex[65];
+   assert(vault_witness_record_digest(&r, d) == 0);
+   hex32(d, hex);
+   assert(strcmp(hex, "719157b1cf64398bff14d0bcdd8548b5b27c9e888709dcf11f8e558b1c302fde") == 0);
+
+   uint8_t g[32];
+   assert(vault_witness_genesis_sentinel("acme", "anthropic", g) == 0);
+   hex32(g, hex);
+   assert(strcmp(hex, "7222cdf5e667854188aa2e2733a70bff5c6680109dd3fb8e06862d80433a2555") == 0);
+}
+
 static void test_roundtrip(void)
 {
    vault_witness_record_t r = fixture();
@@ -239,6 +292,7 @@ static void test_decode_fuzz(void)
 
 int main(void)
 {
+   test_pinned_digest_vector();
    test_roundtrip();
    test_first_in_shard();
    test_source_pred_rules();
