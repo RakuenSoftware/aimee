@@ -62,7 +62,12 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 		}
 	}
 	if fleetMutation {
-		fleetAckToken = randToken()
+		var err error
+		fleetAckToken, err = randToken()
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet mutation token unavailable"})
+			return
+		}
 		claimed, err := s.sessions.claimFleetMutation(sess.id, fleetAckToken)
 		if err != nil {
 			s.sessions.del(sess.id)

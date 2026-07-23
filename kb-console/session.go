@@ -77,15 +77,25 @@ func openSessionStore(path string) (*sessionStore, error) {
 	return &sessionStore{db: db}, nil
 }
 
-func randToken() string {
+func randToken() (string, error) {
 	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // create makes a fresh session bound to (iss, sub). A break-glass session gets a
 // short absolute TTL. The id is always fresh — login rotates by creating anew.
 func (s *sessionStore) create(p *principal, breakGlass bool) (*session, error) {
+	id, err := randToken()
+	if err != nil {
+		return nil, err
+	}
+	csrf, err := randToken()
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	abs := sessionAbsoluteTimeout
 	if breakGlass {
@@ -96,7 +106,7 @@ func (s *sessionStore) create(p *principal, breakGlass bool) (*session, error) {
 		expires = p.expires
 	}
 	sess := &session{
-		id: randToken(), csrf: randToken(),
+		id: id, csrf: csrf,
 		iss: p.iss, sub: p.sub, breakGlass: breakGlass,
 		created: now, lastSeen: now, expires: expires, oidcExpires: p.expires,
 	}
@@ -108,7 +118,7 @@ func (s *sessionStore) create(p *principal, breakGlass bool) (*session, error) {
 	if !sess.oidcExpires.IsZero() {
 		oidcExpires = sess.oidcExpires.Unix()
 	}
-	_, err := s.db.Exec(
+	_, err = s.db.Exec(
 		`INSERT INTO sessions(id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires,fleet_indeterminate) VALUES(?,?,?,?,?,?,?,?,?,0)`,
 		sess.id, sess.csrf, sess.iss, sess.sub, bg, now.Unix(), now.Unix(), sess.expires.Unix(),
 		oidcExpires)
