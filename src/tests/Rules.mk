@@ -287,6 +287,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-coord-closet \
                $(TESTPREFIX)/unit-test-economizer-proof \
+               $(TESTPREFIX)/unit-test-economizer-activation \
                $(TESTPREFIX)/unit-test-economizer-wire-snapshot \
                $(TESTPREFIX)/unit-test-economizer-live-surface \
                $(TESTPREFIX)/unit-test-economizer-openai \
@@ -2990,6 +2991,13 @@ $(TESTPREFIX)/unit-test-coord-closet: $(OBJDIR)/tests/test_coord_closet.o $(OBJD
 
 $(TESTPREFIX)/unit-test-economizer-proof: $(OBJDIR)/tests/test_economizer_proof.o \
                                   $(OBJDIR)/modules/economizer/economizer_proof.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-economizer-activation: \
+                                  $(OBJDIR)/tests/test_economizer_activation.o \
+                                  $(OBJDIR)/modules/economizer/economizer_json.o \
+                                  $(OBJDIR)/modules/economizer/economizer_provenance.o \
+                                  $(OBJDIR)/modules/economizer/economizer_dispatch_lease.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-economizer-wire-snapshot: \

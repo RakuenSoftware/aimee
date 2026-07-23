@@ -42,7 +42,7 @@ type discussionTranscriptReport struct {
 // strict majority. Suggestions, nits, and ordinary blockers can never cause a
 // second cycle. The caller's context/deadline is the only backstop: expiry is
 // returned visibly so the workflow parks instead of inventing consensus.
-func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, panel roundtablecfg.Panel, analysis panelAnalysis, artifactStage string) (wfe.ReviewFeedback, int, float64, string) {
+func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, panel roundtablecfg.Panel, analysis panelAnalysis, artifactStage string) (wfe.ReviewFeedback, int, float64, int, string) {
 	feedback := analysis.Feedback
 	issues := makeDiscussionIssues(feedback.Findings)
 	// The stable ID is the issue's identity everywhere after independent
@@ -53,7 +53,7 @@ func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, 
 		feedback.Findings[issue.feedbackIndex].ID = issue.ID
 	}
 	if len(analysis.Reports) == 0 {
-		return feedback, analysis.Approvals, analysis.CostUSD, "discussion has no successful seated analyses"
+		return feedback, analysis.Approvals, analysis.CostUSD, 0, "discussion has no successful seated analyses"
 	}
 	if len(issues) == 0 {
 		// Agents still compare their reports once even when every independent
@@ -66,6 +66,7 @@ func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, 
 	}
 
 	totalCost := analysis.CostUSD
+	discussionFailed := 0
 	active := issues
 	cycle := 1
 	type issueDecision struct {
@@ -75,16 +76,22 @@ func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, 
 	decisions := make(map[string]issueDecision)
 	for {
 		if err := ctx.Err(); err != nil {
-			return feedback, analysis.Approvals, totalCost, "discussion deadline reached before foundational consensus"
+			return feedback, analysis.Approvals, totalCost, discussionFailed, "discussion deadline reached before foundational consensus"
 		}
 		prompt := buildDiscussionPrompt(cycle, reports, active)
 		votes, successful, cost := r.runDiscussionCycle(ctx, req, analysis.Reports, active, prompt, artifactStage, cycle)
 		totalCost += cost
-		if ctx.Err() != nil {
-			return feedback, analysis.Approvals, totalCost, "discussion deadline reached before foundational consensus"
+		// Degradation is sticky across cycles. A seat that recovers after an
+		// earlier failure must not make the completed roundtable look healthy.
+		cycleFailed := len(analysis.Reports) - successful
+		if cycleFailed > discussionFailed {
+			discussionFailed = cycleFailed
 		}
 		if successful < panel.MinSuccessful {
-			return feedback, analysis.Approvals, totalCost, fmt.Sprintf("discussion quorum %d/%d is below min_successful %d", successful, len(analysis.Reports), panel.MinSuccessful)
+			if ctx.Err() != nil {
+				return feedback, analysis.Approvals, totalCost, discussionFailed, "discussion deadline reached before foundational consensus"
+			}
+			return feedback, analysis.Approvals, totalCost, discussionFailed, fmt.Sprintf("discussion quorum %d/%d is below min_successful %d", successful, len(analysis.Reports), panel.MinSuccessful)
 		}
 		majority := successful/2 + 1
 		var contested []discussionIssue
@@ -118,7 +125,7 @@ func (r *NativeRunner) runPanelDiscussion(ctx context.Context, req StepRequest, 
 	if len(feedback.Findings) == 0 {
 		approvals = len(analysis.Reports)
 	}
-	return feedback, approvals, totalCost, ""
+	return feedback, approvals, totalCost, discussionFailed, ""
 }
 
 func makeDiscussionIssues(findings []wfe.Finding) []discussionIssue {

@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,24 @@ import (
 type blockingRunner struct {
 	started chan string
 	release chan struct{}
+}
+
+type transientRoundtableRunner struct {
+	mu       sync.Mutex
+	reasons  map[string]string
+	versions map[string]string
+}
+
+func (r *transientRoundtableRunner) Run(_ context.Context, request StepRequest) (StepResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if first, ok := r.versions[request.WorkItem.ID]; !ok {
+		r.versions[request.WorkItem.ID] = request.WorkItem.UpdatedAt
+		return StepResult{Status: StepPending, PauseReason: r.reasons[request.WorkItem.ID], Detail: "temporary roundtable phase failure"}, nil
+	} else if first == request.WorkItem.UpdatedAt {
+		return StepResult{}, errors.New("scheduler retry reused the parked execution version")
+	}
+	return StepResult{Status: StepAdvanced}, nil
 }
 
 func (r *blockingRunner) Run(ctx context.Context, request StepRequest) (StepResult, error) {
@@ -97,6 +117,83 @@ func waitStarted(t *testing.T, started <-chan string) string {
 		t.Fatal("workflow did not start")
 		return ""
 	}
+}
+
+func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := map[string]string{
+		"wi_discussion": "roundtable_discussion",
+		"wi_chairman":   "roundtable_chairman",
+	}
+	for id := range reasons {
+		if err := artifacts.PutProposal(id, []byte("proposal")); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
+			WorkflowVersion: def.Version, StartStage: "work", Mode: "autonomous",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &transientRoundtableRunner{reasons: reasons, versions: make(map[string]string)}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, workflowEngine, 2, nil)
+	scheduler.pollEvery = 10 * time.Millisecond
+	scheduler.transientPauses = []transientPause{
+		{reason: "roundtable_discussion", backoff: time.Second},
+		{reason: "roundtable_chairman", backoff: time.Second},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go scheduler.Run(ctx)
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		accepted := 0
+		for id := range reasons {
+			item, err := store.WorkItem(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if item.State == "accepted" {
+				accepted++
+			}
+		}
+		if accepted == len(reasons) {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for id, reason := range reasons {
+		item, _ := store.WorkItem(t.Context(), id)
+		t.Logf("%s (%s): state=%s pause=%s updated=%s", id, reason, item.State, item.PauseReason, item.UpdatedAt)
+	}
+	t.Fatal("roundtable phase pauses did not recover through the scheduler")
 }
 
 func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {

@@ -63,22 +63,37 @@ A foundational finding also stops after one cycle when the seats agree or one
 position already has a strict majority. Only an explicitly disputed
 foundational finding may continue to another cycle, and subsequent cycles carry
 only those contested stable issue IDs. Discussion ends when a strict majority
-forms; deadline or quorum loss parks the workflow visibly rather than fabricating
-consensus. Deterministic synthesis retains findings unless a strict majority
+forms; deadline or quorum loss parks the workflow visibly for scheduler retry
+rather than fabricating consensus. Deterministic synthesis retains findings unless a strict majority
 rejects them.
 The denominator is the successful seated participants that return a complete,
 valid ballot in that discussion cycle. Abstentions remain in that denominator
 but do not by themselves count as disagreement or extend discussion. The saved
 `deadline_ms` is the overall analysis-plus-discussion budget; an omitted or zero
 legacy value is normalized to 360 seconds.
+The runtime divides that overall budget evenly across the configured analysis,
+Discussion, and Chairman phases. This prevents one slow analysis seat from
+consuming time reserved for a required downstream phase while preserving the
+single overall deadline as the hard upper bound.
+The C compatibility proxy derives its finite receive timeout from that acquired
+preset deadline and adds only transport grace; it does not impose a shorter
+fixed deadline or wait without a bound.
+
+An unavailable or unusable independent-analysis seat is recorded as failed and
+makes the result degraded. It parks the roundtable only when the remaining
+complete reports are below the preset's `min_successful`; a satisfied configured
+minimum proceeds to discussion or deterministic synthesis without hiding the
+failed seat.
 
 After deterministic synthesis, a preset may optionally require a **chairman**.
 The chairman is one configured, enabled review agent selected visibly in the
 Roundtable GUI. It receives the original request, reviewed artifact, independent
 reports, and deterministic feedback, then submits one final structured verdict.
 There is no chairman retry across the roster: an unavailable chairman, malformed
-verdict, stage mismatch, or missing original-request alignment parks the workflow
-visibly. With the chairman disabled, deterministic synthesis is final.
+verdict, stage mismatch, or contradictory verdict parks the workflow visibly for
+scheduler retry with a new execution version. A valid `changes` verdict with
+`drifted` or `unclear` alignment is refinement feedback, not an execution failure.
+With the chairman disabled, deterministic synthesis is final.
 
 Every review must explicitly report `original_request_alignment` as `aligned`,
 `drifted`, or `unclear`, with a comparison to the originating request. A useful
