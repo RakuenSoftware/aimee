@@ -240,6 +240,72 @@
       "make": true,
       "module": "translation",
       "test": "src/tests/test_aimee_ir_stream.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_handle.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_manifest.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_mirror.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider_container.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider_detached.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_runner_queue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_runner_registry.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_scope.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_turn.c"
     }
   ]
 }

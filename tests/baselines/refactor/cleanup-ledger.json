@@ -605,6 +605,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains learning-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on a multi-element declared source and private-header set; the cleared-latch assertion is also converted from a hardcoded module list to a graph-derived scan, which retroactively restores coverage of governance and prevents future drift.",
       "independent_review": "The slice-decision roundtable approved the declaration scope in slice 42; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-43.md", "docs/modules/learning.md", "src/modules/learning/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 44,
+      "state": "present_and_verified",
+      "disposition": "Declared the workspace descriptor's eleven sources, eleven module-root private headers, eleven direct tests, and document without setting ownership_complete, the declaration half of the pair for the third and largest Class B module so far, carving eleven module tests out of a twelve-target family and confirming three internal-only sources are live.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["CMake compiles four of the eleven sources, the thin-client-reachable subset, and omits seven server/runner-side units, the same intentional thin-client boundary recorded for gateway, audit, and learning; the required CMake jobs building the thin client green from the four-source set are the standing evidence the client closure does not reach the seven", "workspace_provider_container.c, workspace_provider_detached.c, and workspace_runner_queue.c have no external includer but are live module-internal units selected through workspace_provider.h and workspace_runner_registry.h", "test_workspace_memory.c carries the workspace name and links workspace.o but is a memory test of memory_auto_tag_workspace, defined in src/modules/memory/memory_core.c, and is not claimed", "all eleven headers are declared private because none sits under a canonical include tree; workspace_provider.h is the dispatch interface with no paired source and cli_workspace_serve.c has no paired header"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming test_workspace_memory.c by its name, or flagging the three internal-only sources as dead, was rejected: the first is a memory test by subject and the second three are wired through the module's own provider and runner interfaces.",
+        "revisit": "Slice 45 latches workspace and makes the runner_queue-through-runner_registry wiring explicit in the completeness audit; a separate header-layout slice may relocate workspace headers under a canonical include tree."
+      },
+      "consumers": ["server, posix, db2, and cmd workspace consumers", "the client serve path", "the workspace latch slice", "remaining Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven workspace rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: exclude test_workspace_memory.c as a memory test, treat the three internal-only sources as live module-owned, and document the seven-source CMake omission as an intentional thin-client boundary. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-44.md", "docs/modules/workspace.md", "src/modules/workspace/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }

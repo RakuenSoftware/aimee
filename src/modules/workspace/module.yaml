@@ -9,5 +9,47 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/workspace/cli_workspace_serve.c",
+    "src/modules/workspace/workspace.c",
+    "src/modules/workspace/workspace_handle.c",
+    "src/modules/workspace/workspace_manifest.c",
+    "src/modules/workspace/workspace_mirror.c",
+    "src/modules/workspace/workspace_provider_container.c",
+    "src/modules/workspace/workspace_provider_detached.c",
+    "src/modules/workspace/workspace_runner_queue.c",
+    "src/modules/workspace/workspace_runner_registry.c",
+    "src/modules/workspace/workspace_scope.c",
+    "src/modules/workspace/workspace_turn.c"
+  ],
+  "private_headers": [
+    "src/modules/workspace/workspace.h",
+    "src/modules/workspace/workspace_handle.h",
+    "src/modules/workspace/workspace_manifest.h",
+    "src/modules/workspace/workspace_mirror.h",
+    "src/modules/workspace/workspace_provider.h",
+    "src/modules/workspace/workspace_provider_container.h",
+    "src/modules/workspace/workspace_provider_detached.h",
+    "src/modules/workspace/workspace_runner_queue.h",
+    "src/modules/workspace/workspace_runner_registry.h",
+    "src/modules/workspace/workspace_scope.h",
+    "src/modules/workspace/workspace_turn.h"
+  ],
+  "tests": [
+    "src/tests/test_workspace.c",
+    "src/tests/test_workspace_handle.c",
+    "src/tests/test_workspace_manifest.c",
+    "src/tests/test_workspace_mirror.c",
+    "src/tests/test_workspace_provider.c",
+    "src/tests/test_workspace_provider_container.c",
+    "src/tests/test_workspace_provider_detached.c",
+    "src/tests/test_workspace_runner_queue.c",
+    "src/tests/test_workspace_runner_registry.c",
+    "src/tests/test_workspace_scope.c",
+    "src/tests/test_workspace_turn.c"
+  ],
+  "docs": [
+    "docs/modules/workspace.md"
+  ]
 }
