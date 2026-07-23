@@ -194,6 +194,84 @@ static void agent_normalize_legacy_claude_cli(agent_t *ag)
    ag->cli_kind[0] = '\0';
 }
 
+static void agent_derive_catalog_provider(agent_t *ag);
+
+/* Cost tier derived from a model's BASE input price. Provider-general
+ * registration expands one operator entry into several model targets, and
+ * sol/terra/luna are $5.00/$2.50/$1.00 — they cannot share a tier inherited from
+ * the registration, or "cheapest first" would pick arbitrarily among them.
+ *
+ * Deliberately banded rather than ordering on the raw price: routing directly on
+ * a float makes route choice churn every time the catalog refreshes, whereas a
+ * band is a stable policy boundary. Thresholds sit between the observed fleet
+ * price points ($0.30 / $0.95-1.00 / $2.00-2.50 / $5.00 / $10.00) so each lands
+ * in its own tier. */
+static int model_price_to_cost_tier(double in_per_mtok)
+{
+   if (in_per_mtok <= 0.0)
+      return -1; /* unknown: caller keeps the registration's declared tier */
+   if (in_per_mtok < 0.5)
+      return 0;
+   if (in_per_mtok < 1.5)
+      return 1;
+   if (in_per_mtok < 3.5)
+      return 2;
+   if (in_per_mtok < 7.5)
+      return 3;
+   return 4;
+}
+
+/* Expand a provider-general registration ("models": [...]) into one runtime
+ * agent per routable model.
+ *
+ * A model endpoint is what the runtime actually schedules: health, admission,
+ * cost and fallback are all per-model already. Materialising a target per model
+ * therefore needs no change to routing, dispatch or admission, whereas making
+ * routing return (agent, model) would thread a new compound identity through the
+ * highest-risk path. The registration stays the operator-facing object; these
+ * are its runtime targets.
+ *
+ * Targets are named `<registration>:<model>`, matching the canonical ref form
+ * model_capability_resolve_ref() already parses, so `--via codex:gpt-5.6-sol`
+ * addresses exactly one target and health keys stay distinct per model.
+ *
+ * Returns the number of targets written, or -1 if they do not fit — the caller
+ * must then reject the whole config rather than register a partial fleet, since
+ * a silently truncated expansion would drop models an operator declared. */
+static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base, cJSON *models)
+{
+   int written = 0;
+   cJSON *m;
+   cJSON_ArrayForEach(m, models)
+   {
+      const char *model_id = cJSON_GetStringValue(m);
+      if (!model_id || !model_id[0])
+         continue;
+      if (cfg->agent_count >= MAX_AGENTS)
+         return -1;
+
+      agent_t *ag = &cfg->agents[cfg->agent_count];
+      *ag = *base;
+      snprintf(ag->model, sizeof(ag->model), "%s", model_id);
+      snprintf(ag->name, sizeof(ag->name), "%s:%s", base->name, model_id);
+      /* The registration's model list is the exposure policy; a target is only
+       * routable if the catalog can actually describe it. */
+      agent_derive_catalog_provider(ag);
+
+      model_capability_t cap;
+      if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
+      {
+         int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
+         if (tier >= 0)
+            ag->cost_tier = tier;
+      }
+
+      cfg->agent_count++;
+      written++;
+   }
+   return written;
+}
+
 static void agent_normalize_builtin_cost_tier(agent_t *ag)
 {
    if (!ag)
@@ -1153,6 +1231,30 @@ int agent_load_config(agent_config_t *cfg)
           * Agent Only persists. */
          if (!primary_only_present)
             ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
+
+         /* Provider-general registration: an explicit "models" array expands
+          * into one runtime target per model. Strictly OPT-IN — a legacy entry
+          * naming a single `model` keeps exactly its previous meaning, including
+          * its name for `--via`. Inferring provider-general mode from anything
+          * else would change cost, health and attribution on upgrade. */
+         cJSON *models_arr = cJSON_GetObjectItem(a, "models");
+         if (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0)
+         {
+            agent_t base = *ag;
+            int n = agent_expand_provider_models(cfg, &base, models_arr);
+            if (n < 0)
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' expands past the %d-target limit; "
+                         "refusing to load a partial fleet",
+                         base.name, MAX_AGENTS);
+               /* `data` was already freed immediately after cJSON_Parse. */
+               cJSON_Delete(root);
+               return -1;
+            }
+            /* The registration itself is not a route target. */
+            continue;
+         }
          cfg->agent_count++;
       }
    }

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "aimee.h"
@@ -1022,6 +1023,118 @@ void test_capability_routing_flag_behaviour_diff(void)
    assert(!on_picked_incapable);
 
    printf("  PASS: test_capability_routing_flag_behaviour_diff\n");
+}
+
+/* Provider-general registration: one operator entry, one runtime target per
+ * model. The operator writes "codex" once with a models list; routing, health,
+ * admission and fallback continue to work per-model because each target IS an
+ * agent — no routing signature changes.
+ *
+ * Tiers must be DERIVED per model: sol/terra/luna are $5.00/$2.50/$1.00, so a
+ * single inherited tier would make "cheapest first" pick arbitrarily among them. */
+/* Seed a priced catalog under the CURRENT HOME. Tier derivation reads the model
+ * catalog, and without it every expanded target keeps the registration's
+ * declared tier — the assertions below would then pass or fail for reasons
+ * unrelated to derivation. */
+static void seed_codex_prices(void)
+{
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return;
+   char dir[512], path[600];
+   snprintf(dir, sizeof(dir), "%s/.cache", home);
+   mkdir(dir, 0755);
+   snprintf(dir, sizeof(dir), "%s/.cache/aimee", home);
+   mkdir(dir, 0755);
+   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
+   FILE *cf = fopen(path, "w");
+   if (!cf)
+      return;
+   fputs("{\"openai\":{\"models\":{"
+         "\"gpt-5.6-sol\":{\"limit\":{\"context\":1050000},"
+         "  \"cost\":{\"input\":5.0,\"output\":30.0},\"tool_call\":true},"
+         "\"gpt-5.6-terra\":{\"limit\":{\"context\":1050000},"
+         "  \"cost\":{\"input\":2.5,\"output\":15.0},\"tool_call\":true},"
+         "\"gpt-5.6-luna\":{\"limit\":{\"context\":1050000},"
+         "  \"cost\":{\"input\":1.0,\"output\":6.0},\"tool_call\":true}"
+         "}}}",
+         cf);
+   fclose(cf);
+}
+
+void test_provider_general_registration_expands(void)
+{
+   seed_codex_prices();
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":["
+         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"cost_tier\":0,\"roles\":[\"review\"],"
+         "\"models\":[\"gpt-5.6-sol\",\"gpt-5.6-terra\",\"gpt-5.6-luna\"]},"
+         /* A LEGACY single-model entry must keep exactly its old meaning. */
+         "{\"name\":\"legacy\",\"provider\":\"anthropic\","
+         "\"endpoint\":\"https://api.anthropic.com\",\"model\":\"claude-opus-4-8\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"cost_tier\":1,"
+         "\"roles\":[\"review\"]}"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   /* Three expanded targets plus the untouched legacy entry. The registration
+    * itself is NOT a route target. */
+   assert(c.agent_count == 4);
+   assert(agent_find(&c, "codex") == NULL);
+
+   const agent_t *sol = agent_find(&c, "codex:gpt-5.6-sol");
+   const agent_t *terra = agent_find(&c, "codex:gpt-5.6-terra");
+   const agent_t *luna = agent_find(&c, "codex:gpt-5.6-luna");
+   assert(sol && terra && luna);
+
+   /* Registration properties are inherited... */
+   assert(strcmp(sol->provider, "chatgpt") == 0);
+   assert(strcmp(sol->auth_type, "codex-oauth") == 0);
+   assert(sol->enabled == 1);
+   /* ...and the catalog identity is derived, so capability/price resolve. */
+   assert(strcmp(agent_catalog_provider(sol), "openai") == 0);
+
+   /* Tiers are DERIVED per model from price, not inherited from the
+    * registration's declared 0: sol $5 > terra $2.50 > luna $1.00. */
+   assert(sol->cost_tier > terra->cost_tier);
+   assert(terra->cost_tier > luna->cost_tier);
+
+   /* The legacy entry is untouched: same name, same model, declared tier kept. */
+   const agent_t *legacy = agent_find(&c, "legacy");
+   assert(legacy && strcmp(legacy->model, "claude-opus-4-8") == 0);
+   assert(legacy->cost_tier == 1);
+
+   printf("  PASS: test_provider_general_registration_expands\n");
+   unlink(agent_config_path());
+}
+
+/* An expansion that does not fit must reject the WHOLE config rather than
+ * register a partial fleet: silently dropping models an operator declared would
+ * route work to a set they never approved. */
+void test_provider_general_overflow_rejects_config(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"big\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://api.openai.com/v1\",\"auth_type\":\"bearer\","
+         "\"api_key\":\"k\",\"roles\":[\"review\"],\"models\":["
+         "\"m1\",\"m2\",\"m3\",\"m4\",\"m5\",\"m6\",\"m7\",\"m8\","
+         "\"m9\",\"m10\",\"m11\",\"m12\",\"m13\",\"m14\",\"m15\",\"m16\","
+         "\"m17\"]}]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) != 0);
+
+   printf("  PASS: test_provider_general_overflow_rejects_config\n");
+   unlink(agent_config_path());
 }
 
 /* agent_default_primary must never hand back a disabled seat: a disabled
