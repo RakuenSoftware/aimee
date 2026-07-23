@@ -1,7 +1,8 @@
 # P5-D1 console fleet and OIDC-preserving proxy
 
-- **State:** approved for implementation; plan review converged in jobs 8902–8903 after the
-  audience/`azp`, vault-compensation, canonical-team, and response-overflow corrections.
+- **State:** delivered; plan review converged in jobs 8902–8903 after the audience/`azp`,
+  vault-compensation, canonical-team, and response-overflow corrections. Adversarial branch
+  review then drove the durable mutation-result acknowledgement protocol described below.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§3–4.
 - **Depends on:** P5-A registry, P5-B3 live health channel, and P5-C3 action composition.
 - **Followed by:** P5-D2 bounded agents/config reads and P5 close-out.
@@ -128,3 +129,19 @@ and prove the server and kb WORM records contain the OIDC composite actor rather
 effect, the console-admin bearer cannot reach fleet routes, token expiry forces re-login, and no
 automatic redispatch occurs. Complete with an adversarial full-branch roundtable, converge, merge
 to `testing`, update the delivery table, and store the next final tally.
+
+## Delivery record
+
+Delivered on 2026-07-23. The implementation preserves verified OIDC credentials in a bounded,
+process-local cleansing vault; keeps console-admin and fleet ACL/credential classes disjoint;
+adds tenant-scoped fleet registry reads, live health, explicit enable/disable actions, OpenAPI
+contracts, and the Fleet UI; and uses a durable SQLite mutation state machine. Each mutation
+atomically claims state with a fresh random result token, ambiguous outcomes remain locked, a
+definite response is locked before downstream delivery, and only a CSRF-protected browser ACK
+carrying that exact token releases the session. Stale ACKs cannot release later results.
+
+Validation passed locally and from the exact archived head on CT260: Go unit/race/build, 101
+frontend tests and production build, production kb/server builds, docs generation, 75-route kb
+and 309-route server conformance, concurrent single-dispatch, and the live RS256 OIDC mock-kb
+flow (registry, health, enable, disable, cross-team denial, policy denial, and result ACKs). The
+mock proved every fleet request used the operator OIDC bearer and never console-admin.
