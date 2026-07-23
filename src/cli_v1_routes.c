@@ -1380,7 +1380,7 @@ cJSON *marshal_insights_overview(int argc, char **argv)
    return req;
 }
 
-static char *marshal_read_prompt_file(const char *path)
+static char *marshal_read_file_limited(const char *path, size_t limit)
 {
    FILE *f;
    long len;
@@ -1390,13 +1390,13 @@ static char *marshal_read_prompt_file(const char *path)
    if (!path || !path[0])
       return NULL;
 
-   f = fopen(path, "r");
+   f = fopen(path, "rb");
    if (!f)
       return NULL;
    fseek(f, 0, SEEK_END);
    len = ftell(f);
    fseek(f, 0, SEEK_SET);
-   if (len <= 0 || len > 2 * 1024 * 1024)
+   if (len <= 0 || (size_t)len > limit)
    {
       fclose(f);
       return NULL;
@@ -1413,25 +1413,28 @@ static char *marshal_read_prompt_file(const char *path)
    return buf;
 }
 
-static char *marshal_read_prompt_stdin(void)
+static char *marshal_read_stdin_limited(size_t limit)
 {
-   size_t cap = 4096;
+   size_t cap = limit < 4095 ? limit + 1 : 4096;
    size_t len = 0;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
    for (;;)
    {
-      if (len + 1024 >= cap)
+      if (len == limit)
       {
-         if (cap >= 2 * 1024 * 1024)
-         {
-            free(buf);
-            return NULL;
-         }
+         int extra = fgetc(stdin);
+         if (extra == EOF && !ferror(stdin))
+            break;
+         free(buf);
+         return NULL;
+      }
+      if (len + 1024 >= cap && cap < limit + 1)
+      {
          size_t next = cap * 2;
-         if (next > 2 * 1024 * 1024 + 1)
-            next = 2 * 1024 * 1024 + 1;
+         if (next > limit + 1)
+            next = limit + 1;
          char *nb = realloc(buf, next);
          if (!nb)
          {
@@ -1460,6 +1463,16 @@ static char *marshal_read_prompt_stdin(void)
       return NULL;
    }
    return buf;
+}
+
+static char *marshal_read_prompt_file(const char *path)
+{
+   return marshal_read_file_limited(path, 2u * 1024u * 1024u);
+}
+
+static char *marshal_read_prompt_stdin(void)
+{
+   return marshal_read_stdin_limited(2u * 1024u * 1024u);
 }
 
 static char *client_strdup(const char *s)
@@ -1756,13 +1769,65 @@ cJSON *marshal_delegate_aggregate(int argc, char **argv)
 
 cJSON *marshal_roundtable_review(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"json", "apply", NULL};
+   static const char *bool_flags[] = {"json", "apply", "artifact-stdin", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("roundtable.review");
+
+   /* Explicit artifact bytes are authoritative. Paths are read by the thin
+    * client and never sent to the server, so a remote appliance cannot replace
+    * them with an unrelated workspace artifact. `--artifact -`, positional
+    * `-`, and `--artifact-stdin` all read stdin. */
+   const char *artifact_path = rpc_get(&opts, "artifact");
+   int artifact_stdin = rpc_has_flag(&opts, "artifact-stdin");
+   int artifact_positional = 0;
+   if (artifact_path && strcmp(artifact_path, "-") == 0)
+      artifact_stdin = 1;
+   if (artifact_stdin && artifact_path && strcmp(artifact_path, "-") != 0)
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   if (!artifact_path && opts.pos_count > 0 && opts.positional[0] &&
+       strcmp(opts.positional[0], "-") == 0)
+   {
+      artifact_stdin = 1;
+      artifact_positional = 1;
+   }
+   char *artifact_text = NULL;
+   if (artifact_stdin)
+      artifact_text = marshal_read_stdin_limited(16u * 1024u * 1024u);
+   else if (artifact_path)
+      artifact_text = marshal_read_file_limited(artifact_path, 16u * 1024u * 1024u);
+   else if (opts.pos_count > 0 && opts.positional[0])
+   {
+      FILE *probe = fopen(opts.positional[0], "rb");
+      if (probe)
+      {
+         fclose(probe);
+         artifact_positional = 1;
+         artifact_text = marshal_read_file_limited(opts.positional[0], 16u * 1024u * 1024u);
+         if (!artifact_text)
+         {
+            cJSON_Delete(req);
+            return NULL;
+         }
+      }
+   }
+   if ((artifact_stdin || artifact_path) && !artifact_text)
+   {
+      cJSON_Delete(req);
+      return NULL;
+   }
+   if (artifact_text)
+      cJSON_AddStringToObject(req, "artifact", artifact_text);
+
    /* Fold --context-file / --files / --context-dir / --context preloads into the
     * prompt, mirroring marshal_delegate() so both paths ship identical payloads. */
-   char *prompt = (opts.pos_count > 0 && opts.positional[0]) ? strdup(opts.positional[0]) : NULL;
+   int prompt_index = artifact_positional ? 1 : 0;
+   char *prompt = (opts.pos_count > prompt_index && opts.positional[prompt_index])
+                      ? strdup(opts.positional[prompt_index])
+                      : NULL;
    char *preload = marshal_build_preload_context(&opts);
    if (preload)
    {
@@ -1779,11 +1844,35 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
       free(preload);
    }
    if (prompt && prompt[0])
-      cJSON_AddStringToObject(req, "prompt", prompt);
+   {
+      if (artifact_text)
+         cJSON_AddStringToObject(req, "original_request", prompt);
+      else
+         cJSON_AddStringToObject(req, "prompt", prompt);
+   }
    free(prompt);
+   free(artifact_text);
+   const char *original_request = rpc_get(&opts, "original-request");
+   if (original_request)
+   {
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "original_request");
+      cJSON_AddStringToObject(req, "original_request", original_request);
+   }
    const char *mode = rpc_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
+   const char *roundtable = rpc_get(&opts, "roundtable");
+   if (roundtable)
+      cJSON_AddStringToObject(req, "roundtable", roundtable);
+   const char *artifact_stage = rpc_get(&opts, "artifact-stage");
+   if (artifact_stage)
+      cJSON_AddStringToObject(req, "artifact_stage", artifact_stage);
+   const char *workdir = rpc_get(&opts, "workdir");
+   if (workdir)
+      cJSON_AddStringToObject(req, "workdir", workdir);
+   const char *run_id = rpc_get(&opts, "run-id");
+   if (run_id)
+      cJSON_AddStringToObject(req, "run_id", run_id);
    const char *turns = rpc_get(&opts, "turns");
    if (turns)
       cJSON_AddStringToObject(req, "turns", turns);

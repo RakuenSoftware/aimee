@@ -1,10 +1,13 @@
 #include "wfe_roundtable_proxy.h"
 
 #include "cJSON.h"
+#include "config.h"
 #include "json_fluent.h"
+#include "roundtable_preset.h"
 #include "util.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,8 +30,10 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 #include <sys/un.h>
 #include <unistd.h>
 
-#define GO_ROUNDTABLE_IO_TIMEOUT_SECS 420
-#define GO_ROUNDTABLE_MAX_RESPONSE    (16u * 1024u * 1024u)
+#define GO_ROUNDTABLE_DEFAULT_DEADLINE_MS 600000
+#define GO_ROUNDTABLE_TRANSPORT_GRACE_MS  30000
+#define GO_ROUNDTABLE_SEND_TIMEOUT_SECS   30
+#define GO_ROUNDTABLE_MAX_RESPONSE        (16u * 1024u * 1024u)
 
 static int write_all(int fd, const char *data, size_t size)
 {
@@ -83,7 +88,24 @@ static char *decode_chunked(const char *body)
    return out;
 }
 
-static char *post_go_roundtable(const char *body, int *status)
+static int roundtable_receive_timeout_ms(const cJSON *request)
+{
+   config_t cfg;
+   int deadline_ms = GO_ROUNDTABLE_DEFAULT_DEADLINE_MS;
+   if (config_load(&cfg) == 0)
+   {
+      cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
+      const char *requested = cJSON_IsString(preset) ? preset->valuestring : NULL;
+      if (roundtable_preset_resolve_runtime(requested, &cfg, NULL, 0, NULL, 0) >= 0 &&
+          cfg.roundtable_deadline_ms > 0)
+         deadline_ms = cfg.roundtable_deadline_ms;
+   }
+   if (deadline_ms > INT_MAX - GO_ROUNDTABLE_TRANSPORT_GRACE_MS)
+      return INT_MAX;
+   return deadline_ms + GO_ROUNDTABLE_TRANSPORT_GRACE_MS;
+}
+
+static char *post_go_roundtable(const char *body, int receive_timeout_ms, int *status)
 {
    if (status)
       *status = 0;
@@ -93,9 +115,14 @@ static char *post_go_roundtable(const char *body, int *status)
    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
    if (fd < 0)
       return NULL;
-   struct timeval io_timeout = {.tv_sec = GO_ROUNDTABLE_IO_TIMEOUT_SECS, .tv_usec = 0};
-   if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout)) != 0 ||
-       setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout)) != 0)
+   // Derive the receive bound from the same saved preset the Go service
+   // acquires. The transport grace covers response serialization and socket
+   // delivery without replacing the configured roundtable deadline.
+   struct timeval send_timeout = {.tv_sec = GO_ROUNDTABLE_SEND_TIMEOUT_SECS, .tv_usec = 0};
+   struct timeval receive_timeout = {.tv_sec = receive_timeout_ms / 1000,
+                                     .tv_usec = (receive_timeout_ms % 1000) * 1000};
+   if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout, sizeof(send_timeout)) != 0 ||
+       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout)) != 0)
    {
       close(fd);
       return NULL;
@@ -200,7 +227,8 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    cJSON *prompt = cJSON_GetObjectItemCaseSensitive(request, "prompt");
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(request, "brief");
    cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
-   cJSON *run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
+   cJSON *requested_run_id = cJSON_GetObjectItemCaseSensitive(request, "run_id");
+   cJSON *transport_run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
    cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
    cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
    cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
@@ -230,8 +258,12 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    }
    if (cJSON_IsString(preset))
       cJSON_AddStringToObject(payload, "roundtable", preset->valuestring);
-   if (cJSON_IsString(run_id))
-      cJSON_AddStringToObject(payload, "run_id", run_id->valuestring);
+   /* __run_id owns the asynchronous transport job. A caller-supplied run_id is
+    * the review identity and must survive that transport wrapper unchanged. */
+   if (cJSON_IsString(requested_run_id) && requested_run_id->valuestring[0])
+      cJSON_AddStringToObject(payload, "run_id", requested_run_id->valuestring);
+   else if (cJSON_IsString(transport_run_id))
+      cJSON_AddStringToObject(payload, "run_id", transport_run_id->valuestring);
    const char *cwd =
        cJSON_IsString(requested_workdir) ? requested_workdir->valuestring : run_cmd_get_cwd();
    if (cwd && cwd[0])
@@ -242,7 +274,7 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    if (!wire)
       return server_send_error(conn, "out of memory", NULL);
    int status = 0;
-   char *body = post_go_roundtable(wire, &status);
+   char *body = post_go_roundtable(wire, roundtable_receive_timeout_ms(request), &status);
    free(wire);
    if (!body)
       return server_send_error(conn, "Go roundtable service is unreachable", NULL);

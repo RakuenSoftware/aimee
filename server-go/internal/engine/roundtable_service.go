@@ -16,9 +16,11 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 	if r == nil || r.agents == nil {
 		return roundtablecfg.RunResult{}, errors.New("roundtable agent resource plane is unavailable")
 	}
-	request.Artifact = strings.TrimSpace(request.Artifact)
-	if len(request.Artifact) < 20 {
+	if len(strings.TrimSpace(request.Artifact)) < 20 {
 		return roundtablecfg.RunResult{}, roundtablecfg.ValidationError{Message: "roundtable artifact must be at least 20 characters"}
+	}
+	if len(request.Artifact) > 16<<20 {
+		return roundtablecfg.RunResult{}, roundtablecfg.ValidationError{Message: "roundtable artifact exceeds 16 MiB limit"}
 	}
 	stage, ok := normalizeRoundtableStage(request.ArtifactStage)
 	if !ok {
@@ -52,6 +54,11 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 			result.Detail = string(result.Status)
 		}
 		return roundtablecfg.RunResult{}, errors.New(result.Detail)
+	}
+	result.Roundtable.RunID = id
+	result.Roundtable.ArtifactHash = artifact.Hash
+	if result.Roundtable.Feedback == nil || result.Roundtable.Feedback.ArtifactHash != artifact.Hash {
+		return *result.Roundtable, errors.New("roundtable result artifact identity mismatch")
 	}
 	if result.Status == StepPending {
 		return *result.Roundtable, errors.New(result.Detail)

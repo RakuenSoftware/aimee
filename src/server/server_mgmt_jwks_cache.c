@@ -593,6 +593,39 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bu
    return SERVER_MGMT_JWKS_CACHE_OK;
 }
 
+server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_current_generation(const char *trust_bundle,
+                                                                          size_t trust_bundle_len,
+                                                                          int64_t now,
+                                                                          int64_t *generation)
+{
+   if (generation)
+      *generation = 0;
+   if (!generation)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
+   char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   size_t jwks_len = 0;
+   server_mgmt_jwks_cache_result_t result = server_mgmt_jwks_cache_load(
+       trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks), &jwks_len);
+   OPENSSL_cleanse(jwks, sizeof(jwks));
+   if (result != SERVER_MGMT_JWKS_CACHE_OK)
+      return result;
+   sqlite3 *db = db1_conn();
+   sqlite3_stmt *q = NULL;
+   if (!db || sqlite3_prepare_v2(db,
+                                 "SELECT generation FROM server_management_jwks_cache "
+                                 "WHERE singleton=1",
+                                 -1, &q, NULL) != SQLITE_OK)
+      return SERVER_MGMT_JWKS_CACHE_STORAGE;
+   int step = sqlite3_step(q);
+   int64_t found = step == SQLITE_ROW ? sqlite3_column_int64(q, 0) : 0;
+   int tail = step == SQLITE_ROW ? sqlite3_step(q) : step;
+   sqlite3_finalize(q);
+   if (found < 1 || tail != SQLITE_DONE)
+      return step == SQLITE_DONE ? SERVER_MGMT_JWKS_CACHE_MISSING : SERVER_MGMT_JWKS_CACHE_INVALID;
+   *generation = found;
+   return SERVER_MGMT_JWKS_CACHE_OK;
+}
+
 static pthread_mutex_t refresh_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t refresh_condition = PTHREAD_COND_INITIALIZER;
 static int refresh_active;
@@ -694,4 +727,43 @@ server_mgmt_token_result_t server_mgmt_token_verify_cached(
    return server_mgmt_token_verify_ex(jwt, jwt_len, jwks, expected_issuer, expected_audience,
                                       peer_issuer, peer_serial, peer_fingerprint, request_sha256,
                                       now, out);
+}
+
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_cached(
+    const char *jwt, size_t jwt_len, const char *trust_bundle, size_t trust_bundle_len,
+    const char *expected_issuer, const char *expected_audience, const char *peer_issuer,
+    const char *peer_serial, const char *peer_fingerprint, int64_t now,
+    server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!out)
+      return SERVER_MGMT_TOKEN_INVALID;
+   char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   size_t jwks_n = 0;
+   int refreshed = 0;
+   server_mgmt_jwks_cache_result_t loaded = server_mgmt_jwks_cache_load(
+       trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks), &jwks_n);
+   if (loaded != SERVER_MGMT_JWKS_CACHE_OK)
+   {
+      refreshed = 1;
+      if (server_mgmt_jwks_cache_refresh(trust_bundle, trust_bundle_len, now, fetch, fetch_ctx) !=
+              SERVER_MGMT_JWKS_CACHE_OK ||
+          server_mgmt_jwks_cache_load(trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks),
+                                      &jwks_n) != SERVER_MGMT_JWKS_CACHE_OK)
+         return SERVER_MGMT_TOKEN_INVALID;
+   }
+   server_mgmt_token_result_t result = server_mgmt_token_verify_read_claims_ex(
+       jwt, jwt_len, jwks, expected_issuer, expected_audience, peer_issuer, peer_serial,
+       peer_fingerprint, now, out);
+   if (result != SERVER_MGMT_TOKEN_UNKNOWN_KID || refreshed)
+      return result;
+   if (server_mgmt_jwks_cache_refresh(trust_bundle, trust_bundle_len, now, fetch, fetch_ctx) !=
+           SERVER_MGMT_JWKS_CACHE_OK ||
+       server_mgmt_jwks_cache_load(trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks),
+                                   &jwks_n) != SERVER_MGMT_JWKS_CACHE_OK)
+      return SERVER_MGMT_TOKEN_INVALID;
+   return server_mgmt_token_verify_read_claims_ex(jwt, jwt_len, jwks, expected_issuer,
+                                                  expected_audience, peer_issuer, peer_serial,
+                                                  peer_fingerprint, now, out);
 }

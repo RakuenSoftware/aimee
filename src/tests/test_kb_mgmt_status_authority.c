@@ -13,7 +13,8 @@ static int lookup(const char *issuer, const char *serial, const char *fp, const 
    (void)ctx;
    if (strcmp(issuer, "/CN=ca") || strcmp(serial, "01") || strlen(fp) != 64 ||
        strcmp(target, "server-1") ||
-       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1")))
+       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1") &&
+        strcmp(purpose, "management.read.v1") && strcmp(purpose, "management.read.config.v1")))
       return -1;
    *generation = 9;
    snprintf(target_fp, cap, "%064d", 2);
@@ -82,6 +83,7 @@ static void test_checkpoint(const unsigned char sk[32], const unsigned char pk[3
    assert(kb_mgmt_checkpoint_request_from_json(request_json, strlen(request_json), &request) ==
           KB_MGMT_STATUS_AUTHORITY_OK);
    assert(strlen(request.canonical_sha256) == 64 && request.staple_generation == 9);
+   assert(!strcmp(request.purpose, "management.action.v1"));
    char noncanonical[sizeof(request_json) + 2];
    snprintf(noncanonical, sizeof(noncanonical), " %s", request_json);
    assert(kb_mgmt_checkpoint_request_from_json(noncanonical, strlen(noncanonical), &request) ==
@@ -99,6 +101,15 @@ static void test_checkpoint(const unsigned char sk[32], const unsigned char pk[3
    assert(out.revoked == 1 && out.generation == 12 && out.expires_at == 3005);
    assert(!strcmp(out.request_sha256, request.canonical_sha256));
    assert(kb_mgmt_checkpoint_verify_signature(&out, pk) == 0);
+
+   char read_json[sizeof(request_json)];
+   const char *purpose = strstr(request_json, "management.action.v1");
+   assert(purpose && snprintf(read_json, sizeof(read_json), "%.*smanagement.read.v1%s",
+                              (int)(purpose - request_json), request_json,
+                              purpose + strlen("management.action.v1")) > 0);
+   assert(kb_mgmt_checkpoint_request_from_json(read_json, strlen(read_json), &request) ==
+          KB_MGMT_STATUS_AUTHORITY_OK);
+   assert(!strcmp(request.purpose, "management.read.v1"));
 }
 
 static void assert_zero(const void *p, size_t n)
@@ -130,6 +141,12 @@ static void test_codec(void)
    assert(kb_mgmt_status_request_from_json(action, strlen(action), &r) ==
           KB_MGMT_STATUS_AUTHORITY_OK);
    assert(!strcmp(r.purpose, "management.action.v1"));
+   memmove(purpose + strlen("management.read.v1"), purpose + strlen("management.action.v1"),
+           strlen(purpose + strlen("management.action.v1")) + 1);
+   memcpy(purpose, "management.read.v1", strlen("management.read.v1"));
+   assert(kb_mgmt_status_request_from_json(action, strlen(action), &r) ==
+          KB_MGMT_STATUS_AUTHORITY_OK);
+   assert(!strcmp(r.purpose, "management.read.v1"));
 
    static const char *invalid[] = {
        "{}",

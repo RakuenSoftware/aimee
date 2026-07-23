@@ -16,6 +16,7 @@ typedef struct
 typedef struct
 {
    uint32_t version;
+   char purpose[32];
    unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN];
    char caller_issuer[601];
    char caller_serial_norm[129];
@@ -25,7 +26,7 @@ typedef struct
    char staple_sha256[65];
    char correlation_id[65];
    char jti[65];
-   char action_request_sha256[65];
+   char operation_request_sha256[65];
    char canonical_sha256[65];
    /* Filled only after verified-mTLS admission; never part of request JSON. */
    char authenticated_peer_fingerprint[65];

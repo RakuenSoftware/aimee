@@ -4,6 +4,8 @@
  * yaml.c shim handles parse/emit so this file's schema-extraction code
  * never sees the format change. */
 #include <pthread.h>
+#include <limits.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -379,7 +381,7 @@ static const config_schema_entry_t config_schema[] = {
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
     {"modules", SCHEMA_OBJECT, 0},    /* memory/governance/delegates/workflows/economizer toggles */
-    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|proof_gated} */
+    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|safe|aggressive} */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"prompt_tier", SCHEMA_STRING, 0},
@@ -411,6 +413,7 @@ static const config_schema_entry_t config_schema[] = {
     {"auxiliary", SCHEMA_OBJECT, 0},
     {"model_meta", SCHEMA_OBJECT, 0},
     {"db2", SCHEMA_OBJECT, 0},
+    {"vault", SCHEMA_OBJECT, 0},
     {"ensemble", SCHEMA_OBJECT, 0},
     {"roundtable", SCHEMA_OBJECT, 0},
     {"cron_jobs", SCHEMA_ARRAY, 0},
@@ -610,9 +613,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   /* Context economizer defaults OFF. proof_gated freezes pristine provider bytes
-    * behind the signed-empty-registry fence; no legacy reduction lever is live. */
-   cfg->economizer_mode = ECON_MODE_OFF;
+   /* SAFE is useful without provider-specific pricing guesses: it only compacts
+    * strict JSON returned by a local tool before that result's first dispatch. */
+   cfg->economizer_mode = ECON_MODE_SAFE;
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
@@ -915,11 +918,9 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->default_persona, sizeof(cfg->default_persona), "engineer");
    cfg->roundtable_max_rounds = 1;
    cfg->roundtable_converge_threshold = 10;
-   /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
-    * ensemble, short enough that a wedged run fails fast instead of a 10-min
-    * silent block. Overridable via roundtable.deadline_ms. Paired with the
-    * round-boundary progress logging so an in-flight run is observably advancing. */
-   cfg->roundtable_deadline_ms = 360000;
+   /* Ten-minute default safety bound for a complete roundtable. It remains
+    * overridable via roundtable.deadline_ms in GUI and CLI configuration. */
+   cfg->roundtable_deadline_ms = 600000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
    snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
             "zero_blocking");
@@ -994,15 +995,26 @@ int econ_mode(const config_t *cfg)
 
 const char *econ_mode_name(int mode)
 {
-   return mode == ECON_MODE_PROOF_GATED ? "proof_gated" : "off";
+   switch (mode)
+   {
+   case ECON_MODE_OFF:
+      return "off";
+   case ECON_MODE_AGGRESSIVE:
+      return "aggressive";
+   case ECON_MODE_SAFE:
+   default:
+      return "safe";
+   }
 }
 
 int econ_mode_parse(const char *s)
 {
-   if (s && strcmp(s, "off") == 0)
+   if (s && strcasecmp(s, "off") == 0)
       return ECON_MODE_OFF;
-   if (s && strcmp(s, "proof_gated") == 0)
-      return ECON_MODE_PROOF_GATED;
+   if (s && strcasecmp(s, "safe") == 0)
+      return ECON_MODE_SAFE;
+   if (s && strcasecmp(s, "aggressive") == 0)
+      return ECON_MODE_AGGRESSIVE;
    return -1;
 }
 
@@ -1037,8 +1049,7 @@ int guardrails_semantic_mode_parse(const char *s)
 
 int econ_reduction_master_on(const config_t *cfg)
 {
-   (void)cfg;
-   return 0;
+   return econ_mode(cfg) != ECON_MODE_OFF;
 }
 
 int config_module_enabled(int config_tristate, int env_default)
@@ -1053,8 +1064,7 @@ int config_module_enabled(int config_tristate, int env_default)
 
 int econ_gateway_mutate_on(const config_t *cfg)
 {
-   (void)cfg;
-   return 0;
+   return econ_mode(cfg) == ECON_MODE_AGGRESSIVE;
 }
 
 void econ_preset(const config_t *cfg, econ_preset_t *out)
@@ -1062,7 +1072,19 @@ void econ_preset(const config_t *cfg, econ_preset_t *out)
    if (!out)
       return;
    memset(out, 0, sizeof *out);
-   (void)cfg;
+   int mode = econ_mode(cfg);
+   if (mode == ECON_MODE_OFF)
+      return;
+   out->json_compact = 1;
+   if (mode == ECON_MODE_AGGRESSIVE)
+   {
+      out->history_fold = 1;
+      out->compress = 1;
+      out->command_filter = 1;
+      out->freeze_guard_horizon = 1;
+      out->gateway_seam = 1;
+      out->gateway_session_disable_ttl_ms = 3600000;
+   }
 }
 
 static int config_snapshot_live(void);
@@ -1848,7 +1870,7 @@ int config_load_file(config_t *cfg)
    return 0;
 }
 
-/* ---- live config snapshot: double-buffer + seqlock (live-config-reload P1a) ----
+/* ---- live config snapshot: reader-pinned double buffer (live-config-reload P1a) ----
  *
  * A single writer (config_reload, serialized by g_snap_wlock) publishes a fresh config_t
  * into the inactive slot of a two-slot double buffer and flips the active index; readers
@@ -1858,9 +1880,77 @@ int config_load_file(config_t *cfg)
 static config_t g_snap[2];
 static _Atomic unsigned g_snap_seq = 0;    /* seqlock: even = stable, odd = writing */
 static _Atomic unsigned g_snap_active = 0; /* index (0/1) of the live slot */
-static uint64_t g_snap_token = 0;          /* content-hash of the active snapshot */
-static _Atomic int g_snap_inited = 0;      /* atomic so the config_load wrapper's read is visible */
+/* One atomic admission word closes the delayed-pin TOCTOU that a separate reader
+ * count plus writer zero-check would leave.  The high bit reserves a slot for
+ * its writer; the remaining bits count readers that may touch its ordinary
+ * config_t payload. */
+#define CONFIG_SNAPSHOT_WRITER_RESERVED ((unsigned)(UINT_MAX ^ (UINT_MAX >> 1)))
+#define CONFIG_SNAPSHOT_READER_MAX      (CONFIG_SNAPSHOT_WRITER_RESERVED - 1u)
+static _Atomic unsigned g_snap_state[2] = {0, 0};
+static uint64_t g_snap_token = 0;     /* content-hash of the active snapshot */
+static _Atomic int g_snap_inited = 0; /* atomic so the config_load wrapper's read is visible */
 static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Test-only coordination seam.  The focused test links a separately compiled
+ * config object with this macro; production objects contain neither the hook
+ * nor the destructive state controls. */
+#ifdef AIMEE_CONFIG_SNAPSHOT_TESTING
+#include "config_snapshot_test.h"
+static config_snapshot_test_hook_fn g_snap_test_hook;
+static void *g_snap_test_hook_ctx;
+
+static void config_snapshot_test_event(config_snapshot_test_event_t event, unsigned slot)
+{
+   if (g_snap_test_hook)
+      g_snap_test_hook(event, slot, g_snap_test_hook_ctx);
+}
+
+void config_snapshot_test_set_hook(config_snapshot_test_hook_fn hook, void *ctx)
+{
+   g_snap_test_hook = hook;
+   g_snap_test_hook_ctx = ctx;
+}
+
+unsigned config_snapshot_test_writer_reserved(void)
+{
+   return CONFIG_SNAPSHOT_WRITER_RESERVED;
+}
+
+unsigned config_snapshot_test_reader_max(void)
+{
+   return CONFIG_SNAPSHOT_READER_MAX;
+}
+
+int config_snapshot_test_set_slot_state(unsigned slot, unsigned state)
+{
+   if (slot > 1)
+      return -1;
+   atomic_store_explicit(&g_snap_state[slot], state, memory_order_release);
+   return 0;
+}
+
+unsigned config_snapshot_test_get_slot_state(unsigned slot)
+{
+   return slot <= 1 ? atomic_load_explicit(&g_snap_state[slot], memory_order_acquire) : UINT_MAX;
+}
+
+unsigned config_snapshot_test_active_slot(void)
+{
+   return atomic_load_explicit(&g_snap_active, memory_order_acquire);
+}
+#else
+static void config_snapshot_test_event(int event, unsigned slot)
+{
+   (void)event;
+   (void)slot;
+}
+#define CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE    0
+#define CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED 0
+#define CONFIG_SNAPSHOT_TEST_BEFORE_WRITE      0
+#define CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE     0
+#define CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED      0
+#define CONFIG_SNAPSHOT_TEST_PIN_VALIDATED     0
+#endif
 
 /* Re-applier registry (P3): hooks run after a reload publishes, under g_snap_wlock. */
 #define CONFIG_MAX_REAPPLIERS 16
@@ -1899,13 +1989,37 @@ static uint64_t config_snapshot_token(const config_t *c)
 /* Publish `cfg` into the inactive slot and flip. Caller holds g_snap_wlock (single writer). */
 static void config_snapshot_publish(const config_t *cfg)
 {
+   unsigned current = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+   unsigned nxt = current ^ 1u;
+   unsigned expected = 0;
+   config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE, nxt);
+   /* Reserve exactly the drained inactive slot.  Readers admit themselves by
+    * CAS on this same word, so either their pin wins (and we wait for release)
+    * or this reservation wins (and no delayed reader can reach the payload). */
+   unsigned contention_spins = 0;
+   while (!atomic_compare_exchange_weak_explicit(&g_snap_state[nxt], &expected,
+                                                 CONFIG_SNAPSHOT_WRITER_RESERVED,
+                                                 memory_order_acquire, memory_order_relaxed))
+   {
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED, nxt);
+      expected = 0;
+      /* Readers need no writer-held resource to unpin. Bound CPU spinning and
+       * yield the processor so a pinned reader can run its release-decrement. */
+      atomic_signal_fence(memory_order_seq_cst);
+      if (++contention_spins == 64)
+      {
+         sched_yield();
+         contention_spins = 0;
+      }
+   }
+   config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_BEFORE_WRITE, nxt);
    unsigned s = atomic_load_explicit(&g_snap_seq, memory_order_relaxed);
    atomic_store_explicit(&g_snap_seq, s + 1, memory_order_release); /* -> odd (writing) */
-   unsigned nxt = atomic_load_explicit(&g_snap_active, memory_order_relaxed) ^ 1u;
    g_snap[nxt] = *cfg; /* fill the slot no reader is on */
    atomic_store_explicit(&g_snap_active, nxt, memory_order_release);
    g_snap_token = config_snapshot_token(cfg);
    atomic_store_explicit(&g_snap_seq, s + 2, memory_order_release); /* -> even (stable) */
+   atomic_store_explicit(&g_snap_state[nxt], 0, memory_order_release);
    atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
 }
 
@@ -1929,10 +2043,32 @@ int config_snapshot_get(config_t *out)
       if (s0 & 1u)
          continue; /* a publish is in progress */
       unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
-      *out = g_snap[act]; /* POD copy */
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, act);
+      unsigned state = atomic_load_explicit(&g_snap_state[act], memory_order_acquire);
+      for (;;)
+      {
+         if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+            break;
+         if (state == CONFIG_SNAPSHOT_READER_MAX)
+            return -1; /* bounded failure: output and admission word stay unchanged */
+         if (atomic_compare_exchange_weak_explicit(&g_snap_state[act], &state, state + 1,
+                                                   memory_order_acquire, memory_order_relaxed))
+            break;
+      }
+      if (state & CONFIG_SNAPSHOT_WRITER_RESERVED)
+         continue;
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, act);
       unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
-      if (s0 == s1)
-         return 0; /* stable — no publish raced the copy */
+      unsigned act1 = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      if (s0 != s1 || (s1 & 1u) || act != act1)
+      {
+         atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+         continue;
+      }
+      config_snapshot_test_event(CONFIG_SNAPSHOT_TEST_PIN_VALIDATED, act);
+      *out = g_snap[act]; /* reservation excludes writers until the release-unpin below */
+      atomic_fetch_sub_explicit(&g_snap_state[act], 1, memory_order_release);
+      return 0;
    }
 }
 

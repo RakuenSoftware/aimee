@@ -16,6 +16,8 @@ type ReviewRequest struct {
 }
 
 type RunResult struct {
+	RunID              string              `json:"run_id,omitempty"`
+	ArtifactHash       string              `json:"artifact_hash,omitempty"`
 	Artifact           string              `json:"artifact"`
 	Feedback           *wfe.ReviewFeedback `json:"feedback,omitempty"`
 	Items              []wfe.Finding       `json:"items"`

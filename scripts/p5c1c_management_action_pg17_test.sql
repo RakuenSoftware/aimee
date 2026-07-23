@@ -275,7 +275,9 @@ END $$;
 RESET ROLE;
 DROP TRIGGER aa_p5c1c_fail_audit ON public.kb_audit_event;
 DO $$ BEGIN
-  IF EXISTS(SELECT 1 FROM public.kb_management_action_intent WHERE correlation_id=repeat('9',64)) OR
+  IF EXISTS(SELECT 1 FROM public.kb_management_token_intent_namespace
+       WHERE correlation_id=repeat('9',64)) OR
+     EXISTS(SELECT 1 FROM public.kb_management_action_intent WHERE correlation_id=repeat('9',64)) OR
      EXISTS(SELECT 1 FROM public.kb_audit_event WHERE action='management.action.intent'
        AND subject=repeat('9',64)) THEN
     RAISE EXCEPTION 'atomic intent/WORM rollback failed';
@@ -293,6 +295,27 @@ DO $$ BEGIN
   IF EXISTS(SELECT 1 FROM public.kb_management_action_outcome WHERE correlation_id=repeat('6',64)) THEN
     RAISE EXCEPTION 'intent-only fixture gained an outcome';
   END IF;
+  IF (SELECT ROW(n.jti,n.kind) FROM public.kb_management_token_intent_namespace n
+        WHERE n.correlation_id=repeat('6',64)) IS DISTINCT FROM
+          ROW(repeat('5',64),'action'::TEXT) THEN
+    RAISE EXCEPTION 'action namespace tuple mismatch';
+  END IF;
+  IF has_table_privilege('aimee_kb_runtime',
+       'public.kb_management_token_intent_namespace','SELECT') OR
+     has_table_privilege('aimee_kb_runtime',
+       'public.kb_management_token_intent_namespace','INSERT') THEN
+    RAISE EXCEPTION 'runtime gained direct namespace privilege';
+  END IF;
+  BEGIN
+    INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+      VALUES(repeat('6',64),repeat('7',64),'read');
+    RAISE EXCEPTION 'cross-kind correlation collision accepted';
+  EXCEPTION WHEN unique_violation THEN NULL; END;
+  BEGIN
+    UPDATE public.kb_management_token_intent_namespace SET kind='read'
+      WHERE correlation_id=repeat('6',64);
+    RAISE EXCEPTION 'namespace update accepted';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
 END $$;
 
 -- Failure of the outcome WORM append likewise rolls back the terminal row.

@@ -31,7 +31,8 @@ int server_mgmt_nonce_issue_purpose(const server_tls_peer_cert_t *p, const char 
    if (!db || !p || !p->issuer[0] || !p->serial_norm[0] || strlen(p->fingerprint) != 64 ||
        strlen(p->channel_binding) != 64 || !target || !target[0] || strlen(target) > 127 ||
        !purpose ||
-       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1")) ||
+       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1") &&
+        strcmp(purpose, "management.read.v1") && strcmp(purpose, "management.read.config.v1")) ||
        !nonce || !expires || now > INT64_MAX - NONCE_TTL || RAND_bytes(nonce, 32) != 1)
       return SERVER_MGMT_NONCE_INVALID;
    if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
@@ -97,7 +98,8 @@ server_mgmt_nonce_consume_purpose(const kb_mgmt_status_t *st, const server_tls_p
 {
    sqlite3 *db = db1_conn();
    if (!db || !st || !p || !target || !purpose ||
-       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1")) ||
+       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1") &&
+        strcmp(purpose, "management.read.v1") && strcmp(purpose, "management.read.config.v1")) ||
        now > INT64_MAX || st->revocation_generation > INT64_MAX)
       return SERVER_MGMT_NONCE_INVALID;
    if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)

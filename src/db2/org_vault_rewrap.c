@@ -111,7 +111,7 @@ db2_vault_rewrap_result_t db2_vault_rewrap_classify_sqlstate(const char *s)
       return DB2_VAULT_REWRAP_BUSY;
    if (strcmp(s, "P7C01") == 0 || strcmp(s, "23505") == 0)
       return DB2_VAULT_REWRAP_CONFLICT;
-   if (strcmp(s, "P7I01") == 0)
+   if (strcmp(s, "P7I01") == 0 || strcmp(s, "P7B01") == 0)
       return DB2_VAULT_REWRAP_INTEGRITY;
    if (strcmp(s, "40001") == 0 || strcmp(s, "40P01") == 0)
       return DB2_VAULT_REWRAP_TRANSIENT;
@@ -857,16 +857,65 @@ static db2_vault_rewrap_result_t simple_state(db2_vault_rewrap_tx_t *tx, const c
       tx->phase = done_phase;
    return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(tx, rc);
 }
-db2_vault_rewrap_result_t db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *t,
-                                                        const uint8_t o[16], int64_t f)
+db2_vault_rewrap_result_t
+db2_vault_rewrap_inventory_summary(db2_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
+                                   db2_vault_rewrap_inventory_summary_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!tx_owned(t) || t->kind != RW_KIND_STAGING || t->phase != RW_PHASE_STAGING || !out)
+      return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
+   aimee_pg_stmt_t *st =
+       prepare_op(t, "SELECT * FROM org_vault_rewrap_inventory_summary(?1,?2)", o, f);
+   if (!st)
+      return tx_fail(t, t->prepare_error);
+   aimee_pg_step_t sr;
+   db2_vault_rewrap_result_t rc = step(st, &sr);
+   if (rc == DB2_VAULT_REWRAP_OK && sr == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
+       !aimee_pg_column_is_null(st, 1) && blob_exact(st, 2, out->inventory_digest, 32) == 0)
+   {
+      out->secret_count = aimee_pg_column_int64(st, 0);
+      out->check_count = aimee_pg_column_int64(st, 1);
+      rc = out->secret_count < 0 || out->check_count < 0 ? DB2_VAULT_REWRAP_INTEGRITY
+                                                         : expect_done(st);
+   }
+   else if (rc == DB2_VAULT_REWRAP_OK)
+      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   aimee_pg_finalize(st);
+   if (rc != DB2_VAULT_REWRAP_OK)
+   {
+      memset(out, 0, sizeof(*out));
+      return tx_fail(t, rc);
+   }
+   return rc;
+}
+
+db2_vault_rewrap_result_t
+db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16], int64_t f,
+                              const db2_vault_rewrap_inventory_summary_t *expected)
 {
    if (!tx_owned(t) || t->kind != RW_KIND_STAGING || t->phase != RW_PHASE_STAGING ||
-       !t->secret_exhausted || !t->check_exhausted)
+       !t->secret_exhausted || !t->check_exhausted || !expected || expected->secret_count < 0 ||
+       expected->check_count < 0)
       return tx_fail(t, DB2_VAULT_REWRAP_INVALID);
-   return simple_state(t, "SELECT org_vault_rewrap_stage_finish(?1,?2)", o, f, NULL, NULL,
-                       RW_KIND_STAGING, RW_PHASE_STAGING_DONE,
-                       RW_STATES_ALL & ~RW_STATE_BIT(DB2_VAULT_REWRAP_PREPARING) &
-                           ~RW_STATE_BIT(DB2_VAULT_REWRAP_CUSTODY_PREPARED));
+   aimee_pg_stmt_t *st =
+       prepare_op(t, "SELECT org_vault_rewrap_stage_finish(?1,?2,?3,?4,?5)", o, f);
+   if (!st || aimee_pg_bind_int64(st, "?3", expected->secret_count) != 0 ||
+       aimee_pg_bind_int64(st, "?4", expected->check_count) != 0 ||
+       aimee_pg_bind_blob(st, "?5", expected->inventory_digest, 32) != 0)
+   {
+      int had_stmt = st != NULL;
+      aimee_pg_finalize(st);
+      return prepare_or_bind_failure(t, had_stmt);
+   }
+   db2_vault_rewrap_result_t rc =
+       state_scalar(st,
+                    RW_STATES_ALL & ~RW_STATE_BIT(DB2_VAULT_REWRAP_PREPARING) &
+                        ~RW_STATE_BIT(DB2_VAULT_REWRAP_CUSTODY_PREPARED),
+                    NULL);
+   if (rc == DB2_VAULT_REWRAP_OK)
+      t->phase = RW_PHASE_STAGING_DONE;
+   return rc == DB2_VAULT_REWRAP_OK ? rc : tx_fail(t, rc);
 }
 db2_vault_rewrap_result_t db2_vault_rewrap_mark_committing(db2_vault_rewrap_tx_t *t,
                                                            const uint8_t o[16], int64_t f)
@@ -1253,6 +1302,7 @@ const db2_vault_rewrap_ops_t db2_vault_rewrap_default_ops = {
     .source_check_page = db2_vault_rewrap_source_check_page,
     .stage_dek = db2_vault_rewrap_stage_dek,
     .stage_check = db2_vault_rewrap_stage_check,
+    .inventory_summary = db2_vault_rewrap_inventory_summary,
     .stage_finish = db2_vault_rewrap_stage_finish,
     .mark_committing = db2_vault_rewrap_mark_committing,
     .mark_resealed = db2_vault_rewrap_mark_resealed,

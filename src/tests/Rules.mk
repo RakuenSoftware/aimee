@@ -106,7 +106,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-memory $(TESTPREFIX)/unit-test-tasks \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent $(TESTPREFIX)/unit-test-agent-repair $(TESTPREFIX)/unit-test-agent-apikey $(TESTPREFIX)/unit-test-script-runner $(TESTPREFIX)/unit-test-provider-cli-adapter $(TESTPREFIX)/unit-test-cli-acp $(TESTPREFIX)/unit-test-acp-server $(TESTPREFIX)/unit-test-toolset-thread-scope $(TESTPREFIX)/unit-test-workspace-provider-container $(TESTPREFIX)/unit-test-mcp-native-surface $(TESTPREFIX)/unit-test-mcp-native-dispatch $(TESTPREFIX)/unit-test-extractors \
-               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-roundtable-preset $(TESTPREFIX)/unit-test-roundtable-seat-resolve $(TESTPREFIX)/unit-test-audit-worm $(TESTPREFIX)/unit-test-audit-worm-chain $(TESTPREFIX)/unit-test-kb-audit-worm $(TESTPREFIX)/unit-test-config-economizer $(TESTPREFIX)/unit-test-config-snapshot $(TESTPREFIX)/unit-test-msg-session-disable $(TESTPREFIX)/unit-test-gateway-mutate $(TESTPREFIX)/unit-test-gateway-mutate-wire $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-tool-condense $(TESTPREFIX)/unit-test-tool-output-cap $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-code-span $(TESTPREFIX)/unit-test-code-match $(TESTPREFIX)/unit-test-gw-stage-memory $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-cochange $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
+               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-roundtable-preset $(TESTPREFIX)/unit-test-roundtable-seat-resolve $(TESTPREFIX)/unit-test-audit-worm $(TESTPREFIX)/unit-test-audit-worm-chain $(TESTPREFIX)/unit-test-kb-audit-worm $(TESTPREFIX)/unit-test-config-economizer $(TESTPREFIX)/unit-test-config-snapshot $(TESTPREFIX)/unit-test-config-snapshot-race $(TESTPREFIX)/unit-test-msg-session-disable $(TESTPREFIX)/unit-test-gateway-mutate $(TESTPREFIX)/unit-test-gateway-mutate-wire $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-tool-condense $(TESTPREFIX)/unit-test-tool-output-cap $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-code-span $(TESTPREFIX)/unit-test-code-match $(TESTPREFIX)/unit-test-gw-stage-memory $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-cochange $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
                $(TESTPREFIX)/unit-test-render $(TESTPREFIX)/unit-test-index $(TESTPREFIX)/unit-test-manuscript $(TESTPREFIX)/unit-test-persona $(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-openai-shape $(TESTPREFIX)/unit-test-openai-chat-policed $(TESTPREFIX)/unit-test-openai-responses-store \
                $(TESTPREFIX)/unit-test-feedback-shadow $(TESTPREFIX)/unit-test-graph-fusion $(TESTPREFIX)/unit-test-code-vectors $(TESTPREFIX)/unit-test-graph-scoring $(TESTPREFIX)/unit-test-code-projection $(TESTPREFIX)/unit-test-entity-nodes $(TESTPREFIX)/unit-test-memory-advanced $(TESTPREFIX)/unit-test-memory-health \
                $(TESTPREFIX)/unit-test-memory-ranker-boundary \
@@ -287,6 +287,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-coord-closet \
                $(TESTPREFIX)/unit-test-economizer-proof \
+               $(TESTPREFIX)/unit-test-economizer-activation \
                $(TESTPREFIX)/unit-test-economizer-wire-snapshot \
                $(TESTPREFIX)/unit-test-economizer-live-surface \
                $(TESTPREFIX)/unit-test-economizer-openai \
@@ -337,12 +338,23 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-check \
                $(TESTPREFIX)/unit-test-vault-reseal-receipt \
+               $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
                $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-vault-store \
                $(TESTPREFIX)/unit-test-vault-seam \
+               $(TESTPREFIX)/unit-test-vault-local-status \
+               $(TESTPREFIX)/unit-test-vault-operator-status-runtime \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-status \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-mutation \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-choreography \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-runtime \
+               $(TESTPREFIX)/unit-test-kb-vault-protected-secret \
+               $(TESTPREFIX)/unit-test-kb-vault-activation-latch \
+               $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock \
                $(TESTPREFIX)/unit-test-vault-maintenance-guard \
+               $(TESTPREFIX)/unit-test-vault-d3b-custody \
                $(TESTPREFIX)/unit-test-kb-vault-key-use \
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
@@ -553,6 +565,9 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-token \
                $(TESTPREFIX)/unit-test-server-mgmt-endpoint \
+               $(TESTPREFIX)/unit-test-server-mgmt-read \
+               $(TESTPREFIX)/unit-test-server-mgmt-read-source \
+               $(TESTPREFIX)/unit-test-server-mgmt-read-endpoint \
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-server-management-jti \
@@ -1053,6 +1068,7 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1068,6 +1084,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1083,6 +1100,7 @@ $(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
+                      $(OBJDIR)/modules/economizer/economizer_json.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1245,8 +1263,21 @@ $(TESTPREFIX)/unit-test-audit-worm-chain: $(OBJDIR)/tests/test_audit_worm_chain.
 $(TESTPREFIX)/unit-test-config-economizer: $(OBJDIR)/tests/test_config_economizer.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-config-snapshot: $(OBJDIR)/tests/test_config_snapshot.o $(TEST_CORE_OBJS)
+P5D2B0_CONFIG_TEST_OBJS = $(filter-out $(OBJDIR)/modules/config/config.o,$(TEST_CORE_OBJS)) \
+                          $(OBJDIR)/tests/config_snapshot_config.o
+
+$(OBJDIR)/tests/config_snapshot_config.o: modules/config/config.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(TEST_C_FLAGS) -DAIMEE_CONFIG_SNAPSHOT_TESTING -o $@ $<
+
+$(TESTPREFIX)/unit-test-config-snapshot: $(OBJDIR)/tests/test_config_snapshot.o \
+                                         $(P5D2B0_CONFIG_TEST_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-config-snapshot-race: $(OBJDIR)/tests/test_config_snapshot_race.o \
+                                             $(OBJDIR)/tests/config_snapshot_config.o \
+                                             $(OBJDIR)/platform_random.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-msg-session-disable: $(OBJDIR)/tests/test_msg_session_disable.o \
                      $(OBJDIR)/server/msg_session_disable.o $(OBJDIR)/server/gw_mutate_stats.o \
@@ -1466,7 +1497,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
                       $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/modules/config/config_fields.o \
 	                                $(OBJDIR)/server/modules/skill/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/modules/vault/vault_principal.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/modules/vault/vault_principal.o \
 	                                $(OBJDIR)/tests/support/workflow_api_stub.o \
 	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
@@ -1824,6 +1855,22 @@ $(TESTPREFIX)/unit-test-server-mgmt-endpoint: $(OBJDIR)/tests/test_server_mgmt_e
                                               $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
+$(TESTPREFIX)/unit-test-server-mgmt-read: $(OBJDIR)/tests/test_server_mgmt_read.o \
+                                          $(OBJDIR)/shared/management_read.o \
+                                          $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-mgmt-read-source: \
+    $(OBJDIR)/tests/test_server_mgmt_read_source.o \
+    $(OBJDIR)/server/server_mgmt_read_source.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-mgmt-read-endpoint: \
+    $(OBJDIR)/tests/test_server_mgmt_read_endpoint.o \
+    $(OBJDIR)/server/server_mgmt_read_endpoint.o \
+    $(OBJDIR)/shared/management_read.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
 $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
     $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
     $(OBJDIR)/server/server_mgmt_checkpoint_client.o $(OBJDIR)/server/server_mgmt_status.o \
@@ -1874,7 +1921,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-client: \
 
 $(TESTPREFIX)/unit-test-kb-management-runtime: \
     $(OBJDIR)/tests/test_kb_management_runtime.o \
-    $(OBJDIR)/kb/kb_management_runtime.o
+    $(OBJDIR)/kb/kb_management_runtime.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-http-servers-health: \
@@ -2973,6 +3020,13 @@ $(TESTPREFIX)/unit-test-economizer-proof: $(OBJDIR)/tests/test_economizer_proof.
                                   $(OBJDIR)/modules/economizer/economizer_proof.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-economizer-activation: \
+                                  $(OBJDIR)/tests/test_economizer_activation.o \
+                                  $(OBJDIR)/modules/economizer/economizer_json.o \
+                                  $(OBJDIR)/modules/economizer/economizer_provenance.o \
+                                  $(OBJDIR)/modules/economizer/economizer_dispatch_lease.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-economizer-wire-snapshot: \
                                   $(OBJDIR)/tests/test_economizer_wire_snapshot.o \
                                   $(OBJDIR)/modules/economizer/economizer_wire_snapshot.o \
@@ -3634,9 +3688,15 @@ $(TESTPREFIX)/unit-test-vault-reseal-receipt: $(OBJDIR)/tests/test_vault_reseal_
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-vault-mutation-budget: \
+                              $(OBJDIR)/tests/test_vault_mutation_budget.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-vault-reseal-orchestrator: \
                               $(OBJDIR)/tests/test_vault_reseal_orchestrator.o \
                               $(OBJDIR)/modules/vault/vault_reseal_orchestrator.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o \
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
@@ -3691,12 +3751,77 @@ $(TESTPREFIX)/unit-test-vault-seam: $(OBJDIR)/tests/test_vault_seam.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-vault-local-status: $(OBJDIR)/tests/test_vault_local_status.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-operator-status-runtime: \
+                              $(OBJDIR)/tests/test_vault_operator_status_runtime.o \
+                              $(OBJDIR)/db2/vault_operator_status_runtime.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpq -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-status: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-mutation: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_mutation.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-choreography: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_choreography.o \
+                              $(OBJDIR)/kb/kb_vault_operator_mutation.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-runtime: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_runtime.o \
+                              $(OBJDIR)/kb/kb_vault_operator_runtime.o \
+                              $(OBJDIR)/kb/kb_vault_operator_mutation.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-protected-secret: \
+                              $(OBJDIR)/tests/test_kb_vault_protected_secret.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-kb-vault-activation-latch: \
+                              $(OBJDIR)/tests/test_kb_vault_activation_latch.o \
+                              $(OBJDIR)/kb/kb_vault_activation_latch.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock: \
+                              $(OBJDIR)/tests/test_kb_vault_tpm_runtime_lock.o \
+                              $(OBJDIR)/kb/kb_vault_tpm_runtime_lock.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
 $(TESTPREFIX)/unit-test-vault-maintenance-guard: \
                               $(OBJDIR)/tests/test_vault_maintenance_guard.o \
                               $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-d3b-custody: \
+                              $(OBJDIR)/tests/test_vault_d3b_custody.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -4007,8 +4132,8 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
-                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_mgmt_read_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/shared/management_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \
@@ -4016,7 +4141,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
                            $(OBJDIR)/server/compute_pool.o \
-                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
+                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/modules/roundtable/roundtable_preset.o \
                            $(OBJDIR)/role_templates.o \

@@ -71,6 +71,36 @@ int main(void)
    assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.action.v1", 101, 1) ==
           SERVER_MGMT_NONCE_OK);
 
+   memset(&s, 0, sizeof(s));
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.read.v1", 200, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
+   assert(action_expiry == 215);
+   s.revocation_generation = 4;
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.action.v1", 201, 1) ==
+          SERVER_MGMT_NONCE_MISMATCH);
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.v1", 201, 1) ==
+          SERVER_MGMT_NONCE_NOT_FOUND);
+
+   memset(&s, 0, sizeof(s));
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.read.config.v1", 200, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
+   s.revocation_generation = 4;
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.v1", 201, 1) ==
+          SERVER_MGMT_NONCE_MISMATCH);
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.config.v1", 201,
+                                            1) == SERVER_MGMT_NONCE_NOT_FOUND);
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.read.config.v1", 200, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.config.v1", 201,
+                                            1) == SERVER_MGMT_NONCE_OK);
+
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.read.v1", 200, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.v1", 201, 1) ==
+          SERVER_MGMT_NONCE_OK);
+   assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.read.v1", 201, 1) ==
+          SERVER_MGMT_NONCE_NOT_FOUND);
+
    s = issue(&p, 100);
    db1_shutdown();
    assert(db1_init(path) == 0 && server_mgmt_status_init() == 0);

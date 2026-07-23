@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 82
+Total endpoints: 84
 
 ## Endpoints
 
@@ -1039,6 +1039,48 @@ Responses:
 - `409` — Replay, registry conflict, or unresolved prior intent
 - `502` — Action result is indeterminate
 - `503` — Management runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/agents`
+
+Read the bounded public agent projection from one registered server
+
+Performs the nonce-bound management-read exchange over the server's pinned mTLS session. The response contains only the seven frozen public agent fields and is authorized independently from remote_writes.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Complete bounded agent projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/config`
+
+Read the bounded safe configuration projection from one registered server
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200` — Complete five-field safe configuration projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
 
 ### `GET /v1/servers/{server_id}/health`
 

@@ -143,6 +143,10 @@ int main(void)
    assert(server_mgmt_jwks_cache_load(bundle, bundle_n, 101, jwks, sizeof(jwks), &jwks_n) ==
           SERVER_MGMT_JWKS_CACHE_OK);
    assert(jwks_n && !strcmp(jwks, expected_jwks));
+   int64_t current_generation = 0;
+   assert(server_mgmt_jwks_cache_current_generation(bundle, bundle_n, 101, &current_generation) ==
+          SERVER_MGMT_JWKS_CACHE_OK);
+   assert(current_generation == 1);
 
    char other[KB_MGMT_JWKS_ENVELOPE_MAX];
    size_t other_n = 0;
