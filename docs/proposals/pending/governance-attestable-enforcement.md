@@ -3,6 +3,11 @@
 - **State:** PENDING — Part 1 of the three-part governance arc
   (this + [governance posture & policy surface](governance-policy-surface-and-posture.md)
   + [agent identity & artifact trust](governance-agent-identity-and-artifact-trust.md)).
+  **Amended 2026-07-23:** delta A6 adds the core-owned in-memory event bus
+  ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+  as the single uniform capture and enforcement seam once the modularization suite lands, collapsing
+  A2's scattered per-enforcer wiring into one bus tap. A6 depends on that suite and does not gate
+  A1–A5.
 - **Origin:** autonomous overnight governance deep-dive commissioned by JBailes,
   2026-07-13 (codebase enforcement-map + threat-coverage sweep + verified external
   landscape research).
@@ -168,6 +173,40 @@ policy that judged it identified. That is "attest that enforcement held" in the
 strongest form available without TEEs — and stronger than anything surveyed
 shipping today.
 
+### A6 — The event bus as the uniform capture and enforcement seam (2026-07-23 amendment)
+
+A2 above routes seven enforcers into the chain one wiring at a time, and A5's `uncovered_enforcers`
+list exists precisely because capture is a per-site effort that can silently miss a site. The
+modularization suite's amendment
+([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md),
+2026-07-23) removes that problem at the root: once the communication core is C and every module is
+Go, **every inter-module message is a typed event on a single core-owned in-memory event bus**, and
+no module-to-module path exists outside it. That makes the bus the one place to govern and log the
+entire cross-module message stream.
+
+- **Capture completeness becomes structural, not inventoried.** The bus tap offers every event to
+  audit; the A2 sources (gateway policy, memory interception, integrity gate, native gate, vault,
+  trigger/forge, guard) become event kinds on the bus rather than seven bespoke sinks. An enforcer
+  that acts without publishing a bus event cannot act at all, so A5's `uncovered_enforcers` collapses
+  from "sites we remembered to wire" to "event kinds declared but never chained" — a mechanical
+  descriptor check, not a manual sweep.
+- **Enforcement is a bus concern.** Action-class events carry a synchronous pre-delivery verdict
+  through `execution-policy` before the bus delivers them; the verdict and its `policy_rev` (A3) ride
+  the same event record. Non-action events (for example `memory` recall) are observed and recorded,
+  not gated, so completeness does not tax the hot path — the performance budget the suite fixes for
+  the bus (its invariant 15) and the WORM hot-path cost noted under *Risks* below are the same
+  constraint, satisfied by asynchronous, batched recording.
+- **One record shape.** Each governed bus event chains a row carrying the event kind, publishing and
+  serving module, actor/principal, verdict, and `policy_rev` — so `aimee audit attest` (A5) reports
+  over a uniform stream instead of reconciling seven formats.
+
+A6 depends on the modularization suite's event bus and therefore lands with it, after A1–A5; it does
+not block the default-on chain or the anchor pair. Until the bus exists, A2's explicit wiring is the
+capture mechanism; A6 is how that wiring stops being manual once the module boundary is real. The
+trust boundary is unchanged: the bus and its tap run in the audited service's process, so A4's
+out-of-process sealer and off-host anchor remain the actual trust anchor — the bus improves capture
+completeness and uniformity, not the host-compromise guarantee.
+
 ## Non-goals
 
 - **TEE / code-identity attestation.** A remote-attestation quote proving the
@@ -207,3 +246,12 @@ shipping today.
   holding the capability; anchor mismatch after a restore-from-backup is caught.
 - A5: attest bundle over a seeded window verifies offline with the public key;
   an uncovered enforcer (inventory entry without rows) is reported, not silent.
+- A6 (lands with the modularization suite's event bus): every inter-module message
+  is a bus event offered to the tap; an action-class event carries a synchronous
+  `execution-policy` verdict with its `policy_rev` before delivery, while a
+  high-frequency `memory` recall is recorded async and not gated; a module path
+  that reaches another module without a bus event fails the descriptor check
+  (`uncovered_enforcers` becomes "declared event kind never chained"); the chained
+  row carries event kind, publishing/serving module, actor, verdict, and
+  `policy_rev`; the bus tap running in-process does not change A4's out-of-process
+  anchor guarantee.

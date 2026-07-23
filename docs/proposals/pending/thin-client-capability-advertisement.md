@@ -38,6 +38,14 @@ thin client re-advertises the merged effective set to its consumer.
 This proposal owns the *advertisement surface* only. It does not own the capability-state model, the
 config catalog, transport authentication, or governance policy distribution; it composes them.
 
+**One discovery mechanism (2026-07-23).** The suite amendment
+([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+makes every module a Go participant on a core-owned in-memory event bus, where nearly every module
+depends on `memory`. The same generation-stamped capability projection defined here is what a module
+consults to learn whether `memory` (or any dependency) is `ready` before it publishes a request on
+the bus. Discovery is one mechanism for a client and for a module; this proposal's projection serves
+both, so a module never reaches an unready dependency and a client never advertises one.
+
 ## Decision
 
 1. Each Runtime and each Control Plane exposes a **capability advertisement**: a typed, versioned
@@ -65,7 +73,12 @@ any change), plus the `service` role (`runtime` | `control`) and `version`.
 
 The projection is derived only from module-runtime's capability closure and state and config's
 activation filtering. It introduces no capability, no state, and no dependency edge that those
-contracts do not already declare. An `optional` module that is **omitted** from the build closure is
+contracts do not already declare. Under the suite amendment
+([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)),
+that closure is assembled by **modules publishing their capabilities and state transitions to core
+over the event bus** — core aggregates those publications rather than polling modules — and this
+proposal projects the aggregate. Publication (module→core) and advertisement (core→client/module)
+are the same capability data observed from the two ends of the bus. An `optional` module that is **omitted** from the build closure is
 **absent from the advertisement entirely** (not listed as `disabled`) — consistent with the suite
 rule that omission leaves no residue; `disabled` is reserved for a selected module whose runtime
 lifecycle is off. `absent` never appears for an id the caller could otherwise enumerate; unknown ids

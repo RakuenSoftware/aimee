@@ -1,15 +1,37 @@
 # Proposal: define Aimee's required core capability contract
 
-- **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
+- **State:** PENDING — roundtable-approved 2026-07-20; **amended 2026-07-23 (post-approval)** for the
+  C-core / Go-module boundary and the event bus. This child now owns the final C/Go carving of the
+  eighteen IDs and a round-trip proof whose stages flow as bus events across the boundary. The
+  amendment reopens this child for re-review and does not inherit the 2026-07-20 approval.
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
-- **Owns:** required module responsibilities, core dependency law, and the executable core proof
+- **Owns:** required module responsibilities, core dependency law, the C/Go carving of the required
+  set, and the executable core proof
 - **Implementation dependency:** module descriptor/build enforcement
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (amended 2026-07-23)
 
 ## Decision
 
-Aimee Core consists of eighteen required modules. Each owns a narrow public contract and one
+Aimee Core consists of eighteen required capabilities. Each owns a narrow public contract and one
 working reference implementation. None imports, links, loads, or requires an optional module.
+
+**Language carving (2026-07-23 amendment).** Under the suite amendment, "required" no longer means
+"compiled into the C core." The eighteen required IDs split across the C-core / Go-module axis:
+
+- **Communication core (C):** `module-runtime` (which also owns the in-memory event bus and
+  capability-state authority), `config`, `ir`, `translation`, `protocols`, and `gateway`.
+- **Required Go modules:** `memory`, `learning`, `routing`, `delegates`, `tools`, `workspace`,
+  `git`, `skills`, and `response-composition` — always selected, still Go, reached only over the bus.
+- **Trust kernel:** `vault`, `execution-policy`, and `audit`. This proposal places them in the **C
+  communication core**, because the bus authorizes and records every inter-module event through them
+  and the safety boundary must not depend on a Go module the bus is trying to reach. Wherever a
+  future amendment might move them, their contracts and reference implementations stay required in
+  every profile. This placement is the carving the suite delegated here; it is normative for this
+  child's proof and binding checks.
+
+The dependency law below is unchanged in intent but is now evaluated over event-contract edges, not C
+link edges: no required capability requests or subscribes to an optional module, and `memory` is a
+sink that requests nothing from another feature module.
 
 | Module | Required responsibility |
 |---|---|
@@ -106,6 +128,17 @@ the memory/learning proposal owns the semantics and quality gates of stages 6, 8
 Every stage records its component ID and input/output IDs. Required-provider failure is typed and
 fails readiness or the owning stage; silent passthrough is forbidden. The proof requires MCP and
 ACP coverage, response composition, and absence of `kb-synthesis` and every other optional module.
+
+**Bus-crossing proof (2026-07-23 amendment).** Every stage owned by a Go module — including the
+`memory` stages (structured extraction/indexing, memory write, embedding, candidate retrieval,
+reranking) and the learning, routing, delegate, tool, workspace, skills, and response-composition
+stages — is dispatched as a typed event across the C↔Go boundary over the in-memory event bus, not
+as an in-process call. The trace records, per stage, the event kind, the publishing and serving
+module, and the trust-kernel verdict/record for the hop; a stage that reaches a module by any path
+other than an authorized bus event fails the proof. The `memory` stages additionally assert the
+performance budget (suite invariant 15): the boundary crossing holds at parity with the former
+in-process call, and their events are observed/recorded without a synchronous governance verdict on
+the hot path.
 Core descriptors declare their stages. The generator emits the stage manifest from those
 declarations and validates it against the separate canonical stage-name registry. Startup and CI
 require exact equality among descriptor stages, the generated manifest, registered runtime stages,
@@ -140,4 +173,6 @@ mission.
 - {id: 3, tier: integration, check: "scripts/test_core_round_trip.sh --profile core --stage-registry src/generated/core-stage-registry.yaml --generated-stage-manifest tests/core_round_trip/core-stages.yaml --require-descriptor-manifest-registry-runtime-trace-equality --protocols mcp,acp --require-adaptive-skill-affects-context-route --require-learning-records-outcome --fail-noop-learning-skills --require-response-composition-present --require-kb-synthesis-absent --require-no-optional-link-closure --typed-provider-failures"}
 - {id: 4, tier: mechanical, check: "scripts/test_module_profiles.sh --profiles core --make-cmake-object-equality --require-reference-providers --require-ready --require-production-provider-provenance --forbid-test-fixture-objects-handles-descriptors"}
 - {id: 5, tier: mechanical, check: "scripts/check_optional_contract_boundary.sh --optional governance --profile core --forbid-core-requires --ownership-contract tests/baselines/modules/governance-ownership.yaml --require-catalog-owner-equality --forbid-core-capability-shadow"}
+- {id: 6, tier: mechanical, check: "scripts/check_core_carving.sh --communication-core module-runtime,config,ir,translation,protocols,gateway --required-go-modules memory,learning,routing,delegates,tools,workspace,git,skills,response-composition --trust-kernel-in-c vault,execution-policy,audit --require-c-for-communication-core --require-go-for-modules --memory-is-sink"}
+- {id: 7, tier: integration, check: "scripts/test_core_round_trip.sh --profile core --require-go-module-stages-cross-bus memory,learning,routing,delegates,tools,workspace,skills,response-composition --trace-records-event-kind-publisher-server-verdict --fail-non-bus-module-path --memory-stages-perf-parity-vs-inproc --memory-stages-async-record-no-synchronous-verdict"}
 ```

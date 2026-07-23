@@ -1,12 +1,16 @@
 # Proposal: make module ownership drive source, builds, config, and documentation
 
-- **State:** PENDING — roundtable-approved 2026-07-20; awaiting project acceptance
+- **State:** PENDING — roundtable-approved 2026-07-20; **amended 2026-07-23 (post-approval)** for the
+  C-core / Go-module boundary and the in-memory event bus. The amendment adds the polyglot build,
+  the event contract schema, bus ownership, and dependency enforcement over the bus; it reopens this
+  child for re-review and does not inherit the 2026-07-20 approval.
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
-- **Owns:** descriptor schema/validation, physical source ownership, generated Make/CMake and
-  ownership-map outputs, include/type/symbol/link dependency enforcement, and complete individual
-  module-documentation gates
+- **Owns:** descriptor schema/validation, physical source ownership, generated build inputs (C
+  Make/CMake **and** Go module builds) and ownership-map outputs, the event contract schema and bus
+  ownership, include/type/symbol/link **and event publish/subscribe** dependency enforcement, and
+  complete individual module-documentation gates
 - **Implementation dependency:** feature-liveness dispositions identify what should move
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (amended 2026-07-23)
 
 ## Decision
 
@@ -24,6 +28,16 @@ code remain deliberately small and may not absorb feature logic.
 The migration removes feature implementation from `src/`, `src/server/`, `src/kb/`, `src/db1/`,
 `src/db2/`, and `src/headers/`. Database files move by owning capability, not by database number.
 Temporary forwarding headers and root allowlists have owners, expiries, and may only shrink.
+
+**Language boundary (2026-07-23 amendment).** Under the suite amendment, the communication core is C
+and every feature module is Go. `src/modules/<name>/` owns Go source, `module.yaml`, an
+`eventcontract/` schema directory (replacing `include/aimee/<module>/` public headers for Go
+modules), tests, and `docs/modules/<module>.md`. The C communication core lives under the
+application/composition roots and `src/base`/`src/platform`; it exposes the event bus and holds no
+feature logic. A Go module ships no public C header and a C core object links no Go module; the only
+cross-participant surface is the event contract. Trust-kernel modules (`vault`, `execution-policy`,
+`audit`) keep C source under the communication core if the capability-contract child places them
+there; otherwise they follow the Go module layout.
 
 ## Descriptor contract
 
@@ -115,16 +129,59 @@ exact semantic equality with this block, reject unknown keys and aliases, and ru
 generation. The suite's existing full-minus-one matrix then proves governance omission, while the
 core-contract audit test proves the ledger remains required independently of governance.
 
+## Event contract schema and the bus (2026-07-23 amendment)
+
+`module-runtime` owns the in-memory event bus and its schema registry. Each module declares its event
+contract in the descriptor: the event kinds it **publishes**, the kinds it **subscribes to**, and
+the kinds it may **request** (correlated request/reply). The generator emits, from those
+declarations, the typed event stubs for both sides of the C↔Go boundary and a producer/consumer edge
+map. An event kind has exactly one owning publisher module; a request kind has exactly one serving
+module. The bus authorizes and taps every event through the trust kernel (see
+[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)); no module-to-module
+path exists outside it.
+
+`memory` is a sink: its descriptor may declare no request or subscribe edge to any other feature
+module (shared invariant 14). Undeclared publish/subscribe, an event kind with two owners, a request
+with no server, a cycle in the event edge graph, and any core→optional or module→`memory`-return
+edge fail validation with descriptor/kind ownership evidence.
+
+## Installation, capability publication, and replay (2026-07-23 amendment)
+
+`module-runtime` owns installation as well as the bus. Three rules follow from the suite amendment:
+
+- **Capability publication.** A module publishes its capabilities and state transitions to core over
+  the bus at registration and as they change; core aggregates them into the capability closure and
+  the advertisement projection
+  ([`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md)). Core does
+  not poll a module for its capabilities. A module that registers without publishing a capability
+  contract, or that serves an event kind it never advertised, fails validation.
+- **Dependency-complete installation.** Each descriptor declares its module dependencies. The
+  installer/profile generator computes the dependency closure and refuses — fail closed, naming the
+  missing module — any install or selection that would leave a declared dependency uninstalled, and
+  refuses any removal that would strand an installed dependent. This is an install-time precondition
+  distinct from runtime readiness; `memory`, as near-universal dependency, orders first and cannot be
+  removed while a dependent remains.
+- **Record and replay.** The bus supports deterministic capture of the per-service event stream and
+  replay against modules to reproduce a run. Capture obeys the audit tap's redaction and
+  principal-scoping; replay presents the same events in the same order, with module non-determinism
+  captured or stubbed so a replayed run does not diverge. Replay is the primary debugging and
+  regression-seeding surface.
+
 ## Generated builds and dependencies
 
-One deterministic generator emits sorted Make and CMake fragments plus object-to-module and
-symbol-to-module maps. CI compares the selected source/object sets byte-for-byte across build
-systems and every declared profile.
+One deterministic generator emits sorted build inputs for both systems: Make and CMake fragments for
+the C communication core, and Go build inputs (module list, build tags, generated event stubs) for
+the selected Go modules. It also emits object-to-module, symbol-to-module, and event-kind-to-module
+maps. CI compares the selected source/object/module sets byte-for-byte across build systems and every
+declared profile; the C object closure and the Go module closure are each checked for drift.
 
-Dependency enforcement combines compiler depfiles, preprocessor line markers, public AST/type
-references, generated-header producer edges, and selected-object symbol edges. Public headers may
-include only declared public dependencies; private cross-module imports, undeclared edges, cycles,
-and core-to-optional edges fail with file/line/symbol ownership evidence.
+Dependency enforcement combines two graphs. For the C core: compiler depfiles, preprocessor line
+markers, public AST/type references, generated-header producer edges, and selected-object symbol
+edges; public headers may include only declared public dependencies. For Go modules: the declared
+event publish/subscribe/request edges plus the Go import graph, which may not import another module's
+private packages and may reach another participant only through generated event stubs. Across both:
+private cross-module imports, undeclared edges, cycles, and core-to-optional edges fail with
+file/line/symbol or descriptor/event-kind ownership evidence.
 
 ## Individual module documentation
 
@@ -164,4 +221,12 @@ logic or a second provider implementation.
 - {id: 7, tier: mechanical, check: "scripts/check_implementation_uniqueness.sh --normalized-ast-control-flow --fail-duplicate-providers --aliases-forward-only --forbid-alias-business-logic-second-implementation"}
 - {id: 8, tier: mechanical, check: "scripts/check_module_inventory.sh --inventory tests/baselines/modules/canonical-inventory.yaml --schema-version 1 --required-count 18 --optional-count 8 --require-required-module git --forbid-optional-module git --require-code-intelligence-owner memory --require-capability-table-set-equality docs/proposals/pending/aimee-core-capability-contract.md --require-taxonomy-set-equality docs/proposals/pending/core-substrate-and-source-module-boundaries.md --forbid-module triggers,specialist-analyzers,delivery-channels,speech-adapters,sandbox-providers,additional-providers,extractors --forbid-parenthetical-module-ids --forbid-category-placeholders --must-pass-before-taxonomy-consuming-slices"}
 - {id: 9, tier: mechanical, check: "scripts/check_proposal_ordering.sh --scan-module-status-claims docs/proposals,docs/modules --git-contract docs/proposals/pending/git-core-contract.md --require-accepted-before-source-path src/modules/git --require-accepted-before-descriptor-id git --require-accepted-before-build-registration git --require-accepted-before-profile-registration git --require-accepted-before-readiness git --require-child-acceptance-flags require-principal-scoping,require-signed-producer-and-repository-provenance,require-pre-persistence-secret-redaction --after-acceptance-require-descriptor-set-equality src/modules --after-acceptance-require-generated-profile-set-equality build/inventory --derive-order-only-from-descriptors --require-code-intelligence-owner-check docs/proposals/pending/memory-learning-and-inference-boundaries.md#binding-checks --must-pass-before-git-migration"}
+- {id: 10, tier: mechanical, check: "scripts/check_language_boundary.sh --core-c --modules-go --forbid-c-to-go-link --forbid-go-cross-module-private-import --require-eventcontract-only-cross-participant-surface --trust-kernel-placement-from src/modules/aimee-core-capability-contract"}
+- {id: 11, tier: mechanical, check: "scripts/check_event_contracts.sh --schema src/modules/eventcontract.schema.json --single-owner-per-event-kind --single-server-per-request-kind --no-cycles --no-core-to-optional --memory-is-sink --forbid-undeclared-publish-subscribe --forbid-non-bus-module-path --descriptor-kind-evidence"}
+- {id: 12, tier: mechanical, check: "scripts/check_generated_module_builds.sh --go-module-closure --all-profiles --byte-equal --fail-drift && scripts/check_module_deps.sh --event-edge-graph --go-import-graph --no-cycles --no-core-to-optional --file-line-and-event-kind-evidence"}
+- {id: 13, tier: integration, check: "scripts/bench_event_bus.sh --in-memory --intra-service-no-network-no-serialization --memory-roundtrip-parity-vs-inproc --bound-per-event-dispatch-overhead --async-record-off-hot-path --synchronous-verdict-only-action-class"}
+- {id: 14, tier: mechanical, check: "scripts/check_install_dependencies.sh --descriptor-declared-module-deps --transactional --refuse-install-with-unmet-dep --refuse-remove-with-installed-dependent --name-missing-module --dependency-closure --memory-orders-first --distinct-from-runtime-readiness"}
+- {id: 15, tier: integration, check: "scripts/test_capability_publication.sh --modules-publish-to-core-over-bus --no-core-poll --aggregate-into-closure-and-advertisement --fail-register-without-capability-contract --fail-serve-unadvertised-event-kind"}
+- {id: 16, tier: integration, check: "scripts/test_event_replay.sh --capture-per-service-stream --deterministic-same-events-same-order --capture-or-stub-nondeterminism --replay-reproduces-run --capture-obeys-audit-redaction-and-principal-scope"}
+- {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --untrusted-principal --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
 ```
