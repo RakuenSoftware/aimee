@@ -307,6 +307,62 @@ func TestFleetMutationLatchClearsAfterDefiniteDenial(t *testing.T) {
 	}
 }
 
+func TestFleetAckRequiresMethodCSRFStateAndMatchingToken(t *testing.T) {
+	srv := newTestServer(t, "http://127.0.0.1:1")
+	sess, err := srv.sessions.create(&principal{iss: "https://idp", sub: "alice"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ackToken = "bound-result-token"
+	claimed, err := srv.sessions.claimFleetMutation(sess.id, ackToken)
+	if err != nil || !claimed {
+		t.Fatalf("claim: claimed=%v err=%v", claimed, err)
+	}
+	if err := srv.sessions.transitionFleetMutation(sess.id, ackToken, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, csrf, token string) int {
+		r := httptest.NewRequest(method, "/api/fleet/ack", nil)
+		if csrf != "" {
+			r.Header.Set("X-CSRF-Token", csrf)
+		}
+		if token != "" {
+			r.Header.Set("X-Aimee-Fleet-Ack", token)
+		}
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+		w := httptest.NewRecorder()
+		srv.handleFleetAck(w, r)
+		return w.Code
+	}
+	for _, tc := range []struct {
+		method, csrf, token string
+		want                int
+	}{
+		{http.MethodGet, sess.csrf, ackToken, http.StatusMethodNotAllowed},
+		{http.MethodPost, "wrong", ackToken, http.StatusForbidden},
+		{http.MethodPost, sess.csrf, "", http.StatusBadRequest},
+		{http.MethodPost, sess.csrf, "stale-token", http.StatusConflict},
+	} {
+		if got := request(tc.method, tc.csrf, tc.token); got != tc.want {
+			t.Fatalf("ack (%s,%q) status = %d, want %d", tc.method, tc.token, got, tc.want)
+		}
+		latched, err := srv.sessions.get(sess.id)
+		if err != nil || !latched.fleetIndeterminate {
+			t.Fatalf("rejected acknowledgement changed latch: %+v err=%v", latched, err)
+		}
+	}
+	if got := request(http.MethodPost, sess.csrf, ackToken); got != http.StatusOK {
+		t.Fatalf("matching acknowledgement status = %d, want 200", got)
+	}
+	if got := request(http.MethodPost, sess.csrf, ackToken); got != http.StatusConflict {
+		t.Fatalf("replayed acknowledgement status = %d, want 409", got)
+	}
+	cleared, err := srv.sessions.get(sess.id)
+	if err != nil || cleared.fleetIndeterminate {
+		t.Fatalf("ack replay damaged cleared session: %+v err=%v", cleared, err)
+	}
+}
+
 // stubKB records the last request it saw and echoes a canned 200.
 func stubKB(t *testing.T, seen *http.Request) *httptest.Server {
 	t.Helper()
