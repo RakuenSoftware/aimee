@@ -680,7 +680,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    delegate_prompt_plan_t prompt_plan;
    if (!role || delegate_resolve_prompt_inputs(prompt, file_prompt, &prompt_plan) != 0)
       fatal("usage: aimee delegate <role> [\"prompt\"] [--tools|--no-tools] [--prompt-file "
-            "PATH|--prompt-stdin]");
+            "PATH|--prompt-stdin] [--scope bounded|whole_task] [--via AGENT]");
 
    const char *task_prompt = prompt_plan.task_prompt;
    prompt = prompt_plan.user_prompt;

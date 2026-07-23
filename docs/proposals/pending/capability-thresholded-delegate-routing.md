@@ -1,6 +1,6 @@
 # Proposal: Capability-thresholded delegate routing
 
-- **State:** PARTIALLY DELIVERED — see §9. Slices 0, 0b, 0c and 1 are implemented; Slice 2 (competence) and Slice 4 (bandit) are not.
+- **State:** PARTIALLY DELIVERED, in progress — see §9. Slices 0, 0b, 0c and 1 are implemented (PR #1861 / `3332d3c4`), including the §11 transport work, server-side `--scope` enforcement, the health-breaker quota fix, and the retirement of automatic escalation. Slice 2 (competence) and Slice 4 (bandit) are not built.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Supersedes:** nothing. Extends the existing `agent_route_with_caps()` path.
@@ -955,6 +955,10 @@ and pricing code.
 | Routing | primary turn reaches its default seat; capability routing ON by default; fail-upward escalation; same-registration fallback preference |
 | Provider-general | `"models": [...]` or `"models": "auto"` expands one registration into per-model targets with derived tiers |
 | Identity | `provider:model` refs and catalog display names in roundtable attribution, the server projection (GUI) and the CLI |
+| Scope ceiling | `max_scope` per agent + `--scope` per packet, forwarded and enforced server-side; routing never relaxes it (`agent_route_with_caps_scoped`) |
+| Health demotion | prefer-healthy-over-degraded routing + trips-driven exponential breaker backoff (60s→30m), the fix for the six-day out-of-quota `codex` outage where a failing seat kept winning selection |
+| Escalation | automatic verifier-driven re-dispatch RETIRED (see §11) — now advisory: reports `escalation_warranted` + `suggested_escalation_target`, never re-dispatches |
+| Docs / help | generated config reference for the `routing` section and the new agent fields; `DELEGATES.md` Routing section; `delegate --scope` in CLI help |
 
 ### Live defects found and fixed along the way
 
