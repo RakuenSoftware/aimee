@@ -78,10 +78,15 @@ The record is the *evidence*, not the audited event's payload. It carries:
   transaction, so the values cannot be supplied by the caller and cannot drift
   from the lifecycle state in force at append time. Evidence appended by a stale
   instance that lost its fence therefore carries the superseded epoch and fence.
-  The verifier reports that as a typed `stale_fence` result: a distinct triage
-  signal, **not** a tamper detection — a fenced instance writing its own honest
-  record is a liveness artifact, not an attack, and conflating the two would page
-  on-call for a benign race;
+  Carrying the token is not the same as checking it, so the check is specified
+  here: **the local chain verifier compares each record's epoch/fence against the
+  control row's history and reports a typed `stale_fence`**, rather than leaving
+  the field for a downstream consumer to notice. Otherwise a stale instance could
+  pollute the local chain with records that look clean locally and are only ever
+  caught by whoever happens to inspect that field. `stale_fence` is a distinct
+  triage signal, **not** a tamper detection — a fenced instance writing its own
+  honest record is a liveness artifact, and conflating the two would page on-call
+  for a benign race;
 - a monotonic per-shard witness sequence; and
 - the RFC 3339 timestamp of the source entry, not of the export.
 
@@ -122,19 +127,55 @@ computation — a large, unstated cost on exactly the path that must stay bounde
 So:
 
 - **Per advance (hot path, atomic with the source event):** one evidence row and
-  one shard-head update. Two rows. Nothing else.
+  one shard-head update — **two rows in addition to the source append**, plus one
+  record encode and one SHA-256 over it. No tree state, no node writes.
+
+  Stated in full because "two rows" alone flatters the design: the transaction
+  also carries the source row and the source ledger's own row-hash computation,
+  which already existed. The honest bound is *two additional rows and one extra
+  hash* on a path that is already doing an insert and a hash — not a claim that
+  the admission transaction is cheap in absolute terms.
 - **Per checkpoint (E2 cadence, its own transaction, off the hot path):** read the
   shard-head table, build the tree, sign the root, persist the checkpoint and the
   leaf snapshot that proofs are generated from.
 
 The checkpoint therefore *does* scan `kb_vault_witness_shard` once. That is
 stated plainly rather than hidden behind "incrementally maintained": the scan is
-O(shards), bounded by a documented maximum shard count, runs once per cadence
-rather than once per key use. Exceeding the documented ceiling is a typed
-failure, not a silent slowdown. Checkpoint construction carries its own monotonic
-deadline — 1s typical, 5s hard — and expiry raises a typed
-`checkpoint_deadline_exceeded` that aborts and alerts rather than signing late or
-partially; the next cadence retries from the same committed state. The invariant this
+O(shards) and runs once per cadence rather than once per key use.
+
+**The ceiling is a number, and exceeding it has a named operational meaning.**
+The ceiling is **2^20 (1,048,576) shards** — orders of magnitude above any
+realistic `tenant × provider` population, chosen so it is a guardrail against
+runaway shard creation rather than a capacity limit anyone plans against. Above
+it, checkpoint construction raises typed `checkpoint_shard_ceiling_exceeded` and
+does not sign.
+
+Checkpoint construction also carries its own monotonic deadline — 1s typical, 5s
+hard — with expiry raising typed `checkpoint_deadline_exceeded`.
+
+**What either failure actually means in production must be stated, because it is
+not benign.** Admission keeps running and evidence keeps being appended and
+emitted; what stops is the production of *new signed roots*. The latest signed
+checkpoint therefore ages, and the window of evidence not yet anchored to any
+signed root grows without bound until an operator intervenes. That is a
+degradation of the anchoring property, not a safe steady state, so both failures
+raise an integrity alert rather than a warning. It is deliberately *not* an
+admission gate — halting org egress because checkpoint signing stalled would
+trade a certain outage for a bounded loss of anchoring — but no slice may
+describe the stalled state as "fine because appends still work."
+
+**Persist before emit, and only one signer.** Two ordering rules, because getting
+them wrong produces evidence that is worse than none:
+
+- A checkpoint is **durably committed before it is emitted**. Emitting first
+  would let a checkpoint that later loses a unique-index race reach a consumer,
+  who would then hold a signed root that was never committed — and would trust
+  it, since it verifies. Emission reads from committed state only.
+- Checkpoint signing is **fenced**: the signer takes the `kb_vault_control`
+  fence and revalidates it in the signing transaction, so a split or failover
+  cannot produce two instances both scanning and both signing `seq = N+1`. The
+  loser aborts before signing rather than after. Predecessor linkage is by digest,
+  not sequence, so a duplicate-sequence race is otherwise silent. The invariant this
 design satisfies is "checkpoint cost is off the hot path and bounded by a stated
 ceiling" — not "no scan exists."
 
@@ -175,6 +216,14 @@ and proofs must remain generatable against historical roots.
 signature algorithm, and version tag. Rotation retains historical verification
 keys so previously emitted checkpoints stay verifiable; a checkpoint whose key id
 is unknown to the verifier is a typed failure, not a soft pass.
+
+Retention is not the same as trust. The anchor set carries a **revocation list**,
+and the verifier rejects any checkpoint whose `signer_key_id` is revoked even
+when the signature is mathematically valid — otherwise a key compromised before
+rotation would keep validating forged checkpoints forever. Comparison against
+retained copies still catches such a forgery, so this is hygiene rather than the
+load-bearing defense, but a verifier that happily accepts a known-compromised
+key is not defensible.
 
 **Trust anchor.** Consumers obtain verification keys **out of band** — an operator
 provisioned anchor delivered through a channel independent of the emitting host,
@@ -226,9 +275,27 @@ drops records is protected against the first attack and blind to the second. Thi
 is why the CT260 gate requires a consumer retaining *records*, not merely
 checkpoints.
 
+**The leaf snapshot is durable and emitted, not just an internal artifact.** It
+is persisted with the checkpoint and emitted alongside it on the log path. If it
+existed only inside aimee, a consumer holding the emitted stream would have
+checkpoint bytes it can verify but no leaves to compare — and the "compare heads
+across the gap" affordance would require a round trip back to the very host under
+suspicion, which defeats it.
+
+The cross-gap comparison additionally only works if the **records** in the gap
+window were retained, not merely the checkpoints on either side. An attacker who
+can predict where a collector samples could otherwise place a fork in a
+sampled-out window. This is the operator-side prerequisite named in §3; it is
+stated here too because this is where the affordance is defined.
+
 **Inclusion proofs.** A per-shard inclusion proof is the 64-sibling path
 authenticating one shard's leaf against a signed root, generated from that
-checkpoint's leaf snapshot. E1 defines the proof format, generation, and
+checkpoint's leaf snapshot. **Sibling order is part of the format**: at depth *i*
+the proof consumes bit *i* of the key hash to decide whether the sibling is the
+left or right input to the parent hash. A sparse Merkle proof is order-sensitive
+at every level, so a verifier without that bit cannot reproduce the root; the
+encoding is fixed here and unit-tested against a stored vector rather than left
+to the implementer. E1 defines the proof format, generation, and
 verification. Proofs are emitted alongside checkpoints on the log path (§3) — a
 signed root a consumer cannot connect to any shard is not independently
 verifiable, which is the whole point.
@@ -329,6 +396,9 @@ witness side navigable; it does not rebuild history.
   admission's dispatch key — `(tenant, authenticated_origin, request_id)` — as
   its **group id**. One admission may produce several records across the three
   source ledgers; they share one group id and are recognizable as one operation.
+  The group id is a **handle for finding** the corresponding bus-side record, not
+  the reconstruction itself — a consumer holding the emitted stream can collect
+  the witness records for an operation, which is triage, not history.
 - Operator-path evidence (rewrap and open events) never passes through admission
   and has no dispatch key. It carries its own group class keyed by
   `operation_id`, so it is grouped on the same terms rather than being silently
@@ -375,6 +445,17 @@ against the code rather than assumed:**
   `kb_vault_open_event` inserts are likewise inside definer functions. Adding the
   witness append to those functions is same-transaction by construction — no
   restructuring, no new transaction boundary.
+
+  This was checked, not assumed, because the name "outbox" invites the opposite
+  conclusion — that it is a store-and-forward buffer deliberately written outside
+  the producer's transaction so it survives a crash between commit and downstream
+  processing. It is not that. `org_vault_rewrap_begin` updates `kb_vault_control`
+  (sealing, epoch, fence), inserts the `kb_vault_rewrap_operation` row, and
+  `PERFORM`s the WORM append inside one plpgsql function body — one transaction,
+  all three effects. The completed-open function likewise updates the control row,
+  inserts `kb_vault_open_event`, and `PERFORM`s an audit append together. Nothing
+  drains these tables. A witness append added to those bodies inherits the same
+  transaction with no design change.
 - **The admission path needs the witness append moved inside an existing
   transaction.** `db2_kb_audit_append` (`src/db2/kb_audit_worm.c:44`) issues its
   own `BEGIN`, reads the current head, computes the row hash in C, inserts, and
@@ -445,6 +526,13 @@ ON CONFLICT (tenant,provider)
 DO UPDATE SET seq = kb_vault_witness_shard.seq + 1, head_hash = EXCLUDED.head_hash
 RETURNING seq, head_hash;
 ```
+
+First-touch of a brand-new `(tenant, provider)` under concurrency resolves the
+normal way: one transaction takes the row lock and inserts, the other blocks,
+then sees the row and updates it. If the upsert itself fails — constraint
+violation, deadlock — it surfaces as the same typed error path below rather than
+as an opaque admission failure, so a flaky first touch produces a clear operator
+signal instead of a mystery.
 
 **The concurrency contract is part of this slice, not left to the implementer.**
 The witness append function retries a SERIALIZABLE conflict a **bounded** number
@@ -518,6 +606,19 @@ at E2 would discard the precedent E1's gate exists to set.
   recomputed by walking the evidence log aborts with typed `head_log_mismatch`
   and never signs; injected head tampering is caught even when every local
   artifact is mutually consistent.
+- Inclusion-proof sibling order: a stored vector pins left/right at each depth
+  from the key-hash bits; a proof with two levels transposed fails to reproduce
+  the root.
+- Two instances racing to sign `seq = N+1` under a simulated split: the loser
+  aborts *before* signing, and no checkpoint is ever emitted that is not durably
+  committed.
+- A revoked `signer_key_id` is rejected even with a mathematically valid
+  signature.
+- `checkpoint_shard_ceiling_exceeded` and `checkpoint_deadline_exceeded` each
+  raise an integrity alert, leave the previous checkpoint as latest, and do not
+  gate admission.
+- The local verifier flags a record carrying a superseded epoch/fence as
+  `stale_fence` without an external round trip.
 - A stale-fenced append is reported as typed `stale_fence` and is distinguishable
   from both a clean result and a tamper detection.
 - Bounded SERIALIZABLE retry: exhaustion raises `witness_concurrency_exhausted`
@@ -586,7 +687,10 @@ at E2 would discard the precedent E1's gate exists to set.
 - Operator-facing documentation states the conditional-coverage property: that
   external detection covers only evidence a collector retained before compromise,
   and that comparison depends on the deployment's collector ecosystem rather than
-  travelling with the software. The umbrella's no-over-claim invariant is judged
+  travelling with the software. It must also state that with several downstream
+  consumers the property rests on the **intersection** of what they each
+  retained — configuring one durable consumer is not sufficient if two others
+  sample the stream. The umbrella's no-over-claim invariant is judged
   by the words that ship, so a gate reads them back.
 - No new production symbol reachable from admission, HTTP routing, or the reseal
   orchestrator; asserted by a link-level or symbol-level check rather than by
