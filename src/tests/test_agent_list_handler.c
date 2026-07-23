@@ -326,19 +326,6 @@ static void test_http_probe_preserves_discovery_and_plain_execution(void)
  * it costs. `provider` alone is ambiguous for a third-party model served over
  * another vendor's API, so catalog_provider and a canonical provider:model ref
  * are both required. */
-/* Provider profiles are linked so agent_config can resolve a provider-general
- * registration's curated model list; their fetch_models paths reach the network,
- * which this test never exercises. Stubbed rather than linking the HTTP layer. */
-int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
-{
-   (void)url;
-   (void)extra_headers;
-   (void)timeout_ms;
-   if (response_buf)
-      *response_buf = NULL;
-   return -1;
-}
-
 static void test_list_exposes_catalog_identity_and_pricing(void)
 {
    set_home_empty();
