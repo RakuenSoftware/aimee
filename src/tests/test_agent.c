@@ -46,7 +46,7 @@ void test_provider_general_registration_expands(void);
 void test_provider_general_overflow_rejects_config(void);
 void test_provider_general_auto_uses_curated_allowlist(void);
 void test_provider_general_auto_requires_curated_set(void);
-void test_provider_general_dedupes_models(void);
+void test_provider_general_rejects_malformed_registrations(void);
 void test_capability_routing_flag_behaviour_diff(void);
 void test_capability_gate_escalates_instead_of_failing(void);
 void test_no_escalation_when_capability_routing_disabled(void);
@@ -3220,7 +3220,7 @@ int main(void)
    test_provider_general_overflow_rejects_config();
    test_provider_general_auto_uses_curated_allowlist();
    test_provider_general_auto_requires_curated_set();
-   test_provider_general_dedupes_models();
+   test_provider_general_rejects_malformed_registrations();
    test_capability_routing_flag_behaviour_diff();
    test_capability_gate_escalates_instead_of_failing();
    test_no_escalation_when_capability_routing_disabled();

@@ -1179,9 +1179,12 @@ void test_provider_general_auto_requires_curated_set(void)
    unlink(agent_config_path());
 }
 
-/* A duplicate model id must not produce two identical targets — they would share
- * a name, and both health and --via key on the name. */
-void test_provider_general_dedupes_models(void)
+/* A duplicate model id must REJECT the config. Two targets would share a name,
+ * and both health and --via key on it; silently registering fewer models than
+ * the operator declared would route work to a set they never approved. Also
+ * covers the other ill-formed shapes: an empty models array, a non-string
+ * entry, a name colliding with a legacy agent, and `model` alongside `models`. */
+void test_provider_general_rejects_malformed_registrations(void)
 {
    seed_codex_prices();
    FILE *f = fopen(agent_config_path(), "w");
@@ -1194,10 +1197,57 @@ void test_provider_general_dedupes_models(void)
    fclose(f);
 
    agent_config_t c;
-   assert(agent_load_config(&c) == 0);
-   assert(c.agent_count == 2);
+   assert(agent_load_config(&c) != 0); /* duplicate model id */
 
-   printf("  PASS: test_provider_general_dedupes_models\n");
+   /* Empty models array. */
+   f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],\"models\":[]}]}\n",
+         f);
+   fclose(f);
+   assert(agent_load_config(&c) != 0);
+
+   /* Non-string entry. */
+   f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"models\":[\"gpt-5.6-sol\",7]}]}\n",
+         f);
+   fclose(f);
+   assert(agent_load_config(&c) != 0);
+
+   /* `model` AND `models`: the single value would be silently discarded. */
+   f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"model\":\"gpt-5.6-sol\",\"models\":[\"gpt-5.6-luna\"]}]}\n",
+         f);
+   fclose(f);
+   assert(agent_load_config(&c) != 0);
+
+   /* A LEGACY agent already holding the generated name must collide, not be
+    * shadowed by an unreachable duplicate. */
+   f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":["
+         "{\"name\":\"codex:gpt-5.6-sol\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://api.openai.com/v1\",\"model\":\"gpt-5.6-sol\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},"
+         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"models\":[\"gpt-5.6-sol\"]}]}\n",
+         f);
+   fclose(f);
+   assert(agent_load_config(&c) != 0);
+
+   printf("  PASS: test_provider_general_rejects_malformed_registrations\n");
    unlink(agent_config_path());
 }
 

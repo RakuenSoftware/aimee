@@ -282,8 +282,10 @@ static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base
    cJSON_ArrayForEach(m, models)
    {
       const char *model_id = cJSON_GetStringValue(m);
+      /* A non-string or empty entry is a config error. Skipping it would hand
+       * back a partial fleet with no indication anything was dropped. */
       if (!model_id || !model_id[0])
-         continue;
+         return -1;
       int rc = agent_expand_one_model(cfg, base, model_id);
       if (rc < 0)
          return -1;
@@ -304,11 +306,15 @@ static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, cons
    if (n < 0 || (size_t)n >= sizeof(name))
       return -1;
 
-   /* A repeated model id must not produce two identical targets. */
+   /* A name collision - a repeated model id, or a legacy agent already using the
+    * generated name - must REJECT the config, not silently drop a target. Health
+    * and --via both key on the name, so two entries sharing one would conflate
+    * distinct models, and quietly registering fewer models than the operator
+    * declared routes work to a set they never approved. */
    for (int i = 0; i < cfg->agent_count; i++)
    {
       if (strcmp(cfg->agents[i].name, name) == 0)
-         return 0;
+         return -1;
    }
 
    if (cfg->agent_count >= MAX_AGENTS)
@@ -1316,8 +1322,37 @@ int agent_load_config(agent_config_t *cfg)
           * its name for `--via`. Inferring provider-general mode from anything
           * else would change cost, health and attribution on upgrade. */
          cJSON *models_arr = cJSON_GetObjectItem(a, "models");
-         if ((cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0) ||
-             cJSON_IsString(models_arr))
+         if (models_arr)
+         {
+            /* Reject an ill-formed registration rather than degrading it into
+             * something the operator did not write. An empty or non-array/string
+             * `models` would otherwise fall through and register the bare
+             * registration as a routable agent with NO model - routing would
+             * then dispatch whatever the catalog happens to default to. */
+            int models_ok = (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0) ||
+                            cJSON_IsString(models_arr);
+            if (!models_ok)
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' has an empty or malformed \"models\"; "
+                         "use a non-empty array of model ids or \"auto\"",
+                         ag->name);
+               cJSON_Delete(root);
+               return -1;
+            }
+            /* `model` and `models` together are ambiguous: the single value would
+             * be silently discarded by expansion. Make the operator choose. */
+            if (ag->model[0])
+            {
+               LOG_ERROR("agent",
+                         "agents.json: registration '%s' sets both \"model\" and \"models\"; "
+                         "use one or the other",
+                         ag->name);
+               cJSON_Delete(root);
+               return -1;
+            }
+         }
+         if (models_arr)
          {
             agent_t base = *ag;
             int n = agent_expand_provider_models(cfg, &base, models_arr);

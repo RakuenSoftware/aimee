@@ -1,1188 +1,516 @@
-diff --git a/src/agent_tier_lint.c b/src/agent_tier_lint.c
-index 48492ea9..7c403236 100644
---- a/src/agent_tier_lint.c
-+++ b/src/agent_tier_lint.c
-@@ -5,23 +5,75 @@
- #include "model_registry.h"
- #include <string.h>
- 
--/* Resolve an agent's published price. Returns 0 when the catalog has no price,
-- * which is the normal case for a model the registry does not know — treated as
-- * "no evidence", never as "free". */
--static int agent_catalog_price(const agent_t *ag, double *in_out, double *out_out)
-+/* Effective $/Mtok for an agent: operator override first, catalog second. The
-+ * catalog publishes a LIST price, which is not what every deployment pays —
-+ * subscription seats, committed-use discounts, self-hosted compute, and
-+ * reselling gateways all diverge from it. Each axis resolves independently so an
-+ * operator may pin only one. Returns 1 only when BOTH axes are known; the
-+ * capability struct cannot tell "free" from "absent", so a partially known price
-+ * must never enter a comparison as though the missing half were zero. */
-+int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
-+                         double *cached_per_mtok)
- {
--   if (!ag || !ag->model[0])
-+   if (!agent)
-       return 0;
--   model_capability_t cap;
--   if (!model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
--      return 0;
--   if (cap.cost_in_per_mtok <= 0.0 && cap.cost_out_per_mtok <= 0.0)
-+
-+   double in_price = agent->price_in_per_mtok;
-+   double out_price = agent->price_out_per_mtok;
-+   double cached_price = agent->price_cached_per_mtok;
-+
-+   if (in_price <= 0.0 || out_price <= 0.0 || cached_price <= 0.0)
-+   {
-+      model_capability_t cap;
-+      if (agent->model[0] &&
-+          model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
-+      {
-+         if (in_price <= 0.0)
-+            in_price = cap.cost_in_per_mtok;
-+         if (out_price <= 0.0)
-+            out_price = cap.cost_out_per_mtok;
-+         if (cached_price <= 0.0)
-+            cached_price = cap.cost_cache_read_per_mtok;
-+      }
-+   }
-+
-+   /* Cached is optional: many providers publish none, and its absence must not
-+    * make an otherwise-priced agent look unpriced. */
-+   if (cached_per_mtok)
-+      *cached_per_mtok = cached_price > 0.0 ? cached_price : 0.0;
-+   if (in_price <= 0.0 || out_price <= 0.0)
-       return 0;
--   *in_out = cap.cost_in_per_mtok;
--   *out_out = cap.cost_out_per_mtok;
-+   if (in_per_mtok)
-+      *in_per_mtok = in_price;
-+   if (out_per_mtok)
-+      *out_per_mtok = out_price;
-    return 1;
- }
- 
-+/* Could these two agents ever be candidates for the SAME route? Comparing tiers
-+ * across agents that never compete is a false positive: routing never chooses
-+ * between them, so "routing prefers the more expensive model" would be untrue
-+ * and the advice to re-tier them misleading. Substitutability here means sharing
-+ * at least one role — including the default exec roles, which agent_supports_role
-+ * grants to every agent regardless of its declared list. */
-+static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
-+{
-+   for (int i = 0; i < a->role_count; i++)
-+   {
-+      const char *role = a->roles[i];
-+      if (!role[0])
-+         continue;
-+      if (strcmp(role, "all") == 0 || agent_has_role(b, role) || agent_is_exec_role(b, role))
-+         return 1;
-+   }
-+   for (int i = 0; i < b->role_count; i++)
-+   {
-+      if (b->roles[i][0] && strcmp(b->roles[i], "all") == 0)
-+         return 1;
-+   }
-+   return 0;
-+}
-+
- static int agent_is_price_exempt(const agent_t *ag)
- {
-    return ag && ag->tier_price_exempt[0] != '\0';
-@@ -31,7 +83,9 @@ static int agent_price_eligible(const agent_t *ag, double *in_out, double *out_o
- {
-    if (!ag || !ag->enabled || agent_is_price_exempt(ag))
-       return 0;
--   return agent_catalog_price(ag, in_out, out_out);
-+   /* Operator override first, then catalog: the lint must judge tiers against
-+    * what this deployment actually pays, not a list price it may not be on. */
-+   return agent_resolved_price(ag, in_out, out_out, NULL);
- }
- 
- int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max)
-@@ -59,10 +113,16 @@ int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t
-          /* a is configured cheaper than b ... */
-          if (a->cost_tier >= b->cost_tier)
-             continue;
--         /* ... but costs more on BOTH axes. Requiring both keeps the check free
--          * of any invented input/output exchange rate: a pair where the axes
--          * disagree has no single correct ordering and is not a defect. */
--         if (!(a_in > b_in && a_out > b_out))
-+         /* ... but is PARETO-DOMINATED on price: no cheaper on either axis, and
-+          * strictly dearer on at least one. This needs no input/output exchange
-+          * rate, and unlike a strict-on-both test it still catches equality on
-+          * one axis ($10/$50 vs $10/$5 — never cheaper, dearer whenever output
-+          * is nonzero). A pair whose axes DISAGREE has no single correct
-+          * ordering and is deliberately left alone. */
-+         if (!(a_in >= b_in && a_out >= b_out && (a_in > b_in || a_out > b_out)))
-+            continue;
-+         /* ... and they actually compete for the same work. */
-+         if (!agents_compete_for_a_role(a, b))
-             continue;
- 
-          if (out && found < max)
 diff --git a/src/cmd_agent.c b/src/cmd_agent.c
-index 902bfad6..83b21b7f 100644
+index c4305e38..be9a5c08 100644
 --- a/src/cmd_agent.c
 +++ b/src/cmd_agent.c
-@@ -4,6 +4,7 @@
- #include "db1.h"
- #include "agent.h"
- #include "agent_config.h"
-+#include "agent_tier_lint.h" /* agent_resolved_price */
- #include "agent_tunnel.h"
- #include "commands.h"
- #include "hardware_probe.h"
-@@ -388,7 +389,30 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
-          cJSON_AddStringToObject(obj, "model", ag->model);
-          cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
-          cJSON_AddStringToObject(obj, "provider", ag->provider);
-+         /* Vendor identity used for capability/price lookup, which differs from
-+          * `provider` (the wire shape) for a third-party model served over
-+          * another vendor's API. Surfaced so the GUI can show provider+model. */
-+         cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
+@@ -422,6 +422,22 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
+           * `provider` (the wire shape) for a third-party model served over
+           * another vendor's API. Surfaced so the GUI can show provider+model. */
+          cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
++         /* Canonical `provider:model` reference (the form model_capability_resolve_ref
++          * parses and `aimee model show` accepts) plus the catalog's human label,
++          * so any surface that must name a SPECIFIC model — roundtable seats,
++          * routing attribution, a picker — can show provider+model without
++          * hand-maintained strings. display_name is omitted when the catalog has
++          * none rather than echoing the id, so a consumer can tell them apart. */
++         if (ag->model[0])
++         {
++            char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
++            snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
++            cJSON_AddStringToObject(obj, "model_ref", ref);
++            model_capability_t dcap;
++            if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
++                dcap.display_name[0])
++               cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
++         }
           cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
-+         /* Effective price ($/Mtok): operator override when set, else catalog.
-+          * Emitted only when BOTH axes resolve, so a consumer never reads an
-+          * unknown price as free. `price_overridden` tells the GUI whether the
-+          * operator pinned it or it came from the catalog. */
-+         {
-+            double pin = 0.0, pout = 0.0, pcached = 0.0;
-+            if (agent_resolved_price(ag, &pin, &pout, &pcached))
-+            {
-+               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
-+               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
-+               /* Omitted entirely when unpublished, so a consumer cannot mistake
-+                * an absent cache rate for a free one. */
-+               if (pcached > 0.0)
-+                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
-+            }
-+            cJSON_AddBoolToObject(obj, "price_overridden",
-+                                  ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
-+                                      ag->price_cached_per_mtok > 0.0);
-+         }
-          cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
-          cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
-          cJSON_AddNumberToObject(obj, "max_turns", ag->max_turns);
-@@ -422,9 +446,22 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
-       for (int i = 0; i < cfg->agent_count; i++)
-       {
-          agent_t *ag = &cfg->agents[i];
--         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s\n", ag->name,
-+         double pin = 0.0, pout = 0.0, pcached = 0.0;
-+         char price[96] = "";
-+         if (agent_resolved_price(ag, &pin, &pout, &pcached))
-+         {
-+            char cached[32] = "";
-+            if (pcached > 0.0)
-+               snprintf(cached, sizeof(cached), " cached=$%.2f", pcached);
-+            snprintf(price, sizeof(price), " in=$%.2f out=$%.2f%s%s", pin, pout, cached,
-+                     (ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
-+                      ag->price_cached_per_mtok > 0.0)
-+                         ? " *"
-+                         : "");
-+         }
-+         printf("%-16s %-6s tier=%d parallel=%d model=%s endpoint=%s%s%s\n", ag->name,
-                 ag->enabled ? "ON" : "OFF", ag->cost_tier, ag->max_parallel, ag->model,
--                ag->endpoint, ag->tools_enabled ? " [tools]" : "");
-+                ag->endpoint, ag->tools_enabled ? " [tools]" : "", price);
-       }
-    }
+          /* Effective price ($/Mtok): operator override when set, else catalog.
+           * Emitted only when BOTH axes resolve, so a consumer never reads an
+diff --git a/src/modules/roundtable/delegate_ensemble_review.c b/src/modules/roundtable/delegate_ensemble_review.c
+index 2171afea..1b80c218 100644
+--- a/src/modules/roundtable/delegate_ensemble_review.c
++++ b/src/modules/roundtable/delegate_ensemble_review.c
+@@ -94,6 +94,37 @@ static int review_items_same(const roundtable_review_item_t *a, const char *iden
+           strcmp(a->summary, summary) == 0;
  }
-@@ -768,6 +805,14 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
-          ag_set_roles_csv(ag, argv[++i]);
-       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
-          ag->cost_tier = atoi(argv[++i]);
-+      /* Price overrides ($/Mtok). Only meaningful when this deployment does not
-+       * pay the published catalog rate. */
-+      else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
-+         ag->price_in_per_mtok = atof(argv[++i]);
-+      else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
-+         ag->price_out_per_mtok = atof(argv[++i]);
-+      else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
-+         ag->price_cached_per_mtok = atof(argv[++i]);
-       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
-          ag->tools_enabled = 1;
-       else if (strcmp(argv[i], "--max-turns") == 0 && i + 1 < argc)
-diff --git a/src/headers/agent_tier_lint.h b/src/headers/agent_tier_lint.h
-index cc480f19..5f08bf81 100644
---- a/src/headers/agent_tier_lint.h
-+++ b/src/headers/agent_tier_lint.h
-@@ -47,6 +47,25 @@ extern "C"
-     * written). Never mutates config: this reports, it does not re-tier. */
-    int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t *out, int max);
  
-+   /* Effective $/Mtok for an agent across the three billed axes — cached read,
-+    * input, output — resolving the operator override first and the model catalog
-+    * second. This is the single source of truth for "what does this agent cost
-+    * us": the catalog publishes a LIST price, which is not what every deployment
-+    * pays (subscription seats, committed-use discounts, self-hosted compute,
-+    * reselling gateways).
-+    *
-+    * Each axis resolves independently, so an operator may pin only one. Returns
-+    * 1 when input AND output are known, 0 otherwise; a caller must treat 0 as
-+    * "no price evidence" and never as free.
-+    *
-+    * `cached_per_mtok` is OPTIONAL and set to 0 when neither the operator nor the
-+    * catalog publishes one — many providers do not. It is reported separately
-+    * rather than folded into input because cache reads are typically an order of
-+    * magnitude cheaper, so a caching workload's real cost is not approximated by
-+    * the input rate. Any parameter may be NULL. */
-+   int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
-+                            double *cached_per_mtok);
-+
- #ifdef __cplusplus
- }
- #endif
-diff --git a/src/headers/agent_types.h b/src/headers/agent_types.h
-index 1f3fb0c2..43ad3780 100644
---- a/src/headers/agent_types.h
-+++ b/src/headers/agent_types.h
-@@ -257,6 +257,16 @@ typedef struct
-     * the check applies. A REASON is required rather than a bare boolean so an
-     * exemption cannot silently hide a genuinely mis-tiered agent. */
-    char tier_price_exempt[128];
-+   /* Operator price override, US dollars per million tokens. 0 = unset, meaning
-+    * "resolve from the model catalog". Set when the catalog price is not what
-+    * this deployment actually pays: a flat-rate or subscription seat whose
-+    * marginal token cost differs from the published API rate, negotiated or
-+    * committed-use pricing, a self-hosted model whose real cost is compute, or a
-+    * gateway that resells at its own margin. Both axes are independent, so a
-+    * deployment may override only one. */
-+   double price_in_per_mtok;
-+   double price_out_per_mtok;
-+   double price_cached_per_mtok;
-    char roles[MAX_AGENT_ROLES][32];
-    int role_count;
-    /* Personas this agent may be dispatched AS (delegate identities: engineer,
-diff --git a/src/headers/model_registry.h b/src/headers/model_registry.h
-index b2d05bf7..80690637 100644
---- a/src/headers/model_registry.h
-+++ b/src/headers/model_registry.h
-@@ -46,6 +46,10 @@ typedef struct
-    int max_output;
-    double cost_in_per_mtok;
-    double cost_out_per_mtok;
-+   /* Cache-read price ($/Mtok). Typically an order of magnitude below input, so
-+    * it dominates real spend on any prompt-caching workload and cannot be
-+    * approximated by the input rate. 0 = the source published none. */
-+   double cost_cache_read_per_mtok;
-    unsigned flags;
-    char modalities[64];
-    char knowledge_cutoff[16];
-diff --git a/src/models_dev_cache.c b/src/models_dev_cache.c
-index 12a045a2..f57355e9 100644
---- a/src/models_dev_cache.c
-+++ b/src/models_dev_cache.c
-@@ -10,6 +10,32 @@
- 
- #define MODELS_DEV_MAX_SIZE (8 * 1024 * 1024)
- 
-+/* The cache is DOWNLOADED and therefore untrusted. A JSON number outside int
-+ * range converted straight to int is undefined behaviour, so every numeric field
-+ * goes through this: non-finite, negative, and out-of-range values are rejected
-+ * rather than truncated into a nonsense capability. */
-+static int json_int_checked(cJSON *v, int *out)
++/* Seat label for attribution: the agent AND the model it actually served.
++ *
++ * A registered agent is not always one model — a provider-general registration
++ * (codex -> sol/terra/luna) makes the bare agent name ambiguous, and the models
++ * within a provider differ in capability, which is precisely what a reviewer
++ * needs to know when weighing a finding. Uses the canonical `agent:model` form
++ * already understood elsewhere (model_capability_resolve_ref), kept compact
++ * because `sources` is a fixed 256-byte comma-joined list shared by every seat.
++ *
++ * Falls back to the bare name when the model is unknown or merely repeats it —
++ * several agents are named after their single model today, and "MiniMax-M3:
++ * MiniMax-M3" would be noise. */
++static void review_seat_label(const agent_result_t *r, char *buf, size_t len)
 +{
-+   if (!cJSON_IsNumber(v))
-+      return 0;
-+   double d = v->valuedouble;
-+   if (!(d >= 0.0) || d > 2147483647.0) /* also rejects NaN */
-+      return 0;
-+   *out = (int)d;
-+   return 1;
++   if (!buf || len == 0)
++      return;
++   buf[0] = '\0';
++   if (!r)
++      return;
++   const char *name = r->agent_name;
++   const char *model = r->served_model[0] ? r->served_model : r->model;
++   if (!name || !name[0])
++      name = model && model[0] ? model : "";
++   if (!model || !model[0] || strcmp(model, name) == 0)
++   {
++      snprintf(buf, len, "%s", name);
++      return;
++   }
++   snprintf(buf, len, "%s:%s", name, model);
 +}
 +
-+static int json_double_checked(cJSON *v, double *out)
-+{
-+   if (!cJSON_IsNumber(v))
-+      return 0;
-+   double d = v->valuedouble;
-+   if (!(d >= 0.0) || d > 1e12) /* also rejects NaN */
-+      return 0;
-+   *out = d;
-+   return 1;
-+}
-+
- /* Defined below: resolves provider/model against the NESTED live api.json shape
-  * after the flat key lookup misses. */
- static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
-@@ -24,17 +50,15 @@ static void fill_cap_from_json(cJSON *entry, const char *provider, const char *m
- 
-    cJSON *tmp;
-    tmp = cJSON_GetObjectItemCaseSensitive(entry, "contextWindow");
--   if (cJSON_IsNumber(tmp))
--      out->context_window = (int)tmp->valuedouble;
-+   (void)json_int_checked(tmp, &out->context_window);
-    tmp = cJSON_GetObjectItemCaseSensitive(entry, "maxTokens");
--   if (cJSON_IsNumber(tmp))
--      out->max_output = (int)tmp->valuedouble;
-+   (void)json_int_checked(tmp, &out->max_output);
-    tmp = cJSON_GetObjectItemCaseSensitive(entry, "inputCost");
--   if (cJSON_IsNumber(tmp))
--      out->cost_in_per_mtok = tmp->valuedouble;
-+   (void)json_double_checked(tmp, &out->cost_in_per_mtok);
-    tmp = cJSON_GetObjectItemCaseSensitive(entry, "outputCost");
--   if (cJSON_IsNumber(tmp))
--      out->cost_out_per_mtok = tmp->valuedouble;
-+   (void)json_double_checked(tmp, &out->cost_out_per_mtok);
-+   tmp = cJSON_GetObjectItemCaseSensitive(entry, "cacheReadCost");
-+   (void)json_double_checked(tmp, &out->cost_cache_read_per_mtok);
-    tmp = cJSON_GetObjectItemCaseSensitive(entry, "tools");
-    if (cJSON_IsTrue(tmp))
-       out->flags |= MODEL_CAP_TOOLS;
-@@ -81,8 +105,11 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
+ static void review_item_add_source(roundtable_review_item_t *item, const char *source)
  {
-    char key[256];
-    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
-+   /* Flat form wins when it is a USABLE object. Mere presence must not suppress
-+    * the nested lookup: a null, string, or otherwise malformed flat value would
-+    * otherwise mask a perfectly good nested entry and yield empty capabilities. */
-    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
--   if (!entry)
-+   if (!cJSON_IsObject(entry))
-       return lookup_in_nested_json(root, provider, model_id, out);
-    fill_cap_from_json(entry, provider, model_id, out);
-    return 1;
-@@ -116,23 +143,20 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char
-    cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
-    if (cJSON_IsObject(limit))
+    if (!item)
+@@ -282,8 +313,12 @@ void capture_round_review_items(const agent_result_t *results, int ref_count,
+    out->original_request_alignment_summary[0] = '\0';
+    out->original_request_alignment_sources[0] = '\0';
+    for (int i = 0; i < ref_count; i++)
+-      capture_review_items_from_text(results[i].response, results[i].agent_name,
++   {
++      char seat[MAX_AGENT_NAME + MAX_MODEL_LEN + 2];
++      review_seat_label(&results[i], seat, sizeof(seat));
++      capture_review_items_from_text(results[i].response, seat,
+                                      results[i].successful_tool_calls > 0, out);
++   }
+    if (!out->original_request_alignment[0])
     {
--      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(limit, "context");
--      if (cJSON_IsNumber(tmp))
--         out->context_window = (int)tmp->valuedouble;
--      tmp = cJSON_GetObjectItemCaseSensitive(limit, "output");
--      if (cJSON_IsNumber(tmp))
--         out->max_output = (int)tmp->valuedouble;
-+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "context"),
-+                             &out->context_window);
-+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "output"), &out->max_output);
-    }
- 
-    cJSON *cost = cJSON_GetObjectItemCaseSensitive(entry, "cost");
-    if (cJSON_IsObject(cost))
-    {
--      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(cost, "input");
--      if (cJSON_IsNumber(tmp))
--         out->cost_in_per_mtok = tmp->valuedouble;
--      tmp = cJSON_GetObjectItemCaseSensitive(cost, "output");
--      if (cJSON_IsNumber(tmp))
--         out->cost_out_per_mtok = tmp->valuedouble;
-+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "input"),
-+                                &out->cost_in_per_mtok);
-+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "output"),
-+                                &out->cost_out_per_mtok);
-+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "cache_read"),
-+                                &out->cost_cache_read_per_mtok);
-    }
- 
-    /* models.dev spells tool use "tool_call". REASONING has no flat-schema
+       snprintf(out->original_request_alignment, sizeof out->original_request_alignment, "unclear");
 diff --git a/src/server/agent_config.c b/src/server/agent_config.c
-index b315d0bb..e3e270fc 100644
+index e8d169fc..88b4b9a3 100644
 --- a/src/server/agent_config.c
 +++ b/src/server/agent_config.c
-@@ -246,15 +246,38 @@ static const struct
- };
- 
- /* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
-- * Returns 0 when no host could be parsed. */
-+ * Returns 0 when no host could be parsed.
-+ *
-+ * The scheme must be ANCHORED: searching for "://" anywhere lets a scheme-less
-+ * endpoint smuggle an authority through a path segment
-+ * ("gateway.example/relay://api.minimax.io/v1" would otherwise parse as
-+ * api.minimax.io), which for the legacy wire-provider rewrite would change auth
-+ * and credential selection. Scheme-relative "//host/path" is accepted. */
- static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
- {
-    if (!endpoint || !endpoint[0] || !out || out_len == 0)
-       return 0;
-    out[0] = '\0';
- 
--   const char *p = strstr(endpoint, "://");
--   p = p ? p + 3 : endpoint;
-+   const char *p = endpoint;
-+   if (p[0] == '/' && p[1] == '/')
-+   {
-+      p += 2; /* scheme-relative */
-+   }
-+   else
-+   {
-+      /* scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":" "//" */
-+      size_t i = 0;
-+      if (isalpha((unsigned char)p[0]))
-+      {
-+         i = 1;
-+         while (p[i] && (isalnum((unsigned char)p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.'))
-+            i++;
-+      }
-+      if (i > 0 && p[i] == ':' && p[i + 1] == '/' && p[i + 2] == '/')
-+         p += i + 3;
-+      /* else: no scheme — treat the whole string as an authority + path. */
-+   }
- 
-    /* Userinfo (user:pass@host) must not be mistaken for the host, but only when
-     * the '@' precedes the authority's end. */
-@@ -263,7 +286,19 @@ static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
-    if (at)
-       p = at + 1;
- 
--   size_t n = strcspn(p, ":/?#");
-+   size_t n;
-+   if (p[0] == '[')
-+   {
-+      /* Bracketed IPv6 literal: the colons inside are not a port separator. */
-+      const char *close = memchr(p, ']', (size_t)(authority_end - p));
-+      if (!close)
-+         return 0;
-+      n = (size_t)(close - p) + 1;
-+   }
-+   else
-+   {
-+      n = strcspn(p, ":/?#");
-+   }
-    if (n == 0 || n >= out_len)
-       return 0;
-    for (size_t i = 0; i < n; i++)
-@@ -276,6 +311,19 @@ static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
-    return out[0] ? 1 : 0;
+@@ -194,6 +194,84 @@ static void agent_normalize_legacy_claude_cli(agent_t *ag)
+    ag->cli_kind[0] = '\0';
  }
  
-+/* 1 when `model` names the given vendor FAMILY: the prefix must be followed by
-+ * end-of-string or a separator, never more letters. Unanchored matching let
-+ * "minimaximum-production" be treated as MiniMax — which, in the legacy wire
-+ * rewrite, would change the agent's auth type and credential env vars. */
-+static int model_family_is(const char *model, const char *family)
++static void agent_derive_catalog_provider(agent_t *ag);
++
++/* Cost tier derived from a model's BASE input price. Provider-general
++ * registration expands one operator entry into several model targets, and
++ * sol/terra/luna are $5.00/$2.50/$1.00 — they cannot share a tier inherited from
++ * the registration, or "cheapest first" would pick arbitrarily among them.
++ *
++ * Deliberately banded rather than ordering on the raw price: routing directly on
++ * a float makes route choice churn every time the catalog refreshes, whereas a
++ * band is a stable policy boundary. Thresholds sit between the observed fleet
++ * price points ($0.30 / $0.95-1.00 / $2.00-2.50 / $5.00 / $10.00) so each lands
++ * in its own tier. */
++static int model_price_to_cost_tier(double in_per_mtok)
 +{
-+   size_t n = strlen(family);
-+   if (!model || strncasecmp(model, family, n) != 0)
++   if (in_per_mtok <= 0.0)
++      return -1; /* unknown: caller keeps the registration's declared tier */
++   if (in_per_mtok < 0.5)
 +      return 0;
-+   char c = model[n];
-+   return c == '\0' || c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == ' ';
++   if (in_per_mtok < 1.5)
++      return 1;
++   if (in_per_mtok < 3.5)
++      return 2;
++   if (in_per_mtok < 7.5)
++      return 3;
++   return 4;
 +}
 +
- /* 1 when host is `domain` itself or a subdomain of it. Label-anchored, so
-  * "kimi.com.evil.example" does NOT match "kimi.com". */
- static int host_is_within_domain(const char *host, const char *domain)
-@@ -334,12 +382,12 @@ static void agent_derive_catalog_provider(agent_t *ag)
-    }
- 
-    /* Bare vendor-family model id. */
--   if (strncasecmp(ag->model, "minimax", 7) == 0)
-+   if (model_family_is(ag->model, "minimax"))
-    {
-       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
-       return;
-    }
--   if (strncasecmp(ag->model, "kimi", 4) == 0)
-+   if (model_family_is(ag->model, "kimi"))
-    {
-       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
-       return;
-@@ -837,7 +885,7 @@ int agent_load_config(agent_config_t *cfg)
-                                (host_is_within_domain(lhost, "minimax.io") ||
-                                 host_is_within_domain(lhost, "minimaxi.com") ||
-                                 host_is_within_domain(lhost, "minimax.com"));
--            if (minimax_host || strncasecmp(ag->model, "minimax", 7) == 0)
-+            if (minimax_host || model_family_is(ag->model, "minimax"))
-                snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
-          }
- 
-@@ -861,6 +909,18 @@ int agent_load_config(agent_config_t *cfg)
-          if (v && cJSON_IsString(v))
-             snprintf(ag->tier_price_exempt, sizeof(ag->tier_price_exempt), "%s", v->valuestring);
- 
-+         /* Operator price override ($/Mtok); absent or negative leaves it unset
-+          * so the catalog answers. */
-+         v = cJSON_GetObjectItem(a, "price_in_per_mtok");
-+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
-+            ag->price_in_per_mtok = v->valuedouble;
-+         v = cJSON_GetObjectItem(a, "price_out_per_mtok");
-+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
-+            ag->price_out_per_mtok = v->valuedouble;
-+         v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
-+         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
-+            ag->price_cached_per_mtok = v->valuedouble;
-+
-          v = cJSON_GetObjectItem(a, "max_tokens");
-          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
- 
-@@ -1304,6 +1364,12 @@ int agent_save_config(const agent_config_t *cfg)
-          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
-       if (ag->tier_price_exempt[0])
-          JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
-+      if (ag->price_in_per_mtok > 0.0)
-+         cJSON_AddNumberToObject(a, "price_in_per_mtok", ag->price_in_per_mtok);
-+      if (ag->price_out_per_mtok > 0.0)
-+         cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
-+      if (ag->price_cached_per_mtok > 0.0)
-+         cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
- 
-       cJSON *roles = cJSON_CreateArray();
-       for (int j = 0; j < ag->role_count; j++)
-@@ -1892,11 +1958,35 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char
-    return -1;
- }
- 
-+/* A PRIMARY (user-facing) turn must reach the configured default agent whatever
-+ * its cost_tier. The default is the operator's "most capable seat" choice, and a
-+ * user must never be handed a weaker model just because a cheaper peer exists —
-+ * a session the user interacts with has to be coherent before it is cheap.
++/* Expand a provider-general registration ("models": [...]) into one runtime
++ * agent per routable model.
 + *
-+ * This used to be expressed by consulting `default_agent` on a primary turn and
-+ * then returning it only from inside the min_tier-filtered pass below, which
-+ * meant a default above min_tier was never returned. With a premium default
-+ * (cost_tier 1) and any cheaper peer serving the same role (cost_tier 0), the
-+ * primary turn silently routed to the cheap peer — the exact opposite of the
-+ * intent. Resolve the primary default up front instead, subject only to the
-+ * eligibility every route requires. */
-+static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role)
++ * A model endpoint is what the runtime actually schedules: health, admission,
++ * cost and fallback are all per-model already. Materialising a target per model
++ * therefore needs no change to routing, dispatch or admission, whereas making
++ * routing return (agent, model) would thread a new compound identity through the
++ * highest-risk path. The registration stays the operator-facing object; these
++ * are its runtime targets.
++ *
++ * Targets are named `<registration>:<model>`, matching the canonical ref form
++ * model_capability_resolve_ref() already parses, so `--via codex:gpt-5.6-sol`
++ * addresses exactly one target and health keys stay distinct per model.
++ *
++ * Returns the number of targets written, or -1 if they do not fit — the caller
++ * must then reject the whole config rather than register a partial fleet, since
++ * a silently truncated expansion would drop models an operator declared. */
++static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base, cJSON *models)
 +{
-+   if (!agent_routing_primary_turn() || !cfg->default_agent[0])
-+      return NULL;
-+   agent_t *ag = agent_find(cfg, cfg->default_agent);
-+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
-+       !agent_is_available_for_routing(ag))
-+      return NULL;
-+   return ag;
++   int written = 0;
++   cJSON *m;
++   cJSON_ArrayForEach(m, models)
++   {
++      const char *model_id = cJSON_GetStringValue(m);
++      if (!model_id || !model_id[0])
++         continue;
++      if (cfg->agent_count >= MAX_AGENTS)
++         return -1;
++
++      agent_t *ag = &cfg->agents[cfg->agent_count];
++      *ag = *base;
++      snprintf(ag->model, sizeof(ag->model), "%s", model_id);
++      snprintf(ag->name, sizeof(ag->name), "%s:%s", base->name, model_id);
++      /* The registration's model list is the exposure policy; a target is only
++       * routable if the catalog can actually describe it. */
++      agent_derive_catalog_provider(ag);
++
++      model_capability_t cap;
++      if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
++      {
++         int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
++         if (tier >= 0)
++            ag->cost_tier = tier;
++      }
++
++      cfg->agent_count++;
++      written++;
++   }
++   return written;
 +}
 +
- agent_t *agent_route(agent_config_t *cfg, const char *role)
+ static void agent_normalize_builtin_cost_tier(agent_t *ag)
  {
--   agent_t *primary_default = NULL;
--   if (agent_routing_primary_turn() && cfg->default_agent[0])
--      primary_default = agent_find(cfg, cfg->default_agent);
-+   /* Tier is a COST ordering; it must not gate the user-facing seat. */
-+   agent_t *primary_default = agent_primary_turn_default(cfg, role);
-+   if (primary_default)
-+      return primary_default;
- 
-    /* First pass: find the minimum tier; note if any tmux agent is there
-     * (tmux sessions are stateful and always preferred over HTTP peers). */
-@@ -1930,8 +2020,6 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
-          continue;
-       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
-          continue;
--      if (ag == primary_default)
--         return ag;
-       if (count < MAX_AGENTS)
-          candidates[count++] = ag;
-    }
-@@ -2034,6 +2122,16 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
-    if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
-       return agent_route(cfg, role);
- 
-+   /* Same primary-turn rule as agent_route(): the user-facing seat is chosen by
-+    * capability, not by price. It must still SATISFY the requirements — a
-+    * default that cannot hold the prompt or lacks a required modality is not a
-+    * usable seat — but its cost_tier is irrelevant to that decision. */
-+   agent_t *primary_default = agent_primary_turn_default(cfg, role);
-+   if (primary_default && (!(required_caps || min_context > 0) ||
-+                           agent_satisfies_required_caps(primary_default, required_caps,
-+                                                         min_context)))
-+      return primary_default;
+    if (!ag)
+@@ -1153,6 +1231,30 @@ int agent_load_config(agent_config_t *cfg)
+           * Agent Only persists. */
+          if (!primary_only_present)
+             ag->primary_only = agent_is_claude_cli(ag) ? 1 : 0;
 +
-    int min_tier = -1;
-    int has_tmux = 0;
-    for (int i = 0; i < cfg->agent_count; i++)
-@@ -2061,10 +2159,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
-    if (min_tier < 0)
-       return NULL;
- 
--   agent_t *primary_default = NULL;
--   if (agent_routing_primary_turn() && cfg->default_agent[0])
--      primary_default = agent_find(cfg, cfg->default_agent);
--
-    agent_t *candidates[MAX_AGENTS];
-    int count = 0;
-    for (int i = 0; i < cfg->agent_count; i++)
-@@ -2083,8 +2177,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
-             continue;
++         /* Provider-general registration: an explicit "models" array expands
++          * into one runtime target per model. Strictly OPT-IN — a legacy entry
++          * naming a single `model` keeps exactly its previous meaning, including
++          * its name for `--via`. Inferring provider-general mode from anything
++          * else would change cost, health and attribution on upgrade. */
++         cJSON *models_arr = cJSON_GetObjectItem(a, "models");
++         if (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0)
++         {
++            agent_t base = *ag;
++            int n = agent_expand_provider_models(cfg, &base, models_arr);
++            if (n < 0)
++            {
++               LOG_ERROR("agent",
++                         "agents.json: registration '%s' expands past the %d-target limit; "
++                         "refusing to load a partial fleet",
++                         base.name, MAX_AGENTS);
++               /* `data` was already freed immediately after cJSON_Parse. */
++               cJSON_Delete(root);
++               return -1;
++            }
++            /* The registration itself is not a route target. */
++            continue;
++         }
+          cfg->agent_count++;
        }
- 
--      if (ag == primary_default)
--         return ag;
-       if (count < MAX_AGENTS)
-          candidates[count++] = ag;
     }
-diff --git a/src/server/agent_context_budget.c b/src/server/agent_context_budget.c
-index 8f207aec..c42fa3fd 100644
---- a/src/server/agent_context_budget.c
-+++ b/src/server/agent_context_budget.c
-@@ -8,12 +8,28 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
-    if (!agent || agent->middleware.context_window <= 0)
-       return AGENT_CONTEXT_BUDGET;
- 
--   /* Reserve the model's output ceiling from the window for prompt budgeting;
--    * with no explicit agent cap, fall back to the model registry rather than a
--    * hardcoded default (which is now 0 = "unset"). */
--   int output_tokens =
--       agent->max_tokens > 0 ? agent->max_tokens
--                             : model_max_output(agent_catalog_provider(agent), agent->model);
-+   /* Reserve room for the reply, then spend the rest on the prompt.
-+    *
-+    * An operator-pinned max_tokens is a real commitment and is reserved in full.
-+    * The model registry ceiling is NOT: it is the model's theoretical maximum
-+    * (128k on current frontier models), while `context_window` here is often a
-+    * deliberate POLICY ceiling below the model's true capability — Claude bills
-+    * a premium above 200k, and the Codex product expects requests to stay within
-+    * 272k. Reserving a theoretical maximum out of a policy-capped window spends
-+    * most of the window on a reply that a delegate turn will not produce: with a
-+    * 200k ceiling and a 128k ceiling-reserve the prompt budget collapses to 72k.
-+    *
-+    * So an UNPINNED reserve is capped at a quarter of the window. A caller that
-+    * genuinely needs a long reply pins max_tokens (or passes an explicit
-+    * per-request budget, which never reaches this function). */
-+   int output_tokens = agent->max_tokens;
-+   if (output_tokens <= 0)
+diff --git a/src/server/server_agent.c b/src/server/server_agent.c
+index c09470df..b0c26882 100644
+--- a/src/server/server_agent.c
++++ b/src/server/server_agent.c
+@@ -7,6 +7,8 @@
+ #include "commands.h"
+ #include "agent.h"
+ #include "agent_adapter.h"
++#include "model_registry.h"  /* model_capability_t, MODEL_PROVIDER_MAX */
++#include "agent_tier_lint.h" /* agent_resolved_price[_at_context] */
+ #include "cJSON.h"
+ #include "json_fluent.h" /* jo_ok */
+ #include "log.h"
+@@ -408,7 +410,63 @@ static cJSON *server_agent_to_json(const agent_t *ag)
+    cJSON_AddStringToObject(obj, "model", ag->model);
+    cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
+    cJSON_AddStringToObject(obj, "provider", ag->provider);
++   /* Catalog (vendor) identity, which differs from `provider` (the wire shape)
++    * for a third-party model served over another vendor's API. This is the
++    * SERVER-side projection the GUI reads, so the same identity and pricing the
++    * CLI shows must be available here or the two disagree. */
++   cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
++   if (ag->model[0])
 +   {
-+      int model_ceiling = model_max_output(agent_catalog_provider(agent), agent->model);
-+      int reserve_cap = agent->middleware.context_window / 4;
-+      output_tokens = (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling
-+                                                                        : reserve_cap;
++      char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
++      snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
++      cJSON_AddStringToObject(obj, "model_ref", ref);
++      model_capability_t dcap;
++      if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
++          dcap.display_name[0])
++         cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
 +   }
-    int prompt_tokens = agent->middleware.context_window - output_tokens;
-    if (prompt_tokens <= 0)
-       prompt_tokens = agent->middleware.context_window / 2;
+    cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
++   /* Effective BASE-band price ($/Mtok): operator override first, else catalog.
++    * Emitted only when both required axes resolve, so a consumer never reads an
++    * unknown price as free; cached is omitted when unpublished. `price_bands`
++    * carries the context-band schedule, without which a large request would be
++    * shown at half its applicable rate. */
++   {
++      double pin = 0.0, pout = 0.0, pcached = 0.0;
++      if (agent_resolved_price(ag, &pin, &pout, &pcached))
++      {
++         cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
++         cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
++         if (pcached > 0.0)
++            cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
++
++         model_capability_t cap;
++         if (ag->model[0] && model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
++             cap.price_band_count > 0)
++         {
++            cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
++            for (int b = 0; bands && b < cap.price_band_count; b++)
++            {
++               double bin = 0.0, bout = 0.0, bcached = 0.0;
++               int above = cap.price_bands[b].above_tokens;
++               if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
++                  continue;
++               cJSON *e = cJSON_CreateObject();
++               if (!e)
++                  continue;
++               cJSON_AddNumberToObject(e, "above_tokens", above);
++               cJSON_AddNumberToObject(e, "in_per_mtok", bin);
++               cJSON_AddNumberToObject(e, "out_per_mtok", bout);
++               if (bcached > 0.0)
++                  cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
++               cJSON_AddItemToArray(bands, e);
++            }
++         }
++      }
++      cJSON_AddBoolToObject(obj, "price_overridden",
++                            ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
++                                ag->price_cached_per_mtok > 0.0);
++   }
+    cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
+    cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);
+    cJSON_AddBoolToObject(obj, "primary_only", ag->primary_only);
+diff --git a/src/tests/Rules.mk b/src/tests/Rules.mk
+index 5f5455d3..9fa38d2d 100644
+--- a/src/tests/Rules.mk
++++ b/src/tests/Rules.mk
+@@ -1544,6 +1544,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
+ 
+ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
+                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
++                               $(OBJDIR)/agent_tier_lint.o \
+                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
+                                $(OBJDIR)/tests/support/vault_service_stub.o \
+                                $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
 diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
-index 95741c82..34d3bd0b 100644
+index ea343413..3fc8345c 100644
 --- a/src/tests/test_agent.c
 +++ b/src/tests/test_agent.c
-@@ -38,6 +38,9 @@ void test_catalog_provider_host_matching_is_label_anchored(void);
- void test_catalog_provider_namespaced_model_ids(void);
- void test_moonshot_heuristic_scopes_reasoning_to_known_families(void);
- void test_catalog_provider_maps_cli_provider_names(void);
-+void test_primary_turn_reaches_default_above_min_tier(void);
-+void test_primary_turn_default_must_still_satisfy_caps(void);
-+void test_catalog_provider_endpoint_parser_edges(void);
- 
- /* Defined in test_agent_responses.c (split out to keep this file under the
-  * 2000-line hard limit); called from main() below. */
-@@ -3180,6 +3183,9 @@ int main(void)
-    test_catalog_provider_namespaced_model_ids();
-    test_moonshot_heuristic_scopes_reasoning_to_known_families();
-    test_catalog_provider_maps_cli_provider_names();
-+   test_primary_turn_reaches_default_above_min_tier();
-+   test_primary_turn_default_must_still_satisfy_caps();
-+   test_catalog_provider_endpoint_parser_edges();
-    test_agent_config_cache_detects_same_mtime_rewrite();
-    test_agent_adapter_registry();
-    test_agent_config_deletion_guard();
+@@ -42,6 +42,8 @@ void test_primary_turn_reaches_default_above_min_tier(void);
+ void test_primary_turn_default_must_still_satisfy_caps(void);
+ void test_catalog_provider_endpoint_parser_edges(void);
+ void test_request_max_tokens_clamped_to_context_window(void);
++void test_provider_general_registration_expands(void);
++void test_provider_general_overflow_rejects_config(void);
+ void test_capability_routing_flag_behaviour_diff(void);
+ void test_capability_gate_escalates_instead_of_failing(void);
+ void test_no_escalation_when_capability_routing_disabled(void);
+@@ -3211,6 +3213,8 @@ int main(void)
+    test_primary_turn_default_must_still_satisfy_caps();
+    test_catalog_provider_endpoint_parser_edges();
+    test_request_max_tokens_clamped_to_context_window();
++   test_provider_general_registration_expands();
++   test_provider_general_overflow_rejects_config();
+    test_capability_routing_flag_behaviour_diff();
+    test_capability_gate_escalates_instead_of_failing();
+    test_no_escalation_when_capability_routing_disabled();
 diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
-index e9517e72..3a2267e8 100644
+index 7d174b93..fa9b583c 100644
 --- a/src/tests/test_agent_caps.c
 +++ b/src/tests/test_agent_caps.c
-@@ -250,6 +250,59 @@ void test_catalog_provider_host_matching_is_label_anchored(void)
-    unlink(agent_config_path());
+@@ -1,6 +1,7 @@
+ #include <assert.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <sys/stat.h>
+ #include <unistd.h>
+ 
+ #include "aimee.h"
+@@ -1024,6 +1025,118 @@ void test_capability_routing_flag_behaviour_diff(void)
+    printf("  PASS: test_capability_routing_flag_behaviour_diff\n");
  }
  
-+/* Review-driven parser hardening. Each case previously misderived or was
-+ * rejected; a misderivation is silent and, in the legacy wire rewrite, changes
-+ * auth type and credential env-var selection. */
-+void test_catalog_provider_endpoint_parser_edges(void)
++/* Provider-general registration: one operator entry, one runtime target per
++ * model. The operator writes "codex" once with a models list; routing, health,
++ * admission and fallback continue to work per-model because each target IS an
++ * agent — no routing signature changes.
++ *
++ * Tiers must be DERIVED per model: sol/terra/luna are $5.00/$2.50/$1.00, so a
++ * single inherited tier would make "cheapest first" pick arbitrarily among them. */
++/* Seed a priced catalog under the CURRENT HOME. Tier derivation reads the model
++ * catalog, and without it every expanded target keeps the registration's
++ * declared tier — the assertions below would then pass or fail for reasons
++ * unrelated to derivation. */
++static void seed_codex_prices(void)
 +{
++   const char *home = getenv("HOME");
++   if (!home || !home[0])
++      return;
++   char dir[512], path[600];
++   snprintf(dir, sizeof(dir), "%s/.cache", home);
++   mkdir(dir, 0755);
++   snprintf(dir, sizeof(dir), "%s/.cache/aimee", home);
++   mkdir(dir, 0755);
++   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
++   FILE *cf = fopen(path, "w");
++   if (!cf)
++      return;
++   fputs("{\"openai\":{\"models\":{"
++         "\"gpt-5.6-sol\":{\"limit\":{\"context\":1050000},"
++         "  \"cost\":{\"input\":5.0,\"output\":30.0},\"tool_call\":true},"
++         "\"gpt-5.6-terra\":{\"limit\":{\"context\":1050000},"
++         "  \"cost\":{\"input\":2.5,\"output\":15.0},\"tool_call\":true},"
++         "\"gpt-5.6-luna\":{\"limit\":{\"context\":1050000},"
++         "  \"cost\":{\"input\":1.0,\"output\":6.0},\"tool_call\":true}"
++         "}}}",
++         cf);
++   fclose(cf);
++}
++
++void test_provider_general_registration_expands(void)
++{
++   seed_codex_prices();
 +   FILE *f = fopen(agent_config_path(), "w");
 +   assert(f != NULL);
-+   fputs("{\"agents\":[\n"
-+         /* Scheme-less endpoint smuggling an authority through a PATH segment. */
-+         "{\"name\":\"pathscheme\",\"provider\":\"openai\","
-+         "\"endpoint\":\"gateway.example/relay://api.minimax.io/v1\","
-+         "\"model\":\"house\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
-+         "\"roles\":[\"review\"]},\n"
-+         /* Scheme-relative URL must still resolve its host. */
-+         "{\"name\":\"schemerel\",\"provider\":\"anthropic\","
-+         "\"endpoint\":\"//api.kimi.com/v1\",\"model\":\"house\","
-+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
-+         /* Bracketed IPv6 literal must not parse as \"[\". */
-+         "{\"name\":\"v6\",\"provider\":\"openai\","
-+         "\"endpoint\":\"https://[2001:db8::1]:8443/v1\",\"model\":\"house\","
-+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
-+         /* Family prefix must be boundary-anchored: NOT MiniMax. */
-+         "{\"name\":\"lookalikemodel\",\"provider\":\"openai\","
-+         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"minimaximum-production\","
-+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
++   fputs("{\"agents\":["
++         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"cost_tier\":0,\"roles\":[\"review\"],"
++         "\"models\":[\"gpt-5.6-sol\",\"gpt-5.6-terra\",\"gpt-5.6-luna\"]},"
++         /* A LEGACY single-model entry must keep exactly its old meaning. */
++         "{\"name\":\"legacy\",\"provider\":\"anthropic\","
++         "\"endpoint\":\"https://api.anthropic.com\",\"model\":\"claude-opus-4-8\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"cost_tier\":1,"
++         "\"roles\":[\"review\"]}"
 +         "]}\n",
 +         f);
 +   fclose(f);
 +
 +   agent_config_t c;
 +   assert(agent_load_config(&c) == 0);
++   /* Three expanded targets plus the untouched legacy entry. The registration
++    * itself is NOT a route target. */
++   assert(c.agent_count == 4);
++   assert(agent_find(&c, "codex") == NULL);
 +
-+   /* Host is gateway.example, so no vendor: catalog falls back to the wire
-+    * provider AND the legacy wire rewrite must not have fired. */
-+   const agent_t *ps = agent_find(&c, "pathscheme");
-+   assert(strcmp(agent_catalog_provider(ps), "openai") == 0);
-+   assert(strcmp(ps->provider, "openai") == 0);
++   const agent_t *sol = agent_find(&c, "codex:gpt-5.6-sol");
++   const agent_t *terra = agent_find(&c, "codex:gpt-5.6-terra");
++   const agent_t *luna = agent_find(&c, "codex:gpt-5.6-luna");
++   assert(sol && terra && luna);
 +
-+   assert(strcmp(agent_catalog_provider(agent_find(&c, "schemerel")), "moonshotai") == 0);
++   /* Registration properties are inherited... */
++   assert(strcmp(sol->provider, "chatgpt") == 0);
++   assert(strcmp(sol->auth_type, "codex-oauth") == 0);
++   assert(sol->enabled == 1);
++   /* ...and the catalog identity is derived, so capability/price resolve. */
++   assert(strcmp(agent_catalog_provider(sol), "openai") == 0);
 +
-+   /* An IPv6 literal names no vendor domain; it must not derive one. */
-+   assert(strcmp(agent_catalog_provider(agent_find(&c, "v6")), "openai") == 0);
++   /* Tiers are DERIVED per model from price, not inherited from the
++    * registration's declared 0: sol $5 > terra $2.50 > luna $1.00. */
++   assert(sol->cost_tier > terra->cost_tier);
++   assert(terra->cost_tier > luna->cost_tier);
 +
-+   /* "minimaximum-production" is not the minimax family: neither the catalog
-+    * identity nor - critically - the wire provider may change. */
-+   const agent_t *lk = agent_find(&c, "lookalikemodel");
-+   assert(strcmp(agent_catalog_provider(lk), "openai") == 0);
-+   assert(strcmp(lk->provider, "openai") == 0);
++   /* The legacy entry is untouched: same name, same model, declared tier kept. */
++   const agent_t *legacy = agent_find(&c, "legacy");
++   assert(legacy && strcmp(legacy->model, "claude-opus-4-8") == 0);
++   assert(legacy->cost_tier == 1);
 +
-+   printf("  PASS: test_catalog_provider_endpoint_parser_edges\n");
++   printf("  PASS: test_provider_general_registration_expands\n");
 +   unlink(agent_config_path());
 +}
 +
- /* Gateways (OpenRouter and friends) do not carry a vendor host, so the vendor
-  * has to come from a namespaced model id. Review found "moonshotai/kimi-k2.7-code"
-  * missed while "minimax/MiniMax-M3" worked by accident. */
-@@ -326,12 +379,19 @@ void test_catalog_provider_maps_cli_provider_names(void)
-    model_capability_t cap;
-    assert(model_capability_get(agent_catalog_provider(cl), cl->model, &cap) != 0);
-    assert(cap.flags & MODEL_CAP_REASONING);
--   assert(cap.context_window == 200000 || cap.context_window >= 1000000);
--   assert(model_max_output(agent_catalog_provider(cl), cl->model) > 8192);
-+   assert(cap.flags & MODEL_CAP_TOOLS);
-+   /* The catalog value, not the operator's policy ceiling: with a cold cache the
-+    * static prefix table answers 200000 for claude-opus-4; with the real catalog
-+    * it is 1000000. Both are legitimate SOURCES, so pin the property that
-+    * actually regressed instead — an unmapped provider yielded NO flags and the
-+    * non-reasoning 8192 output ceiling. */
-+   assert(cap.context_window >= 200000);
-+   assert(model_max_output(agent_catalog_provider(cl), cl->model) >= 32768);
- 
-    assert(model_capability_get(agent_catalog_provider(cx), cx->model, &cap) != 0);
-    assert(cap.flags & MODEL_CAP_REASONING);
--   assert(model_max_output(agent_catalog_provider(cx), cx->model) > 8192);
-+   assert(cap.flags & MODEL_CAP_TOOLS);
-+   assert(model_max_output(agent_catalog_provider(cx), cx->model) >= 32768);
- 
-    printf("  PASS: test_catalog_provider_maps_cli_provider_names\n");
-    unlink(agent_config_path());
-@@ -461,6 +521,117 @@ void test_context_window_table_covers_live_vendors(void)
-    printf("  PASS: test_context_window_table_covers_live_vendors\n");
- }
- 
-+/* A PRIMARY (user-facing) turn must reach the configured default agent whatever
-+ * its cost_tier. The default is the operator's most-capable-seat choice, and a
-+ * user must never be handed a weaker model because a cheaper peer exists.
-+ * Previously the default was only returned from inside the min_tier-filtered
-+ * pass, so a premium default with ANY cheaper peer serving the same role was
-+ * silently skipped — the exact opposite of the intent. */
-+void test_primary_turn_reaches_default_above_min_tier(void)
++/* An expansion that does not fit must reject the WHOLE config rather than
++ * register a partial fleet: silently dropping models an operator declared would
++ * route work to a set they never approved. */
++void test_provider_general_overflow_rejects_config(void)
 +{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   cfg.agent_count = 2;
-+   strcpy(cfg.default_agent, "premium");
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"big\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://api.openai.com/v1\",\"auth_type\":\"bearer\","
++         "\"api_key\":\"k\",\"roles\":[\"review\"],\"models\":["
++         "\"m1\",\"m2\",\"m3\",\"m4\",\"m5\",\"m6\",\"m7\",\"m8\","
++         "\"m9\",\"m10\",\"m11\",\"m12\",\"m13\",\"m14\",\"m15\",\"m16\","
++         "\"m17\"]}]}\n",
++         f);
++   fclose(f);
 +
-+   strcpy(cfg.agents[0].name, "premium");
-+   strcpy(cfg.agents[0].provider, "anthropic");
-+   strcpy(cfg.agents[0].model, "claude-opus-4-8");
-+   strcpy(cfg.agents[0].roles[0], "review");
-+   cfg.agents[0].role_count = 1;
-+   cfg.agents[0].enabled = 1;
-+   cfg.agents[0].tools_enabled = 1;
-+   cfg.agents[0].cost_tier = 1; /* dearer than the peer below */
-+   strcpy(cfg.agents[0].api_key, "k");
++   agent_config_t c;
++   assert(agent_load_config(&c) != 0);
 +
-+   strcpy(cfg.agents[1].name, "cheap");
-+   strcpy(cfg.agents[1].provider, "anthropic");
-+   strcpy(cfg.agents[1].model, "claude-haiku-4-5");
-+   strcpy(cfg.agents[1].roles[0], "review");
-+   cfg.agents[1].role_count = 1;
-+   cfg.agents[1].enabled = 1;
-+   cfg.agents[1].tools_enabled = 1;
-+   cfg.agents[1].cost_tier = 0;
-+   strcpy(cfg.agents[1].api_key, "k");
-+
-+   /* Delegation (NOT a primary turn) still minimises cost. */
-+   agent_routing_set_primary_turn(0);
-+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
-+
-+   /* A primary turn reaches the premium default despite its higher tier. */
-+   agent_routing_set_primary_turn(1);
-+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
-+
-+   /* A disabled default must not be handed back; fall through to routing. */
-+   cfg.agents[0].enabled = 0;
-+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
-+   cfg.agents[0].enabled = 1;
-+
-+   /* A default that does not serve the role is not a usable seat either. This
-+    * must be checked with a NON-exec role: agent_supports_role() waves any agent
-+    * through for the 18 default exec roles (deploy/validate/test/diagnose/
-+    * execute/review/code/refactor/draft/implement/...), so a `roles` list is not
-+    * consulted at all for those. "explain" is not among them. */
-+   strcpy(cfg.agents[0].roles[0], "review");
-+   strcpy(cfg.agents[1].roles[0], "explain");
-+   assert(agent_route(&cfg, "explain") == &cfg.agents[1]);
-+
-+   /* Guard rail for the above: for an EXEC role the default is reachable even
-+    * though its roles list names something else, because the exec-role fallback
-+    * bypasses role filtering entirely. Documented so a future role split does
-+    * not assume `roles` gates these. */
-+   strcpy(cfg.agents[0].roles[0], "explain");
-+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
-+
-+   agent_routing_set_primary_turn(0);
-+   printf("  PASS: test_primary_turn_reaches_default_above_min_tier\n");
-+}
-+
-+/* Under capability routing the primary default still wins on price, but it must
-+ * genuinely SATISFY the requirements — a seat that cannot hold the prompt is not
-+ * usable just because it is the default. */
-+void test_primary_turn_default_must_still_satisfy_caps(void)
-+{
-+   agent_config_t cfg;
-+   config_t sys_cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   memset(&sys_cfg, 0, sizeof(sys_cfg));
-+   sys_cfg.model_meta_capability_routing = 1;
-+
-+   cfg.agent_count = 2;
-+   strcpy(cfg.default_agent, "small_default");
-+
-+   strcpy(cfg.agents[0].name, "small_default");
-+   strcpy(cfg.agents[0].provider, "openai");
-+   strcpy(cfg.agents[0].model, "gpt-4"); /* 8192 catalog window */
-+   strcpy(cfg.agents[0].roles[0], "review");
-+   cfg.agents[0].role_count = 1;
-+   cfg.agents[0].enabled = 1;
-+   cfg.agents[0].tools_enabled = 1;
-+   cfg.agents[0].cost_tier = 1;
-+   strcpy(cfg.agents[0].api_key, "k");
-+
-+   strcpy(cfg.agents[1].name, "big_peer");
-+   strcpy(cfg.agents[1].provider, "anthropic");
-+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
-+   strcpy(cfg.agents[1].roles[0], "review");
-+   cfg.agents[1].role_count = 1;
-+   cfg.agents[1].enabled = 1;
-+   cfg.agents[1].tools_enabled = 1;
-+   cfg.agents[1].cost_tier = 0;
-+   cfg.agents[1].middleware.context_window = 200000;
-+   strcpy(cfg.agents[1].api_key, "k");
-+
-+   agent_routing_set_primary_turn(1);
-+   /* No requirement: the default wins regardless of tier. */
-+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
-+   /* A 50k prompt does not fit the default -> it is skipped, not forced. */
-+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
-+   agent_routing_set_primary_turn(0);
-+
-+   printf("  PASS: test_primary_turn_default_must_still_satisfy_caps\n");
++   printf("  PASS: test_provider_general_overflow_rejects_config\n");
++   unlink(agent_config_path());
 +}
 +
  /* agent_default_primary must never hand back a disabled seat: a disabled
   * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
   * primary and every ingress request that doesn't name a model fast-fails as
-diff --git a/src/tests/test_agent_tier_lint.c b/src/tests/test_agent_tier_lint.c
-index 843eaabd..a4617f19 100644
---- a/src/tests/test_agent_tier_lint.c
-+++ b/src/tests/test_agent_tier_lint.c
-@@ -11,8 +11,8 @@
- #include "agent_tier_lint.h"
- #include "model_registry.h"
- 
--/* Mirrors agent_config.c. Stubbed so this test links only the registry, not the
-- * whole agent-config layer. */
-+/* Mirror agent_config.c so this test links only the registry, not the whole
-+ * agent-config layer. Kept behaviourally identical to the originals. */
- const char *agent_catalog_provider(const agent_t *agent)
- {
-    if (!agent)
-@@ -20,6 +20,35 @@ const char *agent_catalog_provider(const agent_t *agent)
-    return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
+diff --git a/src/tests/test_agent_list_handler.c b/src/tests/test_agent_list_handler.c
+index 7b515222..470b0085 100644
+--- a/src/tests/test_agent_list_handler.c
++++ b/src/tests/test_agent_list_handler.c
+@@ -153,6 +153,58 @@ static void test_primary_only_round_trips(void)
+    printf("  PASS: primary_only round-trips through the list handler\n");
  }
  
-+int agent_has_role(const agent_t *agent, const char *role)
++/* The SERVER projection is what the GUI reads. It must carry the same identity
++ * and pricing the CLI shows, or the two disagree about what an agent is and what
++ * it costs. `provider` alone is ambiguous for a third-party model served over
++ * another vendor's API, so catalog_provider and a canonical provider:model ref
++ * are both required. */
++static void test_list_exposes_catalog_identity_and_pricing(void)
 +{
-+   for (int i = 0; i < agent->role_count; i++)
-+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
-+         return 1;
-+   return 0;
-+}
++   set_home_empty();
++   write_agents("{\"agents\":["
++                /* Anthropic WIRE format, MiniMax VENDOR. */
++                "{\"name\":\"MiniMax-M3\",\"provider\":\"anthropic\","
++                "\"endpoint\":\"https://api.minimax.io/anthropic\","
++                "\"model\":\"MiniMax-M3\",\"auth_type\":\"bearer\","
++                "\"api_key\":\"k\",\"roles\":[\"all\"]},"
++                /* Operator-priced agent: the override must win over the catalog. */
++                "{\"name\":\"priced\",\"provider\":\"anthropic\","
++                "\"endpoint\":\"https://api.anthropic.com\","
++                "\"model\":\"claude-opus-4-8\",\"auth_type\":\"bearer\","
++                "\"api_key\":\"k\",\"price_in_per_mtok\":1.5,"
++                "\"price_out_per_mtok\":2.5,\"roles\":[\"all\"]}"
++                "]}\n");
++   reset_capture();
 +
-+int agent_is_exec_role(const agent_t *agent, const char *role)
-+{
-+   /* Same default set as agent_config.c: these 18 roles are granted to every
-+    * agent regardless of its declared roles list. */
-+   static const char *defaults[] = {"deploy",  "validate",   "test",  "diagnose",   "execute",
-+                                    "review",  "code",       "refactor", "draft",   "implement",
-+                                    "continuity", "prose",   "line-edit", "beat-check",
-+                                    "lyric",   "hook",       "prosody", "songform"};
-+   if (agent->exec_role_count > 0)
-+   {
-+      for (int i = 0; i < agent->exec_role_count; i++)
-+         if (strcmp(agent->exec_roles[i], role) == 0)
-+            return 1;
-+      return 0;
-+   }
-+   for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++)
-+      if (strcmp(defaults[i], role) == 0)
-+         return 1;
-+   return 0;
-+}
++   assert(handle_agent_list(NULL, NULL, NULL) == 0);
++   assert(g_last_error[0] == '\0' && g_last_response != NULL);
++   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
++   assert(cJSON_IsArray(agents) && cJSON_GetArraySize(agents) == 2);
 +
- /* Seed a real priced catalog. Without this the static table prices nothing for
-  * the fixture models and every meaningful assertion below SKIPs — a green run
-  * that proves nothing. models_dev_cache_lookup() reads $HOME/.cache/aimee on
-@@ -45,11 +74,20 @@ static void seed_priced_catalog(void)
-                       "\"testvendor/dear\":  {\"contextWindow\":100000,\"inputCost\":10.0,"
-                       "                      \"outputCost\":50.0,\"tools\":true},"
-                       "\"testvendor/cheap\": {\"contextWindow\":100000,\"inputCost\":1.0,"
--                      "                      \"outputCost\":5.0,\"tools\":true},"
-+                      "                      \"outputCost\":5.0,\"cacheReadCost\":0.1,"
-+                      "                      \"tools\":true},"
-                       "\"testvendor/ambig_a\":{\"contextWindow\":100000,\"inputCost\":9.0,"
-                       "                      \"outputCost\":1.0,\"tools\":true},"
-                       "\"testvendor/ambig_b\":{\"contextWindow\":100000,\"inputCost\":1.0,"
--                      "                      \"outputCost\":9.0,\"tools\":true}"
-+                      "                      \"outputCost\":9.0,\"tools\":true},"
-+                      /* Equal on input, dearer on output: Pareto-dominated. */
-+                      "\"testvendor/eq_dear\":{\"contextWindow\":100000,\"inputCost\":10.0,"
-+                      "                      \"outputCost\":50.0,\"tools\":true},"
-+                      "\"testvendor/eq_cheap\":{\"contextWindow\":100000,\"inputCost\":10.0,"
-+                      "                      \"outputCost\":5.0,\"tools\":true},"
-+                      /* Output price ABSENT: partial data, not a known zero. */
-+                      "\"testvendor/partial\":{\"contextWindow\":100000,\"inputCost\":1.0,"
-+                      "                      \"tools\":true}"
-                       "}";
-    FILE *f = fopen(path, "w");
-    assert(f);
-@@ -217,6 +255,165 @@ static void test_ambiguous_price_axes_not_flagged(void)
-    printf("  PASS: test_ambiguous_price_axes_not_flagged\n");
- }
- 
-+/* Equality on one axis with a strictly dearer other axis IS unambiguous Pareto
-+ * dominance and needs no exchange rate: $10/$50 is never cheaper than $10/$5.
-+ * A strict-on-both-axes test missed this. */
-+static void test_equal_axis_dominance_is_flagged(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "dear_at_tier0", "testvendor", "eq_dear", 0);
-+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "eq_cheap", 1);
++   cJSON *mm = cJSON_GetArrayItem(agents, 0);
++   /* Wire provider is untouched; catalog identity is the vendor. */
++   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "provider")),
++                 "anthropic") == 0);
++   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "catalog_provider")),
++                 "minimax") == 0);
++   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "model_ref")),
++                 "minimax:MiniMax-M3") == 0);
 +
-+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
-+   assert(strcmp(out[0].cheaper_tier_agent, "dear_at_tier0") == 0);
++   cJSON *pr = cJSON_GetArrayItem(agents, 1);
++   cJSON *pin = cJSON_GetObjectItemCaseSensitive(pr, "price_base_in_per_mtok");
++   cJSON *pout = cJSON_GetObjectItemCaseSensitive(pr, "price_base_out_per_mtok");
++   assert(cJSON_IsNumber(pin) && pin->valuedouble == 1.5);
++   assert(cJSON_IsNumber(pout) && pout->valuedouble == 2.5);
++   cJSON *ovr = cJSON_GetObjectItemCaseSensitive(pr, "price_overridden");
++   assert(cJSON_IsBool(ovr) && cJSON_IsTrue(ovr));
 +
-+   printf("  PASS: test_equal_axis_dominance_is_flagged\n");
-+}
++   /* The unpriced-override agent reports the catalog rate as NOT overridden. */
++   cJSON *ovr0 = cJSON_GetObjectItemCaseSensitive(mm, "price_overridden");
++   assert(cJSON_IsBool(ovr0) && !cJSON_IsTrue(ovr0));
 +
-+/* A model with only one published price axis must not be compared as though the
-+ * missing axis were known to be zero — that would manufacture a conflict from
-+ * absent data, contradicting "absent is no evidence". */
-+static void test_partial_price_data_is_not_compared(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);      /* 10 / 50 */
-+   add_agent(&cfg, "partial_at_tier1", "testvendor", "partial", 1); /* 1 / absent */
-+
-+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
-+
-+   printf("  PASS: test_partial_price_data_is_not_compared\n");
-+}
-+
-+/* Agents that can never enter the same candidate set are not substitutes, so
-+ * their relative tiers cannot mis-route anything. Reporting them would tell the
-+ * operator routing prefers the dearer model when routing never chooses between
-+ * them at all. */
-+static void test_non_competing_roles_not_flagged(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
-+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
-+   /* Disjoint, NON-exec roles: neither can serve the other's work. */
-+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
-+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
-+
-+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
-+
-+   /* Sharing a role restores the finding. */
-+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "explain");
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
-+
-+   printf("  PASS: test_non_competing_roles_not_flagged\n");
-+}
-+
-+/* Operator pricing beats the catalog. The published rate is a LIST price and is
-+ * not what every deployment pays: a subscription seat, committed-use discount,
-+ * self-hosted compute, or a reselling gateway all differ. Overriding is the
-+ * mechanism for saying what this deployment actually pays. */
-+static void test_operator_price_override_wins(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);  /* catalog 10 / 50 */
-+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1); /* catalog 1 / 5  */
-+
-+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
-+   /* On catalog prices this is a genuine contradiction. */
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
-+
-+   /* The operator declares the tier-0 agent is actually near-free to them (a
-+    * flat-rate seat). The tiers now agree with real cost, so no finding. */
-+   cfg.agents[0].price_in_per_mtok = 0.10;
-+   cfg.agents[0].price_out_per_mtok = 0.20;
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
-+
-+   double pin = 0.0, pout = 0.0, pcached = 0.0;
-+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
-+   assert(pin == 0.10 && pout == 0.20);
-+
-+   /* An override can also CREATE a finding the catalog would not: a gateway
-+    * reselling the cheap model at a markup. */
-+   memset(&cfg.agents[0].price_in_per_mtok, 0, sizeof(double));
-+   cfg.agents[0].price_in_per_mtok = 0.0;
-+   cfg.agents[0].price_out_per_mtok = 0.0;
-+   cfg.agents[1].price_in_per_mtok = 100.0;
-+   cfg.agents[1].price_out_per_mtok = 500.0;
-+   /* Now tier-1 is dearer, which is CONSISTENT with its higher tier: no finding. */
-+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
-+
-+   printf("  PASS: test_operator_price_override_wins\n");
-+}
-+
-+/* Each axis resolves independently: an operator may pin only one and let the
-+ * catalog answer the other. */
-+static void test_price_override_per_axis(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "a", "testvendor", "dear", 0); /* catalog 10 / 50 */
-+
-+   double pin = 0.0, pout = 0.0, pcached = 0.0;
-+   cfg.agents[0].price_in_per_mtok = 2.0; /* pin input only */
-+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
-+   assert(pin == 2.0);   /* operator */
-+   assert(pout == 50.0); /* catalog  */
-+
-+   /* An unpriced model with only one axis pinned is still "no evidence": the
-+    * catalog cannot supply the other, so both axes are not known. */
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "unknown", "anthropic", "totally-unknown-model-zzz", 0);
-+   cfg.agents[0].price_in_per_mtok = 3.0;
-+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 0);
-+
-+   /* Pinning both makes an otherwise unpriced model fully priced — the path a
-+    * self-hosted or gateway model takes. */
-+   cfg.agents[0].price_out_per_mtok = 9.0;
-+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
-+   assert(pin == 3.0 && pout == 9.0);
-+
-+   printf("  PASS: test_price_override_per_axis\n");
-+}
-+
-+/* Cache-read price is a THIRD billed axis and is reported separately: it is
-+ * typically an order of magnitude below input, so a caching workload's real
-+ * cost is not approximated by the input rate. It is optional — many providers
-+ * publish none — and its absence must not make an otherwise-priced agent look
-+ * unpriced. */
-+static void test_cached_price_axis(void)
-+{
-+   agent_config_t cfg;
-+   memset(&cfg, 0, sizeof(cfg));
-+   add_agent(&cfg, "cheap", "testvendor", "cheap", 0); /* catalog publishes cache_read */
-+   add_agent(&cfg, "dear", "testvendor", "dear", 1);   /* catalog publishes none */
-+
-+   double pin = 0.0, pout = 0.0, pcached = -1.0;
-+   assert(agent_resolved_price(&cfg.agents[0], &pin, &pout, &pcached) == 1);
-+   assert(pin == 1.0 && pout == 5.0);
-+   assert(pcached == 0.1);
-+
-+   /* No published cache rate -> 0, and the agent is still fully priced. */
-+   pcached = -1.0;
-+   assert(agent_resolved_price(&cfg.agents[1], &pin, &pout, &pcached) == 1);
-+   assert(pcached == 0.0);
-+
-+   /* An operator may pin the cache rate alone; input/output still resolve from
-+    * the catalog. */
-+   cfg.agents[1].price_cached_per_mtok = 0.5;
-+   assert(agent_resolved_price(&cfg.agents[1], &pin, &pout, &pcached) == 1);
-+   assert(pcached == 0.5 && pin == 10.0 && pout == 50.0);
-+
-+   /* Every out-parameter is optional. */
-+   assert(agent_resolved_price(&cfg.agents[0], NULL, NULL, NULL) == 1);
-+
-+   printf("  PASS: test_cached_price_axis\n");
++   printf("  PASS: list exposes catalog identity and pricing\n");
 +}
 +
  int main(void)
  {
-    printf("agent_tier_lint:\n");
-@@ -227,6 +424,12 @@ int main(void)
-    test_disabled_agent_ignored();
-    test_equal_tiers_never_conflict();
-    test_ambiguous_price_axes_not_flagged();
-+   test_equal_axis_dominance_is_flagged();
-+   test_partial_price_data_is_not_compared();
-+   test_non_competing_roles_not_flagged();
-+   test_operator_price_override_wins();
-+   test_price_override_per_axis();
-+   test_cached_price_axis();
-    test_guards();
-    printf("agent_tier_lint: all tests passed\n");
-    return 0;
-diff --git a/src/tests/test_context_assembly.c b/src/tests/test_context_assembly.c
-index 8e134dfe..8db0ec8c 100644
---- a/src/tests/test_context_assembly.c
-+++ b/src/tests/test_context_assembly.c
-@@ -353,6 +353,47 @@ static void test_agent_context_budget_uses_context_window(void)
-    assert(agent_exec_context_budget_chars(&ag) > AGENT_CONTEXT_BUDGET);
- }
- 
-+/* An UNPINNED output reserve must not eat the window.
-+ *
-+ * middleware.context_window is frequently a deliberate POLICY ceiling below the
-+ * model's true capability (Claude bills a premium above 200k; Codex expects
-+ * <=272k), while model_max_output() reports the model's THEORETICAL maximum
-+ * (128k on current frontier models). Reserving the theoretical maximum out of a
-+ * policy-capped window collapsed the prompt budget: a 200k ceiling minus a 128k
-+ * reserve leaves 72k, a ~62% cut. Cap an unpinned reserve at a quarter of the
-+ * window; an operator who needs a long reply pins max_tokens, which is still
-+ * reserved in full. */
-+static void test_agent_context_budget_caps_unpinned_output_reserve(void)
-+{
-+   agent_t ag;
-+   memset(&ag, 0, sizeof(ag));
-+   strcpy(ag.provider, "anthropic");
-+   strcpy(ag.model, "claude-opus-4-8");
-+   ag.middleware.context_window = 200000; /* deliberate policy ceiling */
-+
-+   /* Unpinned: the reserve is min(model ceiling, window/4), so the prompt budget
-+    * is AT LEAST window - window/4 == 150000 tokens, and far above the 72000 a
-+    * full 128k reserve would have left. Asserted as an invariant rather than an
-+    * exact figure so the test does not pin whichever ceiling the catalog or the
-+    * heuristic currently reports for this model. */
-+   size_t unpinned = agent_exec_context_budget_chars(&ag);
-+   assert(unpinned >= (size_t)(200000 - 200000 / 4) * 4u);
-+   assert(unpinned > (size_t)72000 * 4u);
-+
-+   /* An explicit operator cap is a real commitment and is reserved in full. */
-+   ag.max_tokens = 128000;
-+   assert(agent_exec_context_budget_chars(&ag) == (size_t)(200000 - 128000) * 4u);
-+
-+   /* A model whose ceiling is genuinely small still reserves only that much,
-+    * rather than being inflated to window/4. */
-+   memset(&ag, 0, sizeof(ag));
-+   strcpy(ag.provider, "openai");
-+   strcpy(ag.model, "gpt-4"); /* small non-reasoning ceiling */
-+   ag.middleware.context_window = 1000000;
-+   size_t small = agent_exec_context_budget_chars(&ag);
-+   assert(small > (size_t)(1000000 - 1000000 / 4) * 4u);
-+}
-+
- int main(void)
- {
-    test_null_hint_produces_same_as_original();
-@@ -372,6 +413,7 @@ int main(void)
-    test_agent_exec_context_truncates_large_prompt();
-    test_agent_exec_context_ex_can_skip_kb();
-    test_agent_context_budget_uses_context_window();
-+   test_agent_context_budget_caps_unpinned_output_reserve();
-    printf("context_assembly: all tests passed\n");
+    printf("agent_list_handler:\n");
+@@ -160,6 +212,7 @@ int main(void)
+    test_empty_config_is_ok_with_empty_array();
+    test_populated_config_lists_agents();
+    test_primary_only_round_trips();
++   test_list_exposes_catalog_identity_and_pricing();
+    printf("all agent_list_handler tests passed\n");
     return 0;
  }
