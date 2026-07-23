@@ -652,6 +652,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
+   /* -1 = operator did not say. web_search_ex resolves it to the built-in
+    * default; 0/1 are explicit off/on. memset-0 above would otherwise read as an
+    * explicit "off" and silently disable page fetching. */
+   cfg->search_fetch_pages = -1;
    /* structured-pdf Phase C blob reconciliation: default hourly sweep, alarm at 1 GiB of
     * reclaimable orphan bytes (config_t is memset-0 above, so these explicit values are the
     * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */
@@ -909,8 +913,16 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
+   cfg->prefer_local_agents = 0;
    cfg->model_meta_refresh_minutes = 60;
-   cfg->model_meta_capability_routing = 0;
+   /* Capability routing ON by default. Routing previously consulted cost_tier
+    * and role support only, so a packet could be handed to a model whose context
+    * window could not hold it — the failure surfaced as a provider error rather
+    * than a routing decision. Safe to default on now that the gate FAILS UPWARD
+    * (agent_route_with_caps escalates to the most capable seat instead of
+    * returning no route), so enabling it cannot cost an operator a route they
+    * had. Set model_meta.capability_routing=false to restore cost-tier-only. */
+   cfg->model_meta_capability_routing = 1;
    snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "auto");
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;

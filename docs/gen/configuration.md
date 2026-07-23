@@ -235,7 +235,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 | `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
 | `dogfood_log_dir` | string | Directory for dogfood logs. |
 
-## Config-file sections (53)
+## Config-file sections (54)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -280,9 +280,10 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
+- **`routing`** — _Capability-gated delegate routing: whether to gate seat choice on capability before cost, and whether to prefer free local seats._ Keys: `enabled`, `prefer_local`
 - **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
-- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
 - **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`telemetry`** — `metrics_token`
@@ -657,6 +658,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `auth_type` | Auth scheme (bearer / oauth / none). |
 | `auto_compact_pct` | Context % at which to auto-compact. |
 | `backend` | Execution backend (http / cli / ssh / docker). |
+| `catalog_provider` | Catalog vendor key used for model lookups (`anthropic`, `openai`, …), when it differs from the wire `provider`. |
 | `cidr` | Allowed CIDR (relay / tunnel networking). |
 | `cli_cmd` | CLI command for a cli-backend agent. |
 | `cli_idle_timeout_ms` | Idle timeout (ms) for a CLI agent. |
@@ -680,18 +682,24 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `ip` | Bind/target IP (relay / tunnel). |
 | `max_parallel` | Max concurrent calls to this agent. |
 | `max_reconnects` | Max reconnect attempts (streaming / relay). |
+| `max_scope` | Largest task scope this agent may be given (`bounded` or `whole_task`). Routing never relaxes this. |
 | `max_tokens` | Max output tokens. |
 | `max_turns` | Max agent-loop turns. |
 | `middleware` | Per-agent middleware overrides (e.g. `context_window`, `max_tokens`). |
 | `model` | Model name. |
+| `models` | Provider-general registration: the models to expand into individual routable agents. Omit to expand every routable model the catalog lists. |
 | `name` | Agent identifier. |
 | `network` | Network mode (backend sandbox). |
 | `networks` | Allowed networks. |
 | `personas` | Personas this agent may be dispatched AS (engineer, architect, …); `"all"` or omitted = every persona. |
 | `port` | Target port (relay / tunnel). |
+| `price_cached_per_mtok` | Cached-input price, USD per million tokens. Overrides the catalog price. |
+| `price_in_per_mtok` | Input price, USD per million tokens. Overrides the catalog price. |
+| `price_out_per_mtok` | Output price, USD per million tokens. Overrides the catalog price. |
 | `provider` | Provider name. |
 | `recommended_sampling` | Provider-recommended sampling parameters. |
 | `reconnect_delay` | Delay between reconnects (ms). |
+| `registration` | Name of the provider registration this agent was expanded from. Set automatically; used to prefer same-provider peers during fallback. |
 | `relay_key` | Relay auth key. |
 | `relay_ssh` | SSH relay config. |
 | `roles` | Roles this agent serves (review, plan, …); `"all"` = every role. |
@@ -701,6 +709,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `stall_threshold` | Stall-detection threshold. |
 | `target_host` | Target host (relay / tunnel). |
 | `target_port` | Target port (relay / tunnel). |
+| `tier_price_exempt` | Reason this agent is exempt from the `cost_tier`-vs-price lint (e.g. a flat-rate seat whose per-token price is not meaningful). |
 | `timeout_ms` | Per-call timeout (ms). |
 | `tokens` | Token budget / accounting block. |
 | `tools_enabled` | Allow tool use for this agent. |

@@ -7,6 +7,9 @@
 static const char *anthropic_env_vars[] = {"ANTHROPIC_API_KEY", NULL};
 static const char *anthropic_default_headers[] = {"anthropic-version", "2023-06-01", NULL};
 
+static const char *anthropic_routable_models[] = {"claude-opus-4-8", "claude-sonnet-5",
+                                                  "claude-haiku-4-5", NULL};
+
 model_provider_t anthropic_provider = {
     .name = "anthropic",
     .display_name = "Anthropic",
@@ -20,6 +23,7 @@ model_provider_t anthropic_provider = {
     .default_model = "claude-sonnet-4-6",
     .default_aux_model = "claude-haiku-4-5-20251001",
     .fallback_models = NULL,
+    .routable_models = anthropic_routable_models,
     .fixed_temperature = -1,
     .default_max_tokens = 8192,
     .default_headers = anthropic_default_headers,

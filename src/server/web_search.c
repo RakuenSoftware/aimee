@@ -10,9 +10,12 @@
 #include "agent_exec.h"
 #include "config.h"
 #include "http_retry.h"
+#include "log.h"
 #include "web_egress.h"
 #include "web_extract.h"
 #include "web_page_cache.h"
+#include "web_search_breaker.h"
+#include "web_search_fuse.h"
 #include <time.h>
 #include "dstr.h"
 #include "cJSON.h"
@@ -574,6 +577,15 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
 
    long long spent = 0;
    int fetched = 0;
+   /* Observed quantities only.
+    *
+    * The temptation here is a "you saved $X" figure, which would require a
+    * counterfactual -- what a hosted search API would have charged, or how many
+    * tokens the whole page would have cost in context. Neither happened, so
+    * neither is measurable, and an unfalsifiable number in a log is worse than
+    * no number. Everything below is something that actually occurred. */
+   int cache_hits = 0, cache_misses = 0;
+   long long bytes_from_cache = 0, bytes_from_network = 0, bytes_returned = 0;
    for (int i = 0; i < want; i++)
    {
       if (!results[i].url || !results[i].url[0])
@@ -593,9 +605,15 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
       long cache_age = -1;
       char pinned[64] = "";
       char *text = db1_web_page_get(results[i].url, &cache_age, pinned, sizeof(pinned));
+      if (text)
+      {
+         cache_hits++;
+         bytes_from_cache += (long long)strlen(text);
+      }
 
       if (!text)
       {
+         cache_misses++;
          cache_age = -1;
          long long t0 = (long long)time(NULL) * 1000;
          const char *err = NULL;
@@ -613,6 +631,7 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
             dstr_append_str(ds, note);
             continue;
          }
+         bytes_from_network += (long long)strlen(html);
          text = web_extract_html_to_text(html);
          free(html);
          if (!text)
@@ -632,19 +651,110 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
          dstr_append_str(ds, lead);
          dstr_append_str(ds, spans);
          dstr_append_str(ds, "\n");
+         bytes_returned += (long long)strlen(spans);
          free(spans);
          fetched++;
       }
    }
+   LOG_INFO("web_search.retrieval",
+            "pages=%d cache_hits=%d cache_misses=%d bytes_cache=%lld bytes_network=%lld "
+            "bytes_returned=%lld fetch_ms=%lld",
+            want, cache_hits, cache_misses, bytes_from_cache, bytes_from_network, bytes_returned,
+            spent);
    if (fetched == 0)
       dstr_append_str(ds, "(no pages could be fetched; the snippets above are all that is "
                           "available)\n");
 }
 #endif /* !_WIN32 */
 
+/* ---------------- multi-engine fanout ----------------
+ *
+ * OFF unless `search.backends` is configured, and that is not timidity: a
+ * default install has exactly one usable engine (duckduckgo needs no key, the
+ * other two need a URL or an API key), so fanout would triple latency to fuse
+ * one list with two empties.
+ *
+ * The DEDUP half runs unconditionally, because it pays off with one engine too
+ * -- a scraped result page can list the same URL twice.
+ *
+ * Serial, not concurrent, for the same reason the page fetches are: aimee has no
+ * concurrent-fetch helper and adding one is a larger change than this warrants.
+ * Each engine is therefore a latency cost paid in full, which is the honest
+ * argument for leaving fanout off by default. */
+
+/* Parse a comma-separated engine list. Returns how many names were written. */
+static int parse_engine_list(const char *spec, char names[][32], int max)
+{
+   int n = 0;
+   if (!spec || !spec[0])
+      return 0;
+   const char *p = spec;
+   while (*p && n < max)
+   {
+      while (*p == ' ' || *p == ',')
+         p++;
+      const char *start = p;
+      while (*p && *p != ',')
+         p++;
+      const char *end = p;
+      while (end > start && end[-1] == ' ')
+         end--;
+      size_t len = (size_t)(end - start);
+      if (len > 0 && len < 32)
+      {
+         memcpy(names[n], start, len);
+         names[n][len] = '\0';
+         /* ignore a repeat rather than querying the same engine twice */
+         int dup = 0;
+         for (int i = 0; i < n; i++)
+            if (strcmp(names[i], names[n]) == 0)
+               dup = 1;
+         if (!dup)
+            n++;
+      }
+   }
+   return n;
+}
+
+/* Run one engine. Returns NULL on success with `results`/`count` filled, or a
+ * malloc'd error string the caller frees. An engine whose credential is missing
+ * is an error for that engine only -- with fanout it is skipped and the others
+ * still answer. */
+static char *run_engine(const char *engine, const char *query, int max_results, const config_t *cfg,
+                        web_search_result_t *results, int *count)
+{
+   *count = 0;
+   char *block = NULL;
+   if (strcmp(engine, "tavily") == 0)
+   {
+      if (!cfg->search_tavily_api_key[0])
+         return safe_strdup("error: web_search: tavily backend requires search.tavily_api_key in "
+                            "config");
+      block = backend_tavily(query, max_results, cfg->search_tavily_api_key, results, count);
+   }
+   else if (strcmp(engine, "searxng") == 0)
+   {
+      if (!cfg->search_searxng_url[0])
+         return safe_strdup("error: web_search: searxng backend requires search.searxng_url in "
+                            "config");
+      block = backend_searxng(query, max_results, cfg->search_searxng_url, results, count);
+   }
+   else
+   {
+      block = backend_duckduckgo(query, max_results, results, count);
+   }
+
+   if (!block)
+      return safe_strdup("error: web_search: backend returned nothing");
+   if (strncmp(block, "error:", 6) == 0)
+      return block; /* the backend's own message, handed to the caller */
+   free(block);     /* re-formatted from the fused list below */
+   return NULL;
+}
+
 char *web_search(const char *query, int max_results)
 {
-   return web_search_ex(query, max_results, 0, NULL);
+   return web_search_ex(query, max_results, WEB_SEARCH_FETCH_PAGES_UNSET, NULL);
 }
 
 char *web_search_ex(const char *query, int max_results, int fetch_pages, const char *extract_query)
@@ -660,50 +770,100 @@ char *web_search_ex(const char *query, int max_results, int fetch_pages, const c
    config_t cfg;
    config_load(&cfg);
 
-   const char *backend = cfg.search_backend[0] ? cfg.search_backend : "duckduckgo";
+   if (fetch_pages == WEB_SEARCH_FETCH_PAGES_UNSET)
+      fetch_pages =
+          (cfg.search_fetch_pages >= 0) ? cfg.search_fetch_pages : WEB_SEARCH_FETCH_PAGES_DEFAULT;
 
-   web_search_result_t hits[WEB_SEARCH_MAX_RESULTS];
-   memset(hits, 0, sizeof(hits));
-   int nhits = 0;
-   web_search_result_t *keep = fetch_pages ? hits : NULL;
-   int *keepn = fetch_pages ? &nhits : NULL;
+   char engines[WEB_SEARCH_MAX_ENGINES][32];
+   int nengines = parse_engine_list(cfg.search_backends, engines, WEB_SEARCH_MAX_ENGINES);
+   if (nengines == 0)
+   {
+      snprintf(engines[0], sizeof(engines[0]), "%s",
+               cfg.search_backend[0] ? cfg.search_backend : "duckduckgo");
+      nengines = 1;
+   }
 
-   char *block = NULL;
-   if (strcmp(backend, "tavily") == 0)
+   web_search_result_t per[WEB_SEARCH_MAX_ENGINES][WEB_SEARCH_MAX_RESULTS];
+   memset(per, 0, sizeof(per));
+   int counts[WEB_SEARCH_MAX_ENGINES];
+   memset(counts, 0, sizeof(counts));
+
+   char *first_err = NULL;
+   int attempted = 0;
+   for (int i = 0; i < nengines; i++)
    {
-      if (!cfg.search_tavily_api_key[0])
-         return safe_strdup(
-             "error: web_search: tavily backend requires search.tavily_api_key in config");
-      block = backend_tavily(query, max_results, cfg.search_tavily_api_key, keep, keepn);
+      /* A benched engine is skipped without a request -- the point of the
+       * breaker is to stop paying its timeout on every search. */
+      if (!web_search_breaker_allow(engines[i]))
+         continue;
+      attempted++;
+      char *err = run_engine(engines[i], query, max_results, &cfg, per[i], &counts[i]);
+      /* An empty result set counts as failure: a scraper that has decided you
+       * are a bot answers 200 with nothing, so status alone would call that
+       * healthy forever. */
+      web_search_breaker_report(engines[i], err == NULL && counts[i] > 0);
+      if (err)
+      {
+         if (!first_err)
+            first_err = err;
+         else
+            free(err);
+      }
    }
-   else if (strcmp(backend, "searxng") == 0)
+
+   web_search_result_t fused[WEB_SEARCH_MAX_ENGINES * WEB_SEARCH_MAX_RESULTS];
+   memset(fused, 0, sizeof(fused));
+   const web_search_result_t *lists[WEB_SEARCH_MAX_ENGINES];
+   for (int i = 0; i < nengines; i++)
+      lists[i] = counts[i] > 0 ? per[i] : NULL;
+   int nf =
+       web_search_fuse(lists, counts, nengines, fused, (int)(sizeof(fused) / sizeof(fused[0])));
+   if (nf < 0)
+      nf = 0;
+   for (int i = 0; i < nengines; i++)
+      web_search_free_results(per[i], counts[i]);
+
+   if (nf == 0)
    {
-      if (!cfg.search_searxng_url[0])
-         return safe_strdup(
-             "error: web_search: searxng backend requires search.searxng_url in config");
-      block = backend_searxng(query, max_results, cfg.search_searxng_url, keep, keepn);
+      web_search_free_results(fused, nf);
+      if (first_err)
+         return first_err;
+      if (attempted == 0)
+         return safe_strdup("error: web_search: every configured engine is in cooldown after "
+                            "repeated failures");
+      return web_search_format_results(NULL, 0, 0);
    }
-   else
+   free(first_err);
+
+   /* Trim to what the caller asked for: fanout is about better ranking, not
+    * about returning three engines' worth of results. */
+   if (nf > max_results)
    {
-      block = backend_duckduckgo(query, max_results, keep, keepn);
+      web_search_free_results(fused + max_results, nf - max_results);
+      nf = max_results;
    }
+
+   char *block = web_search_format_results(fused, nf, 0);
 
    if (!fetch_pages || !block)
+   {
+      web_search_free_results(fused, nf);
       return block;
+   }
 
    /* The snippet block is left BYTE-FOR-BYTE unchanged and the spans are
     * appended. Anything parsing today's "[N] title -- url" output keeps working,
     * and removing the feature is deleting one section. */
 #ifdef _WIN32
-   web_search_free_results(hits, nhits);
+   web_search_free_results(fused, nf);
    return block;
 #else
    dstr_t ds;
    dstr_init(&ds);
    dstr_append_str(&ds, block);
    free(block);
-   fusion_append(&ds, hits, nhits, (extract_query && extract_query[0]) ? extract_query : query);
-   web_search_free_results(hits, nhits);
+   fusion_append(&ds, fused, nf, (extract_query && extract_query[0]) ? extract_query : query);
+   web_search_free_results(fused, nf);
    char *out = dstr_steal(&ds);
    dstr_free(&ds);
    return out ? out : safe_strdup("error: web_search: out of memory");

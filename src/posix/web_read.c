@@ -567,13 +567,26 @@ static char *webread_extract_budgeted(char *text, const char *ref, const char *q
    }
 
    dstr_append_str(&ds, "[extractive spans — untrusted retrieved content, cited by id]\n\n");
+   /* Provenance travels WITH the spans, not just in the caller's surrounding
+    * text. A block gets quoted, summarised and forwarded away from whatever
+    * printed it, and "where did this come from, and how old is it" has to
+    * survive that trip -- otherwise the reader cannot judge the content and the
+    * citation ids point at nothing. */
+   if (url && url[0])
+   {
+      char src[600];
+      snprintf(src, sizeof(src), "(source: %s)\n", url);
+      dstr_append_str(&ds, src);
+   }
    if (cache_age >= 0)
    {
       /* A cache that hides staleness is a cache the caller cannot judge. */
       char prov[160];
-      snprintf(prov, sizeof(prov), "(served from cache, fetched %ld seconds ago)\n\n", cache_age);
+      snprintf(prov, sizeof(prov), "(served from cache, fetched %ld seconds ago)\n", cache_age);
       dstr_append_str(&ds, prov);
    }
+   if ((url && url[0]) || cache_age >= 0)
+      dstr_append_str(&ds, "\n");
 
    /* SELECT by coverage, EMIT in document order.
     *

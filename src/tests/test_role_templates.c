@@ -124,20 +124,6 @@ static void test_build_novel_roles(void)
    assert(strstr(cont, "{{TASK}}") == NULL);
    free(cont);
 
-   /* prose: write role, voice-aware. */
-   char *prose = role_template_build(NULL, "prose", "Draft the duel", NULL);
-   assert(prose != NULL);
-   assert(strstr(prose, "prose-drafting delegate") != NULL);
-   assert(strstr(prose, "voice") != NULL);
-   free(prose);
-
-   /* line-edit: must not change events/canon. */
-   char *le = role_template_build(NULL, "line-edit", "Polish the opening", NULL);
-   assert(le != NULL);
-   assert(strstr(le, "line-editing delegate") != NULL);
-   assert(strstr(le, "Do NOT change what happens") != NULL);
-   free(le);
-
    /* beat-check: read-only structure check. */
    char *bc = role_template_build(NULL, "beat-check", "Check pacing", NULL);
    assert(bc != NULL);
@@ -145,35 +131,27 @@ static void test_build_novel_roles(void)
    free(bc);
 }
 
-static void test_build_songwriter_roles(void)
+/* The persona-vs-role cull deleted these templates. role_template_build must
+ * now return NULL for them, exactly as it does for any unknown role — a
+ * surviving template would let a name that routing refuses still produce a
+ * plausible-looking prompt. */
+static void test_culled_role_templates_are_gone(void)
 {
-   char *lyric = role_template_build(NULL, "lyric", "Write verse 2", NULL);
-   assert(lyric && strstr(lyric, "lyric-writing delegate") != NULL);
-   assert(strstr(lyric, "meter") != NULL);
-   free(lyric);
-
-   char *hook = role_template_build(NULL, "hook", "Sharpen the chorus", NULL);
-   assert(hook && strstr(hook, "hook delegate") != NULL);
-   free(hook);
-
-   /* prosody: read-only, emits a PROSODY verdict for the done-gate. */
-   char *pros = role_template_build(NULL, "prosody", "Check verse 1", NULL);
-   assert(pros && strstr(pros, "prosody editor") != NULL);
-   assert(strstr(pros, "READ-ONLY") != NULL);
-   assert(strstr(pros, "PROSODY: FAIL") != NULL);
-   free(pros);
-
-   char *sf = role_template_build(NULL, "songform", "Check structure", NULL);
-   assert(sf && strstr(sf, "structure delegate") != NULL);
-   free(sf);
+   static const char *const culled[] = {"prose",   "line-edit", "lyric", "hook",
+                                        "prosody", "songform",  NULL};
+   for (int i = 0; culled[i]; i++)
+   {
+      char *result = role_template_build(NULL, culled[i], "task", NULL);
+      assert(result == NULL);
+   }
 }
 
 static void test_build_all_builtin_roles(void)
 {
    static const char *roles[] = {
-       "review",    "validate",   "diagnose", "code",   "refactor", "explain",    "draft",
-       "execute",   "summarize",  "format",   "search", "reason",   "continuity", "prose",
-       "line-edit", "beat-check", "lyric",    "hook",   "prosody",  "songform",   NULL,
+       "review",  "validate", "diagnose",   "code",       "refactor",
+       "explain", "draft",    "execute",    "summarize",  "format",
+       "search",  "reason",   "continuity", "beat-check", NULL,
    };
    for (int i = 0; roles[i]; i++)
    {
@@ -309,7 +287,10 @@ static void test_install_defaults(void)
    char *dir = make_tmpdir();
 
    int n = role_template_install_defaults(dir);
-   assert(n == 20); /* 12 code roles + 4 novel + 4 songwriter roles */
+   /* 12 code roles + continuity/beat-check. The persona-vs-role cull removed
+    * the four songwriter templates and prose/line-edit: those name a persona,
+    * not an action, and the action is `draft`. */
+   assert(n == 14);
 
    /* Verify files were written */
    char path[256];
@@ -417,7 +398,7 @@ int main(void)
    test_build_builtin_validate();
    test_build_builtin_diagnose();
    test_build_novel_roles();
-   test_build_songwriter_roles();
+   test_culled_role_templates_are_gone();
    test_build_all_builtin_roles();
    test_build_unknown_role_returns_null();
    test_build_null_role_returns_null();

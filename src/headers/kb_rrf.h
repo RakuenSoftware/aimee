@@ -1,4 +1,10 @@
-/* kb_rrf.h: Reciprocal Rank Fusion for hybrid code retrieval (proposal §5).
+/* kb_rrf.h: Reciprocal Rank Fusion over ranked candidate lists.
+ *
+ * Shared, not kb-owned. The implementation is pure -- no DB, no network, no
+ * kb state -- and the web-search path fuses engine rankings with it, which the
+ * module boundary rightly forbids reaching into kb/ to do. Originally written
+ * for hybrid code retrieval (proposal §5); the name is kept so the kb callers
+ * and their history stay greppable.
  *
  * Fuses several independently-ranked candidate lists — graph neighborhood,
  * vector similarity, memory recall — into one ranking. The three signals have
