@@ -120,11 +120,12 @@ The descriptor claims only `src/tests/test_plugin_c_hook.c`. `src/tests/test_plu
 complementary coverage of `extension.c` rather than a second owner, and a test is never claimed
 twice. It is nonetheless the only current coverage of the extension context and typed registries.
 
-Test registration is not uniform across build systems. Make registers `unit-test-plugin-c-hook`
-in `src/tests/Rules.mk`; CMake registers no module-runtime test target, so the declared test runs
-only under the Make suite even though both build systems compile both sources. That is recorded
-follow-up debt with a concrete target — CTest must execute the pre-LLM hook test — and is a
-build-membership change rather than an ownership one.
+Both build systems register the declared test. Make builds `unit-test-plugin-c-hook` from
+`src/tests/Rules.mk`, and `src/tests/CMakeLists.txt` registers `test_plugin_c_hook` as a CTest case.
+`scripts/check_module_test_registration.py` derives that from the build files, bound to the
+declared source path rather than to a target name, and pins it to
+`tests/baselines/refactor/module-test-registration.json`, so a change in build-file registration
+fails until the baseline is regenerated and re-reviewed.
 
 ## Operational diagnostics
 

@@ -122,11 +122,13 @@ module-runtime's focused ownership remains `src/tests/test_plugin_c_hook.c`.
 here.
 
 Test registration is not uniform across build systems. Make registers `unit-test-plugin` and
-`unit-test-plugin-loader` in `src/tests/Rules.mk`; neither is registered with CTest, so Make's is
-the only tracked build registration that runs them, even though both build systems compile both
-sources under the feature flag. That is recorded follow-up debt with a concrete target — CTest must
-execute both plugin tests in an enabled profile — and is a build-membership change rather than an
-ownership one.
+`unit-test-plugin-loader` in `src/tests/Rules.mk`; `src/tests/CMakeLists.txt` registers
+`test_plugin_loader` as a CTest case but not `test_plugin`, which therefore runs only under Make.
+That single gap is recorded follow-up debt with a concrete target — CTest must also execute
+`test_plugin` — and is a build-membership change rather than an ownership one.
+`scripts/check_module_test_registration.py` pins each declared test's build-file registration to a
+reviewed baseline, binding it to the declared source path rather than to a target name, so a change
+surfaces as a baseline diff.
 
 ## Operational diagnostics
 

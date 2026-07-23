@@ -86,6 +86,10 @@ jobs:
         run: python3 -I -S scripts/check_module_docs.py
       - name: Test module-documentation failure modes
         run: python3 -I scripts/tests/test_check_module_docs.py -v
+      - name: Enforce descriptor-declared module test registration
+        run: python3 -I -S scripts/check_module_test_registration.py
+      - name: Test module test-registration failure modes
+        run: python3 -I scripts/tests/test_check_module_test_registration.py -v
 
   git-core-contract:
     name: git-core-contract

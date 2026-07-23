@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "tests": [
+    {
+      "ctest": true,
+      "make": false,
+      "module": "audit",
+      "test": "src/tests/test_audit_action.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "audit",
+      "test": "src/tests/test_audit_ledger.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "audit",
+      "test": "src/tests/test_audit_worm.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "audit",
+      "test": "src/tests/test_audit_worm_chain.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_aimee_ir_rescue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_panel_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_p4_delegate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_pipeline.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_policy.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_aimee_ir.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_aimee_ir_metrics.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_panel_ir_contract.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "module-runtime",
+      "test": "src/tests/test_plugin_c_hook.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "plugin-loader",
+      "test": "src/tests/test_plugin.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "plugin-loader",
+      "test": "src/tests/test_plugin_loader.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_acp_server.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_integration.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_registry.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_sse.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_gateway_tools.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_native_surface.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_delegate_ensemble.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_chair.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_capture.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_chunk.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_eval.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_preset.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_seat_resolve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_verify.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "skills",
+      "test": "src/tests/test_skill.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "skills",
+      "test": "src/tests/test_skill_review.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_backend.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_backend_bedrock.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_converse_stream.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_frontend.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_ir_stream.c"
+    }
+  ]
+}
