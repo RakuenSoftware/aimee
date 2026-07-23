@@ -937,6 +937,69 @@ WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason='' 
 	return tx.Commit()
 }
 
+// RecoverLostReplay resolves a replay-only invocation whose durable delegate
+// result is gone (e.g. a restart killed the in-flight job). A reservation left
+// 'unresolved' was an ambiguous, interrupted dispatch whose estimate never
+// reached cum_cost_usd: the interruption is recoverable, so the reservation is
+// released and the item is left runnable for a fresh dispatch (redispatch=true).
+// A reservation left 'actual' means the cost was measured and reconciled but the
+// result cannot be reproduced: re-running would double-bill known spend, so the
+// measured cost is committed and the item is parked non-transiently for a human
+// (redispatch=false). Only the current owner may recover.
+func (s *Store) RecoverLostReplay(ctx context.Context, workItemID, stage, owner string) (redispatch bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var state, currentOwner string
+	var amount float64
+	if err := tx.QueryRowContext(ctx, `SELECT reservation_state,reservation_owner,reserved_cost_usd
+FROM lifecycle_work_item WHERE work_item_id=?`, workItemID).Scan(&state, &currentOwner, &amount); err != nil {
+		return false, err
+	}
+	if currentOwner != owner {
+		return false, errors.New("lost-replay reservation is owned by another invocation")
+	}
+	switch state {
+	case "unresolved":
+		// Recoverable interruption: drop the never-committed estimate and leave the
+		// item runnable so the next scheduler pass re-dispatches fresh work.
+		result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET reserved_cost_usd=0,reservation_state='',reservation_owner='',reservation_lease_until='',updated_at=datetime('now')
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state='unresolved'`, workItemID, owner)
+		if err != nil {
+			return false, err
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return false, errors.New("lost-replay reservation changed concurrently")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) VALUES (?,?, 'redispatch','go-wfe','replay result lost; re-dispatching fresh',0)`, workItemID, stage); err != nil {
+			return false, err
+		}
+		return true, tx.Commit()
+	case "actual":
+		// Known spend whose result is unreproducible: commit the measured cost and
+		// park for a human rather than silently re-billing it.
+		result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET cum_cost_usd=cum_cost_usd+reserved_cost_usd,reserved_cost_usd=0,reservation_state='',reservation_owner='',
+    reservation_lease_until='',pause_reason='replay_unrecoverable',paused_state=current_stage,updated_at=datetime('now')
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state='actual'`, workItemID, owner)
+		if err != nil {
+			return false, err
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return false, errors.New("lost-replay reservation changed concurrently")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) VALUES (?,?, 'pause','go-wfe','replay_unrecoverable: reconciled result lost, parked for human',?)`, workItemID, stage, amount); err != nil {
+			return false, err
+		}
+		return false, tx.Commit()
+	default:
+		return false, fmt.Errorf("lost-replay reservation is not replayable (state=%q)", state)
+	}
+}
+
 func (s *Store) ParkBudgetTree(ctx context.Context, rootID, completedItemID string, addedCost float64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
