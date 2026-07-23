@@ -61,8 +61,19 @@ The record is the *evidence*, not the audited event's payload. It carries:
 - the **witness** predecessor hash — the previous witness record in this shard.
   This is the linkage the witness chain owns and it exists for every source
   ledger, which is what makes a source ledger without its own chain still
-  tamper-evident once witnessed;
-- the emitting seal epoch and fencing token;
+  tamper-evident once witnessed. The first record in a shard has no predecessor
+  and uses a **domain-separated genesis sentinel** —
+  `SHA-256("aimee-vault-witness-genesis-v1" || packed shard key)` — not all
+  zeros. An all-zero placeholder is forgeable as "first record" for a shard that
+  already has history; a shard-bound sentinel is not. The decoder rejects the
+  genesis sentinel on any record whose shard sequence is not the first, and
+  rejects any other value on the first;
+- the emitting seal epoch and fencing token, taken from the vault control row
+  (`kb_vault_control`) as read inside the same transaction that appends the
+  record. They are not new counters: they bind the evidence to the vault
+  lifecycle state in force at append time, so evidence appended under a superseded
+  epoch — by a stale instance that lost its fence — is identifiable as such
+  rather than blending into the shard's history;
 - a monotonic per-shard witness sequence; and
 - the RFC 3339 timestamp of the source entry, not of the export.
 
@@ -82,56 +93,91 @@ on both sides.
 ## 2. Signed checkpoint over a sparse Merkle tree
 
 A checkpoint commits to every shard head at a defined instant. The commitment is
-a **sparse Merkle tree (SMT) keyed by the SHA-256 of the packed shard key**, with
-a fixed depth, whose leaves are the packed `(shard key, sequence, head hash)`.
+a **sparse Merkle tree (SMT) of fixed depth 64, keyed by the leading 8 bytes of
+SHA-256 over the packed shard key**, whose leaves are the packed
+`(shard key, sequence, head hash)`.
 
-The tree shape is named on purpose. "Incrementally maintained, canonically
-ordered" is not a design — a sorted Merkle tree changes topology as shards are
-inserted, so an insert is not bounded and proofs are not stable. An SMT has fixed
-topology determined by the key hash, so advancing one shard head updates exactly
-one root-to-leaf path: **O(depth) node writes, independent of how many shards
-exist.** Empty subtrees have precomputed constant hashes and are never
-materialized.
+Depth is named, not left to the implementation. Depth 64 keeps collision
+probability negligible for any realistic shard population (shards are
+`tenant × provider`, so thousands, not billions: at 10^5 shards the birthday
+bound is ~10^-9) while keeping proofs to 64 siblings. A shallower key would trade
+proof size for a collision posture where two shards share a leaf, which is
+disqualifying — a collision would let one tenant's head silently stand in for
+another's. Empty subtrees have precomputed constant hashes per level and are
+never materialized.
 
-**Durable schema.** The tree is database state, not process memory — process
-memory would violate the shared-state invariant and evaporate on autoscale
-teardown:
+**The tree is built at checkpoint time, not on every shard advance.** An earlier
+revision updated a durable root-to-leaf path inside the same transaction as the
+source event. At depth 64 that is 64 node upserts on the admission hot path, in
+the transaction that also carries the source WORM append and the chain-hash
+computation — a large, unstated cost on exactly the path that must stay bounded.
+So:
 
-- `kb_vault_witness_smt_node(level, idx, hash)`, primary key `(level, idx)`,
-  holding only materialized (non-empty) internal nodes. Updated by upsert along
-  the changed path inside the same transaction as the shard advance.
-- `kb_vault_witness_checkpoint(seq, root, predecessor_digest, shard_count,
-  signer_key_id, sig_alg, signature, created_at)`, append-only under the same
-  trigger discipline as the evidence log, retaining every checkpoint. Retention
-  matters: a consumer holding an old checkpoint must still be able to obtain the
-  ones between it and the current head.
+- **Per advance (hot path, atomic with the source event):** one evidence row and
+  one shard-head update. Two rows. Nothing else.
+- **Per checkpoint (E2 cadence, its own transaction, off the hot path):** read the
+  shard-head table, build the tree, sign the root, persist the checkpoint and the
+  leaf snapshot that proofs are generated from.
+
+The checkpoint therefore *does* scan `kb_vault_witness_shard` once. That is
+stated plainly rather than hidden behind "incrementally maintained": the scan is
+O(shards), bounded by a documented maximum shard count, runs once per cadence
+rather than once per key use, and never touches the evidence log. Exceeding the
+documented ceiling is a typed failure, not a silent slowdown. The invariant this
+design satisfies is "checkpoint cost is off the hot path and bounded by a stated
+ceiling" — not "no scan exists."
+
+Because different shards have unrelated key-hash prefixes, their leaves are
+disjoint and concurrent advances never contend on shared tree state; there is no
+tree state on the advance path at all.
+
+**Durable schema.** `kb_vault_witness_checkpoint(seq, root, predecessor_digest,
+shard_count, leaf_snapshot, signer_key_id, sig_alg, sig_version, signature,
+created_at)`, append-only under the same trigger discipline as the evidence log,
+retaining every checkpoint. Retention matters: a consumer holding an old
+checkpoint must still be able to obtain the ones between it and the current head,
+and proofs must remain generatable against historical roots.
 
 **Signer identity.** The checkpoint carries an explicit `signer_key_id`,
 signature algorithm, and version tag. Rotation retains historical verification
 keys so previously emitted checkpoints stay verifiable; a checkpoint whose key id
 is unknown to the verifier is a typed failure, not a soft pass.
 
-Consumers obtain verification keys **out of band** — an operator-provisioned
-trust anchor, never the same surface the checkpoints arrive on. A signature
-checked against a key fetched from the emitting host proves nothing against a
-host attacker, who substitutes both. Signatures give transport integrity and
-rotation hygiene; comparison against retained copies is what defends against host
+**Trust anchor.** Consumers obtain verification keys **out of band** — an operator
+provisioned anchor delivered through a channel independent of the emitting host,
+not a file the kb host serves or a key fetched from the same surface the
+checkpoints arrive on. A signature checked against a key the attacker also
+controls proves nothing. On the kb side, chain verification loads its anchor set
+at boot; **an anchor set that is missing, empty, malformed, or contains no key
+matching a checkpoint's `signer_key_id` fails closed**, exactly as verification
+being switched off does. Signatures give transport integrity and rotation
+hygiene; comparison against retained copies is what defends against host
 compromise, and E1 must not imply otherwise.
 
 **Predecessor linkage is advisory, not a verification precondition.** Each
 checkpoint names its predecessor digest so a consumer holding a contiguous run
 can verify continuity. A consumer holding a *gapped* set must still be able to
 verify each checkpoint it holds on its own — signature plus root — because
-emission gaps are normal, not evidence of tampering. Verification therefore takes
-a checkpoint and an optional expected predecessor: absent it, the verdict is
-"individually valid, continuity unproven," which is a distinct typed result from
-"continuity broken."
+emission gaps are normal, not evidence of tampering. Verification takes a
+checkpoint and an optional expected predecessor: absent it, the verdict is
+`continuity_unproven`, a distinct typed result from `continuity_broken`.
 
-**Inclusion proofs.** A per-shard inclusion proof is the O(depth) sibling path
-authenticating one shard's leaf against a signed root. E1 defines the proof
-format, generation, and verification. Proofs are emitted alongside checkpoints on
-the log path (§3) — a signed root a consumer cannot connect to any shard is not
-independently verifiable, which is the whole point.
+**`continuity_unproven` is a work item, not a pass.** An attacker who knows
+tooling treats it as clean can hide a fork behind a claimed emission gap: keep
+local state consistent, suppress emission of the checkpoints spanning the fork,
+and an operator comparing A, B, D, E finds each individually valid and stops. The
+verifier must therefore make the gap actionable rather than merely labelled — for
+every gap it reports, it surfaces the leaf set immediately preceding and
+following, so the operator can compare heads directly across the gap. E1 defines
+that output; E2's tool surfaces it. No slice may describe `continuity_unproven`
+as a clean result.
+
+**Inclusion proofs.** A per-shard inclusion proof is the 64-sibling path
+authenticating one shard's leaf against a signed root, generated from that
+checkpoint's leaf snapshot. E1 defines the proof format, generation, and
+verification. Proofs are emitted alongside checkpoints on the log path (§3) — a
+signed root a consumer cannot connect to any shard is not independently
+verifiable, which is the whole point.
 
 E1 defines the format, canonical serialization, leaf encoding, root computation,
 proof format, digest, and verification entry points. E1 does **not** wire
@@ -171,6 +217,10 @@ transport:
   signer key id.
 - **Inclusion proofs**, so a consumer can authenticate a specific shard head
   against a signed root it holds.
+
+The rendered stream carries an explicit export format version tag, so consumers
+comparing copies produced by different aimee versions can tell "encoding changed"
+apart from "evidence disagrees."
 
 **Metrics carry numbers only** — current checkpoint sequence, evidence count,
 emission backlog depth, verification-failure counters. No bytes, no roots, no
@@ -230,15 +280,30 @@ attached — that is the existing P7 admission rule, not something this slice ad
 or relaxes. That gate is what guarantees no org key is used unaudited, and it
 operates entirely on aimee-kb's own committed state.
 
-**The witness append must be atomic with that source append.** The witness row,
-its shard-head advance, and the SMT path update commit in the *same transaction*
-as the source WORM event. If the witness were derived asynchronously, a crash
-between the source commit and the witness append would leave an admitted key use
-with no witness row — and the claim that evidence exists before use would be
-false for exactly the events an attacker would most want missing. E1 provides the
-SECURITY DEFINER function that does all of it in one transaction; E2 calls it
-from the admission path. This is an E2 release prerequisite, not something E3's
-kill matrix is expected to discover.
+**The witness append must be atomic with that source append — on every path, not
+just admission.** The witness row and its shard-head advance commit in the *same
+transaction* as the source event. If the witness were derived asynchronously, a
+crash between the source commit and the witness append would leave a source event
+with no witness row — exactly the row an attacker would want missing.
+
+This applies to all three source ledgers, and the two operator paths are not
+exceptions:
+
+- **Admission path** — `kb_audit_event`, the append that gates key attachment.
+- **Reseal orchestrator** — `kb_vault_rewrap_worm` events. These introduce new
+  wrapped material, so they are among the most security-relevant evidence there
+  is; witnessing them out-of-band would be worse than not witnessing them, since
+  the gap would be invisible.
+- **D3b open events** — `kb_vault_open_event`, the sealed-to-open transition.
+
+E1 provides one SECURITY DEFINER function that appends the evidence row and
+advances the shard head in the caller's transaction. **E2 wires it into all three
+call sites**, which means E2 modifies the reseal orchestrator and the D3b open
+function, not only the admission path. E1 §7's "no admission gating" exclusion is
+about E1's own scope; it does not narrow E2's obligation to a single ledger.
+
+E1's validation gate proves the atomicity for all three ledgers, and it is an E2
+release prerequisite — not something E3's kill matrix is expected to discover.
 
 Emission lag does **not** gate egress. A collector that is down, slow, or
 misconfigured reduces redundancy; it does not mean a key use went unaudited, and
@@ -252,7 +317,7 @@ a later rewrite of aimee's own state is contradicted by whatever copies were
 retained before the compromise. Evidence never emitted, or emitted but not
 retained, has no external anchor.
 
-## 6. Evidence log, shard counters, and Merkle state
+## 6. Evidence log, shard counters, and checkpoint state
 
 Folded in from what was originally E2. These are schema and SQL only; no C caller
 in this slice reaches them from a production path.
@@ -279,11 +344,11 @@ created lazily by DML upsert — never by runtime DDL, and never by a PostgreSQL
 `UPDATE … SET seq = seq + 1 … RETURNING` inside the caller's transaction, giving
 each shard its own total order without a fleet-wide hotspot on a single head.
 
-**Merkle and checkpoint state.** `kb_vault_witness_smt_node` and
-`kb_vault_witness_checkpoint` per §2, under the same revoke/definer/append-only
-discipline. Node upserts and the checkpoint insert are part of the same
-transaction as the evidence append and shard advance, so the tree can never
-commit a root that disagrees with the log.
+**Checkpoint state.** `kb_vault_witness_checkpoint` per §2, under the same
+revoke/definer/append-only discipline. There is no durable Merkle-node table: the
+tree is built from the shard-head rows at checkpoint time, so there is no
+persistent tree state that could drift out of agreement with the log, and nothing
+tree-shaped touches the hot path.
 
 **No budget table.** There is no unwitnessed counter, no ceiling, and no
 reservation. With evidence durably committed on aimee-kb before key use (§5),
@@ -321,20 +386,29 @@ reserved slot — a budget here would only ever deadlock.
 - Checkpoint verification accepts a valid checkpoint and rejects a tampered leaf,
   a forged inclusion proof, an unknown signer key id, and a wrong signature, each
   with a distinct typed reason.
-- Gapped checkpoints verify individually and return "continuity unproven" — a
-  distinct typed result from "continuity broken" — so normal emission gaps do not
-  read as tampering.
-- SMT correctness: incremental path updates and a full rebuild agree for the same
-  leaf set; the root is independent of insertion order; empty-subtree constants
-  are correct at every level; advancing one shard writes O(depth) nodes and reads
-  no other shard's leaf.
+- Gapped checkpoints verify individually and return `continuity_unproven` — a
+  distinct typed result from `continuity_broken` — so normal emission gaps do not
+  read as tampering; and the gap report carries the leaf sets immediately before
+  and after each gap so an operator can compare heads across it.
+- A fork hidden behind a suppressed-checkpoint gap is caught when those cross-gap
+  leaf sets are compared, proving the affordance is sufficient for the attack it
+  exists to stop.
+- SMT correctness at depth 64: the root is independent of leaf insertion order;
+  empty-subtree constants are correct at every level; two shard keys differing
+  only beyond the 8-byte key prefix are detected as a collision and fail typed
+  rather than sharing a leaf.
+- Hot-path cost: one shard advance writes exactly two rows and touches no tree
+  state.
 - Inclusion proofs verify against the signed root for present shards and fail
   typed for absent ones; a proof from one checkpoint does not verify against
   another's root.
 - Signer rotation: a checkpoint signed under a retired key still verifies when
   the historical key is in the anchor set, and fails typed when it is not.
 - Deterministic rendering: the same evidence renders byte-identically twice, and
-  across two independently constructed module instances.
+  across two independently constructed module instances. The rendering carries
+  its own **export format version tag**, distinct from the record version tag, so
+  a future encoding change cannot silently split the comparison universe into two
+  mutually unverifiable halves.
 - Group id binding: records from one admission share a group id, operator-path
   records carry their own class, and altering the group id changes the record
   digest.
@@ -358,12 +432,15 @@ reserved slot — a budget here would only ever deadlock.
 - `aimee_kb_runtime` and every unrelated role are denied direct DML on both new
   tables and denied every new function they are not explicitly granted.
 - Shard counter rows are created by upsert under concurrency without duplicate
-  sequences and without DDL; SMT node upserts under concurrent advances on
-  different shards do not deadlock and converge to the same root as a serial
-  application.
-- Atomicity: the evidence row, shard-head advance, and SMT path update commit
-  together with the source event or not at all, proven by injected failure at
-  each statement.
+  sequences and without DDL.
+- Checkpoint construction over a shard table at the documented ceiling completes
+  within its deadline; exceeding the ceiling is a typed failure, not a silent
+  slowdown.
+- Atomicity, proven separately for **all three source ledgers** — admission
+  (`kb_audit_event`), reseal (`kb_vault_rewrap_worm`), and D3b open
+  (`kb_vault_open_event`): the evidence row and shard-head advance commit
+  together with the source event or not at all, under injected failure at each
+  statement.
 - Concurrent appends to one shard produce a gap-free sequence with correct
   predecessor linkage under SERIALIZABLE retry.
 - Connection loss at BEGIN, at the append, and at COMMIT never leaves a shard

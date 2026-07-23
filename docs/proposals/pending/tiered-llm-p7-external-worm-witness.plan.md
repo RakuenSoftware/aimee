@@ -176,17 +176,25 @@ because those copies are already gone from the host's reach.
   depth and failed OTLP sends — never on "a collector is down," which a design
   with no consumer registry cannot know. There is no delivery receipt, no
   watermark, no consumer registry, and no unwitnessed budget.
-- **The witness append is atomic with the source event.** The witness row and its
-  shard-head advance commit in the *same transaction* as the source WORM append
-  that gates key attachment. A separate or asynchronous append would allow a
-  crash between them to leave an admitted key use with no witness row, which
-  would falsify the whole "evidence exists before use" claim. This is an E2
-  release prerequisite, not something E3's kill matrix discovers.
+- **The witness append is atomic with the source event, on every path.** The
+  witness row and its shard-head advance commit in the *same transaction* as the
+  source event — for the admission append that gates key attachment, for reseal
+  rewrap events, and for D3b open events alike. A separate or asynchronous append
+  would let a crash between them drop exactly the row an attacker wants missing.
+  E2 therefore wires the witness call into the reseal orchestrator and the D3b
+  open function as well as admission; covering only admission does not satisfy
+  this. It is an E2 release prerequisite, not something E3's kill matrix
+  discovers.
 - **Comparison is operator-driven, and the docs say so.** No automated
   cross-consumer comparator is in scope. What this umbrella guarantees is that
   the material needed for comparison exists, is signed, and is independently
   verifiable offline; E2 ships a verifier tool so an operator can actually run
   it. Slices may claim "detectable by comparison," never "detected."
+- **Comparison depends on someone actually retaining the stream.** With no
+  consumer registry, aimee cannot know whether anyone kept anything. The
+  "detectable by comparison" property is therefore a property of the deployment's
+  surrounding collector ecosystem, not of aimee alone, and operator documentation
+  must say so rather than implying the guarantee travels with the software.
 
 - **Evidence is durably committed before key use.** This is the existing P7
   admission rule and the actual fail-closed property. No slice may weaken it, and
@@ -202,11 +210,15 @@ because those copies are already gone from the host's reach.
 - **Shared state only.** The evidence log and shard counters are PostgreSQL
   state. Nothing load-bearing lives in instance-local memory or on an instance's
   disk, because autoscale teardown destroys it.
-- **Bounded work, with a named structure.** Checkpoint generation touches
-  O(log N) durable nodes of a sparse Merkle tree, never a full scan of every
-  shard head. "Incrementally maintained" is not a design; the concrete tree
-  shape, its durable schema, and its update and proof bounds are specified in E1
-  §2 and §6. Every emission call carries a monotonic deadline.
+- **The hot path is bounded; checkpoint cost is off it and explicitly capped.** A
+  shard advance writes two rows — the evidence record and the shard head — and
+  touches no tree state. Checkpoint generation builds a depth-64 sparse Merkle
+  tree by scanning the shard-head table once per cadence, bounded by a documented
+  maximum shard count with a typed failure above it. The scan is stated, not
+  hidden behind "incrementally maintained": what matters is that it is off the
+  admission path and capped, not that no scan exists. Concrete shape, depth,
+  schema, and proof bounds are in E1 §2 and §6. Every emission call carries a
+  monotonic deadline.
 - **Signature verification requires an out-of-band trust anchor.** Consumers must
   obtain checkpoint verification keys through a channel independent of the
   emitting host. A signature checked against a key taken from the same surface as
@@ -246,14 +258,19 @@ already beyond the attacker's reach. No slice may claim the residual is zero.
   transition.
 - **Real PG17 on CT103:** in-place schema upgrade plus the full P1 RLS gate;
   concurrent shard appends produce gap-free sequences with correct linkage;
-  the witness row, shard head, and Merkle node updates commit atomically with the
-  source event or not at all; forced disconnect at each transaction boundary
-  never advances a shard head without its evidence row; sparse-Merkle updates are
-  O(log N) and a checkpoint never scans all shards; append-only rules reject
-  update/delete/truncate on every new table.
+  the witness row and shard head commit atomically with the source event or not
+  at all, proven separately for all three source ledgers; forced disconnect at
+  each transaction boundary never advances a shard head without its evidence row;
+  a shard advance writes exactly two rows; checkpoint construction at the
+  documented shard ceiling completes within its deadline; append-only rules
+  reject update/delete/truncate on every new table.
 - **CT260 real daemon:** the E3 kill matrix against a real aimee-kb process, real
-  PG17, swtpm, and real metrics/log consumers, proving that a rewritten local
-  chain is caught by comparison against previously exported copies.
+  PG17, swtpm, and a log/OTLP consumer **configured to durably retain the stream**
+  — proving that a rewritten local chain is caught by comparison against
+  previously emitted copies. The retention configuration is part of the gate: run
+  with a consumer that drops or samples and the comparison result proves nothing,
+  because the copies it would compare against were never kept. A gate that can be
+  passed by a dropping consumer is not a gate.
 - **Canary scan:** database, files, logs, crash artifacts, and the bytes actually
   emitted.
 - **Offline verifier:** the E2 verifier tool validates a checkpoint, an inclusion
