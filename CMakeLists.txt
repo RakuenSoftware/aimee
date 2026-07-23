@@ -170,6 +170,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
+        ${AIMEE_SRC_DIR}/kb/kb_rrf.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
@@ -229,6 +230,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
+        ${AIMEE_SRC_DIR}/kb/kb_rrf.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
@@ -548,6 +550,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/tool_egress.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
@@ -1302,6 +1305,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/tool_egress.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
