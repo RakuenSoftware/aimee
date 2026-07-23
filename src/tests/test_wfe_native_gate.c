@@ -20,6 +20,8 @@ int main(void)
 
    /* web/egress tools externalize by name (no command needed) */
    assert(wfe_native_tool_externalizes("WebFetch", NULL));
+   assert(wfe_native_tool_externalizes("web_read", NULL));
+   assert(wfe_native_tool_externalizes("WebRead", NULL));
    assert(wfe_native_tool_externalizes("websearch", ""));
 
    /* non-shell, non-web named tools: not externalizing unless the name is a known
