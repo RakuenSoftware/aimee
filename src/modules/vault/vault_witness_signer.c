@@ -82,6 +82,10 @@ int vault_witness_signer_sign_from_kek(const uint8_t kek[32], const uint8_t *msg
    uint8_t seed[32];
    if (derive_seed(kek, seed) != 0)
       return -1;
+   /* Best-effort pin: mlock can fail under a low RLIMIT_MEMLOCK (common in
+    * containers). Failing the signature there would stop checkpoint production
+    * entirely — a worse outcome than a pageable seed that is still cleansed
+    * immediately below. The cleanse, not the pin, is the load-bearing control. */
    (void)mlock(seed, sizeof seed);
    int rc = -1;
    EVP_PKEY *pkey = EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, NULL, seed, 32);

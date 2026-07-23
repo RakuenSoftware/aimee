@@ -8,8 +8,11 @@
 #include "vault_witness_record.h"
 #include "vault_witness_verify.h"
 
-/* Bound total collected items so a hostile stream cannot exhaust memory. */
-#define OFFLINE_MAX_ITEMS (4u * 1024u * 1024u)
+/* Bound total collected items so a hostile stream cannot exhaust memory. The
+ * stream itself is already resident (the caller reads it whole), and the smallest
+ * record frame is ~156 bytes, so the input size is the primary bound; this cap is
+ * the backstop. Kept low enough that the worst case stays well under a gigabyte. */
+#define OFFLINE_MAX_ITEMS (1u * 1024u * 1024u)
 
 typedef struct
 {
