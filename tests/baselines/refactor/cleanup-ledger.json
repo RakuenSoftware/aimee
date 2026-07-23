@@ -435,6 +435,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, stored data, or runtime behavior changes; descriptor validation gains skills-specific missing-source, planted-source/header, and missing-document failures.",
       "independent_review": "The slice decision roundtable approved the bounded ownership-completion plan without findings; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-33.md", "docs/modules/skills.md", "src/modules/skills/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 34,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core audit module-root ownership domain after proving all four sources have shipping Make consumers, recording the four canonical public headers and four direct tests, and documenting the narrower existing CMake membership and test-facing API candidates.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["CMake retains its pre-existing action-and-ledger-only audit source membership while Make ships the full server WORM store and the chain source used for canonical KB row hashing", "Make and CMake remain separately maintained build inventories", "nine test-facing, embedding, verification, or internal helper exports remain pending focused compatibility review"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide the CMake capability gap, the shared KB row-hash consumer, and public helpers whose tests do not establish external production use.",
+        "revisit": "Resolve CMake WORM capability intentionally, then privatize, activate, or delete test-facing and module-internal exports in a focused API slice."
+      },
+      "consumers": ["guardrails and execution policy", "audit CLI and server management", "trajectory export", "KB vault operations", "DB2 PostgreSQL WORM storage", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains audit-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "The decision roundtable required the exact diff, concrete Make/CMake membership, enumerated API candidates, and named mutations before approval; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-34.md", "docs/modules/audit.md", "src/modules/audit/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }

@@ -15,8 +15,15 @@ immutable hardware/storage, or make a best-effort dual write authoritative.
 The four canonical public headers live under `src/modules/audit/include/aimee/audit/`, and consumers
 include them as `aimee/audit/<header>.h`. `audit_action.h` owns bounded governed-action evidence;
 `audit_ledger.h` owns legacy ledger reads; `audit_worm.h` owns the server store API; and
-`audit_worm_chain.h` is the shared engine-independent canonical hash/MAC boundary also consumed by
-the KB PostgreSQL store.
+`audit_worm_chain.h` owns the engine-independent canonical row-hash and checkpoint-MAC primitives.
+The KB PostgreSQL store consumes `audit_worm_row_hash` at the shared canonical row-hash boundary.
+
+`src/modules/audit/module.yaml` declares ownership of four production sources, four canonical public
+headers, four direct unit tests, and this document; the module has no private headers. Its
+`ownership_complete: true` latch exhaustively checks module-local C and private-header files and requires
+this canonical document. Public-header and test entries are explicit audited claims rather than
+auto-discovered completeness domains. The source liveness, build membership, adjacent-boundary, and
+test-facing API audit is recorded in `docs/validation/core-modularization-slice-34.md`.
 
 ## Dependencies and consumers
 
@@ -31,8 +38,8 @@ own event meaning; audit owns safe record formation, storage, verification, and 
 ## Providers and readiness
 
 The legacy provider appends JSON lines to rotating `audit.log`. The server WORM provider is SQLite at
-`$AIMEE_HOME/audit/worm-live.db`; the KB uses a separate PostgreSQL store while sharing chain
-primitives. Readiness reports capture gate, store availability, chain result, checkpoint attestation,
+`$AIMEE_HOME/audit/worm-live.db`; the KB uses a separate PostgreSQL store while sharing the canonical
+row-hash primitive. Readiness reports capture gate, store availability, chain result, checkpoint attestation,
 and sealed-file immutability separately. Legacy logging remains authoritative while WORM dual-write is
 default-off and best-effort.
 
@@ -97,7 +104,7 @@ named tests remain with their actual subsystem or integration boundary; a filena
 | `test_code_audit_graph.c` | The independent code-audit graph algorithms | Not assigned; code-health analysis is not the audit evidence module |
 | `test_db2_code_audit.c` | DB2 code-audit assembly and PostgreSQL query shims | Not assigned; this is a DB2 code-intelligence test |
 | `test_harness_memory_audit.c` | Memory-interception JSONL logging through `hmem_audit` | Not assigned; this is a memory harness test |
-| `test_kb_audit_worm.c` | The KB PostgreSQL store and artifact capture seam, using the shared chain contract | Not assigned; this is a mixed KB/store integration test |
+| `test_kb_audit_worm.c` | The KB PostgreSQL store and artifact capture seam, using the shared canonical row-hash contract | Not assigned; this is a mixed KB/store integration test |
 | `test_kb_audit_worm_pg.c` | SQL and C append parity against a real PostgreSQL KB store | Not assigned; this is a mixed KB/PostgreSQL integration test |
 | `test_token_audit.c` | DB1 token accounting and agent ingress attribution | Not assigned; this is a DB1/agent-accounting test |
 | `test_token_audit_load.c` | Concurrent DB1 token writes and asynchronous ingress recording | Not assigned; this is a DB1/agent-ingress load test |
@@ -107,6 +114,13 @@ The direct tests deliberately separate the shared chain primitive from the SQLit
 it. That is complementary coverage, not duplicate ownership. The CMake suite registers the action and
 ledger tests; the Make unit-test suite registers the WORM store and chain tests. Issue #1753 records the
 evidence used to resolve this classification.
+
+Build membership is intentionally not uniform today. Make's `CORE_SRCS` contains all four audit sources;
+its KB projection removes only the SQLite-specific `audit_worm.c`, retaining the pure shared chain.
+CMake's `CORE_SRCS`, and therefore the `aimee-core` static library plus its server/KB projections, contains
+only `audit_action.c` and `audit_ledger.c`. The descriptor records canonical source ownership; it does not
+claim that the current Make and CMake products expose identical WORM capabilities. Closing that existing
+build-profile gap requires a separate behavior and dependency slice.
 
 Current governed-action emission is best-effort: hashing writes a stable sentinel on failure, and WORM
 loss does not block the action while legacy logging is authoritative.
@@ -122,8 +136,9 @@ unbounded principal or subject. `amber` means an intact unattested tail, not cor
 
 The `v1-` args-hash form, per-tool projection, WORM domain and fixed field order, genesis value,
 gap-free sequence, checkpoint MAC contract, verification status meanings, event fields, and legacy
-reader ordering are compatibility contracts. Server SQLite and KB PostgreSQL must remain byte-identical
-at the shared chain seam; storage-engine migrations cannot silently rewrite historical records.
+reader ordering are compatibility contracts. Server SQLite and KB PostgreSQL must produce byte-identical
+canonical row hashes at the shared row-hash seam; storage-engine migrations cannot silently rewrite
+historical records. The checkpoint-MAC contract remains a separate compatibility boundary.
 
 ## Extension and removal
 
