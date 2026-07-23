@@ -665,6 +665,7 @@ void delegate_worker(void *arg)
    cJSON *jparent_deleg = cJSON_GetObjectItemCaseSensitive(req, "parent_delegation_id");
    cJSON *jreq_caps = cJSON_GetObjectItemCaseSensitive(req, "required_caps");
    cJSON *jmin_ctx = cJSON_GetObjectItemCaseSensitive(req, "min_context");
+   cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
@@ -840,6 +841,13 @@ void delegate_worker(void *arg)
    }
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
+   /* The packet's scope CEILING. Routing is the server's job, so the ceiling is
+    * enforced here rather than by the caller. Absent or unparseable leaves it
+    * UNSET, which admits every seat - the client validates the spelling, so an
+    * unparseable value here means a non-CLI caller, and the permissive default
+    * matches the previous behaviour for every existing caller. */
+   agent_scope_t scope =
+       cJSON_IsString(jscope) ? agent_scope_from_string(jscope->valuestring) : AGENT_SCOPE_UNSET;
    {
       char route_err[256];
       unsigned inferred_caps = 0;
@@ -902,15 +910,17 @@ void delegate_worker(void *arg)
 
    config_t route_cfg;
    config_load(&route_cfg);
-   target_agent = agent_route_with_caps(&acfg, role, &route_cfg, required_caps, min_context);
+   target_agent =
+       agent_route_with_caps_scoped(&acfg, role, &route_cfg, required_caps, min_context, scope);
    if (!target_agent)
    {
       char caps_buf[128];
       model_capability_format_flags(required_caps, caps_buf, sizeof(caps_buf));
       char errmsg[256];
       snprintf(errmsg, sizeof(errmsg),
-               "no configured model supports required capabilities (caps=%s, min_context=%d)",
-               caps_buf[0] ? caps_buf : "none", min_context);
+               "no configured model supports required capabilities (caps=%s, min_context=%d, "
+               "scope=%s)",
+               caps_buf[0] ? caps_buf : "none", min_context, agent_scope_name(scope));
       delegation_compute_error(cctx, errmsg);
       compute_ctx_free(cctx);
       return;

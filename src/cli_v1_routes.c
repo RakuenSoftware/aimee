@@ -1909,26 +1909,41 @@ cJSON *marshal_delegate(int argc, char **argv)
 
    cJSON *req = marshal_no_args("delegate");
 
-   /* --verify and --scope are honoured ONLY when the delegate runs in-process
-    * (cmd_agent_delegate.c). This marshaller forwards a fixed allowlist to the
-    * server, the server's delegate path implements neither, and anything not on
-    * the allowlist is simply dropped - so routing a run with either flag used to
-    * return a normal, successful-looking result while the verifier never ran and
-    * the scope ceiling never bound. Silently ignoring a flag that governs
-    * SPEND (escalation) or what a seat is allowed to attempt (scope) is worse
-    * than refusing the run. Fail here until they are plumbed end to end. */
+   /* --scope is pure ROUTING POLICY: it names a ceiling the seat choice must
+    * respect, carries no caller-supplied code, and the server is already the
+    * thing picking the seat. So it is forwarded and enforced server-side.
+    * Validate here so a typo fails at the client with a usable message rather
+    * than being silently ignored by a server that cannot parse it. */
+   const char *scope = rpc_get(&opts, "scope");
+   if (scope)
+   {
+      /* Spelled out rather than calling agent_scope_from_string: that lives in
+       * agent_config.c, which the thin client deliberately does not link. The
+       * server re-parses with the canonical function, so this is only a
+       * fail-fast on a typo - keep the two names in step with agent_scope_t. */
+      if (strcmp(scope, "bounded") != 0 && strcmp(scope, "whole_task") != 0)
+      {
+         fprintf(stderr,
+                 "aimee: delegate --scope expects \"bounded\" or \"whole_task\", got '%s'\n",
+                 scope);
+         exit(1);
+      }
+      cJSON_AddStringToObject(req, "scope", scope);
+   }
+
+   /* --verify is NOT forwarded. Verification runs a caller-supplied shell
+    * command and its exit status is the sole evidence used to decide a model was
+    * inadequate - so honouring it server-side would both execute caller-supplied
+    * code on a shared server and hand whoever passes the flag control of
+    * escalation, and therefore of spend. The thin client cannot run it either:
+    * it links no delegate engine (cmd_agent_delegate.c is in CMD_SRCS, not
+    * CLI_SRCS). Until that has a designed home, refuse rather than accept a flag
+    * that would be silently ignored. */
    if (rpc_get(&opts, "verify"))
    {
       fprintf(stderr, "aimee: delegate --verify is not supported for a server-routed run: "
-                      "verification and escalation run in-process only, and this request is "
-                      "dispatched to the server.\n");
-      exit(1);
-   }
-   if (rpc_get(&opts, "scope"))
-   {
-      fprintf(stderr, "aimee: delegate --scope is not supported for a server-routed run: "
-                      "the scope ceiling is applied by in-process routing, and this request is "
-                      "dispatched to the server.\n");
+                      "verification and one-shot escalation are not implemented server-side, and "
+                      "the thin client has no local delegate engine to run them in.\n");
       exit(1);
    }
 
