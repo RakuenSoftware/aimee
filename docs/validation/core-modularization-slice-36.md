@@ -63,13 +63,16 @@ Exports with tracked production consumers:
   `src/modules/protocols/mcp/mcp_tools.c`.
 - `plugin_loader_discover_all` — `src/server/server_main.c`, the live startup path.
 
-Exports with no tracked production caller outside the module:
+Exports with no tracked production caller outside the module. The list is exhaustive; each entry
+names every tracked caller:
 
 - `plugin_registry_path` — called only from `plugin.c`. The two mentions in
   `src/tests/test_plugin.c` are comments about path caching, not calls.
 - `plugin_registry_save` — called only from `plugin.c`, by the install, enable, and remove paths.
 - `plugin_load_and_register` — called from `plugin.c` and `plugin_loader.c`.
 - `plugin_tool_conflicts_with_builtin` — called from `plugin.c`, and externally only by
+  `src/tests/test_plugin.c`.
+- `plugin_registry_get` — no module-local caller; its only tracked caller is
   `src/tests/test_plugin.c`.
 
 Exports with no caller in the tracked tree at all:
@@ -91,9 +94,7 @@ build. Absence of a tracked-tree caller is liveness evidence, not proof that no 
 links and calls them — a downstream host can call the setter before discovery, in which case the
 fallback chain does not apply. Removing or rewiring either is therefore an API and ABI
 compatibility decision rather than a dead-code cleanup, and the same applies to privatizing the
-four exports above.
-
-Test-only external caller: `plugin_registry_get` is called only by `src/tests/test_plugin.c`.
+five exports above.
 
 Whole-tree tracked-file and symbol searches find no second manifest parser, installed-registry
 implementation, or dynamic-library loader.

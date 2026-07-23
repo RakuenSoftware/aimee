@@ -20,10 +20,11 @@ install/enable/remove, hook/tool aggregation, conflict checks, `plugin_manifest_
 Loader types consume `aimee/module-runtime/extension.h` one way; module-runtime never includes this
 module.
 
-Four exports have no tracked production caller outside the module: `plugin_registry_path`,
+Five exports have no tracked production caller outside the module: `plugin_registry_path`,
 `plugin_registry_save`, and `plugin_load_and_register` are called only from `plugin.c` and
-`plugin_loader.c`, and `plugin_tool_conflicts_with_builtin` is called from `plugin.c` plus the
-focused test, its only external caller. Two more have no caller in the tracked tree at all:
+`plugin_loader.c`; `plugin_tool_conflicts_with_builtin` is called from `plugin.c` plus the focused
+test, its only external caller; and `plugin_registry_get` has no module-local caller and only the
+focused test as a tracked caller. Two more have no caller in the tracked tree at all:
 `plugin_load_all_registered`, a second registration entry point superseded by
 `plugin_loader_discover_all`, and `plugin_loader_set_install_prefix`, whose documented `main()`
 call is absent — so in the tracked startup path bundled discovery takes the
