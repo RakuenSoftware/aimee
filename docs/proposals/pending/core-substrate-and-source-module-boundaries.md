@@ -71,6 +71,12 @@ is now the suite index and shared contract; it does not duplicate the child prop
     dependency on is already installed. Installation and selection are transactional and fail closed
     on a missing dependency; a module cannot be removed while an installed module still depends on
     it.
+17. **Bus admission is restricted, authenticated, and core-controlled.** The bus is not a promiscuous
+    endpoint any process can dial. Core is the sole admission authority; a participant attaches only
+    with an attested identity and only when installed, registered, and authorized. There is no
+    anonymous or ambient attach — an arbitrary local process cannot connect, enumerate, publish, or
+    subscribe. Admission is least-privilege (an admitted participant is still confined to its declared,
+    authorized event kinds) and fail-closed (a refused attach is denied and audited).
 
 ## Shared terms
 
@@ -182,6 +188,39 @@ Cross-boundary readiness is answered by the capability advertisement defined in
 module requests `memory` (or any dependency), it observes that dependency's `ready` state through
 the same generation-stamped projection the thin client uses. Discovery, for a module and for a
 client, is one mechanism.
+
+### Bus admission and isolation
+
+The bus carries every module's traffic, including the near-universal `memory` path and every
+governed action-class event, so **who may attach to it is a security boundary in its own right** —
+distinct from, and prior to, the per-event authorization above. A process that could connect freely
+could observe every module's messages or inject its own; the bus must therefore not be a
+promiscuous endpoint any process can dial (shared invariant 17).
+
+- **Core is the sole admission authority.** As bus owner in each service, core admits or refuses
+  every participant. There is no side channel to join and no anonymous or ambient attach.
+- **Every participant is identity-attested.** Admission reuses the existing principal and transport
+  classes — the vault principal model and the `cert:CN` / bearer attestation the thin-client↔server
+  link already uses ([`tiered-llm-p8-thinclient-mtls.md`](tiered-llm-p8-thinclient-mtls.md)) — rather
+  than inventing a second identity scheme. In-process built-in modules are admitted under the
+  service's own principal at load; an out-of-process or externally authored module (via
+  `plugin-loader`) attaches only through an access-restricted local endpoint and a per-module
+  authenticated handshake. An arbitrary local process holds no such identity and is refused.
+- **Admission is gated by installation and authorization.** A participant is admitted only when it
+  is installed, registered, and authorized by `execution-policy`; a module that is not installed, or
+  whose identity or dependencies do not check out, cannot attach. This is the connection-layer gate;
+  the per-event contract check (declared, authorized event kinds only) still applies afterward, so
+  admission never implies full access.
+- **Isolation and least privilege.** An admitted participant sees only the event kinds it is
+  authorized to subscribe to — the bus is not a broadcast every attached participant can read in
+  full. A compromised or malicious local process cannot attach, enumerate participants, snoop
+  traffic, or publish.
+- **Fail-closed and audited.** A refused or failed attach is denied and recorded through the same
+  tap as any other governed event, so an unexpected connection attempt is visible, not silent.
+
+This contract sets the admission invariant and its reuse of existing identity machinery; the
+mechanics of the local endpoint, the handshake, and out-of-process module attachment are owned by
+`module-runtime` and `plugin-loader` in their documents.
 
 ### Record, replay, and debugging
 

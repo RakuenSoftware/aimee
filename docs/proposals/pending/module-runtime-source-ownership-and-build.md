@@ -145,6 +145,16 @@ module (shared invariant 14). Undeclared publish/subscribe, an event kind with t
 with no server, a cycle in the event edge graph, and any core→optional or module→`memory`-return
 edge fail validation with descriptor/kind ownership evidence.
 
+**Bus admission (shared invariant 17).** `module-runtime` is the sole admission authority for its
+service's bus. A participant attaches only with an attested identity — reusing the vault principal
+and `cert:CN`/bearer classes, not a second scheme — and only when installed, registered, and
+authorized by `execution-policy`; the bus exposes no promiscuous endpoint, so an unauthenticated or
+unknown process cannot connect, enumerate, publish, or subscribe. In-process built-in modules are
+admitted under the service principal at load; out-of-process or externally authored modules
+(`plugin-loader`) attach over an access-restricted local endpoint with a per-module handshake.
+Admission is least-privilege — an admitted participant still reaches only its declared, authorized
+event kinds — and a refused attach is denied and audited.
+
 ## Installation, capability publication, and replay (2026-07-23 amendment)
 
 `module-runtime` owns installation as well as the bus. Three rules follow from the suite amendment:
@@ -229,4 +239,5 @@ logic or a second provider implementation.
 - {id: 15, tier: integration, check: "scripts/test_capability_publication.sh --modules-publish-to-core-over-bus --no-core-poll --aggregate-into-closure-and-advertisement --fail-register-without-capability-contract --fail-serve-unadvertised-event-kind"}
 - {id: 16, tier: integration, check: "scripts/test_event_replay.sh --capture-per-service-stream --deterministic-same-events-same-order --capture-or-stub-nondeterminism --replay-reproduces-run --capture-obeys-audit-redaction-and-principal-scope"}
 - {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --untrusted-principal --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
+- {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --require-attested-identity --reuse-vault-principal-and-cert-cn-classes --no-anonymous-or-ambient-attach --refuse-unauthenticated-process-connect-enumerate-publish-subscribe --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --restricted-local-endpoint-for-out-of-process --fail-closed-and-audited"}
 ```
