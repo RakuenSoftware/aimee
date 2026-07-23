@@ -537,6 +537,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains an empty-domain refusal exercised against all eight unmigrated descriptors.",
       "independent_review": "The scoping roundtable required the guard be unconditional rather than offering an opt-out for a hypothetical header-only module, required its message to read as not-migrated rather than broken, required the unmigrated set be given a tracked record rather than the guard alone, and required that authoring previously-undeclared ownership claims be split from latching them so an audit never reviews declarations it just wrote. All four are applied; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-class-a-migration.md", "scripts/validate_module_descriptors.py", "scripts/tests/test_validate_module_descriptors.py", "docs/modules/module-runtime.md"]
+    },
+    {
+      "slice": 40,
+      "state": "present_and_verified",
+      "disposition": "Declared the governance descriptor's sources, private header, test, and document without setting ownership_complete, as the declaration half of the declaration-then-latch split the scoping roundtable required for modules with module-local files no descriptor declares, and confirmed the single source is live production code with a clean build membership.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The descriptor now declares the response-governance stage alone; the OIDC, identity, policy-distribution and console surfaces the canonical document describes remain distributed across kb, DB2, management and console layers and are not yet module-local", "ownership_complete is deliberately left unset so the follow-up latch slice reviews declarations reviewed on their own first", "CMake compiles no governance source under any target of its own, the same intentional thin-client profile boundary recorded for gateway", "The two weak governance symbols in ir_ingress_stubs.c are deliberate test stubs, not a second implementation"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Declaring and latching in one slice was rejected on roundtable direction: it would make the completeness audit review declarations authored in the same change, and doing that across the nine module class would lock in the wrong precedent.",
+        "revisit": "The follow-up latch slice sets ownership_complete, adds the governance latch mutation tests, and records the completeness audit; the broader governance plane remains a later migration."
+      },
+      "consumers": ["server Anthropic and OpenAI response paths", "descriptor-envelope and module-inventory CI", "the governance latch slice", "future Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains the governance row.",
+      "independent_review": "The scoping roundtable established that declaration and latching are separate acts and that governance is the correct first module because it is smallest and the first to carry a private header, exercising a validator path the nine latched modules never have. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-40.md", "docs/modules/governance.md", "src/modules/governance/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }

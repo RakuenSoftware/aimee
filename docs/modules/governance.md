@@ -16,6 +16,17 @@ explicit endpoints, client identity, vault-backed secret reference, redirects, s
 accepted algorithms, and namespaced claim mappings. GitHub may be configured if it conforms, but
 `GitHub` is never the governance contract or default provider.
 
+The descriptor's ownership fields describe what lives under `src/modules/governance/` today, which is
+the response-governance stage alone: `gw_stage_governance.c` and its private header
+`gw_stage_governance.h`, tested by `src/tests/test_response_governance_stage.c`. That is narrower than
+the governance plane this document describes — the OIDC, identity, policy-distribution, and console
+surfaces remain distributed across the KB, DB2, management, and console layers and are not yet
+module-local. The descriptor therefore declares its sources, private header, test, and this document but
+does not set `ownership_complete`: the module is mid-migration, and its declared set is not yet its whole
+intended surface. `docs/validation/core-modularization-slice-40.md` records the audit behind these
+declarations. Latching follows in a separate slice once the declarations have been reviewed on their own,
+so no audit blesses claims written in the same change.
+
 ## Dependencies and consumers
 
 - `audit`: records organizational decisions and supplies the canonical ledger for read-only projections.
