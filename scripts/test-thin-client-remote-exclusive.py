@@ -15,10 +15,21 @@ import threading
 
 
 class RemoteHandler(http.server.BaseHTTPRequestHandler):
+    # ThreadingHTTPServer serves each request on its own thread, so the request
+    # counter is shared mutable state: `requests += 1` is a non-atomic
+    # read-modify-write that can lose an increment under concurrency and make an
+    # assertion flaky. Guard every access with a lock.
     requests = 0
+    _lock = threading.Lock()
+
+    @classmethod
+    def count(cls) -> int:
+        with cls._lock:
+            return cls.requests
 
     def _respond(self) -> None:
-        type(self).requests += 1
+        with type(self)._lock:
+            type(self).requests += 1
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
@@ -136,7 +147,7 @@ def run_client(
         text=True,
         capture_output=True,
         input='{"tool_name":"Read","tool_input":{},"cwd":"/tmp"}\n'
-        if command == ["hooks", "pre"]
+        if command[:1] == ["hooks"]
         else "{}\n"
         if command == ["session-start"]
         else None,
@@ -171,27 +182,38 @@ def main() -> int:
             port = int(server.server_address[1])
             result = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["agent", "list"], True)
             assert result.returncode == 0, (result.stdout, result.stderr)
-            assert RemoteHandler.requests >= 2, RemoteHandler.requests
+            assert RemoteHandler.count() >= 2, RemoteHandler.count()
             assert sentinel.contacts_after_settle() == 0, (
                 "configured remote also contacted local UDS"
             )
 
             # Each independently special-cased path must obey the same exclusive
-            # selection rule as ordinary /v1 routing. Their semantic response
-            # rendering is not under test here; the remote request and local
-            # sentinel are the transport assertions.
-            for command in (["hooks", "pre"], ["session-start"], ["optimize", "points"]):
-                before = RemoteHandler.requests
+            # selection rule as ordinary /v1 routing. Both hooks phases and every
+            # optimize export subcommand share one dispatch change, so cover more
+            # than one of each. Their semantic response rendering is not under
+            # test here; the remote request and local sentinel are the transport
+            # assertions.
+            # `optimize baseline` needs --point before it dispatches; the point
+            # need not exist, since only the transport is under assertion.
+            reachable = (
+                ["hooks", "pre"],
+                ["hooks", "post"],
+                ["session-start"],
+                ["optimize", "points"],
+                ["optimize", "baseline", "--point", "router"],
+            )
+            for command in reachable:
+                before = RemoteHandler.count()
                 special = run_client(binary, home, f"tcp:127.0.0.1:{port}", command)
-                assert RemoteHandler.requests > before, (command, special.stderr)
+                assert RemoteHandler.count() > before, (command, special.stderr)
                 assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
 
-            for command in (["hooks", "pre"], ["session-start"], ["optimize", "points"]):
+            for command in reachable:
                 failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)
                 # hooks intentionally fail open when the policy server is
                 # unavailable; that is not a local fallback and is therefore a
                 # valid result for this transport-only assertion.
-                if command == ["optimize", "points"]:
+                if command[0] == "optimize":
                     assert failed.returncode != 0, (
                         f"{command}: unreachable remote unexpectedly succeeded"
                     )
