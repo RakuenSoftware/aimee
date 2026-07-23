@@ -250,7 +250,7 @@ static size_t verify_vectors(void)
    int shape_seen[REQUIRED_SHAPE_COUNT];
    memset(shape_seen, 0, sizeof shape_seen);
 
-   size_t n = 0, negatives = 0;
+   size_t n = 0, negatives = 0, geometry_checked = 0;
    char line[2048];
    while (fgets(line, sizeof line, fp))
    {
@@ -332,6 +332,37 @@ static size_t verify_vectors(void)
             if (want.hdr_flags == REQUIRED_SHAPES[i].flags)
                shape_seen[i] = 1;
       }
+      /* Every payload-bearing positive row also goes through the checked path,
+       * twice: once with geometry that comfortably contains it, and once with
+       * geometry deliberately one byte too small. Testing the checked path only
+       * on a hand-built case would leave the committed vectors — the rows a
+       * future client is held to — saying nothing about geometry at all. */
+      if (!negative && r == BUS_WIRE_OK && got.payload_len > 0)
+      {
+         uint64_t end = got.payload_ref + got.payload_len;
+         uint32_t roomy_slot = (uint32_t)(end + 64);
+         uint64_t roomy_arena = end + 64;
+
+         bus_frame_t chk;
+         if (bus_wire_decode_checked(raw, rawn, roomy_slot, roomy_arena, &chk) != BUS_WIRE_OK)
+         {
+            fprintf(stderr, "vector '%s': checked decode refused it under ample geometry\n",
+                    name);
+            exit(1);
+         }
+
+         uint32_t tight_slot = (uint32_t)(end - 1);
+         uint64_t tight_arena = end - 1;
+         if (bus_wire_decode_checked(raw, rawn, tight_slot, tight_arena, &chk) !=
+             BUS_WIRE_ERR_PAYLOAD_LEN)
+         {
+            fprintf(stderr, "vector '%s': checked decode accepted it one byte out of bounds\n",
+                    name);
+            exit(1);
+         }
+         geometry_checked++;
+      }
+
       if (negative)
          negatives++;
       n++;
@@ -357,8 +388,14 @@ static size_t verify_vectors(void)
                       "everything would pass conformance against it\n");
       exit(1);
    }
-   printf("  vectors: %zu rows (%zu negative), both directions, all %zu shapes covered\n", n,
-          negatives, REQUIRED_SHAPE_COUNT);
+   if (geometry_checked == 0)
+   {
+      fprintf(stderr, "no payload-bearing vector was run through the checked path\n");
+      exit(1);
+   }
+   printf("  vectors: %zu rows (%zu negative), both directions, %zu geometry-checked,\n"
+          "           all %zu shapes covered\n",
+          n, negatives, geometry_checked, REQUIRED_SHAPE_COUNT);
    return n;
 }
 

@@ -1550,8 +1550,13 @@ native-tool-parity-check:
 # D7 of docs/dev/EVENT_BUS_DECISIONS.md: while the event-bus feature tree is in
 # flight, no shipping binary may link or include the bus. Wired into lint so it
 # runs on every PR, not only when someone remembers to invoke it.
+#
+# The gate's artefact layer inspects the built binaries, and refuses to report
+# clean when it inspected none — a check that did not run must not read as a
+# check that passed. For local iteration before a build exists:
+#   make bus-blast-radius-check BUS_BLAST_RADIUS_FLAGS=--allow-unbuilt
 bus-blast-radius-check:
-	@bash ../scripts/check_bus_blast_radius.sh
+	@bash ../scripts/check_bus_blast_radius.sh $(BUS_BLAST_RADIUS_FLAGS)
 
 sanitizer-callsites-check:
 	@python3 ../scripts/check-sanitizer-callsites.py
