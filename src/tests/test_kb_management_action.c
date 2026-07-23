@@ -9,7 +9,7 @@
 typedef struct
 {
    int stage, intents, snapshots, opens, requests, authority, tokens, outcomes, closes, clears;
-   int ambiguous_intent, ambiguous_outcome, replay;
+   int ambiguous_intent, ambiguous_outcome, replay, invalid_active;
    kb_mgmt_token_authority_ipc_result_t token_result;
    kb_management_action_transport_t action_transport;
    const char *response;
@@ -131,6 +131,8 @@ static kb_management_health_result_t bundle(void *ctx, kb_management_cert_bundle
    snprintf(a->issuer, sizeof(a->issuer), "CN=client-ca");
    snprintf(a->serial_norm, sizeof(a->serial_norm), "2b");
    memset(a->fingerprint, 0xaa, 32);
+   if (f->invalid_active)
+      a->generation++;
    return KB_MANAGEMENT_HEALTH_OK;
 }
 
@@ -350,6 +352,9 @@ int main(void)
    reset(&f);
    f.replay = 1;
    assert(run(&f) == KB_MANAGEMENT_ACTION_CONFLICT && f.opens == 0 && f.tokens == 0);
+   reset(&f);
+   f.invalid_active = 1;
+   assert(run(&f) == KB_MANAGEMENT_ACTION_UNAVAILABLE && f.opens == 0 && f.clears == 1);
    for (int denied = KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID;
         denied <= KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED; denied++)
    {

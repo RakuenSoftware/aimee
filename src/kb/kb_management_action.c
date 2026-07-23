@@ -323,6 +323,10 @@ kb_management_action_execute(const kb_management_action_request_t *r,
       result = journal_local_failure(r, d, &intent);
       goto done;
    }
+   /* The loader may have populated private-key material even when it reports
+    * an error or the returned metadata fails validation.  Once invoked, its
+    * matching cleanup callback owns every exit path. */
+   loaded = 1;
    hr = d->bundle_load(d->bundle_ctx, &bundle, &active);
    uint64_t active_now = d->wall_seconds(d->clock_ctx);
    if (hr != KB_MANAGEMENT_HEALTH_OK || !active_matches(&active, &intent) ||
@@ -333,7 +337,6 @@ kb_management_action_execute(const kb_management_action_request_t *r,
       result = journal_local_failure(r, d, &intent);
       goto done;
    }
-   loaded = 1;
    hr = d->server_open(d->server_ctx, &a, &bundle, r->deadline_millis, &session);
    if (hr != KB_MANAGEMENT_HEALTH_OK)
    {
