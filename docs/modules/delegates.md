@@ -16,6 +16,19 @@ orchestration. The main durable worker and HTTP/RPC orchestration still live in 
 root `cmd_agent_delegate.c` is an entry-point consumer. Remaining server/root implementations are relocation
 debt, not a second supported delegate engine.
 
+The descriptor declares this module's twenty-seven sources, twenty-one public headers, nineteen direct
+tests, and this document; it does not yet set `ownership_complete`. `delegates` is the only module in
+the program whose headers all live under the canonical `src/modules/delegates/include/aimee/delegates/`
+tree, so it declares no `private_headers`: the module root holds no header, and an absent field is an
+empty declared set against an empty actual set. An earlier slice declared the panel and IR-rescue
+pieces — three sources and two tests — and this declaration completes the remaining twenty-four sources
+and the broader direct-test set. Make compiles all twenty-seven sources; CMake compiles twenty-three,
+omitting `aimee_ir_rescue.c`, `delegate_ephemeral_ws.c`, `delegate_sandbox_image.c`, and
+`gw_orch_delegates.c`, the server/kb-side units — the same intentional thin-client boundary recorded
+for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
+than of those. `docs/validation/core-modularization-slice-52.md` records the audit; latching follows in
+a separate slice so the completeness audit does not review declarations authored in the same change.
+
 ### IR-side prose tool-call rescue
 
 The module owns `aimee_ir_rescue_tool_calls` in
@@ -134,8 +147,18 @@ and audit boundaries while reacquiring credentials through the authorized vault 
 
 ## Tests and failure behavior
 
-`src/tests/test_delegate_driver.c` plus the backend, credentials, dispatch, role, plan, economics, sandbox,
-ephemeral-workspace, liveness, budget, gateway-orchestration, CLI/API, and workflow suites cover the
+The descriptor's nineteen direct tests each drive a delegates source as their subject: the driver,
+backend family (`test_delegate_backend*.c`), credentials, economics, ephemeral workspace, patch
+coordinator, plan, role, sandbox image, XML fallback, gateway-orchestration
+(`test_gw_orch_delegates.c`), IR rescue, and panel provider suites, plus
+`test_delegate_context_shed.c`, `test_delegate_dispatch_reliability.c`, and
+`test_delegate_handoff.c`, which each link only `delegate_prompt.o` and together are that source's
+coverage. Six adjacent `test_delegate*`/`test_panel*`/`test_gw_orch*` files are not claimed because
+their subject is another module: `test_delegate_liveness.c` links `server/liveness.o`,
+`test_delegate_token_budget.c` links `server/agent_coord.o`, `test_delegate_ensemble.c` drives
+`modules/roundtable/delegate_ensemble.c`, `test_gw_orch_workflows.c` and
+`test_gw_orchestration_seam.c` link no delegates object, and `test_panel_ir_contract.c` includes
+`<aimee/ir/panel_result.h>`. Together with the CLI/API and workflow suites they cover the
 distributed implementation. An unavailable route, provider, or backend must fail concretely; partial runs retain audit
 evidence; policy, budget, or sandbox failure is fail-closed and cannot downgrade to raw local execution.
 `src/tests/test_aimee_ir_rescue.c` directly covers prose rescue. `src/tests/test_panel_provider.c` covers
