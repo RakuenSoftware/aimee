@@ -15,6 +15,23 @@ Canonical implementation lives in `src/modules/vault`: the server-wrap retrieval
 attested identities, and `vault_capability` limits delegated access. Direct calls to internal vault
 implementations outside these facades are boundary violations rather than alternate public APIs.
 
+The descriptor declares this module's twelve sources, thirteen module-root headers, eleven direct
+tests, and this document; it does not yet set `ownership_complete`. All thirteen headers are declared
+as `private_headers` because they live at the module root rather than under
+`src/modules/vault/include/aimee/vault/`, the layout the header-layout checker treats as private;
+`vault_internal.h` is the backend-seam header and has no paired source. The four custody backends
+(`vault_custody_kms.c`, `vault_custody_mock.c`, `vault_custody_pkcs11.c`, `vault_custody_tpm2.c`) are
+always compiled by Make: `WITH_TPM2` and `WITH_PKCS11` toggle a `-D` flag that switches the tpm2 and
+pkcs11 sources between a real implementation and a fail-closed stub rather than omitting them.
+`vault_hwm.c` has no external includer but is live: `vault_custody_kms.c` calls
+`vault_hwm_attest_verify` in its high-water-mark attestation path. CMake compiles the six sources the
+thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
+`vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
+`vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
+gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the audit;
+latching follows in a separate slice so the completeness audit does not review declarations authored
+in the same change.
+
 ## Dependencies and consumers
 
 - `config`: supplies selected custody provider and provider-specific effective settings.
@@ -74,10 +91,22 @@ principal, decision, and outcome metadata before transient plaintext is discarde
 
 ## Tests and failure behavior
 
-`test_vault_service.c`, `test_vault_store.c`, `test_vault_seam.c`, capability, principal, bootstrap,
-seal, rotation, PostgreSQL, KMS, PKCS#11, and TPM2 suites cover the layered contracts. Wrong principal,
-locked/sealed state, corrupt ciphertext, missing entry, expired capability, or custody failure must
-return typed failure and never expose partial plaintext or select a weaker backend silently.
+The descriptor's eleven direct tests are `test_vault_capability.c`, `test_vault_crypto.c`,
+`test_vault_kek_cache.c`, `test_vault_kms.c`, `test_vault_master_rotate.c`, `test_vault_principal.c`,
+`test_vault_seam.c`, `test_vault_server_key.c`, `test_vault_service.c`, `test_vault_store.c`, and
+`test_vault_tpm2.c`. The last backs the `WITH_TPM2`-gated `p7-tpm2-harness` and is the only test that
+links and exercises the real `vault_custody_tpm2.c`, so it is claimed despite the gate. Several
+`test_vault_*` files exercise other modules and are not claimed: `test_vault_audit.c` pins
+`vault_audit_server_write` in `src/server/server_vault.c` (server), `test_vault_seal.c` and
+`test_vault_tpm2_stub.c` drive the `kb/kb_vault_policy.c` seal barrier (KB), `test_vault_pg.c` links
+`kb/kb_main.c` (KB integration), and `test_vault_bootstrap.c` drives `server_vault_bootstrap.c`
+(server). `test_vault_custody_pkcs11.c` is an orphan that no build target compiles; it is left
+undeclared and flagged for a later cleanup rather than claimed as coverage. `vault_hwm.c`,
+`vault_custody_mock.c`, and `vault_custody_pkcs11.c` have no declared direct test; they are exercised
+transitively (the high-water-mark path through `test_vault_kms.c`, the mock custody through the
+service and store suites). Wrong principal, locked/sealed state, corrupt ciphertext, missing entry,
+expired capability, or custody failure must return typed failure and never expose partial plaintext or
+select a weaker backend silently.
 
 ## Operational diagnostics
 

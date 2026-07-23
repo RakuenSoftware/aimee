@@ -639,6 +639,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains workspace-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on an eleven-element declared source and private-header set.",
       "independent_review": "The slice-decision roundtable approved the declaration scope in slice 44 and carried the runner-queue wiring evidence forward to this slice; this slice adds only the completeness assertion and that evidence. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-45.md", "docs/modules/workspace.md", "src/modules/workspace/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 46,
+      "state": "present_and_verified",
+      "disposition": "Declared the vault descriptor's twelve sources, thirteen module-root private headers, eleven direct tests, and document without setting ownership_complete, the declaration half of the pair for the fourth and most test-classification-heavy Class B module, resolving seventeen test files down to eleven module tests by subject and confirming every source is live including the always-compiled custody backends.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["CMake compiles six of the twelve sources, the thin-client-reachable subset, and omits the four custody backends, vault_hwm.c, and vault_server_key.c, the same intentional thin-client boundary recorded for gateway, audit, learning, and workspace", "vault_hwm.c has no external includer but is live: vault_custody_kms.c calls vault_hwm_attest_verify; the tpm2 and pkcs11 custody sources are always compiled, switching between real impl and fail-closed stub by -D flag", "Five test_vault_* files exercise other modules and are not claimed: audit (server_vault.c), seal and tpm2_stub (kb_vault_policy.c), pg (kb_main.c), bootstrap (server_vault_bootstrap.c)", "test_vault_tpm2.c backs the WITH_TPM2-gated p7-tpm2-harness and is claimed on roundtable direction as the only test exercising the real vault_custody_tpm2.c", "test_vault_custody_pkcs11.c is an orphan no target builds, left undeclared and flagged for a later cleanup; vault_hwm.c, vault_custody_mock.c, and vault_custody_pkcs11.c have no declared direct test and are covered transitively"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming the five other-module tests by their vault name, or the orphan pkcs11 test as coverage, was rejected: each of the five drives another module's source by subject, and an unbuilt orphan is not a coverage claim.",
+        "revisit": "Slice 47 latches vault; a later cleanup wires or deletes the orphan test_vault_custody_pkcs11.c, and a separate header-layout slice may relocate vault headers under a canonical include tree."
+      },
+      "consumers": ["server, kb, db2 credential and custody consumers", "the vault latch slice", "remaining Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven vault rows.",
+      "independent_review": "The slice-decision roundtable confirmed the subject-over-name exclusion of the five other-module tests, directed that the orphan pkcs11 test stay undeclared and flagged, and directed that the WITH_TPM2-gated tpm2 harness be declared as the only test of the real tpm2 custody source. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-46.md", "docs/modules/vault.md", "src/modules/vault/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }

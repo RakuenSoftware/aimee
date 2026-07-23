@@ -8,5 +8,50 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/vault/vault_capability.c",
+    "src/modules/vault/vault_crypto.c",
+    "src/modules/vault/vault_custody_kms.c",
+    "src/modules/vault/vault_custody_mock.c",
+    "src/modules/vault/vault_custody_pkcs11.c",
+    "src/modules/vault/vault_custody_tpm2.c",
+    "src/modules/vault/vault_hwm.c",
+    "src/modules/vault/vault_kek_cache.c",
+    "src/modules/vault/vault_principal.c",
+    "src/modules/vault/vault_server_key.c",
+    "src/modules/vault/vault_service.c",
+    "src/modules/vault/vault_store.c"
+  ],
+  "private_headers": [
+    "src/modules/vault/vault_capability.h",
+    "src/modules/vault/vault_crypto.h",
+    "src/modules/vault/vault_custody_kms.h",
+    "src/modules/vault/vault_custody_mock.h",
+    "src/modules/vault/vault_custody_pkcs11.h",
+    "src/modules/vault/vault_custody_tpm2.h",
+    "src/modules/vault/vault_hwm.h",
+    "src/modules/vault/vault_internal.h",
+    "src/modules/vault/vault_kek_cache.h",
+    "src/modules/vault/vault_principal.h",
+    "src/modules/vault/vault_server_key.h",
+    "src/modules/vault/vault_service.h",
+    "src/modules/vault/vault_store.h"
+  ],
+  "tests": [
+    "src/tests/test_vault_capability.c",
+    "src/tests/test_vault_crypto.c",
+    "src/tests/test_vault_kek_cache.c",
+    "src/tests/test_vault_kms.c",
+    "src/tests/test_vault_master_rotate.c",
+    "src/tests/test_vault_principal.c",
+    "src/tests/test_vault_seam.c",
+    "src/tests/test_vault_server_key.c",
+    "src/tests/test_vault_service.c",
+    "src/tests/test_vault_store.c",
+    "src/tests/test_vault_tpm2.c"
+  ],
+  "docs": [
+    "docs/modules/vault.md"
+  ]
 }
