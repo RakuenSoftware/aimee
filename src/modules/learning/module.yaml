@@ -10,6 +10,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/learning/learning_bundle.c",
     "src/modules/learning/learning_evidence.c",
