@@ -6,6 +6,7 @@
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "vault_service.h"   /* vault_service_* : the permanent credential store (P4) */
 #include "model_registry.h"
+#include "model_provider.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
 #include "oauth_flow.h" /* oauth_token_store/get : vault-backed auto-refreshing codex token */
@@ -238,38 +239,100 @@ static int model_price_to_cost_tier(double in_per_mtok)
  * Returns the number of targets written, or -1 if they do not fit — the caller
  * must then reject the whole config rather than register a partial fleet, since
  * a silently truncated expansion would drop models an operator declared. */
+static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id);
+
+/* Curated allowlist for "models": "auto". The provider CATALOG is discovery
+ * data, not exposure policy: a model appearing in it does not prove it is
+ * intended for this product, has complete capability metadata, or is enabled for
+ * the account. Returns NULL when the profile publishes no curated set, so "auto"
+ * fails loudly rather than exposing whatever the provider happens to list. */
+static const char **agent_provider_routable_models(const agent_t *base)
+{
+   const char *vendor = agent_catalog_provider(base);
+   model_provider_t *p = vendor && vendor[0] ? model_provider_get(vendor) : NULL;
+   if (!p && base->provider[0])
+      p = model_provider_get(base->provider);
+   return p ? p->routable_models : NULL;
+}
+
 static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base, cJSON *models)
 {
    int written = 0;
+
+   /* "models": "auto" -> the provider profile's curated allowlist, so an
+    * operator can register a provider without naming its models at all. */
+   if (cJSON_IsString(models))
+   {
+      if (strcmp(cJSON_GetStringValue(models), "auto") != 0)
+         return -1;
+      const char **curated = agent_provider_routable_models(base);
+      if (!curated || !curated[0])
+         return -1;
+      for (int i = 0; curated[i]; i++)
+      {
+         int rc = agent_expand_one_model(cfg, base, curated[i]);
+         if (rc < 0)
+            return -1;
+         written += rc;
+      }
+      return written;
+   }
+
    cJSON *m;
    cJSON_ArrayForEach(m, models)
    {
       const char *model_id = cJSON_GetStringValue(m);
       if (!model_id || !model_id[0])
          continue;
-      if (cfg->agent_count >= MAX_AGENTS)
+      int rc = agent_expand_one_model(cfg, base, model_id);
+      if (rc < 0)
          return -1;
-
-      agent_t *ag = &cfg->agents[cfg->agent_count];
-      *ag = *base;
-      snprintf(ag->model, sizeof(ag->model), "%s", model_id);
-      snprintf(ag->name, sizeof(ag->name), "%s:%s", base->name, model_id);
-      /* The registration's model list is the exposure policy; a target is only
-       * routable if the catalog can actually describe it. */
-      agent_derive_catalog_provider(ag);
-
-      model_capability_t cap;
-      if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
-      {
-         int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
-         if (tier >= 0)
-            ag->cost_tier = tier;
-      }
-
-      cfg->agent_count++;
-      written++;
+      written += rc;
    }
    return written;
+}
+
+/* Materialise one runtime target. Returns 1 when written, 0 when skipped as a
+ * duplicate, -1 when it does not fit. */
+static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id)
+{
+   char name[MAX_AGENT_NAME];
+   int n = snprintf(name, sizeof(name), "%s:%s", base->name, model_id);
+   /* A truncated name would collide with a sibling target and, because health
+    * and --via both key on the name, silently conflate two models. Reject the
+    * registration instead. */
+   if (n < 0 || (size_t)n >= sizeof(name))
+      return -1;
+
+   /* A repeated model id must not produce two identical targets. */
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      if (strcmp(cfg->agents[i].name, name) == 0)
+         return 0;
+   }
+
+   if (cfg->agent_count >= MAX_AGENTS)
+      return -1;
+
+   agent_t *ag = &cfg->agents[cfg->agent_count];
+   *ag = *base;
+   snprintf(ag->model, sizeof(ag->model), "%s", model_id);
+   snprintf(ag->name, sizeof(ag->name), "%s", name);
+   /* Re-derive per target: the vendor can depend on the model id. */
+   ag->catalog_provider[0] = '\0';
+   ag->catalog_provider_explicit = 0;
+   agent_derive_catalog_provider(ag);
+
+   model_capability_t cap;
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
+   {
+      int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
+      if (tier >= 0)
+         ag->cost_tier = tier;
+   }
+
+   cfg->agent_count++;
+   return 1;
 }
 
 static void agent_normalize_builtin_cost_tier(agent_t *ag)
@@ -440,8 +503,23 @@ static void agent_derive_catalog_provider(agent_t *ag)
       }
    }
 
+   /* Provider-alias fallback runs even with NO model: a provider-general
+    * registration carries only a provider until it is expanded, and its vendor
+    * identity is what selects the curated model list. Checked before the
+    * model-shaped rules below so an explicit model still wins where present. */
    if (!ag->model[0])
+   {
+      for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
+      {
+         if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
+         {
+            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                     g_catalog_provider_aliases[i].vendor);
+            return;
+         }
+      }
       return;
+   }
 
    /* Namespaced gateway id: "<vendor>/<model>". */
    const char *slash = strchr(ag->model, '/');
@@ -1238,7 +1316,8 @@ int agent_load_config(agent_config_t *cfg)
           * its name for `--via`. Inferring provider-general mode from anything
           * else would change cost, health and attribution on upgrade. */
          cJSON *models_arr = cJSON_GetObjectItem(a, "models");
-         if (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0)
+         if ((cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0) ||
+             cJSON_IsString(models_arr))
          {
             agent_t base = *ag;
             int n = agent_expand_provider_models(cfg, &base, models_arr);

@@ -40,6 +40,17 @@ extern "C"
       const char *default_aux_model; /* cheap model for auxiliary tasks */
       const char **fallback_models;  /* NULL-terminated */
 
+      /* Curated set of models this provider EXPOSES as routable, NULL-terminated.
+       * Distinct from fallback_models, which describes retry ORDER and may omit
+       * the primary. This is exposure POLICY: a provider's catalog is discovery
+       * data, and a model appearing in it does not prove it is intended for this
+       * product, has complete capability metadata, or is enabled for the
+       * configured account. Lets an operator register a provider without naming
+       * models ("models": "auto"); they can still narrow it with an explicit
+       * list. NULL means the provider offers no curated set, so "auto" is
+       * rejected rather than guessed at. */
+      const char **routable_models;
+
       int fixed_temperature; /* -1 = caller chooses; >= 0 = pinned */
       int default_max_tokens;
 

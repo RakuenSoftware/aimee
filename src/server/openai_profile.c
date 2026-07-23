@@ -69,6 +69,8 @@ static int openai_fetch_models(model_provider_t *p, char ***models_out, int *n_o
    return 0;
 }
 
+static const char *openai_routable_models[] = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", NULL};
+
 model_provider_t openai_provider = {
     .name = "openai",
     .display_name = "OpenAI",
@@ -82,6 +84,7 @@ model_provider_t openai_provider = {
     .default_model = "gpt-4o",
     .default_aux_model = "gpt-4o-mini",
     .fallback_models = NULL,
+    .routable_models = openai_routable_models,
     .fixed_temperature = -1,
     .default_max_tokens = 8192,
     .default_headers = NULL,

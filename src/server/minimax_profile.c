@@ -71,6 +71,8 @@ static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_
    return 0;
 }
 
+static const char *minimax_routable_models[] = {"MiniMax-M3", NULL};
+
 model_provider_t minimax_provider = {
     .name = "minimax",
     .display_name = "MiniMax",
@@ -84,6 +86,7 @@ model_provider_t minimax_provider = {
     .default_model = "MiniMax-M3",
     .default_aux_model = "MiniMax-M3",
     .fallback_models = minimax_fallback_models,
+    .routable_models = minimax_routable_models,
     .fixed_temperature = -1,
     .default_max_tokens = 8192,
     .default_headers = NULL,

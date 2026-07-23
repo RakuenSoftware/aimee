@@ -1114,6 +1114,93 @@ void test_provider_general_registration_expands(void)
    unlink(agent_config_path());
 }
 
+/* "models": "auto" is the operator experience the requirement actually asks for:
+ * register the provider, name no models. It resolves the provider profile's
+ * CURATED allowlist rather than the raw catalog — a model appearing in a
+ * provider's listing does not prove it is intended for this product, has
+ * complete capability metadata, or is enabled for the account. */
+void test_provider_general_auto_uses_curated_allowlist(void)
+{
+   seed_codex_prices();
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":["
+         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"models\":\"auto\"}"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   /* The openai profile curates exactly sol/terra/luna. */
+   assert(c.agent_count == 3);
+   assert(agent_find(&c, "codex:gpt-5.6-sol") != NULL);
+   assert(agent_find(&c, "codex:gpt-5.6-terra") != NULL);
+   assert(agent_find(&c, "codex:gpt-5.6-luna") != NULL);
+   /* Registration itself is not routable. */
+   assert(agent_find(&c, "codex") == NULL);
+   /* Tiers still derive per model. */
+   assert(agent_find(&c, "codex:gpt-5.6-sol")->cost_tier >
+          agent_find(&c, "codex:gpt-5.6-luna")->cost_tier);
+
+   printf("  PASS: test_provider_general_auto_uses_curated_allowlist\n");
+   unlink(agent_config_path());
+}
+
+/* "auto" against a provider with no curated set must FAIL rather than expose
+ * whatever the provider happens to list, and an unrecognised string is not a
+ * silent no-op. */
+void test_provider_general_auto_requires_curated_set(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"x\",\"provider\":\"ollama\","
+         "\"endpoint\":\"http://localhost:11434\",\"auth_type\":\"none\","
+         "\"roles\":[\"review\"],\"models\":\"auto\"}]}\n",
+         f);
+   fclose(f);
+   agent_config_t c;
+   assert(agent_load_config(&c) != 0);
+
+   f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"x\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"models\":\"everything\"}]}\n",
+         f);
+   fclose(f);
+   assert(agent_load_config(&c) != 0);
+
+   printf("  PASS: test_provider_general_auto_requires_curated_set\n");
+   unlink(agent_config_path());
+}
+
+/* A duplicate model id must not produce two identical targets — they would share
+ * a name, and both health and --via key on the name. */
+void test_provider_general_dedupes_models(void)
+{
+   seed_codex_prices();
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"codex\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+         "\"models\":[\"gpt-5.6-sol\",\"gpt-5.6-sol\",\"gpt-5.6-luna\"]}]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   assert(c.agent_count == 2);
+
+   printf("  PASS: test_provider_general_dedupes_models\n");
+   unlink(agent_config_path());
+}
+
 /* An expansion that does not fit must reject the WHOLE config rather than
  * register a partial fleet: silently dropping models an operator declared would
  * route work to a set they never approved. */
