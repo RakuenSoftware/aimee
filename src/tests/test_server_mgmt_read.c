@@ -1,4 +1,4 @@
-#include "server/server_mgmt_read.h"
+#include "management_read.h"
 
 #include <assert.h>
 #include <stdio.h>

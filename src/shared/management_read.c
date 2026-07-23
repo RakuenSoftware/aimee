@@ -1,4 +1,4 @@
-#include "server_mgmt_read.h"
+#include "management_read.h"
 #include "cJSON.h"
 
 #include <openssl/sha.h>
@@ -21,8 +21,8 @@ static int identifier(const char *s, size_t max)
    for (size_t i = 0; i < n; ++i)
    {
       unsigned char c = (unsigned char)s[i];
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-'))
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-'))
          return 0;
    }
    return 1;
@@ -36,9 +36,8 @@ static int model_identifier(const char *s)
    for (size_t i = 0; i < n; ++i)
    {
       unsigned char c = (unsigned char)s[i];
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '_' || c == ':' || c == '/' ||
-            c == '+' || c == '-'))
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == ':' || c == '/' || c == '+' || c == '-'))
          return 0;
    }
    return 1;
@@ -51,16 +50,17 @@ static int utf8_valid(const unsigned char *s, size_t n)
       unsigned c = s[i++];
       if (c < 0x80)
          continue;
-      unsigned need = c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2
-                                                       : c >= 0xf0 && c <= 0xf4   ? 3
-                                                                                 : 99;
+      unsigned need = c >= 0xc2 && c <= 0xdf   ? 1
+                      : c >= 0xe0 && c <= 0xef ? 2
+                      : c >= 0xf0 && c <= 0xf4 ? 3
+                                               : 99;
       if (need == 99 || need > n - i)
          return 0;
       if ((s[i] & 0xc0) != 0x80 || (need >= 2 && (s[i + 1] & 0xc0) != 0x80) ||
           (need == 3 && (s[i + 2] & 0xc0) != 0x80))
          return 0;
-      if ((c == 0xe0 && s[i] < 0xa0) || (c == 0xed && s[i] >= 0xa0) ||
-          (c == 0xf0 && s[i] < 0x90) || (c == 0xf4 && s[i] >= 0x90))
+      if ((c == 0xe0 && s[i] < 0xa0) || (c == 0xed && s[i] >= 0xa0) || (c == 0xf0 && s[i] < 0x90) ||
+          (c == 0xf4 && s[i] >= 0x90))
          return 0;
       i += need;
    }
@@ -129,12 +129,12 @@ int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *in, char out[
    int path_n = snprintf(path, sizeof(path), "/v1/servers/%s/agents", in->server_id);
    if (path_n <= 0 || (size_t)path_n >= sizeof(path) ||
        !put(&t, domain, sizeof(domain)) || /* includes the required NUL */
-       !put_u16_text(&t, "GET") || !put_u16_text(&t, path) ||
-       !put_u16_text(&t, "agents") || !put_u16_text(&t, in->server_id) ||
-       !put_u64(&t, (uint64_t)in->team_id) || !put(&t, in->nonce, 32) ||
-       !put_u16_text(&t, in->kb_issuer) || !put_u16_text(&t, in->kb_serial) ||
-       !put_u16_text(&t, in->server_issuer) || !put_u16_text(&t, in->server_serial) ||
-       !put_u64(&t, in->revocation_generation) || !put_u64(&t, in->publication_generation))
+       !put_u16_text(&t, "GET") || !put_u16_text(&t, path) || !put_u16_text(&t, "agents") ||
+       !put_u16_text(&t, in->server_id) || !put_u64(&t, (uint64_t)in->team_id) ||
+       !put(&t, in->nonce, 32) || !put_u16_text(&t, in->kb_issuer) ||
+       !put_u16_text(&t, in->kb_serial) || !put_u16_text(&t, in->server_issuer) ||
+       !put_u16_text(&t, in->server_serial) || !put_u64(&t, in->revocation_generation) ||
+       !put_u64(&t, in->publication_generation))
       return -1;
    unsigned char digest[SHA256_DIGEST_LENGTH];
    if (!SHA256(t.bytes, t.n, digest))

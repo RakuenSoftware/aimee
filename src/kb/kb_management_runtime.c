@@ -10,7 +10,7 @@
 #include "kb_tls.h"
 #include "kb_workload_helper_posix.h"
 #include "kb_workload_provider.h"
-#include "server/server_mgmt_read.h"
+#include "management_read.h"
 #include "cJSON.h"
 
 #include <openssl/bio.h>

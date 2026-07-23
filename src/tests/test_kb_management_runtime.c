@@ -6,7 +6,7 @@
 #include "kb_workload_provider.h"
 #include "kb_mgmt_status.h"
 #include "db2/management_read_journal.h"
-#include "server/server_mgmt_read.h"
+#include "management_read.h"
 
 #include <assert.h>
 #include <fcntl.h>

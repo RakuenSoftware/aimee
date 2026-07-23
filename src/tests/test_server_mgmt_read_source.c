@@ -1,6 +1,6 @@
 #include "server.h"
 #include "agent_config.h"
-#include "server/server_mgmt_read.h"
+#include "management_read.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -38,8 +38,8 @@ int main(void)
    assert(!strcmp(out[0].name, "safe-agent"));
    assert(!strcmp(out[0].provider, "openai"));
    assert(!strcmp(out[0].model, "gpt-5.2"));
-   assert(out[0].enabled == 1 && out[0].delegate_available == 1 &&
-          out[0].primary_only == 0 && out[0].max_parallel == 7);
+   assert(out[0].enabled == 1 && out[0].delegate_available == 1 && out[0].primary_only == 0 &&
+          out[0].max_parallel == 7);
    const unsigned char *bytes = (const unsigned char *)&out[0];
    assert(!memmem(bytes, sizeof(out[0]), "secret", 6));
    count = 99;

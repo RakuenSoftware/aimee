@@ -2,7 +2,7 @@
 #define AIMEE_SERVER_MGMT_READ_ENDPOINT_H
 
 #include "server_mgmt_endpoint.h"
-#include "server_mgmt_read.h"
+#include "management_read.h"
 
 typedef enum
 {
@@ -36,10 +36,12 @@ typedef struct
    int64_t now;
 } server_mgmt_read_request_t;
 
-typedef server_mgmt_read_result_t (*server_mgmt_read_status_fn)(
-    void *, const server_mgmt_read_request_t *, server_mgmt_read_status_proof_t *);
-typedef server_mgmt_read_result_t (*server_mgmt_read_token_fn)(
-    void *, const server_mgmt_read_request_t *, server_mgmt_token_claims_t *);
+typedef server_mgmt_read_result_t (*server_mgmt_read_status_fn)(void *,
+                                                                const server_mgmt_read_request_t *,
+                                                                server_mgmt_read_status_proof_t *);
+typedef server_mgmt_read_result_t (*server_mgmt_read_token_fn)(void *,
+                                                               const server_mgmt_read_request_t *,
+                                                               server_mgmt_token_claims_t *);
 typedef server_mgmt_read_result_t (*server_mgmt_read_checkpoint_fn)(
     void *, const server_mgmt_read_request_t *, const server_mgmt_token_claims_t *,
     const server_mgmt_read_status_proof_t *);
@@ -56,7 +58,7 @@ typedef struct
 } server_mgmt_read_deps_t;
 
 server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_request_t *,
-                                                     const server_mgmt_read_deps_t *, char *,
-                                                     size_t, size_t *);
+                                                    const server_mgmt_read_deps_t *, char *, size_t,
+                                                    size_t *);
 
 #endif
