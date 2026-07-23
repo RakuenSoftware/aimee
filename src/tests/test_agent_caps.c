@@ -828,12 +828,16 @@ void test_capability_gate_escalates_instead_of_failing(void)
    printf("  PASS: test_capability_gate_escalates_instead_of_failing\n");
 }
 
-/* Escalation must not re-admit an agent the ordinary pass excluded for POLICY or
- * HEALTH reasons. Review raised this as a High — that escalation reconstructs
- * eligibility and could bypass primary_only or the Claude-CLI structural gate.
- * These assert the actual behaviour: both live inside
- * agent_is_available_for_routing(), which escalation calls, so neither is
- * bypassed. Written because the claim deserved evidence either way. */
+/* Escalation must not re-admit an agent the ordinary pass excluded. Review raised
+ * this as a High — that escalation reconstructs eligibility and could bypass a
+ * gate. It cannot: every gate lives inside agent_is_available_for_routing(),
+ * which escalation calls.
+ *
+ * Covered here: the generic POLICY filter callback (the mechanism by which the
+ * server enforces primary_only — the flag itself is inert without that filter
+ * registered, so a unit test can only exercise the callback), the HEALTH filter
+ * callback, and the Claude-CLI STRUCTURAL rule, which agent_config enforces
+ * directly and so is testable as itself. */
 static int esc_policy_excludes_all(const agent_t *ag)
 {
    (void)ag;
@@ -882,6 +886,17 @@ void test_escalation_respects_policy_and_health_gates(void)
    /* Gates cleared: escalation works again, proving the NULLs above were the
     * gates and not some unrelated failure. */
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
+
+   /* The Claude-CLI STRUCTURAL gate: a claude CLI seat that is not server-hosted
+    * has no session to drive, so it is excluded regardless of any filter.
+    * Escalation must honour that too. */
+   strcpy(cfg.agents[0].backend, AGENT_BACKEND_TMUX_CLI);
+   strcpy(cfg.agents[0].cli_kind, "claude");
+   cfg.agents[0].is_server_hosted = 0;
+   assert(agent_is_available_for_routing(&cfg.agents[0]) == 0);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
+   cfg.agents[0].backend[0] = '\0';
+   cfg.agents[0].cli_kind[0] = '\0';
 
    printf("  PASS: test_escalation_respects_policy_and_health_gates\n");
 }
@@ -982,23 +997,29 @@ void test_capability_routing_flag_behaviour_diff(void)
     * ON, only agents that can actually hold it survive. This is the flag's whole
     * value, and the reason the catalog-identity work had to land first: without
     * it MiniMax/kimi resolved a wrong or zero window. */
-   r_off = agent_route_with_caps(&cfg, "review", &off, 0, 300000);
-   r_on = agent_route_with_caps(&cfg, "review", &on, 0, 300000);
-   assert(r_off && r_on);
-   /* OFF: cheapest-first regardless of whether it fits. */
-   assert(r_off->cost_tier == 0);
-   /* ON: whatever is chosen must genuinely hold 300k, or be the escalation
-    * target when nothing does. Both are acceptable; silently picking a seat that
-    * cannot hold the prompt is not. */
+   /* Sample the rotation: agent_pick_balanced() round-robins tier peers on a
+    * process-wide cursor, so a SINGLE call proves nothing about which agent each
+    * mode prefers — it would pass even if both modes returned the same seat. */
+   int off_picked_incapable = 0, on_picked_incapable = 0;
+   for (int i = 0; i < 9; i++)
    {
-      model_capability_t cap;
-      int ctx = r_on->middleware.context_window;
-      if (ctx <= 0 && model_capability_get(agent_catalog_provider(r_on), r_on->model, &cap))
-         ctx = cap.context_window;
-      /* MiniMax-M3 (1M) is the only seat here that holds 300k. */
-      assert(ctx >= 300000);
-      assert(strcmp(r_on->name, "MiniMax-M3") == 0);
+      agent_t *a_off = agent_route_with_caps(&cfg, "review", &off, 0, 300000);
+      agent_t *a_on = agent_route_with_caps(&cfg, "review", &on, 0, 300000);
+      assert(a_off && a_on);
+
+      /* MiniMax-M3 (1M catalog window) is the only seat here that holds 300k;
+       * codex is capped at 272k by policy and kimi at 262144 by catalog. */
+      if (strcmp(a_off->name, "MiniMax-M3") != 0)
+         off_picked_incapable = 1;
+      if (strcmp(a_on->name, "MiniMax-M3") != 0)
+         on_picked_incapable = 1;
+      /* ON must ALWAYS choose the capable seat, on every rotation. */
+      assert(strcmp(a_on->name, "MiniMax-M3") == 0);
    }
+   /* OFF ignores capability, so across a full rotation it demonstrably hands the
+    * 300k packet to a seat that cannot hold it. That difference is the flag. */
+   assert(off_picked_incapable);
+   assert(!on_picked_incapable);
 
    printf("  PASS: test_capability_routing_flag_behaviour_diff\n");
 }

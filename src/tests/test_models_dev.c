@@ -154,10 +154,9 @@ static void test_price_band_capacity_and_duplicates(void)
        "    {\"input\":10,\"output\":10,\"tier\":{\"type\":\"context\",\"size\":100}},"
        /* duplicate of a MIDDLE retained threshold: must overwrite in place */
        "    {\"input\":11,\"output\":11,\"tier\":{\"type\":\"context\",\"size\":200}},"
-       /* threshold INT_MAX: rejected (above+1 would overflow, and a band applies
-        * strictly ABOVE its threshold so it could never be selected) */
-       "    {\"input\":99,\"output\":99,"
-       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
+       /* duplicate of the LARGEST retained threshold (800): must also overwrite,
+        * not be discarded by the "higher than everything kept" eviction test */
+       "    {\"input\":81,\"output\":81,\"tier\":{\"type\":\"context\",\"size\":800}},"
        /* non-context tier type: skipped rather than guessed at */
        "    {\"input\":77,\"output\":77,\"tier\":{\"type\":\"tokens\",\"size\":50}}"
        "  ]}}}}}";
@@ -180,20 +179,104 @@ static void test_price_band_capacity_and_duplicates(void)
    assert(c.price_bands[0].above_tokens == 100);
    assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens == 800);
 
-   /* The middle duplicate overwrote in place: 200 now prices 11, and no distinct
-    * band was evicted to accommodate it. */
+   /* Both duplicates overwrote IN PLACE — the middle one (200) and the largest
+    * retained (800), the latter being the case the eviction branch would
+    * otherwise discard — and neither evicted a distinct band to make room. */
+   int seen_200 = 0, seen_800 = 0;
    for (int i = 0; i < c.price_band_count; i++)
    {
       if (c.price_bands[i].above_tokens == 200)
+      {
          assert(c.price_bands[i].in_per_mtok == 11.0);
-   }
-
-   /* INT_MAX and the non-context tier were both rejected. */
-   for (int i = 0; i < c.price_band_count; i++)
-   {
-      assert(c.price_bands[i].above_tokens != 2147483647);
+         seen_200 = 1;
+      }
+      if (c.price_bands[i].above_tokens == 800)
+      {
+         assert(c.price_bands[i].in_per_mtok == 81.0);
+         seen_800 = 1;
+      }
+      /* The non-context tier type was skipped rather than guessed at. */
       assert(c.price_bands[i].above_tokens != 50);
    }
+   assert(seen_200 && seen_800);
+
+   unlink(path);
+   rmdir(dir);
+   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
+   rmdir(dir);
+   rmdir(tmpdir);
+}
+
+/* Two claims the descending-overflow fixture CANNOT prove, because its array is
+ * already full and already truncated before those cases arise:
+ *   - a duplicate arriving at exactly capacity must not spuriously set
+ *     price_bands_truncated;
+ *   - INT_MAX must be rejected by the PARSER, not merely evicted by the
+ *     capacity rule (which would discard it either way).
+ * Both need free capacity or an exactly-full array, so they get their own
+ * fixture rather than a passing-for-the-wrong-reason assertion. */
+static void test_price_band_exact_capacity_and_intmax(void)
+{
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-md-bands2-XXXXXX");
+   assert(mkdtemp(tmpdir) != NULL);
+   char dir[512], path[600];
+   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
+   mkdir(dir, 0755);
+   snprintf(dir, sizeof(dir), "%s/.cache/aimee", tmpdir);
+   mkdir(dir, 0755);
+   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
+
+   /* Exactly MODEL_PRICE_BANDS_MAX (8) distinct thresholds, then a duplicate. */
+   const char *json =
+       "{\"v\":{\"models\":{\"m\":{"
+       "  \"limit\":{\"context\":2000000},"
+       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
+       "    {\"input\":1,\"output\":1,\"tier\":{\"type\":\"context\",\"size\":100}},"
+       "    {\"input\":2,\"output\":2,\"tier\":{\"type\":\"context\",\"size\":200}},"
+       "    {\"input\":3,\"output\":3,\"tier\":{\"type\":\"context\",\"size\":300}},"
+       "    {\"input\":4,\"output\":4,\"tier\":{\"type\":\"context\",\"size\":400}},"
+       "    {\"input\":5,\"output\":5,\"tier\":{\"type\":\"context\",\"size\":500}},"
+       "    {\"input\":6,\"output\":6,\"tier\":{\"type\":\"context\",\"size\":600}},"
+       "    {\"input\":7,\"output\":7,\"tier\":{\"type\":\"context\",\"size\":700}},"
+       "    {\"input\":8,\"output\":8,\"tier\":{\"type\":\"context\",\"size\":800}},"
+       "    {\"input\":88,\"output\":88,\"tier\":{\"type\":\"context\",\"size\":800}}"
+       "  ]}}}}}";
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(json, f);
+   fclose(f);
+   setenv("HOME", tmpdir, 1);
+
+   model_capability_t c;
+   memset(&c, 0, sizeof(c));
+   assert(models_dev_cache_lookup("v", "m", &c) == 1);
+   assert(c.price_band_count == MODEL_PRICE_BANDS_MAX);
+   /* The duplicate consumed no slot, so nothing was dropped: NOT truncated. */
+   assert(c.price_bands_truncated == 0);
+   /* ...and it overwrote the largest retained threshold in place. */
+   assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens == 800);
+   assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].in_per_mtok == 88.0);
+
+   /* INT_MAX with FREE capacity: only parser rejection can keep it out now. */
+   const char *json2 =
+       "{\"v\":{\"models\":{\"m\":{"
+       "  \"limit\":{\"context\":2000000},"
+       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
+       "    {\"input\":9,\"output\":9,"
+       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
+       "    {\"input\":5,\"output\":5,\"tier\":{\"type\":\"context\",\"size\":500}}"
+       "  ]}}}}}";
+   f = fopen(path, "w");
+   assert(f);
+   fputs(json2, f);
+   fclose(f);
+
+   memset(&c, 0, sizeof(c));
+   assert(models_dev_cache_lookup("v", "m", &c) == 1);
+   assert(c.price_band_count == 1); /* only the 500 band survived */
+   assert(c.price_bands[0].above_tokens == 500);
+   assert(c.price_bands_truncated == 0);
 
    unlink(path);
    rmdir(dir);
@@ -232,6 +315,8 @@ int main(void)
    printf("nested_api OK, ");
    test_price_band_capacity_and_duplicates();
    printf("bands OK, ");
+   test_price_band_exact_capacity_and_intmax();
+   printf("bands_cap OK, ");
    test_cache_lookup_miss();
    printf("cache_miss OK, ");
    test_cache_lookup_null_guard();
