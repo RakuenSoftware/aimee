@@ -63,9 +63,13 @@ mirrored in `CMakeLists.txt`, `-Imodules/bus` on the include path, tests registe
 
 ## Slices
 
-Each slice is one PR into `feat/event-bus`, roundtable-reviewed before merge. A slice is not done
-until its tests pass under the normal build **and** the ASAN build; slices 2, 5, 6, 7 additionally
-require TSAN. `scripts/check_bus_blast_radius.sh` (D7) is a required check on **every** slice PR.
+Each slice is one PR into `feat/event-bus`, roundtable-reviewed before merge. Slice branches are
+flat — `feat/event-bus-s1-wire-codec`, not `feat/event-bus/s1-...` — because git cannot hold a branch
+and a directory of the same name.
+
+A slice is not done until its tests pass under the normal build **and** the ASAN build; slices 2, 5,
+6, 7 additionally require TSAN. `scripts/check_bus_blast_radius.sh` (D7) is a required check on
+**every** slice PR, wired into `make lint`.
 
 | # | Slice | Delivers | Proof obligations | Test command |
 |---|---|---|---|---|
@@ -125,9 +129,18 @@ make -C src unit-tests OBJDIR=build/obj-asan \
      EXTRA_L_FLAGS="-fsanitize=address,undefined"
 
 # TSAN — required for slices 2, 5, 6, 7
-make -C src unit-tests OBJDIR=build/obj-tsan \
+make -C src unit-tests OBJDIR=build/obj-tsan TESTPREFIX=build/obj-tsan/tests \
      EXTRA_C_FLAGS="-fsanitize=thread -O1" EXTRA_L_FLAGS="-fsanitize=thread"
+
+# On this host TSAN's own mapping guard trips on ASLR, so run the binary under:
+setarch "$(uname -m)" -R build/obj-tsan/tests/unit-test-bus-ring
 ```
+
+Two things implementation surfaced that are worth stating before the later slices repeat them:
+`atomic_thread_fence` is invisible to TSAN, so any publication ordering must be carried by an atomic
+field's release/acquire rather than a standalone fence if the pairing is to be verifiable; and a
+header written by another process is a claim, so every geometry field must be checked against the
+buffer actually mapped rather than trusted.
 
 ## Acceptance
 
@@ -143,8 +156,16 @@ rather than merely asserted.
 - {id: 6, enforces: "D7, every slice PR", tier: mechanical, check: "scripts/check_bus_blast_radius.sh --no-shipping-binary-links-bus --required-on-every-slice-pr"}
 ```
 
+## Progress
+
+| Slice | State |
+|---|---|
+| 1 — wire codec + vectors | implemented; green under normal + ASAN; in review |
+| 2 — SPSC ring | implemented; green under normal + ASAN + TSAN; in review |
+| 3–12 | blocked on the D1 amendment (`scripts/check_bus_d1_gate.sh`) |
+
 ## Review status
 
 See the revision history in [`EVENT_BUS_DECISIONS.md`](EVENT_BUS_DECISIONS.md) for what each round of
-review found and how it was closed. Revision 3 awaits ratification; slices 1 and 2 may begin, slice 3
-onward is gated on the D1 amendment.
+review found and how it was closed. Slices 1 and 2 are in flight; slice 3 onward is gated on the D1
+amendment, whose status line lives in the wire spec and is read by `scripts/check_bus_d1_gate.sh`.
