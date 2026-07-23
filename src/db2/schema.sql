@@ -5258,6 +5258,12 @@ BEGIN
   VALUES(eid,'completed_opened',p_op,p_request,p_actor,p_fence,ne,nf,rh);
   PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.completed',
     eid,'allow',p_op);
+  -- P7-witness-e2: witness the open transition into the reserved ('!kb','!open')
+  -- shard, in this transaction. rh is the open row's content hash; the replay
+  -- branch above RETURNs early so this runs only on a genuinely new open event.
+  PERFORM public.org_vault_witness_append(
+    2::smallint, eid, '!kb', '!open', p_request, p_actor, '', p_op,
+    public.pg_now_text(), rh, false, NULL);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION
@@ -5328,6 +5334,11 @@ BEGIN
   VALUES(eid,'idle_opened',NULL,p_request,p_actor,NULL,ne,nf,rh);
   PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.idle',
     eid,'allow',p_request);
+  -- P7-witness-e2: witness the idle open into the reserved ('!kb','!open') shard.
+  -- An idle open has no operation_id, so the event id serves as the group handle.
+  PERFORM public.org_vault_witness_append(
+    2::smallint, eid, '!kb', '!open', p_request, p_actor, '', eid,
+    public.pg_now_text(), rh, false, NULL);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION
