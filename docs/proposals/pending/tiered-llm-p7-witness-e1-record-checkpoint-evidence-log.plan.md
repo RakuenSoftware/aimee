@@ -4,7 +4,8 @@
 - **Depends on:** P7-reseal D3b, the kb audit chain
   (`src/db2/kb_audit_worm.c`), and the reseal outbox
   (`kb_vault_rewrap_worm`).
-- **Enables:** E2's emission, continuous verification, and release-gate flip.
+- **Enables:** E2's atomic admission caller, emission, and verification; E3's
+  kill matrix and release-gate flip.
 - **Umbrella:** `tiered-llm-p7-external-worm-witness.plan.md`.
 
 ## Why E1 carries no caller
@@ -48,9 +49,19 @@ The record is the *evidence*, not the audited event's payload. It carries:
 - the non-secret identifying fields of the source event — request id, principal
   or team, and `provider:cred` — carried explicitly, not merely committed to by
   the source hash. A 32-byte hash cannot be inverted, so any field an operator
-  must be able to read during reconstruction has to be exported in the clear;
-- the source entry's own hash and its predecessor hash, so the witness can verify
-  linkage without holding the payload;
+  must be able to read during triage has to be emitted in the clear;
+- the source entry's own hash, plus its source-ledger predecessor hash **only
+  where that ledger actually is a chain**. `kb_audit_event` is hash-chained and
+  supplies one. `kb_vault_rewrap_worm` has deterministic event IDs and replay
+  checks but no predecessor link, and D3b's `kb_vault_open_event` has a row hash
+  but no predecessor. For those, the field is explicitly absent and the
+  discriminator says so — never a zero placeholder, which would look like a
+  verified link, and never the witness shard predecessor, which would conflate
+  two different chains;
+- the **witness** predecessor hash — the previous witness record in this shard.
+  This is the linkage the witness chain owns and it exists for every source
+  ledger, which is what makes a source ledger without its own chain still
+  tamper-evident once witnessed;
 - the emitting seal epoch and fencing token;
 - a monotonic per-shard witness sequence; and
 - the RFC 3339 timestamp of the source entry, not of the export.
@@ -68,37 +79,66 @@ shifting, and the existing SQL side already avoids that. The C and SQL packing
 must agree; a test asserts identical digests for the same logical event computed
 on both sides.
 
-## 2. Signed-head checkpoint format
+## 2. Signed checkpoint over a sparse Merkle tree
 
-Add the checkpoint record to the same module. A checkpoint commits to the set of
-per-shard heads at a defined instant.
+A checkpoint commits to every shard head at a defined instant. The commitment is
+a **sparse Merkle tree (SMT) keyed by the SHA-256 of the packed shard key**, with
+a fixed depth, whose leaves are the packed `(shard key, sequence, head hash)`.
 
-**The commitment is a Merkle root, not a shard-head vector.** The number of
-`(tenant, provider)` shards grows without bound over the system's lifetime, so a
-checkpoint that serializes every shard head would grow without bound with it —
-unbounded read, unbounded sort, unbounded signed output — and a monotonic
-deadline would not make that bounded, it would only make checkpoint generation
-start failing once the fleet got large enough — and the anchor that makes
-exported evidence verifiable would quietly stop being produced.
+The tree shape is named on purpose. "Incrementally maintained, canonically
+ordered" is not a design — a sorted Merkle tree changes topology as shards are
+inserted, so an insert is not bounded and proofs are not stable. An SMT has fixed
+topology determined by the key hash, so advancing one shard head updates exactly
+one root-to-leaf path: **O(depth) node writes, independent of how many shards
+exist.** Empty subtrees have precomputed constant hashes and are never
+materialized.
 
-The checkpoint therefore carries its own domain label, the checkpoint sequence,
-the predecessor checkpoint digest, the shard count, and a single Merkle root over
-the canonically ordered `(shard key, sequence, head hash)` leaves. The tree is
-maintained incrementally as shards advance rather than rebuilt per checkpoint. A
-per-shard inclusion proof is exportable separately and independently verifiable
-against the signed root, so a consumer interested in one tenant retains a small
-proof rather than the whole fleet's heads.
+**Durable schema.** The tree is database state, not process memory — process
+memory would violate the shared-state invariant and evaporate on autoscale
+teardown:
 
-The checkpoint is signed under an existing vault-held key through the current
-custody seam; E1 defines the format, the canonical serialization, the leaf
-ordering, the root computation, the inclusion-proof format, the digest, and the
-verification entry points. E1 does **not** wire checkpoint generation to a timer
-or to any production scheduler — that is **E2**, which owns the "every N entries
-or T seconds, whichever first" cadence together with emission.
+- `kb_vault_witness_smt_node(level, idx, hash)`, primary key `(level, idx)`,
+  holding only materialized (non-empty) internal nodes. Updated by upsert along
+  the changed path inside the same transaction as the shard advance.
+- `kb_vault_witness_checkpoint(seq, root, predecessor_digest, shard_count,
+  signer_key_id, sig_alg, signature, created_at)`, append-only under the same
+  trigger discipline as the evidence log, retaining every checkpoint. Retention
+  matters: a consumer holding an old checkpoint must still be able to obtain the
+  ones between it and the current head.
 
-Checkpoint verification is a pure function over bytes: given a checkpoint, its
-predecessor digest, and a public verification key, decide valid or invalid with a
-typed reason. It never consults the database, so a compromised database cannot
+**Signer identity.** The checkpoint carries an explicit `signer_key_id`,
+signature algorithm, and version tag. Rotation retains historical verification
+keys so previously emitted checkpoints stay verifiable; a checkpoint whose key id
+is unknown to the verifier is a typed failure, not a soft pass.
+
+Consumers obtain verification keys **out of band** — an operator-provisioned
+trust anchor, never the same surface the checkpoints arrive on. A signature
+checked against a key fetched from the emitting host proves nothing against a
+host attacker, who substitutes both. Signatures give transport integrity and
+rotation hygiene; comparison against retained copies is what defends against host
+compromise, and E1 must not imply otherwise.
+
+**Predecessor linkage is advisory, not a verification precondition.** Each
+checkpoint names its predecessor digest so a consumer holding a contiguous run
+can verify continuity. A consumer holding a *gapped* set must still be able to
+verify each checkpoint it holds on its own — signature plus root — because
+emission gaps are normal, not evidence of tampering. Verification therefore takes
+a checkpoint and an optional expected predecessor: absent it, the verdict is
+"individually valid, continuity unproven," which is a distinct typed result from
+"continuity broken."
+
+**Inclusion proofs.** A per-shard inclusion proof is the O(depth) sibling path
+authenticating one shard's leaf against a signed root. E1 defines the proof
+format, generation, and verification. Proofs are emitted alongside checkpoints on
+the log path (§3) — a signed root a consumer cannot connect to any shard is not
+independently verifiable, which is the whole point.
+
+E1 defines the format, canonical serialization, leaf encoding, root computation,
+proof format, digest, and verification entry points. E1 does **not** wire
+checkpoint generation to a timer or any production scheduler — that is E2.
+
+Checkpoint and proof verification are pure functions over bytes plus a trust
+anchor. They never consult the database, so a compromised database cannot
 influence the verdict.
 
 ## 3. Export contract
@@ -120,48 +160,66 @@ architecture has already solved, and every candidate mechanism would overstate
 what a scrape or a transport ack actually proves.
 
 Add `src/modules/vault/vault_witness_export.{c,h}` defining the rendering only —
-not a network client, not a state machine. Two exported surfaces, deliberately on
-different transports:
+not a network client, not a state machine.
 
-- **Signed checkpoint export, over metrics.** The canonical checkpoint bytes,
-  signature, Merkle root, and sequence, rendered so a consumer can verify offline
-  with no access to aimee's database. This is small, bounded, and constant-shape,
-  which is what a Prometheus sample can carry honestly.
-- **Per-entry evidence export, over the log/OTLP path.** The witness records
-  themselves, in shard order, each carrying its own hash, predecessor hash, and
-  the non-secret identifying fields needed for reconstruction.
+**All evidence bytes ride the log/OTLP path.** Three emitted kinds, one
+transport:
 
-The transports are split on purpose. Prometheus exposition is a sampled snapshot,
-not an event stream: evidence appearing between scrapes can be missed, repeated
-samples may be deduplicated, and encoding record bytes into labels is unbounded
-cardinality. Checkpoints tolerate sampling because each one commits to everything
-before it. Per-entry records do not, so they ride the log path, which is
-append-oriented and lossless in the way this needs.
+- **Witness records**, in shard order, each carrying its hashes and the
+  non-secret identifying fields.
+- **Signed checkpoints**, complete with root, sequence, predecessor digest, and
+  signer key id.
+- **Inclusion proofs**, so a consumer can authenticate a specific shard head
+  against a signed root it holds.
+
+**Metrics carry numbers only** — current checkpoint sequence, evidence count,
+emission backlog depth, verification-failure counters. No bytes, no roots, no
+signatures. An earlier draft put checkpoints on the metrics surface as "small and
+constant-shape"; that fails against the Prometheus data model, where changing
+roots and signatures as labels mint a time series per checkpoint and numeric
+samples lose precision on 64-bit values. Exposition is also a sampled snapshot,
+so checkpoints between scrapes would vanish silently.
+
+**What the log path does and does not give us.** It is append-oriented and
+ordered, which is what evidence needs, and it is the same seam P9's forwarder
+work extends. It is *not* a guaranteed-delivery durable queue: OTLP and
+application logging can drop under queue pressure, collector outage, process
+crash, or retry exhaustion. E1 therefore claims only that evidence is *emitted*,
+and the emission path reports what it can actually observe:
+
+- local emission backlog depth, and
+- failed or timed-out sends.
+
+It never claims a collector retained anything, and it cannot report "a collector
+is down" — with no consumer registry, aimee has no way to know whether an absent
+scrape means an outage or simply no collector configured. Alerting on measurable
+local state is honest; alerting on inferred downstream health is not.
 
 The rendering is deterministic: the same evidence renders to identical bytes on
 any instance, so copies retained by different consumers can be compared directly.
 Rendering never consults mutable state outside the evidence itself.
 
 Consumers are not enumerated, ranked, or tracked. Any authorized collector may
-take the exports; more copies in more places is strictly better and requires no
-bookkeeping on aimee. Every export call takes a caller-owned monotonic deadline.
+take the emissions; more copies in more places is strictly better and requires no
+bookkeeping on aimee. Every emission call takes a caller-owned monotonic
+deadline.
 
 ## 4. Reservation identity and evidence grouping
 
-Witness records are grouped so that reconstruction can recover *operations*, not
-just a flat sequence of hashes. This is the surviving half of what an earlier
-draft used for budget accounting; with no budget, grouping is what it is actually
-for.
+Witness records are grouped so incident *triage* can see operations, not just a
+flat sequence of hashes. This is the surviving half of what an earlier draft used
+for budget accounting. Note the word: full reconstruction of what was done
+belongs to the event bus, per the umbrella's invariant. Grouping makes the
+witness side navigable; it does not rebuild history.
 
 - Every witness record produced on behalf of an org key use carries the
   admission's dispatch key — `(tenant, authenticated_origin, request_id)` — as
   its **group id**. One admission may produce several records across the three
-  source ledgers; they share one group id and are reconstructable as one
-  operation.
+  source ledgers; they share one group id and are recognizable as one operation.
 - Operator-path evidence (rewrap and open events) never passes through admission
   and has no dispatch key. It carries its own group class keyed by
-  `operation_id`, so it is grouped and reconstructable on the same terms rather
-  than being silently ungrouped.
+  `operation_id`, so it is grouped on the same terms rather than being silently
+  ungrouped.
 - The group id is part of the hashed record, so an attacker cannot regroup
   evidence without breaking linkage.
 
@@ -172,37 +230,47 @@ attached — that is the existing P7 admission rule, not something this slice ad
 or relaxes. That gate is what guarantees no org key is used unaudited, and it
 operates entirely on aimee-kb's own committed state.
 
-Export lag therefore does **not** gate egress. A collector that is down, slow, or
+**The witness append must be atomic with that source append.** The witness row,
+its shard-head advance, and the SMT path update commit in the *same transaction*
+as the source WORM event. If the witness were derived asynchronously, a crash
+between the source commit and the witness append would leave an admitted key use
+with no witness row — and the claim that evidence exists before use would be
+false for exactly the events an attacker would most want missing. E1 provides the
+SECURITY DEFINER function that does all of it in one transaction; E2 calls it
+from the admission path. This is an E2 release prerequisite, not something E3's
+kill matrix is expected to discover.
+
+Emission lag does **not** gate egress. A collector that is down, slow, or
 misconfigured reduces redundancy; it does not mean a key use went unaudited, and
-halting all org egress because a metrics scraper died would trade a real
-availability outage for no assurance gain. Export lag is an alerting signal with
-a typed integrity alert, not an admission gate.
+halting all org egress because a log collector died would trade a real
+availability outage for no assurance gain. Backlog depth and failed sends are
+alerting signals, not admission gates.
 
 The honest claim, and the only one any slice may make: evidence is durably
-committed on aimee-kb before key use, and is continuously copied outward so that
-a later rewrite of aimee's own state is contradicted by copies the attacker
-cannot reach.
+committed on aimee-kb before key use, and is continuously emitted outward so that
+a later rewrite of aimee's own state is contradicted by whatever copies were
+retained before the compromise. Evidence never emitted, or emitted but not
+retained, has no external anchor.
 
-## 6. Shared outbox and shard counters
+## 6. Evidence log, shard counters, and Merkle state
 
 Folded in from what was originally E2. These are schema and SQL only; no C caller
 in this slice reaches them from a production path.
 
-**Outbox.** `kb_vault_witness_outbox`, keyed by `(shard_key, shard_seq)`, holding
-the encoded witness record, its hash and predecessor hash, the source
-discriminator and source identity, the group id from §4, and the emitting seal
-epoch and fencing token. Append-only by the same trigger discipline the existing
+**Evidence log.** `kb_vault_witness_log`, keyed by `(shard_key, shard_seq)`,
+holding the encoded witness record, its own hash, its witness predecessor hash,
+the source-ledger predecessor where one exists, the source discriminator and
+source identity, the group id from §4, and the emitting seal epoch and fencing
+token. Append-only by the same trigger discipline the existing
 WORM tables use (`kb_worm_block` / `org_vault_rewrap_worm_block` in
 `src/db2/schema.sql`), with UPDATE, DELETE, and TRUNCATE all rejected. Direct
 table access is revoked from PUBLIC and from `aimee_kb_runtime`; the only paths
 in are narrowly scoped SECURITY DEFINER functions with a pinned `search_path`,
 matching the pattern D3a and D3b established.
 
-"Outbox" is a name inherited from the drain-to-sink design and is now a misnomer:
-nothing drains out of it and nothing empties it. It is the retained evidence
-store, and E1 names it `kb_vault_witness_log` for that reason. Rows are never
-deleted by any code path in this umbrella; retention is an operator policy
-decision outside it.
+It is deliberately not called an outbox. Nothing drains out of it and nothing
+empties it; it is the retained evidence store. Rows are never deleted by any code
+path in this umbrella; retention is an operator policy decision outside it.
 
 **Shard counters.** `kb_vault_witness_shard`, one row per `(tenant, provider)`,
 carrying the monotonic per-shard sequence and the current head hash. Rows are
@@ -210,6 +278,12 @@ created lazily by DML upsert — never by runtime DDL, and never by a PostgreSQL
 `SEQUENCE` object — so the no-DDL invariant holds. The sequence is assigned by
 `UPDATE … SET seq = seq + 1 … RETURNING` inside the caller's transaction, giving
 each shard its own total order without a fleet-wide hotspot on a single head.
+
+**Merkle and checkpoint state.** `kb_vault_witness_smt_node` and
+`kb_vault_witness_checkpoint` per §2, under the same revoke/definer/append-only
+discipline. Node upserts and the checkpoint insert are part of the same
+transaction as the evidence append and shard advance, so the tree can never
+commit a root that disagrees with the log.
 
 **No budget table.** There is no unwitnessed counter, no ceiling, and no
 reservation. With evidence durably committed on aimee-kb before key use (§5),
@@ -224,9 +298,11 @@ reserved slot — a budget here would only ever deadlock.
 - No scheduler, no background thread, no emission.
 - No checkpoint cadence, no signing invocation from production paths.
 - No delivery receipts, watermarks, consumer registry, or budget.
-- No claim, anywhere in code comments or docs, that exported evidence has been
-  durably retained by anyone. The umbrella's wording rule applies to every symbol
-  name and log string added here.
+- No claim, anywhere in code comments or docs, that emitted evidence has been
+  durably retained by anyone, or that tampering "cannot go unnoticed" without the
+  conditional-coverage qualifier. The umbrella's wording rules apply to every
+  symbol name and log string added here.
+- No offline verifier tool; that is E2, which also owns emission.
 
 ## 8. Validation gates
 
@@ -242,11 +318,21 @@ reserved slot — a budget here would only ever deadlock.
   would collide must produce different digests.
 - C-versus-SQL digest agreement for the same logical event.
 - Canonical shard ordering is stable and independent of insertion order.
-- Checkpoint verification accepts a valid checkpoint and rejects a tampered
-  leaf, a reordered leaf set, a wrong predecessor digest, a forged inclusion
-  proof, and a wrong signature, each with a distinct typed reason.
-- Merkle root stability: incremental maintenance and a full rebuild agree for the
-  same leaf set, and the root is independent of shard insertion order.
+- Checkpoint verification accepts a valid checkpoint and rejects a tampered leaf,
+  a forged inclusion proof, an unknown signer key id, and a wrong signature, each
+  with a distinct typed reason.
+- Gapped checkpoints verify individually and return "continuity unproven" — a
+  distinct typed result from "continuity broken" — so normal emission gaps do not
+  read as tampering.
+- SMT correctness: incremental path updates and a full rebuild agree for the same
+  leaf set; the root is independent of insertion order; empty-subtree constants
+  are correct at every level; advancing one shard writes O(depth) nodes and reads
+  no other shard's leaf.
+- Inclusion proofs verify against the signed root for present shards and fail
+  typed for absent ones; a proof from one checkpoint does not verify against
+  another's root.
+- Signer rotation: a checkpoint signed under a retired key still verifies when
+  the historical key is in the anchor set, and fails typed when it is not.
 - Deterministic rendering: the same evidence renders byte-identically twice, and
   across two independently constructed module instances.
 - Group id binding: records from one admission share a group id, operator-path
@@ -272,7 +358,12 @@ reserved slot — a budget here would only ever deadlock.
 - `aimee_kb_runtime` and every unrelated role are denied direct DML on both new
   tables and denied every new function they are not explicitly granted.
 - Shard counter rows are created by upsert under concurrency without duplicate
-  sequences and without DDL.
+  sequences and without DDL; SMT node upserts under concurrent advances on
+  different shards do not deadlock and converge to the same root as a serial
+  application.
+- Atomicity: the evidence row, shard-head advance, and SMT path update commit
+  together with the source event or not at all, proven by injected failure at
+  each statement.
 - Concurrent appends to one shard produce a gap-free sequence with correct
   predecessor linkage under SERIALIZABLE retry.
 - Connection loss at BEGIN, at the append, and at COMMIT never leaves a shard
@@ -288,6 +379,8 @@ reserved slot — a budget here would only ever deadlock.
 
 ## 9. Deferred to later slices
 
-- Checkpoint cadence, metrics/log emission, continuous chain verification, the
-  boot fail-closed check, and the release-gate flip (E2).
-- The full restart and signal-level kill matrix (E3).
+- Checkpoint cadence, log/OTLP emission, numeric metrics, continuous chain
+  verification, the offline verifier tool, the atomic admission-path caller, and
+  the boot fail-closed check (E2).
+- The full restart and signal-level kill matrix, and only then the release-gate
+  flip (E3).
