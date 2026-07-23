@@ -56,6 +56,29 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
 int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_len,
                                            int64_t *out_unknown, char *sample, size_t sample_cap);
 
+/* Continuous verification over the retained checkpoint run. Loads the most recent
+ * `limit` checkpoints, reconstructs each from its stored columns, verifies every
+ * signature against the current witness key, and checks predecessor continuity
+ * across the run.
+ *
+ * This complements — it does not duplicate — the per-tick shard cross-check the
+ * producer already performs: that one proves each shard head still matches its
+ * evidence log, this one proves the signed roots over those heads are themselves
+ * authentic and correctly linked. A store can pass one and fail the other.
+ *
+ * Returns 0 if the check ran (results in the out params), -1 if it could not run.
+ * A caller must treat -1 as "unverified", never as "clean". */
+typedef struct
+{
+   int64_t checked;      /* checkpoints reconstructed and verified */
+   int64_t bad_signature;/* signature did not verify under the current key */
+   int64_t unknown_key;  /* signer_key_id is not the current key */
+   int continuity_broken;/* a mid-run checkpoint denies having a predecessor */
+   int continuity_unproven; /* a predecessor digest does not link (gap or fork) */
+} db2_witness_verify_report_t;
+
+int db2_witness_checkpoint_verify_run(int limit, db2_witness_verify_report_t *out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,5 +1,6 @@
 #include "db2_witness_checkpoint.h"
 
+#include <openssl/crypto.h>
 #include <openssl/sha.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 #include "modules/vault/vault_witness_merkle.h"
 #include "modules/vault/vault_witness_record.h" /* vault_witness_shard_key_hash */
 #include "modules/vault/vault_witness_signer.h"
+#include "modules/vault/vault_witness_verify.h"
 
 #define CP_ERR 256
 
@@ -440,5 +442,132 @@ int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_
       rc = 0;
    }
    aimee_pg_finalize(st);
+   return rc;
+}
+
+int db2_witness_checkpoint_verify_run(int limit, db2_witness_verify_report_t *out)
+{
+   if (!out || limit <= 0)
+      return -1;
+   memset(out, 0, sizeof *out);
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   uint8_t pub[VAULT_WITNESS_ED25519_PUB_LEN], key_id[VAULT_WITNESS_SIGNER_KEY_ID_LEN];
+   if (vault_witness_signer_identity(pub, key_id) != 0)
+      return -1;
+   vault_witness_anchor_t anchor;
+   memset(&anchor, 0, sizeof anchor);
+   memcpy(anchor.key_id, key_id, sizeof key_id);
+   memcpy(anchor.ed25519_pub, pub, sizeof pub);
+
+   char err[CP_ERR];
+   /* Ascending within the newest `limit`, so continuity is checked in chain order.
+    * The oldest checkpoint in the window legitimately has a predecessor outside it;
+    * continuity therefore starts from the second row in the window. */
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT seq,root,has_predecessor,predecessor_digest,shard_count,leaf_snapshot_digest,"
+       "signer_key_id,sig_alg,sig_version,signature,created_at FROM ("
+       "SELECT * FROM kb_vault_witness_checkpoint ORDER BY seq DESC LIMIT ?1) w ORDER BY seq",
+       err, sizeof err);
+   if (!st)
+      return -1;
+   if (aimee_pg_bind_int64(st, "?1", limit) != 0)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+
+   vault_witness_checkpoint_t *cps = NULL;
+   size_t n = 0, cap = 0;
+   int rc = -1;
+   aimee_pg_step_t sr;
+   while ((sr = aimee_pg_step(st, err, sizeof err)) == AIMEE_PG_ROW)
+   {
+      if (n == cap)
+      {
+         size_t ncap = cap ? cap * 2 : 64;
+         vault_witness_checkpoint_t *nc = realloc(cps, ncap * sizeof *nc);
+         if (!nc)
+            goto done;
+         cps = nc;
+         cap = ncap;
+      }
+      vault_witness_checkpoint_t *cp = &cps[n];
+      memset(cp, 0, sizeof *cp);
+      cp->version = 1;
+      cp->seq = (uint64_t)aimee_pg_column_int64(st, 0);
+      /* Every bytea copied out before the next is read (single blob cache). */
+      const void *b = aimee_pg_column_blob(st, 1);
+      if (!b || aimee_pg_column_bytes(st, 1) != 32)
+         goto done;
+      memcpy(cp->root, b, 32);
+      const char *hp = aimee_pg_column_text(st, 2);
+      cp->has_predecessor = (hp && hp[0] == 't');
+      b = aimee_pg_column_blob(st, 3);
+      if (!b || aimee_pg_column_bytes(st, 3) != 32)
+         goto done;
+      memcpy(cp->predecessor_digest, b, 32);
+      cp->shard_count = (uint64_t)aimee_pg_column_int64(st, 4);
+      b = aimee_pg_column_blob(st, 5);
+      if (!b || aimee_pg_column_bytes(st, 5) != 32)
+         goto done;
+      memcpy(cp->leaf_snapshot_digest, b, 32);
+      b = aimee_pg_column_blob(st, 6);
+      if (!b || aimee_pg_column_bytes(st, 6) != VAULT_WITNESS_SIGNER_KEY_ID_LEN)
+         goto done;
+      memcpy(cp->signer_key_id, b, VAULT_WITNESS_SIGNER_KEY_ID_LEN);
+      cp->sig_alg = (uint16_t)aimee_pg_column_int64(st, 7);
+      cp->sig_version = (uint16_t)aimee_pg_column_int64(st, 8);
+      b = aimee_pg_column_blob(st, 9);
+      if (!b || aimee_pg_column_bytes(st, 9) != 64)
+         goto done;
+      memcpy(cp->signature, b, 64);
+      snprintf(cp->created_at, sizeof cp->created_at, "%s", aimee_pg_column_text(st, 10));
+      n++;
+   }
+   if (sr == AIMEE_PG_ERR)
+      goto done;
+
+   for (size_t i = 0; i < n; i++)
+   {
+      switch (vault_witness_checkpoint_verify(&cps[i], &anchor, 1))
+      {
+      case VAULT_WITNESS_CP_OK:
+         break;
+      case VAULT_WITNESS_CP_UNKNOWN_KEY:
+      case VAULT_WITNESS_CP_REVOKED_KEY:
+         out->unknown_key++;
+         break;
+      default:
+         out->bad_signature++;
+         break;
+      }
+      out->checked++;
+   }
+   if (n > 1)
+   {
+      size_t gap = 0;
+      switch (vault_witness_verify_checkpoint_run(cps, n, &gap))
+      {
+      case VAULT_WITNESS_CONTINUITY_OK:
+         break;
+      case VAULT_WITNESS_CONTINUITY_UNPROVEN:
+         out->continuity_unproven = 1;
+         break;
+      default:
+         out->continuity_broken = 1;
+         break;
+      }
+   }
+   rc = 0;
+
+done:
+   aimee_pg_finalize(st);
+   free(cps);
+   OPENSSL_cleanse(pub, sizeof pub);
+   OPENSSL_cleanse(key_id, sizeof key_id);
    return rc;
 }

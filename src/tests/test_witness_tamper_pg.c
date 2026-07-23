@@ -311,6 +311,74 @@ int main(void)
       printf("witness_tamper_pg: scenario 3 OK (unverifiable checkpoint detected)\n");
    }
 
+   /* -----------------------------------------------------------------------
+    * Scenario 4: continuous verification of the retained checkpoint run. The
+    * per-tick shard cross-check cannot see a forged SIGNATURE over an otherwise
+    * consistent shard, so this is a distinct detection path and is tested as one.
+    * The foreign signer_key_id planted above is restored first so this measures the
+    * signature check, not the leftover from scenario 3. */
+   {
+      db2_witness_verify_report_t vr;
+      uint8_t cur_pub[32], cur_id[16];
+      assert(vault_witness_signer_identity(cur_pub, cur_id) == 0);
+
+      /* Unknown key is detected. */
+      if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
+      {
+         fprintf(stderr, "SCENARIO 4 FAILED: verify run could not execute\n");
+         return 1;
+      }
+      if (vr.unknown_key < 1)
+      {
+         fprintf(stderr, "SCENARIO 4 FAILED: foreign signer key not reported by verify run "
+                         "(checked=%lld unknown=%lld)\n",
+                 (long long)vr.checked, (long long)vr.unknown_key);
+         return 1;
+      }
+
+      /* Now isolate the SIGNATURE check from the key-identity check. Restoring the
+       * real signer_key_id alone is not enough to keep this meaningful: that field
+       * is part of the signed body, so putting it back reproduces the exact bytes
+       * that were signed and the signature legitimately verifies again. To test the
+       * signature path the signature itself must be corrupted. */
+      {
+         char sql[256];
+         char hex[33];
+         for (int i = 0; i < 16; i++)
+            snprintf(hex + i * 2, 3, "%02x", cur_id[i]);
+         snprintf(sql, sizeof sql,
+                  "UPDATE kb_vault_witness_checkpoint SET signer_key_id = decode('%s','hex')", hex);
+         assert(exec_sql(conn, sql) == 0);
+         /* Sanity: with the body restored the run must be clean again, otherwise the
+          * bad-signature result below would not be attributable to the corruption. */
+         if (db2_witness_checkpoint_verify_run(256, &vr) != 0 || vr.bad_signature != 0 ||
+             vr.unknown_key != 0)
+         {
+            fprintf(stderr, "SCENARIO 4 FAILED: restoring the signed body did not restore a clean "
+                            "verdict (bad=%lld unknown=%lld)\n",
+                    (long long)vr.bad_signature, (long long)vr.unknown_key);
+            return 1;
+         }
+         assert(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
+                               "SET signature = decode(repeat('7f',64),'hex')") == 0);
+      }
+      if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
+      {
+         fprintf(stderr, "SCENARIO 4 FAILED: verify run could not execute after restore\n");
+         return 1;
+      }
+      if (vr.bad_signature < 1)
+      {
+         fprintf(stderr, "SCENARIO 4 FAILED: checkpoint whose signer_key_id was swapped still "
+                         "verified (checked=%lld bad=%lld)\n",
+                 (long long)vr.checked, (long long)vr.bad_signature);
+         return 1;
+      }
+      printf("witness_tamper_pg: scenario 4 OK (continuous verification catches unknown key and "
+             "bad signature: checked=%lld bad=%lld)\n",
+             (long long)vr.checked, (long long)vr.bad_signature);
+   }
+
    db2_shutdown();
    printf("witness_tamper_pg: PASSED\n");
    return 0;

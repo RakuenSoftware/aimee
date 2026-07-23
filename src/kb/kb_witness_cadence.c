@@ -109,6 +109,12 @@ static int log_sink(void *ctx, vault_witness_export_kind_t kind, const uint8_t *
  * the backlog gauge reports what is still outstanding. */
 #define KB_WITNESS_EMIT_MAX_PER_STREAM 8192
 
+/* Continuous verification cadence and window. Re-verifying a bounded window keeps
+ * the cost flat as the chain grows; older checkpoints are already covered by the
+ * offline verifier over retained copies, which is the authority for history. */
+#define KB_WITNESS_VERIFY_INTERVAL_S 300
+#define KB_WITNESS_VERIFY_WINDOW 256
+
 static void emit_once(void)
 {
    db2_witness_emit_stats_t s;
@@ -185,6 +191,56 @@ void kb_witness_cadence_tick(time_t now)
    default:
       LOG_WARN("kb.witness", "checkpoint attempt failed (transient/config); will retry");
       break;
+   }
+
+   /* Continuous verification of the retained checkpoint run. The producer already
+    * re-verifies every shard head against its evidence log on each tick (the leaf
+    * scan raises head_log_mismatch), so chain verification is continuous by
+    * construction; what that does NOT cover is whether the signed roots over those
+    * heads are themselves authentic and correctly linked. This closes that half.
+    *
+    * It runs on a slower cadence than checkpointing because it re-verifies a window
+    * of history rather than one new root, and a compromise it would catch does not
+    * become undetectable in the interim — the evidence is durable and the offline
+    * verifier sees the same thing. */
+   {
+      static time_t next_verify = 0;
+      if (next_verify == 0)
+         next_verify = now + KB_WITNESS_VERIFY_INTERVAL_S;
+      if (now >= next_verify)
+      {
+         next_verify = now + KB_WITNESS_VERIFY_INTERVAL_S;
+         db2_witness_verify_report_t vr;
+         if (db2_witness_checkpoint_verify_run(KB_WITNESS_VERIFY_WINDOW, &vr) != 0)
+         {
+            /* Could not verify is not verified. It is not proof of tampering
+             * either, so this is a warning rather than an integrity alert — but it
+             * must never be silent. */
+            LOG_WARN("kb.witness", "checkpoint verification could not run; evidence is unverified "
+                                   "until it succeeds");
+         }
+         else if (vr.bad_signature > 0 || vr.unknown_key > 0 || vr.continuity_broken)
+         {
+            LOG_ERROR("kb.witness",
+                      "INTEGRITY: retained checkpoints failed verification "
+                      "(checked=%lld bad_signature=%lld unknown_key=%lld continuity_broken=%d)",
+                      (long long)vr.checked, (long long)vr.bad_signature,
+                      (long long)vr.unknown_key, vr.continuity_broken);
+         }
+         else if (vr.continuity_unproven)
+         {
+            /* A gap and a fork are indistinguishable from the stored run alone, so
+             * this is a work item for an operator to resolve by comparing retained
+             * copies — deliberately not reported as clean, and not as tampering. */
+            LOG_WARN("kb.witness",
+                     "checkpoint continuity UNPROVEN over the retained window (checked=%lld); "
+                     "compare cross-gap leaf sets against retained copies before concluding clean",
+                     (long long)vr.checked);
+         }
+         else
+            LOG_DEBUG("kb.witness", "checkpoint run verified: %lld checkpoints",
+                      (long long)vr.checked);
+      }
    }
 
    /* Emission runs after the checkpoint attempt so a checkpoint signed this tick
