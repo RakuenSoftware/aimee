@@ -1112,15 +1112,19 @@ static void test_panel_authorization_resolves_random_first(void)
    acfg.agents[0].enabled = 1;
    snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "primary");
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   snprintf(cfg.provider, sizeof(cfg.provider), "primary");
-   cfg.ensemble_reference_count = 1;
-   snprintf(cfg.ensemble_reference_models[0], 128, "$random");
+   const char *random_seats[] = {"$random", ""};
+   for (size_t i = 0; i < sizeof(random_seats) / sizeof(random_seats[0]); i++)
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.provider, sizeof(cfg.provider), "primary");
+      cfg.ensemble_reference_count = 1;
+      snprintf(cfg.ensemble_reference_models[0], 128, "%s", random_seats[i]);
 
-   ensemble_filter_panel_authorization(&cfg, &acfg);
-   assert(cfg.ensemble_reference_count == 0);
-   assert(cfg.ensemble_aggregator[0] == '\0');
+      ensemble_filter_panel_authorization(&cfg, &acfg);
+      assert(cfg.ensemble_reference_count == 0);
+      assert(cfg.ensemble_aggregator[0] == '\0');
+   }
    printf("  test_panel_authorization_resolves_random_first: ok\n");
 }
 

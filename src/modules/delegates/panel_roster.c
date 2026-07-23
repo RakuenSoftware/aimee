@@ -15,7 +15,7 @@
 
 static int seat_is_random(const char *seat)
 {
-   return seat && strcmp(seat, PANEL_RANDOM_SEAT) == 0;
+   return !seat || !seat[0] || strcmp(seat, PANEL_RANDOM_SEAT) == 0;
 }
 
 int aimee_panelist_eligible(const config_t *cfg, const agent_t *agent)

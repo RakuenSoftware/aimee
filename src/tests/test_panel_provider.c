@@ -3,12 +3,14 @@
 #include <aimee/delegates/panel_provider.h>
 
 #include <assert.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
-static int release_count;
-static int run_mode;
+static _Atomic int release_count;
+static _Atomic int run_mode;
 
 static int mock_aggregate(agent_config_t *agents, const config_t *cfg, const char *prompt,
                           aimee_panel_aggregate_result_t *out)
@@ -26,15 +28,16 @@ static int mock_run(agent_config_t *agents, const config_t *cfg, const char *tas
    (void)agents;
    (void)cfg;
    (void)options;
-   if (run_mode == 2)
+   int mode = atomic_load_explicit(&run_mode, memory_order_relaxed);
+   if (mode == 2)
       return 0; /* inconsistent provider: success without a result */
    out->artifact = strdup(task);
-   return run_mode == 1 ? -1 : 0; /* mode 1 allocates and then fails */
+   return mode == 1 ? -1 : 0; /* mode 1 allocates and then fails */
 }
 
 static void mock_release(aimee_panel_result_t *result)
 {
-   release_count++;
+   atomic_fetch_add_explicit(&release_count, 1, memory_order_relaxed);
    free(result->artifact);
    result->artifact = NULL;
 }
@@ -50,6 +53,26 @@ static const aimee_panel_provider_t other_provider = {
     .run = mock_run,
     .release = mock_release,
 };
+
+typedef struct
+{
+   agent_config_t *agents;
+   config_t *cfg;
+   int iterations;
+} worker_ctx_t;
+
+static void *run_and_release_worker(void *arg)
+{
+   worker_ctx_t *ctx = arg;
+   for (int i = 0; i < ctx->iterations; i++)
+   {
+      aimee_panel_result_t result;
+      assert(aimee_panel_run(ctx->agents, ctx->cfg, "concurrent", NULL, &result) ==
+             AIMEE_PANEL_PROVIDER_OK);
+      aimee_panel_result_release(&result);
+   }
+   return NULL;
+}
 
 int main(void)
 {
@@ -77,24 +100,42 @@ int main(void)
    assert(aggregate.success == 1);
    assert(strcmp(aggregate.response, "answer") == 0);
 
-   release_count = 0;
-   run_mode = 0;
+   enum
+   {
+      WORKER_COUNT = 8,
+      ITERATIONS_PER_WORKER = 100
+   };
+   pthread_t workers[WORKER_COUNT];
+   worker_ctx_t worker_ctx = {.agents = &agents, .cfg = &cfg, .iterations = ITERATIONS_PER_WORKER};
+   atomic_store_explicit(&release_count, 0, memory_order_relaxed);
+   atomic_store_explicit(&run_mode, 0, memory_order_relaxed);
+   for (int i = 0; i < WORKER_COUNT; i++)
+      assert(pthread_create(&workers[i], NULL, run_and_release_worker, &worker_ctx) == 0);
+   for (int i = 0; i < WORKER_COUNT; i++)
+      assert(pthread_join(workers[i], NULL) == 0);
+   assert(atomic_load_explicit(&release_count, memory_order_relaxed) ==
+          WORKER_COUNT * ITERATIONS_PER_WORKER);
+   assert(aimee_panel_provider_unregister(&provider) == AIMEE_PANEL_PROVIDER_OK);
+   assert(aimee_panel_provider_register(&provider) == AIMEE_PANEL_PROVIDER_OK);
+
+   atomic_store_explicit(&release_count, 0, memory_order_relaxed);
+   atomic_store_explicit(&run_mode, 0, memory_order_relaxed);
    assert(aimee_panel_run(&agents, &cfg, "artifact", NULL, &result) == AIMEE_PANEL_PROVIDER_OK);
    assert(strcmp(result.artifact, "artifact") == 0);
    assert(aimee_panel_provider_unregister(&provider) == AIMEE_PANEL_PROVIDER_BUSY);
    aimee_panel_result_release(&result);
    aimee_panel_result_release(&result);
-   assert(release_count == 1);
+   assert(atomic_load_explicit(&release_count, memory_order_relaxed) == 1);
 
-   run_mode = 1;
+   atomic_store_explicit(&run_mode, 1, memory_order_relaxed);
    assert(aimee_panel_run(&agents, &cfg, "failed", NULL, &result) == AIMEE_PANEL_PROVIDER_ERROR);
    assert(result.artifact == NULL);
-   assert(release_count == 2);
+   assert(atomic_load_explicit(&release_count, memory_order_relaxed) == 2);
 
-   run_mode = 2;
+   atomic_store_explicit(&run_mode, 2, memory_order_relaxed);
    assert(aimee_panel_run(&agents, &cfg, "empty", NULL, &result) == AIMEE_PANEL_PROVIDER_ERROR);
    assert(result.artifact == NULL);
-   assert(release_count == 2);
+   assert(atomic_load_explicit(&release_count, memory_order_relaxed) == 2);
 
    assert(aimee_panel_provider_unregister(&other_provider) == AIMEE_PANEL_PROVIDER_INVALID);
    assert(aimee_panel_provider_unregister(&provider) == AIMEE_PANEL_PROVIDER_OK);

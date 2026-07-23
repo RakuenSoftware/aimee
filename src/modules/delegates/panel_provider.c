@@ -1,10 +1,11 @@
 /* panel_provider.c -- required-core facade for an optional panel engine. */
 #include <aimee/delegates/panel_provider.h>
 
+#include <stdatomic.h>
 #include <string.h>
 
 static const aimee_panel_provider_t *active_provider;
-static unsigned int outstanding_results;
+static _Atomic unsigned int outstanding_results;
 
 static int provider_valid(const aimee_panel_provider_t *provider)
 {
@@ -25,7 +26,7 @@ int aimee_panel_provider_unregister(const aimee_panel_provider_t *provider)
 {
    if (!provider || active_provider != provider)
       return AIMEE_PANEL_PROVIDER_INVALID;
-   if (outstanding_results > 0)
+   if (atomic_load_explicit(&outstanding_results, memory_order_acquire) > 0)
       return AIMEE_PANEL_PROVIDER_BUSY;
    active_provider = NULL;
    return AIMEE_PANEL_PROVIDER_OK;
@@ -71,7 +72,7 @@ int aimee_panel_run(agent_config_t *agents, const config_t *cfg, const char *tas
       memset(out, 0, sizeof(*out));
       return AIMEE_PANEL_PROVIDER_ERROR;
    }
-   outstanding_results++;
+   atomic_fetch_add_explicit(&outstanding_results, 1, memory_order_release);
    return AIMEE_PANEL_PROVIDER_OK;
 }
 
@@ -83,7 +84,10 @@ void aimee_panel_result_release(aimee_panel_result_t *result)
    {
       active_provider->release(result);
       memset(result, 0, sizeof(*result));
-      if (outstanding_results > 0)
-         outstanding_results--;
+      unsigned int current = atomic_load_explicit(&outstanding_results, memory_order_acquire);
+      while (current > 0 &&
+             !atomic_compare_exchange_weak_explicit(&outstanding_results, &current, current - 1,
+                                                    memory_order_acq_rel, memory_order_acquire))
+         ;
    }
 }

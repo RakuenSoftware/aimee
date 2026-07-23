@@ -1654,7 +1654,7 @@ $(TESTPREFIX)/unit-test-panel-ir-contract: $(OBJDIR)/tests/test_panel_ir_contrac
 
 $(TESTPREFIX)/unit-test-panel-provider: $(OBJDIR)/tests/test_panel_provider.o \
                                        $(OBJDIR)/modules/delegates/panel_provider.o
-	$(TESTLINK_MIN) -o $@ $^
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # Slice 0: IR shadow metrics (pure).
 $(TESTPREFIX)/unit-test-aimee-ir-metrics: $(OBJDIR)/tests/test_aimee_ir_metrics.o \
