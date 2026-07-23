@@ -39,18 +39,27 @@ also does not add, remove, or move OpenAI or Anthropic cache controls.
 ## Why the planners are provider-specific
 
 OpenAI and Anthropic both reward stable cacheable prefixes, but their cache breakpoints, write/read
-prices, long-context rules, and response accounting differ. Neither API exposes enough pre-dispatch
-settlement information to let a generic compressor safely infer cache residency or hidden
-breakpoints.
+prices, long-context rules, and response accounting differ. GPT-5.6 exposes explicit breakpoints and
+an exact remote input count, but the counting call has no published finite price bound. Anthropic's
+free remote count is explicitly an estimate with no published numerical error bound. Neither API
+therefore exposes enough pre-dispatch cost evidence to authorize a generic compressor safely.
 
 The OpenAI and Anthropic planners therefore use separate signed pricing and cache-semantics
-contracts. They operate only on local evidence and fully serialized alternatives. Remote token-count
-calls, cache probes, predicted cache hits, and post-response usage fields cannot authorize a change.
+contracts. They operate only on local evidence and fully serialized alternatives. An OpenAI remote
+exact count is rejected as `remote_token_count_unpriced`; an Anthropic remote estimate is rejected as
+`remote_token_count`. Cache probes, predicted cache hits, and post-response usage fields likewise
+cannot authorize a change.
 
 The planners can return a proof for reviewed fixtures, but they are not yet connected to a live
 transform because the production registry has no entries. A future transform needs its own lossless
 semantic contract, exact tokenizer/model compatibility, provenance rules, and converged review
 before it can enter that registry.
+
+This is an activation decision, not a claim that savings are impossible. With the current provider
+contracts, no OpenAI or Anthropic tuple has a complete worst-case monetary proof. Both production
+registries therefore remain empty; unsupported, unknown, or incomplete evidence sends exactly the
+original request without a counting preflight or economizer retry. A damaged signature or unexpected
+nonempty registry fails the wire fence and sends no provider request.
 
 ## Configuration migration
 

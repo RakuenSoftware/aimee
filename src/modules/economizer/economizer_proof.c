@@ -335,6 +335,8 @@ const char *econ_reason_str(econ_reason_t reason)
       return "tokenizer_not_local_exact";
    case ECON_REASON_REMOTE_TOKEN_COUNT:
       return "remote_token_count";
+   case ECON_REASON_REMOTE_TOKEN_COUNT_UNPRICED:
+      return "remote_token_count_unpriced";
    case ECON_REASON_INVALID_REQUEST_SHAPE:
       return "invalid_request_shape";
    case ECON_REASON_UNSUPPORTED_CACHE_LAYOUT:
