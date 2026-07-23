@@ -1,0 +1,394 @@
+#include "db2_witness_checkpoint.h"
+
+#include <openssl/sha.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "db2/db2_internal.h" /* db2_conn */
+#include "db2/db_postgres.h"  /* aimee_pg_* */
+#include "modules/vault/vault_witness_checkpoint.h"
+#include "modules/vault/vault_witness_merkle.h"
+#include "modules/vault/vault_witness_record.h" /* vault_witness_shard_key_hash */
+#include "modules/vault/vault_witness_signer.h"
+
+#define CP_ERR 256
+
+/* Leaf snapshot wire format (canonical, so a consumer can rebuild the tree):
+ *   u32 count, then per leaf: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32].
+ * leaf_snapshot_digest = SHA-256 over these bytes. */
+static void put_u16(uint8_t *p, uint16_t v)
+{
+   p[0] = (uint8_t)(v >> 8);
+   p[1] = (uint8_t)v;
+}
+static void put_u32(uint8_t *p, uint32_t v)
+{
+   p[0] = (uint8_t)(v >> 24);
+   p[1] = (uint8_t)(v >> 16);
+   p[2] = (uint8_t)(v >> 8);
+   p[3] = (uint8_t)v;
+}
+static void put_u64(uint8_t *p, uint64_t v)
+{
+   for (unsigned i = 0; i < 8; i++)
+      p[i] = (uint8_t)(v >> (56U - 8U * i));
+}
+
+/* A growable byte buffer for the leaf snapshot. */
+typedef struct
+{
+   uint8_t *buf;
+   size_t len, cap;
+   int oom;
+} bytebuf_t;
+
+static void bb_append(bytebuf_t *b, const void *p, size_t n)
+{
+   if (b->oom)
+      return;
+   if (b->len + n > b->cap)
+   {
+      size_t ncap = b->cap ? b->cap * 2 : 4096;
+      while (ncap < b->len + n)
+         ncap *= 2;
+      uint8_t *nb = realloc(b->buf, ncap);
+      if (!nb)
+      {
+         b->oom = 1;
+         return;
+      }
+      b->buf = nb;
+      b->cap = ncap;
+   }
+   memcpy(b->buf + b->len, p, n);
+   b->len += n;
+}
+
+static int leaf_cmp(const void *a, const void *b)
+{
+   return memcmp(((const vault_witness_leaf_t *)a)->key, ((const vault_witness_leaf_t *)b)->key, 8);
+}
+
+static db2_witness_checkpoint_result_t map_sqlstate(const char *st)
+{
+   if (!st)
+      return DB2_WITNESS_CP_ERROR;
+   if (strcmp(st, "P7W01") == 0)
+      return DB2_WITNESS_CP_HEAD_MISMATCH;
+   if (strcmp(st, "P7W02") == 0)
+      return DB2_WITNESS_CP_CEILING;
+   if (strcmp(st, "P7W03") == 0)
+      return DB2_WITNESS_CP_FENCE_STALE;
+   /* P7W05 (seq stale) means a concurrent producer committed the next checkpoint;
+    * retry picks up the new max. Treat like a serialization failure. */
+   if (strcmp(st, "P7W05") == 0 || strcmp(st, "40001") == 0 || strcmp(st, "40P01") == 0 ||
+       strcmp(st, "23505") == 0)
+      return DB2_WITNESS_CP_TRANSIENT;
+   return DB2_WITNESS_CP_ERROR;
+}
+
+/* Reconstruct the previous checkpoint's digest (its predecessor role for the new
+ * one) from its stored columns, keeping all digesting in C. Returns 0 and sets
+ * *has_pred/pred, or -1 on error. has_pred is 0 when no prior checkpoint exists. */
+static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
+{
+   *has_pred = 0;
+   memset(pred, 0, 32);
+   char err[CP_ERR];
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT root,has_predecessor,predecessor_digest,shard_count,leaf_snapshot_digest,"
+       "signer_key_id,sig_alg,sig_version,created_at FROM kb_vault_witness_checkpoint "
+       "ORDER BY seq DESC LIMIT 1",
+       err, sizeof err);
+   if (!st)
+      return -1;
+   aimee_pg_step_t sr = aimee_pg_step(st, err, sizeof err);
+   if (sr == AIMEE_PG_ERR)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+   if (sr != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(st); /* no prior checkpoint: first one has no predecessor */
+      return 0;
+   }
+   vault_witness_checkpoint_t prev;
+   memset(&prev, 0, sizeof prev);
+   prev.version = 1;
+   /* aimee_pg_column_blob caches ONE blob per statement and frees the previous on
+    * the next call, so every bytea must be copied out BEFORE reading the next one. */
+   int ok = 1;
+   const void *b = aimee_pg_column_blob(st, 0);
+   ok = ok && b && aimee_pg_column_bytes(st, 0) == 32;
+   if (ok)
+      memcpy(prev.root, b, 32);
+   const char *hp = aimee_pg_column_text(st, 1);
+   prev.has_predecessor = (hp && hp[0] == 't');
+   b = aimee_pg_column_blob(st, 2);
+   ok = ok && b && aimee_pg_column_bytes(st, 2) == 32;
+   if (ok)
+      memcpy(prev.predecessor_digest, b, 32);
+   prev.shard_count = (uint64_t)aimee_pg_column_int64(st, 3);
+   b = aimee_pg_column_blob(st, 4);
+   ok = ok && b && aimee_pg_column_bytes(st, 4) == 32;
+   if (ok)
+      memcpy(prev.leaf_snapshot_digest, b, 32);
+   b = aimee_pg_column_blob(st, 5);
+   ok = ok && b && aimee_pg_column_bytes(st, 5) == 16;
+   if (ok)
+      memcpy(prev.signer_key_id, b, VAULT_WITNESS_SIGNER_KEY_ID_LEN);
+   prev.sig_alg = (uint16_t)aimee_pg_column_int64(st, 6);
+   prev.sig_version = (uint16_t)aimee_pg_column_int64(st, 7);
+   const char *ca = aimee_pg_column_text(st, 8);
+   ok = ok && hp && ca;
+   if (ok)
+      snprintf(prev.created_at, sizeof prev.created_at, "%s", ca);
+   aimee_pg_finalize(st);
+   if (!ok)
+      return -1;
+   /* Re-read the seq (needed for the signable body). */
+   aimee_pg_stmt_t *sq = aimee_pg_prepare(
+       conn, "SELECT seq FROM kb_vault_witness_checkpoint ORDER BY seq DESC LIMIT 1", err,
+       sizeof err);
+   if (!sq)
+      return -1;
+   if (aimee_pg_step(sq, err, sizeof err) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(sq);
+      return -1;
+   }
+   prev.seq = (uint64_t)aimee_pg_column_int64(sq, 0);
+   aimee_pg_finalize(sq);
+   if (vault_witness_checkpoint_digest(&prev, pred) != 0)
+      return -1;
+   *has_pred = 1;
+   return 0;
+}
+
+db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return DB2_WITNESS_CP_TRANSIENT;
+   char err[CP_ERR], state[6] = "";
+   db2_witness_checkpoint_result_t rc = DB2_WITNESS_CP_ERROR;
+   vault_witness_leaf_t *leaves = NULL;
+   size_t n = 0, cap = 0;
+   bytebuf_t snap = {0};
+
+   if (aimee_pg_exec_sqlstate(conn, "BEGIN ISOLATION LEVEL REPEATABLE READ", state, err,
+                              sizeof err) != 0)
+      return DB2_WITNESS_CP_TRANSIENT;
+
+   /* 1. Fence to revalidate at persist time. */
+   int64_t fence = -1;
+   {
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "SELECT fencing_token FROM kb_vault_control WHERE singleton=1",
+                           err, sizeof err);
+      if (st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+         fence = aimee_pg_column_int64(st, 0);
+      if (st)
+         aimee_pg_finalize(st);
+   }
+   if (fence < 0)
+      goto rollback;
+
+   /* 2. Verified leaves (raises P7W01 / P7W02 inside the scan). */
+   {
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn, "SELECT tenant,provider,seq,head_hash FROM org_vault_witness_checkpoint_leaves()",
+          err, sizeof err);
+      if (!st)
+         goto rollback;
+      aimee_pg_step_t sr;
+      while ((sr = aimee_pg_step(st, err, sizeof err)) == AIMEE_PG_ROW)
+      {
+         const char *tenant = aimee_pg_column_text(st, 0);
+         const char *provider = aimee_pg_column_text(st, 1);
+         int64_t seq = aimee_pg_column_int64(st, 2);
+         const void *head = aimee_pg_column_blob(st, 3);
+         if (!tenant || !provider || !head || aimee_pg_column_bytes(st, 3) != 32 || seq <= 0)
+         {
+            aimee_pg_finalize(st);
+            goto rollback;
+         }
+         if (n == cap)
+         {
+            size_t ncap = cap ? cap * 2 : 64;
+            vault_witness_leaf_t *nl = realloc(leaves, ncap * sizeof *leaves);
+            if (!nl)
+            {
+               aimee_pg_finalize(st);
+               goto rollback;
+            }
+            leaves = nl;
+            cap = ncap;
+         }
+         if (vault_witness_shard_key_hash(tenant, provider, leaves[n].key) != 0 ||
+             vault_witness_leaf_hash(tenant, provider, (uint64_t)seq, head, leaves[n].hash) != 0)
+         {
+            aimee_pg_finalize(st);
+            goto rollback;
+         }
+         /* Snapshot: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32]. */
+         uint8_t hdr[2];
+         size_t tl = strlen(tenant), pl = strlen(provider);
+         put_u16(hdr, (uint16_t)tl);
+         bb_append(&snap, hdr, 2);
+         bb_append(&snap, tenant, tl);
+         put_u16(hdr, (uint16_t)pl);
+         bb_append(&snap, hdr, 2);
+         bb_append(&snap, provider, pl);
+         uint8_t sb[8];
+         put_u64(sb, (uint64_t)seq);
+         bb_append(&snap, sb, 8);
+         bb_append(&snap, head, 32);
+         n++;
+      }
+      const char *ss = aimee_pg_sqlstate(st);
+      char stbuf[6] = "";
+      if (ss)
+         snprintf(stbuf, sizeof stbuf, "%s", ss);
+      aimee_pg_finalize(st);
+      if (sr == AIMEE_PG_ERR)
+      {
+         rc = map_sqlstate(stbuf);
+         goto rollback;
+      }
+      if (snap.oom)
+         goto rollback;
+   }
+
+   /* Finalize the stored snapshot as count || body, so leaf_snapshot_digest is
+    * SHA-256 over exactly the stored bytes (a verifier recomputes it directly). */
+   {
+      bytebuf_t full = {0};
+      uint8_t cnt[4];
+      put_u32(cnt, (uint32_t)n);
+      bb_append(&full, cnt, 4);
+      if (snap.len)
+         bb_append(&full, snap.buf, snap.len);
+      free(snap.buf);
+      snap = full;
+      if (snap.oom)
+         goto rollback;
+   }
+
+   /* 3. Root over the sorted leaves. */
+   if (n > 1)
+      qsort(leaves, n, sizeof *leaves, leaf_cmp);
+   uint8_t root[32];
+   if (vault_witness_merkle_root(leaves, n, root) != 0)
+      goto rollback; /* duplicate key collision, or over ceiling */
+
+   /* 4. Predecessor digest from the prior checkpoint (C-side digesting). */
+   int has_pred = 0;
+   uint8_t pred[32];
+   if (previous_digest(conn, &has_pred, pred) != 0)
+      goto rollback;
+
+   /* Next monotonic seq. It is part of the signed body, so it must be fixed BEFORE
+    * signing; persist re-verifies it is still the next value under the fence lock. */
+   int64_t next_seq = -1;
+   {
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn, "SELECT COALESCE(max(seq),0)+1 FROM kb_vault_witness_checkpoint", err, sizeof err);
+      if (st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+         next_seq = aimee_pg_column_int64(st, 0);
+      if (st)
+         aimee_pg_finalize(st);
+   }
+   if (next_seq < 1)
+      goto rollback;
+
+   /* 5. Build + 6. sign. created_at from the DB for a real timestamp. */
+   vault_witness_checkpoint_t cp;
+   memset(&cp, 0, sizeof cp);
+   cp.version = 1;
+   cp.seq = (uint64_t)next_seq;
+   cp.has_predecessor = has_pred;
+   if (has_pred)
+      memcpy(cp.predecessor_digest, pred, 32);
+   cp.shard_count = n;
+   memcpy(cp.root, root, 32);
+   /* leaf_snapshot_digest = SHA-256 over the exact stored snapshot bytes. */
+   SHA256(snap.buf ? snap.buf : (const uint8_t *)"", snap.len, cp.leaf_snapshot_digest);
+   cp.sig_version = 1;
+   {
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT pg_now_text()", err, sizeof err);
+      const char *ts = NULL;
+      if (st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+         ts = aimee_pg_column_text(st, 0);
+      snprintf(cp.created_at, sizeof cp.created_at, "%s", ts ? ts : "1970-01-01 00:00:00");
+      if (st)
+         aimee_pg_finalize(st);
+   }
+   if (vault_witness_checkpoint_sign(&cp) != 0)
+      goto rollback;
+
+   /* 7. Persist (fenced, monotonic). */
+   int64_t new_seq = -1;
+   {
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn,
+          "SELECT org_vault_witness_checkpoint_persist(?1,?2,?3::boolean,?4,?5,?6,?7,?8,?9::smallint,"
+          "?10,?11,?12)",
+          err, sizeof err);
+      if (!st)
+         goto rollback;
+      int bad = aimee_pg_bind_int64(st, "?1", (int64_t)cp.seq) != 0 ||
+                aimee_pg_bind_blob(st, "?2", cp.root, 32) != 0 ||
+                aimee_pg_bind_text(st, "?3", cp.has_predecessor ? "true" : "false") != 0 ||
+                aimee_pg_bind_blob(st, "?4", cp.predecessor_digest, 32) != 0 ||
+                aimee_pg_bind_int64(st, "?5", (int64_t)cp.shard_count) != 0 ||
+                aimee_pg_bind_blob(st, "?6", snap.buf ? snap.buf : (const uint8_t *)"",
+                                   (int)snap.len) != 0 ||
+                aimee_pg_bind_blob(st, "?7", cp.leaf_snapshot_digest, 32) != 0 ||
+                aimee_pg_bind_blob(st, "?8", cp.signer_key_id, VAULT_WITNESS_SIGNER_KEY_ID_LEN) !=
+                    0 ||
+                aimee_pg_bind_int64(st, "?9", cp.sig_alg) != 0 ||
+                aimee_pg_bind_int64(st, "?10", cp.sig_version) != 0 ||
+                aimee_pg_bind_blob(st, "?11", cp.signature, 64) != 0 ||
+                aimee_pg_bind_int64(st, "?12", fence) != 0;
+      if (bad)
+      {
+         aimee_pg_finalize(st);
+         goto rollback;
+      }
+      aimee_pg_step_t sr = aimee_pg_step(st, err, sizeof err);
+      if (sr == AIMEE_PG_ROW)
+         new_seq = aimee_pg_column_int64(st, 0);
+      const char *ss = aimee_pg_sqlstate(st);
+      char stbuf[6] = "";
+      if (ss)
+         snprintf(stbuf, sizeof stbuf, "%s", ss);
+      aimee_pg_finalize(st);
+      if (sr == AIMEE_PG_ERR)
+      {
+         rc = map_sqlstate(stbuf);
+         goto rollback;
+      }
+   }
+   if (new_seq < 0)
+      goto rollback;
+
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof err) != 0)
+   {
+      rc = DB2_WITNESS_CP_TRANSIENT;
+      goto rollback;
+   }
+   if (out_seq)
+      *out_seq = new_seq;
+   free(leaves);
+   free(snap.buf);
+   return DB2_WITNESS_CP_OK;
+
+rollback:
+   aimee_pg_exec(conn, "ROLLBACK", err, sizeof err);
+   free(leaves);
+   free(snap.buf);
+   return rc;
+}

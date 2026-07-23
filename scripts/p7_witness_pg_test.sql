@@ -179,26 +179,26 @@ BEGIN
 
   -- First checkpoint: seq 1, no predecessor.
   v_seq := public.org_vault_witness_checkpoint_persist(
-    root1, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+    1::bigint, root1, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
   IF v_seq <> 1 THEN RAISE EXCEPTION 'WITNESS FAIL: first checkpoint seq % (want 1)', v_seq; END IF;
 
   -- A non-first checkpoint (seq 2) WITHOUT a predecessor is rejected.
   BEGIN
     PERFORM public.org_vault_witness_checkpoint_persist(
-      root2, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+      2::bigint, root2, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
     RAISE EXCEPTION 'WITNESS FAIL: seq-2 checkpoint without predecessor accepted';
   EXCEPTION WHEN sqlstate 'P7W04' THEN NULL; -- expected checkpoint_predecessor_inconsistent
   END;
 
   -- Second checkpoint: seq 2, WITH predecessor -> accepted.
   v_seq := public.org_vault_witness_checkpoint_persist(
-    root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+    2::bigint, root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
   IF v_seq <> 2 THEN RAISE EXCEPTION 'WITNESS FAIL: second checkpoint seq % (want 2)', v_seq; END IF;
 
   -- Fence-stale refusal.
   BEGIN
     PERFORM public.org_vault_witness_checkpoint_persist(
-      root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence + 999);
+      3::bigint, root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence + 999);
     RAISE EXCEPTION 'WITNESS FAIL: stale fence accepted';
   EXCEPTION WHEN sqlstate 'P7W03' THEN NULL; -- expected checkpoint_fence_stale
   END;

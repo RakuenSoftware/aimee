@@ -326,6 +326,7 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
            db2/cross_repo_route.c db2/cross_repo_build.c \
            db2/vault_pg.c db2/org_vault_rewrap.c db2/org_vault_rotation.c db2/org_vault_key_use.c db2/org_model_catalog.c db2/org_spend.c db2/org_budget.c db2/org_rate.c db2/org_egress.c db2/org_telemetry.c db2/org_telemetry_fmt.c
 DB2_SRCS += db2/server_registry.c db2/management_client_instance.c db2/management_action_journal.c db2/management_read_journal.c db2/management_jwks_runtime.c
+DB2_SRCS += db2/db2_witness_checkpoint.c
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
@@ -333,7 +334,8 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 # as KB_VAULT_OBJS below, kb/-prefixed objects). db2/vault_pg.c (the kb Postgres store)
 # rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
 # DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
-VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c \
+VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
+  modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
                   modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c modules/vault/vault_custody_kms.c \

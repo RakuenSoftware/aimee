@@ -65,7 +65,7 @@ BEGIN
     org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
     org_vault_witness_verify_shard(TEXT,TEXT),
     org_vault_witness_checkpoint_leaves(),
-    org_vault_witness_checkpoint_persist(BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT)
+    org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT)
     FROM aimee_kb_runtime;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_runtime;
   ALTER DEFAULT PRIVILEGES FOR ROLE aimee_kb_owner IN SCHEMA public
