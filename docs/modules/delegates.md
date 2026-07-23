@@ -17,7 +17,7 @@ root `cmd_agent_delegate.c` is an entry-point consumer. Remaining server/root im
 debt, not a second supported delegate engine.
 
 The descriptor declares this module's twenty-seven sources, twenty-one public headers, nineteen direct
-tests, and this document; it does not yet set `ownership_complete`. `delegates` is the only module in
+tests, and this document; it sets `ownership_complete: true`. `delegates` is the only module in
 the program whose headers all live under the canonical `src/modules/delegates/include/aimee/delegates/`
 tree, so it declares no `private_headers`: the module root holds no header, and an absent field is an
 empty declared set against an empty actual set. An earlier slice declared the panel and IR-rescue
@@ -26,8 +26,11 @@ and the broader direct-test set. Make compiles all twenty-seven sources; CMake c
 omitting `aimee_ir_rescue.c`, `delegate_ephemeral_ws.c`, `delegate_sandbox_image.c`, and
 `gw_orch_delegates.c`, the server/kb-side units — the same intentional thin-client boundary recorded
 for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
-than of those. `docs/validation/core-modularization-slice-52.md` records the audit; latching follows in
-a separate slice so the completeness audit does not review declarations authored in the same change.
+than of those. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
+`docs/validation/core-modularization-slice-53.md` the completeness audit; the two were split so the
+latch reviews declarations merged on their own first. Adding a new module-local source now fails CI on
+`rule=ownership-complete`, and so does adding a module-root header: the absent `private_headers` field
+means the empty set is enforced, not unchecked.
 
 ### IR-side prose tool-call rescue
 
