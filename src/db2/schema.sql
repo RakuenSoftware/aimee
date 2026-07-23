@@ -5547,7 +5547,7 @@ CREATE TABLE IF NOT EXISTS kb_vault_witness_checkpoint (
   sig_alg SMALLINT NOT NULL CHECK (sig_alg = 1),
   sig_version INTEGER NOT NULL,
   signature BYTEA NOT NULL CHECK (octet_length(signature)=64),
-  created_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()) CHECK (octet_length(created_at) BETWEEN 1 AND 40),
   CHECK (has_predecessor = true OR predecessor_digest = decode(repeat('00',32),'hex'))
 );
 

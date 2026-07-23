@@ -118,6 +118,8 @@ int vault_witness_checkpoint_sign_ed25519(vault_witness_checkpoint_t *cp,
 {
    if (!cp || !priv)
       return -1;
+   /* Clear any stale signature first, so a failed sign never leaves prior bytes. */
+   OPENSSL_cleanse(cp->signature, VAULT_WITNESS_ED25519_SIG_LEN);
    cp->sig_alg = VAULT_WITNESS_SIG_ED25519;
    uint8_t body[512];
    size_t len = 0;

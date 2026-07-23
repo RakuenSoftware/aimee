@@ -119,7 +119,10 @@ DO $$
 BEGIN
   IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
     IF has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_log','INSERT') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_log','DELETE') OR
        has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','UPDATE') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','DELETE') OR
+       has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_shard','INSERT') OR
        has_table_privilege('aimee_kb_runtime','public.kb_vault_witness_checkpoint','INSERT') THEN
       RAISE EXCEPTION 'WITNESS FAIL: runtime has direct DML on a witness table';
     END IF;

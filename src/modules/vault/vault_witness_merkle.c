@@ -104,11 +104,13 @@ int vault_witness_leaf_hash(const char *tenant, const char *provider, uint64_t s
    if (!tenant || !provider || !head_hash)
       return -1;
    size_t tl = strlen(tenant), pl = strlen(provider);
-   /* Bounded to the record's shard-key caps; the SMT never sees longer keys. */
-   if (tl == 0 || pl == 0 || tl > 512 || pl > 512)
+   /* Bounded to the record's shard-key caps (128 each); the SMT never sees longer
+    * keys — vault_witness_shard_key_hash and _genesis_sentinel enforce the same
+    * 128 cap, so keeping them aligned avoids a latent accept-here/reject-there. */
+   if (tl == 0 || pl == 0 || tl > 128 || pl > 128)
       return -1;
    size_t label_len = strlen(VAULT_WITNESS_SMT_LEAF_LABEL);
-   uint8_t buf[sizeof(VAULT_WITNESS_SMT_LEAF_LABEL) + 4 + 512 + 4 + 512 + 8 + 32];
+   uint8_t buf[sizeof(VAULT_WITNESS_SMT_LEAF_LABEL) + 4 + 128 + 4 + 128 + 8 + 32];
    size_t off = 0;
    memcpy(buf, VAULT_WITNESS_SMT_LEAF_LABEL, label_len);
    off = label_len;

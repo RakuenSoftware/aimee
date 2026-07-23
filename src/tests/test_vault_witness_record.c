@@ -110,6 +110,14 @@ static void test_roundtrip(void)
    assert(vault_witness_record_decode(wire, len, &back) == 0);
    assert(vault_witness_record_equal(&r, &back));
 
+   /* The wire faithfully carries every digest-relevant field, including the two
+    * flags E2 must reconstruct from stored columns (is_first_in_shard and
+    * has_source_pred). If the wire layout ever drifts from the digest preimage,
+    * decode->digest would diverge from the original digest. */
+   assert(back.is_first_in_shard == r.is_first_in_shard);
+   assert(back.has_source_pred == r.has_source_pred);
+   assert(back.source == r.source && back.shard_seq == r.shard_seq);
+
    uint8_t d1[32], d2[32];
    assert(vault_witness_record_digest(&r, d1) == 0);
    assert(vault_witness_record_digest(&back, d2) == 0);
