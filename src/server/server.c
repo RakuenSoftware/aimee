@@ -1691,14 +1691,10 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},
-       {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},
-       {"roundtable.review", LIMIT_ROUNDTABLE},
-       {"mcp.call", LIMIT_DELEGATE},
-       {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST},
-       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
        {NULL, LIMIT_DEFAULT},
    };
 

@@ -239,8 +239,9 @@ static cJSON *marshal_roundtable_with_stdin(int argc, char **argv, const char *i
 
 static void test_roundtable_stdin_is_authoritative_artifact(void)
 {
-   char *argv[] = {"-", "Review PR #1828 only", "--run-id", "review-pr-1828",
-                   "--artifact-stage", "frozen_diff"};
+   char *argv[] = {
+       "-",          "Review PR #1828 only", "--run-id", "review-pr-1828", "--artifact-stage",
+       "frozen_diff"};
    cJSON *req = marshal_roundtable_with_stdin(6, argv, "diff --git a/PR1828 b/PR1828\n+marker\n");
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring,
