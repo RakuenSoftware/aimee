@@ -16,6 +16,15 @@ and `skill_rollback.c` in `src/modules/skills`, with CLI orchestration in `src/c
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 
+`src/modules/skills/module.yaml` declares ownership of the three production sources above, both
+canonical public headers, two direct unit tests, and this document; the module has no private headers.
+Its `ownership_complete: true` latch exhaustively checks module-local C and private-header files and
+requires this canonical document. Public-header and test entries are explicit ownership claims, but the
+completeness latch does not discover undeclared public headers or tests. Command, server, protocol, and
+configuration files with skill surfaces remain orchestration or consumer boundaries rather than
+duplicate skill implementations. The source-level liveness and public-API cleanup audit is recorded in
+`docs/validation/core-modularization-slice-33.md`.
+
 ## Dependencies and consumers
 
 - `config`: supplies dispatch, index, lifecycle, and evaluation policy for skills.
@@ -81,10 +90,9 @@ usable rather than inventing instructions.
 
 ## Operational diagnostics
 
-Use `aimee skill list|show|lint|eval`, review records, lifecycle result counts, and `skill_metrics` to
-diagnose precedence, malformed content, stale state, or failed automation. Diagnostics should include the
-resolved source class and safe path context while avoiding logging full private skill bodies or injected
-secrets.
+Use `aimee skill list|show|lint|eval`, review records, and lifecycle result counts to diagnose
+precedence, malformed content, stale state, or failed automation. Diagnostics should include the resolved
+source class and safe path context while avoiding logging full private skill bodies or injected secrets.
 
 ## Compatibility
 
