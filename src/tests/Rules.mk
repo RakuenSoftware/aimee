@@ -346,8 +346,14 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-local-status \
                $(TESTPREFIX)/unit-test-vault-operator-status-runtime \
                $(TESTPREFIX)/unit-test-kb-vault-operator-status \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-mutation \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-choreography \
+               $(TESTPREFIX)/unit-test-kb-vault-operator-runtime \
+               $(TESTPREFIX)/unit-test-kb-vault-protected-secret \
+               $(TESTPREFIX)/unit-test-kb-vault-activation-latch \
                $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock \
                $(TESTPREFIX)/unit-test-vault-maintenance-guard \
+               $(TESTPREFIX)/unit-test-vault-d3b-custody \
                $(TESTPREFIX)/unit-test-kb-vault-key-use \
                $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
                $(TESTPREFIX)/unit-test-kb-vault-rotation \
@@ -3752,7 +3758,38 @@ $(TESTPREFIX)/unit-test-vault-operator-status-runtime: \
 
 $(TESTPREFIX)/unit-test-kb-vault-operator-status: \
                               $(OBJDIR)/tests/test_kb_vault_operator_status.o \
-                              $(OBJDIR)/kb/kb_vault_operator_status.o
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-mutation: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_mutation.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-choreography: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_choreography.o \
+                              $(OBJDIR)/kb/kb_vault_operator_mutation.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-kb-vault-operator-runtime: \
+                              $(OBJDIR)/tests/test_kb_vault_operator_runtime.o \
+                              $(OBJDIR)/kb/kb_vault_operator_runtime.o \
+                              $(OBJDIR)/kb/kb_vault_operator_mutation.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
+
+$(TESTPREFIX)/unit-test-kb-vault-protected-secret: \
+                              $(OBJDIR)/tests/test_kb_vault_protected_secret.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-kb-vault-activation-latch: \
+                              $(OBJDIR)/tests/test_kb_vault_activation_latch.o \
+                              $(OBJDIR)/kb/kb_vault_activation_latch.o \
+                              $(OBJDIR)/kb/kb_vault_operator_status.o \
+                              $(OBJDIR)/kb/kb_vault_protected_secret.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lpthread
 
 $(TESTPREFIX)/unit-test-kb-vault-tpm-runtime-lock: \
@@ -3766,6 +3803,16 @@ $(TESTPREFIX)/unit-test-vault-maintenance-guard: \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_kek_cache.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-d3b-custody: \
+                              $(OBJDIR)/tests/test_vault_d3b_custody.o \
+                              $(OBJDIR)/modules/vault/vault_store.o $(OBJDIR)/modules/vault/vault_kek_check.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                              $(OBJDIR)/modules/vault/vault_server_key.o \
+                              $(OBJDIR)/modules/vault/vault_custody_tpm2.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

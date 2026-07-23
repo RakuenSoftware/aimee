@@ -472,8 +472,11 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
            kb/kb_management_action.c kb/kb_management_runtime.c shared/management_read.c
 KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
-KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_tpm_runtime_lock.c \
-           db2/vault_operator_status_runtime.c
+KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_protected_secret.c \
+           kb/kb_vault_activation_latch.c kb/kb_vault_operator_mutation.c \
+           kb/kb_vault_operator_runtime.c \
+           kb/kb_vault_tpm_runtime_lock.c \
+           db2/vault_operator_status_runtime.c db2/vault_operator_rewrap_runtime.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes

@@ -463,16 +463,27 @@ BEGIN
   ALTER SCHEMA aimee_kb_vault_orchestrator_api OWNER TO aimee_kb_owner;
   ALTER TABLE public.kb_vault_control OWNER TO aimee_kb_owner;
   ALTER TABLE public.kb_vault_rewrap_operation OWNER TO aimee_kb_owner;
-  ALTER FUNCTION
-    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
-    OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_rewrap_worm OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_open_event OWNER TO aimee_kb_owner;
+  ALTER FUNCTION public.org_vault_open_event_worm_block() OWNER TO aimee_kb_owner;
+  FOR fn IN
+    SELECT p.oid::regprocedure AS signature
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='aimee_kb_vault_orchestrator_api'
+  LOOP
+    EXECUTE format('ALTER FUNCTION %s OWNER TO aimee_kb_owner',fn.signature);
+  END LOOP;
   -- The SECURITY DEFINER resolves only explicitly-qualified public relations.
   -- PUBLIC schema usage is revoked globally above, so grant the function owner
   -- the resolution privilege it needs without exposing it to the capability.
   GRANT USAGE ON SCHEMA public TO aimee_kb_owner;
   -- PostgreSQL row-locking SELECTs also require UPDATE authority.
-  GRANT SELECT,UPDATE ON TABLE public.kb_vault_control,
-    public.kb_vault_rewrap_operation TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.kb_vault_control,
+    public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
+    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+    public.kb_vault_open_event TO aimee_kb_owner;
+  GRANT SELECT ON TABLE public.org_vault_rotation,public.org_vault_salt,
+    public.org_vault_secret TO aimee_kb_owner;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api
     FROM aimee_kb_vault_orchestrator_login,aimee_kb_runtime;
@@ -490,11 +501,13 @@ BEGIN
 
   REVOKE ALL ON TABLE public.kb_vault_control,
     public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
-    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM PUBLIC;
+    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+    public.kb_vault_open_event FROM PUBLIC;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
     REVOKE ALL ON TABLE public.kb_vault_control,
       public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
-      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM aimee_kb_runtime;
+      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+      public.kb_vault_open_event FROM aimee_kb_runtime;
   END IF;
 
   FOR fn IN
@@ -506,10 +519,15 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
       EXECUTE format('REVOKE ALL ON FUNCTION %s FROM aimee_kb_runtime',fn.signature);
     END IF;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aimee_kb_owner',fn.signature);
   END LOOP;
-  GRANT EXECUTE ON FUNCTION
-    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
-    TO aimee_kb_vault_orchestrator;
+  FOR fn IN
+    SELECT p.oid::regprocedure AS signature
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='aimee_kb_vault_orchestrator_api'
+  LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aimee_kb_vault_orchestrator',fn.signature);
+  END LOOP;
 END
 $p7_d3a_orchestrator_grants$;
 
