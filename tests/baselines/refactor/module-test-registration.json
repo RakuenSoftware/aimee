@@ -56,6 +56,12 @@
       "test": "src/tests/test_gateway_policy.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "governance",
+      "test": "src/tests/test_response_governance_stage.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "ir",

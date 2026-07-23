@@ -17,5 +17,17 @@
   "enabled_by_default": false,
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/governance/gw_stage_governance.c"
+  ],
+  "private_headers": [
+    "src/modules/governance/gw_stage_governance.h"
+  ],
+  "tests": [
+    "src/tests/test_response_governance_stage.c"
+  ],
+  "docs": [
+    "docs/modules/governance.md"
+  ]
 }
