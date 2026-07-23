@@ -111,6 +111,9 @@ describe('Fleet interactions', () => {
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(mocks.send).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Team id'), { target: { value: '8' } });
+    expect(screen.getByText(/Further mutations are blocked/)).toBeTruthy();
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces policy denial without locking future actions', async () => {

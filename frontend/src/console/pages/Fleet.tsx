@@ -56,7 +56,6 @@ export default function Fleet() {
     setServers([]);
     setSelected('');
     setMessage('');
-    setIndeterminate(false);
   }
 
   async function loadFleet() {
@@ -135,6 +134,7 @@ export default function Fleet() {
           ))}
         </tbody>
       </table>
+      {indeterminate && <p className="kbc-error">Further mutations are blocked until the fleet is reloaded and the prior result is resolved.</p>}
       {selected && (
         <fieldset>
           <legend>Agent action on {selected}</legend>
@@ -142,7 +142,6 @@ export default function Fleet() {
           <button disabled={busy || indeterminate || !validAgent(agent)} onClick={() => mutate('agent.enable')}>Enable</button>
           <button disabled={busy || indeterminate || !validAgent(agent)} onClick={() => mutate('agent.disable')}>Disable</button>
           {agent && !validAgent(agent) && <p className="kbc-error">Agent names use 1–63 letters, digits, dot, underscore, or dash.</p>}
-          {indeterminate && <p className="kbc-error">Further mutations are blocked until the fleet is reloaded and the prior result is resolved.</p>}
         </fieldset>
       )}
     </section>
