@@ -3,6 +3,15 @@
 *Filed from measurement taken while implementing the retrieval proposal's
 Slice 5. Classification: **correctness, medium**.*
 
+> **RESOLVED by removing chunking.** Both failures below were consequences of
+> pre-cutting the page into fixed-size boxes. Extraction now centres a window on
+> each match, so a needle cannot be split by a boundary (Failure 1 is
+> unrepresentable, not merely rare) and there is no per-chunk literal count to
+> exhaust (Failure 2 does not arise). The tool description has been reworded to
+> what is deliverable. Retained as the record of how the defect was found and
+> why the boundary-backoff patch that was written for it was dropped in favour
+> of deleting the chunker.
+
 ## The claim that is not true
 
 `web_read`'s tool description promises callers:

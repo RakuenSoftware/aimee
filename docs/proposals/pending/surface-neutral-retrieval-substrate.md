@@ -5,6 +5,46 @@ was rejected. Revision 2 withdrew that claim and narrowed scope; it was approved
 with eight required changes. Revision 3 applies all eight. Full disposition is in
 the Review record.*
 
+
+> ## SUPERSEDED — the premise was wrong
+>
+> This proposal's Part 2 argued that the web page reader should become the second
+> caller of the rank-fusion primitive. Implementation showed it should have no
+> ranking at all, so there is no second caller and the argument does not survive.
+>
+> **What the premise rested on.** The reader pre-cut a page into fixed ~480-byte
+> chunks and scored each chunk by how many query needles fell inside it. That
+> score is an artifact of the segmentation, not a property of the document: two
+> matches 20 bytes apart score 2 together, or 1 and 1 if a cut falls between
+> them — same page, same query, different number. The "lexical leg" existed only
+> because that score existed, and it ranged over the same candidates as the
+> literal leg (a chunk scored above zero exactly when it contained a needle), so
+> the two legs were one set in two orders. Fusion existed only to combine them.
+>
+> And chunking itself existed only to feed a neural embedder that the earlier
+> proposal specified but never built — the sole trace of it in the code was a log
+> line saying it would have helped.
+>
+> So the stack was: an unbuilt embedder → chunks → a segmentation artifact → a
+> redundant second leg → a fusion step → *this proposal*. Removing the bottom
+> removes all of it.
+>
+> **What replaced it.** Deterministic extraction: find the query's occurrences,
+> widen each to a readable window, merge overlaps, emit in document order until
+> the byte budget is spent. No chunker, no scorer, no ranker, ~100 lines. It also
+> makes the split-needle failure below unrepresentable rather than merely rare,
+> because a window is centred on the match.
+>
+> **What was still worth having**, and is unaffected: the fail-closed egress
+> capability gate (Part 1), the untrusted-content fencing, and the session-search
+> fix. Those were never about retrieval.
+>
+> **The lesson worth keeping.** Five review rounds hardened a design without any
+> round asking whether the thing being reused was needed. The evidence was in
+> hand early — the two legs were measured to share an identical candidate set —
+> and it was recorded as a curiosity instead of read as the tell that the second
+> leg was an artifact.
+
 ## Executive decision
 
 This proposal delivers two independent, separately revertible things:

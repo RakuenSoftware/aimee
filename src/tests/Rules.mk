@@ -1630,8 +1630,7 @@ $(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OB
 
 $(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
-                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o \
-                                    $(OBJDIR)/kb/kb_rrf.o
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
 	$(CC) $(L_FLAGS) -o $@ $^
 
 $(TESTPREFIX)/unit-test-tool-egress: $(OBJDIR)/tests/test_tool_egress.o \

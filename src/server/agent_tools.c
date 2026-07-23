@@ -1269,8 +1269,10 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
     {"web_read",
-     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
-     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Read a web page token-lean: fetches once server-side and returns the parts of the page the "
+     "query occurs in, cited by id and fenced as untrusted. Extraction is deterministic: matches "
+     "are located, widened to readable windows, merged, and emitted in document order until the "
+     "span budget is spent. "
      "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
      "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
      tp_web_read, TSURF_ALL},

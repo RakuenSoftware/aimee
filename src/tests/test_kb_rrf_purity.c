@@ -3,13 +3,17 @@
  *
  * WHY A SEPARATE TEST
  *
- * The proposal originally called kb_rrf "pure" on the strength of its include
- * list (math/stdio/stdlib/string only). Review rejected that: a list of headers
- * shows the module has no DB or network dependency, which is not the same as
- * showing it is free of side effects or hidden state. Slice 5 relies on the
- * stronger property in two places -- it calls fusion from a second consumer, and
- * the differential harness runs two selectors in one process -- so the property
- * has to be established, not assumed.
+ * These checks were written for a web-side consumer of kb_rrf that no longer
+ * exists: web_read's extraction turned out to need no ranking at all, so the
+ * fusion primitive has exactly one caller again (the knowledge-base hybrid
+ * route).
+ *
+ * They are kept because the property is worth pinning on its own merits, not
+ * because of who calls it. kb_rrf was described as "pure" on the strength of its
+ * include list; a list of headers shows no DB or network dependency, which is
+ * not the same as showing freedom from side effects or hidden state. The KB
+ * route fuses repeatedly within a process, so accumulation or a cached last
+ * result would corrupt it exactly as it would have corrupted any other caller.
  *
  * WHAT "NO HIDDEN STATE" MEANS HERE, CONCRETELY
  *   - repeated identical calls return identical results (no accumulation);

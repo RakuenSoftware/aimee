@@ -170,7 +170,6 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
-        ${AIMEE_SRC_DIR}/kb/kb_rrf.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
@@ -230,7 +229,6 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
-        ${AIMEE_SRC_DIR}/kb/kb_rrf.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
     list(APPEND PLATFORM_AGENT_SRCS
