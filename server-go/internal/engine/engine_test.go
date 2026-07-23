@@ -1000,3 +1000,71 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		}
 	})
 }
+
+type alwaysFailingRunner struct{ calls int }
+
+func (r *alwaysFailingRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	r.calls++
+	return StepResult{}, &DelegateExecutionError{Err: ErrDelegateTerminal, Dispatched: true, CostKnown: true}
+}
+
+// A stage that keeps failing without advancing must stop auto-resuming and park
+// for a human rather than retrying on the transient backoff forever.
+func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_persistent_fail", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &alwaysFailingRunner{}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last AdvanceResult
+	for attempt := 0; attempt < maxRunnerFailuresWithoutProgress+2; attempt++ {
+		out, err := eng.Advance(t.Context(), item.ID)
+		if err != nil {
+			t.Fatalf("advance %d: %v", attempt, err)
+		}
+		last = out
+		if out.PauseReason == "delegate_failed" {
+			break
+		}
+		// Simulate the scheduler's transient resume so the next attempt runs.
+		if _, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil {
+			t.Fatalf("resume %d: %v", attempt, err)
+		}
+	}
+	if last.PauseReason != "delegate_failed" {
+		t.Fatalf("persistent failure never parked for human: %+v after %d calls", last, runner.calls)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.PauseReason != "delegate_failed" {
+		t.Fatalf("item not parked delegate_failed: %+v err=%v", got, err)
+	}
+}
