@@ -35,6 +35,15 @@ paths within or across descriptors, then emits a deterministic declared-ownershi
 inputs are still maintained by Make and CMake in this slice; descriptor-driven build generation
 remains a later step, so these ownership fields are documentation and validation only.
 
+Descriptor v1 also supports `private_headers` and the opt-in `ownership_complete` latch. For a
+complete descriptor, the validator compares the declared source and private-header sets with every
+matching owner-local file and requires the canonical module document. An undeclared new file or a
+stale declaration fails CI. Public headers remain confined to `include/aimee/<module>/`; tests are
+explicit declarations because integration tests can span more than one module. Modules that have not
+set `ownership_complete: true` remain migration debt and must not feed generated build profiles.
+Public headers and tests are validated when declared but are not part of completeness set equality in
+this slice.
+
 ## Providers and readiness
 
 `module-runtime` is its own required reference implementation and has no replaceable provider.

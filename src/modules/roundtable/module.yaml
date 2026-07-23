@@ -11,7 +11,46 @@
     "routing"
   ],
   "enabled_by_default": false,
+  "ownership_complete": true,
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/roundtable/delegate_ensemble.c",
+    "src/modules/roundtable/delegate_ensemble_review.c",
+    "src/modules/roundtable/roundtable_activation.c",
+    "src/modules/roundtable/roundtable_chair.c",
+    "src/modules/roundtable/roundtable_pipeline_capture.c",
+    "src/modules/roundtable/roundtable_pipeline_chunk.c",
+    "src/modules/roundtable/roundtable_pipeline_eval.c",
+    "src/modules/roundtable/roundtable_preset.c",
+    "src/modules/roundtable/roundtable_seat_resolve.c",
+    "src/modules/roundtable/roundtable_verify.c"
+  ],
+  "private_headers": [
+    "src/modules/roundtable/delegate_ensemble.h",
+    "src/modules/roundtable/delegate_ensemble_internal.h",
+    "src/modules/roundtable/roundtable_activation.h",
+    "src/modules/roundtable/roundtable_chair.h",
+    "src/modules/roundtable/roundtable_pipeline_capture.h",
+    "src/modules/roundtable/roundtable_pipeline_chunk.h",
+    "src/modules/roundtable/roundtable_pipeline_eval.h",
+    "src/modules/roundtable/roundtable_preset.h",
+    "src/modules/roundtable/roundtable_seat_resolve.h",
+    "src/modules/roundtable/roundtable_types.h",
+    "src/modules/roundtable/roundtable_verify.h"
+  ],
+  "tests": [
+    "src/tests/test_delegate_ensemble.c",
+    "src/tests/test_roundtable_chair.c",
+    "src/tests/test_roundtable_pipeline_capture.c",
+    "src/tests/test_roundtable_pipeline_chunk.c",
+    "src/tests/test_roundtable_pipeline_eval.c",
+    "src/tests/test_roundtable_preset.c",
+    "src/tests/test_roundtable_seat_resolve.c",
+    "src/tests/test_roundtable_verify.c"
+  ],
+  "docs": [
+    "docs/modules/roundtable.md"
+  ]
 }

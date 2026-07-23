@@ -24,10 +24,11 @@ MAX_DEPTH = 32
 MAX_ARRAY = 256
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 BASE_KEYS = {"descriptor_version", "id", "dependencies", "runtime_toggle"}
-OWNERSHIP_FIELDS = ("sources", "public_headers", "tests", "docs")
+OWNERSHIP_FIELDS = ("sources", "private_headers", "public_headers", "tests", "docs")
 DEFAULT_ON = {"runtime-web", "control-web"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
+    "private_headers": {".h", ".hpp"},
     "public_headers": {".h", ".hpp"},
     "tests": {".c", ".cpp", ".py", ".sh"},
     "docs": {".md"},
@@ -150,6 +151,7 @@ def schema() -> dict[str, object]:
                 "uniqueItems": True,
             },
             "enabled_by_default": {"type": "boolean"},
+            "ownership_complete": {"type": "boolean"},
             "runtime_toggle": {
                 "type": "object",
                 "additionalProperties": False,
@@ -189,7 +191,7 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
     if identifier not in required | optional:
         fail("module-unknown", f"unknown module ID {identifier!r}", "/id")
     required_keys = BASE_KEYS | ({"enabled_by_default"} if identifier in optional else set())
-    allowed_keys = required_keys | set(OWNERSHIP_FIELDS)
+    allowed_keys = required_keys | set(OWNERSHIP_FIELDS) | {"ownership_complete"}
     if not required_keys <= set(value) or not set(value) <= allowed_keys:
         fail(
             "descriptor-keys",
@@ -246,6 +248,9 @@ def validate_descriptor(value: object, required: set[str], optional: set[str]) -
         )
     if identifier in optional and type(value["enabled_by_default"]) is not bool:
         fail("default-type", "enabled_by_default must be boolean", "/enabled_by_default")
+    if "ownership_complete" in value and type(value["ownership_complete"]) is not bool:
+        fail("ownership-complete-type", "ownership_complete must be boolean",
+             "/ownership_complete")
     return identifier
 
 
@@ -284,6 +289,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
 
     role_prefixes = {
         "sources": PurePosixPath("src/modules") / identifier,
+        "private_headers": PurePosixPath("src/modules") / identifier,
         "public_headers": PurePosixPath("src/modules") / identifier / "include/aimee" / identifier,
         "tests": PurePosixPath("src/tests"),
         "docs": PurePosixPath("docs/modules"),
@@ -305,6 +311,7 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
     module_root = _resolve_owned(resolved_repo / "src/modules" / identifier, pointer)
     boundaries = {
         "sources": module_root,
+        "private_headers": module_root,
         "public_headers": _resolve_owned(module_root / "include/aimee" / identifier, pointer),
         "tests": _resolve_owned(resolved_repo / "src/tests", pointer),
         "docs": _resolve_owned(resolved_repo / "docs/modules", pointer),
@@ -312,6 +319,10 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
     boundary = boundaries[field]
     if not _contained(resolved, boundary):
         fail("ownership-role-boundary", f"{field} path is outside {boundary}: {raw}", pointer)
+    public_boundary = _resolve_owned(module_root / "include/aimee" / identifier, pointer)
+    if field == "private_headers" and _contained(resolved, public_boundary):
+        fail("ownership-role-boundary", f"private header is inside {public_boundary}: {raw}",
+             pointer)
     if field == "tests" and not PurePosixPath(raw).name.startswith("test_"):
         fail("ownership-role", f"test path must use the test_ convention: {raw}", pointer)
     if field == "docs" and raw != f"docs/modules/{identifier}.md":
@@ -322,6 +333,51 @@ def validate_owned_path(repo: Path, identifier: str, field: str, raw: object,
     if not resolved.is_file():
         fail("ownership-file", f"path is not an existing regular file: {raw}", pointer)
     return {"path": raw, "result": "PASS"}
+
+
+def validate_complete_ownership(repo: Path, identifier: str,
+                                value: dict[str, object]) -> None:
+    """Require an opted-in descriptor to enumerate its complete owner-local C surface."""
+    module_root = repo / "src/modules" / identifier
+    public_root = module_root / "include/aimee" / identifier
+    policies = {
+        "sources": ROLE_EXTENSIONS["sources"],
+        "private_headers": ROLE_EXTENSIONS["private_headers"],
+    }
+    for role, extensions in policies.items():
+        actual: set[str] = set()
+        for path in module_root.rglob("*"):
+            if path == module_root / "module.yaml":
+                continue
+            if _contained(path, public_root) or path.suffix not in extensions:
+                continue
+            relative = path.relative_to(repo).as_posix()
+            if path.is_symlink():
+                fail(
+                    "ownership-complete-symlink",
+                    f"{identifier} {role} path must not be a symlink: {relative}",
+                    f"/{role}",
+                )
+            if not path.is_file():
+                fail(
+                    "ownership-complete-file",
+                    f"{identifier} {role} path is not a regular file: {relative}",
+                    f"/{role}",
+                )
+            actual.add(relative)
+        declared = set(value.get(role, []))
+        missing = sorted(actual - declared)
+        extra = sorted(declared - actual)
+        if missing or extra:
+            fail(
+                "ownership-complete",
+                f"{identifier} {role} mismatch for extensions {sorted(extensions)}; "
+                f"missing={missing}, extra={extra}",
+                f"/{role}",
+            )
+    expected_doc = f"docs/modules/{identifier}.md"
+    if value.get("docs") != [expected_doc]:
+        fail("ownership-complete", f"{identifier} docs must equal [{expected_doc!r}]", "/docs")
 
 
 def validate_ownership(
@@ -371,6 +427,8 @@ def validate_ownership(
             if cross_claims is not None:
                 cross_claims[raw] = (identifier, field, pointer)
         ownership[field] = entries
+    if value.get("ownership_complete") is True:
+        validate_complete_ownership(repo, identifier, value)
     return report
 
 
