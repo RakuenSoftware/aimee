@@ -44,6 +44,13 @@ export default function Fleet() {
   const [busy, setBusy] = useState(false);
   const teamID = canonicalTeam(team);
 
+  function changeTeam(value: string) {
+    setTeam(value);
+    setServers([]);
+    setSelected('');
+    setMessage('');
+  }
+
   async function loadFleet() {
     if (!teamID) return;
     setBusy(true);
@@ -97,7 +104,7 @@ export default function Fleet() {
       <p>Inspect one team&apos;s registered servers and perform bounded management actions.</p>
       <label>
         Team id
-        <input value={team} onChange={(e) => setTeam(e.target.value)} inputMode="numeric" />
+        <input value={team} disabled={busy} onChange={(e) => changeTeam(e.target.value)} inputMode="numeric" />
       </label>
       <button disabled={!teamID || busy} onClick={loadFleet}>Load fleet</button>
       {team && !teamID && <p className="kbc-error">Use a canonical positive 64-bit team id.</p>}
