@@ -568,6 +568,25 @@ static void agent_derive_catalog_provider(agent_t *ag)
    }
 }
 
+/* Registration prefix of a route-target name: everything before the first ':'.
+ * Provider-general registration names targets `<registration>:<model>`, so this
+ * identifies siblings that share credentials, endpoint and wire protocol. A
+ * legacy single-model agent has no ':' and is its own registration. */
+void agent_registration_prefix(const char *name, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (!name || !name[0])
+      return;
+   const char *colon = strchr(name, ':');
+   size_t n = colon ? (size_t)(colon - name) : strlen(name);
+   if (n >= out_len)
+      n = out_len - 1;
+   memcpy(out, name, n);
+   out[n] = '\0';
+}
+
 const char *agent_catalog_provider(const agent_t *ag)
 {
    if (!ag)

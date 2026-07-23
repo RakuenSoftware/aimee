@@ -42,6 +42,7 @@ void test_primary_turn_reaches_default_above_min_tier(void);
 void test_primary_turn_default_must_still_satisfy_caps(void);
 void test_catalog_provider_endpoint_parser_edges(void);
 void test_request_max_tokens_clamped_to_context_window(void);
+void test_registration_prefix(void);
 void test_provider_general_registration_expands(void);
 void test_provider_general_overflow_rejects_config(void);
 void test_provider_general_auto_uses_curated_allowlist(void);
@@ -3216,6 +3217,7 @@ int main(void)
    test_primary_turn_default_must_still_satisfy_caps();
    test_catalog_provider_endpoint_parser_edges();
    test_request_max_tokens_clamped_to_context_window();
+   test_registration_prefix();
    test_provider_general_registration_expands();
    test_provider_general_overflow_rejects_config();
    test_provider_general_auto_uses_curated_allowlist();

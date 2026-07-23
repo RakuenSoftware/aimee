@@ -100,6 +100,13 @@ int agent_routing_primary_turn(void);
  * Kimi over Anthropic). Never use it for auth, headers, or request building. */
 const char *agent_catalog_provider(const agent_t *agent);
 
+/* Registration prefix of a route-target name: everything before the first ':'.
+ * Provider-general registration names its targets `<registration>:<model>`, so
+ * this identifies siblings sharing credentials, endpoint and wire protocol —
+ * used to prefer a same-registration peer during fallback. A legacy
+ * single-model agent has no ':' and is its own registration. */
+void agent_registration_prefix(const char *name, char *out, size_t out_len);
+
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);

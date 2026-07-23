@@ -1274,6 +1274,42 @@ void test_provider_general_overflow_rejects_config(void)
    unlink(agent_config_path());
 }
 
+/* Fallback prefers a peer from the SAME provider registration before crossing to
+ * another vendor: a sibling model shares the wire protocol, credentials, tool
+ * conventions and request features, so switching within a registration preserves
+ * far more about the request. The prefix is what identifies those siblings. */
+void test_registration_prefix(void)
+{
+   char buf[MAX_AGENT_NAME];
+
+   agent_registration_prefix("codex:gpt-5.6-sol", buf, sizeof(buf));
+   assert(strcmp(buf, "codex") == 0);
+
+   /* A legacy agent has no ':' and is its own registration, so it simply has no
+    * siblings — the same-registration pass finds nothing and costs it nothing. */
+   agent_registration_prefix("claude", buf, sizeof(buf));
+   assert(strcmp(buf, "claude") == 0);
+
+   /* Only the FIRST ':' separates; a model id containing one stays intact. */
+   agent_registration_prefix("gw:vendor:model", buf, sizeof(buf));
+   assert(strcmp(buf, "gw") == 0);
+
+   /* Degenerate inputs must not read past the buffer or invent a prefix. */
+   agent_registration_prefix(":leading", buf, sizeof(buf));
+   assert(buf[0] == '\0');
+   agent_registration_prefix("", buf, sizeof(buf));
+   assert(buf[0] == '\0');
+   agent_registration_prefix(NULL, buf, sizeof(buf));
+   assert(buf[0] == '\0');
+
+   /* Truncation is bounded by the output buffer. */
+   char small[4];
+   agent_registration_prefix("abcdefgh:model", small, sizeof(small));
+   assert(strlen(small) == 3);
+
+   printf("  PASS: test_registration_prefix\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as

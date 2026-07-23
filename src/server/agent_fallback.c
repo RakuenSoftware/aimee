@@ -112,9 +112,24 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
    /* Fail fast at a peer's limit so we move to the next free peer instead of queueing on
     * a busy one; the caller's own turn already queued at its admission point. */
    agent_dispatch_set_fail_fast(1);
+   /* Two passes: peers from the SAME provider registration first, then the rest.
+    * A sibling model shares the wire protocol, credentials, tool conventions and
+    * request features, so switching within a registration preserves far more
+    * about the request than crossing to another vendor. Cross-provider fallback
+    * is still valuable for availability, just a bigger semantic jump — so it is
+    * the second choice, not the first. A legacy agent has no ':' and therefore no
+    * siblings, which makes pass 0 empty and costs it nothing. */
+   char own_reg[MAX_AGENT_NAME];
+   agent_registration_prefix(ag->name, own_reg, sizeof(own_reg));
+   for (int pass = 0; pass < 2 && rc != 0; pass++)
    for (int i = 0; i < cfg->agent_count && rc != 0; i++)
    {
       agent_t *peer = &cfg->agents[i];
+      char peer_reg[MAX_AGENT_NAME];
+      agent_registration_prefix(peer->name, peer_reg, sizeof(peer_reg));
+      int same_reg = own_reg[0] && strcmp(own_reg, peer_reg) == 0;
+      if ((pass == 0) != (same_reg != 0))
+         continue;
       if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
           !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
           agent_is_named_in_fallback_chain(cfg, peer->name))
@@ -131,7 +146,8 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
       out->response = NULL;
       out->error[0] = '\0';
 
-      aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s'", peer->name);
+      aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
+                peer->name, pass == 0 ? "same" : "other");
       /* Through the single guarded executor: enforces peer->max_parallel and
        * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
        * non-zero so the loop simply moves to the next same-tier peer. */
