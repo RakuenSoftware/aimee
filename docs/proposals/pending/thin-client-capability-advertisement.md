@@ -220,9 +220,24 @@ it is the only party that sees both services' keys. Admission order is: Control-
 first, then Runtime-local capabilities, then within each group the descriptor graph's profile order,
 which is already deterministic for a given profile. So when a Runtime module and a Control-Plane
 module claim the same key, the Control-Plane claimant is the incumbent and the Runtime one is
-refused — the same way on every start, on every node, with the same profile. A conflict is a stable,
-reproducible configuration error surfaced at startup, not an intermittent one that depends on which
-service finished attaching first.
+refused — the same way on every start, on every node, with the same profile.
+
+**That order only holds if the startup sequence produces it,** so the sequence is part of the
+contract rather than an implementation detail. A Runtime, on start: (1) attempts registration with
+its Control Plane and waits for the returned projection, bounded by a startup deadline; (2) admits
+the Control-Plane capabilities into the merged closure; (3) only then admits its own modules' keys;
+(4) begins serving client registrations. Serving clients before step 3 would expose a closure that is
+about to change; admitting local keys before step 2 would make a Runtime module the incumbent purely
+because it started first.
+
+The unhappy path is stated because it is the one that actually varies: if the Control Plane is
+unreachable within the startup deadline, the Runtime proceeds to step 3 and serves its local
+capabilities — the outage rule already says an outage must not withhold independent Runtime-local
+capabilities. A Control-Plane capability arriving later that claims a key a local module now holds is
+**refused**, because incumbent-preservation outranks admission order: rank decides who wins a
+*simultaneous* claim, never who may evict a live one. That refusal is a configuration error reported
+to the operator with both claimants named, not a silent reordering, and it is resolved by the
+authorized transactional replacement or by changing a descriptor — never automatically.
 
 Separately, core **reserves** the names of the verbs it owns (the attach/remote, identity/enrollment,
 health, help, and version verbs) plus a reserved prefix; a module descriptor claiming a reserved name
@@ -247,9 +262,13 @@ envelope:
   mode: {enum: [notified, bounded-revalidation], required: true}
   revalidate_after_ms: {type: uint32, required: true}
   stale_after_ms: {type: uint32, required: true}
-  heartbeat_ms: {type: uint32, required: true}          # required iff mode == notified
-  half_open_after_ms: {type: uint32, required: true}    # required iff mode == notified
-  reconnect_deadline_ms: {type: uint32, required: true} # required iff mode == notified
+  heartbeat_ms: {type: uint32, required: when_notified}
+  half_open_after_ms: {type: uint32, required: when_notified}
+  reconnect_deadline_ms: {type: uint32, required: when_notified}
+  # `when_notified` means: MUST be present and non-zero when mode == notified, and MUST be
+  # absent when mode == bounded-revalidation. Present-but-ignored is not permitted, so a
+  # registrant never has to decide whether a stale deadline applies. The relations below
+  # that mention these fields are evaluated only in notified mode.
   round_trip_budget_ms: {type: uint32, required: true}  # p99 allowance for one conditional exchange
   hop_bound_ms: {type: uint32, required: true}          # THIS hop's worst-case contribution
   propagation_bound_ms: {type: uint32, required: true}  # end-to-end: this hop + all upstream hops
@@ -259,6 +278,11 @@ capability:
   state: {enum: [absent, selected, disabled, starting, ready, degraded,
                  unavailable, stopping, failed], required: true}
   unavailable_reason: {enum: [dependency, stale, schema_too_old, policy], required: false}
+  # `policy` is permitted ONLY for a capability the caller is authorized to SEE but currently
+  # forbidden to USE. A capability the caller is not authorized to see is absent from the
+  # projection entirely (see "Absent means absent") and is NEVER projected as
+  # unavailable/policy -- doing so would disclose its existence and defeat the
+  # authorization scoping. Withholding and forbidding are different outcomes.
   # Legal only when state is one of {unavailable, degraded, failed}; the validator rejects
   # a reason on any other state (e.g. `ready` + `dependency`) as a contradictory record.
   # `degraded` carries `dependency` only when a soft dependency is unready.
@@ -578,9 +602,10 @@ advertising a stale list.
   projection a registrant fetches for any other reason, and never trigger one on their own.
 
     A notified hop contributes `heartbeat_ms + round_trip_budget_ms` on the healthy path and
-    `half_open_after_ms + reconnect_deadline_ms + revalidate_after_ms + round_trip_budget_ms` on the
-    failure path, and its advertised `hop_bound_ms` is the **worse** of the two, since a registrant
-    cannot know in advance whether its stream is alive. Two terms here are easy to drop and both are
+    `half_open_after_ms + reconnect_deadline_ms + one_revalidation` on the failure path — where
+    `one_revalidation` is itself `revalidate_after_ms + request_timeout_ms + round_trip_budget_ms`,
+    exactly as `hop_bound_computation` defines it. Its advertised `hop_bound_ms` is the **worse** of
+    the two, since a registrant cannot know in advance whether its stream is alive. Two terms here are easy to drop and both are
     load-bearing: the post-fallback revalidation, because detecting a dead stream and abandoning
     reconnection does not by itself deliver the change; and the round trip, because an interval
     elapsing is not a delivery either — the conditional exchange still has to complete. Omitting
@@ -805,6 +830,16 @@ review time is not the script but the **observable pass condition** each check a
 cannot later be satisfied by a script that merely exits zero. Each check below therefore states its
 fixture and its decision procedure; a flag name alone is not an acceptance criterion.
 
+**Each flag is a separately reported assertion.** The checks below are written as one invocation per
+concern, but the flag lists bundle many independent assertions, and a single exit code would let one
+passing assertion mask a failing one — or let an unimplemented assertion contribute silently. So the
+contract on every script here is: it emits one machine-readable result **per flag** (`flag`,
+`pass|fail|not-implemented`, and on failure the observed value), a flag with no implementation
+reports `not-implemented` rather than passing by omission, and the run fails if *any* flag is not
+`pass`. This is what makes a long flag list acceptable — it is a list of named assertions with
+individual verdicts, not a checklist collapsed into one boolean. Reviewers read the per-flag report,
+not the exit status.
+
 The non-obvious ones, made concrete:
 
 - **Closure equality** (check 1) compares the served projection against the closure the descriptor
@@ -818,8 +853,17 @@ The non-obvious ones, made concrete:
   capability's visibility changes if and only if the gateway gate's answer changes.
 - **"Client source unchanged when a module is added"** (check 4) builds the client from an unmodified
   source tree, adds a fixture module to the service, and asserts the module's `cli`/`tool` surfaces
-  are usable through that same client binary — the artifact is bit-identical, so "unchanged" is a
-  hash comparison, not a review judgement.
+  are usable through that same client binary. The "unchanged" half is a hash comparison rather than a
+  review judgement — but a hash comparison is only meaningful against a **reproducible build**, and
+  an ordinary C toolchain defeats it by embedding build timestamps, build IDs, and absolute paths
+  that differ run to run even when no source changed. So the check requires a normalized build:
+  `SOURCE_DATE_EPOCH` pinned, deterministic archive and link order, no `__DATE__`/`__TIME__`, build
+  paths remapped, and build ID either omitted or derived only from input content. The check
+  **self-tests that contract first** — it builds the unmodified tree twice and requires those two
+  hashes to match before comparing anything else, so a toolchain that cannot reproduce fails as a
+  harness error rather than as a false report about module leakage. Where reproducibility genuinely
+  cannot be achieved on a platform, the fallback assertion is that no file under the client's source
+  closure differs, which is weaker and must be reported as such rather than silently substituted.
 - **Propagation latency** (check 5) is measured, not asserted: a fixture module transitions state,
   and the elapsed time until the consumer observes the change must be at or below the sum of the
   configured per-hop bounds, in both notified and bounded-revalidation modes. The test also asserts
@@ -854,14 +898,14 @@ The non-obvious ones, made concrete:
 - {id: 1, tier: mechanical, check: "scripts/check_capability_advertisement.sh --projection-only --equals-module-runtime-closure --forbid-static-capability-list src/server/server_http.c,src/kb/http/kb_http.c --require-generation-epoch-schema-version --require-typed-state --omitted-optional-absent --disabled-only-for-selected"}
 - {id: 2, tier: mechanical, check: "scripts/check_capability_advertisement.sh --authorization-scoped --require-transport-class-scoping bearer,cert-cn --scope-surfaces-with-capability --forbid-unauthorized-capability-leak --no-second-authorization-model"}
 - {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --conform-to-normative-wire-schema-v1 --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --arg-types-from-closed-scalar-set --forbid-general-json-schema-dialect --assert-state-reason-validity-relation --reject-reason-on-ready-state --reject-defined-field-rename-without-schema-version-bump --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
-- {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --client-binary-hash-identical-when-module-added"}
+- {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --reproducible-build-self-test-builds-twice-and-requires-match --source-date-epoch-pinned --deterministic-archive-and-link-order --no-date-time-macros --build-paths-remapped --client-binary-hash-identical-when-module-added --fallback-no-source-closure-diff-reported-as-weaker"}
 - {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --capture-from-before-start-to-after-exit --assert-no-client-to-control-packet-observed --scan-config-env-argv-for-control-address-and-credential plaintext,percent,base64 --measure-propagation-latency-vs-sum-of-hop-bounds --assert-addition-discovered-within-bound --both-modes notified,bounded-revalidation --healthy-notified-hop-bound-equals-heartbeat-plus-roundtrip --failed-notified-hop-bound-equals-halfopen-plus-reconnect-plus-revalidate-plus-roundtrip --hop-bound-is-worse-of-healthy-and-failed --assert-failure-path-includes-post-fallback-revalidation --assert-bound-includes-round-trip --measure-against-same-bound-validator-enforces --cosmetic-help-edit-does-not-advance-generation --semantic-edit-does-advance-generation --drop-stream-falls-back-to-revalidation --half-open-stream-detected-within-deadline"}
 - {id: 6, tier: integration, check: "scripts/test_capability_advertisement.sh --on-registration-snapshot --generation-advances-on-closure-state-and-surface-change --epoch-change-forces-refetch --stale-window-exceeds-revalidation-interval --stale-window-fails-closed --control-outage-withdraws-only-control-provenance-and-hard-dependents --assert-independent-runtime-local-capabilities-remain-available --soft-dependent-degrades-with-fallback-not-unavailable --assert-outage-surfaces-to-client-as-dependency-reason --registration-refused-when-neither-mode-available"}
 - {id: 7, tier: integration, check: "scripts/test_capability_advertisement.sh --merge-at-runtime --hard-dependency-not-ready-suppresses-dependent --soft-dependency-not-ready-degrades-with-declared-fallback --soft-dependency-never-suppresses --cross-service-both-directions --shared-id-takes-weaker-state --conflicting-shared-descriptor-fails-closed --effective-set-equals-ready-closure-under-hard-deps"}
 - {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-ext-addition-invisible-to-old-client --new-defined-field-yields-unavailable-reason schema_too_old --unknown-key-at-defined-position-yields-schema-too-old --advisory-ext-is-only-unknown-key-position --assert-unavailable-record-with-empty-surfaces-still-enumerated-to-consumer --assert-id-state-and-reason-shown-to-user --per-capability-not-per-connection-refusal --other-capabilities-unaffected --assert-authority-rejects-invocation-of-schema-too-old-capability --older-representation-derived-not-hand-maintained --derivation-cached-per-capability-generation-schemaversion --assert-projection-latency-flat-in-supported-window-width --unknown-surface-kind-dropped --unknown-state-fails-closed --defined-field-addition-bumps-schema-version --below-minimum-version-refuses-registration-with-typed-error"}
 - {id: 9, tier: integration, check: "scripts/test_capability_advertisement.sh --consumer mcp --consumer acp --consumer cli --re-advertise-effective-set --generic-dispatch-from-descriptor --invalid-args-typed-error-not-forwarded --emit-change-on-effective-set-change --absent-capability-returns-typed-capability-absent --disabled-and-unknown-externally-identical"}
 - {id: 10, tier: integration, check: "scripts/test_advertisement_noninterference.sh --two-principals-differing-scope --change-outside-scope-b --assert-no-generation-advance-for-b --assert-no-event-for-b --assert-byte-identical-projection-for-b --assert-scope-decision-uses-only-id-and-authorization-tag --assert-no-allocation-on-out-of-scope-advisory-blob --per-scope-generation-derived-from-projection-content --no-wallclock-timing-assertion"}
-- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --uniqueness-enforced-at-merged-closure-holder --admission-order control-plane-then-runtime-then-profile-order --colliding-keys-across-services-fixture --same-incumbent-on-every-start --duplicate-claim-rejects-later-registration-atomically --replacement-requires-incumbent-authorization-under-cert-cn --replacement-refused-for-bare-bearer --replacement-registration-time-only --replacement-emits-audit-record --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
+- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --uniqueness-enforced-at-merged-closure-holder --admission-order control-plane-then-runtime-then-profile-order --startup-sequence register-upstream-then-admit-upstream-then-admit-local-then-serve-clients --no-client-served-before-local-admitted --incumbent-preservation-outranks-admission-order --late-upstream-claim-on-live-local-key-refused --colliding-keys-across-services-fixture --same-incumbent-on-every-start --duplicate-claim-rejects-later-registration-atomically --replacement-requires-incumbent-authorization-under-cert-cn --replacement-refused-for-bare-bearer --replacement-registration-time-only --replacement-emits-audit-record --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
 - {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-nfc --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --enforce-per-scalar-type-bounds string,int,uint,bool,enum,duration_ms,capability_id --default-satisfies-declared-type-bounds --enforce-schema-v1-numeric-limits name_token,bounded_string,capability_id,normalized_path,max_args_per_surface,max_surfaces_per_capability,max_capabilities_per_projection,max_projection_bytes,max_advisory_bytes_per_capability,max_advisory_bytes_per_authority --assert-per-authority-advisory-aggregate-bound --enforcement-site registration-time --assert-overflow-rejects-registration-atomically --assert-running-total-decremented-on-withdrawal --assert-not-deferred-to-projection-time --linearity-by-closed-scalar-arg-model --enforced-at-validator-and-client"}
 - {id: 13, tier: mechanical, check: "scripts/check_projection_topology_nondisclosure.sh --client-visible-schema-has-no-provenance-field --path-level-not-schema-only --deny-list-applied-to response,headers,logs,traces,metrics-labels,audit --inject-provenance-fixture-and-assert-absent-from-every-emitted-artifact --client-visible-reason-enum dependency,stale,schema_too_old,policy --forbid-upstream-reason-codes-downward --forbid-service-name-address-or-health-field --assert-upstream-outage-projects-as-dependency --diff-client-projection-vs-internal-closure"}
 - {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-roundtrip-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --recompute-hop-bound-and-reject-mismatch --assert-bound-includes-stalled-request-timeout --drop-connection-mid-request-fixture --assert-propagation-bound-equals-hop-plus-upstream-over-actual-topology --assert-stale-at-least-propagation-bound --control-plane-propagation-bound-equals-its-hop-bound --reject-malformed-envelope-fail-closed"}
@@ -895,6 +939,30 @@ have suppressed capabilities whose *soft* dependency was unready (contradicting 
 change notification optional on network edges, used an authority-wide generation that leaked
 cross-scope activity, treated every additive descriptor field as compatible, and asserted a
 client-local-execution ban with no decidable property behind it.
+
+*Revision 6 → 7* (roundtable run `…_1784827190_54`, 7 real blocking + suggestions; two of the nine
+reported blocking were false and rejected — one seat reported the *Capability state* paragraph
+"ends mid-token", which it does not; the text is intact and that seat had truncated its own context.
+Another claimed `route_capabilities` is at `server_http.c:675` and `server_http_set_ready_provider`
+at `702`; both are wrong — 642 and 669 respectively in this branch *and* in `origin/testing`, the
+same 675 a prior round asserted, so the citations stand.) Real fixes: the envelope marked the
+notified-mode deadlines `required: true` while the prose said "required iff notified" — reconciled to
+a `when_notified` requiredness (present-and-non-zero in notified mode, absent otherwise), so the
+validity relations that mention them are unambiguous. The narrative hop arithmetic still summed
+`revalidate_after_ms + round_trip_budget_ms` while the YAML had grown a `request_timeout_ms` term, so
+prose and schema disagreed on the number a conformance test checks — the narrative now names
+`one_revalidation` and matches. `unavailable_reason: policy` had no stated precondition, so it could
+have been used for a capability withheld for authorization — disclosing its existence; it is now
+permitted only for a capability the caller may *see* but not *use*, with withheld capabilities absent
+entirely. The Runtime's startup sequence was never pinned, so the admission order that decides
+"incumbent" was not actually guaranteed by anything; the sequence (register upstream → admit upstream
+→ admit local → serve clients) is now stated, with the unreachable-upstream path and the rule that
+incumbent-preservation outranks admission order. Check 4's bit-identical-binary assertion assumed a
+reproducible build the proposal never required; it now specifies the normalization and self-tests
+reproducibility before drawing any conclusion about module leakage. And the proposal's own "a flag
+name alone is not an acceptance criterion" was contradicted by checks that bundle many assertions
+under one exit code; every check script now reports per-flag verdicts, with unimplemented flags
+failing rather than passing by omission.
 
 *Revision 5 → 6* (roundtable run `…_1784826546_53`, 5 architect blocking + 5 suggestions; two further
 "blocking" entries were seat failures returning malformed verdicts, not findings): `capability_absent`
