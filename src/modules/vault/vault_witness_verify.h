@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "vault_witness_checkpoint.h"
+#include "vault_witness_merkle.h"
 #include "vault_witness_record.h"
 
 /* P7-witness-e2: offline verification over emitted bytes only.
@@ -44,6 +45,17 @@ typedef enum
  * catches a locally inconsistent tampering of the emitted stream. */
 vault_witness_chain_result_t vault_witness_verify_chain(const vault_witness_record_t *records,
                                                         size_t n, size_t *break_index);
+
+/* Verify that a shard's head is included under a signed checkpoint root. The
+ * consumer supplies the shard IDENTITY (tenant, provider, sequence, head_hash) and
+ * an inclusion proof; this recomputes the SMT key and leaf hash FROM the identity
+ * — never trusting a caller-supplied key/leaf — and checks the proof against
+ * `root`. That binding is what stops an attacker presenting one shard's leaf at
+ * another's position. Returns 1 if included, 0 otherwise (including bad input). */
+int vault_witness_verify_inclusion(const char *tenant, const char *provider, uint64_t sequence,
+                                   const uint8_t head_hash[32],
+                                   const uint8_t proof[VAULT_WITNESS_SMT_DEPTH][32],
+                                   const uint8_t root[32]);
 
 /* Continuity over a run of checkpoints the consumer holds, each already verified
  * for signature. Returns the strongest verdict that holds across the run:

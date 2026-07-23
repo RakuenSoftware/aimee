@@ -67,6 +67,22 @@ vault_witness_chain_result_t vault_witness_verify_chain(const vault_witness_reco
    return VAULT_WITNESS_CHAIN_OK;
 }
 
+int vault_witness_verify_inclusion(const char *tenant, const char *provider, uint64_t sequence,
+                                   const uint8_t head_hash[32],
+                                   const uint8_t proof[VAULT_WITNESS_SMT_DEPTH][32],
+                                   const uint8_t root[32])
+{
+   if (!tenant || !provider || !head_hash || !proof || !root)
+      return 0;
+   uint8_t key[8], leaf[32];
+   /* Recompute both the position key and the leaf commitment from the identity,
+    * so a caller cannot substitute one shard's leaf at another's position. */
+   if (vault_witness_shard_key_hash(tenant, provider, key) != 0 ||
+       vault_witness_leaf_hash(tenant, provider, sequence, head_hash, leaf) != 0)
+      return 0;
+   return vault_witness_merkle_verify(key, leaf, proof, root);
+}
+
 vault_witness_continuity_t vault_witness_verify_checkpoint_run(
     const vault_witness_checkpoint_t *checkpoints, size_t n, size_t *gap_after_index)
 {

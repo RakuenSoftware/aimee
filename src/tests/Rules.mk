@@ -3712,7 +3712,8 @@ $(TESTPREFIX)/unit-test-vault-witness-export: $(OBJDIR)/tests/test_vault_witness
 $(TESTPREFIX)/unit-test-vault-witness-verify: $(OBJDIR)/tests/test_vault_witness_verify.o \
                               $(OBJDIR)/modules/vault/vault_witness_verify.o \
                               $(OBJDIR)/modules/vault/vault_witness_record.o \
-                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-mutation-budget: \

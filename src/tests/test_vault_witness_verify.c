@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "modules/vault/vault_witness_checkpoint.h"
+#include "modules/vault/vault_witness_merkle.h"
 #include "modules/vault/vault_witness_record.h"
 
 /* Build a correctly linked run of `n` records for shard (tenant,provider), each
@@ -176,6 +177,60 @@ static void test_checkpoint_run_single(void)
    assert(vault_witness_verify_checkpoint_run(cps, 1, NULL) == VAULT_WITNESS_CONTINUITY_OK);
 }
 
+/* Build a real SMT over a few shard identities, then prove one is included and a
+ * tampered head is not. This exercises the identity->key/leaf recomputation. */
+static void test_inclusion(void)
+{
+   struct
+   {
+      const char *tenant, *provider;
+      uint64_t seq;
+      uint8_t head[32];
+   } shards[3] = {{"!kb", "!audit", 12, {0}}, {"!kb", "!reseal", 4, {0}}, {"!kb", "!open", 7, {0}}};
+   for (int i = 0; i < 3; i++)
+      memset(shards[i].head, 0x11 * (i + 1), 32);
+
+   vault_witness_leaf_t leaves[3];
+   for (int i = 0; i < 3; i++)
+   {
+      assert(vault_witness_shard_key_hash(shards[i].tenant, shards[i].provider, leaves[i].key) == 0);
+      assert(vault_witness_leaf_hash(shards[i].tenant, shards[i].provider, shards[i].seq,
+                                     shards[i].head, leaves[i].hash) == 0);
+   }
+   /* sort leaves by key for the SMT contract */
+   for (int a = 0; a < 3; a++)
+      for (int b = a + 1; b < 3; b++)
+         if (memcmp(leaves[a].key, leaves[b].key, 8) > 0)
+         {
+            vault_witness_leaf_t t = leaves[a];
+            leaves[a] = leaves[b];
+            leaves[b] = t;
+         }
+   uint8_t root[32];
+   assert(vault_witness_merkle_root(leaves, 3, root) == 0);
+
+   /* Prove the audit shard's inclusion. Find its index post-sort. */
+   uint8_t akey[8], aleaf[32];
+   assert(vault_witness_shard_key_hash("!kb", "!audit", akey) == 0);
+   assert(vault_witness_leaf_hash("!kb", "!audit", 12, shards[0].head, aleaf) == 0);
+   size_t idx = 4;
+   for (size_t i = 0; i < 3; i++)
+      if (memcmp(leaves[i].key, akey, 8) == 0)
+         idx = i;
+   assert(idx < 3);
+   uint8_t proof[VAULT_WITNESS_SMT_DEPTH][32];
+   assert(vault_witness_merkle_proof(leaves, 3, idx, proof) == 0);
+
+   assert(vault_witness_verify_inclusion("!kb", "!audit", 12, shards[0].head, proof, root) == 1);
+   /* A tampered head at the same position must not verify. */
+   uint8_t bad_head[32];
+   memcpy(bad_head, shards[0].head, 32);
+   bad_head[0] ^= 0xFF;
+   assert(vault_witness_verify_inclusion("!kb", "!audit", 12, bad_head, proof, root) == 0);
+   /* A different shard identity with the same proof must not verify. */
+   assert(vault_witness_verify_inclusion("!kb", "!open", 12, shards[0].head, proof, root) == 0);
+}
+
 int main(void)
 {
    test_chain_ok();
@@ -187,6 +242,7 @@ int main(void)
    test_checkpoint_run_ok();
    test_checkpoint_run_gap_unproven();
    test_checkpoint_run_single();
+   test_inclusion();
    printf("test_vault_witness_verify: all passed\n");
    return 0;
 }
