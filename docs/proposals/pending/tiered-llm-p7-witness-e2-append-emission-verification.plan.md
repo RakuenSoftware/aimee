@@ -282,7 +282,60 @@ alone with no database access; a single flipped byte is detected; a second run w
 nothing new appended is a no-op and a subsequent append emits exactly one record.
 The offline core is clean under ASAN+UBSAN with leak detection.
 
+### Findings from the emission review (job 11477 roundtable)
+
+Two were real defects, found and fixed:
+
+- **False tamper alarm on re-emission.** The offline verifier deduped records but
+  not checkpoints, while a comment claimed otherwise. A byte-identical re-emitted
+  checkpoint — which this emitter itself produces after a snapshot sink failure, and
+  which a reset cursor produces for the entire run — was reported
+  `CONTINUITY_BROKEN` with `any_tamper=1`, because the duplicate's
+  `has_predecessor` is false in mid-run position. A healthy system retrying would
+  have raised a hard tampering alarm. Checkpoints are now collapsed exactly as
+  records are, and same-seq-different-checkpoint is reported as a fork. Reproduced
+  before fixing.
+- **The cursor could suppress emission.** Monotonicity alone did not prevent an
+  advance far past the head, which would make the emitter skip all existing and
+  future evidence while every gauge read healthy. Advances past the real stream head
+  are now rejected (`P7W06`).
+
+One assurance gap, closed: nothing checked that a snapshot's **leaves rebuild the
+checkpoint's root**. Digest equality only proves the bytes are the ones signed; a
+checkpoint whose root and snapshot digest did not correspond would have passed, and
+the cross-gap comparison would have rested on a snapshot that describes a different
+tree. The verifier now rebuilds the SMT root from the snapshot and requires equality
+with the signed root, and the PG gate confirms the producer's stored format and the
+verifier's parser agree.
+
+Hardening: the offline core is clean under ASAN+UBSAN with leak detection; 20k
+random streams and 60k bit-flip mutations of a valid stream produce no crash and
+zero cases where a mutated stream verified as clean.
+
 ## 4. Continuous verification
+
+**Status: built.** Two complementary halves, because a store can pass one and fail
+the other:
+
+- *Chain verification is continuous by construction.* The checkpoint producer's leaf
+  scan calls `org_vault_witness_verify_shard` on every shard every tick, so a shard
+  head that diverges from its evidence log raises `head_log_mismatch` and refuses to
+  sign — verified on PG17, including that the producer refuses rather than
+  certifying a divergent shard.
+- *Signed-root verification* (`db2_witness_checkpoint_verify_run`, every 300s over a
+  bounded window) reconstructs retained checkpoints from stored columns, verifies
+  each signature against the current witness key, and checks predecessor continuity.
+  "Could not run" is logged as unverified rather than passing silently, and
+  `continuity_unproven` is surfaced as an operator work item — neither clean nor a
+  tampering claim.
+
+Boot fail-closed is built and extends beyond the original wording: a key-holding kb
+now also refuses to start when any retained checkpoint names a `signer_key_id` it
+cannot derive, and when the coverage check itself could not run. There is no
+historical-anchor file because nothing rotates the server KEK yet; when rotation
+lands it brings the anchor set and this check widens. **Validation-pending:** the
+refusal path needs an environment where live keys are allowed; CT103 has none, so
+the test reports that explicitly rather than claiming a pass it never exercised.
 
 A background verifier walks the evidence log and checks: witness predecessor
 linkage per shard, the genesis sentinel on first-in-shard records only, source
