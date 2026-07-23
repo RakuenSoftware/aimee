@@ -9,6 +9,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/audit/audit_action.c",
     "src/modules/audit/audit_ledger.c",
