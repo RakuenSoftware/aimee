@@ -25,6 +25,22 @@
 #        passing silently, because a skipped check must never read as coverage.
 set -euo pipefail
 
+# The artefact layer is the only one that can see a link edge the build text
+# hides, so "it did not run" must not read as "it found nothing". By default,
+# inspecting zero shipping binaries is a failure. --allow-unbuilt exists for
+# local iteration on a fresh checkout, where there is genuinely nothing to
+# inspect yet; CI and `make lint` use the strict default.
+allow_unbuilt=0
+for arg in "$@"; do
+   case "$arg" in
+   --allow-unbuilt) allow_unbuilt=1 ;;
+   *)
+      printf 'unknown option: %s\n' "$arg" >&2
+      exit 2
+      ;;
+   esac
+done
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
@@ -39,7 +55,16 @@ note() { printf '%s\n' "$*" >&2; }
 # Every grep feeding this is wrapped in `|| true`: under `set -o pipefail` a
 # grep that simply found nothing would otherwise take down the whole script,
 # turning "clean" into an error.
-strip_comments() { grep -vE '^[0-9]+:[[:space:]]*#' || true; }
+# Drop whole-line comments, then cut any trailing comment off the rest, so an
+# inline `# ... modules/bus ...` explaining the boundary does not read as a
+# build reference. Deliberately lexical and deliberately limited:
+#
+#   NOT covered — a reference assembled across a line continuation, or hidden
+#   behind a variable a shipping target expands later. Layer 4 is what catches
+#   those, which is why layer 4 must actually run.
+strip_comments() {
+   grep -vE '^[0-9]+:[[:space:]]*#' | sed 's/[[:space:]]#.*$//' || true
+}
 
 # ------------------------------------------------------- 1. make build graph
 # src/Makefile builds every shipping binary. The bus belongs to no shipping
@@ -192,8 +217,22 @@ fi
 # Report what actually ran. A skipped layer must never read as coverage, so the
 # artefact count is stated rather than implied — but its absence is not itself a
 # failure, because a fresh checkout has no build and lint must still run there.
+if [ "$checked" -eq 0 ]; then
+   if [ "$allow_unbuilt" -eq 0 ]; then
+      note "FAIL: the artefact layer inspected no shipping binaries ($missing not built)."
+      note ""
+      note "Layers 1-3 reason about the build text; only this one reasons about the"
+      note "compiled result, and it is the only layer that can catch a link edge the"
+      note "text hides. A run in which it inspected nothing has not established D7."
+      note "Build first, or pass --allow-unbuilt for local iteration."
+      exit 1
+   fi
+   echo "check_bus_blast_radius: build graph clean; artefact layer SKIPPED ($missing not built, --allow-unbuilt)"
+   exit 0
+fi
+
 if [ "$missing" -gt 0 ]; then
-   echo "check_bus_blast_radius: ok — build graph clean; $checked binary(s) inspected, $missing not built (artefact layer partial)"
+   echo "check_bus_blast_radius: ok — build graph clean; $checked binary(s) carry no bus symbol, $missing not built"
 else
    echo "check_bus_blast_radius: ok — build graph clean; all $checked shipping binary(s) carry no bus symbol"
 fi
