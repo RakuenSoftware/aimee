@@ -1317,9 +1317,10 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
-   /* Live transport rollout controls (transport.*). All default off so a new
-    * binary stays on the established one-shot, uncompressed wire behavior
-    * until an operator selects a measured canary cohort. */
+   /* Live transport controls (transport.*). The measured defaults enable KB
+    * pooling and resident-client keep-alive; either can be set false for the
+    * one-shot rollback path. gzip stays default-off until a link profile meets
+    * both the wire-reduction and latency promotion gates. */
    int transport_kb_pool_enabled;
    int transport_server_keepalive_enabled;
    int transport_thinclient_gzip_enabled;

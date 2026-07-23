@@ -581,6 +581,8 @@ ENV_DESC = {
     # Client & session
     "AIMEE_SERVER_URL": ("Client & session", "aimee-server endpoint the thin client connects to (UDS path or `tcp:host:port`)."),
     "AIMEE_SERVER_TOKEN": ("Client & session", "Bearer token presented to aimee-server over TCP."),
+    "AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED": ("Client & session", "Resident HTTPS connection reuse. Defaults on; set to 0 to restore one request per connection."),
+    "AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED": ("Client & session", "Negotiated gzip for eligible buffered thin-client routes. Defaults off; set to 1 only for a measured remote link profile."),
     "AIMEE_API_ENDPOINT": ("Client & session", "Override the `/v1` API endpoint used by the client RPC layer."),
     "AIMEE_API_BEARER": ("Client & session", "Bearer token for the `/v1` API endpoint."),
     "AIMEE_SESSION_ID": ("Client & session", "Pre-set the session id (enables non-blocking session attach)."),
@@ -637,6 +639,7 @@ ENV_DESC = {
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
     "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
     "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),

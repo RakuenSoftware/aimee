@@ -482,13 +482,14 @@ not altered query semantics, caused the improvement.
 
 ## P7 — Canary rollout and automatic rollback
 
-The development sequence below is not itself a rollout. P2 and P3 therefore ship
-behind independent, live-reloadable settings, initially off:
+P2 and P3 ship behind independent, live-reloadable settings. After the
+2026-07-22 three-node validation, the two connection-reuse settings default on;
+the compression settings remain off:
 
-- `transport.kb_pool_enabled`;
-- `transport.server_keepalive_enabled`;
-- `transport.thinclient_gzip_enabled`;
-- `transport.kb_gzip_enabled`.
+- `transport.kb_pool_enabled=true`;
+- `transport.server_keepalive_enabled=true`;
+- `transport.thinclient_gzip_enabled=false`;
+- `transport.kb_gzip_enabled=false`.
 
 Each feature advances through: CI/impairment harness → one explicitly selected
 server↔kb pair → 10% of enrolled server identities → 50% → 100%. Thin-client gzip
