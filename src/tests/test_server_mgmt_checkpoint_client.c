@@ -164,6 +164,10 @@ int main(void)
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                      7, staple_digest) == SERVER_MGMT_CHECKPOINT_OK);
    uint64_t hwm = 0; assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 7);
+   /* A highest-seen generation is a floor, not a single-use value. Multiple
+    * independently authorized actions at the same generation remain valid. */
+   assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
+                                                     7, staple_digest) == SERVER_MGMT_CHECKPOINT_OK);
    fake.revoked = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                      7, staple_digest) == SERVER_MGMT_CHECKPOINT_DENIED);
@@ -205,7 +209,7 @@ int main(void)
    fake.generation_delta = -1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                      6, staple_digest) == SERVER_MGMT_CHECKPOINT_DENIED);
-   assert(fake.calls == 14);
+   assert(fake.calls == 15);
    assert(server_mgmt_status_hwm_advance(9) == 0);
    assert(server_mgmt_status_hwm_advance(8) == -1);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 9);
