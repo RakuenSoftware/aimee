@@ -16,6 +16,18 @@ The current C contract is principally `src/headers/memory.h`, with platform seam
 search, `memory_assemble`, and `gw_stage_memory` are one required capability family even though their
 physical paths have not all reached the module directory.
 
+The descriptor declares this module's thirty-two sources, twelve module-root headers, sixteen direct
+tests, and this document; it does not yet set `ownership_complete`. All twelve headers are declared as
+`private_headers` because they live at the module root rather than under
+`src/modules/memory/include/aimee/memory/`, the layout the header-layout checker treats as private;
+five carry no paired source (`memory_assemble_util.h`, `memory_core_internal.h`, `memory_ontology.h`,
+`memory_platform.h`, `memory_rewrite_llm.h`), the highest unpaired count in the module graph. Make
+compiles all thirty-two sources; CMake compiles nineteen, omitting the memory-core CRUD, search, tiers
+and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage — the
+server/kb-side units — the same intentional thin-client boundary recorded for the earlier modules.
+`docs/validation/core-modularization-slice-56.md` records the audit; latching follows in a separate
+slice so the completeness audit does not review declarations authored in the same change.
+
 ## Dependencies and consumers
 
 - `config`: supplies embedding, reranking, recall, retention, and safety policy used by memory paths.
@@ -70,9 +82,20 @@ blast-radius analysis participate in the same required memory journey.
 
 ## Tests and failure behavior
 
-Focused coverage includes `test_memory.c`, `test_memory_retrieval_eval.c`,
-`test_memory_embed_dim_guard.c`, `test_memory_ranker_boundary.c`, `test_gw_stage_memory.c`, and the code
-curator/index tests. Provider, database, dimension, and corruption failures must surface as degraded or
+The descriptor's sixteen direct tests are `test_memory.c`, `test_memory_advanced.c`,
+`test_memory_assemble_util.c`, `test_memory_embed_dim_guard.c`, `test_memory_fact_gate.c`,
+`test_memory_filter.c`, `test_memory_health.c`, `test_memory_lanes.c`, `test_memory_profiles.c`,
+`test_memory_provider.c`, `test_memory_ranker_boundary.c`, `test_memory_recall_pivot.c`,
+`test_memory_redirect.c`, `test_memory_retrieval_eval.c`, `test_gw_stage_memory.c`, and
+`test_workspace_memory.c` — the last claimed here because its subject `memory_auto_tag_workspace` is
+defined in `memory_core.c`, which is why slice 44 excluded it from workspace.
+
+The `memory` name collides in two directions, so a `*memory*` filename is not an ownership signal.
+DB1 owns a separate working-memory store (`src/db1/wm.c`, tested by `test_working_memory.c`), and the
+root-level `src/harness_memory_*.c` files implement the memory-interception harness (tested by the four
+`test_harness_memory*.c` files). Neither is claimed here, nor is `test_kb_client_memory.c` (a kb_client
+test) or `test_server_memory_benchmark.c` (a server test). Together with the code curator/index tests
+they cover current behavior. Provider, database, dimension, and corruption failures must surface as degraded or
 failed readiness; an empty recall is a valid no-op, while silently bypassing required ranking is not.
 
 ## Operational diagnostics

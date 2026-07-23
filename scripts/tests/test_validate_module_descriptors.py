@@ -222,8 +222,19 @@ class DescriptorTests(unittest.TestCase):
             runtime["ownership"]["docs"],
             [{"path": "docs/modules/module-runtime.md", "result": "PASS"}],
         )
-        memory = next(item for item in descriptors if item["id"] == "memory")
-        self.assertEqual(memory["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS})
+        # An undeclared descriptor still reports every ownership role as empty. Derived from
+        # the graph rather than naming one module, so completing a module's declaration does
+        # not stale this fixture the way declaring `memory` did.
+        undeclared = [
+            item for item in descriptors
+            if not any(item["ownership"][field] for field in validator.OWNERSHIP_FIELDS)
+        ]
+        self.assertTrue(undeclared, "expected at least one descriptor with no declared ownership")
+        for item in undeclared:
+            with self.subTest(identifier=item["id"]):
+                self.assertEqual(
+                    item["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS}
+                )
 
     def test_ownership_report_sorts_descriptors_independent_of_root_order(self) -> None:
         root = Path("tests/fixtures/modules/positive")
