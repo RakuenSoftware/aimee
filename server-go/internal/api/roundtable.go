@@ -14,7 +14,10 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request roundtable.ReviewRequest
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
+	// A 16 MiB text artifact can expand substantially when JSON-escaped. Bound
+	// the wire representation without truncating it; Review applies the smaller
+	// semantic artifact limit after decoding.
+	r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
 	decoder := jsonDecoder(r.Body)
 	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, err)

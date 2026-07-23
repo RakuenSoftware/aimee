@@ -92,6 +92,35 @@ func TestHealthIdentifiesGoImplementation(t *testing.T) {
 	}
 }
 
+func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
+	server, store, _ := newTestServer(t)
+	ctx := context.Background()
+	for _, in := range []db1.CreateWorkItem{
+		{ID: "wi_api_stop", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_api_stop.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_api_stop"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cancelled := make(map[string]bool)
+	server.SetSchedulerCancel(func(id string) { cancelled[id] = true })
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/workflow/items/wi_api_stop/stop", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, id := range []string{"wi_api_stop", "wi_api_stop.child"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" {
+			t.Fatalf("%s item=%+v err=%v", id, item, err)
+		}
+		if !cancelled[id] {
+			t.Fatalf("scheduler did not cancel %s", id)
+		}
+	}
+}
+
 func TestBearerAuthentication(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	handler := RequireBearer(server, "secret-token")

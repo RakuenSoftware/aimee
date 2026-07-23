@@ -323,6 +323,76 @@ func TestHTTPAgentClientCancelsDelegateResourceAndForgetsAcknowledgedJob(t *test
 	}
 }
 
+func TestCancelTerminalJobsRecoversCommitToCancelCrashWindow(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+	store, err := db1.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const workItemID = "wi_crash_recovery"
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", WorkItemID: workItemID, Stage: "impl", ExecutionVersion: "v1"}
+	key := delegateJobKey(request)
+	if err := store.SaveWorkflowDelegateJob(t.Context(), key, workItemID, 77, "participant-77"); err != nil {
+		t.Fatal(err)
+	}
+	const completedID = "wi_completed_mapping"
+	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: completedID, Repo: "repo", ProposalPath: completedID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+		t.Fatal(err)
+	}
+	completedKey := completedID + ":impl:v1:hash"
+	if err := store.SaveWorkflowDelegateJob(t.Context(), completedKey, completedID, 78, "participant-78"); err != nil {
+		t.Fatal(err)
+	}
+	rawDB, err := sql.Open("sqlite", "file:"+dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawDB.Close()
+	if _, err := rawDB.ExecContext(t.Context(), `CREATE TABLE IF NOT EXISTS agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL); INSERT INTO agent_jobs(id,status) VALUES(77,'running'),(78,'done')`); err != nil {
+		t.Fatal(err)
+	}
+	// Model a server failure immediately after the terminal lifecycle commit:
+	// the durable delegate mapping remains and no in-memory cancel callback ran.
+	if _, err := store.StopTree(t.Context(), workItemID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.StopTree(t.Context(), completedID); err != nil {
+		t.Fatal(err)
+	}
+	var cancelledJob atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/jobs/cancel" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			JobID int `json:"job_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		cancelledJob.Store(int32(body.JobID))
+		_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": true})
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := client.CancelTerminalJobs(t.Context())
+	if err != nil || cancelled != 1 || cancelledJob.Load() != 77 {
+		t.Fatalf("cancelled=%d job=%d err=%v", cancelled, cancelledJob.Load(), err)
+	}
+	if _, _, err := store.DelegateJob(t.Context(), key); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("acknowledged terminal mapping retained: %v", err)
+	}
+	if jobID, _, err := store.DelegateJob(t.Context(), completedKey); err != nil || jobID != 78 {
+		t.Fatalf("completed mapping was incorrectly cancelled: job=%d err=%v", jobID, err)
+	}
+}
+
 func TestCancelRemoteRetainsMappingWithoutBooleanAcknowledgement(t *testing.T) {
 	tests := []struct {
 		name, response string

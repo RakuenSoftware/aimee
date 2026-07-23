@@ -94,6 +94,7 @@ func main() {
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 	var runner engine.Runner
+	var agentClient *engine.HTTPAgentClient
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
 		runner, err = engine.NewHTTPRunner(engine.HTTPRunnerConfig{
@@ -113,6 +114,7 @@ func main() {
 		if clientErr != nil {
 			log.Fatal(clientErr)
 		}
+		agentClient = agents
 		worktrees, worktreeErr := engine.NewWorktreeManager(store, filepath.Join(*home, "wfe-worktrees"))
 		if worktreeErr != nil {
 			log.Fatal(worktreeErr)
@@ -149,6 +151,9 @@ func main() {
 			log.Fatal(err)
 		}
 		scheduler := engine.NewScheduler(store, workflowEngine, *concurrency, nil)
+		if agentClient != nil {
+			scheduler.SetTerminalCancellation(agentClient.CancelTerminalJobs)
+		}
 		var liveMu sync.Mutex
 		lastConcurrency := *concurrency
 		lastPolicy := engine.RunPolicy{MaxTurns: 300, MaxWall: 1800 * time.Second, AutoResumeWall: true, MaxResumes: 50}

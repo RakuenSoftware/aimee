@@ -2,10 +2,23 @@ package engine
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 )
+
+func TestRoundtableReviewRejectsOversizedArtifact(t *testing.T) {
+	runner := &NativeRunner{agents: &recordingAgents{}}
+	_, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
+		Artifact: strings.Repeat("x", (16<<20)+1),
+	})
+	var validation roundtablecfg.ValidationError
+	if !errors.As(err, &validation) || !strings.Contains(err.Error(), "16 MiB") {
+		t.Fatalf("err=%v", err)
+	}
+}
 
 func TestSharedRoundtableReviewUsesGoEngine(t *testing.T) {
 	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}

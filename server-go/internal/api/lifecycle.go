@@ -101,12 +101,15 @@ func (s *Server) workflowResume(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) workflowStop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := s.db.Stop(r.Context(), id); err != nil {
+	ids, err := s.db.StopTree(r.Context(), id)
+	if err != nil {
 		writeError(w, http.StatusConflict, err)
 		return
 	}
 	if s.cancel != nil {
-		s.cancel(id)
+		for _, descendant := range ids {
+			s.cancel(descendant)
+		}
 	}
 	s.writeItem(w, r)
 }

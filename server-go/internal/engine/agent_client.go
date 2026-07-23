@@ -41,6 +41,9 @@ type DelegateRequest struct {
 	// must evaluate. It is carried structurally so runner collaborators and test
 	// doubles never need to recover authority from prompt prose.
 	ArtifactStage string
+	// ArtifactHash is the authoritative inline artifact identity for review
+	// phases. It remains Go-local; the prompt carries the value to the delegate.
+	ArtifactHash string
 	// ProvidedTarget tells the resource-plane transport that Prompt already
 	// contains the complete artifact under review. It suppresses unrelated
 	// worktree-diff evidence. Only true emits the strict JSON boolean opt-in;
@@ -247,7 +250,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			return DelegateResult{}, fmt.Errorf("%w: %s", ErrDelegateNoJobID, detail)
 		}
 		if c.store != nil && request.WorkItemID != "" {
-			if err := c.store.SaveDelegateJob(ctx, key, launched.JobID, launched.Participant); err != nil {
+			if err := c.store.SaveWorkflowDelegateJob(ctx, key, request.WorkItemID, launched.JobID, launched.Participant); err != nil {
 				return DelegateResult{}, err
 			}
 		}
@@ -349,6 +352,29 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		case <-ticker.C:
 		}
 	}
+}
+
+// CancelTerminalJobs closes the durable commit-to-cancel crash window. A
+// mapping is removed only after the resource plane acknowledges cancellation;
+// failures remain mapped and are retried by the next scheduler fill.
+func (c *HTTPAgentClient) CancelTerminalJobs(ctx context.Context) (int, error) {
+	if c.store == nil {
+		return 0, nil
+	}
+	mappings, err := c.store.TerminalDelegateJobs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	cancelled := 0
+	var errs []error
+	for _, mapping := range mappings {
+		if err := c.cancelRemoteAndForget(mapping.JobID, mapping.ExecutionKey, ctx); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		cancelled++
+	}
+	return cancelled, errors.Join(errs...)
 }
 
 func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {

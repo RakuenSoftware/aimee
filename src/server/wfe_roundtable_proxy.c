@@ -227,7 +227,8 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    cJSON *prompt = cJSON_GetObjectItemCaseSensitive(request, "prompt");
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(request, "brief");
    cJSON *preset = cJSON_GetObjectItemCaseSensitive(request, "roundtable");
-   cJSON *run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
+   cJSON *requested_run_id = cJSON_GetObjectItemCaseSensitive(request, "run_id");
+   cJSON *transport_run_id = cJSON_GetObjectItemCaseSensitive(request, "__run_id");
    cJSON *original = cJSON_GetObjectItemCaseSensitive(request, "original_request");
    cJSON *stage = cJSON_GetObjectItemCaseSensitive(request, "artifact_stage");
    cJSON *requested_workdir = cJSON_GetObjectItemCaseSensitive(request, "workdir");
@@ -257,8 +258,12 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
    }
    if (cJSON_IsString(preset))
       cJSON_AddStringToObject(payload, "roundtable", preset->valuestring);
-   if (cJSON_IsString(run_id))
-      cJSON_AddStringToObject(payload, "run_id", run_id->valuestring);
+   /* __run_id owns the asynchronous transport job. A caller-supplied run_id is
+    * the review identity and must survive that transport wrapper unchanged. */
+   if (cJSON_IsString(requested_run_id) && requested_run_id->valuestring[0])
+      cJSON_AddStringToObject(payload, "run_id", requested_run_id->valuestring);
+   else if (cJSON_IsString(transport_run_id))
+      cJSON_AddStringToObject(payload, "run_id", transport_run_id->valuestring);
    const char *cwd =
        cJSON_IsString(requested_workdir) ? requested_workdir->valuestring : run_cmd_get_cwd();
    if (cwd && cwd[0])
