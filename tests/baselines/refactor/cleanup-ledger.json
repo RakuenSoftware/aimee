@@ -622,6 +622,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven workspace rows.",
       "independent_review": "The slice-decision roundtable confirmed all three scoping decisions: exclude test_workspace_memory.c as a memory test, treat the three internal-only sources as live module-owned, and document the seven-source CMake omission as an intentional thin-client boundary. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-44.md", "docs/modules/workspace.md", "src/modules/workspace/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
+    },
+    {
+      "slice": 45,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the workspace descriptor against the declarations slice 44 authored and reviewed on their own, the latch half of the pair for the third and largest Class B module, and exercised the sources and private_headers set-equality checks against an eleven-element declared set, the largest in the program.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The latch asserts the descriptor covers the module root as it stands, eleven sources and eleven module-root headers, not that the compatibility worktree declarations in guardrails.h or adjacent workspace-touching code outside the module root have been moved in", "CMake compiles four of the eleven sources and omits seven server/runner-side units, the same intentional thin-client boundary recorded for gateway, audit, and learning", "workspace_runner_queue.c is reachable in production through workspace_runner_registry.h, which includes workspace_runner_queue.h and has external callers in the runner and serve paths"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining six Class B modules follow the same declaration-then-latch pair; a separate header-layout slice may relocate workspace headers under a canonical include tree."
+      },
+      "consumers": ["descriptor-envelope and module-inventory CI", "the remaining Class B declaration and latch slices", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains workspace-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on an eleven-element declared source and private-header set.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 44 and carried the runner-queue wiring evidence forward to this slice; this slice adds only the completeness assertion and that evidence. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-45.md", "docs/modules/workspace.md", "src/modules/workspace/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }

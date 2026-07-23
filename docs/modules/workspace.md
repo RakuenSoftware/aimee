@@ -16,7 +16,7 @@ worktree creation at line 1175, manifests and handles,
 compatibility/ownership seam to consolidate, not a second workspace implementation.
 
 The descriptor declares this module's eleven sources, eleven module-root headers, eleven direct
-tests, and this document; it does not yet set `ownership_complete`. All eleven headers are declared as
+tests, and this document; it sets `ownership_complete: true`. All eleven headers are declared as
 `private_headers` because they live at the module root rather than under
 `src/modules/workspace/include/aimee/workspace/`, the layout the header-layout checker treats as
 private; `workspace_provider.h` is the provider dispatch interface and has no paired source, while
@@ -28,8 +28,9 @@ consumed through `workspace_runner_registry.h`. Make compiles all eleven sources
 four the thin `aimee` client reaches (`cli_workspace_serve.c`, `workspace.c`, `workspace_manifest.c`,
 `workspace_provider_detached.c`) and omits the seven server/runner-side units, the same intentional
 thin-client boundary recorded for gateway and learning. `docs/validation/core-modularization-slice-44.md`
-records the audit; latching follows in a separate slice so the completeness audit does not review
-declarations authored in the same change.
+records the declaration audit and `docs/validation/core-modularization-slice-45.md` the completeness
+audit; the two were split so the latch reviews declarations merged on their own first. Adding a new
+module-local source or module-root header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 
