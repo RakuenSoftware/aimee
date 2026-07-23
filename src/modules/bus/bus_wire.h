@@ -1,0 +1,117 @@
+/* bus_wire.h: the event-bus frame encoding.
+ *
+ * This is the wire contract from docs/proposals/pending/event-bus-wire-spec.md,
+ * as decided in docs/dev/EVENT_BUS_DECISIONS.md. It covers framing only: the
+ * per-kind payload schema belongs to the event-contract schema, and the region
+ * layout belongs to bus_region.
+ *
+ * Two properties this header is responsible for keeping true:
+ *
+ *   - The frame is fixed-size and self-describing. BUS_WIRE_HDR_LEN is frozen
+ *     by the golden vectors in src/tests/fixtures/bus/, not by this prose, and
+ *     the Go reference client is held to the same bytes.
+ *
+ *   - Nothing here depends on slot_size or inline_budget (D4). Those are
+ *     control-region parameters a client reads at attach; a producer uses them
+ *     to choose inline-vs-arena placement, but the resulting frame is identical
+ *     either way for the same choice. Re-tuning them never re-issues a vector.
+ */
+#ifndef AIMEE_BUS_WIRE_H
+#define AIMEE_BUS_WIRE_H 1
+
+#include <stddef.h>
+#include <stdint.h>
+
+/* "BUS0" little-endian. Frame sync; a decode that does not see this stops. */
+#define BUS_WIRE_MAGIC 0x30535542u
+
+/* Encoding version, negotiated at attach. Distinct from the region
+ * layout_version (D4): this answers "can I decode this frame", not "can I map
+ * this region". */
+#define BUS_WIRE_VERSION 1
+
+/* Frozen by the vectors. Every frame is exactly this many bytes. */
+#define BUS_WIRE_HDR_LEN 64
+
+/* An upper bound on a single event's payload, inline or arena. Bounds the
+ * capture record size (REC_MAX in D10) and stops a length field from
+ * describing a payload no allocator would serve. */
+#define BUS_WIRE_MAX_PAYLOAD (1u << 20)
+
+/* hdr_flags. Placement and pattern are separate axes; both are validated. */
+#define BUS_F_INLINE       0x0001u /* payload_ref is an in-slot offset */
+#define BUS_F_ARENA        0x0002u /* payload_ref is an arena offset */
+#define BUS_F_NOTIFICATION 0x0004u /* one-way; correlation_id is 0 */
+#define BUS_F_REQUEST      0x0008u /* correlated; expects a reply */
+#define BUS_F_REPLY        0x0010u /* correlated; answers a request */
+#define BUS_F_CANCEL       0x0020u /* correlated; cancels an outstanding request */
+#define BUS_F_CONTROL      0x0040u /* control-class (D6): never shed, reserved credit */
+
+#define BUS_F_PLACEMENT_MASK (BUS_F_INLINE | BUS_F_ARENA)
+#define BUS_F_PATTERN_MASK                                                                         \
+   (BUS_F_NOTIFICATION | BUS_F_REQUEST | BUS_F_REPLY | BUS_F_CANCEL)
+#define BUS_F_KNOWN_MASK (BUS_F_PLACEMENT_MASK | BUS_F_PATTERN_MASK | BUS_F_CONTROL)
+
+/* Reserved event kinds. Kinds below BUS_KIND_MODULE_BASE are the bus's own;
+ * the event-contract schema allocates everything at or above it. Keeping the
+ * bus's own traffic in the same frame shape is deliberate: an overflow notice
+ * is an ordinary seq-stamped event (D6), not a side channel. */
+#define BUS_KIND_ATTACH_REQUEST   1u
+#define BUS_KIND_ATTACH_REPLY     2u
+#define BUS_KIND_ERROR            3u
+#define BUS_KIND_CAPABILITY_ABSENT 4u
+#define BUS_KIND_OVERFLOW         5u
+#define BUS_KIND_PRODUCER_REAPED  6u
+#define BUS_KIND_EPOCH_CHANGE     7u
+#define BUS_KIND_MODULE_BASE      256u
+
+/* Decoded frame. Field order here follows the wire layout so the two read
+ * together; the encoder writes explicit little-endian bytes, so this struct's
+ * in-memory layout is never itself the contract. */
+typedef struct
+{
+   uint16_t hdr_flags;
+   uint16_t wire_version;
+   uint32_t event_kind;
+   uint32_t principal_ref; /* attested principal, for the tap and policy */
+   uint64_t correlation_id;
+   uint64_t seq;         /* host-assigned; 0 until the host stamps it */
+   uint64_t logical_ts;  /* ordering across sources without wall-clock trust */
+   uint64_t payload_ref; /* in-slot or arena offset, per the placement flag */
+   uint32_t payload_len;
+   uint32_t src_handle; /* set by the client */
+   uint32_t dst_handle; /* set by the host on routing */
+} bus_frame_t;
+
+typedef enum
+{
+   BUS_WIRE_OK = 0,
+   BUS_WIRE_ERR_SHORT,       /* fewer than BUS_WIRE_HDR_LEN bytes available */
+   BUS_WIRE_ERR_MAGIC,       /* not a frame */
+   BUS_WIRE_ERR_VERSION,     /* wire_version this build cannot decode */
+   BUS_WIRE_ERR_FLAGS,       /* unknown bit set, or an impossible combination */
+   BUS_WIRE_ERR_PAYLOAD_LEN, /* over the bound, or disagrees with placement */
+   BUS_WIRE_ERR_CORRELATION, /* correlation_id contradicts the pattern flag */
+   BUS_WIRE_ERR_RESERVED,    /* a reserved field was not zero */
+   BUS_WIRE_RESULT_COUNT
+} bus_wire_result_t;
+
+/* Encode into out. Returns BUS_WIRE_HDR_LEN on success, 0 if outsz is too
+ * small or the frame would not survive a decode — the encoder validates the
+ * same rules the decoder enforces, so a round trip cannot produce a frame this
+ * process would then reject. */
+size_t bus_wire_encode(const bus_frame_t *f, uint8_t *out, size_t outsz);
+
+/* Decode from in. On BUS_WIRE_OK, *out holds the frame. On any error *out is
+ * untouched, so a caller cannot accidentally act on a partial decode. */
+bus_wire_result_t bus_wire_decode(const uint8_t *in, size_t insz, bus_frame_t *out);
+
+/* Validate a frame without encoding it. */
+bus_wire_result_t bus_wire_validate(const bus_frame_t *f);
+
+/* Stable name for a result, for logs, errors, and the conformance vectors.
+ * These strings are part of the cross-language contract: the Go client reports
+ * the same names, so a vector's expected result compares as a string. */
+const char *bus_wire_result_name(bus_wire_result_t r);
+
+#endif /* AIMEE_BUS_WIRE_H */
