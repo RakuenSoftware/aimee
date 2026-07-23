@@ -304,12 +304,13 @@ The exact mapping is:
 - HTTP 502, `integrity`, `Integrity verification failed.`
 - HTTP 503, `unavailable`, `Service unavailable.`
 
-Checks stop at the first failing protocol step in the fixed ten-step sequence above. Within one
-step, precedence is `invalid_request`, `forbidden`, `not_found`, `conflict`, `integrity`, then
-`unavailable`; no later check may replace the selected error. Cross-team and unauthorized callers
+Checks stop at the first failing protocol step in the fixed ten-step sequence above. Within a step,
+the executable sub-check order below is authoritative: an earlier result wins and no later check
+may replace it. Cross-team and unauthorized callers
 always receive `forbidden`, not target existence. A missing target is `not_found` only after actor
-authorization for that team. Cryptographic mismatch, replay, rollback, binding failure, or malformed
-authenticated upstream proof is `integrity`; dependency timeout/outage/capacity is `unavailable`.
+authorization for that team. Cryptographic mismatch, rollback, binding failure, or malformed
+authenticated upstream proof is `integrity`; an already-consumed nonce or JTI is `conflict`;
+dependency timeout/outage/capacity is `unavailable`.
 Never copy upstream response text or headers, parser detail, certificate/path/endpoint data, SQL
 detail, or internal identifiers.
 
@@ -327,8 +328,14 @@ The executable sub-check order and mapping is also closed:
    loss; `integrity` for readback mismatch; otherwise database failure is `unavailable`).
 5. Admit/finalize/read back the token (`conflict` for state/lease loss, `integrity` for claim/token
    mismatch, `unavailable` for authority/key/database outage).
-6. Verify status signature, purpose, nonce, identities, and generations (`integrity`), explicit
-   revocation (`forbidden`), then dispatch; transport/primary outage is `unavailable`.
+6. Parse enough of the bounded status envelope to identify a nonce; malformed/unidentifiable input
+   is `integrity`. For an identifiable nonce, atomically consume it on every attempt while passing
+   the complete signature/shape result into `consume_purpose`: already absent/consumed/expired is
+   `conflict`, binding/purpose/rollback or invalid proof is `integrity`, and storage failure is
+   `unavailable`. Only after a valid trusted proof may its explicit revoked state produce
+   `forbidden`; then compare remaining identities/generations (`integrity`) and dispatch. Thus an
+   invalid proof cannot assert revocation, while a valid signed revoked proof deterministically
+   yields `forbidden`.
 7. Verify token and all bindings (`integrity`), then consume JTI (`conflict` for replay,
    `unavailable` for storage/capacity).
 8. Load and project the frozen getter; any load, validation, count, or encoding failure is
@@ -338,10 +345,10 @@ The executable sub-check order and mapping is also closed:
 10. Write the already-complete success bytes once; a socket failure cannot be converted to a later
     public error and never restores nonce/JTI state.
 
-Within a parenthesized sub-check group, the earlier listed public category wins. Tests inject
-combined observable faults, including revoked certificate plus replica outage and namespace
-collision plus malformed readback, and assert this order rather than whichever dependency returns
-last.
+Tests inject combined observable faults, including a malformed proof carrying a revoked bit, a
+valid signed revoked proof with a later generation mismatch, revoked certificate plus replica
+outage, and namespace collision plus malformed readback, and assert the ordered result rather than
+whichever dependency returns last.
 
 ## Database isolation and failure semantics
 
