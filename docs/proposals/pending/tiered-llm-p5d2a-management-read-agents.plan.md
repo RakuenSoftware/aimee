@@ -72,10 +72,14 @@ server, selector (CHECK exactly `agents`), capability (CHECK exactly `remote_rea
 external method/path, the 32-byte challenge nonce, request digest, actual kb peer certificate
 issuer/serial, enrolled target certificate issuer/serial, revocation generation, token-publication
 generation, exact audience and issuer, and issuance deadline. Add the database-enforced shared
-`kb_management_token_intent_namespace` table with UNIQUE `correlation_id`, UNIQUE `jti`, and a
-kind CHECK of exactly `action` or `read`. In one transaction, the exact action/read creation
-function first inserts its namespace row and then the typed intent row with a composite foreign key
-to that namespace kind. Migrate existing action intents into the namespace and require every future
+`kb_management_token_intent_namespace` table with UNIQUE `correlation_id`, UNIQUE `jti`, UNIQUE
+`(correlation_id,jti,kind)`, and a kind CHECK of exactly `action` or `read`. Each typed intent has a
+constant kind column checked to exactly its type and an explicit foreign key on the complete
+`(correlation_id,jti,kind)` tuple. In one transaction, the exact action/read creation function uses
+`INSERT ... ON CONFLICT DO NOTHING` to reserve its namespace row, requires exactly one returned
+row, and then inserts the typed row. Zero returned rows or SQLSTATE `23505` maps only to the public
+`conflict` result; every other SQL error rolls the transaction back and maps to `unavailable`.
+Migrate existing action intents into the namespace and require every future
 action creation to reserve it too. No preflight query substitutes for the unique constraints;
 concurrent cross-kind inserts for either identifier yield exactly one reservation and one closed
 conflict. Authority admission joins exactly one namespace row to exactly one matching typed row and
@@ -90,7 +94,8 @@ JTI, correlation, digest, peer issuer/serial/fingerprint, kid and key generation
 Only these authority-definer transitions exist, guarded with locked rows and database time:
 
 - `pending -> signing` when `now < issuance_deadline`, recording a random lease owner and bounded
-  `lease_until`; `pending -> expired` when `now >= issuance_deadline` through the authority expiry
+  `lease_until`, with `now < lease_until <= issuance_deadline`; `pending -> expired` when
+  `now >= issuance_deadline` through the authority expiry
   function;
 - `signing -> signing` only as lease recovery when `lease_until <= now < issuance_deadline`, changing
   only lease metadata and preserving every claim; `signing -> expired` whenever
@@ -103,6 +108,12 @@ Only these authority-definer transitions exist, guarded with locked rows and dat
 expiry is enforced from its frozen `exp`. Authority admission invokes the expiration transition
 before any claim or signing readback. At the equality boundary (`now == issuance_deadline`) expiry
 wins and signing/finalization is forbidden.
+
+Every authority-definer call assigns `v_now := statement_timestamp()` once, locks the typed row
+with `SELECT ... FOR UPDATE`, and uses that same `v_now` for lease, issuance-deadline, and frozen
+`exp` comparisons through commit. Lease recovery, expiry, and finalization therefore serialize on
+the row lock; after waiting, each re-evaluates state and predicates against its one pinned time and
+cannot enter the equality boundary twice.
 
 After signing, one authority transaction atomically stores the exact bounded JWT bytes in the
 authority-owned row, stores their SHA-256, appends the WORM key-use record, and moves the row to
@@ -117,8 +128,9 @@ without weakening the new table's type separation.
 
 The request digest is SHA-256 over this exact length-prefixed binary encoding. It begins with the
 19 bytes `aimee-mgmt-read-v1\0`, followed in order by: external method `GET`, canonical external
-path formed by byte-concatenating `/v1/servers/`, the concrete validated `server_id`, and `/agents`
-(there are no literal braces), selector `agents`, server id, team as unsigned big-endian
+path first formed by byte-concatenating `/v1/servers/`, the concrete validated `server_id`, and
+`/agents` (there are no literal braces), then encoded as one length-prefixed string (the three
+substrings are not separately encoded), selector `agents`, server id, team as unsigned big-endian
 64-bit, the raw 32-byte nonce, kb peer certificate issuer, kb peer certificate serial, enrolled
 server certificate issuer, enrolled server certificate serial, revocation generation as unsigned
 big-endian 64-bit, and token-publication generation as unsigned big-endian 64-bit. Each string is
@@ -179,6 +191,13 @@ single-use. Receiving it confers no authorization and exposes no fleet data. Ent
 clock failure, malformed body, replay, expiry, session change, or capacity exhaustion fails closed
 with the bounded error schema below.
 
+The server generates the challenge `purpose` from a closed enum containing exactly
+`management.read.v1`; it accepts no caller-supplied purpose. The kb challenge parser requires the
+exact field set and exact purpose before constructing an intent. The signed status proof carries
+the same closed purpose and the server verifies it byte-for-byte; an unknown or action purpose is
+`integrity`. The JWT is purpose-separated by its exact `remote_reads` capability plus bound method,
+path, selector, nonce digest, and audience; do not add an advisory token-purpose field.
+
 The kb/server sequence is fixed:
 
 1. Authenticate the operator and obtain one primary target/actor/certificate snapshot.
@@ -200,6 +219,26 @@ server audience, enrolled certificate identity, revocation/status generation, pu
 generation, status proof, and checkpoint must all refer to the same request snapshot. The purpose
 is closed everywhere to `management.read.v1`; action-purpose artifacts cannot satisfy it.
 
+Step 7 reuses the existing server-local SQLite `server_management_jti` table and
+`server_management_jti_consume` transaction, extending its capability CHECK to the closed pair
+`remote_writes`/`remote_reads` without changing action rows. Its primary key on `jti`,
+`BEGIN IMMEDIATE`, bounded garbage collection, and insert-before-commit provide durable at-most-once
+consumption across threads and process restart. Replay/unique collision is `conflict`; invalid
+verified-claim material is `integrity`; database unavailable, busy, commit failure, or capacity is
+`unavailable`. No data loads before commit returns OK, and no later failure deletes the row.
+
+Status freshness is the existing B3 bound (proof issue/expiry fields and high-water generation),
+further limited by the 15-second read nonce; both must be valid at dispatch. All identity strings
+use the canonical issuer/serial rules above, fingerprints and digests use exact lowercase hex, and
+identifiers use exact ASCII bytes. Compare, in order: intent kb identity to live peer; intent
+snapshot to status peer/target/cert fingerprints and revocation/publication generations; stable
+registry server id to token audience; enrolled `mgmt_cert_cn`/identity to the pinned server peer;
+and status snapshot to the final checkpoint. Any byte/generation mismatch or rollback is
+`integrity`; explicit revoked/inactive state is `forbidden`; authority transport/primary outage is
+`unavailable`. The final checkpoint returns the current primary generation/snapshot and must equal
+the intent/status generation tuple. A rotation or generation bump between dispatch and checkpoint
+therefore emits `integrity` and zero response bytes.
+
 ## Bounded agents projection
 
 Load the authoritative local agent configuration through a dedicated read-only projector. A load
@@ -220,6 +259,12 @@ The precise lexical bounds are: `name` matches `[A-Za-z0-9._-]{1,63}`, `provider
 `0..1024`. Sort by unsigned ASCII bytes of `name`, independent of locale. Duplicate names,
 invalid UTF-8, wrong types, out-of-range values, or more than 16 agents fail the whole request.
 The completely encoded envelope is capped at 32 KiB; it is never truncated or streamed.
+
+The projector reads only through a new frozen getter that copies the seven typed allowlisted fields
+from each validated `agent_t` into a dedicated projection record. It receives neither the raw JSON
+object nor the remaining `agent_t` fields. Adding fields to the loader or `agent_t` cannot widen
+this getter without changing its type and focused fixtures; an `api_key_ref`/endpoint/command
+canary present in the source object must remain unreachable and absent through JSON round-trip fuzz.
 
 The envelope contains only `server_id`, `team`, and `agents`. Unknown internal fields are ignored
 by construction because the projector creates fresh objects from the allowlist; it does not clone
@@ -255,6 +300,36 @@ authenticated upstream proof is `integrity`; dependency timeout/outage/capacity 
 Never copy upstream response text or headers, parser detail, certificate/path/endpoint data, SQL
 detail, or internal identifiers.
 
+The executable sub-check order and mapping is also closed:
+
+1. Parse method/path/query/body (`invalid_request`); authenticate actor (`forbidden`); obtain a
+   primary snapshot (`unavailable`); authorize admin/active lead and team ownership (`forbidden`);
+   test authorized-team target existence (`not_found`); test active/revoked state (`forbidden`);
+   then validate snapshot self-consistency and generation monotonicity (`integrity`).
+2. Resolve the snapshotted endpoint and open the one pinned mTLS connection (transport outage is
+   `unavailable`; any completed peer/pin/identity mismatch is `integrity`).
+3. Parse the exact challenge envelope and purpose, then construct/recompute the KAT-defined digest;
+   any mismatch is `integrity`, while entropy/challenge service outage is `unavailable`.
+4. Reserve namespace and insert the exact immutable intent (`conflict` for the specified unique
+   loss; `integrity` for readback mismatch; otherwise database failure is `unavailable`).
+5. Admit/finalize/read back the token (`conflict` for state/lease loss, `integrity` for claim/token
+   mismatch, `unavailable` for authority/key/database outage).
+6. Verify status signature, purpose, nonce, identities, and generations (`integrity`), explicit
+   revocation (`forbidden`), then dispatch; transport/primary outage is `unavailable`.
+7. Verify token and all bindings (`integrity`), then consume JTI (`conflict` for replay,
+   `unavailable` for storage/capacity).
+8. Load and project the frozen getter; any load, validation, count, or encoding failure is
+   `unavailable` and produces no partial object.
+9. Verify checkpoint signature/bindings/generation (`integrity`) after a successful lookup;
+   lookup/primary outage is `unavailable`.
+10. Write the already-complete success bytes once; a socket failure cannot be converted to a later
+    public error and never restores nonce/JTI state.
+
+Within a parenthesized sub-check group, the earlier listed public category wins. Tests inject
+combined observable faults, including revoked certificate plus replica outage and namespace
+collision plus malformed readback, and assert this order rather than whichever dependency returns
+last.
+
 ## Database isolation and failure semantics
 
 Preserve the four-role authority split: `aimee_kb_token_authority_definer`,
@@ -273,6 +348,9 @@ durable `issued` plus WORM/key-use audit exposes no token; lease recovery signs 
 immutable claim set. Projection or checkpoint failure after JTI consumption does not roll it back.
 PostgreSQL gates must negatively prove role membership, SET ROLE, direct DML, authority-function,
 cross-kind source, multi-row source, and type-confusion denial in addition to successful recovery.
+They also race lease recovery against expiry at `lease_until`/deadline boundaries using the pinned
+database time and race two server listener threads on one JTI, including SQLite busy/storage death;
+exactly one transition/consume may succeed and no agent bytes may be loaded or emitted on failure.
 
 ## Console UI
 
@@ -293,6 +371,8 @@ Unit and integration coverage must include:
   cert, stale/read-replica snapshot, and wrong target denial;
 - read-intent immutability, FORCE RLS/least privilege, multi-instance concurrent admission, closed
   `remote_reads` capability, action/read type confusion denial, and WORM/key-use audit closure;
+- byte-for-byte recomputation of the complete 165-byte digest known-answer vector and expected
+  SHA-256, plus one-byte-at-a-time field mutations that must change the digest;
 - mTLS peer/EKU/pin, token audience/team/path/digest/cert/capability/expiry/JTI, unknown-kid single
   refresh, signed generation rollback, nonce purpose/replay, checkpoint race, revocation at every
   challenge/dispatch/response boundary, no redirect/reconnect, and runtime unregister races;
