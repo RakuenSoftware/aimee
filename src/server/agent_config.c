@@ -621,6 +621,17 @@ void agent_registration_prefix(const char *name, char *out, size_t out_len)
    out[n] = '\0';
 }
 
+/* See agent_config.h for why this compares the stored registration rather than
+ * parsing the name, and why an unregistered agent has no siblings. */
+int agent_same_registration(const agent_t *a, const agent_t *b)
+{
+   if (!a || !b)
+      return 0;
+   if (!a->registration[0] || !b->registration[0])
+      return 0;
+   return strcmp(a->registration, b->registration) == 0;
+}
+
 const char *agent_scope_name(agent_scope_t s)
 {
    switch (s)

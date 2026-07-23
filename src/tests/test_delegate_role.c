@@ -190,8 +190,8 @@ static void test_novel_roles(void)
  * read-only delegate with a generic prompt. */
 static void test_culled_persona_roles_are_rejected(void)
 {
-   static const char *const culled[] = {"prose",   "line-edit", "lyric",
-                                        "hook",    "prosody",   "songform"};
+   static const char *const culled[] = {"prose", "line-edit", "lyric",
+                                        "hook",  "prosody",   "songform"};
    for (size_t i = 0; i < sizeof(culled) / sizeof(culled[0]); i++)
    {
       assert(delegate_role_removed_reason(culled[i]) != NULL);

@@ -137,8 +137,8 @@ static void test_build_novel_roles(void)
  * plausible-looking prompt. */
 static void test_culled_role_templates_are_gone(void)
 {
-   static const char *const culled[] = {"prose",   "line-edit", "lyric",
-                                        "hook",    "prosody",   "songform", NULL};
+   static const char *const culled[] = {"prose",   "line-edit", "lyric", "hook",
+                                        "prosody", "songform",  NULL};
    for (int i = 0; culled[i]; i++)
    {
       char *result = role_template_build(NULL, culled[i], "task", NULL);
@@ -149,9 +149,9 @@ static void test_culled_role_templates_are_gone(void)
 static void test_build_all_builtin_roles(void)
 {
    static const char *roles[] = {
-       "review",  "validate",  "diagnose",   "code",       "refactor", "explain",
-       "draft",   "execute",   "summarize",  "format",     "search",   "reason",
-       "continuity", "beat-check", NULL,
+       "review",  "validate", "diagnose",   "code",       "refactor",
+       "explain", "draft",    "execute",    "summarize",  "format",
+       "search",  "reason",   "continuity", "beat-check", NULL,
    };
    for (int i = 0; roles[i]; i++)
    {

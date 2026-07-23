@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 
 #include "delegate_verify.h"
 
@@ -37,19 +38,35 @@ static void test_classification(void)
    assert(verify_classify(143) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+15 SIGTERM */
 
    /* Boundaries of the signal band. 128 is not 128+N for any positive N, and
-    * above SIGRTMAX (64) a code cannot plausibly be signal-derived - a verifier
-    * documenting 200 as a work-product failure must still be able to trigger an
-    * escalation, so a blanket "anything over 128 is infrastructure" was too
-    * broad in the opposite direction. */
+    * above the platform's highest signal a code cannot plausibly be
+    * signal-derived - a verifier documenting 200 as a work-product failure must
+    * still be able to trigger an escalation, so a blanket "anything over 128 is
+    * infrastructure" was too broad in the opposite direction.
+    *
+    * The ceiling is derived from THIS platform's signal range rather than
+    * asserted as a literal, so the test states the rule instead of pinning
+    * Linux's SIGRTMAX and quietly becoming wrong where the range is smaller. */
+#if defined(SIGRTMAX)
+   const int max_sig = SIGRTMAX;
+#elif defined(NSIG)
+   const int max_sig = NSIG - 1;
+#else
+   const int max_sig = 31;
+#endif
    assert(verify_classify(128) == VERIFY_OUTCOME_FAILED);
-   assert(verify_classify(129) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+1  SIGHUP */
-   assert(verify_classify(192) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+64 SIGRTMAX */
-   assert(verify_classify(193) == VERIFY_OUTCOME_FAILED);      /* beyond any signal */
-   assert(verify_classify(200) == VERIFY_OUTCOME_FAILED);      /* a real failure code */
+   assert(verify_classify(129) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+1 SIGHUP */
+   assert(verify_classify(128 + max_sig) == VERIFY_OUTCOME_INFRA_ERROR);
+   assert(verify_classify(128 + max_sig + 1) == VERIFY_OUTCOME_FAILED);
+   /* 200 is the case that motivated narrowing the band. It must classify as a
+    * work-product failure on any platform whose signals stop below 72; assert it
+    * only where that holds, rather than baking in one platform's answer. */
+   if (128 + max_sig < 200)
+      assert(verify_classify(200) == VERIFY_OUTCOME_FAILED);
    assert(verify_classify(255) == VERIFY_OUTCOME_FAILED);
 
-   /* ...and a documented 200 must still be able to warrant escalation. */
-   assert(verify_escalation_warranted(0, verify_classify(200), 0) == 1);
+   /* ...and a status above the signal band must still be able to warrant
+    * escalation: that is the whole point of narrowing it. */
+   assert(verify_escalation_warranted(0, verify_classify(128 + max_sig + 1), 0) == 1);
 
    /* An OOM-killed test suite must NOT warrant escalation - that would blame the
     * model for the machine running out of memory. */

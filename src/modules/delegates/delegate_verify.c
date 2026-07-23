@@ -1,5 +1,20 @@
 /* delegate_verify.c: verification outcome classification and escalation policy. */
 #include "delegate_verify.h"
+#include <signal.h>
+
+/* Highest status a POSIX shell can report as "command killed by signal N".
+ * Derived from the PLATFORM's own signal range rather than hardcoded: Linux runs
+ * to SIGRTMAX (64, so 192), while platforms without realtime signals top out far
+ * lower (NSIG-1 ~ 31, so 159). Hardcoding Linux's ceiling would classify a
+ * deliberate exit 160-192 as infrastructure on those platforms and silently
+ * suppress its escalation. */
+#if defined(SIGRTMAX)
+#define VERIFY_MAX_SIGNAL_STATUS (128 + SIGRTMAX)
+#elif defined(NSIG)
+#define VERIFY_MAX_SIGNAL_STATUS (128 + (NSIG - 1))
+#else
+#define VERIFY_MAX_SIGNAL_STATUS 159 /* 128 + 31, the conservative POSIX floor */
+#endif
 
 verify_outcome_t verify_classify(int exec_rc)
 {
@@ -28,12 +43,18 @@ verify_outcome_t verify_classify(int exec_rc)
     *   124      GNU coreutils `timeout` reporting expiry
     *   128+N    a command killed by signal N (137 = SIGKILL/OOM, 143 = SIGTERM)
     */
-   /* 128+N only for a PLAUSIBLE signal number. Treating everything above 128 as
-    * infrastructure was too broad: a verifier may document 200 as a work-product
-    * failure, and suppressing escalation for it is exactly the mistake this
-    * classification exists to avoid, just in the other direction. Linux signals
-    * run to SIGRTMAX (64), so 129..192 is the credible band. */
-   if (exec_rc == 126 || exec_rc == 127 || exec_rc == 124 || (exec_rc >= 129 && exec_rc <= 192))
+   /* 128+N only for a signal number this PLATFORM can actually produce. Treating
+    * everything above 128 as infrastructure was too broad: a verifier may
+    * document 200 as a work-product failure, and suppressing escalation for it
+    * is exactly the mistake this classification exists to avoid, just in the
+    * other direction.
+    *
+    * This remains a heuristic and cannot be made exact: `sh -c` collapses "died
+    * from signal N" and "deliberately exited 128+N" into the same integer, and
+    * nothing in the status distinguishes them afterwards. A verifier that needs
+    * an unambiguous work-product failure should exit below 124. */
+   if (exec_rc == 126 || exec_rc == 127 || exec_rc == 124 ||
+       (exec_rc >= 129 && exec_rc <= VERIFY_MAX_SIGNAL_STATUS))
       return VERIFY_OUTCOME_INFRA_ERROR;
    return VERIFY_OUTCOME_FAILED;
 }

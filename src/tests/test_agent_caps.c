@@ -1385,6 +1385,41 @@ void test_registration_grouping(void)
       assert(legacy_rt && legacy_rt->registration[0] == '\0');
    }
 
+   {
+      /* The persisted field is only worth persisting because fallback GROUPS on
+       * it. Pin the grouping rule itself, not just that the string survived: a
+       * change that kept the field but stopped grouping on it would otherwise
+       * pass. */
+      agent_t *sol_rt = agent_find(&rt, "codex:gpt-5.6-sol");
+      agent_t *luna_rt = agent_find(&rt, "codex:gpt-5.6-luna");
+      agent_t *legacy_rt = agent_find(&rt, "codex:legacy");
+      assert(agent_same_registration(sol_rt, luna_rt) == 1);
+      assert(agent_same_registration(sol_rt, sol_rt) == 1);
+      /* The legacy agent's NAME shares the "codex" prefix, so a prefix parse
+       * would call it a sibling of sol and hand fallback a seat with unrelated
+       * endpoint and credentials. It has no registration, so it is its own. */
+      assert(agent_same_registration(sol_rt, legacy_rt) == 0);
+      assert(agent_same_registration(legacy_rt, sol_rt) == 0);
+      /* Two UNREGISTERED agents are not siblings of each other either — empty
+       * must not compare equal to empty. */
+      agent_t bare_a, bare_b;
+      memset(&bare_a, 0, sizeof(bare_a));
+      memset(&bare_b, 0, sizeof(bare_b));
+      assert(agent_same_registration(&bare_a, &bare_b) == 0);
+      /* A registration whose own name contains ':' must not be flattened to the
+       * text before it: "gw:east" and "gw:west" are distinct registrations. */
+      agent_t east, west;
+      memset(&east, 0, sizeof(east));
+      memset(&west, 0, sizeof(west));
+      snprintf(east.registration, sizeof(east.registration), "gw:east");
+      snprintf(west.registration, sizeof(west.registration), "gw:west");
+      assert(agent_same_registration(&east, &west) == 0);
+      snprintf(west.registration, sizeof(west.registration), "gw:east");
+      assert(agent_same_registration(&east, &west) == 1);
+      assert(agent_same_registration(NULL, sol_rt) == 0);
+      assert(agent_same_registration(sol_rt, NULL) == 0);
+   }
+
    printf("  PASS: test_registration_grouping\n");
    unlink(agent_config_path());
 }

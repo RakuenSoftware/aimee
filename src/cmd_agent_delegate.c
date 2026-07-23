@@ -1724,6 +1724,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
        * means the PLACEMENT was wrong, so it is logged as an incident - its rate
        * is a health signal on the routing logic, not a routine cost. */
       int escalated = 0;
+      /* Set when an escalation was dispatched and the dispatch itself failed, so
+       * the worktree may hold partial edits that the reported (first delegate's)
+       * result does not describe. Surfaced in the JSON — stderr alone is not
+       * visible to API callers. */
+      int esc_dispatch_failed = 0;
+      char pre_esc_sha[64] = {0};
       if (verify_escalation_warranted(rc, verify_outcome, 0))
       {
          agent_t *failed_seat = agent_find(&cfg, result.agent_name);
@@ -1776,7 +1782,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
                /* Snapshot the first delegate's work so a failed escalation can be
                 * undone rather than merely reported. */
-               char pre_esc_sha[64];
                int have_snapshot = delegate_snapshot_worktree(pre_esc_sha, sizeof(pre_esc_sha));
 
                agent_result_t esc_result;
@@ -1810,27 +1815,29 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                else
                {
                   free(esc_result.response);
-                  /* The reported result is the FIRST delegate's, so the tree must
-                   * match it. Roll back the failed attempt's partial edits rather
-                   * than reporting one thing while the worktree contains another. */
                   /* The reported result is the FIRST delegate's, but the worktree
                    * may now hold partial edits from the failed attempt. Rollback
                    * is deliberately NOT automated - see delegate_snapshot_worktree
                    * for why an incorrect inverse is worse than an accurate
-                   * warning. Hand the operator a recoverable reference instead. */
+                   * warning. Hand the operator a recoverable reference instead,
+                   * and record the hazard in the JSON so a non-interactive caller
+                   * that never reads stderr still learns the tree is suspect. */
+                  esc_dispatch_failed = 1;
                   if (have_snapshot)
                      LOG_WARN("delegate",
                               "escalation dispatch to '%s' failed (rc=%d); keeping the original "
                               "result. The worktree may contain PARTIAL changes from the failed "
-                              "attempt - the pre-escalation state was captured as %s; inspect "
-                              "with 'git diff %s' and restore selectively if needed",
+                              "attempt. TRACKED file contents as of the first delegate were "
+                              "captured in %s - compare with 'git diff %s' and restore "
+                              "selectively. Untracked files are NOT in that snapshot, so check "
+                              "'git status --short' separately",
                               target->name, esc_rc, pre_esc_sha, pre_esc_sha);
                   else
                      LOG_WARN("delegate",
                               "escalation dispatch to '%s' failed (rc=%d) and no pre-escalation "
                               "snapshot could be taken; the worktree may contain PARTIAL changes "
-                              "from the failed attempt - inspect the diff before trusting the "
-                              "reported result",
+                              "from the failed attempt - inspect 'git status --short' and the "
+                              "diff before trusting the reported result",
                               target->name, esc_rc);
                }
             }
@@ -1880,6 +1887,17 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             cJSON_AddBoolToObject(obj, "escalation_warranted",
                                   verify_escalation_warranted(rc, verify_outcome, escalated));
             cJSON_AddBoolToObject(obj, "escalated", escalated ? 1 : 0);
+            /* The returned result is the FIRST delegate's, but a failed
+             * escalation dispatch may have left partial edits behind, so the
+             * tree no longer matches the result. Callers that act on the
+             * worktree must treat it as suspect and reconcile before trusting
+             * either. Only emitted when it actually happened. */
+            if (esc_dispatch_failed)
+            {
+               cJSON_AddBoolToObject(obj, "worktree_may_be_partial", 1);
+               if (pre_esc_sha[0])
+                  cJSON_AddStringToObject(obj, "pre_escalation_snapshot", pre_esc_sha);
+            }
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
             char *json = cJSON_Print(obj);

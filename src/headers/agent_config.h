@@ -126,6 +126,26 @@ const char *agent_catalog_provider(const agent_t *agent);
  * single-model agent has no ':' and is its own registration. */
 void agent_registration_prefix(const char *name, char *out, size_t out_len);
 
+/* 1 if `a` and `b` belong to the same provider registration, and so share
+ * credentials, endpoint and wire protocol. This is what fallback consults to
+ * prefer a sibling model before crossing to another vendor.
+ *
+ * Compares the STORED registration, never a name prefix: a prefix parse groups
+ * a legacy agent coincidentally named "gw:backup" with the targets of a
+ * registration "gw", and flattens a registration named "gw:east" down to "gw" —
+ * both group seats with unrelated endpoints and credentials.
+ *
+ * An agent with no registration (a legacy single-model entry, or one written by
+ * hand) is its own group and has no siblings, so it never matches — including
+ * against another unregistered agent.
+ *
+ * NOTE: after a save/load cycle `registration` is trusted operator-supplied
+ * grouping metadata, not authenticated provenance. Expansion collapses the
+ * operator's `models` form into individual agents, so a hand-edited agents.json
+ * can assign any value. That is the same trust level as every other field in
+ * that file (endpoints, credentials policy, routing eligibility). */
+int agent_same_registration(const agent_t *a, const agent_t *b);
+
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
