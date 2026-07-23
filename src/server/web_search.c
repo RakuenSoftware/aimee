@@ -608,8 +608,8 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
          if (!html)
          {
             char note[320];
-            snprintf(note, sizeof(note), "[%d] %s\n  (not fetched: %s)\n\n", i + 1,
-                     results[i].url, err ? err : "fetch failed");
+            snprintf(note, sizeof(note), "[%d] %s\n  (not fetched: %s)\n\n", i + 1, results[i].url,
+                     err ? err : "fetch failed");
             dstr_append_str(ds, note);
             continue;
          }

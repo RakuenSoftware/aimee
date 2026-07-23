@@ -85,11 +85,10 @@ char *db1_web_page_get(const char *url, long *age_secs, char *pinned_addr_out,
       return NULL; /* no cache is a miss, never an error */
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql =
-       "SELECT body, pinned_addr, CAST(strftime('%s','now') AS INTEGER)"
-       " - CAST(strftime('%s', fetched_at) AS INTEGER)"
-       " FROM web_page_cache WHERE url = ?"
-       " AND fetched_at > datetime('now', '-' || ? || ' seconds')";
+   static const char *sql = "SELECT body, pinned_addr, CAST(strftime('%s','now') AS INTEGER)"
+                            " - CAST(strftime('%s', fetched_at) AS INTEGER)"
+                            " FROM web_page_cache WHERE url = ?"
+                            " AND fetched_at > datetime('now', '-' || ? || ' seconds')";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return NULL;
 
@@ -119,8 +118,9 @@ char *db1_web_page_get(const char *url, long *age_secs, char *pinned_addr_out,
    {
       /* refresh LRU position; failure here is irrelevant to the caller */
       sqlite3_stmt *up = NULL;
-      if (sqlite3_prepare_v2(db, "UPDATE web_page_cache SET last_used_at = datetime('now')"
-                                 " WHERE url = ?",
+      if (sqlite3_prepare_v2(db,
+                             "UPDATE web_page_cache SET last_used_at = datetime('now')"
+                             " WHERE url = ?",
                              -1, &up, NULL) == SQLITE_OK)
       {
          sqlite3_bind_text(up, 1, key, -1, SQLITE_TRANSIENT);
