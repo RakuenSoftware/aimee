@@ -36,8 +36,20 @@ static void test_classification(void)
    assert(verify_classify(137) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+9  SIGKILL/OOM */
    assert(verify_classify(143) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+15 SIGTERM */
 
-   /* ...and the boundary: 128 itself is not a signal code. */
+   /* Boundaries of the signal band. 128 is not 128+N for any positive N, and
+    * above SIGRTMAX (64) a code cannot plausibly be signal-derived - a verifier
+    * documenting 200 as a work-product failure must still be able to trigger an
+    * escalation, so a blanket "anything over 128 is infrastructure" was too
+    * broad in the opposite direction. */
    assert(verify_classify(128) == VERIFY_OUTCOME_FAILED);
+   assert(verify_classify(129) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+1  SIGHUP */
+   assert(verify_classify(192) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+64 SIGRTMAX */
+   assert(verify_classify(193) == VERIFY_OUTCOME_FAILED);      /* beyond any signal */
+   assert(verify_classify(200) == VERIFY_OUTCOME_FAILED);      /* a real failure code */
+   assert(verify_classify(255) == VERIFY_OUTCOME_FAILED);
+
+   /* ...and a documented 200 must still be able to warrant escalation. */
+   assert(verify_escalation_warranted(0, verify_classify(200), 0) == 1);
 
    /* An OOM-killed test suite must NOT warrant escalation - that would blame the
     * model for the machine running out of memory. */

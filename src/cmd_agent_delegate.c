@@ -86,16 +86,29 @@ void generate_task_id(char *buf, size_t len)
             rand_bytes[7]);
 }
 
-/* Capture the worktree's current tracked state as a commit object WITHOUT
- * touching the worktree or the stash stack, so a failed escalation can be rolled
- * back to exactly what the first delegate produced.
+/* Capture the worktree's current state as a commit object WITHOUT touching the
+ * worktree or the stash stack, so a failed escalation is RECOVERABLE.
  *
  * `git stash create` is used deliberately over `git stash push`: the stash STACK
  * is shared across worktrees and concurrent sessions, so pushing could pop
  * another session's work. `create` only writes an object and prints its sha.
  *
- * Returns 1 and fills `sha` when a snapshot exists, 0 when there is nothing to
- * snapshot or git failed - in which case the caller must NOT attempt a restore. */
+ * Deliberately NOT paired with an automatic rollback. A correct inverse has to
+ * handle three cases this cannot verify from here, and an INCORRECT one destroys
+ * the first delegate's work - strictly worse than the partial state it would be
+ * correcting:
+ *   - a clean pre-escalation tree produces no stash object, so there is no
+ *     baseline and HEAD would have to be used instead;
+ *   - untracked files the first delegate CREATED are not in the stash tree, so
+ *     an escalation that overwrites one cannot be undone from it;
+ *   - `git checkout SHA -- .` stages what it restores, collapsing the
+ *     staged/unstaged split, so the tree would no longer match what the first
+ *     delegate actually produced.
+ * The operator gets the sha and an exact command instead, which is recoverable
+ * without risking automated data loss.
+ *
+ * Returns 1 and fills `sha` when a snapshot exists, 0 otherwise (clean tree, no
+ * repository, or git unavailable). */
 static int delegate_snapshot_worktree(char *sha, size_t sha_len)
 {
    if (!sha || sha_len < 41)
@@ -117,27 +130,7 @@ static int delegate_snapshot_worktree(char *sha, size_t sha_len)
    }
    sha[n] = '\0';
    free(out);
-   /* Empty output means a clean tree: nothing to restore, and nothing to undo. */
    return n >= 7 ? 1 : 0;
-}
-
-/* Roll TRACKED files back to a snapshot taken by delegate_snapshot_worktree.
- * Untracked files the failed attempt created are deliberately left in place:
- * removing them would mean `git clean`, which could delete work this function
- * has no business judging. Best-effort - a failure is reported, never fatal. */
-static void delegate_restore_worktree(const char *sha)
-{
-   if (!sha || !sha[0])
-      return;
-   const char *argv[] = {"git", "checkout", sha, "--", ".", NULL};
-   char *out = NULL;
-   int rc = safe_exec_capture(argv, &out, AGENT_TOOL_OUTPUT_MAX);
-   free(out);
-   if (rc != 0)
-      LOG_WARN("delegate",
-               "could not roll the worktree back to the pre-escalation snapshot %s (git exit %d); "
-               "the tree may contain partial changes from the failed attempt",
-               sha, rc);
 }
 
 static void delegate_list_roles(void)
@@ -1820,24 +1813,25 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                   /* The reported result is the FIRST delegate's, so the tree must
                    * match it. Roll back the failed attempt's partial edits rather
                    * than reporting one thing while the worktree contains another. */
+                  /* The reported result is the FIRST delegate's, but the worktree
+                   * may now hold partial edits from the failed attempt. Rollback
+                   * is deliberately NOT automated - see delegate_snapshot_worktree
+                   * for why an incorrect inverse is worse than an accurate
+                   * warning. Hand the operator a recoverable reference instead. */
                   if (have_snapshot)
-                  {
-                     delegate_restore_worktree(pre_esc_sha);
                      LOG_WARN("delegate",
-                              "escalation dispatch to '%s' failed (rc=%d); rolled tracked files "
-                              "back to the pre-escalation state and kept the original result. "
-                              "Untracked files the attempt created were left in place.",
-                              target->name, esc_rc);
-                  }
+                              "escalation dispatch to '%s' failed (rc=%d); keeping the original "
+                              "result. The worktree may contain PARTIAL changes from the failed "
+                              "attempt - the pre-escalation state was captured as %s; inspect "
+                              "with 'git diff %s' and restore selectively if needed",
+                              target->name, esc_rc, pre_esc_sha, pre_esc_sha);
                   else
-                  {
                      LOG_WARN("delegate",
                               "escalation dispatch to '%s' failed (rc=%d) and no pre-escalation "
-                              "snapshot was available; the worktree may contain PARTIAL changes "
+                              "snapshot could be taken; the worktree may contain PARTIAL changes "
                               "from the failed attempt - inspect the diff before trusting the "
                               "reported result",
                               target->name, esc_rc);
-                  }
                }
             }
          }

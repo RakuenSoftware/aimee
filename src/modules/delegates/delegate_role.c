@@ -56,9 +56,11 @@ const char *delegate_role_removed_reason(const char *role)
    for (int i = 0; g_removed_roles[i]; i++)
    {
       if (strcmp(role, g_removed_roles[i]) == 0)
+         /* Do NOT advertise "declare it in exec_roles" as a workaround: the CLI
+          * rejects the name before routing is consulted, so that advice would
+          * send an operator down a path that cannot work. */
          return "removed: novel/songwriter work is a PERSONA concern, not a delegate role. "
-                "Use a persona with a general role (draft/review/validate), or declare the "
-                "name in that agent's exec_roles and supply your own role template.";
+                "Use a persona with a general role such as draft, review or validate.";
    }
    return NULL;
 }
