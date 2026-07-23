@@ -108,6 +108,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_rewrap_pg_test.sql"
 echo "== P7-witness-e1 evidence store: C<->SQL digest parity, append, WORM, ACLs =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_pg_test.sql"
 
+echo "== P7-witness-e2 wiring gate (isolated DB: audit + reseal + open ledgers) =="
+"$ROOT/scripts/run-p7-witness-wiring.sh" "$BASE_URL"
+
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 

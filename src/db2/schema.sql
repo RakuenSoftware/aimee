@@ -5795,6 +5795,17 @@ BEGIN
   INSERT INTO kb_audit_event(seq, ts, actor_role, actor_principal, action, subject,
       verdict, detail, key_id, prev_hash, row_hash)
     VALUES (v_seq, pg_now_text(), r, a, ac, s, vd, d, '', v_prev, v_hash);
+  -- P7-witness-e2: witness this audit-chain row into the reserved ('!kb','!audit')
+  -- shard, in this same transaction (fail-closed: if the witness append fails the
+  -- audit append rolls back too). This is the ledger that carries 'vault.key_use',
+  -- so witnessing it here covers the key-attachment gate. source_hash is the audit
+  -- row's own content hash; has_source_pred is true because the audit chain has a
+  -- real predecessor (its prev_hash, all-zero for the genesis row). group_id is the
+  -- action so the emitted stream can be filtered by it. The advisory lock above
+  -- already serializes appenders, so the witness shard lock is never contended.
+  PERFORM public.org_vault_witness_append(
+    0::smallint, v_seq::text, '!kb', '!audit', '', a, '', ac, pg_now_text(),
+    decode(v_hash, 'hex'), true, decode(v_prev, 'hex'));
 END; $$;
 
 -- Atomic certificate renewal lineage. The caller supplies metadata extracted
