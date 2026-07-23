@@ -597,6 +597,17 @@ ENV_DESC = {
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
     "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Gate remote (TCP) write methods: `off` | `data` | `full`."),
+    "AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT": (
+        "Server runtime",
+        "Permit the operator-configured search backend (`search.searxng_url`) to resolve to a "
+        "private, loopback, or link-local address. Off by default: every outbound fetch is "
+        "validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this "
+        "is set. Deliberately an environment variable rather than a config key, because "
+        "`config.set` is reachable from inside the running system and pointing the search backend "
+        "at a cloud metadata address would exfiltrate instance credentials through a tool that "
+        "looks like search. Set to exactly `1`; any other value is off. Never widens fetches of "
+        "model-supplied or search-result URLs, which stay denied.",
+    ),
     "AIMEE_WEBCHAT_GIT": ("Server runtime", "Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and \"Sign in with GitHub\" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR."),
     "AIMEE_WEBCHAT_EDITOR": ("Server runtime", "Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images)."),
     "AIMEE_WEBCHAT_EDITOR_BIN": ("Server runtime", "Override path to the code-server binary used for the in-browser editor."),
