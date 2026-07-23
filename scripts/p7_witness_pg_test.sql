@@ -137,4 +137,35 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 6. E2 reseal wiring: org_vault_rewrap_worm_append writes a witness row into the
+--    reserved ('!kb','!reseal') shard, in the same transaction, exactly once per
+--    new worm row (a replay does not double-witness).
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_op TEXT := 'deadbeefdeadbeefdeadbeefdeadbeef'; v_n BIGINT; v_sid TEXT; v_kind SMALLINT;
+BEGIN
+  -- rewrap_begin performs the 'intent' worm append, which now witnesses.
+  PERFORM public.org_vault_rewrap_begin('operator@test','req-reseal-1',v_op,0,1);
+
+  SELECT count(*), max(source_id), max(source_kind) INTO v_n, v_sid, v_kind
+    FROM public.kb_vault_witness_log WHERE tenant='!kb' AND provider='!reseal';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: expected 1 reseal witness row, got %', v_n;
+  END IF;
+  IF v_sid <> v_op || '/intent' OR v_kind <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: reseal witness source_id/kind wrong: % / %', v_sid, v_kind;
+  END IF;
+
+  -- Idempotent replay: appending the same 'intent' event again must not add a
+  -- second witness row (ON CONFLICT DO NOTHING -> no new worm row -> no witness).
+  PERFORM public.org_vault_rewrap_worm_append(v_op,'intent','preparing','');
+  SELECT count(*) INTO v_n FROM public.kb_vault_witness_log
+    WHERE tenant='!kb' AND provider='!reseal';
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: reseal replay double-witnessed (% rows)', v_n;
+  END IF;
+  RAISE NOTICE 'WITNESS OK: reseal event witnessed once, replay is idempotent';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_pg_test: all checks passed'; END $$;

@@ -3943,6 +3943,24 @@ BEGIN
        w.detail<>COALESCE(p_detail,'') THEN
       RAISE EXCEPTION 'org_vault_rewrap_worm_append: replay mismatch' USING ERRCODE='23505';
     END IF;
+  ELSE
+    -- P7-witness-e2: witness this reseal event into the reserved ('!kb','!reseal')
+    -- shard, in THIS transaction, only when a new worm row was actually inserted
+    -- (a replay must not double-witness). source_hash binds the row's immutable
+    -- CONTENT, not event_id (which is only a hash of op/kind and would miss a
+    -- tamper of state/epoch/digests/detail).
+    PERFORM public.org_vault_witness_append(
+      1::smallint, p_op || '/' || p_kind, '!kb', '!reseal',
+      '', o.actor, '', p_op, public.pg_now_text(),
+      sha256(convert_to('aimee-vault-rewrap-worm-row-v1','UTF8') ||
+        public.org_vault_rewrap_pack_text(v_event) || public.org_vault_rewrap_pack_text(p_state) ||
+        int8send(o.seal_epoch) || int8send(o.fencing_token) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.receipt_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.inventory_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_bytes(COALESCE(o.stage_digest,''::bytea)) ||
+        public.org_vault_rewrap_pack_text(o.actor) ||
+        public.org_vault_rewrap_pack_text(COALESCE(p_detail,''))),
+      false, NULL);
   END IF;
 END; $$;
 
