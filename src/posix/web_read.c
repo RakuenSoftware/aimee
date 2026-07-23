@@ -23,6 +23,7 @@
 #include "dstr.h"
 #include "log.h"
 #include "web_egress.h"
+#include "web_extract.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -439,8 +440,8 @@ static int webread_windows(const char *text, size_t n, const size_t *m, int nm, 
 }
 
 /* Extraction. TAKES OWNERSHIP of `text` and frees it on every path. */
-static char *webread_extract(char *text, const char *ref, const char *query, int span,
-                             const char *url)
+static char *webread_extract_budgeted(char *text, const char *ref, const char *query, int span,
+                                      const char *url, size_t budget)
 {
    size_t n = strlen(text);
    const char *q = (query && query[0]) ? query : "";
@@ -522,7 +523,6 @@ static char *webread_extract(char *text, const char *ref, const char *query, int
       return safe_strdup("error: out of memory");
    }
    int npick = 0;
-   size_t budget = WEBREAD_BUDGET;
    size_t used = 0;
    char *taken = calloc((size_t)(nw > 0 ? nw : 1), 1);
    if (!taken)
@@ -594,6 +594,28 @@ static char *webread_extract(char *text, const char *ref, const char *query, int
    free(text);
    char *out = dstr_steal(&ds);
    return out ? out : safe_strdup("error: out of memory");
+}
+
+/* Extraction with the tool's own budget. */
+static char *webread_extract(char *text, const char *ref, const char *query, int span,
+                             const char *url)
+{
+   return webread_extract_budgeted(text, ref, query, span, url, WEBREAD_BUDGET);
+}
+
+/* Exported for the search-fusion path (headers/web_extract.h). Search fetches
+ * several pages and spends a smaller budget on each, so the budget cannot be a
+ * constant there. Takes ownership of `text` exactly as the tool path does. */
+char *web_extract_spans(char *text, const char *ref, const char *query, size_t budget,
+                        const char *url)
+{
+   return webread_extract_budgeted(text, ref, query, 0, url, budget);
+}
+
+/* Exported so search strips a fetched page the same way the reader does. */
+char *web_extract_html_to_text(const char *html)
+{
+   return html_to_text(html);
 }
 
 char *tool_web_read(const char *ref, const char *query, int span, const char *mode)
