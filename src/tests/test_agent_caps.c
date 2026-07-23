@@ -725,8 +725,23 @@ void test_request_max_tokens_clamped_to_context_window(void)
    assert(agent_request_max_tokens(&ag, 500000) == 100000);
    assert(agent_request_max_tokens(&ag, 4096) == 4096);
 
-   /* With no configured window there is nothing to clamp against. */
+   /* With no operator override the CATALOG window is the ceiling. Consulting
+    * only middleware.context_window left a catalogued small-window model
+    * accepting an oversized pinned cap. claude-opus-4-8 resolves >= 200000, so
+    * a 300000 pin is still a misconfiguration and is clamped. */
    ag.middleware.context_window = 0;
+   ag.max_tokens = 300000;
+   {
+      model_capability_t cap;
+      assert(model_capability_get(agent_catalog_provider(&ag), ag.model, &cap) != 0);
+      assert(cap.context_window > 0);
+      assert(agent_request_max_tokens(&ag, 0) == cap.context_window / 2);
+   }
+
+   /* A model with NO known window anywhere has nothing to clamp against. */
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "anthropic");
+   strcpy(ag.model, "totally-unknown-model-qqq");
    ag.max_tokens = 300000;
    assert(agent_request_max_tokens(&ag, 0) == 300000);
 
@@ -811,6 +826,64 @@ void test_capability_gate_escalates_instead_of_failing(void)
    cfg.agents[1].tools_enabled = 1;
 
    printf("  PASS: test_capability_gate_escalates_instead_of_failing\n");
+}
+
+/* Escalation must not re-admit an agent the ordinary pass excluded for POLICY or
+ * HEALTH reasons. Review raised this as a High — that escalation reconstructs
+ * eligibility and could bypass primary_only or the Claude-CLI structural gate.
+ * These assert the actual behaviour: both live inside
+ * agent_is_available_for_routing(), which escalation calls, so neither is
+ * bypassed. Written because the claim deserved evidence either way. */
+static int esc_policy_excludes_all(const agent_t *ag)
+{
+   (void)ag;
+   return 1; /* exclude every agent */
+}
+
+static int esc_health_down_all(const char *name)
+{
+   (void)name;
+   return 1; /* every agent DOWN */
+}
+
+void test_escalation_respects_policy_and_health_gates(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 1;
+   strcpy(cfg.default_agent, "only"); /* also exercises the fast path */
+   strcpy(cfg.agents[0].name, "only");
+   strcpy(cfg.agents[0].provider, "openai");
+   strcpy(cfg.agents[0].model, "gpt-4"); /* 8192 window, far below the ask */
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   /* Baseline: an impossible context requirement escalates to this agent. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
+
+   /* POLICY excluded (this is how primary_only is enforced) -> no route, not an
+    * escalation that ignores the policy. */
+   agent_set_route_policy_filter(esc_policy_excludes_all);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
+   agent_set_route_policy_filter(NULL);
+
+   /* HEALTH down -> likewise no route. */
+   agent_set_route_health_filter(esc_health_down_all);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
+   agent_set_route_health_filter(NULL);
+
+   /* Gates cleared: escalation works again, proving the NULLs above were the
+    * gates and not some unrelated failure. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
+
+   printf("  PASS: test_escalation_respects_policy_and_health_gates\n");
 }
 
 /* Escalation is gated on capability routing: with the flag OFF, plain cost-tier

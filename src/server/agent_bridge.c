@@ -117,18 +117,32 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    }
    cJSON_AddItemToObject(req, "models", models);
 }
-/* Never promise the provider more output than the agent's context window can
- * hold. A pinned max_tokens at or above the window is a misconfiguration: the
- * reply alone would consume the whole context, leaving nothing for the prompt.
- * agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but that
- * is a local calculation - without this the request still carried the oversized
- * limit, so a 200k-window agent pinned at 300k asked for 300k of output. */
+/* Reject the gross misconfiguration where the OUTPUT limit alone would consume
+ * the entire context window, leaving no room for any prompt at all.
+ *
+ * Scope, precisely: this function does NOT know the request's prompt size, so it
+ * cannot and does not guarantee `prompt + output <= window`. It only bounds the
+ * case that is invalid regardless of prompt — an output cap at or above the
+ * whole window. Half the window is a policy choice for that case, not a derived
+ * bound. agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but
+ * that is a local calculation; without this the REQUEST still carried the
+ * oversized limit, so a 200k-window agent pinned at 300k asked for 300k output.
+ *
+ * The window is the agent's effective ceiling: the operator's policy value when
+ * set, else the model catalog. Consulting only middleware.context_window left a
+ * catalogued 8k model with no override accepting a pinned 300k. */
 static int agent_clamp_to_context(const agent_t *agent, int tokens)
 {
    if (!agent || tokens <= 0)
       return tokens;
    int window = agent->middleware.context_window;
-   if (window > 0 && tokens >= window)
+   if (window <= 0)
+   {
+      model_capability_t cap;
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
+         window = cap.context_window;
+   }
+   if (window > 1 && tokens >= window)
       return window / 2;
    return tokens;
 }

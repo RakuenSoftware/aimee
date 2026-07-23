@@ -1962,6 +1962,9 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
    return -1;
 }
 
+static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
+                                          unsigned required_caps, int min_context);
+
 /* A PRIMARY (user-facing) turn must reach the configured default agent whatever
  * its cost_tier. The default is the operator's "most capable seat" choice, and a
  * user must never be handed a weaker model just because a cheaper peer exists —
@@ -2000,8 +2003,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *peer = &cfg->agents[i];
-         if (!peer->enabled || !agent_supports_role(peer, role) ||
-             !agent_is_available_for_routing(peer))
+         if (!agent_route_candidate_eligible(peer, role, 0, 0))
             continue;
          if (min_tier < 0 || peer->cost_tier < min_tier)
             min_tier = peer->cost_tier;
@@ -2009,8 +2011,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *peer = &cfg->agents[i];
-         if (peer == ag || !peer->enabled || !agent_supports_role(peer, role) ||
-             !agent_is_available_for_routing(peer))
+         if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0))
             continue;
          if (peer->cost_tier == min_tier &&
              strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
@@ -2257,6 +2258,23 @@ static int agent_effective_context(const agent_t *ag)
  * precisely the seat the capability gate just rejected. Prefer the configured
  * default (the operator's most-capable choice), then the largest effective
  * context window, then the highest cost_tier as a capability proxy. */
+/* The single candidate-eligibility predicate shared by ordinary routing and
+ * escalation. Factored so the two cannot DRIFT: escalation re-deriving its own
+ * copy would silently bypass any gate added to the normal pass later. Note the
+ * policy filter (primary_only), the health filter, and the Claude-CLI structural
+ * rule all live inside agent_is_available_for_routing(), so they are enforced
+ * here for both paths. `min_context` is the only axis escalation relaxes. */
+static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
+                                          unsigned required_caps, int min_context)
+{
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_routing(ag))
+      return 0;
+   if (required_caps || min_context > 0)
+      return agent_satisfies_required_caps(ag, required_caps, min_context);
+   return 1;
+}
+
 static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsigned required_caps)
 {
    agent_t *best = NULL;
@@ -2265,23 +2283,19 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
    if (cfg->default_agent[0])
    {
       agent_t *def = agent_find(cfg, cfg->default_agent);
-      if (def && def->enabled && agent_supports_role(def, role) &&
-          agent_is_available_for_routing(def) &&
-          agent_satisfies_required_caps(def, required_caps, 0))
+      if (def && agent_route_candidate_eligible(def, role, required_caps, 0))
          return def;
    }
 
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
-         continue;
       /* Escalation only helps a DEGREE shortfall - the prompt exceeds every
        * window - where a bigger seat is a genuine best effort. It cannot help a
        * KIND shortfall: if no agent has tools, none can be conjured, and
        * dispatching anyway trades a clear, actionable config error for a doomed
        * request. So required_caps still bind; only min_context is relaxed. */
-      if (!agent_satisfies_required_caps(ag, required_caps, 0))
+      if (!agent_route_candidate_eligible(ag, role, required_caps, 0))
          continue;
       int ctx = agent_effective_context(ag);
       if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))

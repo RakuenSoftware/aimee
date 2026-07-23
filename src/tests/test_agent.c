@@ -45,6 +45,7 @@ void test_request_max_tokens_clamped_to_context_window(void);
 void test_capability_routing_flag_behaviour_diff(void);
 void test_capability_gate_escalates_instead_of_failing(void);
 void test_no_escalation_when_capability_routing_disabled(void);
+void test_escalation_respects_policy_and_health_gates(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
@@ -3213,6 +3214,7 @@ int main(void)
    test_capability_routing_flag_behaviour_diff();
    test_capability_gate_escalates_instead_of_failing();
    test_no_escalation_when_capability_routing_disabled();
+   test_escalation_respects_policy_and_health_gates();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();

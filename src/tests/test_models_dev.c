@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "models_dev.h"
+#include "model_registry.h"
 
 static void test_cache_lookup_hit(void)
 {
@@ -118,6 +119,89 @@ static void test_cache_lookup_nested_api_schema(void)
    rmdir(tmpdir);
 }
 
+/* Band-schedule edge cases introduced by the capacity/eviction logic. Review
+ * found duplicate handling at capacity silently losing data, and none of the
+ * overflow paths were covered. */
+static void test_price_band_capacity_and_duplicates(void)
+{
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-md-bands-XXXXXX");
+   assert(mkdtemp(tmpdir) != NULL);
+   char dir[512], path[600];
+   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
+   mkdir(dir, 0755);
+   snprintf(dir, sizeof(dir), "%s/.cache/aimee", tmpdir);
+   mkdir(dir, 0755);
+   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
+
+   /* Ten DESCENDING thresholds against a capacity of eight, then a duplicate of
+    * a middle one and a duplicate of the largest retained. Descending order is
+    * the case that a naive "keep the first N" would corrupt by discarding the
+    * LOWEST bands, leaving mid-size requests on the base rate. */
+   const char *json =
+       "{\"v\":{\"models\":{\"m\":{"
+       "  \"limit\":{\"context\":2000000},"
+       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
+       "    {\"input\":100,\"output\":100,\"tier\":{\"type\":\"context\",\"size\":1000}},"
+       "    {\"input\":90,\"output\":90,\"tier\":{\"type\":\"context\",\"size\":900}},"
+       "    {\"input\":80,\"output\":80,\"tier\":{\"type\":\"context\",\"size\":800}},"
+       "    {\"input\":70,\"output\":70,\"tier\":{\"type\":\"context\",\"size\":700}},"
+       "    {\"input\":60,\"output\":60,\"tier\":{\"type\":\"context\",\"size\":600}},"
+       "    {\"input\":50,\"output\":50,\"tier\":{\"type\":\"context\",\"size\":500}},"
+       "    {\"input\":40,\"output\":40,\"tier\":{\"type\":\"context\",\"size\":400}},"
+       "    {\"input\":30,\"output\":30,\"tier\":{\"type\":\"context\",\"size\":300}},"
+       "    {\"input\":20,\"output\":20,\"tier\":{\"type\":\"context\",\"size\":200}},"
+       "    {\"input\":10,\"output\":10,\"tier\":{\"type\":\"context\",\"size\":100}},"
+       /* duplicate of a MIDDLE retained threshold: must overwrite in place */
+       "    {\"input\":11,\"output\":11,\"tier\":{\"type\":\"context\",\"size\":200}},"
+       /* threshold INT_MAX: rejected (above+1 would overflow, and a band applies
+        * strictly ABOVE its threshold so it could never be selected) */
+       "    {\"input\":99,\"output\":99,"
+       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
+       /* non-context tier type: skipped rather than guessed at */
+       "    {\"input\":77,\"output\":77,\"tier\":{\"type\":\"tokens\",\"size\":50}}"
+       "  ]}}}}}";
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(json, f);
+   fclose(f);
+   setenv("HOME", tmpdir, 1);
+
+   model_capability_t c;
+   memset(&c, 0, sizeof(c));
+   assert(models_dev_cache_lookup("v", "m", &c) == 1);
+
+   assert(c.price_band_count == MODEL_PRICE_BANDS_MAX);
+   assert(c.price_bands_truncated == 1); /* ten distinct > capacity of eight */
+
+   /* Ascending, and the LOWEST thresholds were the ones kept. */
+   for (int i = 1; i < c.price_band_count; i++)
+      assert(c.price_bands[i].above_tokens > c.price_bands[i - 1].above_tokens);
+   assert(c.price_bands[0].above_tokens == 100);
+   assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens == 800);
+
+   /* The middle duplicate overwrote in place: 200 now prices 11, and no distinct
+    * band was evicted to accommodate it. */
+   for (int i = 0; i < c.price_band_count; i++)
+   {
+      if (c.price_bands[i].above_tokens == 200)
+         assert(c.price_bands[i].in_per_mtok == 11.0);
+   }
+
+   /* INT_MAX and the non-context tier were both rejected. */
+   for (int i = 0; i < c.price_band_count; i++)
+   {
+      assert(c.price_bands[i].above_tokens != 2147483647);
+      assert(c.price_bands[i].above_tokens != 50);
+   }
+
+   unlink(path);
+   rmdir(dir);
+   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
+   rmdir(dir);
+   rmdir(tmpdir);
+}
+
 static void test_cache_lookup_miss(void)
 {
    model_capability_t caps;
@@ -146,6 +230,8 @@ int main(void)
    printf("cache_hit OK, ");
    test_cache_lookup_nested_api_schema();
    printf("nested_api OK, ");
+   test_price_band_capacity_and_duplicates();
+   printf("bands OK, ");
    test_cache_lookup_miss();
    printf("cache_miss OK, ");
    test_cache_lookup_null_guard();

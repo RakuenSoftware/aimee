@@ -193,6 +193,27 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
                                 &band.cache_read_per_mtok);
 
+      /* Duplicate threshold FIRST: last definition wins and consumes no slot.
+       * Checking this before the capacity logic matters — at capacity, an
+       * eviction pass would otherwise discard a replacement for the largest
+       * threshold, or evict a distinct band to make room for an entry that
+       * needed none, losing real data and spuriously marking the schedule
+       * truncated. */
+      int dup = -1;
+      for (int k = 0; k < out->price_band_count; k++)
+      {
+         if (out->price_bands[k].above_tokens == band.above_tokens)
+         {
+            dup = k;
+            break;
+         }
+      }
+      if (dup >= 0)
+      {
+         out->price_bands[dup] = band;
+         continue;
+      }
+
       /* Insertion sort, ascending. When full, keep the LOWEST thresholds and
        * flag the schedule as truncated rather than dropping whichever entries
        * happened to arrive last: taking the first N in input order silently
@@ -211,12 +232,6 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
       {
          out->price_bands[i] = out->price_bands[i - 1];
          i--;
-      }
-      /* Duplicate threshold: last definition wins, no new slot consumed. */
-      if (i > 0 && out->price_bands[i - 1].above_tokens == band.above_tokens)
-      {
-         out->price_bands[i - 1] = band;
-         continue;
       }
       out->price_bands[i] = band;
       out->price_band_count++;
