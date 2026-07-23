@@ -34,6 +34,14 @@ WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
 
+# Preserve post-mortem evidence when the temporary C resource plane crashes.
+# Required appliance profiles fail closed if either the resource limit or the
+# storage policy cannot guarantee it; other runtimes stay warning-compatible.
+. /usr/local/bin/core-storage.sh
+if ! aimee_enable_core_dumps || ! aimee_prepare_core_storage; then
+    exit 1
+fi
+
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
 # bind-mounted (empty) volume would otherwise leave the listener unconfigured.
@@ -104,6 +112,7 @@ for cli_dir in .codex .claude .config .npm-global; do
 done
 
 . /usr/local/bin/webchat-lib.sh
+. /usr/local/bin/plane-supervisor.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
@@ -171,7 +180,10 @@ runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
-runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
+# runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
+# parent entrypoint configured them. Raise the soft limit again as the final
+# unprivileged child operation so the actual server process inherits it.
+runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; aimee_verify_core_dump; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
@@ -194,34 +206,18 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         exit 1
     fi
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- aimee-wfe \
-        --home "$AIMEE_HOME" \
-        --socket "$AIMEE_WFE_HTTP_SOCKET" \
-        --config "$AIMEE_HOME/aimee.yaml" \
-        --workflow-dir "$AIMEE_HOME/workflows" \
-        --agent-service-socket "$AIMEE_HOME/aimee-http.sock" &
+    runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
     wfe_pid=$!
 fi
 
 if [ -n "$wfe_pid" ]; then
-    # POSIX sh has no portable wait -n. GNU tail's PID watcher gives us the same
-    # first-exit notification without a shell polling loop.
-    watch_dir=$(mktemp -d /tmp/aimee-plane-watch.XXXXXX)
-    watch_fifo="$watch_dir/first"
-    mkfifo "$watch_fifo"
-    ( tail -s 0.1 --pid="$server_pid" -f /dev/null; printf '%s\n' server > "$watch_fifo" ) & server_watch=$!
-    ( tail -s 0.1 --pid="$wfe_pid" -f /dev/null; printf '%s\n' wfe > "$watch_fifo" ) & wfe_watch=$!
-    IFS= read -r first < "$watch_fifo"
-    kill "$server_watch" "$wfe_watch" 2>/dev/null || true
-    wait "$server_watch" 2>/dev/null || true
-    wait "$wfe_watch" 2>/dev/null || true
-    rm -f "$watch_fifo"
-    rmdir "$watch_dir"
+    status=0
+    aimee_supervise_plane_unit "$server_pid" "$wfe_pid" || status=$?
+    first=$AIMEE_FIRST_EXIT
     log "$first plane exited; terminating its peer so the container restarts as one unit"
     shutdown
-    wait "$server_pid" 2>/dev/null || true
-    wait "$wfe_pid" 2>/dev/null || true
-    status=1
 else
     if wait "$server_pid"; then status=0; else status=$?; fi
 fi

@@ -423,6 +423,48 @@ static void test_make_name_null_role(void)
    free(name);
 }
 
+static void test_execution_name_isolates_override_less_delegates(void)
+{
+   int reuse_a = 1, reuse_b = 1;
+   char *a =
+       cli_session_make_execution_name("claude", 1, "process-fallback", 0, "deleg-a", 0, &reuse_a);
+   char *b =
+       cli_session_make_execution_name("claude", 1, "process-fallback", 0, "deleg-b", 0, &reuse_b);
+   char *again = cli_session_make_execution_name("claude", 1, NULL, 0, "deleg-a", 0, NULL);
+   assert(a && b && again);
+   assert(strcmp(a, b) != 0);
+   assert(strcmp(a, again) == 0);
+   assert(reuse_a == 0 && reuse_b == 0);
+   free(a);
+   free(b);
+   free(again);
+}
+
+static void test_execution_name_preserves_primary_reuse(void)
+{
+   int reuse = 0;
+   char *bound = cli_session_make_execution_name("claude", 0, "web-123", 1, NULL, 0, &reuse);
+   assert(bound && reuse == 1);
+   char *want = cli_session_make_name("web-123", "cli");
+   assert(want && strcmp(bound, want) == 0);
+   free(bound);
+   free(want);
+
+   char *shared = cli_session_make_execution_name("claude", 1, NULL, 0, NULL, 0, &reuse);
+   assert(shared && reuse == 1);
+   want = cli_session_make_name("claude", "shared");
+   assert(want && strcmp(shared, want) == 0);
+   free(shared);
+   free(want);
+
+   char *isolated = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, &reuse);
+   char *isolated_again = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, NULL);
+   assert(isolated && isolated_again && reuse == 0);
+   assert(strcmp(isolated, isolated_again) != 0);
+   free(isolated);
+   free(isolated_again);
+}
+
 /* --- cli_session_resolve_cwd tests --- */
 
 /* A bound cwd that exists on this host is used verbatim; no fallback. */
@@ -1047,6 +1089,14 @@ int main(void)
 
    printf("test_make_name_null_role... ");
    test_make_name_null_role();
+   printf("OK\n");
+
+   printf("test_execution_name_isolates_override_less_delegates... ");
+   test_execution_name_isolates_override_less_delegates();
+   printf("OK\n");
+
+   printf("test_execution_name_preserves_primary_reuse... ");
+   test_execution_name_preserves_primary_reuse();
    printf("OK\n");
 
    printf("test_strip_ansi_plain_text... ");

@@ -25,6 +25,12 @@ The snapshot's pointer and exact byte length are passed to the HTTP transport an
 ordinary retry. A retry can duplicate delivery after an ambiguous network failure, but it cannot
 rebuild, restore, or substitute a different economizer representation.
 
+The release also contains dormant activation machinery for a future reviewed transform: strict
+whitespace-only JSON compaction, one-shot local-output provenance, canonical signed-registry tuple
+serialization, and a tenant-scoped first-write generation lease. Source-surface tests keep those APIs
+unreachable from live request paths while the registry is empty. Their presence is not reported as a
+token or dollar saving.
+
 This release deliberately removes the previous live history folding, tool-output condensation,
 body compression, gateway mutation, and economizer-owned restore/resend behavior. Their helper code
 may remain for offline or isolated tests, but it has no production request caller. The economizer
@@ -78,4 +84,5 @@ fail instead of falling back to an active mode.
 
 The normative safety rules and implementation plan are in
 `docs/proposals/pending/provider-neutral-economizer-safety-spec.md` and
-`docs/proposals/pending/provider-neutral-cache-aware-economizer.md`.
+`docs/proposals/pending/provider-neutral-cache-aware-economizer.md`. The current provider activation
+matrix is in `docs/proposals/pending/economizer-lossless-json-live-transform.md`.

@@ -42,7 +42,7 @@ static _Thread_local char tl_session_hdr[80] = "";
  * beyond this is deterministic (same input -> same truncated string -> same session
  * key), so it only risks two >2KB bearers that share a 2KB prefix sharing a disable
  * bucket — a benign availability edge, not a security boundary. */
-static _Thread_local char tl_bearer[2048] = "";
+static _Thread_local char tl_bearer[4097] = "";
 static _Thread_local char tl_status_staple[KB_MGMT_STATUS_JSON_MAX + 1] = "";
 static _Thread_local server_tls_peer_cert_t tl_peer_cert;
 static _Thread_local char tl_local_fingerprint[65] = "";
@@ -139,7 +139,7 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    if (buf)
    {
       http_header(buf, "aimee-session-id", tl_session_hdr, sizeof(tl_session_hdr));
-      char authz[2048] = "";
+      char authz[4105] = "";
       /* Bearer scheme token is case-insensitive (RFC 7235 §2.1). */
       if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
           strncasecmp(authz, "Bearer ", 7) == 0)

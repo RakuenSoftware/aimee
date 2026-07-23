@@ -107,6 +107,14 @@ int kb_http_servers_route(const char *method, const char *path, const char *quer
    return -1;
 }
 
+int kb_http_servers_route_ex(const char *method, const char *path, const char *query_string,
+                             const char *body, size_t body_len, char *out_buf, int out_cap)
+{
+   (void)body;
+   (void)body_len;
+   return kb_http_servers_route(method, path, query_string, out_buf, out_cap);
+}
+
 int g_test_registry_heartbeat_allow;
 char g_test_registry_server_id[128], g_test_registry_issuer[601], g_test_registry_serial[129],
     g_test_registry_fingerprint[65];

@@ -55,13 +55,15 @@ static void arena_free(protected_arena_t *p, size_t n)
 #endif
 }
 
-kb_vault_key_use_status_t kb_vault_protected_use(uint64_t expected_epoch, const char *principal,
-                                                 const char *agent, const char *cred,
-                                                 const db2_vault_key_use_envelope_t *e,
-                                                 kb_vault_key_use_fn callback, void *ctx)
+static kb_vault_key_use_status_t
+protected_use_aad(uint64_t expected_epoch, const db2_vault_key_use_envelope_t *e,
+                  const uint8_t *aad, size_t aad_len, const uint8_t *fallback_aad,
+                  size_t fallback_aad_len, kb_vault_key_use_fn callback, void *ctx)
 {
-   if (!expected_epoch || !principal || !agent || !cred || !e || e->seal_epoch < 1 ||
-       e->version < 1 || !e->ciphertext_len || e->ciphertext_len > sizeof(e->ciphertext) ||
+   if (!expected_epoch || !e || e->seal_epoch < 1 || e->version < 1 || !e->ciphertext_len ||
+       e->ciphertext_len > sizeof(e->ciphertext) || !aad || !aad_len ||
+       aad_len > VAULT_ENVELOPE_AAD_MAX ||
+       ((!fallback_aad && fallback_aad_len) || fallback_aad_len > VAULT_ENVELOPE_AAD_MAX) ||
        !callback)
       return KB_VAULT_KEY_USE_INTEGRITY;
    size_t mapped = 0;
@@ -81,16 +83,20 @@ kb_vault_key_use_status_t kb_vault_protected_use(uint64_t expected_epoch, const 
    else
    {
       held = 1;
-      size_t aad_len = 0;
-      if (vault_aad_build_v2(principal, agent, cred, e->version, a->aad, sizeof(a->aad),
-                             &aad_len) ||
-          vault_dek_unwrap(a->kek, e->wrapped_dek, a->dek) ||
-          (vault_secret_decrypt(a->dek, a->aad, aad_len, e->nonce, e->ciphertext, e->ciphertext_len,
-                                e->tag, a->plaintext) &&
-           (vault_aad_build_v1_safe(principal, agent, cred, e->version, a->aad, sizeof(a->aad),
-                                    &aad_len) ||
-            vault_secret_decrypt(a->dek, a->aad, aad_len, e->nonce, e->ciphertext,
-                                 e->ciphertext_len, e->tag, a->plaintext))))
+      memcpy(a->aad, aad, aad_len);
+      int unwrap_failed = vault_dek_unwrap(a->kek, e->wrapped_dek, a->dek);
+      int decrypt_failed = unwrap_failed;
+      if (!unwrap_failed)
+         decrypt_failed = vault_secret_decrypt(a->dek, a->aad, aad_len, e->nonce, e->ciphertext,
+                                               e->ciphertext_len, e->tag, a->plaintext);
+      if (!unwrap_failed && decrypt_failed && fallback_aad && fallback_aad_len)
+      {
+         memcpy(a->aad, fallback_aad, fallback_aad_len);
+         decrypt_failed =
+             vault_secret_decrypt(a->dek, a->aad, fallback_aad_len, e->nonce, e->ciphertext,
+                                  e->ciphertext_len, e->tag, a->plaintext);
+      }
+      if (decrypt_failed)
          rc = KB_VAULT_KEY_USE_INTEGRITY;
       else
          rc = callback(a->plaintext, e->ciphertext_len, ctx) ? KB_VAULT_KEY_USE_CALLBACK_FAILED
@@ -100,5 +106,32 @@ kb_vault_key_use_status_t kb_vault_protected_use(uint64_t expected_epoch, const 
    if (held)
       vault_use_end();
    (void)pthread_setcancelstate(old_state, NULL);
+   return rc;
+}
+
+kb_vault_key_use_status_t kb_vault_protected_use_with_aad(uint64_t expected_epoch,
+                                                          const db2_vault_key_use_envelope_t *e,
+                                                          const uint8_t *aad, size_t aad_len,
+                                                          kb_vault_key_use_fn callback, void *ctx)
+{
+   return protected_use_aad(expected_epoch, e, aad, aad_len, NULL, 0, callback, ctx);
+}
+
+kb_vault_key_use_status_t kb_vault_protected_use(uint64_t expected_epoch, const char *principal,
+                                                 const char *agent, const char *cred,
+                                                 const db2_vault_key_use_envelope_t *e,
+                                                 kb_vault_key_use_fn callback, void *ctx)
+{
+   uint8_t aad[VAULT_ENVELOPE_AAD_MAX] = {0}, fallback[VAULT_ENVELOPE_AAD_MAX] = {0};
+   size_t aad_len = 0, fallback_len = 0;
+   if (!e || vault_aad_build_v2(principal, agent, cred, e->version, aad, sizeof(aad), &aad_len))
+      return KB_VAULT_KEY_USE_INTEGRITY;
+   if (vault_aad_build_v1_safe(principal, agent, cred, e->version, fallback, sizeof(fallback),
+                               &fallback_len))
+      fallback_len = 0;
+   kb_vault_key_use_status_t rc =
+       protected_use_aad(expected_epoch, e, aad, aad_len, fallback, fallback_len, callback, ctx);
+   OPENSSL_cleanse(aad, sizeof(aad));
+   OPENSSL_cleanse(fallback, sizeof(fallback));
    return rc;
 }

@@ -309,6 +309,8 @@ econ_openai_plan_t econ_openai_gpt56_plan(const econ_openai_plan_input_t *input)
    local.transform.pricing_table_id = context->pricing_table_id;
    local.transform.contract_versions = context->contract_versions;
    local.transform.transform_id = local.transform.transform_version = 1;
+   local.transform.scenario_set_id = 1;
+   local.transform.scenario_coverage = UINT64_C(1);
    local.scenario_count = ECON_OPENAI_GPT56_SCENARIO_COUNT;
    local.safety_margin = context->safety_margin;
    local.scenarios[0] = out.scenario;

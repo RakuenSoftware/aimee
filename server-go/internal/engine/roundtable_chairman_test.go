@@ -18,7 +18,7 @@ func chairmanRequest() StepRequest {
 
 func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	agents := &discussionTestAgents{respond: func(request DelegateRequest) (string, error) {
-		if request.Delegate != "codex" || request.Persona != "chairman" || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") {
+		if request.Delegate != "codex" || request.Persona != "chairman" || !strings.Contains(request.DurableSlot, ":chairman") || !strings.Contains(request.Prompt, "BEGIN_CHAIRMAN_DATA") || !strings.Contains(request.Prompt, "plurality, format, or existence is never original-request drift") {
 			t.Fatalf("chairman request=%+v", request)
 		}
 		return `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":" Approve ","findings":[]}`, nil
@@ -40,6 +40,21 @@ func TestChairmanChangesReceiveStableFinalIDs(t *testing.T) {
 	feedback, approvals, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan")
 	if errText != "" || approvals != 0 || len(feedback.Findings) != 1 || !strings.HasPrefix(feedback.Findings[0].ID, "issue-") || feedback.Findings[0].Persona != "chairman" {
 		t.Fatalf("chairman changes failed: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
+	}
+}
+
+func TestChairmanDriftedChangesBecomeActionableFeedback(t *testing.T) {
+	agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) {
+		return `{"artifact_stage":"plan","original_request_alignment":{"status":"drifted","summary":"the plan substitutes a different outcome"},"verdict":"changes","findings":[{"id":"scope","severity":"blocking","location":"objective","summary":"wrong outcome","recommendation":"restore the requested outcome"}]}`, nil
+	}}
+	runner := &NativeRunner{agents: agents}
+	analysis := discussionAnalysis("blocking")
+	feedback, approvals, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan")
+	if errText != "" || approvals != 0 || len(feedback.Findings) != 2 {
+		t.Fatalf("drifted changes did not reach refinement: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
+	}
+	if feedback.Findings[0].Persona != "chairman" || !strings.Contains(feedback.Findings[0].Summary, "alignment is drifted") {
+		t.Fatalf("missing alignment feedback: %+v", feedback.Findings)
 	}
 }
 

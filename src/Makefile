@@ -20,6 +20,7 @@ KB_STATUS_PROVISIONER = ../aimee-kb-status-provision$(EXEEXT)
 KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
 KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
 KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
+KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
 WEBCHAT = ../aimee-webchat$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
@@ -297,7 +298,7 @@ MCP_GIT_OBJS = $(MCP_GIT_SRCS:%.c=$(OBJDIR)/%.o)
 # --- Layer 0: Foundation (db, config, util, text, render, log, platform, cJSON) ---
 CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/config_sections.c modules/config/config_database.c modules/config/config_learning.c modules/config/config_memory.c modules/config/config_charter.c modules/config/config_trigger.c modules/config/config_kb_maintenance.c modules/config/config_kb_curator.c modules/config/config_server_api.c modules/config/config_skills.c modules/config/config_save.c modules/config/config_mode.c modules/config/config_fields.c toolset.c util.c util_url.c kb/kb_identity.c modules/git/forge_credentials.c forge_app_token.c modules/workspace/workspace_mirror.c report_enrichment.c modules/audit/audit_action.c modules/audit/audit_worm.c modules/audit/audit_worm_chain.c modules/audit/audit_ledger.c delivery_target.c text.c render.c markdown.c json_fluent.c code_audit_graph.c log.c shutdown_forensics.c dstr.c yaml.c diff.c anchor_snapshot.c edit_anchored.c code_outline.c sse_parser.c \
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
-            compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_wire_snapshot.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
+            compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_wire_snapshot.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/economizer_json.c modules/economizer/economizer_provenance.c modules/economizer/economizer_dispatch_lease.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c plugin.c \
             plugin_ctx.c plugin_loader.c modules/memory/memory_provider.c plugin_c_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
@@ -432,7 +433,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
-SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_status.c kb/kb_mgmt_status.c
+SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
@@ -468,7 +469,8 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_cert_binding.c \
            kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
-           kb/kb_management_runtime.c
+           kb/kb_management_action.c kb/kb_management_runtime.c
+KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes
@@ -487,6 +489,21 @@ STATUS_AUTHORITY_VAULT_OBJS = $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(OBJDIR)/modules/vault/vault_server_key.o \
                               $(OBJDIR)/modules/vault/vault_custody_kms.o \
                               $(OBJDIR)/modules/vault/vault_store.o
+
+# P5-C2d online token authority.  The private database adapter, protected
+# signer, and daemon never enter ordinary KB/server/publisher/provisioner
+# targets; ordinary KB links only the bounded IPC client object above.
+TOKEN_AUTHORITY_OBJS = $(OBJDIR)/kb/kb_mgmt_token_authority_main.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_daemon.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority_service.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_authority.o \
+                       $(OBJDIR)/kb/kb_vault_protected_use.o \
+                       $(OBJDIR)/kb/kb_mgmt_token.o \
+                       $(OBJDIR)/kb/kb_mgmt_token_public.o \
+                       $(OBJDIR)/db2/management_token_authority.o \
+                       $(OBJDIR)/db2/db_postgres.o
+TOKEN_AUTHORITY_VAULT_OBJS = $(STATUS_AUTHORITY_VAULT_OBJS)
 .PHONY: status-authority-core status-authority-package-check
 status-authority-package-check:
 	cd .. && python3 scripts/check-status-authority-packaging.py
@@ -511,6 +528,7 @@ STATUS_PROVISIONER_PLATFORM_OBJS = $(filter %/platform_path.o,$(PLATFORM_BASIC_O
 # closure out of every runtime target and installation surface.
 TOKEN_ROOTS_PROVISIONER_OBJS = $(OBJDIR)/kb/kb_mgmt_token_roots_provision_main.o \
                                $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                               $(OBJDIR)/kb/kb_mgmt_token_public.o \
                                $(OBJDIR)/db2/management_token_roots.o \
                                $(OBJDIR)/db2/db_postgres.o
 TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
@@ -525,6 +543,7 @@ TOKEN_ROOTS_PROVISIONER_VAULT_OBJS = $(OBJDIR)/kb/modules/vault/vault_crypto.o \
 JWKS_PUBLISHER_OBJS = $(OBJDIR)/kb/kb_mgmt_jwks_publish_main.o \
                       $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
                       $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                      $(OBJDIR)/kb/kb_mgmt_token_public.o \
                       $(OBJDIR)/db2/management_jwks_publication.o \
                       $(OBJDIR)/db2/db_postgres.o
 JWKS_PUBLISHER_VAULT_OBJS = $(TOKEN_ROOTS_PROVISIONER_VAULT_OBJS)
@@ -689,12 +708,12 @@ GATEWAY_PLATFORM_OBJS = $(filter %/platform_process.o, $(PLATFORM_BASIC_OBJS))
 GATEWAY_OBJS = $(GATEWAY_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o $(GATEWAY_PLATFORM_OBJS)
 
 # All source files for linting (excluding vendored cJSON)
-ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
+ALL_SRCS = $(sort $(KB_MEMORY_SPLIT_SRCS) $(CORE_SRCS) $(DB1_SRCS) $(DB2_PG_SRCS) $(DB2_SRCS) $(STATUS_AUTHORITY_SRCS) kb/kb_mgmt_token_authority_main.c kb/kb_mgmt_token_authority_daemon.c kb/kb_mgmt_token_authority_service.c kb/kb_mgmt_token_authority.c kb/kb_mgmt_token_public.c db2/management_token_authority.c kb/kb_mgmt_status_provision_main.c kb/kb_mgmt_token_roots_provision_main.c kb/kb_mgmt_token_roots_provision.c db2/management_token_roots.c kb/kb_mgmt_jwks_publish_main.c kb/kb_mgmt_jwks_publication.c db2/management_jwks_publication.c $(MCP_GIT_SRCS) $(DATA_SRCS) $(AGENT_SRCS) $(CMD_SRCS) \
            $(CLI_SRCS) $(SERVER_SRCS) $(KB_SRCS) $(GATEWAY_SRCS) $(PLATFORM_SRCS) $(PLATFORM_AGENT_SRCS))
 LINT_SRCS = $(ALL_SRCS) kb/http/kb_http_resolver.c $(wildcard tests/test_*.c) $(wildcard tests/fuzz_*.c) $(wildcard tests/bench_*.c)
 
 # All object files for dependency tracking
-ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
+ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_OBJS) $(STATUS_PROVISIONER_OBJS) $(TOKEN_ROOTS_PROVISIONER_OBJS) $(JWKS_PUBLISHER_OBJS) $(MCP_GIT_OBJS) $(DATA_OBJS) $(SERVER_DATA_OBJS) $(AGENT_OBJS) $(CMD_OBJS) \
            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
 DEPS = $(ALL_OBJS:.o=.d)
 
@@ -1131,6 +1150,22 @@ $(KB_STATUS_AUTHORITY): $(STATUS_AUTHORITY_OBJS) $(STATUS_AUTHORITY_VAULT_OBJS) 
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
+.PHONY: token-authority-core token-authority-isolation-check token-authority-regression-check
+token-authority-isolation-check:
+	cd .. && python3 scripts/check-token-authority-isolation.py
+	cd .. && python3 scripts/check-token-authority-isolation.py --plant-test
+
+token-authority-regression-check:
+	cd .. && scripts/run-p5c2d-token-authority-regressions.sh
+
+token-authority-core: token-authority-isolation-check token-authority-regression-check $(KB_TOKEN_AUTHORITY)
+
+$(KB_TOKEN_AUTHORITY): $(TOKEN_AUTHORITY_OBJS) $(TOKEN_AUTHORITY_VAULT_OBJS) \
+                       $(STATUS_PROVISIONER_PLATFORM_OBJS) $(OBJDIR)/cJSON.o \
+                       $(OBJDIR)/modules/config/config.o $(OBJDIR)/aimee_home.o
+	$(AIMEE_RUNTIME_MUTATION_GUARD)
+	$(CC) -o $@ $^ $(L_KB)
+
 # Standalone libpq memory-negation eval driver (dev tool, not part of `all`): the
 # aimee-kb object set with kb_main() swapped for a corpus-eval main() plus the
 # mem_eval harness. Links the REAL libpq DB2, so mem_eval_load_corpus opens an
@@ -1464,6 +1499,8 @@ clean:
 	       tests/fuzz_config_load tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
 	       tests/fuzz_kb_mgmt_jwks_publication \
+	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+	       tests/fuzz_server_mgmt_action \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
@@ -1632,14 +1669,33 @@ FUZZ_SERVER_MGMT_TOKEN_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_token.o \
 FUZZ_KB_MGMT_TOKEN_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_token.o \
                           $(OBJDIR)/kb/kb_mgmt_token.o
 
+FUZZ_KB_MGMT_TOKEN_AUTHORITY_IPC_OBJS = \
+    $(OBJDIR)/tests/fuzz_kb_mgmt_token_authority_ipc.o \
+    $(OBJDIR)/kb/kb_mgmt_token_authority_ipc.o
+
 FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publication.o \
                                      $(OBJDIR)/kb/kb_mgmt_jwks_publication.o \
-                                     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o
+                                     $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
+                                     $(OBJDIR)/kb/kb_mgmt_token_public.o
+
+FUZZ_KB_MGMT_CHECKPOINT_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_checkpoint.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_authority.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_listener.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_peer.o \
+                               $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/cJSON.o
+
+FUZZ_KB_MANAGEMENT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_kb_management_action.o \
+                                 $(OBJDIR)/kb/kb_management_action.o $(OBJDIR)/cJSON.o
+
+FUZZ_SERVER_MGMT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_action.o \
+                               $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/cJSON.o
 
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse tests/fuzz_config_load \
                tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
                tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
-               tests/fuzz_kb_mgmt_jwks_publication
+               tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication \
+               tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+               tests/fuzz_server_mgmt_action
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -1677,7 +1733,23 @@ $(OBJDIR)/tests/fuzz_kb_mgmt_token.o: tests/fuzz_kb_mgmt_token.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
+$(OBJDIR)/tests/fuzz_kb_mgmt_token_authority_ipc.o: tests/fuzz_kb_mgmt_token_authority_ipc.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
 $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publication.o: tests/fuzz_kb_mgmt_jwks_publication.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
+$(OBJDIR)/tests/fuzz_kb_mgmt_checkpoint.o: tests/fuzz_kb_mgmt_checkpoint.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
+$(OBJDIR)/tests/fuzz_kb_management_action.o: tests/fuzz_kb_management_action.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
+$(OBJDIR)/tests/fuzz_server_mgmt_action.o: tests/fuzz_server_mgmt_action.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
@@ -1708,7 +1780,19 @@ tests/fuzz_server_mgmt_token: $(FUZZ_SERVER_MGMT_TOKEN_OBJS)
 tests/fuzz_kb_mgmt_token: $(FUZZ_KB_MGMT_TOKEN_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
+tests/fuzz_kb_mgmt_token_authority_ipc: $(FUZZ_KB_MGMT_TOKEN_AUTHORITY_IPC_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
 tests/fuzz_kb_mgmt_jwks_publication: $(FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
+tests/fuzz_kb_mgmt_checkpoint: $(FUZZ_KB_MGMT_CHECKPOINT_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
+tests/fuzz_kb_management_action: $(FUZZ_KB_MANAGEMENT_ACTION_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
+tests/fuzz_server_mgmt_action: $(FUZZ_SERVER_MGMT_ACTION_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
 fuzz: $(FUZZ_TARGETS)
@@ -1721,7 +1805,11 @@ fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_kb_workload_wire tests/fuzz_corpus/seed.*
 	./tests/fuzz_server_mgmt_token tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_token tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_jwks_publication tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_mgmt_checkpoint tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_management_action tests/fuzz_corpus/seed.*
+	./tests/fuzz_server_mgmt_action tests/fuzz_corpus/seed.*
 
 # --- Coverage reporting ---
 

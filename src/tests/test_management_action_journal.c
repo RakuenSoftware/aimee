@@ -392,6 +392,12 @@ static void test_outcome(void)
    memset(op.response_sha256, 0, sizeof(op.response_sha256));
    assert(db2_management_action_outcome_append(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
    assert(!out.has_status_code && !out.has_response_sha256);
+
+   op.result_class = DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE;
+   assert(db2_management_action_outcome_append(&principal, &op, &out) == DB2_MANAGEMENT_ACTION_OK);
+   op.result = DB2_MANAGEMENT_ACTION_FAILED;
+   assert(db2_management_action_outcome_append(&principal, &op, &out) ==
+          DB2_MANAGEMENT_ACTION_INVALID);
 }
 
 static void test_sqlstate(void)

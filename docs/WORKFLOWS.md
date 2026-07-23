@@ -123,17 +123,30 @@ If Discussion mode is enabled on that preset, all successful seats compare the
 independent reports once. Nits, suggestions, and ordinary defects cannot extend
 discussion beyond that cycle. Only disagreement about a foundational issue may
 continue, carrying just the contested stable issue IDs until a strict majority
-forms. Deadline or quorum loss parks the gate instead of inventing consensus.
+forms. Deadline or quorum loss parks the gate instead of inventing consensus;
+the scheduler retries that execution-owned pause after a bounded backoff with a
+new durable execution version. Work-item cost and turn caps remain the safety
+backstops, while operator and convergence parks are never auto-resumed.
 Strict majority is measured over successful seats returning a complete valid
 ballot in that cycle; abstentions remain in the denominator but do not alone
 extend discussion. The preset's `deadline_ms` covers analysis and discussion
 together, with zero/omitted legacy values normalized to 360 seconds.
+That overall budget is divided evenly among enabled analysis, Discussion, and
+Chairman phases so a slow seat cannot consume the time required by a later
+configured phase.
+The compatibility proxy uses the acquired preset deadline plus bounded
+transport grace, so its socket timeout cannot preempt valid configured work.
+An unavailable independent-analysis seat remains visible as degraded
+participation, but it parks the gate only when complete reports fall below the
+preset's `min_successful`; meeting that configured minimum continues normally.
 
 An optional configured chairman runs once after deterministic synthesis and
 submits the final structured feedback. The chairman is a positive, visible agent
-selection, not an exclusion rule. Failure, malformed output, wrong artifact
-stage, or missing original-request alignment parks the gate; it never triggers a
-roster-wide fallback. When disabled, deterministic synthesis is final.
+selection, not an exclusion rule. Transport failure, malformed output, wrong
+artifact stage, or a contradictory verdict parks the gate for scheduler retry;
+it never triggers a roster-wide fallback. A valid `changes` verdict with
+`drifted` or `unclear` alignment becomes structured refinement feedback rather
+than an execution pause. When disabled, deterministic synthesis is final.
 
 Roundtable presets are execution policy. Agents and automation may read and use
 them, but create, edit, delete, and default-selection operations require the

@@ -1,6 +1,7 @@
 #ifndef AIMEE_KB_MGMT_TOKEN_ROOTS_PROVISION_H
 #define AIMEE_KB_MGMT_TOKEN_ROOTS_PROVISION_H
 
+#include "kb_mgmt_token_public.h"
 #include "vault_crypto.h"
 
 #include <stddef.h>
@@ -8,12 +9,9 @@
 
 #define KB_MGMT_ROOT_CUSTODY_ID_MAX 600
 #define KB_MGMT_ROOT_BOOTSTRAP_LEN  64
-#define KB_MGMT_TOKEN_MODULUS_LEN   384
-#define KB_MGMT_TOKEN_KID_MAX       64
 #define KB_MGMT_MANIFEST_ID_MAX     64
 #define KB_MGMT_ROOT_ATTEST_MAX     512
 #define KB_MGMT_ROOT_SECRET_MAX     4096
-#define KB_MGMT_TOKEN_JWK_MAX       768
 #define KB_MGMT_PUBLIC_BUNDLE_MAX   1536
 
 typedef enum
@@ -117,11 +115,6 @@ typedef struct
 } kb_mgmt_roots_config_t;
 
 /* All encoders emit one exact compact JSON representation and clear output on error. */
-int kb_mgmt_token_kid(const uint8_t *modulus, size_t modulus_len, char *out, size_t cap);
-int kb_mgmt_token_jwk(const uint8_t *modulus, size_t modulus_len, char *out, size_t cap,
-                      size_t *out_len);
-int kb_mgmt_token_jwk_validate(const char *jwk, size_t jwk_len, uint8_t *modulus,
-                               size_t modulus_cap, size_t *modulus_len);
 int kb_mgmt_manifest_wire_id(const uint8_t public_key[32], char *out, size_t cap);
 int kb_mgmt_public_bundle(const uint8_t *token_modulus, size_t token_modulus_len,
                           const uint8_t manifest_public[32],

@@ -1,12 +1,81 @@
 #include "server_http_internal.h"
+#include "server_mgmt_endpoint.h"
+#include "kb_mgmt_endpoint.h"
+#include "kb_mgmt_status.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+
+static pthread_mutex_t g_management_action_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_management_action_idle = PTHREAD_COND_INITIALIZER;
+static unsigned g_management_action_active;
+/* Direct route unit tests run without a listener. A real listener start resets
+ * this state, while stop closes the gate before it tears down any dependency. */
+static int g_management_action_stopping;
+extern int g_remote_writes;
+
+int server_http_remote_writes(void)
+{
+   return g_remote_writes;
+}
+
+int server_http_management_action_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int ok = !g_management_action_stopping;
+   if (ok)
+      g_management_action_active++;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return ok ? 0 : -1;
+}
+
+int server_http_management_action_allowed(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int allowed = !g_management_action_stopping;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return allowed;
+}
+
+void server_http_management_action_end(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   if (g_management_action_active)
+      g_management_action_active--;
+   if (!g_management_action_active)
+      pthread_cond_broadcast(&g_management_action_idle);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_start(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 0;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_shutdown_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_stop_and_wait(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   while (g_management_action_active)
+      pthread_cond_wait(&g_management_action_idle, &g_management_action_lock);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
 
 int server_http_management_health_route(const char *method, const char *path)
 {
@@ -15,12 +84,25 @@ int server_http_management_health_route(const char *method, const char *path)
            (!strcmp(method, "GET") && !strcmp(path, "/v1/management/health")));
 }
 
+int server_http_management_action_route(const char *method, const char *path)
+{
+   return method && path && !strcmp(method, "POST") &&
+          (!strcmp(path, "/v1/management/action/challenge") ||
+           !strcmp(path, "/v1/management/action"));
+}
+
+int server_http_management_route(const char *method, const char *path)
+{
+   return server_http_management_health_route(method, path) ||
+          server_http_management_action_route(method, path);
+}
+
 server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
                                                           int management_lane, int verified_peer,
                                                           int management_profile,
                                                           const char *peer_cn)
 {
-   int route = server_http_management_health_route(method, path);
+   int route = server_http_management_route(method, path);
    int profile = verified_peer && management_profile;
    if (management_lane && route)
       return profile && peer_cn && strcmp(peer_cn, "p5-kb-management") == 0
@@ -113,6 +195,11 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
        "AIMEE_SERVER_MGMT_TLS_KEY",
        "AIMEE_SERVER_MGMT_CLIENT_CA",
    };
+   static const char *const checkpoint_names[] = {
+       "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",   "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+       "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",   "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
+       "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
+   };
    g_management_start_error = NULL;
    if (!out)
    {
@@ -166,6 +253,18 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    const char *server_id = getenv("AIMEE_SERVER_ID");
    const char *status_key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
    const char *status_public = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
+   const char *token_issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
+   const char *trust_bundle = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   size_t checkpoint_present = 0;
+   for (size_t i = 0; i < sizeof(checkpoint_names) / sizeof(checkpoint_names[0]); i++)
+      if (getenv(checkpoint_names[i]) && getenv(checkpoint_names[i])[0])
+         checkpoint_present++;
+   const char *checkpoint_endpoint = getenv(checkpoint_names[0]);
+   const char *checkpoint_ca = getenv(checkpoint_names[1]);
+   const char *checkpoint_pin = getenv(checkpoint_names[2]);
+   const char *checkpoint_cert = getenv(checkpoint_names[3]);
+   const char *checkpoint_key = getenv(checkpoint_names[4]);
+   const char *checkpoint_secondary = getenv("AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN");
    if (server_http_management_bind_addr(bind_text, &out->bind_addr))
       g_management_start_error = "AIMEE_SERVER_MGMT_BIND";
    else if (errno || !end || *end || port < 1 || port > UINT16_MAX)
@@ -182,6 +281,24 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
       g_management_start_error = "AIMEE_MGMT_STATUS_KEY_ID";
    else if (!management_lower_hex(status_public, 64))
       g_management_start_error = "AIMEE_MGMT_STATUS_PUBLIC_KEY";
+   else if (!token_issuer || strncmp(token_issuer, "https://", 8) || !token_issuer[8])
+      g_management_start_error = "AIMEE_SERVER_MGMT_ISSUER";
+   else if (!management_absolute_path(trust_bundle))
+      g_management_start_error = "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE";
+   else if (checkpoint_present != sizeof(checkpoint_names) / sizeof(checkpoint_names[0]))
+      g_management_start_error = "management checkpoint packet";
+   else if (kb_mgmt_endpoint_validate(checkpoint_endpoint) != 0)
+      g_management_start_error = checkpoint_names[0];
+   else if (!management_absolute_path(checkpoint_ca))
+      g_management_start_error = checkpoint_names[1];
+   else if (!management_lower_hex(checkpoint_pin, 64))
+      g_management_start_error = checkpoint_names[2];
+   else if (!management_absolute_path(checkpoint_cert))
+      g_management_start_error = checkpoint_names[3];
+   else if (!management_absolute_path(checkpoint_key))
+      g_management_start_error = checkpoint_names[4];
+   else if (checkpoint_secondary && !management_lower_hex(checkpoint_secondary, 64))
+      g_management_start_error = "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN";
    if (g_management_start_error)
    {
       memset(out, 0, sizeof(*out));
@@ -193,7 +310,31 @@ int server_http_management_config_from_env(server_http_management_config_t *out)
    snprintf(out->cert, sizeof(out->cert), "%s", cert);
    snprintf(out->key, sizeof(out->key), "%s", key);
    snprintf(out->client_ca, sizeof(out->client_ca), "%s", client_ca);
+   snprintf(out->status_endpoint, sizeof(out->status_endpoint), "%s", checkpoint_endpoint);
+   snprintf(out->status_ca, sizeof(out->status_ca), "%s", checkpoint_ca);
+   snprintf(out->status_leaf_pin, sizeof(out->status_leaf_pin), "%s", checkpoint_pin);
+   snprintf(out->status_secondary_leaf_pin, sizeof(out->status_secondary_leaf_pin), "%s",
+            checkpoint_secondary ? checkpoint_secondary : "");
+   snprintf(out->status_client_cert, sizeof(out->status_client_cert), "%s", checkpoint_cert);
+   snprintf(out->status_client_key, sizeof(out->status_client_key), "%s", checkpoint_key);
+   snprintf(out->status_key_id, sizeof(out->status_key_id), "%s", status_key_id);
+   snprintf(out->status_public_key, sizeof(out->status_public_key), "%s", status_public);
    return 0;
+}
+
+int server_http_management_checkpoint_files_valid(const server_http_management_config_t *c)
+{
+   if (!c || !c->enabled)
+      return c ? 1 : 0;
+   const char *paths[] = {c->status_ca, c->status_client_cert, c->status_client_key};
+   for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
+   {
+      struct stat st;
+      if (stat(paths[i], &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != 0 ||
+          (st.st_mode & (S_IWGRP | S_IWOTH)))
+         return 0;
+   }
+   return 1;
 }
 
 static const char *management_find_bytes(const char *begin, const char *end, const char *needle,
@@ -246,8 +387,14 @@ int server_http_management_request_syntax_valid(const char *method, const char *
          value_end--;
       if (name_len == 14 && strncasecmp(line, "Content-Length", 14) == 0)
       {
-         if (++content_length_count != 1 || value_end - value != 1 || value[0] != '0')
+         if (++content_length_count != 1 || value == value_end)
             return 0;
+         size_t digits = (size_t)(value_end - value);
+         if (digits > 3 || (digits > 1 && value[0] == '0'))
+            return 0;
+         for (size_t i = 0; i < digits; i++)
+            if (value[i] < '0' || value[i] > '9')
+               return 0;
       }
       else if ((name_len == 17 && strncasecmp(line, "Transfer-Encoding", 17) == 0) ||
                (name_len == 6 && strncasecmp(line, "Expect", 6) == 0) ||
@@ -256,6 +403,72 @@ int server_http_management_request_syntax_valid(const char *method, const char *
       line = eol + 2;
    }
    return line == headers_end + 2;
+}
+
+int server_http_management_action_framing_valid(const char *method, const char *path,
+                                                const char *request, size_t request_len)
+{
+   if (!server_http_management_action_route(method, path) || !request || !request_len ||
+       !server_http_management_request_syntax_valid(method, path, request, request_len))
+      return 0;
+   const char *end = management_find_bytes(request, request + request_len, "\r\n\r\n", 4);
+   const char *line = management_find_bytes(request, request + request_len, "\r\n", 2);
+   if (!end || !line)
+      return 0;
+   line += 2;
+   int host = 0, ct = 0, cl = 0, conn = 0, auth = 0, staple = 0;
+   size_t body_len = 0;
+   while (line < end)
+   {
+      const char *eol = management_find_bytes(line, end + 2, "\r\n", 2);
+      const char *colon = eol ? memchr(line, ':', (size_t)(eol - line)) : NULL;
+      if (!eol || !colon || colon == line)
+         return 0;
+      const char *v = colon + 1;
+      while (v < eol && (*v == ' ' || *v == '\t'))
+         v++;
+      const char *ve = eol;
+      while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+         ve--;
+      size_t n = (size_t)(colon - line), vn = (size_t)(ve - v);
+      if (n == 4 && !strncasecmp(line, "Host", n))
+         host = ++host == 1 && vn > 0 ? host : 99;
+      else if (n == 12 && !strncasecmp(line, "Content-Type", n))
+         ct = ++ct == 1 && vn == 16 && !strncasecmp(v, "application/json", 16) ? ct : 99;
+      else if (n == 14 && !strncasecmp(line, "Content-Length", n))
+      {
+         cl++;
+         body_len = 0;
+         for (size_t i = 0; i < vn; i++)
+            body_len = body_len * 10 + (size_t)(v[i] - '0');
+      }
+      else if (n == 10 && !strncasecmp(line, "Connection", n))
+      {
+         int challenge = !strcmp(path, "/v1/management/action/challenge");
+         int exact = challenge ? vn == 10 && !strncasecmp(v, "keep-alive", 10)
+                               : vn == 5 && !strncasecmp(v, "close", 5);
+         conn = ++conn == 1 && exact ? conn : 99;
+      }
+      else if (n == 13 && !strncasecmp(line, "Authorization", n))
+         auth = ++auth == 1 && vn > 7 && vn <= 4096 && !strncasecmp(v, "Bearer ", 7) ? auth : 99;
+      else if (n == 25 && !strncasecmp(line, "X-Aimee-Management-Status", n))
+         staple = ++staple == 1 && vn > 0 && vn <= KB_MGMT_STATUS_JSON_MAX ? staple : 99;
+      else if ((n == 17 && !strncasecmp(line, "Transfer-Encoding", n)) ||
+               (n == 6 && !strncasecmp(line, "Expect", n)) ||
+               (n == 7 && !strncasecmp(line, "Upgrade", n)) ||
+               (n >= 6 && !strncasecmp(line, "Proxy-", 6)) ||
+               (n == 9 && !strncasecmp(line, "Forwarded", n)) ||
+               (n >= 12 && !strncasecmp(line, "X-Forwarded-", 12)) ||
+               (n == 16 && !strncasecmp(line, "Content-Encoding", n)) ||
+               (n == 7 && !strncasecmp(line, "Trailer", n)))
+         return 0;
+      line = eol + 2;
+   }
+   int challenge = !strcmp(path, "/v1/management/action/challenge");
+   return host == 1 && ct == 1 && cl == 1 && conn == 1 &&
+          (challenge ? body_len == 0 && auth == 0 && staple == 0
+                     : body_len > 0 && body_len <= SERVER_MGMT_ACTION_BODY_MAX && auth == 1 &&
+                           staple == 1);
 }
 
 int server_http_management_framing_valid(const char *method, const char *path, const char *request,

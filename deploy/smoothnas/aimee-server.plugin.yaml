@@ -33,6 +33,12 @@ services:
       # gateway (stable host address from inside any plugin container).
       AIMEE_KB_API_URL: http://10.100.0.1:8741
       AIMEE_SERVER_HTTP_BIND: "1"
+      # Refuse to start without a writable mount matching the kernel's
+      # core_pattern. Native-plane crashes must leave evidence across restarts.
+      AIMEE_REQUIRE_PERSISTENT_CORES: "1"
+      # Exercise the kernel path as the server user before every start; a
+      # missing mount, hostile hard rlimit, or ineffective core_pattern is fatal.
+      AIMEE_CORE_SELFTEST: "1"
       # ---- Delegate sandbox (needs the docker-socket profile above) -----------
       # Run server-executed delegates' tools in a --network none Docker sandbox.
       AIMEE_DELEGATE_SANDBOX: "1"
@@ -59,6 +65,10 @@ services:
         mode: tier-bound
         slot: HDD
         bind: /var/lib/aimee-workspaces
+      - name: cores
+        mode: tier-bound
+        slot: HDD
+        bind: /mnt/media/cores
     ports:
       # Remote /v1 is served over native TLS on 8743 (https://). Plaintext 8740
       # is loopback-only in the server (it refuses a non-loopback plaintext bind),

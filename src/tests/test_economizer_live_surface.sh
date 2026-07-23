@@ -28,6 +28,14 @@ for source in posix/agent_runtime.c server/openai_chat.c server/anthropic_http.c
     grep -q 'econ_wire_select' "$source" || fail "$source bypasses the wire snapshot selector"
 done
 
+# Activation machinery may ship, but the production registry is still empty.
+# No live request path may construct or consume a candidate before a separately
+# reviewed provider tuple is signed.
+if grep -R -n -E 'econ_json_compact[[:space:]]*\(|econ_provenance_issue_local[[:space:]]*\(|econ_dispatch_lease_begin[[:space:]]*\(' $live_sources >/dev/null; then
+    grep -R -n -E 'econ_json_compact[[:space:]]*\(|econ_provenance_issue_local[[:space:]]*\(|econ_dispatch_lease_begin[[:space:]]*\(' $live_sources >&2
+    fail "dormant activation machinery is reachable from a production request source"
+fi
+
 grep -q 'http_retry_post_context_bytes' posix/agent_runtime.c ||
     fail "delegate retries do not use the exact-length snapshot transport"
 grep -q 'http_retry_post_context_bytes' server/openai_chat.c ||

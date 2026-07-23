@@ -293,6 +293,8 @@ econ_anthropic_plan_t econ_anthropic_plan(const econ_anthropic_plan_input_t *inp
    local.transform.pricing_table_id = context->pricing_table_id;
    local.transform.contract_versions = context->contract_versions;
    local.transform.transform_id = local.transform.transform_version = 1;
+   local.transform.scenario_set_id = 1;
+   local.transform.scenario_coverage = UINT64_C(1);
    local.scenario_count = ECON_ANTHROPIC_NO_CACHE_SCENARIO_COUNT;
    local.safety_margin = context->safety_margin;
    local.scenarios[0] = out.scenario;

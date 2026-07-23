@@ -100,6 +100,25 @@ int main(void)
 
    snprintf(bad, sizeof(bad), "%s ", json);
    assert(kb_mgmt_status_from_json(bad, &parsed) == -1);
+
+   kb_mgmt_checkpoint_t checkpoint = {
+       .version = 1, .revoked = 1, .generation = 11, .issued_at = 2000, .expires_at = 2005};
+   memset(checkpoint.request_sha256, 'c', 64);
+   checkpoint.request_sha256[64] = 0;
+   snprintf(checkpoint.key_id, sizeof(checkpoint.key_id), "checkpoint-key-1");
+   assert(kb_mgmt_checkpoint_sign(&checkpoint, sk) == 0);
+   assert(kb_mgmt_checkpoint_verify_signature(&checkpoint, pk) == 0);
+   assert(kb_mgmt_checkpoint_validate(&checkpoint, 2002, 11) == 0);
+   assert(kb_mgmt_checkpoint_validate(&checkpoint, 2005, 11) == -1);
+   assert(kb_mgmt_checkpoint_to_json(&checkpoint, json, sizeof(json)) == 0);
+   kb_mgmt_checkpoint_t parsed_checkpoint;
+   assert(kb_mgmt_checkpoint_from_json(json, &parsed_checkpoint) == 0);
+   assert(memcmp(&checkpoint, &parsed_checkpoint, sizeof(checkpoint)) == 0);
+   assert(strstr(json, "\"domain\":\"management.action.checkpoint.v1\""));
+   char *domain = strstr(json, "management.action.checkpoint.v1");
+   assert(domain);
+   domain[0] = 'M';
+   assert(kb_mgmt_checkpoint_from_json(json, &parsed_checkpoint) == -1);
    puts("kb_mgmt_status: ok");
    return 0;
 }

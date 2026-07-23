@@ -830,7 +830,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int tr = kb_http_team_route(method, path, query_string, body, out_buf, out_cap);
       if (tr >= 0)
          return tr;
-      tr = kb_http_servers_route(method, path, query_string, out_buf, out_cap);
+      tr = kb_http_servers_route_ex(method, path, query_string, body,
+                                    body_len > 0 ? (size_t)body_len : 0, out_buf, out_cap);
       if (tr >= 0)
          return tr;
    }
