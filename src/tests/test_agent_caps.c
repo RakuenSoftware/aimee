@@ -1363,6 +1363,28 @@ void test_registration_grouping(void)
     * therefore not a sibling - even though a name-prefix parse would say it is. */
    assert(legacy->registration[0] == '\0');
 
+   /* ROUND TRIP. agent_save_config writes cfg->agents, and expansion has already
+    * replaced the registration with its generated targets - so a save collapses
+    * the operator's `models` form into individual agents. Pin what actually
+    * happens so the behaviour is a decision rather than a surprise. */
+   assert(agent_save_config(&c) == 0);
+   agent_config_t rt;
+   assert(agent_load_config(&rt) == 0);
+   assert(agent_find(&rt, "codex:gpt-5.6-sol") != NULL);
+   assert(agent_find(&rt, "codex:gpt-5.6-luna") != NULL);
+   {
+      /* `registration` must SURVIVE the save. It is set during expansion, and the
+       * expanded targets are what get written, so without persisting it the
+       * same-registration fallback preference silently disappeared the first
+       * time anything saved the config - verified empirically before the fix. */
+      const agent_t *sol_rt = agent_find(&rt, "codex:gpt-5.6-sol");
+      const agent_t *luna_rt = agent_find(&rt, "codex:gpt-5.6-luna");
+      assert(strcmp(sol_rt->registration, "codex") == 0);
+      assert(strcmp(luna_rt->registration, "codex") == 0);
+      const agent_t *legacy_rt = agent_find(&rt, "codex:legacy");
+      assert(legacy_rt && legacy_rt->registration[0] == '\0');
+   }
+
    printf("  PASS: test_registration_grouping\n");
    unlink(agent_config_path());
 }

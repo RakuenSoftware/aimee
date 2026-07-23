@@ -1,0 +1,672 @@
+diff --git a/src/cmd_agent_delegate.c b/src/cmd_agent_delegate.c
+index 6e416f82..2e775153 100644
+--- a/src/cmd_agent_delegate.c
++++ b/src/cmd_agent_delegate.c
+@@ -86,6 +86,60 @@ void generate_task_id(char *buf, size_t len)
+             rand_bytes[7]);
+ }
+ 
++/* Capture the worktree's current tracked state as a commit object WITHOUT
++ * touching the worktree or the stash stack, so a failed escalation can be rolled
++ * back to exactly what the first delegate produced.
++ *
++ * `git stash create` is used deliberately over `git stash push`: the stash STACK
++ * is shared across worktrees and concurrent sessions, so pushing could pop
++ * another session's work. `create` only writes an object and prints its sha.
++ *
++ * Returns 1 and fills `sha` when a snapshot exists, 0 when there is nothing to
++ * snapshot or git failed - in which case the caller must NOT attempt a restore. */
++static int delegate_snapshot_worktree(char *sha, size_t sha_len)
++{
++   if (!sha || sha_len < 41)
++      return 0;
++   sha[0] = '\0';
++   const char *argv[] = {"git", "stash", "create", NULL};
++   char *out = NULL;
++   int rc = safe_exec_capture(argv, &out, AGENT_TOOL_OUTPUT_MAX);
++   if (rc != 0 || !out)
++   {
++      free(out);
++      return 0;
++   }
++   size_t n = 0;
++   while (out[n] && out[n] != '\n' && n + 1 < sha_len)
++   {
++      sha[n] = out[n];
++      n++;
++   }
++   sha[n] = '\0';
++   free(out);
++   /* Empty output means a clean tree: nothing to restore, and nothing to undo. */
++   return n >= 7 ? 1 : 0;
++}
++
++/* Roll TRACKED files back to a snapshot taken by delegate_snapshot_worktree.
++ * Untracked files the failed attempt created are deliberately left in place:
++ * removing them would mean `git clean`, which could delete work this function
++ * has no business judging. Best-effort - a failure is reported, never fatal. */
++static void delegate_restore_worktree(const char *sha)
++{
++   if (!sha || !sha[0])
++      return;
++   const char *argv[] = {"git", "checkout", sha, "--", ".", NULL};
++   char *out = NULL;
++   int rc = safe_exec_capture(argv, &out, AGENT_TOOL_OUTPUT_MAX);
++   free(out);
++   if (rc != 0)
++      LOG_WARN("delegate",
++               "could not roll the worktree back to the pre-escalation snapshot %s (git exit %d); "
++               "the tree may contain partial changes from the failed attempt",
++               sha, rc);
++}
++
+ static void delegate_list_roles(void)
+ {
+    agent_config_t cfg;
+@@ -686,6 +740,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+    prompt = prompt_plan.user_prompt;
+ 
+    {
++      const char *removed = delegate_role_removed_reason(role);
++      if (removed)
++         fatal("role '%s' was %s", role, removed);
+       const char *canonical = delegate_role_canonicalize(role);
+       if (canonical != role)
+          LOG_INFO("delegate", "delegate: role alias '%s' -> '%s'", role, canonical);
+@@ -732,13 +789,19 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+        * whole_task: boundedness is opt-in, because under uncertainty we
+        * over-select toward capability rather than risk a misplacement. */
+       const char *scope_opt = opt_get(&opts, "scope");
+-      agent_scope_t scope = AGENT_SCOPE_UNSET;
++      agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
+       if (scope_opt && scope_opt[0])
+       {
+          scope = agent_scope_from_string(scope_opt);
+          if (scope == AGENT_SCOPE_UNSET)
+             fatal("--scope expects \"bounded\" or \"whole_task\", got '%s'", scope_opt);
+       }
++      /* Resolved HERE, not left UNSET for a downstream router to interpret. This
++       * command routes through the mutably-filtered cfg and plain agent_route(),
++       * which carry no packet scope - so leaving it UNSET made
++       * delegate_filter_route_scope() a no-op and the advertised "default
++       * whole_task" silently unenforced, letting a bounded-only local seat win on
++       * price. */
+       int drop_deprecated = !(via_agent_name && via_agent_name[0]) &&
+                             !(provider_override && provider_override[0]) &&
+                             !(model_override && model_override[0]);
+@@ -1672,8 +1735,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+       {
+          agent_t *failed_seat = agent_find(&cfg, result.agent_name);
+          int failed_tier = failed_seat ? failed_seat->cost_tier : -1;
+-         agent_t *target =
+-             agent_route_escalation_target(&cfg, role, failed_tier, 0, AGENT_SCOPE_UNSET);
++         /* The packet's OWN scope, not UNSET: scope is fixed at decomposition and
++          * survives re-routing. Passing UNSET reclassified a bounded packet as
++          * whole_task during target selection, which could exclude a perfectly
++          * valid bounded-capable seat and leave a bounded packet unable to
++          * escalate at all. */
++         agent_t *target = agent_route_escalation_target(&cfg, role, failed_tier, 0, scope);
+          if (target)
+          {
+             LOG_WARN("delegate",
+@@ -1700,16 +1767,33 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+             if (esc_prompt)
+             {
+                /* Pin routing to the chosen seat so the re-dispatch cannot land
+-                * back on the class of agent that just failed. */
++                * back on the class of agent that just failed - but SNAPSHOT the
++                * fleet first and restore it afterwards. cfg outlives this block:
++                * the economics JSON below calls agent_route(&cfg, role) to name
++                * the agent that did the work, so leaving the fleet pinned would
++                * attribute the result to the escalation target even when the
++                * escalation dispatch failed and the ORIGINAL result was kept. */
++               int saved_enabled[MAX_AGENTS];
++               int saved_pinned = cfg.route_pinned;
++               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
++                  saved_enabled[i] = cfg.agents[i].enabled;
+                for (int i = 0; i < cfg.agent_count; i++)
+                   cfg.agents[i].enabled = (&cfg.agents[i] == target);
+                cfg.route_pinned = 1;
+ 
++               /* Snapshot the first delegate's work so a failed escalation can be
++                * undone rather than merely reported. */
++               char pre_esc_sha[64];
++               int have_snapshot = delegate_snapshot_worktree(pre_esc_sha, sizeof(pre_esc_sha));
++
+                agent_result_t esc_result;
+                memset(&esc_result, 0, sizeof(esc_result));
+                int esc_rc =
+                    agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens, &esc_result);
+                free(esc_prompt);
++               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
++                  cfg.agents[i].enabled = saved_enabled[i];
++               cfg.route_pinned = saved_pinned;
+                if (esc_rc == 0)
+                {
+                   free(result.response);
+@@ -1733,9 +1817,27 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+                else
+                {
+                   free(esc_result.response);
+-                  LOG_WARN("delegate", "escalation dispatch to '%s' failed (rc=%d); keeping the "
+-                                       "original result for review",
+-                           target->name, esc_rc);
++                  /* The reported result is the FIRST delegate's, so the tree must
++                   * match it. Roll back the failed attempt's partial edits rather
++                   * than reporting one thing while the worktree contains another. */
++                  if (have_snapshot)
++                  {
++                     delegate_restore_worktree(pre_esc_sha);
++                     LOG_WARN("delegate",
++                              "escalation dispatch to '%s' failed (rc=%d); rolled tracked files "
++                              "back to the pre-escalation state and kept the original result. "
++                              "Untracked files the attempt created were left in place.",
++                              target->name, esc_rc);
++                  }
++                  else
++                  {
++                     LOG_WARN("delegate",
++                              "escalation dispatch to '%s' failed (rc=%d) and no pre-escalation "
++                              "snapshot was available; the worktree may contain PARTIAL changes "
++                              "from the failed attempt - inspect the diff before trusting the "
++                              "reported result",
++                              target->name, esc_rc);
++                  }
+                }
+             }
+          }
+@@ -1747,7 +1849,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+                      result.agent_name[0] ? result.agent_name : "?", role);
+          }
+       }
+-      (void)escalated;
+       free(verify_out);
+       verify_out = NULL;
+       if (verify_rc != 0)
+@@ -1779,8 +1880,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
+             /* Machine-readable category, so a caller can tell an attributable
+              * work-product failure from an unusable verifier. */
+             cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
++            /* The REAL allowance state: after a re-dispatch the allowance is
++             * spent, so a second genuine failure must not advertise that another
++             * escalation is warranted. */
+             cJSON_AddBoolToObject(obj, "escalation_warranted",
+-                                  verify_escalation_warranted(rc, verify_outcome, 0));
++                                  verify_escalation_warranted(rc, verify_outcome, escalated));
++            cJSON_AddBoolToObject(obj, "escalated", escalated ? 1 : 0);
+             if (handoff_checked)
+                delegate_handoff_add_validation_json(obj, &handoff_validation);
+             char *json = cJSON_Print(obj);
+diff --git a/src/headers/agent_types.h b/src/headers/agent_types.h
+index e18a090c..5a131e7f 100644
+--- a/src/headers/agent_types.h
++++ b/src/headers/agent_types.h
+@@ -307,6 +307,14 @@ typedef struct
+     * model can do bounded work but not whole-task work, and without this it would
+     * win EVERY packet under cheapest-first routing. */
+    agent_scope_t max_scope;
++   /* The provider-general registration that GENERATED this target, when it was
++    * generated. Empty for a legacy single-model agent, which is its own
++    * registration. Stored rather than inferred from the name: parsing "text
++    * before the first ':'" conflates a legacy agent coincidentally named
++    * "gw:backup" with targets of a registration "gw", and reduces a registration
++    * named "gw:east" to "gw" - grouping unrelated seats with different
++    * endpoints and credentials as fallback peers. */
++   char registration[MAX_AGENT_NAME];
+    char roles[MAX_AGENT_ROLES][32];
+    int role_count;
+    /* Personas this agent may be dispatched AS (delegate identities: engineer,
+diff --git a/src/headers/delegate_verify.h b/src/headers/delegate_verify.h
+index f78d4c67..8f928a25 100644
+--- a/src/headers/delegate_verify.h
++++ b/src/headers/delegate_verify.h
+@@ -30,13 +30,16 @@ extern "C"
+ 
+    /* Classify the return of safe_exec_capture() over `/bin/sh -c <verify_cmd>`.
+     *
+-    * -1        : could not spawn, or the child did not exit normally (signal).
+-    * 126 / 127 : the shell ran but the command was not executable / not found.
+-    * other != 0: the command ran and reported failure.
++    * This is a HEURISTIC. `/bin/sh -c` flattens everything into one integer, and
++    * 124, 126, 127 and 128+N are all values a verifier may also return on
++    * purpose - the distinction cannot be made reliably at this layer without a
++    * richer verifier protocol.
+     *
+-    * 126/127 are deliberately treated as infrastructure: they are the shell's own
+-    * report that it never executed the verifier, and a verifier that is missing
+-    * from a delegate's environment is a setup defect, not a failed build. */
++    * The tie is therefore broken toward INFRA_ERROR, because the two mistakes are
++    * not symmetric: treating a real test failure as infrastructure merely skips an
++    * escalation and defers to a human, whereas treating an OOM kill, a timeout or
++    * a missing binary as a work-product failure blames the model for its
++    * environment and burns a dearer seat for nothing. */
+    verify_outcome_t verify_classify(int exec_rc);
+ 
+    const char *verify_outcome_name(verify_outcome_t o);
+diff --git a/src/modules/delegates/delegate_role.c b/src/modules/delegates/delegate_role.c
+index 491a3529..430a48a7 100644
+--- a/src/modules/delegates/delegate_role.c
++++ b/src/modules/delegates/delegate_role.c
+@@ -39,6 +39,30 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
+    return 0;
+ }
+ 
++/* Roles deleted in the persona-vs-role cull. They are named here so an operator
++ * or custom persona that still requests one gets a CLEAR error, rather than the
++ * hazardous half-supported state of the name still being accepted as an
++ * arbitrary role string while its semantics (write classification, tool
++ * defaults, built-in template) have all been removed - which would silently hand
++ * back a read-only delegate with a generic prompt. */
++static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric",
++                                              "hook",    "prosody",   "songform",
++                                              NULL};
++
++const char *delegate_role_removed_reason(const char *role)
++{
++   if (!role || !role[0])
++      return NULL;
++   for (int i = 0; g_removed_roles[i]; i++)
++   {
++      if (strcmp(role, g_removed_roles[i]) == 0)
++         return "removed: novel/songwriter work is a PERSONA concern, not a delegate role. "
++                "Use a persona with a general role (draft/review/validate), or declare the "
++                "name in that agent's exec_roles and supply your own role template.";
++   }
++   return NULL;
++}
++
+ const char *delegate_role_canonicalize(const char *role)
+ {
+    if (!role || !role[0])
+diff --git a/src/modules/delegates/delegate_role.h b/src/modules/delegates/delegate_role.h
+index d326a8ac..d49b0937 100644
+--- a/src/modules/delegates/delegate_role.h
++++ b/src/modules/delegates/delegate_role.h
+@@ -44,6 +44,13 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int
+  * literal — do not free it. */
+ const char *delegate_role_canonicalize(const char *role);
+ 
++/* Non-NULL when `role` was deleted by the persona-vs-role cull, giving an
++ * operator-facing reason and the migration path. Callers should refuse the
++ * invocation rather than route it: the name would otherwise still be accepted as
++ * an arbitrary role string while its write classification, tool defaults and
++ * built-in template no longer exist. */
++const char *delegate_role_removed_reason(const char *role);
++
+ /* Returns 1 if role is a write-capable role (code or refactor, including
+  * aliases).  Write roles are subject to no-op edit detection. */
+ int delegate_role_is_write(const char *role);
+diff --git a/src/modules/delegates/delegate_verify.c b/src/modules/delegates/delegate_verify.c
+index 926ed908..0f2a5c1e 100644
+--- a/src/modules/delegates/delegate_verify.c
++++ b/src/modules/delegates/delegate_verify.c
+@@ -5,13 +5,30 @@ verify_outcome_t verify_classify(int exec_rc)
+ {
+    if (exec_rc == 0)
+       return VERIFY_OUTCOME_PASS;
+-   /* safe_exec_capture returns -1 when it could not fork/exec, or when the child
+-    * did not exit normally - a timeout kill lands here. */
++   /* safe_exec_capture returns -1 when it could not fork/exec, or when the CHILD
++    * SHELL did not exit normally. */
+    if (exec_rc < 0)
+       return VERIFY_OUTCOME_INFRA_ERROR;
+-   /* The shell's own "not executable" / "not found" codes: it never ran the
+-    * verifier, so this is a setup defect rather than a failed build. */
+-   if (exec_rc == 126 || exec_rc == 127)
++
++   /* HEURISTIC, and deliberately biased toward NOT escalating.
++    *
++    * Running the verifier through `/bin/sh -c` flattens everything into one
++    * integer, and these codes are genuinely AMBIGUOUS: a verifier may itself
++    * exit 126, 127 or 137 on purpose. We cannot distinguish that from the shell
++    * reporting it never ran the command, or from the command being killed,
++    * without a richer verifier protocol.
++    *
++    * So the tie is broken toward INFRA_ERROR. Misreading a real test failure as
++    * infrastructure means we skip an escalation and hand the work to a human -
++    * conservative. Misreading an OOM kill or a missing binary as a work-product
++    * failure would blame the model for the environment and burn a dearer seat
++    * for nothing. Only the first is acceptable.
++    *
++    *   126/127  shell's "not executable" / "not found"
++    *   124      GNU coreutils `timeout` reporting expiry
++    *   128+N    a command killed by signal N (137 = SIGKILL/OOM, 143 = SIGTERM)
++    */
++   if (exec_rc == 126 || exec_rc == 127 || exec_rc == 124 || exec_rc > 128)
+       return VERIFY_OUTCOME_INFRA_ERROR;
+    return VERIFY_OUTCOME_FAILED;
+ }
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index 0658ac83..10a7f6fa 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -324,6 +324,9 @@ static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, cons
+    *ag = *base;
+    snprintf(ag->model, sizeof(ag->model), "%s", model_id);
+    snprintf(ag->name, sizeof(ag->name), "%s", name);
++   /* Record the generating registration so fallback grouping never has to infer
++    * it from the name. */
++   snprintf(ag->registration, sizeof(ag->registration), "%s", base->name);
+    /* Re-derive per target, since the vendor can depend on the model id — but
+     * ONLY when the registration's value was itself derived. An operator who
+     * pinned catalog_provider on the registration (a gateway speaking one wire
+@@ -2218,23 +2221,6 @@ static int agent_is_local(const agent_t *ag)
+    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
+ }
+ 
+-/* routing.prefer_local: shift work to free local seats when any ELIGIBLE candidate
+- * is local. Applied AFTER eligibility, so it can never smuggle a packet past a
+- * scope ceiling or a capability requirement - it only reorders seats already
+- * allowed to take the work. Local tokens are free, which removes the COST argument
+- * for over-selecting, but not the wall-clock one: a local seat failing work beyond
+- * its ceiling still burns a session, a review and an escalation. Returns the
+- * narrowed count. */
+-static int agent_prefer_local(agent_t **candidates, int count, const config_t *sys_cfg)
+-{
+-   if (!sys_cfg || !sys_cfg->prefer_local_agents || count <= 1)
+-      return count;
+-   int n = 0;
+-   for (int i = 0; i < count; i++)
+-      if (agent_is_local(candidates[i]))
+-         candidates[n++] = candidates[i];
+-   return n > 0 ? n : count; /* no local seat eligible: leave the field alone */
+-}
+ 
+ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
+ {
+@@ -2570,7 +2556,29 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
+                                             int min_context, agent_scope_t scope)
+ {
+    if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
+-      return agent_route(cfg, role);
++   {
++      /* A scope ceiling is CONFIGURATION eligibility, not model-metadata
++       * capability routing: it must bind whether or not capability routing is
++       * enabled. Returning agent_route() here unconditionally would let a
++       * whole_task packet reach a bounded-only seat the moment an operator set
++       * model_meta.capability_routing=false. */
++      agent_t *plain = agent_route(cfg, role);
++      if (!plain || agent_scope_admits(plain, scope))
++         return plain;
++      /* The cheapest seat is ceiling-barred: retry with the barred agents
++       * temporarily withheld so plain cost-tier routing still finds a seat. */
++      int saved[MAX_AGENTS];
++      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
++      {
++         saved[i] = cfg->agents[i].enabled;
++         if (!agent_scope_admits(&cfg->agents[i], scope))
++            cfg->agents[i].enabled = 0;
++      }
++      agent_t *scoped = agent_route(cfg, role);
++      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
++         cfg->agents[i].enabled = saved[i];
++      return scoped;
++   }
+ 
+    /* Same primary-turn rule as agent_route(): the user-facing seat is chosen by
+     * capability, not by price. It must still SATISFY the requirements — a
+@@ -2582,6 +2590,31 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
+         agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
+       return primary_default;
+ 
++   /* prefer_local must be decided BEFORE min_tier, not after. Applying it to the
++    * cheapest-tier candidate list only ever preferred a local seat among peers
++    * that had already won on price - so an eligible local at tier 1 could never
++    * beat a paid remote at tier 0, which is the opposite of "try free local
++    * delegates first". Decide up front whether any ELIGIBLE seat is local, and if
++    * so treat non-local seats as out of contention for the whole selection. */
++   int locals_only = 0;
++   if (sys_cfg && sys_cfg->prefer_local_agents)
++   {
++      for (int i = 0; i < cfg->agent_count; i++)
++      {
++         agent_t *ag = &cfg->agents[i];
++         if (!ag->enabled || !agent_supports_role(ag, role) ||
++             !agent_is_available_for_routing(ag) || !agent_is_local(ag))
++            continue;
++         if (!agent_scope_admits(ag, scope))
++            continue;
++         if ((required_caps || min_context > 0) &&
++             !agent_satisfies_required_caps(ag, required_caps, min_context, scope))
++            continue;
++         locals_only = 1;
++         break;
++      }
++   }
++
+    int min_tier = -1;
+    int has_tmux = 0;
+    for (int i = 0; i < cfg->agent_count; i++)
+@@ -2589,6 +2622,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
+       agent_t *ag = &cfg->agents[i];
+       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+          continue;
++      if (locals_only && !agent_is_local(ag))
++         continue;
+ 
+       /* The scope ceiling binds even when NOTHING else is required: it is a
+        * property of the agent, not of the request's capability demands, so it
+@@ -2626,6 +2661,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
+       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
+          continue;
+ 
++      if (locals_only && !agent_is_local(ag))
++         continue;
+       if (!agent_scope_admits(ag, scope))
+          continue;
+       if (required_caps || min_context > 0)
+@@ -2637,7 +2674,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
+       if (count < MAX_AGENTS)
+          candidates[count++] = ag;
+    }
+-   count = agent_prefer_local(candidates, count, sys_cfg);
+    return agent_pick_balanced(candidates, count);
+ }
+ 
+diff --git a/src/server/agent_fallback.c b/src/server/agent_fallback.c
+index 4c002cd5..61f8d580 100644
+--- a/src/server/agent_fallback.c
++++ b/src/server/agent_fallback.c
+@@ -119,15 +119,19 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
+     * is still valuable for availability, just a bigger semantic jump — so it is
+     * the second choice, not the first. A legacy agent has no ':' and therefore no
+     * siblings, which makes pass 0 empty and costs it nothing. */
+-   char own_reg[MAX_AGENT_NAME];
+-   agent_registration_prefix(ag->name, own_reg, sizeof(own_reg));
++   /* The STORED registration, not a name prefix. Inferring from "text before the
++    * first ':'" grouped a legacy agent coincidentally named "gw:backup" with the
++    * targets of a registration "gw", and flattened a registration named
++    * "gw:east" down to "gw" - both group seats with unrelated endpoints and
++    * credentials as same-registration peers, which is exactly what this
++    * preference exists to avoid. A legacy agent has no registration and is its
++    * own, so it simply has no siblings. */
++   const char *own_reg = ag->registration;
+    for (int pass = 0; pass < 2 && rc != 0; pass++)
+    for (int i = 0; i < cfg->agent_count && rc != 0; i++)
+    {
+       agent_t *peer = &cfg->agents[i];
+-      char peer_reg[MAX_AGENT_NAME];
+-      agent_registration_prefix(peer->name, peer_reg, sizeof(peer_reg));
+-      int same_reg = own_reg[0] && strcmp(own_reg, peer_reg) == 0;
++      int same_reg = own_reg[0] && strcmp(own_reg, peer->registration) == 0;
+       if ((pass == 0) != (same_reg != 0))
+          continue;
+       if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
+diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
+index ca302e0d..67e5f6d2 100644
+--- a/src/tests/test_agent.c
++++ b/src/tests/test_agent.c
+@@ -44,6 +44,7 @@ void test_primary_turn_default_must_still_satisfy_caps(void);
+ void test_catalog_provider_endpoint_parser_edges(void);
+ void test_request_max_tokens_clamped_to_context_window(void);
+ void test_registration_prefix(void);
++void test_registration_grouping(void);
+ void test_declared_roles_route_precisely(void);
+ void test_scope_ceiling_matches_work_to_capability(void);
+ void test_escalation_target_selection(void);
+@@ -3241,6 +3242,7 @@ int main(void)
+    test_catalog_provider_endpoint_parser_edges();
+    test_request_max_tokens_clamped_to_context_window();
+    test_registration_prefix();
++   test_registration_grouping();
+    test_declared_roles_route_precisely();
+    test_scope_ceiling_matches_work_to_capability();
+    test_escalation_target_selection();
+diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
+index 5d7911d8..bc7c2d5e 100644
+--- a/src/tests/test_agent_caps.c
++++ b/src/tests/test_agent_caps.c
+@@ -1324,10 +1324,50 @@ void test_provider_general_overflow_rejects_config(void)
+    unlink(agent_config_path());
+ }
+ 
+-/* Fallback prefers a peer from the SAME provider registration before crossing to
+- * another vendor: a sibling model shares the wire protocol, credentials, tool
+- * conventions and request features, so switching within a registration preserves
+- * far more about the request. The prefix is what identifies those siblings. */
++/* Fallback prefers a peer from the SAME provider registration. Grouping is by the
++ * STORED registration, set at expansion, NOT by parsing the name: a legacy agent
++ * coincidentally named "gw:backup" must not be treated as a sibling of targets
++ * generated by a registration "gw", and a registration named "gw:east" must not
++ * flatten to "gw". Both would group seats with unrelated endpoints and
++ * credentials, which is what the preference exists to avoid. */
++void test_registration_grouping(void)
++{
++   seed_codex_prices();
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":["
++         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":[\"gpt-5.6-sol\",\"gpt-5.6-luna\"]},"
++         /* A LEGACY agent whose name merely LOOKS like a codex target. */
++         "{\"name\":\"codex:legacy\",\"provider\":\"anthropic\","
++         "\"endpoint\":\"https://api.anthropic.com\",\"model\":\"claude-opus-4-8\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}"
++         "]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) == 0);
++
++   const agent_t *sol = agent_find(&c, "codex:gpt-5.6-sol");
++   const agent_t *luna = agent_find(&c, "codex:gpt-5.6-luna");
++   const agent_t *legacy = agent_find(&c, "codex:legacy");
++   assert(sol && luna && legacy);
++
++   /* Generated targets carry the registration that produced them. */
++   assert(strcmp(sol->registration, "codex") == 0);
++   assert(strcmp(luna->registration, "codex") == 0);
++   /* The legacy agent was NOT generated, so it belongs to no registration and is
++    * therefore not a sibling - even though a name-prefix parse would say it is. */
++   assert(legacy->registration[0] == '\0');
++
++   printf("  PASS: test_registration_grouping\n");
++   unlink(agent_config_path());
++}
++
++/* The prefix helper remains for display/diagnostic use. */
+ void test_registration_prefix(void)
+ {
+    char buf[MAX_AGENT_NAME];
+@@ -1534,6 +1574,25 @@ void test_scope_ceiling_matches_work_to_capability(void)
+       unlink(agent_config_path());
+    }
+ 
++   /* The ceiling is CONFIGURATION eligibility, not model-metadata capability
++    * routing, so it must bind with capability routing DISABLED as well. It
++    * previously did not: agent_route_with_caps_inner returned the unscoped
++    * router before scope was consulted, so a whole_task packet reached a
++    * bounded-only seat the moment an operator set capability_routing=false. */
++   {
++      cfg.agents[1].enabled = 1; /* re-enable after the KIND-trap assertions above */
++      config_t off_cfg;
++      memset(&off_cfg, 0, sizeof(off_cfg));
++      off_cfg.model_meta_capability_routing = 0;
++      assert(agent_route_with_caps_scoped(&cfg, "code", &off_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
++             &cfg.agents[0]);
++      assert(agent_route_with_caps_scoped(&cfg, "code", &off_cfg, 0, 0, AGENT_SCOPE_WHOLE_TASK) ==
++             &cfg.agents[1]);
++      /* And a NULL sys_cfg must not be a bypass either. */
++      assert(agent_route_with_caps_scoped(&cfg, "code", NULL, 0, 0, AGENT_SCOPE_WHOLE_TASK) ==
++             &cfg.agents[1]);
++   }
++
+    printf("  PASS: test_scope_ceiling_matches_work_to_capability\n");
+ }
+ 
+@@ -1551,7 +1610,10 @@ void test_prefer_local_orders_but_never_bypasses(void)
+ 
+    cfg.agent_count = 2;
+ 
+-   /* Local seat, but DEARER tier so only the preference can select it. */
++   /* Local seat at a DEARER tier - the case that actually matters. Applying the
++    * preference to the cheapest-tier list only would let a paid remote at tier 0
++    * beat an eligible local at tier 1, the opposite of "try free local first".
++    * An earlier version of this test set both to tier 0 and so proved nothing. */
+    strcpy(cfg.agents[0].name, "local");
+    strcpy(cfg.agents[0].provider, "ollama");
+    strcpy(cfg.agents[0].model, "local-small");
+@@ -1561,7 +1623,7 @@ void test_prefer_local_orders_but_never_bypasses(void)
+    cfg.agents[0].role_count = 1;
+    cfg.agents[0].enabled = 1;
+    cfg.agents[0].tools_enabled = 1;
+-   cfg.agents[0].cost_tier = 0;
++   cfg.agents[0].cost_tier = 1; /* DEARER than the remote seat */
+    cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
+ 
+    strcpy(cfg.agents[1].name, "remote");
+@@ -1571,12 +1633,13 @@ void test_prefer_local_orders_but_never_bypasses(void)
+    cfg.agents[1].role_count = 1;
+    cfg.agents[1].enabled = 1;
+    cfg.agents[1].tools_enabled = 1;
+-   cfg.agents[1].cost_tier = 0; /* SAME tier, so ordering decides */
++   cfg.agents[1].cost_tier = 0; /* CHEAPER, so only the preference can lose it */
+    strcpy(cfg.agents[1].api_key, "k");
+ 
+-   /* Off: same tier, so the balanced picker may return either. */
++   /* Off: cheapest-first wins, so the paid remote seat takes bounded work. */
+    sys_cfg.prefer_local_agents = 0;
+-   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) != NULL);
++   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
++          &cfg.agents[1]);
+ 
+    /* On: the local seat wins every time for work it can take. */
+    sys_cfg.prefer_local_agents = 1;
+diff --git a/src/tests/test_delegate_verify.c b/src/tests/test_delegate_verify.c
+index 822bc6b3..f40f3a2f 100644
+--- a/src/tests/test_delegate_verify.c
++++ b/src/tests/test_delegate_verify.c
+@@ -23,10 +23,26 @@ static void test_classification(void)
+     * for both. A timeout kill lands here and must NOT read as a failed build. */
+    assert(verify_classify(-1) == VERIFY_OUTCOME_INFRA_ERROR);
+ 
+-   /* The shell's own report that it never executed the verifier. A missing test
+-    * runner in a delegate's environment is a setup defect, not a failing test. */
+-   assert(verify_classify(126) == VERIFY_OUTCOME_INFRA_ERROR);
+-   assert(verify_classify(127) == VERIFY_OUTCOME_INFRA_ERROR);
++   /* Ambiguous codes, resolved toward INFRA_ERROR on purpose. Through
++    * `/bin/sh -c` these can be the shell reporting it never ran the command, OR
++    * a verifier returning them itself - indistinguishable at this layer. The two
++    * mistakes are not symmetric: reading a real failure as infrastructure only
++    * skips an escalation and defers to a human, while reading an OOM kill or a
++    * missing binary as a work-product failure blames the model for its
++    * environment and burns a dearer seat for nothing. */
++   assert(verify_classify(126) == VERIFY_OUTCOME_INFRA_ERROR); /* not executable */
++   assert(verify_classify(127) == VERIFY_OUTCOME_INFRA_ERROR); /* not found */
++   assert(verify_classify(124) == VERIFY_OUTCOME_INFRA_ERROR); /* coreutils timeout */
++   assert(verify_classify(137) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+9  SIGKILL/OOM */
++   assert(verify_classify(143) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+15 SIGTERM */
++
++   /* ...and the boundary: 128 itself is not a signal code. */
++   assert(verify_classify(128) == VERIFY_OUTCOME_FAILED);
++
++   /* An OOM-killed test suite must NOT warrant escalation - that would blame the
++    * model for the machine running out of memory. */
++   assert(verify_escalation_warranted(0, verify_classify(137), 0) == 0);
++   assert(verify_escalation_warranted(0, verify_classify(124), 0) == 0);
+ 
+    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_PASS), "pass") == 0);
+    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_FAILED), "failed") == 0);

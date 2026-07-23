@@ -1155,6 +1155,14 @@ int agent_load_config(agent_config_t *cfg)
 
          /* An unrecognised value must not silently mean "no ceiling": that would
           * hand the hardest work to the seat the operator was trying to limit. */
+         /* Persisted so same-registration fallback grouping survives a save. The
+          * expanded targets are what get written (the registration entry itself
+          * is not a route target), so without this the grouping silently
+          * disappeared the first time anything called agent_save_config. */
+         v = cJSON_GetObjectItem(a, "registration");
+         if (v && cJSON_IsString(v))
+            snprintf(ag->registration, sizeof(ag->registration), "%s", v->valuestring);
+
          v = cJSON_GetObjectItem(a, "max_scope");
          if (v && cJSON_IsString(v) && v->valuestring[0])
          {
@@ -1720,6 +1728,8 @@ int agent_save_config(const agent_config_t *cfg)
          cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
       if (ag->max_scope != AGENT_SCOPE_UNSET)
          JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
+      if (ag->registration[0])
+         JSON_ADD_STR(a, "registration", ag->registration);
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)
