@@ -4,6 +4,20 @@
 [surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md)
 ("S2"). Classification: **security, medium**.*
 
+> **PROMOTED TO BLOCKER.** This was filed as a latent structural gap, on the
+> reasoning that `web_search`'s endpoints are compile-time constants so nothing
+> attacker-controlled reaches them today. That holds only while search returns
+> snippets.
+>
+> The capability assessment
+> ([web-retrieval-capability-map.md](web-retrieval-capability-map.md)) ranks
+> "fetch and extract from the top N search results" as the highest-value change
+> available. Those result URLs come from a third-party engine and are influenced
+> by whoever ranks in it. Fetching them through a path with no egress validation
+> is a direct SSRF, not a latent one.
+>
+> This must land before search fetches anything.
+
 ## Problem
 
 `src/posix/web_read.c` implements a correct egress posture for untrusted
