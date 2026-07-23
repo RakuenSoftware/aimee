@@ -79,8 +79,8 @@ int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome, int a
    if (already_escalated)
       return 0;
    /* The delegate must have finished. A failed run is an availability problem for
-    * retry/failover to handle; escalating would blame the model for a transport
-    * or process failure it did not cause. */
+    * retry/failover to handle; reporting a misplacement would blame the model for
+    * a transport or process failure it did not cause. */
    if (delegate_rc != 0)
       return 0;
    return outcome == VERIFY_OUTCOME_FAILED;

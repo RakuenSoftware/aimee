@@ -1,13 +1,20 @@
-/* delegate_verify.h: classify a verification run, and decide whether its outcome
- * justifies escalating the packet to a more capable agent.
+/* delegate_verify.h: classify a verification run, and judge whether its outcome
+ * is evidence the packet was placed on too weak a seat.
  *
  * The distinction this header exists for: a verify command that RAN and reported
  * a build/test failure indicts the delegate's work product. A verify command that
  * could not be run at all indicts the environment. Only the first is evidence
- * about the model's competence, and only the first may trigger a capability
- * escalation. Conflating them turns a missing binary or a killed process into a
- * "the model wasn't good enough" signal, which would escalate real work for
- * reasons that have nothing to do with the model. */
+ * about the model's competence. Conflating them turns a missing binary or a
+ * killed process into a "the model wasn't good enough" signal.
+ *
+ * ADVISORY ONLY. Nothing here re-dispatches. Automatic verifier-driven
+ * escalation was retired: a verifier failure has many causes a dearer model will
+ * not fix - invalid tests, a broken environment, ambiguous requirements, an
+ * impossible task - so "the output failed a check" does not establish "the seat
+ * was badly chosen", and automatic spend is a poor default response to that
+ * ambiguity. Capability gating and the scope ceiling are what pick a sufficient
+ * seat on the first attempt; this reports when that judgement looks wrong so a
+ * human or an operator-owned policy can decide, and dispatch explicitly. */
 #ifndef AIMEE_DELEGATE_VERIFY_H
 #define AIMEE_DELEGATE_VERIFY_H 1
 
@@ -36,32 +43,38 @@ extern "C"
     * richer verifier protocol.
     *
     * The tie is therefore broken toward INFRA_ERROR, because the two mistakes are
-    * not symmetric: treating a real test failure as infrastructure merely skips an
-    * escalation and defers to a human, whereas treating an OOM kill, a timeout or
-    * a missing binary as a work-product failure blames the model for its
-    * environment and burns a dearer seat for nothing. */
+    * not symmetric: treating a real test failure as infrastructure merely
+    * withholds a placement warning, whereas treating an OOM kill, a timeout or a
+    * missing binary as a work-product failure blames the model for its
+    * environment. */
    verify_outcome_t verify_classify(int exec_rc);
 
    const char *verify_outcome_name(verify_outcome_t o);
 
-   /* May this delegate result trigger a CAPABILITY escalation - a re-dispatch to
-    * a more capable agent?
+   /* Is this delegate result evidence the packet was placed on too weak a seat -
+    * i.e. worth REPORTING as a misplacement, and worth a human considering a
+    * dearer retry?
     *
-    * An escalation asserts "this model was not good enough for this work", so it
-    * requires an attributable, verified work-product failure. It is deliberately
-    * NOT triggered by availability problems (API errors, transport failures,
-    * timeouts, crashes) or by verification-infrastructure problems: those are
-    * retry/failover concerns, and escalating on them would burn a dearer seat for
-    * a reason the cheaper one was never responsible for.
+    * The claim is "this model was not good enough for this work", so it requires
+    * an attributable, verified work-product failure. It is deliberately NOT
+    * raised by availability problems (API errors, transport failures, timeouts,
+    * crashes) or by verification-infrastructure problems: those are
+    * retry/failover concerns and say nothing about the seat.
+    *
+    * The caller does not act on this automatically - see the header note.
     *
     *   delegate_rc      : 0 when the delegate run itself completed
     *   outcome          : classification of the verify run
-    *   already_escalated: escalation allowance already consumed for this packet
+    *   already_escalated: a dearer retry has ALREADY been made for this packet.
+    *                      Suppresses the advice so an explicit retry loop cannot
+    *                      talk itself into a ladder - the thing the operator
+    *                      rejected as a fundamental mechanism.
     *
     * Returns 1 only when the delegate completed, a verifier genuinely ran and
-    * failed, and the allowance is intact. With no verifier configured there is no
-    * objective signal at all, so the caller must pass VERIFY_OUTCOME_PASS and this
-    * returns 0 - fail for review rather than guessing from delegate prose. */
+    * failed, and no dearer retry has been made. With no verifier configured there
+    * is no objective signal at all, so the caller must pass VERIFY_OUTCOME_PASS
+    * and this returns 0 - report for review rather than guessing from delegate
+    * prose. */
    int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome,
                                    int already_escalated);
 

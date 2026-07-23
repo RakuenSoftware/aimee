@@ -1095,9 +1095,9 @@ server and hand whoever passes the flag control of escalation, and therefore of 
 client-side is not available: there is no delegate engine there. It is therefore **refused** on the
 routed path rather than accepted and ignored.
 
-### Open decision: retire generic auto-escalation
+### Decision: generic auto-escalation is retired (operator-approved)
 
-The panel's stronger recommendation, not yet acted on because it removes a requested feature:
+The panel's recommendation, now actioned:
 
 > Drop generic verifier-driven auto-escalation from the public `--verify` contract. Route
 > correctly first; make retries explicit.
@@ -1105,15 +1105,32 @@ The panel's stronger recommendation, not yet acted on because it removes a reque
 The argument: a verifier failure has many causes a dearer model will not fix — invalid tests,
 environment problems, ambiguous requirements, an impossible task — so "the output failed a test"
 does not establish "the seat was badly chosen", and automatic spend escalation is a poor default
-response to that ambiguity. This is consistent with the operator's own rule that over-selecting
-beats laddering: the scope ceiling plus capability gating are what should choose a sufficient seat
-on the first attempt, and escalation is better treated as routing telemetry plus an explicit,
-audited retry.
+response to that ambiguity. It also let whoever supplied the verify command decide when to spend.
+This is consistent with the operator's own rule that over-selecting beats laddering: the scope
+ceiling plus capability gating are what choose a sufficient seat on the first attempt, and a
+failure afterwards is evidence the routing policy needs correcting.
 
-If retained, it should be an operator-owned recovery policy enabled narrowly for specific task and
-failure classes — never a consequence of a caller-supplied flag. The escalation TARGET SELECTION
-logic is worth keeping either way, as server routing intelligence or an advisory query.
+**What changed.** `cmd_agent_delegate.c` no longer re-dispatches. On an attributable failure it
+now REPORTS:
 
-Until that is decided, `verify` + escalation remain implemented in `cmd_agent_delegate.c` and
-unreachable from the shipped client, which is the honest state: refused where it cannot work,
-not quietly ignored.
+- `escalation_warranted` — the failure is attributable to the work product, so the placement is
+  worth investigating. Routing telemetry, not an instruction.
+- `suggested_escalation_target` — the seat a retry *should* use: genuinely dearer AND still
+  eligible under this packet's scope and capability requirements. Absent when no such seat exists,
+  which is itself the answer: the placement cannot be corrected by spending more.
+
+`escalated` was removed rather than pinned false — a field that is always false is worse than an
+absent one. `delegate_snapshot_worktree()` went with it: it existed only to make a failed
+automatic re-dispatch recoverable, and with nothing re-dispatching there is no partial-worktree
+hazard to guard against. `worktree_may_be_partial` and `pre_escalation_snapshot` are gone for the
+same reason.
+
+**What was kept, deliberately.** `agent_route_escalation_target()` — the judgement of which seat
+is genuinely dearer and still eligible — is the part worth keeping, and is what now backs
+`suggested_escalation_target`. `verify_classify()` still separates an attributable work-product
+failure from an unusable verifier, because that distinction governs whether the placement warning
+is honest. `verify_escalation_warranted()`'s `already_escalated` argument is retained so an
+explicit retry loop consulting it cannot talk itself into the ladder the operator rejected.
+
+If automated escalation returns, it should be an operator-owned recovery policy enabled narrowly
+for specific task and failure classes — never a consequence of a caller-supplied flag.

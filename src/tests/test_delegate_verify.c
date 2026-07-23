@@ -1,9 +1,13 @@
-/* test_delegate_verify.c: verification classification + escalation policy.
+/* test_delegate_verify.c: verification classification + misplacement advice.
  *
- * The property under test is the one the design review called a blocker: an
- * escalation asserts "this model was not good enough", so it may only fire on an
- * attributable, VERIFIED work-product failure. Anything that merely means the
- * verifier could not run must not indict the model. */
+ * The property under test is the one the design review called a blocker: the
+ * claim "this model was not good enough" may only be raised on an attributable,
+ * VERIFIED work-product failure. Anything that merely means the verifier could
+ * not run must not indict the model.
+ *
+ * Note the signal is now ADVISORY - automatic verifier-driven re-dispatch was
+ * retired, because a verifier failure has many causes a dearer model will not
+ * fix. These predicates decide what is REPORTED, not what is spent. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -82,8 +86,8 @@ static void test_classification(void)
 
 static void test_escalation_policy(void)
 {
-   /* The ONLY case that warrants escalation: the delegate finished, and a
-    * verifier genuinely ran and failed. */
+   /* The ONLY case that warrants the misplacement advice: the delegate finished,
+    * and a verifier genuinely ran and failed. */
    assert(verify_escalation_warranted(0, VERIFY_OUTCOME_FAILED, 0) == 1);
 
    /* A passing verifier obviously does not. Nor does the no-verifier case: the
@@ -91,18 +95,19 @@ static void test_escalation_policy(void)
     * the right answer is "fail for review", never "guess from delegate prose". */
    assert(verify_escalation_warranted(0, VERIFY_OUTCOME_PASS, 0) == 0);
 
-   /* An unusable verifier says NOTHING about the model. Escalating here would
-    * burn a dearer seat because a binary was missing. */
+   /* An unusable verifier says NOTHING about the model. Advising a dearer seat
+    * here would blame it for a missing binary. */
    assert(verify_escalation_warranted(0, VERIFY_OUTCOME_INFRA_ERROR, 0) == 0);
 
    /* The delegate run itself failing is an AVAILABILITY problem - API error,
     * transport failure, crash, timeout - which belongs to retry/failover. The
-    * model is not to blame, so competence escalation must not fire. */
+    * model is not to blame, so the competence claim must not be raised. */
    assert(verify_escalation_warranted(1, VERIFY_OUTCOME_FAILED, 0) == 0);
    assert(verify_escalation_warranted(-1, VERIFY_OUTCOME_FAILED, 0) == 0);
 
-   /* The allowance is spent once. This is what keeps a ladder from forming:
-    * cheap -> capable -> more capable across three delegates is exactly the
+   /* Once a dearer retry has been made, the advice stops. Nothing re-dispatches
+    * automatically any more, but an explicit retry loop consulting this must not
+    * be able to talk itself into cheap -> capable -> more capable, which is the
     * pattern the operator rejected as the fundamental mechanism. */
    assert(verify_escalation_warranted(0, VERIFY_OUTCOME_FAILED, 1) == 0);
 

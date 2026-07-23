@@ -86,53 +86,6 @@ void generate_task_id(char *buf, size_t len)
             rand_bytes[7]);
 }
 
-/* Capture the worktree's current state as a commit object WITHOUT touching the
- * worktree or the stash stack, so a failed escalation is RECOVERABLE.
- *
- * `git stash create` is used deliberately over `git stash push`: the stash STACK
- * is shared across worktrees and concurrent sessions, so pushing could pop
- * another session's work. `create` only writes an object and prints its sha.
- *
- * Deliberately NOT paired with an automatic rollback. A correct inverse has to
- * handle three cases this cannot verify from here, and an INCORRECT one destroys
- * the first delegate's work - strictly worse than the partial state it would be
- * correcting:
- *   - a clean pre-escalation tree produces no stash object, so there is no
- *     baseline and HEAD would have to be used instead;
- *   - untracked files the first delegate CREATED are not in the stash tree, so
- *     an escalation that overwrites one cannot be undone from it;
- *   - `git checkout SHA -- .` stages what it restores, collapsing the
- *     staged/unstaged split, so the tree would no longer match what the first
- *     delegate actually produced.
- * The operator gets the sha and an exact command instead, which is recoverable
- * without risking automated data loss.
- *
- * Returns 1 and fills `sha` when a snapshot exists, 0 otherwise (clean tree, no
- * repository, or git unavailable). */
-static int delegate_snapshot_worktree(char *sha, size_t sha_len)
-{
-   if (!sha || sha_len < 41)
-      return 0;
-   sha[0] = '\0';
-   const char *argv[] = {"git", "stash", "create", NULL};
-   char *out = NULL;
-   int rc = safe_exec_capture(argv, &out, AGENT_TOOL_OUTPUT_MAX);
-   if (rc != 0 || !out)
-   {
-      free(out);
-      return 0;
-   }
-   size_t n = 0;
-   while (out[n] && out[n] != '\n' && n + 1 < sha_len)
-   {
-      sha[n] = out[n];
-      n++;
-   }
-   sha[n] = '\0';
-   free(out);
-   return n >= 7 ? 1 : 0;
-}
-
 static void delegate_list_roles(void)
 {
    agent_config_t cfg;
@@ -1713,23 +1666,29 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       int verify_rc = safe_exec_capture(verify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
       verify_outcome_t verify_outcome = verify_classify(verify_rc);
 
-      /* MISPLACEMENT ESCALATION. The seat completed its run but its work product
-       * failed a verifier that genuinely executed - an attributable statement
-       * that this seat was not up to this packet. Re-dispatch ONCE to a dearer,
-       * still-eligible seat with the failing verifier output attached, then
-       * re-verify.
+      /* MISPLACEMENT SIGNAL — ADVISORY ONLY. The seat completed its run but its
+       * work product failed a verifier that genuinely executed.
        *
-       * Once, not a ladder: the allowance is spent here, so a second failure
-       * falls through to the normal failure path for human review. An escalation
-       * means the PLACEMENT was wrong, so it is logged as an incident - its rate
-       * is a health signal on the routing logic, not a routine cost. */
-      int escalated = 0;
-      /* Set when an escalation was dispatched and the dispatch itself failed, so
-       * the worktree may hold partial edits that the reported (first delegate's)
-       * result does not describe. Surfaced in the JSON — stderr alone is not
-       * visible to API callers. */
-      int esc_dispatch_failed = 0;
-      char pre_esc_sha[64] = {0};
+       * This used to RE-DISPATCH once to a dearer seat automatically. That
+       * coupling is retired: a verifier failure has many causes a dearer model
+       * will not fix - invalid tests, a broken environment, ambiguous
+       * requirements, an impossible task - so "the output failed a check" does
+       * not establish "the seat was badly chosen", and spending on a dearer seat
+       * is a poor default response to that ambiguity. It also let whoever
+       * supplied the verify command decide when to spend.
+       *
+       * The operator's own rule points the same way: over-selecting beats
+       * laddering, so capability gating and the scope ceiling are what should
+       * pick a sufficient seat on the FIRST attempt. A failure here is evidence
+       * the routing policy needs correcting, not a licence to retry dearer.
+       *
+       * So: report it. Name the seat a retry SHOULD use if a human or an
+       * operator-owned policy decides one is warranted, and let them dispatch it
+       * explicitly. The target-selection logic is kept precisely because that
+       * judgement - which seat is genuinely dearer AND still eligible under the
+       * packet's scope and capability requirements - is the part worth keeping.
+       */
+      const char *suggested_target = NULL;
       if (verify_escalation_warranted(rc, verify_outcome, 0))
       {
          agent_t *failed_seat = agent_find(&cfg, result.agent_name);
@@ -1737,116 +1696,23 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          /* The packet's OWN scope, not UNSET: scope is fixed at decomposition and
           * survives re-routing. Passing UNSET reclassified a bounded packet as
           * whole_task during target selection, which could exclude a perfectly
-          * valid bounded-capable seat and leave a bounded packet unable to
-          * escalate at all. */
+          * valid bounded-capable seat. */
          agent_t *target = agent_route_escalation_target(&cfg, role, failed_tier, 0, scope);
          if (target)
          {
+            suggested_target = target->name;
             LOG_WARN("delegate",
                      "MISPLACEMENT: '%s' (tier %d) completed but failed verification for role "
-                     "'%s'; escalating once to '%s' (tier %d). Investigate the PLACEMENT, not "
-                     "just the diff.",
+                     "'%s'. A dearer eligible seat exists ('%s', tier %d). Investigate the "
+                     "PLACEMENT, not just the diff; re-dispatch explicitly if warranted.",
                      result.agent_name[0] ? result.agent_name : "?", failed_tier, role,
                      target->name, target->cost_tier);
-            fprintf(stderr, "aimee: verify failed on '%s'; escalating once to '%s'\n",
-                    result.agent_name, target->name);
-
-            char *esc_prompt = NULL;
-            /* The failing verifier output is the whole point: the dearer seat
-             * must see WHY the previous attempt failed, not just retry blind. */
-            if (asprintf(&esc_prompt,
-                         "%s\n\n--- PREVIOUS ATTEMPT FAILED VERIFICATION ---\n"
-                         "A previous delegate produced changes that failed `%s` (exit %d).\n"
-                         "Verifier output:\n%s\n"
-                         "Correct the work so the verification passes.\n",
-                         prompt_to_use ? prompt_to_use : "", verify_cmd, verify_rc,
-                         verify_out && verify_out[0] ? verify_out : "(no output captured)") < 0)
-               esc_prompt = NULL;
-
-            if (esc_prompt)
-            {
-               /* Pin routing to the chosen seat so the re-dispatch cannot land
-                * back on the class of agent that just failed - but SNAPSHOT the
-                * fleet first and restore it afterwards. cfg outlives this block:
-                * the economics JSON below calls agent_route(&cfg, role) to name
-                * the agent that did the work, so leaving the fleet pinned would
-                * attribute the result to the escalation target even when the
-                * escalation dispatch failed and the ORIGINAL result was kept. */
-               int saved_enabled[MAX_AGENTS];
-               int saved_pinned = cfg.route_pinned;
-               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
-                  saved_enabled[i] = cfg.agents[i].enabled;
-               for (int i = 0; i < cfg.agent_count; i++)
-                  cfg.agents[i].enabled = (&cfg.agents[i] == target);
-               cfg.route_pinned = 1;
-
-               /* Snapshot the first delegate's work so a failed escalation can be
-                * undone rather than merely reported. */
-               int have_snapshot = delegate_snapshot_worktree(pre_esc_sha, sizeof(pre_esc_sha));
-
-               agent_result_t esc_result;
-               memset(&esc_result, 0, sizeof(esc_result));
-               int esc_rc = agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens,
-                                                 &esc_result);
-               free(esc_prompt);
-               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
-                  cfg.agents[i].enabled = saved_enabled[i];
-               cfg.route_pinned = saved_pinned;
-               if (esc_rc == 0)
-               {
-                  free(result.response);
-                  result = esc_result;
-                  rc = 0;
-                  escalated = 1;
-                  free(verify_out);
-                  verify_out = NULL;
-                  const char *reverify_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
-                  verify_rc = safe_exec_capture(reverify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
-                  verify_outcome = verify_classify(verify_rc);
-                  if (verify_rc == 0)
-                     fprintf(stderr, "aimee: escalation to '%s' passed verification\n",
-                             target->name);
-                  else
-                     fprintf(stderr,
-                             "aimee: escalation to '%s' ALSO failed verification (exit %d); "
-                             "failing for review\n",
-                             target->name, verify_rc);
-               }
-               else
-               {
-                  free(esc_result.response);
-                  /* The reported result is the FIRST delegate's, but the worktree
-                   * may now hold partial edits from the failed attempt. Rollback
-                   * is deliberately NOT automated - see delegate_snapshot_worktree
-                   * for why an incorrect inverse is worse than an accurate
-                   * warning. Hand the operator a recoverable reference instead,
-                   * and record the hazard in the JSON so a non-interactive caller
-                   * that never reads stderr still learns the tree is suspect. */
-                  esc_dispatch_failed = 1;
-                  if (have_snapshot)
-                     LOG_WARN("delegate",
-                              "escalation dispatch to '%s' failed (rc=%d); keeping the original "
-                              "result. The worktree may contain PARTIAL changes from the failed "
-                              "attempt. TRACKED file contents as of the first delegate were "
-                              "captured in %s - compare with 'git diff %s' and restore "
-                              "selectively. Untracked files are NOT in that snapshot, so check "
-                              "'git status --short' separately",
-                              target->name, esc_rc, pre_esc_sha, pre_esc_sha);
-                  else
-                     LOG_WARN("delegate",
-                              "escalation dispatch to '%s' failed (rc=%d) and no pre-escalation "
-                              "snapshot could be taken; the worktree may contain PARTIAL changes "
-                              "from the failed attempt - inspect 'git status --short' and the "
-                              "diff before trusting the reported result",
-                              target->name, esc_rc);
-               }
-            }
          }
          else
          {
             LOG_WARN("delegate",
-                     "MISPLACEMENT: '%s' failed verification for role '%s' but NO dearer eligible "
-                     "seat exists; failing for review rather than re-running the same class",
+                     "MISPLACEMENT: '%s' failed verification for role '%s' and NO dearer eligible "
+                     "seat exists - the placement cannot be corrected by spending more",
                      result.agent_name[0] ? result.agent_name : "?", role);
          }
       }
@@ -1881,23 +1747,20 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             /* Machine-readable category, so a caller can tell an attributable
              * work-product failure from an unusable verifier. */
             cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
-            /* The REAL allowance state: after a re-dispatch the allowance is
-             * spent, so a second genuine failure must not advertise that another
-             * escalation is warranted. */
+            /* ADVISORY. True when the failure is attributable to the work
+             * product rather than to an unusable verifier - i.e. the placement
+             * is worth investigating. Nothing is re-dispatched automatically;
+             * this is routing telemetry, and any retry is the caller's explicit
+             * decision. `escalated` is deliberately gone rather than pinned
+             * false: a field that is always false is worse than absent. */
             cJSON_AddBoolToObject(obj, "escalation_warranted",
-                                  verify_escalation_warranted(rc, verify_outcome, escalated));
-            cJSON_AddBoolToObject(obj, "escalated", escalated ? 1 : 0);
-            /* The returned result is the FIRST delegate's, but a failed
-             * escalation dispatch may have left partial edits behind, so the
-             * tree no longer matches the result. Callers that act on the
-             * worktree must treat it as suspect and reconcile before trusting
-             * either. Only emitted when it actually happened. */
-            if (esc_dispatch_failed)
-            {
-               cJSON_AddBoolToObject(obj, "worktree_may_be_partial", 1);
-               if (pre_esc_sha[0])
-                  cJSON_AddStringToObject(obj, "pre_escalation_snapshot", pre_esc_sha);
-            }
+                                  verify_escalation_warranted(rc, verify_outcome, 0));
+            /* The seat a retry SHOULD use - genuinely dearer AND still eligible
+             * under this packet's scope and capability requirements. Absent when
+             * no such seat exists, which is itself the answer: the placement
+             * cannot be corrected by spending more. */
+            if (suggested_target)
+               cJSON_AddStringToObject(obj, "suggested_escalation_target", suggested_target);
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
             char *json = cJSON_Print(obj);
