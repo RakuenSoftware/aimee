@@ -4,11 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KB_VAULT_OPERATOR_SOCKET_PATH "/run/aimee/vault-operator.sock"
-#define KB_VAULT_OPERATOR_RUNTIME_DIR "/run/aimee"
-#define KB_VAULT_OPERATOR_LISTEN_FD 3
-#define KB_VAULT_OPERATOR_HEADER_LEN 16u
-#define KB_VAULT_OPERATOR_STATUS_LEN 80u
+#define KB_VAULT_OPERATOR_SOCKET_PATH   "/run/aimee/vault-operator.sock"
+#define KB_VAULT_OPERATOR_RUNTIME_DIR   "/run/aimee"
+#define KB_VAULT_OPERATOR_LISTEN_FD     3
+#define KB_VAULT_OPERATOR_HEADER_LEN    16u
+#define KB_VAULT_OPERATOR_STATUS_LEN    80u
 #define KB_VAULT_OPERATOR_IO_TIMEOUT_MS 5000u
 
 typedef enum
@@ -103,8 +103,8 @@ int kb_vault_operator_request_encode(kb_vault_operator_opcode_t opcode,
 int kb_vault_operator_request_decode(const unsigned char input[KB_VAULT_OPERATOR_HEADER_LEN],
                                      uint16_t *opcode, uint32_t *payload_len);
 int kb_vault_operator_response_encode(kb_vault_operator_transport_t result,
-                                      const kb_vault_operator_status_t *status,
-                                      unsigned char *out, size_t out_cap, size_t *out_len);
+                                      const kb_vault_operator_status_t *status, unsigned char *out,
+                                      size_t out_cap, size_t *out_len);
 int kb_vault_operator_response_decode(const unsigned char *input, size_t input_len,
                                       kb_vault_operator_transport_t *result,
                                       kb_vault_operator_status_t *status);
@@ -114,8 +114,9 @@ int kb_vault_operator_status_validate(const kb_vault_operator_status_t *status);
  * initialization attempt. The fd must be exactly KB_VAULT_OPERATOR_LISTEN_FD
  * and name the fixed root-owned socket. Stop closes admission, drains the
  * current callback, joins, and frees service. */
-kb_vault_operator_service_t *kb_vault_operator_service_start(
-    int inherited_fd, kb_vault_operator_status_fn read_status, void *opaque);
+kb_vault_operator_service_t *
+kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn read_status,
+                                void *opaque);
 void kb_vault_operator_service_stop(kb_vault_operator_service_t *service);
 
 /* Fixed-path client: no endpoint argument and no HTTP fallback. */

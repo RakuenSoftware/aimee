@@ -30,18 +30,15 @@ static pthread_once_t g_atfork_once = PTHREAD_ONCE_INIT;
 static int g_atfork_status = -1;
 static kb_vault_tpm_runtime_lock_t *g_current_owner;
 
-void kb_vault_tpm_runtime_identity(const char *configured_tcti,
-                                   const char *configured_nv_index,
-                                   const char **effective_tcti,
-                                   const char **effective_nv_index)
+void kb_vault_tpm_runtime_identity(const char *configured_tcti, const char *configured_nv_index,
+                                   const char **effective_tcti, const char **effective_nv_index)
 {
    const char *env_tcti = getenv("AIMEE_VAULT_TPM2_TCTI");
    const char *env_nv_index = getenv("AIMEE_VAULT_TPM2_NV_INDEX");
    if (effective_tcti)
       *effective_tcti = env_tcti && env_tcti[0] ? env_tcti : configured_tcti;
    if (effective_nv_index)
-      *effective_nv_index =
-          env_nv_index && env_nv_index[0] ? env_nv_index : configured_nv_index;
+      *effective_nv_index = env_nv_index && env_nv_index[0] ? env_nv_index : configured_nv_index;
 }
 
 static void close_child_descriptors(kb_vault_tpm_runtime_lock_t *owner)
@@ -201,10 +198,11 @@ static int open_production_runtime_dir(void)
 }
 #endif
 
-static kb_vault_tpm_runtime_lock_result_t acquire_at(
-    int runtime_dir_fd, uid_t expected_uid, int build_supported, int allow_loopback_swtpm,
-    const char *tcti, const char *nv_index, kb_vault_tpm_runtime_lock_t **out, char *errbuf,
-    size_t errlen)
+static kb_vault_tpm_runtime_lock_result_t acquire_at(int runtime_dir_fd, uid_t expected_uid,
+                                                     int build_supported, int allow_loopback_swtpm,
+                                                     const char *tcti, const char *nv_index,
+                                                     kb_vault_tpm_runtime_lock_t **out,
+                                                     char *errbuf, size_t errlen)
 {
    if (out)
       *out = NULL;
@@ -246,8 +244,7 @@ static kb_vault_tpm_runtime_lock_result_t acquire_at(
    owner->fd = -1;
    owner->dir_fd = fcntl(runtime_dir_fd, F_DUPFD_CLOEXEC, 3);
    owner->expected_uid = expected_uid;
-   if (owner->dir_fd < 0 ||
-       snprintf(owner->name, sizeof(owner->name), "nv-%08x.lock", nv) != 16)
+   if (owner->dir_fd < 0 || snprintf(owner->name, sizeof(owner->name), "nv-%08x.lock", nv) != 16)
       goto io_fail;
 
    owner->fd = openat(owner->dir_fd, owner->name,
@@ -265,9 +262,8 @@ static kb_vault_tpm_runtime_lock_result_t acquire_at(
       int lock_errno = errno;
       kb_vault_tpm_runtime_lock_release(&owner);
       set_error(errbuf, errlen, "TPM runtime lock: another runtime owns this NV index");
-      return lock_errno == EWOULDBLOCK || lock_errno == EAGAIN
-                 ? KB_VAULT_TPM_RUNTIME_LOCK_BUSY
-                 : KB_VAULT_TPM_RUNTIME_LOCK_IO;
+      return lock_errno == EWOULDBLOCK || lock_errno == EAGAIN ? KB_VAULT_TPM_RUNTIME_LOCK_BUSY
+                                                               : KB_VAULT_TPM_RUNTIME_LOCK_IO;
    }
    if (kb_vault_tpm_runtime_lock_revalidate(owner) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
       goto io_fail;
@@ -342,12 +338,12 @@ kb_vault_tpm_runtime_lock_revalidate(kb_vault_tpm_runtime_lock_t *owner)
        (fcntl(owner->fd, F_GETFL) & O_NONBLOCK) == 0)
       return KB_VAULT_TPM_RUNTIME_LOCK_LOST;
    struct stat held, named;
-   if (fstat(owner->fd, &held) != 0 || !S_ISREG(held.st_mode) ||
-       held.st_dev != owner->device || held.st_ino != owner->inode ||
-       held.st_uid != owner->expected_uid || (held.st_mode & 07777) != 0600 ||
-       held.st_nlink != 1)
+   if (fstat(owner->fd, &held) != 0 || !S_ISREG(held.st_mode) || held.st_dev != owner->device ||
+       held.st_ino != owner->inode || held.st_uid != owner->expected_uid ||
+       (held.st_mode & 07777) != 0600 || held.st_nlink != 1)
       return KB_VAULT_TPM_RUNTIME_LOCK_LOST;
-   int named_fd = openat(owner->dir_fd, owner->name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+   int named_fd =
+       openat(owner->dir_fd, owner->name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
    if (named_fd < 0)
       return KB_VAULT_TPM_RUNTIME_LOCK_LOST;
    int ok = fstat(named_fd, &named) == 0 && S_ISREG(named.st_mode) && named.st_dev == held.st_dev &&

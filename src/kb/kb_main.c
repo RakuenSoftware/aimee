@@ -63,8 +63,7 @@ _Static_assert((int)DB2_VAULT_STATE_SEALED_IDLE == (int)KB_VAULT_OPERATOR_STATE_
 _Static_assert((int)DB2_VAULT_OPERATION_RECOVERY_REQUIRED ==
                    (int)KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED,
                "vault operator operation wire mismatch");
-_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE ==
-                   (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+_Static_assert((int)DB2_VAULT_REMEDIATION_FINALIZE == (int)KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
                "vault operator remediation wire mismatch");
 
 static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_status_t *out)
@@ -74,18 +73,18 @@ static int kb_vault_operator_provider_status(void *opaque, db2_vault_provider_st
       return -1;
    switch (vault_custody_selected_local_status())
    {
-      case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
-         *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
-         return 0;
-      case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
-         *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
-         return 0;
-      case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
-         *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
-         return 0;
-      case VAULT_CUSTODY_LOCAL_MALFORMED:
-         *out = DB2_VAULT_PROVIDER_MALFORMED;
-         return 0;
+   case VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED:
+      *out = DB2_VAULT_PROVIDER_AVAILABLE_SEALED;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED:
+      *out = DB2_VAULT_PROVIDER_AVAILABLE_UNSEALED;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_UNAVAILABLE:
+      *out = DB2_VAULT_PROVIDER_UNAVAILABLE;
+      return 0;
+   case VAULT_CUSTODY_LOCAL_MALFORMED:
+      *out = DB2_VAULT_PROVIDER_MALFORMED;
+      return 0;
    }
    return -1;
 }
@@ -94,8 +93,8 @@ static int kb_vault_operator_project(kb_vault_operator_status_t *out, void *opaq
 {
    db2_vault_operator_runtime_t *runtime = opaque;
    db2_vault_operator_status_t status;
-   int rc = db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL,
-                                               &status);
+   int rc =
+       db2_vault_operator_runtime_status(runtime, kb_vault_operator_provider_status, NULL, &status);
    if (rc == DB2_VAULT_OPERATOR_UNAVAILABLE || !out)
       return -1;
    memset(out, 0, sizeof(*out));
@@ -116,8 +115,8 @@ static int kb_vault_operator_status_equal(const db2_vault_operator_status_t *a,
                                           const db2_vault_operator_status_t *b)
 {
    return a && b && a->state == b->state && a->remediation == b->remediation &&
-          a->provider == b->provider && db2_vault_operator_snapshot_equal(&a->snapshot,
-                                                                          &b->snapshot);
+          a->provider == b->provider &&
+          db2_vault_operator_snapshot_equal(&a->snapshot, &b->snapshot);
 }
 
 static int kb_cmd_vault(int argc, char **argv)
@@ -1384,13 +1383,11 @@ int main(int argc, char **argv)
     * primary Postgres credential are environment-backed. */
    const char *vault_operator_enable = getenv("AIMEE_KB_VAULT_OPERATOR_ENABLED");
    const char *vault_orchestrator_url = getenv("AIMEE_KB_VAULT_ORCHESTRATOR_URL");
-   int vault_operator_enabled = vault_operator_enable &&
-                                strcmp(vault_operator_enable, "1") == 0;
+   int vault_operator_enabled = vault_operator_enable && strcmp(vault_operator_enable, "1") == 0;
    const char *vault_tpm2_effective_tcti = NULL;
    const char *vault_tpm2_effective_nv_index = NULL;
    kb_vault_tpm_runtime_identity(kb_cfg.vault_tpm2_tcti, kb_cfg.vault_tpm2_nv_index,
-                                 &vault_tpm2_effective_tcti,
-                                 &vault_tpm2_effective_nv_index);
+                                 &vault_tpm2_effective_tcti, &vault_tpm2_effective_nv_index);
    if ((vault_operator_enable && !vault_operator_enabled) ||
        (vault_operator_enabled != (vault_orchestrator_url && vault_orchestrator_url[0])))
    {
@@ -1518,10 +1515,9 @@ int main(int argc, char **argv)
    if (strcmp(kb_cfg.vault_custody, "tpm2") == 0)
    {
       char lock_error[192] = "";
-      if (kb_vault_tpm_runtime_lock_acquire(vault_tpm2_effective_tcti,
-                                            vault_tpm2_effective_nv_index,
-                                            &vault_tpm_runtime_lock, lock_error,
-                                            sizeof(lock_error)) != KB_VAULT_TPM_RUNTIME_LOCK_OK ||
+      if (kb_vault_tpm_runtime_lock_acquire(
+              vault_tpm2_effective_tcti, vault_tpm2_effective_nv_index, &vault_tpm_runtime_lock,
+              lock_error, sizeof(lock_error)) != KB_VAULT_TPM_RUNTIME_LOCK_OK ||
           kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
               KB_VAULT_TPM_RUNTIME_LOCK_OK)
       {
@@ -1577,12 +1573,11 @@ int main(int argc, char **argv)
       }
 #endif
       if (db2_vault_operator_runtime_open(&vault_operator_runtime, vault_orchestrator_url,
-                                          operator_error, sizeof(operator_error)) !=
-              DB2_VAULT_OPERATOR_OK ||
-          db2_vault_operator_runtime_status(&vault_operator_runtime,
-                                             kb_vault_operator_provider_status, NULL,
-                                             &vault_operator_startup_before) !=
-              DB2_VAULT_OPERATOR_OK ||
+                                          operator_error,
+                                          sizeof(operator_error)) != DB2_VAULT_OPERATOR_OK ||
+          db2_vault_operator_runtime_status(
+              &vault_operator_runtime, kb_vault_operator_provider_status, NULL,
+              &vault_operator_startup_before) != DB2_VAULT_OPERATOR_OK ||
           kb_vault_operator_startup_mode(
               (kb_vault_operator_state_t)vault_operator_startup_before.state) < 0)
       {
@@ -1657,18 +1652,16 @@ int main(int argc, char **argv)
       db2_vault_operator_status_t startup_after;
       memset(&startup_after, 0, sizeof(startup_after));
       if (db2_vault_operator_runtime_status(&vault_operator_runtime,
-                                             kb_vault_operator_provider_status, NULL,
-                                             &startup_after) != DB2_VAULT_OPERATOR_OK ||
+                                            kb_vault_operator_provider_status, NULL,
+                                            &startup_after) != DB2_VAULT_OPERATOR_OK ||
           !kb_vault_operator_status_equal(&vault_operator_startup_before, &startup_after) ||
           kb_vault_operator_startup_mode((kb_vault_operator_state_t)startup_after.state) < 0 ||
           kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
               KB_VAULT_TPM_RUNTIME_LOCK_OK ||
           !(vault_operator_service = kb_vault_operator_service_start(
-                KB_VAULT_OPERATOR_LISTEN_FD, kb_vault_operator_project,
-                &vault_operator_runtime)))
+                KB_VAULT_OPERATOR_LISTEN_FD, kb_vault_operator_project, &vault_operator_runtime)))
       {
-         fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n",
-               stderr);
+         fputs("aimee-kb: vault operator post-epoch status/listener validation failed\n", stderr);
          db2_vault_operator_runtime_close(&vault_operator_runtime);
          vault_operator_runtime_opened = 0;
          db2_shutdown();
@@ -1781,8 +1774,7 @@ int main(int argc, char **argv)
     * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
    kb_http_set_telemetry_token(kb_cfg.telemetry_metrics_token);
    if (vault_tpm_runtime_lock &&
-       kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) !=
-           KB_VAULT_TPM_RUNTIME_LOCK_OK)
+       kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
    {
       fputs("aimee-kb: TPM runtime singleton lost before listener activation\n", stderr);
       kb_service_shutdown(&g_ctx);

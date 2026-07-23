@@ -26,8 +26,8 @@ int main(void)
        .local_status = local_status,
    };
 
-   for (int status = VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED;
-        status <= VAULT_CUSTODY_LOCAL_MALFORMED; status++)
+   for (int status = VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED; status <= VAULT_CUSTODY_LOCAL_MALFORMED;
+        status++)
    {
       context.result = status;
       context.observed_timeout = 0;

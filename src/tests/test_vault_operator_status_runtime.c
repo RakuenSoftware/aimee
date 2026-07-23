@@ -51,8 +51,7 @@ static int query_db(void *ctx, void *db, const char *sql, int64_t deadline,
    if (!strncmp(sql, "SET ", 4))
       return 0;
    r->rows = 1;
-   if (strstr(sql,
-              "FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()"))
+   if (strstr(sql, "FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()"))
    {
       if (g_database_integrity)
          return DB2_VAULT_OPERATOR_INTEGRITY;
@@ -112,8 +111,8 @@ int main(void)
    db2_vault_operator_status_t status;
    char error[128] = "";
    int tcp = -1;
-   assert(db2_vault_operator_conninfo_allowed_for_test(
-              "host=/run/postgresql dbname=aimee", &tcp) == 0 &&
+   assert(db2_vault_operator_conninfo_allowed_for_test("host=/run/postgresql dbname=aimee", &tcp) ==
+              0 &&
           tcp == 0);
    assert(db2_vault_operator_conninfo_allowed_for_test(
               "host=192.0.2.10 sslmode=verify-full dbname=aimee", &tcp) == 0 &&

@@ -188,36 +188,36 @@ static int valid_remediation(const kb_vault_operator_status_t *s)
 {
    switch (s->state)
    {
-      case KB_VAULT_OPERATOR_STATE_SEALED_IDLE:
-      case KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
-      case KB_VAULT_OPERATOR_STATE_OPERATIONAL:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_NONE;
-      case KB_VAULT_OPERATOR_STATE_RESUME_REQUIRED:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_RESUME ||
-                s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
-      case KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_RECOVER ||
-                s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
-      case KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_FINALIZE;
-      case KB_VAULT_OPERATOR_STATE_BACKEND_UNAVAILABLE:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
-      case KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE:
-         return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_INTEGRITY;
-      default:
-         return 0; /* unsupported/disabled are reserved and never served in v1 */
+   case KB_VAULT_OPERATOR_STATE_SEALED_IDLE:
+   case KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   case KB_VAULT_OPERATOR_STATE_OPERATIONAL:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_NONE;
+   case KB_VAULT_OPERATOR_STATE_RESUME_REQUIRED:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_RESUME ||
+             s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
+   case KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_RECOVER ||
+             s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
+   case KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_FINALIZE;
+   case KB_VAULT_OPERATOR_STATE_BACKEND_UNAVAILABLE:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_BACKEND;
+   case KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE:
+      return s->remediation == KB_VAULT_OPERATOR_REMEDIATION_INTEGRITY;
+   default:
+      return 0; /* unsupported/disabled are reserved and never served in v1 */
    }
 }
 
 int kb_vault_operator_status_validate(const kb_vault_operator_status_t *s)
 {
    if (!s || s->state < KB_VAULT_OPERATOR_STATE_SEALED_IDLE ||
-       s->state > KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE || s->flags > 1 ||
-       !s->seal_epoch || !s->control_fence || s->seal_epoch > INT64_MAX ||
-       s->control_fence > INT64_MAX || s->old_generation > INT64_MAX ||
-       s->new_generation > INT64_MAX || s->last_opened_fence > INT64_MAX ||
-       s->last_opened_fence > s->control_fence || !valid_remediation(s))
+       s->state > KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE || s->flags > 1 || !s->seal_epoch ||
+       !s->control_fence || s->seal_epoch > INT64_MAX || s->control_fence > INT64_MAX ||
+       s->old_generation > INT64_MAX || s->new_generation > INT64_MAX ||
+       s->last_opened_fence > INT64_MAX || s->last_opened_fence > s->control_fence ||
+       !valid_remediation(s))
       return 0;
 
    if (!(s->flags & 1))
@@ -228,8 +228,8 @@ int kb_vault_operator_status_validate(const kb_vault_operator_status_t *s)
              s->state != KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED;
 
    if (s->operation_state < KB_VAULT_OPERATOR_OPERATION_PREPARING ||
-       s->operation_state > KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED ||
-       !s->new_generation || s->new_generation != s->old_generation + 1 ||
+       s->operation_state > KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED || !s->new_generation ||
+       s->new_generation != s->old_generation + 1 ||
        all_zero(s->operation_id, sizeof(s->operation_id)))
       return 0;
    if (s->state == KB_VAULT_OPERATOR_STATE_RESUME_REQUIRED)
@@ -305,8 +305,8 @@ static int status_decode(const unsigned char input[80], kb_vault_operator_status
 }
 
 int kb_vault_operator_response_encode(kb_vault_operator_transport_t result,
-                                      const kb_vault_operator_status_t *status,
-                                      unsigned char *out, size_t out_cap, size_t *out_len)
+                                      const kb_vault_operator_status_t *status, unsigned char *out,
+                                      size_t out_cap, size_t *out_len)
 {
    if (out_len)
       *out_len = 0;
@@ -437,8 +437,8 @@ static int validate_listener(int fd)
    socklen_t address_len = sizeof(address);
    memset(&address, 0, sizeof(address));
    if (fstat(fd, &st) != 0 || !S_ISSOCK(st.st_mode) ||
-       getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &option_len) != 0 ||
-       option_len != sizeof(type) || type != SOCK_STREAM)
+       getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &option_len) != 0 || option_len != sizeof(type) ||
+       type != SOCK_STREAM)
       return 0;
    option_len = sizeof(accepting);
    if (getsockopt(fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &option_len) != 0 ||
@@ -492,8 +492,9 @@ static void *service_main(void *opaque)
    return NULL;
 }
 
-kb_vault_operator_service_t *kb_vault_operator_service_start(
-    int inherited_fd, kb_vault_operator_status_fn read_status, void *opaque)
+kb_vault_operator_service_t *
+kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn read_status,
+                                void *opaque)
 {
    if (!read_status || !validate_listener(inherited_fd))
    {
@@ -503,8 +504,7 @@ kb_vault_operator_service_t *kb_vault_operator_service_start(
    }
    int flags = fcntl(inherited_fd, F_GETFL);
    int fd_flags = fcntl(inherited_fd, F_GETFD);
-   if (flags < 0 || fd_flags < 0 ||
-       fcntl(inherited_fd, F_SETFL, flags | O_NONBLOCK) != 0 ||
+   if (flags < 0 || fd_flags < 0 || fcntl(inherited_fd, F_SETFL, flags | O_NONBLOCK) != 0 ||
        fcntl(inherited_fd, F_SETFD, fd_flags | FD_CLOEXEC) != 0)
    {
       (void)close(inherited_fd);
@@ -577,8 +577,7 @@ static int connect_fixed(void)
    struct sockaddr_un address;
    memset(&address, 0, sizeof(address));
    address.sun_family = AF_UNIX;
-   memcpy(address.sun_path, KB_VAULT_OPERATOR_SOCKET_PATH,
-          sizeof(KB_VAULT_OPERATOR_SOCKET_PATH));
+   memcpy(address.sun_path, KB_VAULT_OPERATOR_SOCKET_PATH, sizeof(KB_VAULT_OPERATOR_SOCKET_PATH));
    int64_t deadline;
    int connected = connect(fd, (const struct sockaddr *)&address, sizeof(address));
    if (deadline_after(KB_VAULT_OPERATOR_IO_TIMEOUT_MS, &deadline) != 0)
@@ -598,8 +597,8 @@ static int connect_fixed(void)
    struct ucred peer;
    socklen_t peer_len = sizeof(peer);
    if (connected != 0 || !exact_socket_path() ||
-       getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_len) != 0 ||
-       peer_len != sizeof(peer) || peer.uid != 0)
+       getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_len) != 0 || peer_len != sizeof(peer) ||
+       peer.uid != 0)
    {
       close(fd);
       return -1;
@@ -634,7 +633,8 @@ kb_vault_operator_status_client(kb_vault_operator_status_t *status)
       ok = read_eof(fd, deadline) == 0;
    close(fd);
    kb_vault_operator_transport_t result;
-   if (!ok || kb_vault_operator_response_decode(response, 16u + payload_len, &result, status) != 0 ||
+   if (!ok ||
+       kb_vault_operator_response_decode(response, 16u + payload_len, &result, status) != 0 ||
        result != KB_VAULT_OPERATOR_TRANSPORT_OK)
    {
       memset(status, 0, sizeof(*status));
@@ -659,19 +659,19 @@ int kb_vault_operator_startup_mode(kb_vault_operator_state_t state)
 {
    switch (state)
    {
-      case KB_VAULT_OPERATOR_STATE_OPERATIONAL:
-         return 0;
-      case KB_VAULT_OPERATOR_STATE_SEALED_IDLE:
-      case KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED:
-      case KB_VAULT_OPERATOR_STATE_RESUME_REQUIRED:
-      case KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED:
-      case KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED:
-         return 1;
-      case KB_VAULT_OPERATOR_STATE_UNSUPPORTED_RESERVED:
-      case KB_VAULT_OPERATOR_STATE_DISABLED_RESERVED:
-      case KB_VAULT_OPERATOR_STATE_BACKEND_UNAVAILABLE:
-      case KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE:
-         return -1;
+   case KB_VAULT_OPERATOR_STATE_OPERATIONAL:
+      return 0;
+   case KB_VAULT_OPERATOR_STATE_SEALED_IDLE:
+   case KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED:
+   case KB_VAULT_OPERATOR_STATE_RESUME_REQUIRED:
+   case KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED:
+   case KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED:
+      return 1;
+   case KB_VAULT_OPERATOR_STATE_UNSUPPORTED_RESERVED:
+   case KB_VAULT_OPERATOR_STATE_DISABLED_RESERVED:
+   case KB_VAULT_OPERATOR_STATE_BACKEND_UNAVAILABLE:
+   case KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE:
+      return -1;
    }
    return -1;
 }
@@ -679,32 +679,31 @@ int kb_vault_operator_startup_mode(kb_vault_operator_state_t state)
 const char *kb_vault_operator_state_name(kb_vault_operator_state_t state)
 {
    static const char *const names[] = {NULL,
-                                      "unsupported",
-                                      "disabled",
-                                      "sealed_idle",
-                                      "operational",
-                                      "local_unseal_required",
-                                      "resume_required",
-                                      "recovery_required",
-                                      "completed_sealed",
-                                      "backend_unavailable",
-                                      "integrity_failure"};
+                                       "unsupported",
+                                       "disabled",
+                                       "sealed_idle",
+                                       "operational",
+                                       "local_unseal_required",
+                                       "resume_required",
+                                       "recovery_required",
+                                       "completed_sealed",
+                                       "backend_unavailable",
+                                       "integrity_failure"};
    return state >= 1 && state <= 10 ? names[state] : NULL;
 }
 
 const char *kb_vault_operator_operation_name(kb_vault_operator_operation_state_t state)
 {
-   static const char *const names[] = {"none",          "preparing", "custody_prepared",
-                                      "wraps_staged",  "reseal_committing", "resealed",
-                                      "promoted",      "completed", "aborted",
-                                      "recovery_required"};
+   static const char *const names[] = {
+       "none",     "preparing", "custody_prepared", "wraps_staged", "reseal_committing",
+       "resealed", "promoted",  "completed",        "aborted",      "recovery_required"};
    return state >= 0 && state <= 9 ? names[state] : NULL;
 }
 
 const char *kb_vault_operator_remediation_name(kb_vault_operator_remediation_t remediation)
 {
-   static const char *const names[] = {"none",    "configure", "unseal",   "resume", "recover",
-                                      "upgrade", "backend",   "integrity", "finalize"};
+   static const char *const names[] = {"none",    "configure", "unseal",    "resume",  "recover",
+                                       "upgrade", "backend",   "integrity", "finalize"};
    return remediation >= 0 && remediation <= 8 ? names[remediation] : NULL;
 }
 

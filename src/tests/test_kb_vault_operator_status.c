@@ -89,8 +89,7 @@ static void test_codec(void)
    status.control_fence = 0;
    assert(!kb_vault_operator_status_validate(&status));
    status = operational();
-   assert(kb_vault_operator_status_exit_mapping(&status) ==
-          KB_VAULT_OPERATOR_CLIENT_OK);
+   assert(kb_vault_operator_status_exit_mapping(&status) == KB_VAULT_OPERATOR_CLIENT_OK);
    status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
    status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
    assert(kb_vault_operator_status_exit_mapping(&status) ==

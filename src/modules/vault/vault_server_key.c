@@ -693,8 +693,7 @@ vault_custody_local_status_t vault_custody_selected_local_status(void)
    if (!status_fn)
       return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
    int status = status_fn(ctx, 50);
-   return status >= VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED &&
-                  status <= VAULT_CUSTODY_LOCAL_MALFORMED
+   return status >= VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED && status <= VAULT_CUSTODY_LOCAL_MALFORMED
               ? (vault_custody_local_status_t)status
               : VAULT_CUSTODY_LOCAL_MALFORMED;
 }

@@ -43,29 +43,29 @@ int main(void)
    uid_t uid = geteuid();
    kb_vault_tpm_runtime_lock_t *first = NULL, *second = NULL;
 
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 0, 0, "device:/dev/tpmrm0", "0x01500001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 0, 0, "device:/dev/tpmrm0",
+                                                        "0x01500001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_UNSUPPORTED);
    assert(first == NULL);
    assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
               dir, uid, 1, 0, "swtpm:host=127.0.0.1,port=2321", "0x01500001", &first, err,
               sizeof(err)) == KB_VAULT_TPM_RUNTIME_LOCK_INELIGIBLE);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "22020097", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "22020097", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_INELIGIBLE);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0X01500001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0X01500001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_INELIGIBLE);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0x02000001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0x02000001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_INELIGIBLE);
 
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0x01500001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_OK);
    assert(kb_vault_tpm_runtime_lock_revalidate(first) == KB_VAULT_TPM_RUNTIME_LOCK_OK);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &second, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0x01500001", &second, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_BUSY);
    assert(second == NULL);
 
@@ -77,11 +77,11 @@ int main(void)
    {
       assert(kb_vault_tpm_runtime_lock_revalidate(first) == KB_VAULT_TPM_RUNTIME_LOCK_LOST);
       assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &second, err,
-                 sizeof(err)) == KB_VAULT_TPM_RUNTIME_LOCK_BUSY);
+                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &second, err, sizeof(err)) ==
+             KB_VAULT_TPM_RUNTIME_LOCK_BUSY);
       assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500002", &second, err,
-                 sizeof(err)) == KB_VAULT_TPM_RUNTIME_LOCK_OK);
+                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500002", &second, err, sizeof(err)) ==
+             KB_VAULT_TPM_RUNTIME_LOCK_OK);
       kb_vault_tpm_runtime_lock_release(&second);
       _exit(0);
    }
@@ -98,8 +98,8 @@ int main(void)
    {
       kb_vault_tpm_runtime_lock_t *isolated = NULL;
       assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500003", &isolated, err,
-                 sizeof(err)) == KB_VAULT_TPM_RUNTIME_LOCK_OK);
+                 dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500003", &isolated, err, sizeof(err)) ==
+             KB_VAULT_TPM_RUNTIME_LOCK_OK);
       assert(unlinkat(dir, "nv-01500003.lock", 0) == 0);
       int planted = openat(dir, "nv-01500003.lock", O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
       assert(planted >= 0);
@@ -123,14 +123,14 @@ int main(void)
 
    assert(unlinkat(dir, "nv-01500001.lock", 0) == 0);
    assert(symlinkat("target", dir, "nv-01500001.lock") == 0);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0x01500001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_IO);
    assert(unlinkat(dir, "nv-01500001.lock", 0) == 0);
 
    assert(fchmod(dir, 0755) == 0);
-   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(
-              dir, uid, 1, 0, "device:/dev/tpmrm0", "0x01500001", &first, err, sizeof(err)) ==
+   assert(kb_vault_tpm_runtime_lock_acquire_at_for_test(dir, uid, 1, 0, "device:/dev/tpmrm0",
+                                                        "0x01500001", &first, err, sizeof(err)) ==
           KB_VAULT_TPM_RUNTIME_LOCK_IO);
    close(dir);
    assert(rmdir(path) == 0);

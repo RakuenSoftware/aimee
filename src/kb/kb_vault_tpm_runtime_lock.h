@@ -9,10 +9,8 @@ typedef struct kb_vault_tpm_runtime_lock kb_vault_tpm_runtime_lock_t;
 
 /* Resolve the exact env-over-config identity used by the TPM2 provider.  The
  * returned pointers remain owned by the environment/config caller. */
-void kb_vault_tpm_runtime_identity(const char *configured_tcti,
-                                   const char *configured_nv_index,
-                                   const char **effective_tcti,
-                                   const char **effective_nv_index);
+void kb_vault_tpm_runtime_identity(const char *configured_tcti, const char *configured_nv_index,
+                                   const char **effective_tcti, const char **effective_nv_index);
 
 typedef enum
 {
@@ -31,8 +29,7 @@ typedef enum
  * must be root-owned, non-symlink objects with exact 0700/0600 modes. */
 kb_vault_tpm_runtime_lock_result_t
 kb_vault_tpm_runtime_lock_acquire(const char *tcti, const char *nv_index,
-                                  kb_vault_tpm_runtime_lock_t **out, char *errbuf,
-                                  size_t errlen);
+                                  kb_vault_tpm_runtime_lock_t **out, char *errbuf, size_t errlen);
 
 /* Revalidate inode identity, ownership/mode, FD_CLOEXEC and nonblocking flock.
  * Call before custody initialization and before listener activation. Acquisition

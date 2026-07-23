@@ -99,17 +99,16 @@ static int numeric_host(const char *host)
 static int dns_identity(const char *host)
 {
    size_t length = host ? strlen(host) : 0;
-   if (!length || length > 253 || host[0] == '.' || host[length - 1] == '.' ||
-       host[0] == '-' || host[length - 1] == '-')
+   if (!length || length > 253 || host[0] == '.' || host[length - 1] == '.' || host[0] == '-' ||
+       host[length - 1] == '-')
       return 0;
    for (size_t i = 0; i < length; ++i)
    {
       unsigned char c = (unsigned char)host[i];
-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '.'))
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '.'))
          return 0;
-      if ((c == '.' && ((i > 0 && host[i - 1] == '-') ||
-                        (i + 1 < length && host[i + 1] == '-'))) ||
+      if ((c == '.' && ((i > 0 && host[i - 1] == '-') || (i + 1 < length && host[i + 1] == '-'))) ||
           (c == '.' && i + 1 < length && host[i + 1] == '.'))
          return 0;
    }
@@ -305,8 +304,7 @@ static int prod_query(void *context, void *opaque, const char *sql, int64_t dead
       const char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
       int integrity =
           sqlstate && !strcmp(sqlstate, "55000") &&
-          strstr(sql, "aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()") !=
-              NULL;
+          strstr(sql, "aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()") != NULL;
       PQclear(result);
       PGresult *remaining;
       while ((remaining = PQgetResult(connection)) != NULL)
@@ -427,7 +425,8 @@ static int session_assert(db2_vault_operator_runtime_t *r, int after_role, int64
        "(SELECT 1 FROM pg_catalog.pg_namespace n CROSS JOIN LATERAL "
        "pg_catalog.aclexplode(n.nspacl) acl WHERE acl.grantee=l.oid) AND NOT EXISTS (SELECT 1 FROM "
        "pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace CROSS JOIN "
-       "LATERAL pg_catalog.aclexplode(c.relacl) acl WHERE acl.grantee=l.oid) AND NOT EXISTS (SELECT 1 FROM "
+       "LATERAL pg_catalog.aclexplode(c.relacl) acl WHERE acl.grantee=l.oid) AND NOT EXISTS "
+       "(SELECT 1 FROM "
        "pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace CROSS JOIN "
        "LATERAL pg_catalog.aclexplode(p.proacl) acl WHERE acl.grantee=l.oid) AND "
        "NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON "
@@ -489,7 +488,8 @@ static int session_assert(db2_vault_operator_runtime_t *r, int after_role, int64
        "pg_catalog.pg_roles WHERE rolname=session_user)) AND "
        "NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspowner=o.oid) AND NOT EXISTS "
        "(SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON "
-       "n.oid=c.relnamespace WHERE c.relowner=o.oid) AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN "
+       "n.oid=c.relnamespace WHERE c.relowner=o.oid) AND NOT EXISTS (SELECT 1 FROM "
+       "pg_catalog.pg_proc p JOIN "
        "pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=o.oid) AND NOT EXISTS "
        "(SELECT 1 FROM "
        "pg_catalog.pg_auth_members membership WHERE membership.member=o.oid)) FROM "
