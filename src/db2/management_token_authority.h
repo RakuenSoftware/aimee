@@ -2,6 +2,7 @@
 #define AIMEE_DB2_MANAGEMENT_TOKEN_AUTHORITY_H
 
 #include "../kb/kb_mgmt_token_authority.h"
+#include "kb_mgmt_token_authority_ipc.h"
 
 #include <stddef.h>
 
@@ -26,6 +27,12 @@ typedef struct
    char jti[65];
    kb_mgmt_token_authority_record_t use_record;
 } db2_management_token_authority_ctx_t;
+
+typedef enum
+{
+   DB2_MANAGEMENT_TOKEN_INTENT_ACTION = 1,
+   DB2_MANAGEMENT_TOKEN_INTENT_READ = 2
+} db2_management_token_intent_kind_t;
 
 #ifdef __cplusplus
 extern "C"
@@ -61,6 +68,24 @@ extern "C"
    db2_management_token_authority_result_t
    db2_management_token_authority_finalize(db2_management_token_authority_ctx_t *ctx);
    void db2_management_token_authority_abort(db2_management_token_authority_ctx_t *ctx);
+
+   db2_management_token_authority_result_t
+   db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
+                                       const char correlation_id[65], const char jti[65],
+                                       db2_management_token_intent_kind_t *kind);
+   db2_management_token_authority_result_t
+   db2_management_token_read_claim(db2_management_token_authority_ctx_t *ctx,
+                                   const char correlation_id[65], const char jti[65],
+                                   const char lease_owner[65],
+                                   kb_mgmt_token_authority_record_t *out);
+   db2_management_token_authority_result_t
+   db2_management_token_read_finalize(db2_management_token_authority_ctx_t *ctx,
+                                      const char correlation_id[65], const char jti[65],
+                                      const char lease_owner[65], const char *jwt);
+   db2_management_token_authority_result_t
+   db2_management_token_read_readback(db2_management_token_authority_ctx_t *ctx,
+                                      const char correlation_id[65], const char jti[65],
+                                      kb_mgmt_token_authority_output_t *out);
 
 #ifdef __cplusplus
 }

@@ -10248,12 +10248,22 @@ BEGIN
   RETURN QUERY SELECT a.jwt,a.jwt_sha256,a.expires_at;
 END $$;
 
-CREATE OR REPLACE FUNCTION kb_management_read_authority_claim(
+DROP FUNCTION IF EXISTS kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER);
+CREATE FUNCTION kb_management_read_authority_claim(
   p_correlation_id TEXT,p_jti TEXT,p_lease_owner TEXT,p_lease_seconds INTEGER)
-RETURNS TABLE(claim_status TEXT,lease_owner TEXT,claims JSONB,token_custody_key_id TEXT,
-  key_generation BIGINT,token_public_key BYTEA,token_public_exponent BYTEA,
+RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,
+  actor_identity TEXT,capability TEXT,
+  target_server_id TEXT,request_sha256 TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,local_cert_issuer TEXT,local_cert_serial_norm TEXT,
+  local_cert_fingerprint TEXT,target_enrollment_id BIGINT,target_mgmt_issuer TEXT,
+  target_mgmt_serial_norm TEXT,target_mgmt_fingerprint TEXT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
   vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
-  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA)
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,key_use_created_at_epoch BIGINT)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
 DECLARE
@@ -10288,23 +10298,21 @@ BEGIN
     RAISE EXCEPTION 'management read authority: intent unavailable' USING ERRCODE='P0002';
   END IF;
   IF a.state IN ('issued','expired') THEN
-    RETURN QUERY SELECT a.state,NULL::TEXT,NULL::JSONB,NULL::TEXT,NULL::BIGINT,NULL::BYTEA,
-      NULL::BYTEA,NULL::BIGINT,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
     RETURN;
   END IF;
   IF v_now>=a.issuance_deadline OR extract(epoch FROM v_now)::BIGINT>=a.expires_at THEN
-    UPDATE public.kb_management_read_intent SET state='expired',lease_owner=NULL,
-      lease_until=NULL,updated_at=v_now WHERE correlation_id=a.correlation_id RETURNING * INTO a;
-    RETURN QUERY SELECT 'expired',NULL::TEXT,NULL::JSONB,NULL::TEXT,NULL::BIGINT,NULL::BYTEA,
-      NULL::BYTEA,NULL::BIGINT,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA,NULL::BYTEA;
+    UPDATE public.kb_management_read_intent AS target SET state='expired',lease_owner=NULL,
+      lease_until=NULL,updated_at=v_now WHERE target.correlation_id=a.correlation_id
+      RETURNING target.* INTO a;
     RETURN;
   END IF;
   IF a.state='signing' AND a.lease_until>v_now THEN
     RAISE EXCEPTION 'management read authority: signing conflict' USING ERRCODE='23505';
   END IF;
-  UPDATE public.kb_management_read_intent SET state='signing',lease_owner=p_lease_owner,
-    lease_until=least(v_now+(p_lease_seconds::TEXT||' seconds')::INTERVAL,issuance_deadline),
-    updated_at=v_now WHERE correlation_id=a.correlation_id RETURNING * INTO a;
+  UPDATE public.kb_management_read_intent AS target SET state='signing',lease_owner=p_lease_owner,
+    lease_until=least(v_now+(p_lease_seconds::TEXT||' seconds')::INTERVAL,
+      target.issuance_deadline),updated_at=v_now
+    WHERE target.correlation_id=a.correlation_id RETURNING target.* INTO a;
 
   SELECT x.* INTO m FROM public.kb_team_membership x
     WHERE x.identity_key=a.actor_identity AND x.team=a.team_id FOR SHARE;
@@ -10391,16 +10399,16 @@ BEGIN
      ctl.seal_epoch<>pg.seal_epoch OR pc.seal_epoch<>pg.seal_epoch THEN
     RAISE EXCEPTION 'management read authority: vault sealed' USING ERRCODE='55000';
   END IF;
-  RETURN QUERY SELECT 'signing',a.lease_owner,pg_catalog.jsonb_build_object(
-    'version',a.token_version,'iss',a.token_issuer,'aud',a.audience,'sub',a.actor_identity,
-    'team',a.team_id,'capability',a.capability,'jti',a.jti,
-    'correlation_id',a.correlation_id,'request_sha256',a.request_sha256,
-    'peer_issuer',a.local_cert_issuer,'peer_serial',a.local_cert_serial_norm,
-    'peer_fingerprint',a.local_cert_fingerprint,'kid',a.kid,
-    'iat',a.issued_at,'exp',a.expires_at),
-    tr.custody_key_id,tr.current_version,tr.public_key,tr.public_exponent,ctl.seal_epoch,
-    vs.hwm_attestation,pg_catalog.sha256(vs.hwm_attestation),vs.wrapped_dek,vs.nonce,
-    vs.ciphertext,vs.tag;
+  RETURN QUERY SELECT true,a.correlation_id,a.jti,a.team_id,
+    a.actor_identity,a.capability,a.target_server_id,a.request_sha256,a.token_issuer,a.audience,
+    a.kid,a.issued_at,a.expires_at,a.installation_id,a.installation_generation,
+    a.installation_enrollment_id,a.local_cert_issuer,a.local_cert_serial_norm,
+    a.local_cert_fingerprint,a.target_enrollment_id,a.target_mgmt_issuer,
+    a.target_mgmt_serial_norm,a.target_mgmt_fingerprint,a.revocation_generation,
+    a.publication_generation,pg.candidate_id,pg.manifest_sha256,pg.envelope_sha256,
+    tr.custody_key_id,tr.current_version,tr.public_key,tr.public_exponent,tr.public_digest,
+    tr.jwk_digest,ctl.seal_epoch,vs.hwm_attestation,pg_catalog.sha256(vs.hwm_attestation),
+    vs.wrapped_dek,vs.nonce,vs.ciphertext,vs.tag,0::BIGINT;
 END $$;
 
 CREATE OR REPLACE FUNCTION kb_management_read_b64url_decode(p_value TEXT) RETURNS BYTEA
@@ -10486,7 +10494,7 @@ BEGIN
     'peer_issuer',a.local_cert_issuer,'peer_serial',a.local_cert_serial_norm,
     'peer_fingerprint',a.local_cert_fingerprint,'iat',a.issued_at,'exp',a.expires_at);
   IF header IS DISTINCT FROM pg_catalog.jsonb_build_object('alg','RS256','typ','JWT','kid',a.kid) OR
-     payload IS DISTINCT FROM expected OR octet_length(signature)<>256 THEN
+     payload IS DISTINCT FROM expected OR octet_length(signature)<>384 THEN
     RAISE EXCEPTION 'management read finalize: token claims mismatch' USING ERRCODE='40001';
   END IF;
   token_hash:=pg_catalog.sha256(pg_catalog.convert_to(p_jwt,'UTF8'));
@@ -10505,6 +10513,39 @@ BEGIN
   UPDATE public.kb_management_read_intent SET state='issued',lease_owner=NULL,lease_until=NULL,
     jwt=p_jwt,jwt_sha256=token_hash,updated_at=v_now WHERE correlation_id=a.correlation_id;
   RETURN true;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_intent_kind(
+  p_correlation_id TEXT,p_jti TEXT) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_kind TEXT;
+BEGIN
+  IF p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'management token kind: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT x.kind INTO v_kind FROM public.kb_management_token_intent_namespace x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF v_kind IS NULL THEN
+    RAISE EXCEPTION 'management token kind: absent' USING ERRCODE='P0002';
+  END IF;
+  RETURN v_kind;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_authority_readback(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(jwt TEXT,jwt_sha256 BYTEA,expires_at BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE a public.kb_management_read_intent%ROWTYPE;
+BEGIN
+  SELECT x.* INTO a FROM public.kb_management_read_intent x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF a.correlation_id IS NULL THEN RETURN; END IF;
+  IF a.state IN ('pending','signing','expired') THEN RETURN; END IF;
+  IF a.state<>'issued' OR a.jwt IS NULL OR a.jwt_sha256 IS NULL OR
+     a.jwt_sha256<>pg_catalog.sha256(pg_catalog.convert_to(a.jwt,'UTF8')) THEN
+    RAISE EXCEPTION 'management read authority readback conflict' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT a.jwt,a.jwt_sha256,a.expires_at;
 END $$;
 
 DROP FUNCTION IF EXISTS kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT);
@@ -10583,7 +10624,9 @@ REVOKE ALL ON FUNCTION kb_management_read_transition_guard(),kb_management_read_
   kb_management_read_token_readback(TEXT,TEXT),
   kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
   kb_management_read_b64url_decode(TEXT),
-  kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+  kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),
+  kb_management_token_intent_kind(TEXT,TEXT),
+  kb_management_read_authority_readback(TEXT,TEXT) FROM PUBLIC;
 
 -- ============================================================================
 -- P5-C2d ONLINE MANAGEMENT-TOKEN AUTHORITY.  The immutable row below is a

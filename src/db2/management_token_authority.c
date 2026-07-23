@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <openssl/crypto.h>
+#include <openssl/sha.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -15,6 +16,13 @@ static const char SQL_READBACK[] =
     "SELECT * FROM public.kb_management_token_authority_readback(?1,?2)";
 static const char SQL_USE[] = "SELECT * FROM public.kb_management_token_authority_use(?1,?2)";
 static const char SQL_FINALIZE[] = "SELECT public.kb_management_token_authority_finalize(?1,?2)";
+static const char SQL_KIND[] = "SELECT public.kb_management_token_intent_kind(?1,?2)";
+static const char SQL_READ_CLAIM[] =
+    "SELECT * FROM public.kb_management_read_authority_claim(?1,?2,?3,5)";
+static const char SQL_READ_FINALIZE[] =
+    "SELECT public.kb_management_read_authority_finalize(?1,?2,?3,?4)";
+static const char SQL_READ_READBACK[] =
+    "SELECT * FROM public.kb_management_read_authority_readback(?1,?2)";
 
 static int exact_hex_input(const char *s, size_t n)
 {
@@ -110,7 +118,9 @@ static int decode_record(aimee_pg_stmt_t *st, kb_mgmt_token_authority_record_t *
        text_col(st, 1, r->correlation_id, sizeof(r->correlation_id)) ||
        text_col(st, 2, r->jti, sizeof(r->jti)) || integer64(st, 3, &r->team_id) ||
        text_col(st, 4, r->actor_identity, sizeof(r->actor_identity)) ||
-       !aimee_pg_column_text(st, 5) || strcmp(aimee_pg_column_text(st, 5), "remote_writes") ||
+       !aimee_pg_column_text(st, 5) ||
+       (strcmp(aimee_pg_column_text(st, 5), "remote_writes") &&
+        strcmp(aimee_pg_column_text(st, 5), "remote_reads")) ||
        text_col(st, 6, r->target_server_id, sizeof(r->target_server_id)) ||
        text_col(st, 7, r->request_sha256, sizeof(r->request_sha256)) ||
        text_col(st, 8, r->token_issuer, sizeof(r->token_issuer)) ||
@@ -153,7 +163,9 @@ static int decode_record(aimee_pg_stmt_t *st, kb_mgmt_token_authority_record_t *
        blob_col(st, 40, r->envelope.tag, sizeof(r->envelope.tag), NULL, sizeof(r->envelope.tag)) ||
        integer64(st, 41, &r->key_use_created_at_epoch))
       goto invalid;
-   r->capability = KB_MGMT_TOKEN_CAP_REMOTE_WRITES;
+   r->capability = !strcmp(aimee_pg_column_text(st, 5), "remote_writes")
+                       ? KB_MGMT_TOKEN_CAP_REMOTE_WRITES
+                       : KB_MGMT_TOKEN_CAP_REMOTE_READS;
    r->envelope.seal_epoch = r->vault_seal_epoch;
    r->envelope.version = r->token_version;
    memcpy(r->envelope.hwm_attestation, r->hwm_attestation, r->hwm_attestation_len);
@@ -409,6 +421,190 @@ db2_management_token_authority_finalize(db2_management_token_authority_ctx_t *ct
    OPENSSL_cleanse(ctx->correlation_id, sizeof(ctx->correlation_id));
    OPENSSL_cleanse(ctx->jti, sizeof(ctx->jti));
    OPENSSL_cleanse(&ctx->use_record, sizeof(ctx->use_record));
+   OPENSSL_cleanse(error, sizeof(error));
+   return rc;
+}
+
+db2_management_token_authority_result_t
+db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
+                                    const char correlation_id[65], const char jti[65],
+                                    db2_management_token_intent_kind_t *kind)
+{
+   if (kind)
+      *kind = 0;
+   if (!ctx || !ctx->connection || ctx->use_transaction_open || !kind ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64))
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_KIND, error, sizeof(error));
+   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
+               aimee_pg_bind_text(st, "?2", jti);
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0))
+   {
+      const char *value = aimee_pg_column_text(st, 0);
+      *kind = value && !strcmp(value, "action") ? DB2_MANAGEMENT_TOKEN_INTENT_ACTION
+              : value && !strcmp(value, "read") ? DB2_MANAGEMENT_TOKEN_INTENT_READ
+                                                 : 0;
+      step = aimee_pg_step(st, error, sizeof(error));
+      rc = *kind && step == AIMEE_PG_DONE ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+                                          : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   }
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT;
+   if (st)
+      aimee_pg_finalize(st);
+   OPENSSL_cleanse(error, sizeof(error));
+   return rc;
+}
+
+db2_management_token_authority_result_t
+db2_management_token_read_claim(db2_management_token_authority_ctx_t *ctx,
+                                const char correlation_id[65], const char jti[65],
+                                const char lease_owner[65],
+                                kb_mgmt_token_authority_record_t *out)
+{
+   if (out)
+      OPENSSL_cleanse(out, sizeof(*out));
+   if (!ctx || !ctx->connection || ctx->use_transaction_open || !out ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64) ||
+       !exact_hex_input(lease_owner, 64))
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   if (aimee_pg_exec(ctx->connection, "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE", error,
+                     sizeof(error)))
+      return classify(NULL, error);
+   aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_READ_CLAIM, error, sizeof(error));
+   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
+               aimee_pg_bind_text(st, "?2", jti) || aimee_pg_bind_text(st, "?3", lease_owner);
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   kb_mgmt_token_authority_record_t candidate;
+   memset(&candidate, 0, sizeof(candidate));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && decode_record(st, &candidate) == 0)
+   {
+      step = aimee_pg_step(st, error, sizeof(error));
+      rc = step == AIMEE_PG_DONE ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+                                 : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   }
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT;
+   if (st)
+      aimee_pg_finalize(st);
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK &&
+       aimee_pg_exec(ctx->connection, "COMMIT", error, sizeof(error)))
+   {
+      aimee_pg_close(ctx->connection);
+      ctx->connection = NULL;
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS;
+   }
+   else if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK &&
+       (!candidate.newly_admitted || candidate.capability != KB_MGMT_TOKEN_CAP_REMOTE_READS ||
+        strcmp(candidate.correlation_id, correlation_id) || strcmp(candidate.jti, jti)))
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      *out = candidate;
+   OPENSSL_cleanse(&candidate, sizeof(candidate));
+   OPENSSL_cleanse(error, sizeof(error));
+   return rc;
+}
+
+db2_management_token_authority_result_t
+db2_management_token_read_finalize(db2_management_token_authority_ctx_t *ctx,
+                                   const char correlation_id[65], const char jti[65],
+                                   const char lease_owner[65], const char *jwt)
+{
+   size_t jwt_len = jwt ? strnlen(jwt, KB_MGMT_TOKEN_WIRE_MAX + 1) : 0;
+   if (!ctx || !ctx->connection || ctx->use_transaction_open ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64) ||
+       !exact_hex_input(lease_owner, 64) || !jwt_len || jwt_len > KB_MGMT_TOKEN_WIRE_MAX)
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   if (aimee_pg_exec(ctx->connection, "BEGIN ISOLATION LEVEL REPEATABLE READ READ WRITE", error,
+                     sizeof(error)))
+      return classify(NULL, error);
+   aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_READ_FINALIZE, error, sizeof(error));
+   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
+               aimee_pg_bind_text(st, "?2", jti) || aimee_pg_bind_text(st, "?3", lease_owner) ||
+               aimee_pg_bind_text(st, "?4", jwt);
+   int final = 0;
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && !boolean(st, 0, &final) && final &&
+       aimee_pg_step(st, error, sizeof(error)) == AIMEE_PG_DONE)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_OK;
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   if (st)
+      aimee_pg_finalize(st);
+   if (rc == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK &&
+       aimee_pg_exec(ctx->connection, "COMMIT", error, sizeof(error)))
+   {
+      aimee_pg_close(ctx->connection);
+      ctx->connection = NULL;
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS;
+   }
+   else if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      (void)aimee_pg_exec(ctx->connection, "ROLLBACK", error, sizeof(error));
+   OPENSSL_cleanse(error, sizeof(error));
+   return rc;
+}
+
+db2_management_token_authority_result_t
+db2_management_token_read_readback(db2_management_token_authority_ctx_t *ctx,
+                                   const char correlation_id[65], const char jti[65],
+                                   kb_mgmt_token_authority_output_t *out)
+{
+   if (out)
+      OPENSSL_cleanse(out, sizeof(*out));
+   if (!ctx || !ctx->connection || ctx->use_transaction_open || !out ||
+       !exact_hex_input(correlation_id, 64) || !exact_hex_input(jti, 64))
+      return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+   char error[AUTHORITY_ERROR_MAX] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_READ_READBACK, error, sizeof(error));
+   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
+               aimee_pg_bind_text(st, "?2", jti);
+   aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
+   db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
+   if (!bound && step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&
+       !aimee_pg_column_is_null(st, 1))
+   {
+      const char *jwt = aimee_pg_column_text(st, 0);
+      const void *stored = aimee_pg_column_blob(st, 1);
+      int stored_len = aimee_pg_column_bytes(st, 1);
+      size_t n = jwt ? strnlen(jwt, sizeof(out->jwt)) : 0;
+      unsigned char actual[SHA256_DIGEST_LENGTH];
+      if (n && n < sizeof(out->jwt) && stored && stored_len == SHA256_DIGEST_LENGTH &&
+          SHA256((const unsigned char *)jwt, n, actual) &&
+          CRYPTO_memcmp(actual, stored, sizeof(actual)) == 0)
+      {
+         memcpy(out->jwt, jwt, n + 1);
+         out->jwt_len = n;
+         step = aimee_pg_step(st, error, sizeof(error));
+         rc = step == AIMEE_PG_DONE ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
+                                    : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+      }
+      else
+         rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
+      OPENSSL_cleanse(actual, sizeof(actual));
+   }
+   else if (!bound && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st), error);
+   else if (!bound)
+      rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT;
+   if (st)
+      aimee_pg_finalize(st);
+   if (rc != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      OPENSSL_cleanse(out, sizeof(*out));
    OPENSSL_cleanse(error, sizeof(error));
    return rc;
 }

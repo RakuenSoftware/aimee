@@ -8,6 +8,7 @@
 
 #include <limits.h>
 #include <openssl/crypto.h>
+#include <openssl/rand.h>
 #include <pthread.h>
 #include <string.h>
 
@@ -26,6 +27,22 @@ static int exact_hex(const char *s, size_t n)
       if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
          return 0;
    return 1;
+}
+
+static int random_hex(char out[65])
+{
+   static const char digits[] = "0123456789abcdef";
+   unsigned char raw[32];
+   if (RAND_bytes(raw, sizeof(raw)) != 1)
+      return -1;
+   for (size_t i = 0; i < sizeof(raw); ++i)
+   {
+      out[i * 2] = digits[raw[i] >> 4];
+      out[i * 2 + 1] = digits[raw[i] & 15];
+   }
+   out[64] = 0;
+   OPENSSL_cleanse(raw, sizeof(raw));
+   return 0;
 }
 
 static kb_mgmt_token_authority_ipc_result_t map_db(db2_management_token_authority_result_t result)
@@ -93,6 +110,146 @@ static int same_admission(const kb_mgmt_token_authority_record_t *a,
    return same;
 }
 
+static int reopen(kb_mgmt_token_authority_service_t *service)
+{
+   return service->reopen_db && service->reopen_db(service->reopen_opaque, service->db) == 0;
+}
+
+static kb_mgmt_token_authority_ipc_result_t
+read_issue(kb_mgmt_token_authority_service_t *service, const char *correlation_id, const char *jti,
+           kb_mgmt_token_authority_output_t *out)
+{
+   kb_mgmt_token_authority_output_t retained;
+   kb_mgmt_token_authority_record_t use;
+   protected_issue_t issue;
+   uint8_t fresh_attestation[KB_MGMT_ROOT_ATTEST_MAX];
+   uint8_t token_aad[KB_MGMT_TOKEN_ROOT_AAD_MAX];
+   char lease_owner[65];
+   memset(&retained, 0, sizeof(retained));
+   memset(&use, 0, sizeof(use));
+   memset(&issue, 0, sizeof(issue));
+   memset(fresh_attestation, 0, sizeof(fresh_attestation));
+   memset(token_aad, 0, sizeof(token_aad));
+   memset(lease_owner, 0, sizeof(lease_owner));
+
+   db2_management_token_authority_result_t db_result =
+       db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
+   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      *out = retained;
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+   }
+   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+      return map_db(db_result);
+   if (random_hex(lease_owner) != 0)
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+
+   db_result = db2_management_token_read_claim(service->db, correlation_id, jti, lease_owner, &use);
+   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   {
+      if (!reopen(service))
+         return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+      db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
+      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      {
+         *out = retained;
+         return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+      }
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+   }
+   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT)
+   {
+      db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
+      if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      {
+         *out = retained;
+         return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+      }
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED;
+   }
+   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+      return map_db(db_result);
+
+   kb_mgmt_token_authority_ipc_result_t result = KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+   uint64_t hwm_version = 0;
+   size_t fresh_attestation_len = 0;
+   if (vault_hwm_read(use.token_custody_key_id, &hwm_version, fresh_attestation,
+                      sizeof(fresh_attestation), &fresh_attestation_len) != 0)
+      goto done;
+   if (hwm_version == 0 || hwm_version > INT64_MAX || hwm_version != (uint64_t)use.token_version ||
+       !fresh_attestation_len || fresh_attestation_len != use.hwm_attestation_len ||
+       CRYPTO_memcmp(fresh_attestation, use.hwm_attestation, fresh_attestation_len) != 0 ||
+       vault_hwm_verify(use.token_custody_key_id, hwm_version, fresh_attestation,
+                        fresh_attestation_len) != 0 ||
+       vault_hwm_verify(use.token_custody_key_id, hwm_version, use.hwm_attestation,
+                        use.hwm_attestation_len) != 0)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto done;
+   }
+   if (vault_primary_epoch_initialize((uint64_t)use.vault_seal_epoch) != VAULT_MAINTENANCE_OK)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto done;
+   }
+   uint64_t live_epoch = vault_use_epoch_snapshot();
+   if (!live_epoch)
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_SEALED;
+      goto done;
+   }
+   issue.record = &use;
+   issue.result = KB_MGMT_TOKEN_AUTHORITY_CRYPTO_UNAVAILABLE;
+   size_t token_aad_len = 0;
+   if (kb_mgmt_token_root_aad(use.envelope.version, token_aad, sizeof(token_aad), &token_aad_len))
+   {
+      result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+      goto done;
+   }
+   result = map_protected(kb_vault_protected_use_with_aad(
+                              live_epoch, &use.envelope, token_aad, token_aad_len, protected_sign,
+                              &issue),
+                          &issue);
+   if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+      goto done;
+
+   db_result = db2_management_token_read_finalize(service->db, correlation_id, jti, lease_owner,
+                                                   issue.output.jwt);
+   if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
+   {
+      if (!reopen(service))
+      {
+         result = KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS;
+         goto done;
+      }
+   }
+   else if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      result = map_db(db_result);
+      goto done;
+   }
+   db_result = db2_management_token_read_readback(service->db, correlation_id, jti, &retained);
+   if (db_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      result = db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_ABSENT
+                   ? KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS
+                   : map_db(db_result);
+      goto done;
+   }
+   *out = retained;
+   result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+done:
+   if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+      OPENSSL_cleanse(out, sizeof(*out));
+   OPENSSL_cleanse(&retained, sizeof(retained));
+   OPENSSL_cleanse(&use, sizeof(use));
+   OPENSSL_cleanse(&issue, sizeof(issue));
+   OPENSSL_cleanse(fresh_attestation, sizeof(fresh_attestation));
+   OPENSSL_cleanse(token_aad, sizeof(token_aad));
+   OPENSSL_cleanse(lease_owner, sizeof(lease_owner));
+   return result;
+}
+
 kb_mgmt_token_authority_ipc_result_t
 kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jti,
                                       kb_mgmt_token_authority_output_t *out, void *opaque)
@@ -109,6 +266,27 @@ kb_mgmt_token_authority_service_issue(const char *correlation_id, const char *jt
    int old_cancel_state = PTHREAD_CANCEL_ENABLE;
    if (pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state) != 0)
       return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+
+   db2_management_token_intent_kind_t kind = 0;
+   db2_management_token_authority_result_t kind_result =
+       db2_management_token_authority_kind(service->db, correlation_id, jti, &kind);
+   if (kind_result != DB2_MANAGEMENT_TOKEN_AUTHORITY_OK)
+   {
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
+      return map_db(kind_result);
+   }
+   if (kind == DB2_MANAGEMENT_TOKEN_INTENT_READ)
+   {
+      kb_mgmt_token_authority_ipc_result_t read_result =
+          read_issue(service, correlation_id, jti, out);
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
+      return read_result;
+   }
+   if (kind != DB2_MANAGEMENT_TOKEN_INTENT_ACTION)
+   {
+      (void)pthread_setcancelstate(old_cancel_state, NULL);
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
+   }
 
    kb_mgmt_token_authority_ipc_result_t result = KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
    kb_mgmt_token_authority_record_t admitted, use;

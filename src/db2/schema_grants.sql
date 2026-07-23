@@ -350,6 +350,8 @@ BEGIN
   EXECUTE 'ALTER FUNCTION public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER) OWNER TO aimee_kb_token_authority_definer';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_b64url_decode(TEXT) OWNER TO aimee_kb_token_authority_definer';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_token_intent_kind(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
+  EXECUTE 'ALTER FUNCTION public.kb_management_read_authority_readback(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
   EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_snapshot(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
   EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_admit(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
   EXECUTE 'ALTER FUNCTION public.kb_management_token_authority_use(TEXT,TEXT) OWNER TO aimee_kb_token_authority_definer';
@@ -420,7 +422,9 @@ BEGIN
     TO aimee_kb_token_authority_runtime;
   GRANT EXECUTE ON FUNCTION
     public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
-    public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT)
+    public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_token_intent_kind(TEXT,TEXT),
+    public.kb_management_read_authority_readback(TEXT,TEXT)
     TO aimee_kb_token_authority_runtime;
 
   REVOKE ALL ON TABLE public.kb_management_token_key_use_intent,
@@ -433,7 +437,9 @@ BEGIN
     public.kb_management_token_authority_finalize(TEXT,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
     public.kb_management_read_b64url_decode(TEXT),
-    public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+    public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),
+    public.kb_management_token_intent_kind(TEXT,TEXT),
+    public.kb_management_read_authority_readback(TEXT,TEXT) FROM PUBLIC;
 
   FOREACH role_name IN ARRAY ARRAY['aimee_kb_runtime','aimee_kb_status',
     'aimee_kb_status_definer','aimee_kb_status_login','aimee_kb_status_authority',
@@ -453,7 +459,9 @@ BEGIN
       EXECUTE format('REVOKE ALL ON FUNCTION '
         'public.kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),'
         'public.kb_management_read_b64url_decode(TEXT),'
-        'public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT) FROM %I',role_name);
+        'public.kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),'
+        'public.kb_management_token_intent_kind(TEXT,TEXT),'
+        'public.kb_management_read_authority_readback(TEXT,TEXT) FROM %I',role_name);
     END IF;
   END LOOP;
 END

@@ -17,22 +17,20 @@ SET LOCAL ROLE aimee_kb_token_authority_runtime;
 DO $$ DECLARE r RECORD; h TEXT; p TEXT; s TEXT; jwt TEXT; BEGIN
   SELECT * INTO STRICT r FROM public.kb_management_read_authority_claim(
     repeat('9',64),repeat('a',64),repeat('c',64),5);
-  IF r.claim_status<>'signing' OR r.lease_owner<>repeat('c',64) OR
-     r.key_generation<>2 OR octet_length(r.wrapped_dek)<>40 THEN
+  IF NOT r.newly_admitted OR r.capability<>'remote_reads' OR
+     r.token_version<>2 OR octet_length(r.wrapped_dek)<>40 THEN
     RAISE EXCEPTION 'P5-D2a claim mismatch';
   END IF;
   h:=rtrim(translate(replace(encode(convert_to(
-    jsonb_build_object('alg','RS256','typ','JWT','kid',r.claims->>'kid')::TEXT,'UTF8'),
+    jsonb_build_object('alg','RS256','typ','JWT','kid',r.kid)::TEXT,'UTF8'),
     'base64'),chr(10),''),'+/','-_'),'=');
   p:=rtrim(translate(replace(encode(convert_to(jsonb_build_object(
-    'v',(r.claims->>'version')::BIGINT,'iss',r.claims->>'iss','aud',r.claims->>'aud',
-    'sub',r.claims->>'sub','team_id',(r.claims->>'team')::BIGINT,
-    'cap',r.claims->>'capability','jti',r.claims->>'jti',
-    'correlation_id',r.claims->>'correlation_id','request_sha256',r.claims->>'request_sha256',
-    'peer_issuer',r.claims->>'peer_issuer','peer_serial',r.claims->>'peer_serial',
-    'peer_fingerprint',r.claims->>'peer_fingerprint','iat',(r.claims->>'iat')::BIGINT,
-    'exp',(r.claims->>'exp')::BIGINT)::TEXT,'UTF8'),'base64'),chr(10),''),'+/','-_'),'=');
-  s:=rtrim(translate(replace(encode(decode(repeat('00',256),'hex'),'base64'),chr(10),''),
+    'v',1,'iss',r.token_issuer,'aud',r.audience,'sub',r.actor_identity,'team_id',r.team_id,
+    'cap',r.capability,'jti',r.jti,'correlation_id',r.correlation_id,
+    'request_sha256',r.request_sha256,'peer_issuer',r.local_cert_issuer,
+    'peer_serial',r.local_cert_serial_norm,'peer_fingerprint',r.local_cert_fingerprint,
+    'iat',r.issued_at,'exp',r.expires_at)::TEXT,'UTF8'),'base64'),chr(10),''),'+/','-_'),'=');
+  s:=rtrim(translate(replace(encode(decode(repeat('00',384),'hex'),'base64'),chr(10),''),
     '+/','-_'),'=');
   jwt:=h||'.'||p||'.'||s;
   BEGIN
