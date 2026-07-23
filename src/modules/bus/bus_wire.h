@@ -109,6 +109,23 @@ bus_wire_result_t bus_wire_decode(const uint8_t *in, size_t insz, bus_frame_t *o
 /* Validate a frame without encoding it. */
 bus_wire_result_t bus_wire_validate(const bus_frame_t *f);
 
+/* A decoded payload_ref is NOT an authorization to dereference anything.
+ *
+ * bus_wire_validate checks that payload_ref is *consistent* with the placement
+ * flags — present when there is a payload, absent when there is not. It cannot
+ * check that the reference is in bounds, because the bounds are slot_size and
+ * arena_size, which live in the control region and are read at attach (D4).
+ * A codec that pretended to bounds-check without them would be worse than one
+ * that does not: callers would trust a check that never happened.
+ *
+ * So the contract is explicit. Every consumer of a decoded frame must call
+ * bus_wire_check_placement with the live geometry before touching payload
+ * bytes, and the host must call it on ingress before routing. Slice 3 supplies
+ * the geometry; slice 4 adds the lease-generation check that bounds an arena
+ * reference to a region the reader actually holds. */
+bus_wire_result_t bus_wire_check_placement(const bus_frame_t *f, uint32_t slot_size,
+                                           uint64_t arena_size);
+
 /* Stable name for a result, for logs, errors, and the conformance vectors.
  * These strings are part of the cross-language contract: the Go client reports
  * the same names, so a vector's expected result compares as a string. */

@@ -132,6 +132,36 @@ bus_wire_result_t bus_wire_validate(const bus_frame_t *f)
    return BUS_WIRE_OK;
 }
 
+bus_wire_result_t bus_wire_check_placement(const bus_frame_t *f, uint32_t slot_size,
+                                           uint64_t arena_size)
+{
+   bus_wire_result_t r = bus_wire_validate(f);
+   if (r != BUS_WIRE_OK)
+      return r;
+   if (f->payload_len == 0)
+      return BUS_WIRE_OK;
+
+   /* Computed in 64-bit and compared against the limit rather than added to
+    * it, so a hostile length cannot wrap the bound it is being checked
+    * against. */
+   uint64_t end = f->payload_ref + (uint64_t)f->payload_len;
+   if (end < f->payload_ref)
+      return BUS_WIRE_ERR_PAYLOAD_LEN;
+
+   if (f->hdr_flags & BUS_F_INLINE)
+   {
+      /* An inline payload lives in the ring slot, after the header. */
+      if (f->payload_ref < BUS_WIRE_HDR_LEN || end > (uint64_t)slot_size)
+         return BUS_WIRE_ERR_PAYLOAD_LEN;
+   }
+   else
+   {
+      if (end > arena_size)
+         return BUS_WIRE_ERR_PAYLOAD_LEN;
+   }
+   return BUS_WIRE_OK;
+}
+
 size_t bus_wire_encode(const bus_frame_t *f, uint8_t *out, size_t outsz)
 {
    if (!f || !out || outsz < BUS_WIRE_HDR_LEN)

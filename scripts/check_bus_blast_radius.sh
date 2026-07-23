@@ -60,13 +60,31 @@ while IFS= read -r f; do
 done < <(find . -name CMakeLists.txt -not -path './.git/*' -not -path './frontend/*' \
    -not -path './webchat/*' -not -path './node_modules/*' | sed 's|^\./||')
 
-# In the files where the bus IS allowed, it may only feed bus test targets —
-# never a shipping one. Any bus source on a line that also names a non-bus
-# target is suspicious enough to review by hand.
-if grep -n 'modules/bus' src/tests/CMakeLists.txt 2>/dev/null | grep -v 'test_bus' >/dev/null; then
-   note "FAIL: src/tests/CMakeLists.txt uses modules/bus outside a bus test target"
-   fail=1
-fi
+# In the two files where the bus IS allowed, it may only feed bus test targets.
+# Both the CMake and the Make test files are held to the same rule; an earlier
+# version checked only the CMake one.
+bus_uses_outside_tests() {
+   # Comment lines are excluded: they explain the boundary, they do not build
+   # anything. Everything else naming the bus must be a bus test target.
+   grep -n 'modules/bus' "$1" 2>/dev/null |
+      grep -vE '^[0-9]+:[[:space:]]*#' |
+      grep -vE 'test_bus|unit-test-bus|OBJDIR\)/modules/bus' || true
+}
+
+for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
+   [ -f "$f" ] || continue
+   hits=$(bus_uses_outside_tests "$f")
+   if [ -n "$hits" ]; then
+      note "FAIL: $f uses modules/bus outside a bus test target"
+      printf '%s\n' "$hits" >&2
+      fail=1
+   fi
+done
+
+# Line-oriented matching cannot see through a multiline CMake command or a
+# variable a shipping target consumes later. That is why step 4 exists: the
+# textual checks are the pre-build signal, and the symbol check over the built
+# artefacts is the backstop that reasons about the result rather than the intent.
 
 # --------------------------------------------------------- 3. include graph
 # Only the bus itself and its tests may include a bus header. Catching a stray
@@ -79,12 +97,18 @@ while IFS= read -r hit; do
    esac
    note "FAIL: $hit"
    fail=1
-done < <(grep -rn '#include *"bus_[a-z_]*\.h"' src/ 2>/dev/null || true)
+done < <(grep -rnE '#include[[:space:]]*[<"][^">]*bus_[a-z_]+\.h[">]|#include[[:space:]]*[<"][^">]*modules/bus/' src/ 2>/dev/null || true)
 
 # ------------------------------------------------------- 4. built artefacts
 # If a build tree is present, confirm no shipping binary actually carries a bus
 # symbol. Textual checks reason about intent; this reasons about the result.
-for bin in aimee aimee-server aimee-kb aimee-gateway aimee-webchat; do
+# Binary names come from the Makefile's own target variables rather than a
+# hardcoded list, so a renamed or newly added shipping binary is covered without
+# editing this script. Absent binaries are skipped: this check strengthens the
+# gate when a build is present and never weakens it when one is not.
+shipping_bins=$(sed -nE 's/^(BINARY|SERVER|WEBCHAT|KB|GATEWAY|KB_RESOLVER)[[:space:]]*[?:]?=[[:space:]]*([^[:space:]]+).*/\2/p' \
+   src/Makefile 2>/dev/null | sort -u)
+for bin in $shipping_bins; do
    [ -f "$bin" ] || continue
    if nm -C --defined-only "$bin" 2>/dev/null | grep -qE '\bbus_(wire|ring|region|arena|host|client)_'; then
       note "FAIL: built binary '$bin' defines a bus symbol"
