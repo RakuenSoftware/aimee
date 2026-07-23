@@ -182,7 +182,32 @@ result — that is precisely the shape an attacker would hide a fork behind.
   the `provider:cred` field asserted to be a stable identifier and never a
   credential handle or wrapped-key reference.
 
-## 8. Deferred
+## 8. Carried forward from the E1 implementation review (job 11189)
+
+Three items the E1 review confirmed are E2's responsibility, recorded here so they
+are not lost between slices:
+
+- **Emission re-encode parity test.** E1 stores logical columns plus the
+  server-computed digest, not a wire blob. When E2 re-encodes a record from stored
+  columns for emission, a test must assert that the re-encoded wire's digest equals
+  the stored `record_hash`. E1's `record_valid` already rejects a record whose
+  `is_first_in_shard` disagrees with `shard_seq == 1` or whose witness predecessor
+  is not the genesis sentinel on a first record, so a reconstructed-but-inconsistent
+  record fails to encode — but the round-trip-from-columns test is E2's to add,
+  because E1 has no caller that reconstructs from columns.
+- **Typed error for shard-key collision.** `vault_witness_merkle_root` returns a
+  generic `-1` for a duplicate 8-byte key (an SMT collision) as well as for other
+  invalid input. The checkpoint builder must map a collision to its own typed
+  reason, distinct from `checkpoint_shard_ceiling_exceeded`, `checkpoint_deadline_exceeded`,
+  and `head_log_mismatch`, so an operator can tell a birthday-bound collision apart
+  from tampering or overload.
+- **Bounded SERIALIZABLE retry wrapper.** `org_vault_witness_append` is correct in
+  single-shot form under the caller's isolation level; it contains no retry. E2 owns
+  the bounded (5-attempt) SERIALIZABLE retry around the source-plus-witness
+  transaction, raising `witness_concurrency_exhausted` on exhaustion and aborting
+  the source event — never committing a source event whose witness row is missing.
+
+## 9. Deferred
 
 - The full restart and signal-level kill matrix, and only then the release-gate
   flip (E3).
