@@ -1700,7 +1700,16 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             if (esc_prompt)
             {
                /* Pin routing to the chosen seat so the re-dispatch cannot land
-                * back on the class of agent that just failed. */
+                * back on the class of agent that just failed - but SNAPSHOT the
+                * fleet first and restore it afterwards. cfg outlives this block:
+                * the economics JSON below calls agent_route(&cfg, role) to name
+                * the agent that did the work, so leaving the fleet pinned would
+                * attribute the result to the escalation target even when the
+                * escalation dispatch failed and the ORIGINAL result was kept. */
+               int saved_enabled[MAX_AGENTS];
+               int saved_pinned = cfg.route_pinned;
+               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
+                  saved_enabled[i] = cfg.agents[i].enabled;
                for (int i = 0; i < cfg.agent_count; i++)
                   cfg.agents[i].enabled = (&cfg.agents[i] == target);
                cfg.route_pinned = 1;
@@ -1710,6 +1719,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                int esc_rc =
                    agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens, &esc_result);
                free(esc_prompt);
+               for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
+                  cfg.agents[i].enabled = saved_enabled[i];
+               cfg.route_pinned = saved_pinned;
                if (esc_rc == 0)
                {
                   free(result.response);
