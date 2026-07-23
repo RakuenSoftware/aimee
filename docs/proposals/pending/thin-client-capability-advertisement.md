@@ -205,8 +205,14 @@ claimants on conflict would hand any admitted module a **denial-of-service primi
 verb, tool name, or route of an incumbent it wants silenced, and the incumbent's surface disappears
 even though the attacker's own registration failed. Refusal must never cost the incumbent anything.
 Replacing an incumbent's key is possible only through a separately authorized **transactional
-replacement** — withdraw-then-claim as one atomic operation, permitted only to a principal authorized
-for the incumbent capability — never as a side effect of an ordinary registration.
+replacement** — withdraw-then-claim as one atomic operation, never a side effect of an ordinary
+registration. Its authorization is specified rather than implied: the operation is permitted only to
+a principal holding the incumbent capability's own authorization under a `cert:CN` transport class
+(never a bare bearer), is available at registration time only — not as a live runtime mutation, so a
+verb cannot change owner under a session in flight — and emits an audit record naming both
+capabilities, the principal, and the transport class. A Runtime-local module that believes it should
+own a key an incumbent holds does not get it by racing or by priority; an operator performs the
+replacement deliberately.
 
 Because "incumbent" is decided by order, the order is specified rather than left to whoever wins a
 race. Uniqueness is enforced by **the authority that holds the merged closure** — the Runtime — since
@@ -291,6 +297,11 @@ arg:
   name: {type: name_token, required: true}
   form: {enum: [positional, flag], required: true}
   type: {enum: [string, int, uint, bool, enum, duration_ms, capability_id], required: true}
+  # Per-type bounds, so the linearity argument and the content-safety rules are one
+  # validator pass rather than two: string -> bounded_string (charset/NFC/length);
+  # int/uint -> 64-bit, rejected outside [INT64_MIN+1, INT64_MAX-1]; duration_ms ->
+  # uint64 <= INT64_MAX-1; enum -> enum_values required, each a name_token, <= 64 values;
+  # capability_id -> capability_id rules. `default` must satisfy its declared type's bounds.
   enum_values: {type: list<name_token>, required: false}   # required iff type == enum
   repeated: {type: bool, required: true}
   required: {type: bool, required: true}
@@ -305,29 +316,34 @@ route:
   path: {type: normalized_path, required: true}
 web:
   surface: {type: web_surface_enum, required: true}   # closed enum owned by the product boundary
-bounds:
-  # hop_bound_ms is COMPUTED by the authority, not configured independently, and the
-  # validator recomputes it. Every term includes the round trip that actually delivers
-  # the change: an interval elapsing is not a delivery.
-  #   bounded-revalidation hop: revalidate_after_ms + round_trip_budget_ms
+hop_bound_computation:
+  # COMPUTED by the authority, not configured independently; the validator recomputes it.
+  # Every term includes the exchange that actually delivers the change -- an interval
+  # elapsing is not a delivery -- AND the case where that exchange never completes.
+  # request_timeout_ms bounds a conditional request that stalls (packets dropped
+  # mid-request): without it, one dropped GET makes the hop unbounded no matter what the
+  # interval says. The registrant detects the stall by its own request timeout, then
+  # retries on the next interval.
+  #   request_timeout_ms := round_trip_budget_ms * 2   (derived, not configured)
+  #   one_revalidation   := revalidate_after_ms + request_timeout_ms + round_trip_budget_ms
+  #   bounded-revalidation hop: one_revalidation
   #   notified hop (healthy):   heartbeat_ms + round_trip_budget_ms
-  #   notified hop (failed):    half_open_after_ms + reconnect_deadline_ms
-  #                             + revalidate_after_ms + round_trip_budget_ms
-  #   hop_bound_ms := max(healthy, failed)   -- the worst case, since a stream may be dead
-  #
-  # propagation_bound_ms is the sum ALONG THE ACTUAL CHAIN, not a single constant:
+  #   notified hop (failed):    half_open_after_ms + reconnect_deadline_ms + one_revalidation
+  #   hop_bound_ms := max(healthy, failed)   -- worst case, since a stream may be dead
+envelope_validity_relations:
+  # Enforced by the validator and re-checked by the registrant. A projection violating any
+  # of these is malformed and fails closed.
+  #   half_open_after_ms   >  heartbeat_ms        (detect only after a heartbeat is genuinely late)
+  #   stale_after_ms       >  revalidate_after_ms (ordinary revalidation keeps a healthy peer live)
+  #   stale_after_ms       >= propagation_bound_ms (never withdraw faster than change can arrive)
+  #   hop_bound_ms         == hop_bound_computation above (recomputed, never trusted)
+  #   propagation_bound_ms >= hop_bound_ms
+propagation_rule:
+  # The sum ALONG THE ACTUAL CHAIN, not a single constant:
   #   propagation_bound_ms := hop_bound_ms + upstream.propagation_bound_ms
   # An authority with no upstream (a Control Plane) reports propagation_bound_ms == hop_bound_ms.
   # A Runtime adds its own hop to the value its Control Plane advertised, so the client's
   # figure is the true module→consumer worst case over the topology in force.
-  #
-  # Validity relations, enforced by the validator and re-checked by the registrant.
-  # A projection violating any of these is malformed and fails closed:
-  #   half_open_after_ms > heartbeat_ms        (detect only after a heartbeat is genuinely late)
-  #   stale_after_ms     > revalidate_after_ms (ordinary revalidation keeps a healthy peer live)
-  #   stale_after_ms     >= propagation_bound_ms (never withdraw faster than change can arrive)
-  #   hop_bound_ms       == the computation above (recomputed, not trusted)
-  #   propagation_bound_ms >= hop_bound_ms
 limits:
   name_token: {charset: "[a-z0-9][a-z0-9-]*", max_bytes: 64, nfc: true}
   bounded_string: {max_bytes: 4096, nfc: true, control_chars: forbidden}
@@ -341,6 +357,13 @@ limits:
   # advisory_ext is module-controlled, so it is bounded per capability AND in aggregate.
   # The per-entry and per-map caps alone bound one record; without an authority-wide cap a
   # module could register many capabilities each at the maximum and amplify server memory.
+  # ENFORCEMENT SITE IS PART OF THE CONTRACT, not an implementation choice: the authority
+  # maintains a running total of admitted advisory bytes and checks it AT REGISTRATION,
+  # rejecting the whole registration atomically when admitting it would exceed the cap.
+  # Deferring to projection time would let a module register unbounded and fail only on
+  # read (leaving the memory already spent), and a periodic sweep would race admission.
+  # The running total is authority-lifetime state keyed by capability id, decremented on
+  # withdrawal; overflow returns the same typed registration error as any other refusal.
   max_advisory_bytes_per_capability: 4096
   max_advisory_bytes_per_authority: 16777216
 ```
@@ -430,7 +453,17 @@ them; it is not broken by their existence.
 
    An authority therefore cannot introduce a behavior-affecting field that an old client would
    silently ignore: to be behavioral it must be a defined field, and a new defined field bumps
-   `schema_version` and is negotiated per rule 4. The old client's parse is decidable in both
+   `schema_version` and is negotiated per rule 4.
+
+   **Defined fields are additive-only; a rename is not a rename.** Renaming a defined field —
+   `requires_acknowledge` becoming `requires_confirmation` — must never be treated as one edit. It is
+   a removal plus an addition, and rule 4 already bumps `schema_version` for each, so the negotiation
+   path applies and an old client gets `schema_too_old` rather than a silently dropped constraint.
+   Stating it explicitly because the failure mode is quiet and the mistake is natural: if a rename
+   *were* handled as a single in-place edit at an unchanged version, both sides would parse
+   successfully under their own schemas and the constraint would evaporate — exactly the class of
+   silent downgrade this section exists to prevent. The validator therefore rejects any schema
+   revision in which a defined field name disappears without a `schema_version` increment. The old client's parse is decidable in both
    directions — it knows every key it must understand, and it knows exactly one region it may skip.
 2. **Unknown surface kinds are dropped, not fatal.** A capability offering only surface kinds the
    client cannot render is omitted from that client's effective set; a capability offering a mix is
@@ -461,6 +494,11 @@ them; it is not broken by their existence.
    4. Authorities **retain** the older representation of a capability only for versions inside the
       supported window; outside it, rule 3 applies. Older representations are *derived* from the
       current descriptor by projection, never hand-maintained in parallel, so they cannot drift.
+      Derivation is **cached per (capability, generation, schema_version)** and invalidated when the
+      generation advances, so a projection costs one derivation per distinct version actually in use
+      rather than one per request, and the supported-window width adds memory rather than per-request
+      latency. The window is bounded by policy; an authority that cannot afford it narrows the window,
+      which moves capabilities to `schema_too_old` visibly instead of degrading latency silently.
    5. The authority **rejects the invocation** of a capability it projected as `schema_too_old`,
       independently of what the client attempts. The old client's inability to see the constraint is
       never the only thing enforcing it.
@@ -608,6 +646,19 @@ Generalized: a registrant is told what it may *use*, never what its authority is
 future field naming another service, its address, its health, or a capability's origin belongs on the
 upstream edge, not in the downward projection.
 
+**A schema rule is not enough; the whole path is in scope.** Forbidding a `provenance` *field*
+constrains only the document the codec emits. The projection path can leak the same fact through
+channels the schema never sees — a debug log naming the upstream service, an HTTP header, a sidecar
+audit record, an error string quoting an upstream address, a trace span with the peer's identity.
+This is the precise shape of the mistake revision 3 made: a rule that looked complete because it
+covered the structure being reviewed, while the disclosure lived elsewhere. So non-disclosure is a
+property of the **path**, not the schema: no artifact the projection path emits on behalf of a client
+request — response bytes, headers, logs, traces, metrics labels, or audit records visible at the
+client's trust level — may contain another service's identity, address, health, or a capability's
+origin. Enforcement is a deny-list of those tokens applied to everything the path can emit, with a
+fixture that injects a provenance value and asserts it appears nowhere in any emitted artifact
+(check 13). Operator-facing surfaces at the authority's own trust level are unaffected.
+
 **Single-Runtime scope.** This holds for the three-edge chain defined here, in which each registrant
 has exactly one authority. It is *not* established for a topology where Runtimes exchange
 projections with each other — in a mesh or federation, provenance would travel sideways and a peer
@@ -653,9 +704,29 @@ client remain ignorant of the Control Plane entirely.
   CLI/web surfaces. When the effective set changes, the client emits the consumer protocol's
   capability-change signal; consumers without one observe the change on their next handshake.
 - **Absent means absent.** A capability outside the effective set is not listed, and a request against
-  it returns a typed `capability_absent` with the same external status, body shape, and timing as an
-  unknown capability, so the wire cannot distinguish *disabled* from *never-existed* (mirroring the
+  it returns a typed `capability_absent` indistinguishable from a request against a capability that
+  never existed, so the wire cannot distinguish *disabled* from *never-existed* (mirroring the
   web-route rule in `product-governance-web-and-config.md`).
+
+  "Indistinguishable" is only enforceable if the wire result is written down, so it is normative
+  rather than descriptive:
+
+  ```yaml
+  capability_absent:
+    status: 404
+    body: {error: {code: "capability_absent"}}   # exact bytes, no id echo, no detail field
+    headers: no capability-specific header, no varying Content-Length
+    timing: drawn from the same distribution as an unknown capability; the handler
+            resolves absent and never-existed on the same path, so no branch on
+            "existed but withheld" occurs before the response is emitted
+  ```
+
+  The response must not echo the requested id, name a reason, or vary in length — each would
+  reintroduce the distinction the rule exists to remove. Note this is deliberately *different* from a
+  capability that is present-but-`unavailable`: that one is visible in the projection with its state
+  and reason (see *A capability record is rendered even when it carries no surfaces*), because the
+  client is authorized to know it exists. Absent means the client is not authorized to know that, so
+  it learns nothing at all.
 
 ## One discovery mechanism
 
@@ -766,10 +837,14 @@ The non-obvious ones, made concrete:
 - **Noninterference** (check 10) is a differential test over deterministic channels only: two
   principals with different authorized scopes attach; a change confined to capabilities outside
   principal B's scope must produce, for B, no generation advance, no event, and a byte-identical
-  projection. The work-proportionality property is checked structurally — the projection path filters
-  by scope before performing per-capability work — rather than by a wall-clock threshold, since a
-  timing assertion has no stable pass condition in CI. No timing tolerance is asserted because none
-  can be honored.
+  projection. The work-proportionality property is checked structurally, and the structural claim is
+  stated precisely enough to test: **the scope decision for a capability requires only its `id` and
+  authorization tag** — not its surfaces, dependencies, state, or `advisory_ext` — and is taken
+  *before* any expansion or allocation on that capability. "Filters first" is otherwise satisfiable
+  by a path that expands a record and then discards it, which does work proportional to
+  out-of-scope content. The fixture constructs an out-of-scope capability carrying a maximal
+  `advisory_ext` blob and asserts the projection performs no allocation attributable to it. No
+  wall-clock tolerance is asserted, because none can be honored.
 - **N→N+k compatibility** (check 8) uses two real builds, not a mocked version string: client at N,
   service at N+1, with the N+1 service adding an advisory field, a critical field, a new surface
   kind, and a new module. Pass requires the advisory addition invisible, the critical addition
@@ -778,18 +853,19 @@ The non-obvious ones, made concrete:
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "scripts/check_capability_advertisement.sh --projection-only --equals-module-runtime-closure --forbid-static-capability-list src/server/server_http.c,src/kb/http/kb_http.c --require-generation-epoch-schema-version --require-typed-state --omitted-optional-absent --disabled-only-for-selected"}
 - {id: 2, tier: mechanical, check: "scripts/check_capability_advertisement.sh --authorization-scoped --require-transport-class-scoping bearer,cert-cn --scope-surfaces-with-capability --forbid-unauthorized-capability-leak --no-second-authorization-model"}
-- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --conform-to-normative-wire-schema-v1 --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --arg-types-from-closed-scalar-set --forbid-general-json-schema-dialect --assert-state-reason-validity-relation --reject-reason-on-ready-state --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
+- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --conform-to-normative-wire-schema-v1 --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --arg-types-from-closed-scalar-set --forbid-general-json-schema-dialect --assert-state-reason-validity-relation --reject-reason-on-ready-state --reject-defined-field-rename-without-schema-version-bump --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
 - {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --client-binary-hash-identical-when-module-added"}
 - {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --capture-from-before-start-to-after-exit --assert-no-client-to-control-packet-observed --scan-config-env-argv-for-control-address-and-credential plaintext,percent,base64 --measure-propagation-latency-vs-sum-of-hop-bounds --assert-addition-discovered-within-bound --both-modes notified,bounded-revalidation --healthy-notified-hop-bound-equals-heartbeat-plus-roundtrip --failed-notified-hop-bound-equals-halfopen-plus-reconnect-plus-revalidate-plus-roundtrip --hop-bound-is-worse-of-healthy-and-failed --assert-failure-path-includes-post-fallback-revalidation --assert-bound-includes-round-trip --measure-against-same-bound-validator-enforces --cosmetic-help-edit-does-not-advance-generation --semantic-edit-does-advance-generation --drop-stream-falls-back-to-revalidation --half-open-stream-detected-within-deadline"}
 - {id: 6, tier: integration, check: "scripts/test_capability_advertisement.sh --on-registration-snapshot --generation-advances-on-closure-state-and-surface-change --epoch-change-forces-refetch --stale-window-exceeds-revalidation-interval --stale-window-fails-closed --control-outage-withdraws-only-control-provenance-and-hard-dependents --assert-independent-runtime-local-capabilities-remain-available --soft-dependent-degrades-with-fallback-not-unavailable --assert-outage-surfaces-to-client-as-dependency-reason --registration-refused-when-neither-mode-available"}
 - {id: 7, tier: integration, check: "scripts/test_capability_advertisement.sh --merge-at-runtime --hard-dependency-not-ready-suppresses-dependent --soft-dependency-not-ready-degrades-with-declared-fallback --soft-dependency-never-suppresses --cross-service-both-directions --shared-id-takes-weaker-state --conflicting-shared-descriptor-fails-closed --effective-set-equals-ready-closure-under-hard-deps"}
-- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-ext-addition-invisible-to-old-client --new-defined-field-yields-unavailable-reason schema_too_old --unknown-key-at-defined-position-yields-schema-too-old --advisory-ext-is-only-unknown-key-position --assert-unavailable-record-with-empty-surfaces-still-enumerated-to-consumer --assert-id-state-and-reason-shown-to-user --per-capability-not-per-connection-refusal --other-capabilities-unaffected --assert-authority-rejects-invocation-of-schema-too-old-capability --older-representation-derived-not-hand-maintained --unknown-surface-kind-dropped --unknown-state-fails-closed --defined-field-addition-bumps-schema-version --below-minimum-version-refuses-registration-with-typed-error"}
+- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-ext-addition-invisible-to-old-client --new-defined-field-yields-unavailable-reason schema_too_old --unknown-key-at-defined-position-yields-schema-too-old --advisory-ext-is-only-unknown-key-position --assert-unavailable-record-with-empty-surfaces-still-enumerated-to-consumer --assert-id-state-and-reason-shown-to-user --per-capability-not-per-connection-refusal --other-capabilities-unaffected --assert-authority-rejects-invocation-of-schema-too-old-capability --older-representation-derived-not-hand-maintained --derivation-cached-per-capability-generation-schemaversion --assert-projection-latency-flat-in-supported-window-width --unknown-surface-kind-dropped --unknown-state-fails-closed --defined-field-addition-bumps-schema-version --below-minimum-version-refuses-registration-with-typed-error"}
 - {id: 9, tier: integration, check: "scripts/test_capability_advertisement.sh --consumer mcp --consumer acp --consumer cli --re-advertise-effective-set --generic-dispatch-from-descriptor --invalid-args-typed-error-not-forwarded --emit-change-on-effective-set-change --absent-capability-returns-typed-capability-absent --disabled-and-unknown-externally-identical"}
-- {id: 10, tier: integration, check: "scripts/test_advertisement_noninterference.sh --two-principals-differing-scope --change-outside-scope-b --assert-no-generation-advance-for-b --assert-no-event-for-b --assert-byte-identical-projection-for-b --assert-scope-filter-precedes-per-capability-work --per-scope-generation-derived-from-projection-content --no-wallclock-timing-assertion"}
-- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --uniqueness-enforced-at-merged-closure-holder --admission-order control-plane-then-runtime-then-profile-order --colliding-keys-across-services-fixture --same-incumbent-on-every-start --duplicate-claim-rejects-later-registration-atomically --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
-- {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-nfc --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --enforce-schema-v1-numeric-limits name_token,bounded_string,capability_id,normalized_path,max_args_per_surface,max_surfaces_per_capability,max_capabilities_per_projection,max_projection_bytes,max_advisory_bytes_per_capability,max_advisory_bytes_per_authority --assert-per-authority-advisory-aggregate-bound --linearity-by-closed-scalar-arg-model --enforced-at-validator-and-client"}
-- {id: 13, tier: mechanical, check: "scripts/check_projection_topology_nondisclosure.sh --client-visible-schema-has-no-provenance-field --client-visible-reason-enum dependency,stale,schema_too_old,policy --forbid-upstream-reason-codes-downward --forbid-service-name-address-or-health-field --assert-upstream-outage-projects-as-dependency --diff-client-projection-vs-internal-closure"}
-- {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-roundtrip-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --recompute-hop-bound-and-reject-mismatch --assert-propagation-bound-equals-hop-plus-upstream-over-actual-topology --assert-stale-at-least-propagation-bound --control-plane-propagation-bound-equals-its-hop-bound --reject-malformed-envelope-fail-closed"}
+- {id: 10, tier: integration, check: "scripts/test_advertisement_noninterference.sh --two-principals-differing-scope --change-outside-scope-b --assert-no-generation-advance-for-b --assert-no-event-for-b --assert-byte-identical-projection-for-b --assert-scope-decision-uses-only-id-and-authorization-tag --assert-no-allocation-on-out-of-scope-advisory-blob --per-scope-generation-derived-from-projection-content --no-wallclock-timing-assertion"}
+- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --uniqueness-enforced-at-merged-closure-holder --admission-order control-plane-then-runtime-then-profile-order --colliding-keys-across-services-fixture --same-incumbent-on-every-start --duplicate-claim-rejects-later-registration-atomically --replacement-requires-incumbent-authorization-under-cert-cn --replacement-refused-for-bare-bearer --replacement-registration-time-only --replacement-emits-audit-record --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
+- {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-nfc --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --enforce-per-scalar-type-bounds string,int,uint,bool,enum,duration_ms,capability_id --default-satisfies-declared-type-bounds --enforce-schema-v1-numeric-limits name_token,bounded_string,capability_id,normalized_path,max_args_per_surface,max_surfaces_per_capability,max_capabilities_per_projection,max_projection_bytes,max_advisory_bytes_per_capability,max_advisory_bytes_per_authority --assert-per-authority-advisory-aggregate-bound --enforcement-site registration-time --assert-overflow-rejects-registration-atomically --assert-running-total-decremented-on-withdrawal --assert-not-deferred-to-projection-time --linearity-by-closed-scalar-arg-model --enforced-at-validator-and-client"}
+- {id: 13, tier: mechanical, check: "scripts/check_projection_topology_nondisclosure.sh --client-visible-schema-has-no-provenance-field --path-level-not-schema-only --deny-list-applied-to response,headers,logs,traces,metrics-labels,audit --inject-provenance-fixture-and-assert-absent-from-every-emitted-artifact --client-visible-reason-enum dependency,stale,schema_too_old,policy --forbid-upstream-reason-codes-downward --forbid-service-name-address-or-health-field --assert-upstream-outage-projects-as-dependency --diff-client-projection-vs-internal-closure"}
+- {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-roundtrip-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --recompute-hop-bound-and-reject-mismatch --assert-bound-includes-stalled-request-timeout --drop-connection-mid-request-fixture --assert-propagation-bound-equals-hop-plus-upstream-over-actual-topology --assert-stale-at-least-propagation-bound --control-plane-propagation-bound-equals-its-hop-bound --reject-malformed-envelope-fail-closed"}
+- {id: 15, tier: integration, check: "scripts/test_capability_absent_indistinguishability.sh --absent-vs-never-existed --assert-identical-status-404 --assert-identical-body-bytes --assert-no-id-echo --assert-no-reason-field --assert-no-varying-content-length --assert-no-capability-specific-header --assert-single-resolution-path-no-withheld-branch --distinguish-from-present-but-unavailable-record"}
 ```
 
 ## Review status
@@ -819,6 +895,29 @@ have suppressed capabilities whose *soft* dependency was unready (contradicting 
 change notification optional on network edges, used an authority-wide generation that leaked
 cross-scope activity, treated every additive descriptor field as compatible, and asserted a
 client-local-execution ban with no decidable property behind it.
+
+*Revision 5 → 6* (roundtable run `…_1784826546_53`, 5 architect blocking + 5 suggestions; two further
+"blocking" entries were seat failures returning malformed verdicts, not findings): `capability_absent`
+was named as a typed result in two places but had no wire definition, so "indistinguishable from
+never-existed" was unenforceable and an implementer could not tell whether it meant 404, 200+empty,
+or something else — now a normative status/body/timing block with its own check 15, explicitly
+contrasted with the *visible* present-but-`unavailable` record. The per-authority advisory cap named
+no enforcement site; registration-time summation is the only site that closes the amplification
+(projection-time fails after the memory is spent, a sweep races admission), so the site, the running
+total's lifecycle, and the overflow contract are now part of the schema. The bounded-revalidation hop
+bound still had no term for a request that *stalls* — one dropped GET made the hop unbounded
+regardless of the interval — fixed with a derived `request_timeout_ms`. Topology non-disclosure was
+enforced on the schema alone, which cannot bound what the code emits: a log line, header, trace span,
+or audit record could carry provenance out of band, the same shape of mistake revision 3 made, so it
+is now a path-level property with a deny-list over every emitted artifact. Defined-field renames are
+now explicitly rejected without a version bump — rule 4 already covered this, since a rename is a
+removal plus an addition, but the failure is silent and the mistake natural. Adopted suggestions:
+per-scalar-type bounds folded into the one validator pass; the work-proportionality claim formalized
+(the scope decision may use only `id` and authorization tag, before any expansion); transactional
+replacement authorization specified (incumbent's own authorization, `cert:CN` only, registration-time
+only, audited); derivation cost model stated (cached per capability/generation/schema_version, so
+window width costs memory not latency); and the bounds block split into computation, validity
+relations, and propagation rule so each is independently testable.
 
 *Revision 4 → 5* (roundtable run `…_1784825942_51`, 3 blocking + 6 suggestions + 2 nits): an
 `unavailable` capability has its surfaces omitted, and a dispatcher enumerating *surfaces* would have
