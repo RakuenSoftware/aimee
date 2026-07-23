@@ -109,11 +109,12 @@ expiry is enforced from its frozen `exp`. Authority admission invokes the expira
 before any claim or signing readback. At the equality boundary (`now == issuance_deadline`) expiry
 wins and signing/finalization is forbidden.
 
-Every authority-definer call assigns `v_now := statement_timestamp()` once, locks the typed row
-with `SELECT ... FOR UPDATE`, and uses that same `v_now` for lease, issuance-deadline, and frozen
-`exp` comparisons through commit. Lease recovery, expiry, and finalization therefore serialize on
-the row lock; after waiting, each re-evaluates state and predicates against its one pinned time and
-cannot enter the equality boundary twice.
+Every authority-definer call first locks the typed row with `SELECT ... FOR UPDATE`, then assigns
+`v_now := clock_timestamp()` exactly once after the lock is acquired, and uses that same post-lock
+`v_now` for lease, issuance-deadline, and frozen `exp` comparisons through commit. Lease recovery,
+expiry, and finalization therefore serialize on the row lock; after waiting, each evaluates state
+and all time predicates against one fresh pinned time and cannot authorize a transition using a
+pre-wait timestamp or enter the equality boundary twice.
 
 After signing, one authority transaction atomically stores the exact bounded JWT bytes in the
 authority-owned row, stores their SHA-256, appends the WORM key-use record, and moves the row to
@@ -197,6 +198,18 @@ exact field set and exact purpose before constructing an intent. The signed stat
 the same closed purpose and the server verifies it byte-for-byte; an unknown or action purpose is
 `integrity`. The JWT is purpose-separated by its exact `remote_reads` capability plus bound method,
 path, selector, nonce digest, and audience; do not add an advisory token-purpose field.
+
+Challenge issuance and consumption reuse the existing server-local SQLite `server_mgmt_nonce`
+store and `server_mgmt_nonce_issue_purpose`/`consume_purpose` transactions, extending their closed
+purpose allowlist with exactly `management.read.v1`. Issuance atomically stores the raw nonce plus
+peer issuer/serial/fingerprint, TLS channel binding, target server, purpose, and expiry. At step 6,
+status verification calls `consume_purpose` before dispatch; its `BEGIN IMMEDIATE` lookup, binding
+checks, unconditional delete on every identifiable attempt, high-water update, and commit form one
+atomic consume. Concurrent reuse yields one result and then `conflict`; binding/purpose/rollback or
+invalid proof is `integrity`; storage/busy/commit failure is `unavailable`. Process restart clears
+the outstanding-nonce table during management-status initialization, so every pre-restart
+challenge becomes invalid rather than reusable. Expired rows are boundedly collected on issuance.
+No reconnect or fresh JTI can make a consumed, failed, expired, or restart-invalidated nonce valid.
 
 The kb/server sequence is fixed:
 
@@ -376,6 +389,8 @@ Unit and integration coverage must include:
 - mTLS peer/EKU/pin, token audience/team/path/digest/cert/capability/expiry/JTI, unknown-kid single
   refresh, signed generation rollback, nonce purpose/replay, checkpoint race, revocation at every
   challenge/dispatch/response boundary, no redirect/reconnect, and runtime unregister races;
+- concurrent same-nonce consumption and restart invalidation, plus an authority row-lock wait that
+  crosses the issuance deadline and must expire rather than recover/finalize;
 - projection canaries proving raw secrets/endpoints/commands/env references never appear; exact
   count/string/integer/body boundaries; load failure != empty; duplicate names, unknown external
   selectors/wire members, wrong-type/NUL/invalid UTF-8 rejection; accepted extra internal agent
