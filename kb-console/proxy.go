@@ -28,6 +28,7 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	kbPath := strings.TrimPrefix(r.URL.Path, "/api")
 	fleetRoute := fleetAllows(r.Method, kbPath)
 	fleetMutation := fleetRoute && r.Method == http.MethodPost
+	fleetAckToken := ""
 	if !strings.HasPrefix(kbPath, "/v1/") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden: not in console allowlist"})
 		return
@@ -61,7 +62,8 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 		}
 	}
 	if fleetMutation {
-		claimed, err := s.sessions.claimFleetMutation(sess.id)
+		fleetAckToken = randToken()
+		claimed, err := s.sessions.claimFleetMutation(sess.id, fleetAckToken)
 		if err != nil {
 			s.sessions.del(sess.id)
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet mutation latch unavailable; sign in again"})
@@ -86,7 +88,7 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, body)
 	if err != nil {
 		if fleetMutation {
-			s.transitionFleetMutationOrDelete(sess, 1, 0)
+			s.transitionFleetMutationOrDelete(sess, fleetAckToken, 1, 0)
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "proxy build failed"})
 		return
@@ -116,10 +118,11 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 		s.sessions.del(sess.id)
 	}
 	if fleetMutation && !keepFleetLatch && resp.StatusCode != http.StatusUnauthorized {
-		if !s.transitionFleetMutationOrDelete(sess, 1, 2) {
+		if !s.transitionFleetMutationOrDelete(sess, fleetAckToken, 1, 2) {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet result latch unavailable; sign in again"})
 			return
 		}
+		w.Header().Set("X-Aimee-Fleet-Ack", fleetAckToken)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
@@ -128,8 +131,8 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	_, _ = w.Write(payload)
 }
 
-func (s *server) transitionFleetMutationOrDelete(sess *session, from, to int) bool {
-	if err := s.sessions.transitionFleetMutation(sess.id, from, to); err != nil {
+func (s *server) transitionFleetMutationOrDelete(sess *session, ackToken string, from, to int) bool {
+	if err := s.sessions.transitionFleetMutation(sess.id, ackToken, from, to); err != nil {
 		s.sessions.del(sess.id)
 		return false
 	}

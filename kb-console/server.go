@@ -245,9 +245,19 @@ func (s *server) handleFleetAck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "csrf token mismatch"})
 		return
 	}
-	if err := s.sessions.transitionFleetMutation(sess.id, 2, 0); err != nil {
+	ackToken := r.Header.Get("X-Aimee-Fleet-Ack")
+	if ackToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fleet acknowledgement token required"})
+		return
+	}
+	acknowledged, err := s.sessions.acknowledgeFleetMutation(sess.id, ackToken)
+	if err != nil {
 		s.sessions.del(sess.id)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "no definite fleet result awaiting acknowledgement"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet acknowledgement unavailable; sign in again"})
+		return
+	}
+	if !acknowledged {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no matching fleet result awaiting acknowledgement"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})

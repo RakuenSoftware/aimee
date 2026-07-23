@@ -54,7 +54,8 @@ func openSessionStore(path string) (*sessionStore, error) {
 		last_seen INTEGER NOT NULL,
 		expires INTEGER NOT NULL,
 		oidc_expires INTEGER NOT NULL DEFAULT 0,
-		fleet_indeterminate INTEGER NOT NULL DEFAULT 0
+		fleet_indeterminate INTEGER NOT NULL DEFAULT 0,
+		fleet_ack_token TEXT NOT NULL DEFAULT ''
 	)`); err != nil {
 		return nil, err
 	}
@@ -64,6 +65,11 @@ func openSessionStore(path string) (*sessionStore, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN fleet_indeterminate INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN fleet_ack_token TEXT NOT NULL DEFAULT ''`); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		_ = db.Close()
 		return nil, err
@@ -146,8 +152,10 @@ func (s *sessionStore) get(id string) (*session, error) {
 	return &sess, nil
 }
 
-func (s *sessionStore) claimFleetMutation(id string) (bool, error) {
-	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=1 WHERE id=? AND fleet_indeterminate=0`, id)
+func (s *sessionStore) claimFleetMutation(id, ackToken string) (bool, error) {
+	result, err := s.db.Exec(
+		`UPDATE sessions SET fleet_indeterminate=1,fleet_ack_token=? WHERE id=? AND fleet_indeterminate=0`,
+		ackToken, id)
 	if err != nil {
 		return false, err
 	}
@@ -158,8 +166,10 @@ func (s *sessionStore) claimFleetMutation(id string) (bool, error) {
 	return n == 1, nil
 }
 
-func (s *sessionStore) transitionFleetMutation(id string, from, to int) error {
-	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=? WHERE id=? AND fleet_indeterminate=?`, to, id, from)
+func (s *sessionStore) transitionFleetMutation(id, ackToken string, from, to int) error {
+	result, err := s.db.Exec(
+		`UPDATE sessions SET fleet_indeterminate=?,fleet_ack_token=CASE WHEN ?=0 THEN '' ELSE fleet_ack_token END WHERE id=? AND fleet_indeterminate=? AND fleet_ack_token=?`,
+		to, to, id, from, ackToken)
 	if err != nil {
 		return err
 	}
@@ -168,6 +178,20 @@ func (s *sessionStore) transitionFleetMutation(id string, from, to int) error {
 		return errors.New("session unavailable")
 	}
 	return nil
+}
+
+func (s *sessionStore) acknowledgeFleetMutation(id, ackToken string) (bool, error) {
+	result, err := s.db.Exec(
+		`UPDATE sessions SET fleet_indeterminate=0,fleet_ack_token='' WHERE id=? AND fleet_indeterminate=2 AND fleet_ack_token=?`,
+		id, ackToken)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (s *sessionStore) del(id string) {

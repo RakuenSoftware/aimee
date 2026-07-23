@@ -12,10 +12,12 @@ export function setCsrf(token: string) {
 // brittle string-matching on the message.
 export class ApiError extends Error {
   status: number;
-  constructor(status: number) {
+  fleetAck: string;
+  constructor(status: number, fleetAck = '') {
     super(`HTTP ${status}`);
     this.name = 'ApiError';
     this.status = status;
+    this.fleetAck = fleetAck;
   }
 }
 
@@ -36,11 +38,23 @@ export async function apiSend<T = unknown>(method: string, path: string, body?: 
   return r.json() as Promise<T>;
 }
 
-export async function acknowledgeFleetMutation(): Promise<void> {
+export async function fleetSend(method: string, path: string, body?: unknown): Promise<string> {
+  const r = await fetch(`/api${path}`, {
+    method,
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const ack = r.headers.get('X-Aimee-Fleet-Ack') ?? '';
+  if (!r.ok) throw new ApiError(r.status, ack);
+  return ack;
+}
+
+export async function acknowledgeFleetMutation(ack: string): Promise<void> {
   const r = await fetch('/api/fleet/ack', {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'X-CSRF-Token': csrfToken },
+    headers: { 'X-CSRF-Token': csrfToken, 'X-Aimee-Fleet-Ack': ack },
   });
   if (!r.ok) throw new ApiError(r.status);
 }

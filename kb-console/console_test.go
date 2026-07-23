@@ -256,6 +256,7 @@ func TestFleetMutationLatchClearsAfterDefiniteDenial(t *testing.T) {
 	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
 		t.Fatal(err)
 	}
+	previousAck := ""
 	for i := 0; i < 2; i++ {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/server-1/actions?team=9",
 			strings.NewReader(`{"action":"agent.enable","agent":"agent.one"}`))
@@ -267,18 +268,35 @@ func TestFleetMutationLatchClearsAfterDefiniteDenial(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("definite denial %d status = %d", i, w.Code)
 		}
+		ackToken := w.Header().Get("X-Aimee-Fleet-Ack")
+		if ackToken == "" || ackToken == previousAck {
+			t.Fatalf("definite denial %d acknowledgement token = %q", i, ackToken)
+		}
 		latched, err := srv.sessions.get(sess.id)
 		if err != nil || !latched.fleetIndeterminate {
 			t.Fatalf("definite response was not held for browser acknowledgement: %+v err=%v", latched, err)
 		}
 		ack := httptest.NewRequest(http.MethodPost, "/api/fleet/ack", nil)
 		ack.Header.Set("X-CSRF-Token", sess.csrf)
+		if previousAck != "" {
+			ack.Header.Set("X-Aimee-Fleet-Ack", previousAck)
+			ack.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+			staleW := httptest.NewRecorder()
+			srv.handleFleetAck(staleW, ack)
+			if staleW.Code != http.StatusConflict {
+				t.Fatalf("stale acknowledgement status = %d, want 409", staleW.Code)
+			}
+			ack = httptest.NewRequest(http.MethodPost, "/api/fleet/ack", nil)
+			ack.Header.Set("X-CSRF-Token", sess.csrf)
+		}
+		ack.Header.Set("X-Aimee-Fleet-Ack", ackToken)
 		ack.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
 		ackW := httptest.NewRecorder()
 		srv.handleFleetAck(ackW, ack)
 		if ackW.Code != http.StatusOK {
 			t.Fatalf("definite denial %d acknowledgement status = %d", i, ackW.Code)
 		}
+		previousAck = ackToken
 	}
 	if upstreamCalls != 2 {
 		t.Fatalf("definite denials reached upstream %d times, want 2", upstreamCalls)

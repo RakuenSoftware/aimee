@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -83,11 +84,12 @@ func TestFleetMutationClaimIsAtomic(t *testing.T) {
 	var wg sync.WaitGroup
 	var claims atomic.Int32
 	for i := 0; i < contenders; i++ {
+		i := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			<-start
-			claimed, err := srv.sessions.claimFleetMutation(sess.id)
+			claimed, err := srv.sessions.claimFleetMutation(sess.id, fmt.Sprintf("ack-%d", i))
 			if err != nil {
 				t.Errorf("claim: %v", err)
 				return

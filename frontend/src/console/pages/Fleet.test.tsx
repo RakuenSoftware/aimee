@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn(), ack: vi.fn() }));
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, apiGet: mocks.get, apiSend: mocks.send, acknowledgeFleetMutation: mocks.ack };
+  return { ...actual, apiGet: mocks.get, fleetSend: mocks.send, acknowledgeFleetMutation: mocks.ack };
 });
 
 const server: FleetServer = {
@@ -49,7 +49,7 @@ async function selectAgent() {
 
 beforeEach(() => {
   mocks.get.mockReset();
-  mocks.send.mockReset();
+  mocks.send.mockReset().mockResolvedValue('ack-token');
   mocks.ack.mockReset().mockResolvedValue(undefined);
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
@@ -98,7 +98,6 @@ describe('Fleet interactions', () => {
 
   it('requires confirmation and sends each confirmed action once', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
-    mocks.send.mockResolvedValue({ status: 'applied' });
     render(<FleetHarness />);
     await loadFleet();
     await selectAgent();
@@ -111,6 +110,7 @@ describe('Fleet interactions', () => {
       action: 'agent.disable', agent: 'agent.one',
     });
     expect(mocks.ack).toHaveBeenCalledTimes(1);
+    expect(mocks.ack).toHaveBeenCalledWith('ack-token');
   });
 
   it('blocks in-flight duplicates and redispatch after an ambiguous failure', async () => {
@@ -146,19 +146,20 @@ describe('Fleet interactions', () => {
 
   it('surfaces policy denial without locking future actions', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
-    mocks.send.mockRejectedValueOnce(new ApiError(403));
+    mocks.send.mockRejectedValueOnce(new ApiError(403, 'denial-ack'));
     render(<FleetHarness />);
     await loadFleet();
     await selectAgent();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(await screen.findByText('Denied by team policy or the server remote_writes policy.')).toBeTruthy();
     expect(mocks.ack).toHaveBeenCalledTimes(1);
+    expect(mocks.ack).toHaveBeenCalledWith('denial-ack');
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('blocks future actions when a definite result cannot be acknowledged', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
-    mocks.send.mockRejectedValueOnce(new ApiError(403));
+    mocks.send.mockRejectedValueOnce(new ApiError(403, 'denial-ack'));
     mocks.ack.mockRejectedValueOnce(new ApiError(503));
     render(<FleetHarness />);
     await loadFleet();

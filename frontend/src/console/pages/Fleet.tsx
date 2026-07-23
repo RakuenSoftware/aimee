@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { acknowledgeFleetMutation, apiGet, apiSend, ApiError } from '../api';
+import { acknowledgeFleetMutation, apiGet, fleetSend, ApiError } from '../api';
 
 export interface FleetServer {
   server_id: string;
@@ -97,12 +97,12 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
     setBusy(true);
     setMessage('');
     try {
-      await apiSend('POST', `/v1/servers/${encodeURIComponent(selected)}/actions?team=${teamID}`, {
+      const ack = await fleetSend('POST', `/v1/servers/${encodeURIComponent(selected)}/actions?team=${teamID}`, {
         action,
         agent,
       });
       try {
-        await acknowledgeFleetMutation();
+        await acknowledgeFleetMutation(ack);
       } catch {
         onMutationBlocked();
         setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
@@ -115,7 +115,7 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
         // fetch delivered a definite HTTP result even though it was non-2xx.
         // Acknowledge that result before allowing another mutation.
         try {
-          await acknowledgeFleetMutation();
+          await acknowledgeFleetMutation(error.fleetAck);
         } catch {
           onMutationBlocked();
           setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
