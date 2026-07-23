@@ -217,8 +217,8 @@ kb_mgmt_token_result_t kb_mgmt_token_build(const kb_mgmt_token_claims_t *c,
    char header[HEADER_MAX + 1], payload[PAYLOAD_MAX + 1];
    writer_t h = {header, HEADER_MAX, 0}, p = {payload, PAYLOAD_MAX, 0};
    static const char header_prefix[] = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":";
-   const char *capability = c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ? "remote_writes"
-                                                                         : "remote_reads";
+   const char *capability =
+       c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ? "remote_writes" : "remote_reads";
    size_t capability_cap = c->capability == KB_MGMT_TOKEN_CAP_REMOTE_WRITES ? 14u : 13u;
    int ok =
        put(&h, header_prefix, sizeof(header_prefix) - 1) && quoted(&h, c->kid, sizeof(c->kid)) &&

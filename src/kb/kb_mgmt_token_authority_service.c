@@ -115,9 +115,9 @@ static int reopen(kb_mgmt_token_authority_service_t *service)
    return service->reopen_db && service->reopen_db(service->reopen_opaque, service->db) == 0;
 }
 
-static kb_mgmt_token_authority_ipc_result_t
-read_issue(kb_mgmt_token_authority_service_t *service, const char *correlation_id, const char *jti,
-           kb_mgmt_token_authority_output_t *out)
+static kb_mgmt_token_authority_ipc_result_t read_issue(kb_mgmt_token_authority_service_t *service,
+                                                       const char *correlation_id, const char *jti,
+                                                       kb_mgmt_token_authority_output_t *out)
 {
    kb_mgmt_token_authority_output_t retained;
    kb_mgmt_token_authority_record_t use;
@@ -206,15 +206,14 @@ read_issue(kb_mgmt_token_authority_service_t *service, const char *correlation_i
       result = KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY;
       goto done;
    }
-   result = map_protected(kb_vault_protected_use_with_aad(
-                              live_epoch, &use.envelope, token_aad, token_aad_len, protected_sign,
-                              &issue),
+   result = map_protected(kb_vault_protected_use_with_aad(live_epoch, &use.envelope, token_aad,
+                                                          token_aad_len, protected_sign, &issue),
                           &issue);
    if (result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
       goto done;
 
    db_result = db2_management_token_read_finalize(service->db, correlation_id, jti, lease_owner,
-                                                   issue.output.jwt);
+                                                  issue.output.jwt);
    if (db_result == DB2_MANAGEMENT_TOKEN_AUTHORITY_COMMIT_AMBIGUOUS)
    {
       if (!reopen(service))

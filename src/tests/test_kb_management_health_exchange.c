@@ -272,14 +272,12 @@ int main(void)
           expires == 1);
    const char *bad = "{\"nonce\":\"x\",\"expires_at\":\"01\"}";
    assert(kb_management_health_challenge_decode(bad, strlen(bad), nonce, &expires) == -1);
-   const char *read_good =
-       "{\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\","
-       "\"purpose\":\"management.read.v1\",\"expires_at\":1010}";
+   const char *read_good = "{\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\","
+                           "\"purpose\":\"management.read.v1\",\"expires_at\":1010}";
    assert(kb_management_read_challenge_decode(read_good, strlen(read_good), nonce, &expires) == 0 &&
           expires == 1010);
-   const char *read_bad_purpose =
-       "{\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\","
-       "\"purpose\":\"management.health.v1\",\"expires_at\":1010}";
+   const char *read_bad_purpose = "{\"nonce\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\","
+                                  "\"purpose\":\"management.health.v1\",\"expires_at\":1010}";
    assert(kb_management_read_challenge_decode(read_bad_purpose, strlen(read_bad_purpose), nonce,
                                               &expires) == -1);
    const char *read_bad_shape =

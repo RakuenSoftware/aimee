@@ -437,8 +437,8 @@ db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
       return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
    char error[AUTHORITY_ERROR_MAX] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_KIND, error, sizeof(error));
-   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
-               aimee_pg_bind_text(st, "?2", jti);
+   int bound =
+       !st || aimee_pg_bind_text(st, "?1", correlation_id) || aimee_pg_bind_text(st, "?2", jti);
    aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
    db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
    if (!bound && step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0))
@@ -446,7 +446,7 @@ db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
       const char *value = aimee_pg_column_text(st, 0);
       *kind = value && !strcmp(value, "action") ? DB2_MANAGEMENT_TOKEN_INTENT_ACTION
               : value && !strcmp(value, "read") ? DB2_MANAGEMENT_TOKEN_INTENT_READ
-                                                 : 0;
+                                                : 0;
       step = aimee_pg_step(st, error, sizeof(error));
       rc = *kind && step == AIMEE_PG_DONE ? DB2_MANAGEMENT_TOKEN_AUTHORITY_OK
                                           : DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
@@ -464,8 +464,7 @@ db2_management_token_authority_kind(db2_management_token_authority_ctx_t *ctx,
 db2_management_token_authority_result_t
 db2_management_token_read_claim(db2_management_token_authority_ctx_t *ctx,
                                 const char correlation_id[65], const char jti[65],
-                                const char lease_owner[65],
-                                kb_mgmt_token_authority_record_t *out)
+                                const char lease_owner[65], kb_mgmt_token_authority_record_t *out)
 {
    if (out)
       OPENSSL_cleanse(out, sizeof(*out));
@@ -571,8 +570,8 @@ db2_management_token_read_readback(db2_management_token_authority_ctx_t *ctx,
       return DB2_MANAGEMENT_TOKEN_AUTHORITY_INTEGRITY;
    char error[AUTHORITY_ERROR_MAX] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(ctx->connection, SQL_READ_READBACK, error, sizeof(error));
-   int bound = !st || aimee_pg_bind_text(st, "?1", correlation_id) ||
-               aimee_pg_bind_text(st, "?2", jti);
+   int bound =
+       !st || aimee_pg_bind_text(st, "?1", correlation_id) || aimee_pg_bind_text(st, "?2", jti);
    aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
    db2_management_token_authority_result_t rc = DB2_MANAGEMENT_TOKEN_AUTHORITY_UNAVAILABLE;
    if (!bound && step == AIMEE_PG_ROW && !aimee_pg_column_is_null(st, 0) &&

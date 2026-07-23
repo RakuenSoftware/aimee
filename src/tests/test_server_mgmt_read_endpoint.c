@@ -76,9 +76,9 @@ static int load_cb(void *opaque, server_mgmt_read_agent_t *out, size_t cap, size
    return 0;
 }
 
-static server_mgmt_read_result_t checkpoint_cb(
-    void *opaque, const server_mgmt_read_request_t *rq, const server_mgmt_token_claims_t *claims,
-    const server_mgmt_read_status_proof_t *proof)
+static server_mgmt_read_result_t checkpoint_cb(void *opaque, const server_mgmt_read_request_t *rq,
+                                               const server_mgmt_token_claims_t *claims,
+                                               const server_mgmt_read_status_proof_t *proof)
 {
    fixture_t *f = opaque;
    assert(f->step++ == 4 && claims->team_id == 42 && proof->revocation_generation == 7 &&
@@ -111,8 +111,18 @@ static server_mgmt_read_result_t run(fixture_t *f, char *out, size_t *out_len)
        .management_profile = 1,
    };
    server_mgmt_read_request_t rq = {
-       "token", 5, "staple", 6, "https://kb.test", "server-a", &peer, "/CN=server-ca",
-       "10be", "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", 9, 100,
+       "token",
+       5,
+       "staple",
+       6,
+       "https://kb.test",
+       "server-a",
+       &peer,
+       "/CN=server-ca",
+       "10be",
+       "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+       9,
+       100,
    };
    server_mgmt_read_deps_t deps = {status_cb, token_cb, jti_cb, load_cb, checkpoint_cb, f};
    return server_mgmt_read_dispatch(&rq, &deps, out, 4096, out_len);

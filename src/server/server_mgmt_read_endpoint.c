@@ -31,8 +31,8 @@ static server_mgmt_read_result_t fail(char *out, size_t cap, size_t *out_len,
 }
 
 server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_request_t *rq,
-                                                     const server_mgmt_read_deps_t *deps, char *out,
-                                                     size_t cap, size_t *out_len)
+                                                    const server_mgmt_read_deps_t *deps, char *out,
+                                                    size_t cap, size_t *out_len)
 {
    if (!rq || !deps || !out || !cap || !out_len || !deps->verify_and_consume_status ||
        !deps->verify_token || !deps->consume_jti || !deps->load_agents ||
@@ -55,9 +55,8 @@ server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_reque
    rc = deps->verify_token(deps->ctx, rq, &claims);
    if (rc != SERVER_MGMT_READ_OK)
       return fail(out, cap, out_len, closed_result(rc));
-   if (strcmp(claims.issuer, rq->expected_issuer) ||
-       strcmp(claims.capability, "remote_reads") || strcmp(claims.audience, rq->server_id) ||
-       strcmp(claims.peer_issuer, rq->peer->issuer) ||
+   if (strcmp(claims.issuer, rq->expected_issuer) || strcmp(claims.capability, "remote_reads") ||
+       strcmp(claims.audience, rq->server_id) || strcmp(claims.peer_issuer, rq->peer->issuer) ||
        strcmp(claims.peer_serial, rq->peer->serial_norm) ||
        strcmp(claims.peer_fingerprint, rq->peer->fingerprint) || claims.team_id <= 0)
       return fail(out, cap, out_len, SERVER_MGMT_READ_INTEGRITY);
