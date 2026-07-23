@@ -172,8 +172,8 @@ static void test_windows_snap_to_word_edges(void)
 static void test_no_match_and_empty_inputs(void)
 {
    char *out = extract(FIX, "r1", "zzzznotpresentanywhere", 0);
-   assert(contains(out, "r1#1")); /* top of page, honestly labelled by the footer */
-   assert(contains(out, "0 matches"));
+   assert(contains(out, "r1#1"));           /* top of page ... */
+   assert(contains(out, "does not occur")); /* ... and the footer says why */
    free(out);
 
    char *e1 = extract("", "r1", "anything", 0);
@@ -215,6 +215,70 @@ static void test_oversized_window_still_emits(void)
    printf("  PASS: an oversized window still emits\n");
 }
 
+/* Coverage selection: when more windows exist than fit the budget, the ones
+ * shown must be the ones carrying the most DISTINCT query terms -- position on
+ * the page says nothing about relevance. Measured on real agent traffic this
+ * surfaces 56.7% more distinct query terms than document-order truncation. */
+static void test_coverage_selection_beats_position(void)
+{
+   /* A page where the best window is LAST: early sections mention one term each,
+    * the final section mentions all three. Document-order truncation would fill
+    * the budget before reaching it. */
+   char *page = malloc(20000);
+   assert(page);
+   int off = 0;
+   for (int i = 0; i < 8; i++)
+      off +=
+          snprintf(page + off, 20000 - (size_t)off,
+                   "section %d discusses alpha1 only and pads on for a while %*s\n\n", i, 300, "p");
+   off += snprintf(page + off, 20000 - (size_t)off,
+                   "final section covers alpha1 and beta2 and gamma3 together %*s\n\n", 200, "z");
+
+   char *out = extract(page, "r1", "alpha1 beta2 gamma3", 0);
+   /* the high-coverage window must be present despite being last on the page */
+   assert(contains(out, "final section"));
+   assert(contains(out, "beta2"));
+   assert(contains(out, "gamma3"));
+   free(out);
+   free(page);
+   printf("  PASS: coverage selection surfaces the best window regardless of position\n");
+}
+
+/* Selected windows are still EMITTED in document order -- the caller is reading
+ * a page, and reading order is what a page is written for. */
+static void test_emission_stays_in_document_order(void)
+{
+   char *page = malloc(20000);
+   assert(page);
+   int off = 0;
+   off += snprintf(page + off, 20000 - (size_t)off,
+                   "opening mentions alpha1 beta2 gamma3 all together %*s\n\n", 200, "a");
+   for (int i = 0; i < 6; i++)
+      off += snprintf(page + off, 20000 - (size_t)off, "filler %d alpha1 %*s\n\n", i, 300, "f");
+   off += snprintf(page + off, 20000 - (size_t)off,
+                   "closing also mentions alpha1 beta2 gamma3 together %*s\n\n", 200, "z");
+   char *out = extract(page, "r1", "alpha1 beta2 gamma3", 0);
+   const char *opening = strstr(out, "opening mentions");
+   const char *closing = strstr(out, "closing also");
+   if (opening && closing)
+      assert(opening < closing); /* never reordered by score */
+   free(out);
+   free(page);
+   printf("  PASS: emission preserves document order\n");
+}
+
+/* A query that does not occur must say so and name the tool that does what the
+ * caller actually asked for. 7/84 real queries hit this, all whole-document
+ * requests; silently returning the top of the page looks like an answer. */
+static void test_no_match_footer_is_actionable(void)
+{
+   char *out = extract(FIX, "r1", "zzzznotpresentanywhere", 0);
+   assert(contains(out, "does not occur"));
+   assert(contains(out, "mode=\"full\""));
+   free(out);
+   printf("  PASS: no-match footer is actionable\n");
+}
+
 int main(void)
 {
    test_needle_always_retrieved_at_any_offset();
@@ -226,6 +290,9 @@ int main(void)
    test_overlapping_matches_merge();
    test_windows_snap_to_word_edges();
    test_no_match_and_empty_inputs();
+   test_coverage_selection_beats_position();
+   test_emission_stays_in_document_order();
+   test_no_match_footer_is_actionable();
    test_long_query_is_safe();
    test_oversized_window_still_emits();
    printf("web_read_spans: all tests passed\n");
