@@ -1,6 +1,13 @@
 CC      = gcc
 OBJDIR  = build/obj
 AIMEE_WITH_PLUGIN_LOADER ?= 0
+AIMEE_WITH_ROUNDTABLE ?= 1
+
+ifeq ($(AIMEE_WITH_ROUNDTABLE),1)
+ROUNDTABLE_CFLAGS = -Imodules/roundtable
+else
+ROUNDTABLE_CFLAGS =
+endif
 
 ifeq ($(OS),Windows_NT)
 EXEEXT  = .exe
@@ -88,7 +95,7 @@ endif
 # Feature-profile tracking: guarded translation units must rebuild when a
 # compile-time module selection changes in the same worktree.
 FEATURE_PROFILE_FILE = $(OBJDIR)/feature-profile.txt
-CURRENT_FEATURE_PROFILE = plugin-loader=$(AIMEE_WITH_PLUGIN_LOADER)
+CURRENT_FEATURE_PROFILE = plugin-loader=$(AIMEE_WITH_PLUGIN_LOADER),roundtable=$(AIMEE_WITH_ROUNDTABLE)
 PREVIOUS_FEATURE_PROFILE = $(shell cat $(FEATURE_PROFILE_FILE) 2>$(NULLDEV))
 ifneq ($(CURRENT_FEATURE_PROFILE),$(PREVIOUS_FEATURE_PROFILE))
 ifneq ($(PREVIOUS_FEATURE_PROFILE),)
@@ -106,7 +113,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Imodules/plugin-loader/include -Imodules/module-runtime/include -Imodules/audit/include -Imodules/gateway/include -Imodules/ir/include -Imodules/translation/include -Imodules/delegates/include -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skills/include -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp -DAIMEE_WITH_PLUGIN_LOADER=$(AIMEE_WITH_PLUGIN_LOADER) $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Imodules/plugin-loader/include -Imodules/module-runtime/include -Imodules/audit/include -Imodules/gateway/include -Imodules/ir/include -Imodules/translation/include -Imodules/delegates/include -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skills/include -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails $(ROUNDTABLE_CFLAGS) -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/protocols/mcp -Imodules/protocols/acp -DAIMEE_WITH_PLUGIN_LOADER=$(AIMEE_WITH_PLUGIN_LOADER) -DAIMEE_WITH_ROUNDTABLE=$(AIMEE_WITH_ROUNDTABLE) $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -439,6 +446,18 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
+ROUNDTABLE_MODULE_SRCS := $(wildcard modules/roundtable/*.c)
+ROUNDTABLE_COMPOSITION_SRCS := modules/workflows/wfe_live_panel.c \
+                              modules/workflows/wfe_panel_roundtable.c \
+                              modules/workflows/wfe_replay_worktree.c \
+                              modules/workflows/wfe_roundtable.c \
+                              server/server_compute_roundtable.c \
+                              server/server_pipeline.c server/server_pipeline_merge.c
+ifeq ($(AIMEE_WITH_ROUNDTABLE),0)
+    CMD_SRCS := $(filter-out $(ROUNDTABLE_MODULE_SRCS),$(CMD_SRCS))
+    SERVER_SRCS := $(filter-out $(ROUNDTABLE_MODULE_SRCS) $(ROUNDTABLE_COMPOSITION_SRCS),$(SERVER_SRCS))
+    DB1_SRCS := $(filter-out db1/roundtable_pipeline.c,$(DB1_SRCS))
+endif
 ifeq ($(AIMEE_WITH_PLUGIN_LOADER),0)
     SERVER_SRCS := $(filter-out server/server_plugin.c,$(SERVER_SRCS))
 endif

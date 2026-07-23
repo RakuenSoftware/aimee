@@ -1,10 +1,18 @@
 /* server_mcp_surface.c: server-composition filtering for optional MCP tools. */
 #include "server_mcp_surface.h"
+#include "aimee_features.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 
 int server_mcp_tool_available(const char *tool)
 {
+#if AIMEE_WITH_ROUNDTABLE
    return roundtable_tool_available(tool);
+#else
+   (void)tool;
+   return 1;
+#endif
 }
 
 int server_mcp_filter_unavailable_tools(cJSON *tools)

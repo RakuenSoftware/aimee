@@ -1238,11 +1238,15 @@ static const struct
     {"cron.add", marshal_cron_add},
     {"curator.contradictions", marshal_curator_contradictions},
     {"delegate", marshal_delegate},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", marshal_delegate_aggregate},
+#endif
     {"delegate.backend_exec", marshal_delegate_backend_exec},
     {"delegate.launch", marshal_delegate_launch},
     {"delegate.log", marshal_delegate_log},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.roundtable", marshal_delegate_roundtable},
+#endif
     {"delegate.sandbox_gc", marshal_delegate_sandbox_gc},
     {"delegate.status", marshal_delegate_status},
     {"dogfood.report", marshal_dogfood_report},

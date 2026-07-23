@@ -26,7 +26,9 @@ static const struct
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.roundtable", pt_print_delegate_roundtable},
+#endif
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
     {"audit.seal", pt_print_audit},
@@ -756,8 +758,10 @@ static const struct
    const char *path;
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
     {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
+#endif
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},

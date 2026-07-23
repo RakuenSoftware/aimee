@@ -4,6 +4,14 @@ TEST_DASHBOARD_PLUGIN_OBJS =
 ifeq ($(AIMEE_WITH_PLUGIN_LOADER),1)
 TEST_DASHBOARD_PLUGIN_OBJS += $(OBJDIR)/modules/plugin-loader/plugin.o
 endif
+TEST_ROUNDTABLE_ACTIVATION_OBJ =
+TEST_ROUNDTABLE_HTTP_OBJS =
+ifeq ($(AIMEE_WITH_ROUNDTABLE),1)
+TEST_ROUNDTABLE_ACTIVATION_OBJ += $(OBJDIR)/modules/roundtable/roundtable_activation.o
+TEST_ROUNDTABLE_HTTP_OBJS += $(OBJDIR)/modules/roundtable/roundtable_preset.o \
+                             $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
+                             $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o
+endif
 TEST_L_FLAGS = $(L_FULL)
 
 # Test output prefix: defaults to $(OBJDIR)/tests so any `make unit-tests`
@@ -1375,7 +1383,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
-	$(OBJDIR)/modules/roundtable/roundtable_activation.o \
+	$(TEST_ROUNDTABLE_ACTIVATION_OBJ) \
 	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o \
@@ -3561,7 +3569,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
-	                  $(OBJDIR)/modules/roundtable/roundtable_activation.o \
+	                  $(TEST_ROUNDTABLE_ACTIVATION_OBJ) \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
@@ -3573,11 +3581,9 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/compute_pool.o \
                            $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
-                           $(OBJDIR)/modules/roundtable/roundtable_preset.o \
+                           $(TEST_ROUNDTABLE_HTTP_OBJS) \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
-                           $(OBJDIR)/modules/roundtable/roundtable_pipeline_capture.o \
-                           $(OBJDIR)/modules/roundtable/roundtable_pipeline_eval.o \
                            $(DB1_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

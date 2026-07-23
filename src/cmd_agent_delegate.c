@@ -20,7 +20,9 @@
 #include <aimee/delegates/delegate_launch.h>
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/panel_provider.h>
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 #include "memory_platform.h"
 #include "workspace.h"
 #include "guardrails.h"
@@ -508,6 +510,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
+#if AIMEE_WITH_ROUNDTABLE
    if (strcmp(argv[0], "aggregate") == 0)
    {
       if (argc < 2)
@@ -550,6 +553,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          printf("%s\n", result.response);
       return;
    }
+#endif
 
    if (strcmp(argv[0], "result") == 0 || strcmp(argv[0], "log") == 0 ||
        strcmp(argv[0], "logs") == 0)

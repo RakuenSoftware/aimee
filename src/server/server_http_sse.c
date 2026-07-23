@@ -25,7 +25,9 @@
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
+#endif
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */

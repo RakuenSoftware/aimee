@@ -1,7 +1,7 @@
 # Proposal: make module ownership drive source, builds, config, and documentation
 
-- **State:** PENDING — roundtable-approved 2026-07-20; slices 27–29 implemented; physical
-  profile omission and the remaining module migrations still await project acceptance
+- **State:** PENDING — roundtable-approved 2026-07-20; slices 27–30 implemented; generated
+  build selection and the remaining module migrations still await project acceptance
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
 - **Owns:** descriptor schema/validation, physical source ownership, generated Make/CMake and
   ownership-map outputs, include/type/symbol/link dependency enforcement, and complete individual
@@ -28,9 +28,16 @@ Slice 29 makes the roundtable descriptor a mechanically complete inventory of it
 units and private headers. `ownership_complete: true` enforces set equality against the filesystem and
 requires the canonical module document. As policy, incomplete descriptors must not be used by the future
 generator; mechanical enforcement is deferred to the build-generation slice.
-This slice does not claim generated target membership or object omission. Those remain the next build
-slice, including explicit provider seams for Make-only server composition and parity checks only where
-both build systems own the same target.
+Slice 30 introduces the first physical optional-module profile. Make `AIMEE_WITH_ROUNDTABLE=0` omits
+roundtable owner objects, its private include root, and the listed server/workflow/DB composition objects.
+CMake `AIMEE_WITH_ROUNDTABLE=OFF` omits the roundtable provider and private include root from the supported
+thin-client target and rejects the option for non-thin configurations. Required delegate panel facades
+remain linked and return typed unavailable results. CI checks the omitted Make profile's object graph and
+executable CLI/HTTP/MCP/raw-method surface; positive routing, IR, ACP, MCP, response-pipeline, raw-dispatch,
+and HTTP tests prove required core behavior. CI separately verifies that the omitted CMake thin-client
+target builds. Dormant roundtable table
+declarations remain in the shared compatibility schema; the persistence implementation is absent from
+the omitted Make profile, and schema retirement is a separate migration decision.
 The owner API is `roundtable_module_enabled`; workflows map its disabled result through
 `WFE_PANEL_MODULE_DISABLED` to a permanent step failure rather than a transient provider retry.
 Resuming or redispatching that disabled gate re-evaluates activation and, while still disabled,

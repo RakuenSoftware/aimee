@@ -13,7 +13,9 @@
 #include "hud.h"
 #include "log.h"
 #include "server.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 #include "toolset.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
@@ -509,6 +511,7 @@ int handle_session_presence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.presence");
 }
+#if AIMEE_WITH_ROUNDTABLE
 /* The roundtable pipeline handlers are STUBBED here (this test only exercises
  * dispatch-table routing) so the real server_pipeline.o — which drags in the
  * op-run/git/agent-config/chunk graph — is not linked into the dispatch test. */
@@ -540,6 +543,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "pipeline.gate");
 }
+#endif
 int handle_trajectory_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "trajectory.export");
@@ -961,6 +965,7 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate");
 }
+#if AIMEE_WITH_ROUNDTABLE
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate.aggregate");
@@ -969,6 +974,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 {
    return stub_handler(conn, "delegate.roundtable");
 }
+#endif
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dev.sweep");
@@ -1439,6 +1445,7 @@ static int json_array_has_string(const cJSON *array, const char *value)
    return 0;
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 static void test_roundtable_surface_registration(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1489,6 +1496,7 @@ static void test_roundtable_surface_registration(void)
    free(ctx);
    printf("test_roundtable_surface_registration: PASS\n");
 }
+#endif
 
 static void test_removed_storage_named_migration_alias(void)
 {
@@ -1538,16 +1546,23 @@ static void test_routing(void)
    server_conn_t *conn = calloc(1, sizeof(*conn));
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAPS_AUTHENTICATED;
+#if AIMEE_WITH_ROUNDTABLE
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.module_roundtable = 1;
    roundtable_runtime_configure(&cfg);
+#endif
 
    cJSON *json = dispatch_json(ctx, conn, "{\"method\":\"server.info\"}",
                                strlen("{\"method\":\"server.info\"}"));
    assert(cJSON_GetObjectItem(json, "protocol_version") != NULL);
    cJSON *methods = cJSON_GetObjectItem(json, "methods");
    assert(cJSON_IsArray(methods));
+#if !AIMEE_WITH_ROUNDTABLE
+   assert(!json_array_has_string(methods, "delegate.aggregate"));
+   assert(!json_array_has_string(methods, "delegate.roundtable"));
+   assert(!json_array_has_string(methods, "pipeline.start"));
+#endif
    int has_delegate_status = 0;
    int has_delegate_launch = 0;
    int has_launch_run = 0;
@@ -1704,11 +1719,13 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "delegate.status") == 0);
    cJSON_Delete(json);
 
+#if AIMEE_WITH_ROUNDTABLE
    json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}",
                         strlen("{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.roundtable") == 0);
    assert(strcmp(g_last_handler, "delegate.roundtable") == 0);
    cJSON_Delete(json);
+#endif
 
    json = dispatch_json(ctx, conn, "{\"method\":\"delegate.launch\"}",
                         strlen("{\"method\":\"delegate.launch\"}"));
@@ -1761,7 +1778,9 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "cron.add") == 0);
    cJSON_Delete(json);
 
+#if AIMEE_WITH_ROUNDTABLE
    roundtable_runtime_configure(NULL);
+#endif
    free(conn);
    free(ctx);
 }
@@ -1954,7 +1973,9 @@ int main(void)
    test_large_delegate_payload_within_limit();
    test_large_mcp_call_payload_within_limit();
    test_unknown_method();
+#if AIMEE_WITH_ROUNDTABLE
    test_roundtable_surface_registration();
+#endif
    test_removed_storage_named_migration_alias();
    test_authz_denied_shape();
    test_routing();

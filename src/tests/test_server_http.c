@@ -3,7 +3,9 @@
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -120,6 +122,7 @@ int main(void)
    /* Optional roundtable routes are absent while disabled, including internal
     * async submission paths that bypass the declarative HTTP table. */
    {
+#if AIMEE_WITH_ROUNDTABLE
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       cfg.module_roundtable = 0;
@@ -144,6 +147,14 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
       assert(server_http_route_allowed(0, NULL, "POST", "/v1/delegate/roundtable",
                                        SERVER_REMOTE_WRITES_OFF) == 1);
+#else
+      const char *body = "{\"prompt\":\"draft\"}";
+      assert(server_http_route("POST", "/v1/delegate/roundtable", body, (int)strlen(body), resp,
+                               sizeof(resp)) == 404);
+      assert(server_http_route("POST", "/v1/delegate/aggregate", body, (int)strlen(body), resp,
+                               sizeof(resp)) == 404);
+      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == 0);
+#endif
    }
 
    /* --- GET /v1/health is a liveness probe --- */
@@ -758,10 +769,16 @@ int main(void)
       /* Privileged exec/control routes (delegate/cron/agent/provider/worktree/...)
        * are local-only over TCP unless remote_writes==full; data-plane writes need
        * only remote_writes>=data. Fail-closed at the default. */
-      const char *exec_paths[] = {"/v1/delegate/launch",     "/v1/delegate/backend_exec",
-                                  "/v1/delegate/roundtable", "/v1/cron/add",
-                                  "/v1/agent/add",           "/v1/worktree/gc",
-                                  "/v1/model/refresh",       "/v1/api/disable"};
+      const char *exec_paths[] = {"/v1/delegate/launch",
+                                  "/v1/delegate/backend_exec",
+#if AIMEE_WITH_ROUNDTABLE
+                                  "/v1/delegate/roundtable",
+#endif
+                                  "/v1/cron/add",
+                                  "/v1/agent/add",
+                                  "/v1/worktree/gc",
+                                  "/v1/model/refresh",
+                                  "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -773,9 +790,11 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
+#if AIMEE_WITH_ROUNDTABLE
       assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
       assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
                                        "/v1/delegate/roundtable", SERVER_REMOTE_WRITES_FULL) == 0);
+#endif
       /* The detached-workspace plane is exempt: reachable over TCP at remote_writes=off
        * (still cap-gated -> a scoped query-only bearer is still denied). */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/runner/poll", 0) == 1);
@@ -992,6 +1011,7 @@ int main(void)
       /* A real route with no handler seam wired in this test returns 503, not 404
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
+#if AIMEE_WITH_ROUNDTABLE
       openai_runs_store_reset();
       const char *roundtable_body = "{\"prompt\":\"draft\"}";
       assert(server_http_route("POST", "/v1/delegate/roundtable", roundtable_body,
@@ -1038,6 +1058,7 @@ int main(void)
       assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
                                        CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
       assert(strstr(rb, "insufficient capabilities"));
+#endif
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */

@@ -2203,6 +2203,7 @@ void pt_print_identity_diff(const char *method, cJSON *resp)
 /* delegate.roundtable: print the consolidated artifact in human mode (without
  * this, a non-JSON `aimee delegate roundtable` printed nothing — the result was
  * only reachable via --json or the run API). */
+#if AIMEE_WITH_ROUNDTABLE
 void pt_print_delegate_roundtable(const char *method, cJSON *resp)
 {
    (void)method;
@@ -2215,3 +2216,4 @@ void pt_print_delegate_roundtable(const char *method, cJSON *resp)
       fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
               cJSON_IsTrue(converged) ? ", converged" : "");
 }
+#endif

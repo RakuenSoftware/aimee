@@ -42,8 +42,8 @@ The descriptor is the checked inventory for all owner-local roundtable translati
 headers. `ownership_complete: true` makes additions, removals, and stale declarations fail validation;
 the descriptor also names the direct ensemble, chair, preset, seat-resolution, pipeline, and verification
 tests plus this canonical module document. Server, workflow, DB, and protocol integration tests remain
-with their composing layers. This inventory does not yet select emitted objects or make the module
-physically absent from a build profile.
+with their composing layers. Build selection uses that boundary but is still maintained explicitly in
+Make and CMake until descriptor-driven generation lands.
 
 ## Providers and readiness
 
@@ -75,8 +75,16 @@ Changing `modules.roundtable` or its environment fallback therefore requires a s
 disabled, roundtable-owned raw methods are absent from `server.info`, HTTP operation routes return 404,
 and MCP tools are absent from `tools/list`, `find_tools`, and `describe_tool`; direct raw method or MCP
 calls return unknown-method/tool semantics. A provider registration conflict aborts server startup rather
-than advertising unusable routes. Implementation objects remain compiled, so profile-driven object
-omission is still required follow-up work.
+than advertising unusable routes.
+
+Build selection is separate from runtime activation. `AIMEE_WITH_ROUNDTABLE=0` for Make omits the owner
+implementation, its private include root, and the listed server/workflow/database composition objects.
+`-DAIMEE_WITH_ROUNDTABLE=OFF` for CMake omits the roundtable provider and private include root from the
+supported thin-client target; CMake rejects that option for a non-thin configuration rather than implying
+unsupported full-stack omission. Both build systems select roundtable by default for compatibility, while
+a selected module remains runtime-disabled unless explicitly activated. In the validated omitted Make
+profile, the legacy activation key is accepted with a warning, but no roundtable operation, route, CLI
+command, MCP tool, provider, or workflow implementation is exposed.
 
 ## Surfaces
 
@@ -89,15 +97,21 @@ As of slice 28, `roundtable_activation.c` is the single owner of roundtable oper
 classification. Disabled server operations are `delegate.aggregate`, `delegate.roundtable`, and
 `pipeline.*`; disabled MCP surfaces are `ensemble_review`, the collapsed `pipeline` family, and direct
 `pipeline_*` aliases. HTTP `POST /v1/delegate/aggregate` and
-`POST /v1/delegate/roundtable` are absent at the route matcher. Workflow roundtable gates remain valid
-workflow schema but fail permanently without panel work while the module is disabled. CLI commands and
-static reference documentation remain visible so operators can discover and enable the module.
+`POST /v1/delegate/roundtable` are absent at the route matcher. In a selected but runtime-disabled build,
+workflow roundtable gates remain valid schema and fail permanently without panel work. In an omitted
+build, their implementation and live registration are absent. Static documentation remains available;
+executable discovery surfaces do not advertise unavailable functionality.
 
 ## Data and migrations
 
 State includes named JSON presets, DB1 ensemble/session records, panel assignments and contributions,
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
+Omitted Make builds retain the historical roundtable table declarations in the shared DB1 schema solely
+to preserve schema initialization, migration, and downgrade compatibility for existing databases. The
+declarations are dormant: the roundtable persistence implementation is not compiled and no live
+roundtable data provider is created. Removing those declarations requires a separate, versioned
+data-migration decision.
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
 The roundtable provider allocates the `aimee_panel_result_t.artifact` returned by a successful call and
 supplies the matching release callback. The caller must release the result exactly once through the
@@ -127,6 +141,10 @@ plus chair, preset, seat-resolution, pipeline capture/chunk/eval, panel composit
 workflow-gate suites cover current behavior. No eligible/available seats, provider error,
 invalid model output, budget/turn exhaustion, failed quorum, capture failure, or non-convergence must
 produce a typed incomplete/failure result rather than invented consensus.
+
+The omitted Make profile also runs positive delegate routing, IR, ACP, MCP native-surface,
+response-pipeline, raw server-dispatch, and HTTP route tests. Those tests prove required core still
+operates; the separate binary/object inspection proves the optional implementation stayed absent.
 
 ## Operational diagnostics
 
