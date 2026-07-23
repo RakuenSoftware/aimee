@@ -18,6 +18,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/governance/gw_stage_governance.c"
   ],

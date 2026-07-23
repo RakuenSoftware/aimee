@@ -21,11 +21,14 @@ the response-governance stage alone: `gw_stage_governance.c` and its private hea
 `gw_stage_governance.h`, tested by `src/tests/test_response_governance_stage.c`. That is narrower than
 the governance plane this document describes — the OIDC, identity, policy-distribution, and console
 surfaces remain distributed across the KB, DB2, management, and console layers and are not yet
-module-local. The descriptor therefore declares its sources, private header, test, and this document but
-does not set `ownership_complete`: the module is mid-migration, and its declared set is not yet its whole
-intended surface. `docs/validation/core-modularization-slice-40.md` records the audit behind these
-declarations. Latching follows in a separate slice once the declarations have been reviewed on their own,
-so no audit blesses claims written in the same change.
+module-local. The descriptor declares its sources, private header, test, and this document and sets
+`ownership_complete: true`. The latch asserts that those declarations exhaustively cover the module
+root as it stands — one source and one private header — not that the broader governance plane has been
+migrated. `docs/validation/core-modularization-slice-40.md` records the declaration audit and
+`docs/validation/core-modularization-slice-41.md` the completeness audit; the two were split so the
+latch reviews declarations that were merged on their own first. Because the module owns exactly what it
+declares today, adding a new module-local source or private header without declaring it now fails CI on
+`rule=ownership-complete`.
 
 ## Dependencies and consumers
 

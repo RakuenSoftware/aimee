@@ -554,6 +554,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains the governance row.",
       "independent_review": "The scoping roundtable established that declaration and latching are separate acts and that governance is the correct first module because it is smallest and the first to carry a private header, exercising a validator path the nine latched modules never have. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-40.md", "docs/modules/governance.md", "src/modules/governance/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
+    },
+    {
+      "slice": 41,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the governance descriptor against the declarations slice 40 authored and reviewed on their own, the latch half of the declaration-then-latch pair, and exercised the validator's private_headers set-equality enforcement against a real declared module for the first time.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The latch asserts the descriptor covers the module root as it stands, one source and one private header, not that the OIDC, identity, policy-distribution and console governance surfaces have been migrated; those remain distributed across kb, DB2, management and console layers", "CMake compiles no governance source under a target of its own, the same intentional thin-client profile boundary recorded for gateway"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining eight Class B modules follow the same declaration-then-latch pair; the broader governance plane remains a later migration that will extend these declarations."
+      },
+      "consumers": ["descriptor-envelope and module-inventory CI", "the remaining Class B declaration and latch slices", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains governance-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising private_headers set-equality on a real declared module.",
+      "independent_review": "The scoping roundtable required declaration and latching be separate acts; slice 40 declared and this slice latches. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-41.md", "docs/modules/governance.md", "src/modules/governance/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }
