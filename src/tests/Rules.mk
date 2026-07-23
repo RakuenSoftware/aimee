@@ -1659,7 +1659,7 @@ $(TESTPREFIX)/unit-test-wfe-manager-artifacts: $(OBJDIR)/tests/test_wfe_manager_
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OBJDIR)/kb/kb_rrf.o
+$(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OBJDIR)/rrf.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
 
 $(TESTPREFIX)/unit-test-web-search-fusion: $(OBJDIR)/tests/test_web_search_fusion.o \
@@ -2451,8 +2451,6 @@ $(TESTPREFIX)/unit-test-dstr: $(OBJDIR)/tests/test_dstr.o $(OBJDIR)/dstr.o
 # The aimee-client test compiles its in-process TLS mock only in WITH_TLS builds.
 $(OBJDIR)/tests/test_aimee_client.o: C_FLAGS += $(TLS_FLAGS)
 $(OBJDIR)/tests/test_kb_graph.o: C_FLAGS += -Ikb
-$(OBJDIR)/tests/test_kb_rrf.o: C_FLAGS += -Ikb
-$(OBJDIR)/tests/test_kb_rrf_purity.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_kb_graph_analytics.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_cite_tracker.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_reflect.o: C_FLAGS += -Ikb
@@ -2466,7 +2464,7 @@ $(TESTPREFIX)/unit-test-kb-graph: $(OBJDIR)/tests/test_kb_graph.o \
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 # Reciprocal Rank Fusion core (§5 hybrid retrieval scoring model). Pure: no DB.
-$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/kb/kb_rrf.o
+$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/rrf.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
 
 # Graph analytics: degree-centrality hub ranking (§4). Pure: no DB.
@@ -4845,7 +4843,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
                      $(OBJDIR)/kb/http/kb_http_code_graphfb.o $(OBJDIR)/kb/lessons_reflect.o \
                                     $(OBJDIR)/kb/lessons_session_capture.o $(OBJDIR)/kb/lessons_cite_tracker.o \
-                     $(OBJDIR)/kb/kb_rrf.o \
+                     $(OBJDIR)/rrf.o \
                      $(OBJDIR)/kb/kb_graph_analytics.o \
                      $(OBJDIR)/kb/prompt_sanitizer.o \
                      $(OBJDIR)/kb/http/kb_http_pdf.o \
