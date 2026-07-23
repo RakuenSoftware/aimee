@@ -695,3 +695,42 @@ server_mgmt_token_result_t server_mgmt_token_verify_cached(
                                       peer_issuer, peer_serial, peer_fingerprint, request_sha256,
                                       now, out);
 }
+
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_cached(
+    const char *jwt, size_t jwt_len, const char *trust_bundle, size_t trust_bundle_len,
+    const char *expected_issuer, const char *expected_audience, const char *peer_issuer,
+    const char *peer_serial, const char *peer_fingerprint, int64_t now,
+    server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!out)
+      return SERVER_MGMT_TOKEN_INVALID;
+   char jwks[SERVER_MGMT_JWKS_BYTES_MAX];
+   size_t jwks_n = 0;
+   int refreshed = 0;
+   server_mgmt_jwks_cache_result_t loaded = server_mgmt_jwks_cache_load(
+       trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks), &jwks_n);
+   if (loaded != SERVER_MGMT_JWKS_CACHE_OK)
+   {
+      refreshed = 1;
+      if (server_mgmt_jwks_cache_refresh(trust_bundle, trust_bundle_len, now, fetch, fetch_ctx) !=
+              SERVER_MGMT_JWKS_CACHE_OK ||
+          server_mgmt_jwks_cache_load(trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks),
+                                      &jwks_n) != SERVER_MGMT_JWKS_CACHE_OK)
+         return SERVER_MGMT_TOKEN_INVALID;
+   }
+   server_mgmt_token_result_t result = server_mgmt_token_verify_read_claims_ex(
+       jwt, jwt_len, jwks, expected_issuer, expected_audience, peer_issuer, peer_serial,
+       peer_fingerprint, now, out);
+   if (result != SERVER_MGMT_TOKEN_UNKNOWN_KID || refreshed)
+      return result;
+   if (server_mgmt_jwks_cache_refresh(trust_bundle, trust_bundle_len, now, fetch, fetch_ctx) !=
+           SERVER_MGMT_JWKS_CACHE_OK ||
+       server_mgmt_jwks_cache_load(trust_bundle, trust_bundle_len, now, jwks, sizeof(jwks),
+                                   &jwks_n) != SERVER_MGMT_JWKS_CACHE_OK)
+      return SERVER_MGMT_TOKEN_INVALID;
+   return server_mgmt_token_verify_read_claims_ex(
+       jwt, jwt_len, jwks, expected_issuer, expected_audience, peer_issuer, peer_serial,
+       peer_fingerprint, now, out);
+}

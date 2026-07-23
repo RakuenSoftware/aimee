@@ -67,4 +67,10 @@ server_mgmt_token_result_t server_mgmt_token_verify_cached(
     const char *peer_serial, const char *peer_fingerprint, const char *request_sha256, int64_t now,
     server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out);
 
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_cached(
+    const char *jwt, size_t jwt_len, const char *trust_bundle, size_t trust_bundle_len,
+    const char *expected_issuer, const char *expected_audience, const char *peer_issuer,
+    const char *peer_serial, const char *peer_fingerprint, int64_t now,
+    server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out);
+
 #endif

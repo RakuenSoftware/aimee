@@ -55,6 +55,7 @@ const char *server_http_identity_session_hdr(void);
 const char *server_http_identity_bearer(void);
 const char *server_http_identity_status_staple(void);
 const server_tls_peer_cert_t *server_http_identity_peer_cert(void);
+const server_tls_peer_cert_t *server_http_identity_local_cert(void);
 const char *server_http_identity_local_fingerprint(void);
 
 /* The in-flight request's query string ("k=v&…", no '?'), or "" if none. Set by

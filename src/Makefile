@@ -433,7 +433,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
-SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_read.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
+SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_read.c server/server_mgmt_read_endpoint.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))

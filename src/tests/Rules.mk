@@ -555,6 +555,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-server-mgmt-read \
                $(TESTPREFIX)/unit-test-server-mgmt-read-source \
+               $(TESTPREFIX)/unit-test-server-mgmt-read-endpoint \
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-server-management-jti \
@@ -1835,6 +1836,12 @@ $(TESTPREFIX)/unit-test-server-mgmt-read-source: \
     $(OBJDIR)/tests/test_server_mgmt_read_source.o \
     $(OBJDIR)/server/server_mgmt_read_source.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-mgmt-read-endpoint: \
+    $(OBJDIR)/tests/test_server_mgmt_read_endpoint.o \
+    $(OBJDIR)/server/server_mgmt_read_endpoint.o \
+    $(OBJDIR)/server/server_mgmt_read.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
     $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
@@ -4020,7 +4027,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
-                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
+                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/server/server_mgmt_read.o $(OBJDIR)/server/server_mgmt_read_endpoint.o $(OBJDIR)/server/server_mgmt_read_source.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \
@@ -4028,7 +4035,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
                            $(OBJDIR)/server/compute_pool.o \
-                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
+                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/modules/roundtable/roundtable_preset.o \
                            $(OBJDIR)/role_templates.o \

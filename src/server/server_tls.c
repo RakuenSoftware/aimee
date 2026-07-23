@@ -740,6 +740,38 @@ int server_tls_local_fingerprint(SSL *ssl, char out[65])
    return 1;
 }
 
+int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   if (!out)
+      return 0;
+   memset(out, 0, sizeof(*out));
+   X509 *cert = ssl ? SSL_get_certificate(ssl) : NULL; /* owned by SSL */
+   ASN1_INTEGER *asn_serial = cert ? X509_get_serialNumber(cert) : NULL;
+   BIGNUM *bn = asn_serial ? ASN1_INTEGER_to_BN(asn_serial, NULL) : NULL;
+   char *issuer = cert ? X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0) : NULL;
+   char *serial = bn && !BN_is_negative(bn) ? BN_bn2hex(bn) : NULL;
+   unsigned char md[32];
+   unsigned int md_n = 0;
+   int ok = issuer && issuer[0] && strlen(issuer) < sizeof(out->issuer) && serial && serial[0] &&
+            strlen(serial) < sizeof(out->serial_norm) &&
+            X509_digest(cert, EVP_sha256(), md, &md_n) == 1 && md_n == 32;
+   if (ok)
+   {
+      snprintf(out->issuer, sizeof(out->issuer), "%s", issuer);
+      for (size_t i = 0; serial[i]; ++i)
+         out->serial_norm[i] = (char)tolower((unsigned char)serial[i]);
+      for (size_t i = 0; i < sizeof(md); ++i)
+         snprintf(out->fingerprint + i * 2, 3, "%02x", md[i]);
+      out->fingerprint[64] = 0;
+   }
+   OPENSSL_free(serial);
+   OPENSSL_free(issuer);
+   BN_free(bn);
+   if (!ok)
+      memset(out, 0, sizeof(*out));
+   return ok;
+}
+
 static SSL *tls_accept_with_ssl(int fd, SSL *ssl)
 {
    if (fd < 0 || !ssl)

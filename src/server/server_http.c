@@ -1581,7 +1581,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
         (server_http_management_health_route(method, path) &&
          !server_http_management_framing_valid(method, path, buf, management_header_len)) ||
         (server_http_management_action_route(method, path) &&
-         !server_http_management_action_framing_valid(method, path, buf, management_header_len))))
+         !server_http_management_action_framing_valid(method, path, buf, management_header_len)) ||
+        (server_http_management_read_route(method, path) &&
+         !server_http_management_read_framing_valid(method, path, buf, management_header_len))))
    {
       send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
       return;
