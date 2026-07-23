@@ -7482,6 +7482,24 @@ BEGIN
     UNION ALL
       SELECT 'aimee_org_teams'::text, NULL::bigint, NULL::text, NULL::text,
              COUNT(*)::numeric FROM kb_team
+    -- P7-witness-e2: NUMBERS ONLY on the metrics surface (never evidence bytes,
+    -- roots or signatures — those ride the log path). These are the locally
+    -- measurable health signals: how much evidence exists, how many shards, the
+    -- latest signed checkpoint and how stale it is. A growing checkpoint age is
+    -- the operator's cue that new signed roots have stopped.
+    UNION ALL
+      SELECT 'aimee_org_witness_evidence_records'::text, NULL::bigint, NULL::text, NULL::text,
+             COUNT(*)::numeric FROM kb_vault_witness_log
+    UNION ALL
+      SELECT 'aimee_org_witness_shards'::text, NULL::bigint, NULL::text, NULL::text,
+             COUNT(*)::numeric FROM kb_vault_witness_shard WHERE seq > 0
+    UNION ALL
+      SELECT 'aimee_org_witness_checkpoint_seq'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(MAX(cp.seq),0)::numeric FROM kb_vault_witness_checkpoint cp
+    UNION ALL
+      SELECT 'aimee_org_witness_checkpoint_age_seconds'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(cp.created_at)::timestamp)),0)::numeric
+        FROM kb_vault_witness_checkpoint cp
     ORDER BY 1, 2 NULLS FIRST, 3 NULLS FIRST;
 END; $$;
 
