@@ -36,8 +36,8 @@ int wfe_is_shell_tool(const char *tool_name)
 
 static int name_is_web_tool(const char *tool_name)
 {
-   static const char *const web[] = {"webfetch", "websearch", "web_fetch",   "web_search",
-                                     "fetch",    "browse",    "http_request"};
+   static const char *const web[] = {"webfetch", "websearch",    "web_fetch", "web_search", "fetch",
+                                     "browse",   "http_request", "web_read",  "webread"};
    for (size_t i = 0; i < sizeof(web) / sizeof(web[0]); i++)
       if (eq_ci(tool_name, web[i]))
          return 1;

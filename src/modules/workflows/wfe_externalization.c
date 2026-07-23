@@ -38,11 +38,12 @@ static int eq_ci(const char *a, const char *b)
 
 /* Exact/canonical externalization tool names. Extend only with review. */
 static const char *DENY_EXACT[] = {
-    "pr.open",      "pr_open",  "propose_pr",   "open_pr", "merge",
-    "pr.merge",     "git_push", "git-push",     "push",    "gh_pr",
-    "web_fetch",    "webfetch", "fetch",        "http",    "http_request",
-    "curl",         "wget",     "send_email",   "email",   "notify",
-    "notification", "slack",    "post_comment", "comment", NULL};
+    "pr.open",   "pr_open",  "propose_pr",   "open_pr", "merge",
+    "pr.merge",  "git_push", "git-push",     "push",    "gh_pr",
+    "web_fetch", "webfetch", "fetch",        "http",    "http_request",
+    "web_read",  "webread",  "curl",         "wget",    "send_email",
+    "email",     "notify",   "notification", "slack",   "post_comment",
+    "comment",   NULL};
 
 /* Substrings that mark an externalizing action regardless of surrounding name
  * (e.g. an MCP tool `mcp__github__create_pull_request`). Lowercase. */
