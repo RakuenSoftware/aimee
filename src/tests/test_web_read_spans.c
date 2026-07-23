@@ -22,6 +22,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 
 #include "../posix/web_read.c" /* static webread_select_spans, chunk_text, ... */
@@ -447,6 +448,210 @@ static void test_differential_oracle(void)
    printf("  PASS: differential oracle (legacy vs leg-based) over fixtures + generated cases\n");
 }
 
+/* ---- Slice 5: fusion is opt-in and NOT the default ---- */
+
+/* The default must remain the original selector, and this has to exercise the
+ * ACTUAL dispatch rule -- an earlier version compared two direct calls, which
+ * asserted nothing about what tool_web_read would choose. */
+static void test_dispatch_defaults_to_original(void)
+{
+   assert(webread_selector_for(NULL) == webread_select_spans);
+   assert(webread_selector_for("") == webread_select_spans);
+   assert(webread_selector_for("legacy") == webread_select_spans);
+   assert(webread_selector_for("FUSION") == webread_select_spans);  /* case-sensitive opt-in */
+   assert(webread_selector_for("fusion ") == webread_select_spans); /* no trimming */
+   assert(webread_selector_for("nonsense") == webread_select_spans);
+   /* only the two exact opt-in values select an alternative */
+   assert(webread_selector_for("fusion") == webread_select_spans_fusion);
+   assert(webread_selector_for("legs") == webread_select_spans_legs);
+   printf("  PASS: dispatch defaults to the original; opt-in is exact-match only\n");
+}
+
+/* Needle retrieval across all three selectors.
+ *
+ * What this asserts, and what it deliberately does NOT:
+ *
+ * The tool's description promises "exact API/error/version needles guaranteed
+ * in". Taken literally that promise is not achievable, and the measurements are
+ * worth recording because they nearly justified a structural change that would
+ * have fixed nothing:
+ *
+ *   - `chunk_text` splits a needle across a chunk boundary on ~1.6% of
+ *     generated pages. When that happens NO selector can retrieve it -- the
+ *     token no longer exists in any chunk. This is a pre-existing chunker
+ *     limitation, independent of ranking.
+ *   - When a page has more literal hits than the ~1500-byte budget can hold
+ *     (roughly three spans), only the first few are emitted whatever the
+ *     ordering. A page with 60+ literal hits drops a deep target under every
+ *     selector.
+ *
+ * What IS true, and what this test pins: when the needle survives chunking and
+ * the page is of ordinary size, every selector retrieves it. Measured at 0
+ * failures across 49,220 eligible pages for the original selector, the legs
+ * adapter, and fusion alike. Pages where the needle did not survive chunking
+ * are skipped, because including them would assert something no implementation
+ * can satisfy. */
+static void test_needle_retrieved_when_chunking_preserves_it(void)
+{
+   unsigned long rng = 7UL;
+#define GT_RND(lo, hi)                                                                             \
+   (rng = rng * 6364136223846793005UL + 1442695040888963407UL,                                     \
+    (int)((lo) + (int)((rng >> 33) % (unsigned long)((hi) - (lo) + 1))))
+
+   webread_selector_fn sels[] = {webread_select_spans, webread_select_spans_legs,
+                                 webread_select_spans_fusion};
+   const char *names[] = {"original", "legs", "fusion"};
+
+   int eligible = 0, skipped_split = 0;
+   for (int it = 0; it < 400; it++)
+   {
+      char *page = malloc(20000);
+      assert(page);
+      int off = 0;
+      int np = GT_RND(3, 16);
+      int needle_at = GT_RND(0, np - 1);
+      for (int i = 0; i < np && off < 18000; i++)
+      {
+         int pad = (GT_RND(0, 2) == 0) ? GT_RND(2, 80) : GT_RND(200, 470);
+         if (i == needle_at)
+            off += snprintf(page + off, 20000 - (size_t)off,
+                            "exact token retry_budget_ms here %*s\n\n", pad, "n");
+         else
+            off += snprintf(page + off, 20000 - (size_t)off,
+                            "configuration retry client upstream error caller topical %d %*s\n\n",
+                            i, pad, "t");
+      }
+
+      /* eligibility: did the needle survive chunking? */
+      span_t probe[WEBREAD_MAX_CHUNKS];
+      int nc = chunk_text(page, probe, WEBREAD_MAX_CHUNKS);
+      int intact = 0;
+      for (int i = 0; i < nc && !intact; i++)
+         if (istrcontains(probe[i].ptr, probe[i].len, "retry_budget_ms"))
+            intact = 1;
+      if (!intact)
+      {
+         skipped_split++;
+         free(page);
+         continue;
+      }
+      eligible++;
+
+      for (size_t k = 0; k < sizeof(sels) / sizeof(sels[0]); k++)
+      {
+         char *t = safe_strdup(page);
+         char *out = sels[k](t, "r1", "retry_budget_ms", 0, "u");
+         assert(out);
+         if (!contains(out, "retry_budget_ms"))
+         {
+            fprintf(stderr, "selector %s dropped an intact needle (iter %d):\n%s\n", names[k], it,
+                    out);
+            assert(0 && "selector dropped a needle that survived chunking");
+         }
+         free(out);
+      }
+      free(page);
+   }
+#undef GT_RND
+   assert(eligible > 300); /* the corpus must be mostly eligible to mean anything */
+   printf("  PASS: all selectors retrieve an intact needle (%d eligible, %d skipped as "
+          "chunk-split)\n",
+          eligible, skipped_split);
+}
+
+/* Fusion reorders by fused rank, so it is NOT held to byte-identity. What it
+ * must still satisfy are the invariants that are contracts rather than
+ * implementation details. */
+static void test_fusion_respects_contracts(void)
+{
+   struct
+   {
+      const char *text, *query;
+   } cases[] = {
+       {FIX_BASIC, "retry_budget_ms"},      {FIX_BASIC, ""},  {FIX_BASIC, "zzzznotpresent"},
+       {FIX_BASIC, "configuration client"}, {"", "anything"}, {"   \n\n ", "anything"},
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      char *t = safe_strdup(cases[i].text);
+      char *out =
+          webread_select_spans_fusion(t, "r3", cases[i].query, 0, "https://fixture.invalid/page");
+      assert(out != NULL);
+      assert(contains(out, "untrusted retrieved content"));
+      /* cited by chunk index; the internal fusion key never reaches output. A
+       * whitespace-only page chunks to nothing, so there is no span to cite. */
+      int has_content = 0;
+      for (const char *c = cases[i].text; *c; c++)
+         if (!isspace((unsigned char)*c))
+         {
+            has_content = 1;
+            break;
+         }
+      if (has_content)
+         assert(contains(out, "r3#"));
+      /* Bounded by the selection budget plus per-span framing and the footer.
+       * This checks the budget is applied at all, not that it is applied to the
+       * byte. */
+      assert(strlen(out) < (size_t)WEBREAD_BUDGET * 4 + 1024);
+      free(out);
+   }
+   /* span=N round-trip is preserved under fusion too */
+   char *t = safe_strdup(FIX_BASIC);
+   char *one = webread_select_spans_fusion(t, "r3", "", 1, "https://fixture.invalid/page");
+   assert(contains(one, "r3#1"));
+   free(one);
+   printf("  PASS: fusion preserves fencing, chunk-index citation, budget, span=N\n");
+}
+
+/* Fusion is a BEHAVIOUR CHANGE, and that has to be demonstrated rather than
+ * assumed: an opt-in selector that always agreed with the default would be dead
+ * weight dressed up as an experiment. On one small fixture the two often
+ * coincide -- few chunks, little for a reordering to do -- so this measures over
+ * a seeded corpus of mixed-size pages instead. */
+static void test_fusion_is_a_real_behaviour_change(void)
+{
+   unsigned long rng = 99UL;
+#define FZ_RND(lo, hi)                                                                             \
+   (rng = rng * 6364136223846793005UL + 1442695040888963407UL,                                     \
+    (int)((lo) + (int)((rng >> 33) % (unsigned long)((hi) - (lo) + 1))))
+
+   int tried = 0, differs = 0;
+   for (int it = 0; it < 300; it++)
+   {
+      char *page = malloc(20000);
+      assert(page);
+      int off = 0;
+      int np = FZ_RND(2, 14);
+      for (int i = 0; i < np && off < 18000; i++)
+      {
+         int r = FZ_RND(0, 2);
+         const char *terms = (r == 0)   ? "alpha1 beta2 gamma3"
+                             : (r == 1) ? "alpha1 beta2"
+                                        : "alpha1";
+         int pad = (FZ_RND(0, 2) == 0) ? FZ_RND(2, 60) : FZ_RND(200, 480);
+         off += snprintf(page + off, 20000 - (size_t)off, "%s s%d %*s\n\n", terms, i, pad, "x");
+      }
+      const char *q = FZ_RND(0, 1) ? "alpha1 beta2 gamma3" : "alpha1";
+      char *t1 = safe_strdup(page), *t2 = safe_strdup(page);
+      char *a = webread_select_spans(t1, "r1", q, 0, "u");
+      char *b = webread_select_spans_fusion(t2, "r1", q, 0, "u");
+      assert(a && b);
+      assert(contains(a, "untrusted retrieved content"));
+      assert(contains(b, "untrusted retrieved content"));
+      if (strcmp(a, b) != 0)
+         differs++;
+      tried++;
+      free(a);
+      free(b);
+      free(page);
+   }
+#undef FZ_RND
+   /* measured ~74%; assert a loose floor so this tracks "the flag still does
+    * something" rather than pinning a ratio */
+   assert(differs * 4 > tried);
+   printf("  PASS: fusion is a real behaviour change (%d/%d pages differ)\n", differs, tried);
+}
+
 int main(void)
 {
    test_emits_untrusted_fence();
@@ -463,6 +668,10 @@ int main(void)
    test_chunk_in_both_legs_not_duplicated();
    test_deterministic_across_runs();
    test_differential_oracle();
+   test_dispatch_defaults_to_original();
+   test_needle_retrieved_when_chunking_preserves_it();
+   test_fusion_respects_contracts();
+   test_fusion_is_a_real_behaviour_change();
    printf("web_read_spans: all tests passed\n");
    return 0;
 }

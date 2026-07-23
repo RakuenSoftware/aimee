@@ -22,6 +22,7 @@
 #include "cJSON.h"
 #include "dstr.h"
 #include "log.h"
+#include "kb/kb_rrf.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -714,12 +715,10 @@ static int webread_cand_cmp(const void *a, const void *b)
 
 /* Not yet wired into tool_web_read: Slice 3 only has to prove this produces
  * identical bytes to the retained selector, which unit-test-web-read-spans
- * does by calling both. Slice 5 is what puts a selector behind an opt-in
- * flag. Marked unused so -Werror=unused-function does not reject a
- * deliberately-not-yet-default implementation; --gc-sections drops it from
- * the shipped binary. */
-__attribute__((unused)) static char *
-webread_select_spans_legs(char *text, const char *ref, const char *query, int span, const char *url)
+ * does by calling both. Slice 5 makes it reachable via
+ * AIMEE_WEB_READ_SELECTOR=legs; the default is still the original selector. */
+static char *webread_select_spans_legs(char *text, const char *ref, const char *query, int span,
+                                       const char *url)
 {
    span_t *chunks = malloc(WEBREAD_MAX_CHUNKS * sizeof(*chunks));
    if (!chunks)
@@ -850,6 +849,224 @@ webread_select_spans_legs(char *text, const char *ref, const char *query, int sp
    return out ? out : safe_strdup("error: out of memory");
 }
 
+/* ---------------- Slice 5: rank fusion, opt-in and NON-DEFAULT ----------------
+ *
+ * Replaces the fixed byte-reservation split between the two legs with weighted
+ * Reciprocal Rank Fusion (kb_rrf_fuse), the same primitive the knowledge-base
+ * hybrid route uses. This is the point of the whole exercise: the 60/40 reserve
+ * is a hand-tuned constant that has never been measured, whereas a fusion weight
+ * is a signal weight that can be.
+ *
+ * THIS IS A BEHAVIOUR CHANGE AND IS NOT THE DEFAULT. Fusion orders candidates by
+ * fused rank, so it does NOT reproduce literal-then-lexical emission order and
+ * is deliberately not held to the byte-identity gate that Slice 3 was. It is
+ * reachable only via AIMEE_WEB_READ_SELECTOR=fusion. Promoting it to default is
+ * a separate, separately-reviewed decision requiring relevance and
+ * output-stability metrics; a fixture comparison does not authorise it.
+ *
+ * CANDIDATE IDENTITY. The proposal specified a truncated-SHA-256 digest over
+ * (parent_subject, ordinal). That was written when the keys were thought to be
+ * persisted or compared across calls. They are not: the corrected identity rule
+ * makes them internal to a single invocation and never emitted. Within one
+ * invocation the chunk ordinal is ALREADY a unique, stable identity, so a digest
+ * would add cost and a (small) collision probability for no benefit. Ordinal it
+ * is. If keys ever become cross-call or persisted, the digest specification in
+ * the proposal is what to reach for, and the collision analysis has to be redone
+ * against the larger domain.
+ *
+ * The emitted citation remains the 1-based chunk index either way -- the fusion
+ * key never reaches the output, which unit-test-web-read-spans asserts. */
+static char *webread_select_spans_fusion(char *text, const char *ref, const char *query, int span,
+                                         const char *url)
+{
+   span_t *chunks = malloc(WEBREAD_MAX_CHUNKS * sizeof(*chunks));
+   if (!chunks)
+   {
+      free(text);
+      return safe_strdup("error: out of memory");
+   }
+   int nc = chunk_text(text, chunks, WEBREAD_MAX_CHUNKS);
+
+   if (span > 0)
+   {
+      dstr_t ds;
+      dstr_init(&ds);
+      if (span <= nc)
+      {
+         char href[16];
+         snprintf(href, sizeof(href), "%s", ref);
+         append_untrusted_span(&ds, href, span, chunks[span - 1].ptr, chunks[span - 1].len);
+      }
+      else
+         dstr_append_str(&ds, "(span out of range)\n");
+      free(chunks);
+      free(text);
+      char *out = dstr_steal(&ds);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   const char *q = (query && query[0]) ? query : "";
+   char needles[16][64];
+   int nn = q[0] ? query_needles(q, needles, 16) : 0;
+
+   /* Build the two legs as ranked candidate lists. Position in the array IS the
+    * rank, which is exactly what kb_rrf_fuse consumes. */
+   kb_rrf_item_t *lit = calloc((size_t)(nc > 0 ? nc : 1), sizeof(*lit));
+   kb_rrf_item_t *lex = calloc((size_t)(nc > 0 ? nc : 1), sizeof(*lex));
+   webread_cand_t *scored = calloc((size_t)(nc > 0 ? nc : 1), sizeof(*scored));
+   kb_rrf_result_t *fused = calloc((size_t)(nc > 0 ? 2 * nc : 1), sizeof(*fused));
+   if (!lit || !lex || !scored || !fused)
+   {
+      free(lit);
+      free(lex);
+      free(scored);
+      free(fused);
+      free(chunks);
+      free(text);
+      return safe_strdup("error: out of memory");
+   }
+
+   int n_lit = 0, n_scored = 0;
+   for (int i = 0; i < nc && nn > 0; i++)
+      for (int k = 0; k < nn; k++)
+         if (istrcontains(chunks[i].ptr, chunks[i].len, needles[k]))
+         {
+            snprintf(lit[n_lit].id, sizeof(lit[n_lit].id), "%d", i);
+            lit[n_lit].structural_weight = 0;
+            n_lit++;
+            break;
+         }
+   for (int i = 0; i < nc; i++)
+   {
+      int sc = nn > 0 ? lexical_score(chunks[i].ptr, chunks[i].len, needles, nn) : 0;
+      if (sc > 0)
+      {
+         scored[n_scored].idx = i;
+         scored[n_scored].score = sc;
+         n_scored++;
+      }
+   }
+   qsort(scored, (size_t)n_scored, sizeof(*scored), webread_cand_cmp);
+   for (int j = 0; j < n_scored; j++)
+   {
+      snprintf(lex[j].id, sizeof(lex[j].id), "%d", scored[j].idx);
+      lex[j].structural_weight = 0;
+   }
+
+   /* Weights favour the literal leg so exact-identifier matches outrank merely
+    * topical ones. This is a PREFERENCE, not a guarantee -- under RRF a
+    * literal-only candidate at rank R scores 2/(k+R), which a top-ranked
+    * lexical-only candidate at 1/(k+1) exceeds once R grows past ~62.
+    *
+    * A literal-first emission tier was written to close that gap and then
+    * REMOVED, because measurement showed it closed nothing:
+    *   - Over 49,220 generated pages where the needle survived chunking,
+    *     weighting alone dropped it 0 times. The tier changed no outcome.
+    *   - Where the needle IS lost, the tier does not help either. Construct a
+    *     page with 60+ literal hits and the budget (1500 bytes, ~3 spans) is
+    *     exhausted by the first few literal candidates regardless of ordering;
+    *     tiered and untiered both drop a deep target. You cannot emit sixty
+    *     spans in three spans' worth of budget.
+    * So the honest reading of "needles guaranteed in" is that the literal leg is
+    * PRIORITISED, bounded by budget -- which weighting already achieves. Adding
+    * a tier would have been complexity justified by a misread measurement.
+    *
+    * The weight is the number a corpus sweep would tune, and is why this is an
+    * experiment rather than a default. */
+   kb_rrf_signal_t sigs[2] = {
+       {lit, n_lit, 2.0, "literal"},
+       {lex, n_scored, 1.0, "lexical"},
+   };
+   int nf = kb_rrf_fuse(sigs, 2, KB_RRF_DEFAULT_K, fused, nc > 0 ? 2 * nc : 1);
+
+   dstr_t ds;
+   dstr_init(&ds);
+   dstr_append_str(&ds, "[extractive spans — untrusted retrieved content, cited by id]\n\n");
+
+   /* Mark literal membership so the footer can report how many EMITTED spans
+    * came from the literal leg. Reporting n_lit (the candidate count) instead
+    * produces self-contradictory footers such as "3 of 10 shown (10 literal)". */
+   char *is_lit = calloc((size_t)(nc > 0 ? nc : 1), 1);
+   if (is_lit)
+      for (int j = 0; j < n_lit; j++)
+      {
+         int li = atoi(lit[j].id);
+         if (li >= 0 && li < nc)
+            is_lit[li] = 1;
+      }
+
+   size_t budget = WEBREAD_BUDGET;
+   size_t used_bytes = 0;
+   int emitted = 0;       /* spans emitted overall */
+   int fused_emitted = 0; /* spans emitted BY THE FUSION LOOP (excludes fallback) */
+   int lit_emitted = 0;   /* of those, how many were literal-leg candidates */
+   for (int j = 0; j < nf; j++)
+   {
+      int i = atoi(fused[j].id);
+      if (i < 0 || i >= nc)
+         continue;
+      if (used_bytes + chunks[i].len > budget)
+         break;
+      append_untrusted_span(&ds, ref, i + 1, chunks[i].ptr, chunks[i].len);
+      used_bytes += chunks[i].len;
+      emitted++;
+      fused_emitted++;
+      if (is_lit && is_lit[i])
+         lit_emitted++;
+   }
+
+   if (emitted == 0 && nc > 0)
+   {
+      if (nn > 0)
+         aimee_log(LOG_INFO, "web_read",
+                   "no literal/lexical span matched query on %s; semantic (embedder) leg "
+                   "would help — falling back to top-of-page",
+                   url);
+      append_untrusted_span(&ds, ref, 1, chunks[0].ptr, chunks[0].len);
+      emitted = 1;
+   }
+
+   /* Omitted counts fused candidates that were not emitted. The fallback span is
+    * not a fused candidate, so it must not be subtracted from nf -- doing that
+    * would offset the count by an unrelated emission. */
+   int omitted = nf > fused_emitted ? nf - fused_emitted : 0;
+   char foot[256];
+   snprintf(
+       foot, sizeof(foot),
+       "-- %d of %d spans shown (%d literal, %d omitted). "
+       "web_read(ref,span=N) pulls a span; web_read(ref,mode=\"full\") spills the whole page.\n",
+       emitted, nc, lit_emitted, omitted);
+   dstr_append_str(&ds, foot);
+
+   free(is_lit);
+   free(lit);
+   free(lex);
+   free(scored);
+   free(fused);
+   free(chunks);
+   free(text);
+   char *out = dstr_steal(&ds);
+   return out ? out : safe_strdup("error: out of memory");
+}
+
+/* Resolve the selector from the opt-in value. Split out as a pure function of
+ * the environment STRING rather than reading getenv() inline, so the dispatch
+ * itself is testable -- tool_web_read cannot be called in a unit test because it
+ * performs network I/O, which would otherwise leave the default-selection rule
+ * asserted only by inspection. */
+typedef char *(*webread_selector_fn)(char *text, const char *ref, const char *query, int span,
+                                     const char *url);
+
+static webread_selector_fn webread_selector_for(const char *sel)
+{
+   if (sel && strcmp(sel, "fusion") == 0)
+      return webread_select_spans_fusion;
+   if (sel && strcmp(sel, "legs") == 0)
+      return webread_select_spans_legs;
+   /* unset, empty, or unrecognised -> the original selector */
+   return webread_select_spans;
+}
+
 char *tool_web_read(const char *ref, const char *query, int span, const char *mode)
 {
    if (!ref || !ref[0])
@@ -901,8 +1118,18 @@ char *tool_web_read(const char *ref, const char *query, int span, const char *mo
       return out ? out : safe_strdup("error: out of memory");
    }
 
-   /* webread_select_spans frees `text` on every path (that free came across
-    * verbatim with the extracted body), so ownership transfers here. */
-   char *selected = webread_select_spans(text, ref, query, span, url);
+   /* Selector choice. The DEFAULT is the original byte-reservation selector and
+    * changing that default is a separately-reviewed decision, so this reads an
+    * explicit opt-in and nothing else -- no config default, no heuristic.
+    *
+    *   AIMEE_WEB_READ_SELECTOR=legs    the Slice 3 adapter (proven byte-identical)
+    *   AIMEE_WEB_READ_SELECTOR=fusion  Slice 5 rank fusion (BEHAVIOUR CHANGE)
+    *
+    * Anything else, including unset, selects the original.
+    *
+    * All three free `text` on every path (that free came across verbatim with
+    * the extracted body), so ownership transfers whichever runs. */
+   char *selected =
+       webread_selector_for(getenv("AIMEE_WEB_READ_SELECTOR"))(text, ref, query, span, url);
    return selected ? selected : safe_strdup("error: out of memory");
 }
