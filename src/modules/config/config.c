@@ -381,7 +381,7 @@ static const config_schema_entry_t config_schema[] = {
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
     {"modules", SCHEMA_OBJECT, 0},    /* memory/governance/delegates/workflows/economizer toggles */
-    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|proof_gated} */
+    {"economizer", SCHEMA_OBJECT, 0}, /* {mode: off|safe|aggressive} */
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"prompt_tier", SCHEMA_STRING, 0},
@@ -612,9 +612,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   /* Context economizer defaults OFF. proof_gated freezes pristine provider bytes
-    * behind the signed-empty-registry fence; no legacy reduction lever is live. */
-   cfg->economizer_mode = ECON_MODE_OFF;
+   /* SAFE is useful without provider-specific pricing guesses: it only compacts
+    * strict JSON returned by a local tool before that result's first dispatch. */
+   cfg->economizer_mode = ECON_MODE_SAFE;
    /* Pluggable-module toggles default to -1 (unspecified) so the resolver falls back to each
     * module's deprecated env toggle / default-ON until an operator writes the `modules:` block. */
    cfg->module_memory = -1;
@@ -988,15 +988,26 @@ int econ_mode(const config_t *cfg)
 
 const char *econ_mode_name(int mode)
 {
-   return mode == ECON_MODE_PROOF_GATED ? "proof_gated" : "off";
+   switch (mode)
+   {
+   case ECON_MODE_OFF:
+      return "off";
+   case ECON_MODE_AGGRESSIVE:
+      return "aggressive";
+   case ECON_MODE_SAFE:
+   default:
+      return "safe";
+   }
 }
 
 int econ_mode_parse(const char *s)
 {
-   if (s && strcmp(s, "off") == 0)
+   if (s && strcasecmp(s, "off") == 0)
       return ECON_MODE_OFF;
-   if (s && strcmp(s, "proof_gated") == 0)
-      return ECON_MODE_PROOF_GATED;
+   if (s && strcasecmp(s, "safe") == 0)
+      return ECON_MODE_SAFE;
+   if (s && strcasecmp(s, "aggressive") == 0)
+      return ECON_MODE_AGGRESSIVE;
    return -1;
 }
 
@@ -1031,8 +1042,7 @@ int guardrails_semantic_mode_parse(const char *s)
 
 int econ_reduction_master_on(const config_t *cfg)
 {
-   (void)cfg;
-   return 0;
+   return econ_mode(cfg) != ECON_MODE_OFF;
 }
 
 int config_module_enabled(int config_tristate, int env_default)
@@ -1047,8 +1057,7 @@ int config_module_enabled(int config_tristate, int env_default)
 
 int econ_gateway_mutate_on(const config_t *cfg)
 {
-   (void)cfg;
-   return 0;
+   return econ_mode(cfg) == ECON_MODE_AGGRESSIVE;
 }
 
 void econ_preset(const config_t *cfg, econ_preset_t *out)
@@ -1056,7 +1065,19 @@ void econ_preset(const config_t *cfg, econ_preset_t *out)
    if (!out)
       return;
    memset(out, 0, sizeof *out);
-   (void)cfg;
+   int mode = econ_mode(cfg);
+   if (mode == ECON_MODE_OFF)
+      return;
+   out->json_compact = 1;
+   if (mode == ECON_MODE_AGGRESSIVE)
+   {
+      out->history_fold = 1;
+      out->compress = 1;
+      out->command_filter = 1;
+      out->freeze_guard_horizon = 1;
+      out->gateway_seam = 1;
+      out->gateway_session_disable_ttl_ms = 3600000;
+   }
 }
 
 static int config_snapshot_live(void);

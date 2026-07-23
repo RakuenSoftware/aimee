@@ -23,14 +23,14 @@ static void probe_reapplier(const config_t *o, const config_t *n)
    atomic_fetch_add_explicit(&g_reapply_calls, 1, memory_order_relaxed);
 }
 
-/* Author a config file with a MARKER PAIR (proof_gated, budget) via config_save so reload
+/* Author a config file with a MARKER PAIR (safe, budget) via config_save so reload
  * observes a real change. The pair is what the torn-read check keys on. */
-static void write_marker(int proof_gated, int budget)
+static void write_marker(int safe, int budget)
 {
    static config_t c;
    memset(&c, 0, sizeof c);
    config_load(&c);
-   c.economizer_mode = proof_gated ? ECON_MODE_PROOF_GATED : ECON_MODE_OFF;
+   c.economizer_mode = safe ? ECON_MODE_SAFE : ECON_MODE_OFF;
    c.coord_closet_budget_bytes = budget;
    assert(config_save(&c) == 0);
 }
@@ -143,7 +143,7 @@ static config_t snapshot_image(int marker)
 {
    config_t image;
    assert(config_snapshot_get(&image) == 0);
-   image.economizer_mode = marker & 1 ? ECON_MODE_PROOF_GATED : ECON_MODE_OFF;
+   image.economizer_mode = marker & 1 ? ECON_MODE_SAFE : ECON_MODE_OFF;
    image.coord_closet_budget_bytes = marker * 1009;
    image.autonomy_max_turns = marker * 17;
    image.server_api_rate_limit_per_min = marker * 31;
@@ -151,7 +151,7 @@ static config_t snapshot_image(int marker)
    return image;
 }
 
-/* The two configs are {proof_gated,budget=1111} and {off,budget=2222};
+/* The two configs are {safe,budget=1111} and {off,budget=2222};
  * a reader must never observe a mismatched pair (that would be a torn cross-slot read). */
 static void *reader_thread(void *arg)
 {
@@ -162,7 +162,7 @@ static void *reader_thread(void *arg)
       if (config_snapshot_get(&c) != 0)
          continue;
       atomic_fetch_add_explicit(&g_reads, 1, memory_order_relaxed);
-      int a = (c.economizer_mode == ECON_MODE_PROOF_GATED && c.coord_closet_budget_bytes == 1111);
+      int a = (c.economizer_mode == ECON_MODE_SAFE && c.coord_closet_budget_bytes == 1111);
       int b = (c.economizer_mode == ECON_MODE_OFF && c.coord_closet_budget_bytes == 2222);
       if (!a && !b)
          atomic_fetch_add_explicit(&g_torn, 1, memory_order_relaxed);
@@ -196,7 +196,7 @@ int main(void)
       config_snapshot_init(&c0);
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_mode == ECON_MODE_PROOF_GATED);
+      assert(got.economizer_mode == ECON_MODE_SAFE);
       assert(got.coord_closet_budget_bytes == 1111);
    }
 
@@ -219,10 +219,10 @@ int main(void)
    {
       config_reload_register_reapplier(probe_reapplier);
       int before = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
-      write_marker(1, 1111); /* change back to proof_gated */
+      write_marker(1, 1111); /* change back to safe */
       assert(config_reload() == 1);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == before + 1);
-      assert(g_last_mode == ECON_MODE_PROOF_GATED); /* re-applier saw the NEW value */
+      assert(g_last_mode == ECON_MODE_SAFE); /* re-applier saw the NEW value */
       /* a no-op reload does NOT fire the re-applier */
       int mid = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
       assert(config_reload() == 0);

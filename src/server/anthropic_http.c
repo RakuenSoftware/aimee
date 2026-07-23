@@ -23,6 +23,8 @@
 #include "cJSON.h"
 #include "delegate_driver.h"
 #include "economizer_wire_snapshot.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
 #include "gw_stage_memory.h"
@@ -443,8 +445,11 @@ static int messages_buffered(const char *body, char *resp, int cap)
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
    econ_wire_snapshot_t *wire_snapshot = NULL;
+   gw_mutate_ctx_t gwmc;
    int status, http_status, rc;
    const char *model;
+
+   gw_mutate_ctx_init(&gwmc);
 
    if (!req)
       return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
@@ -481,6 +486,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
+   /* Only AGGRESSIVE and only an OpenAI-family upstream. Native Anthropic
+    * requests keep the client's exact cache prefix and cache_control layout. */
+   if (gw_mutate_upstream_ok(parity))
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
+
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -511,12 +526,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
                                          responses_wire);
    const char *pristine_body = prov_body ? prov_body : "{}";
    config_t econ_cfg;
-   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
    econ_wire_bytes_t wire_body;
-   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                         &wire_snapshot, &wire_body) != 0)
    {
       status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
@@ -603,6 +618,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
 cleanup:
    econ_wire_snapshot_destroy(wire_snapshot);
+   gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
    free(response);
@@ -1070,8 +1086,11 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    int input_est;
    int responses_wire = 0;
    econ_wire_snapshot_t *wire_snapshot = NULL;
+   gw_mutate_ctx_t gwmc;
    const void *wire_prov_body = NULL;
    size_t wire_prov_body_len = 0;
+
+   gw_mutate_ctx_init(&gwmc);
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
@@ -1112,6 +1131,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
+
+   if (gw_mutate_upstream_ok(parity))
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
 
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
@@ -1176,12 +1203,12 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    const char *pristine_body = prov_body ? prov_body : "{}";
    config_t econ_cfg;
-   int proof_gated = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
    econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
                                   : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
                                                    : ECON_WIRE_OPENAI_CHAT;
    econ_wire_bytes_t wire_body;
-   if (econ_wire_select(proof_gated, wire_route, pristine_body, strlen(pristine_body),
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
                         &wire_snapshot, &wire_body) != 0)
    {
       xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
@@ -1232,6 +1259,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                          input_est, emit, ctx);
 cleanup:
    econ_wire_snapshot_destroy(wire_snapshot);
+   gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);
    cJSON_Delete(messages);

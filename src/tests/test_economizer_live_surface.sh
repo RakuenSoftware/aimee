@@ -7,19 +7,6 @@ fail()
     exit 1
 }
 
-live_sources="posix server"
-legacy_calls='context_reduce[[:space:]]*\(|tool_condense_apply[[:space:]]*\(|build_fold_view[[:space:]]*\(|agent_compress_tool_result[[:space:]]*\('
-if grep -R -n -E "$legacy_calls" $live_sources |
-    grep -v '^server/agent_policy.c:[0-9][0-9]*:char \*agent_compress_tool_result' >/dev/null; then
-    grep -R -n -E "$legacy_calls" $live_sources |
-        grep -v '^server/agent_policy.c:[0-9][0-9]*:char \*agent_compress_tool_result' >&2
-    fail "legacy reducer remains reachable from a production request source"
-fi
-
-if grep -n 'modules/economizer/gateway_mutate_wire.c' Makefile >/dev/null; then
-    fail "legacy gateway mutation remains linked into production"
-fi
-
 if grep -R -n 'aimee_backend_anthropic_set_cache_enabled' headers server posix >/dev/null; then
     fail "economizer still controls Anthropic cache decoration"
 fi
@@ -28,12 +15,25 @@ for source in posix/agent_runtime.c server/openai_chat.c server/anthropic_http.c
     grep -q 'econ_wire_select' "$source" || fail "$source bypasses the wire snapshot selector"
 done
 
-# Activation machinery may ship, but the production registry is still empty.
-# No live request path may construct or consume a candidate before a separately
-# reviewed provider tuple is signed.
-if grep -R -n -E 'econ_json_compact[[:space:]]*\(|econ_provenance_issue_local[[:space:]]*\(|econ_dispatch_lease_begin[[:space:]]*\(' $live_sources >/dev/null; then
-    grep -R -n -E 'econ_json_compact[[:space:]]*\(|econ_provenance_issue_local[[:space:]]*\(|econ_dispatch_lease_begin[[:space:]]*\(' $live_sources >&2
-    fail "dormant activation machinery is reachable from a production request source"
+# SAFE has exactly one live transform: strict JSON compaction at the fresh local
+# tool-result boundary. Lossy history mutation must remain behind AGGRESSIVE.
+grep -q 'agent_economize_fresh_tool_result(result_str)' posix/agent_runtime.c ||
+    fail "fresh tool output does not pass through the safe compactor"
+grep -q 'preset.json_compact' posix/agent_runtime.c ||
+    fail "safe JSON compaction is not controlled by its preset"
+grep -q '!anthropic && (preset.history_fold || preset.compress)' posix/agent_runtime.c ||
+    fail "agent history reduction is not gated to aggressive OpenAI-family routes"
+grep -q 'gw_mutate_upstream_ok(parity)' server/anthropic_http.c ||
+    fail "Anthropic ingress mutation does not preserve native Anthropic prefixes"
+grep -q 'gw_mutate_upstream_ok(upstream_is_anthropic)' server/openai_chat.c ||
+    fail "OpenAI ingress mutation does not exclude Anthropic upstreams"
+
+# The economizer never adds, removes, or moves provider cache controls and does
+# not perform a remote token-counting preflight.
+if grep -n -E 'cache_control|prompt_cache_key|count_tokens' \
+    modules/economizer/gateway_mutate.c modules/economizer/gateway_mutate_wire.c \
+    posix/agent_runtime.c >/dev/null; then
+    fail "economizer controls provider caching or remote token counting"
 fi
 
 grep -q 'http_retry_post_context_bytes' posix/agent_runtime.c ||

@@ -1213,15 +1213,17 @@ int config_save(const config_t *cfg)
  * test does not link the real config.o. */
 const char *econ_mode_name(int mode)
 {
-   return mode == ECON_MODE_PROOF_GATED ? "proof_gated" : "off";
+   return mode == ECON_MODE_AGGRESSIVE ? "aggressive" : mode == ECON_MODE_SAFE ? "safe" : "off";
 }
 
 int econ_mode_parse(const char *s)
 {
    if (s && strcmp(s, "off") == 0)
       return ECON_MODE_OFF;
-   if (s && strcmp(s, "proof_gated") == 0)
-      return ECON_MODE_PROOF_GATED;
+   if (s && strcmp(s, "safe") == 0)
+      return ECON_MODE_SAFE;
+   if (s && strcmp(s, "aggressive") == 0)
+      return ECON_MODE_AGGRESSIVE;
    return -1;
 }
 

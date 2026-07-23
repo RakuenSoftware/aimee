@@ -1,5 +1,5 @@
-/* test_config_economizer.c: the proof-gated economizer control
- * (economizer: {mode: off|proof_gated}) — mode resolution, defaults, and the
+/* test_config_economizer.c: the economizer policy control
+ * (economizer: {mode: off|safe|aggressive}) — mode resolution, defaults, and the
  * save/load round-trip — plus the Coordinate Closet tuning round-trip. Kept
  * separate from test_config.c, which is at the build-integrity line-count limit. */
 #include <assert.h>
@@ -13,8 +13,7 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
-/* Mode resolution: neither public mode enables the disconnected legacy mutation
- * levers. modules.economizer:false is an authoritative hard kill. Pure — no I/O. */
+/* Mode resolution and modules.economizer hard kill. Pure — no I/O. */
 static void test_tier_resolution(void)
 {
    config_t c;
@@ -29,17 +28,26 @@ static void test_tier_resolution(void)
    assert(econ_reduction_master_on(&c) == 0);
    assert(econ_gateway_mutate_on(&c) == 0);
    econ_preset(&c, &ep);
-   assert(ep.history_fold == 0 && ep.command_filter == 0 && ep.compress == 0 &&
-          ep.gateway_seam == 0);
+   assert(ep.json_compact == 0 && ep.history_fold == 0 && ep.command_filter == 0 &&
+          ep.compress == 0 && ep.gateway_seam == 0);
 
-   /* PROOF_GATED authorizes only the new proof path. Old lossy levers remain dead. */
-   c.economizer_mode = ECON_MODE_PROOF_GATED;
-   assert(econ_mode(&c) == ECON_MODE_PROOF_GATED);
-   assert(econ_reduction_master_on(&c) == 0);
+   /* SAFE: only strict fresh-result JSON compaction. */
+   c.economizer_mode = ECON_MODE_SAFE;
+   assert(econ_mode(&c) == ECON_MODE_SAFE);
+   assert(econ_reduction_master_on(&c) == 1);
    assert(econ_gateway_mutate_on(&c) == 0);
    econ_preset(&c, &ep);
-   assert(ep.history_fold == 0 && ep.command_filter == 0 && ep.compress == 0 &&
-          ep.gateway_seam == 0);
+   assert(ep.json_compact == 1 && ep.history_fold == 0 && ep.command_filter == 0 &&
+          ep.compress == 0 && ep.gateway_seam == 0);
+
+   /* AGGRESSIVE: safe compaction plus the lossy reducers. */
+   c.economizer_mode = ECON_MODE_AGGRESSIVE;
+   assert(econ_mode(&c) == ECON_MODE_AGGRESSIVE);
+   assert(econ_reduction_master_on(&c) == 1);
+   assert(econ_gateway_mutate_on(&c) == 1);
+   econ_preset(&c, &ep);
+   assert(ep.json_compact == 1 && ep.history_fold == 1 && ep.command_filter == 1 &&
+          ep.compress == 1 && ep.gateway_seam == 1);
 
    /* modules.economizer:false is an authoritative hard-kill over either mode. */
    c.module_economizer = 0;
@@ -49,17 +57,18 @@ static void test_tier_resolution(void)
    econ_preset(&c, &ep);
    assert(ep.history_fold == 0 && ep.gateway_seam == 0);
 
-   /* The parser is exact and rejects every legacy/unknown spelling. */
+   /* The parser accepts exactly the three public modes, case-insensitively. */
    assert(econ_mode_parse("off") == ECON_MODE_OFF);
-   assert(econ_mode_parse("proof_gated") == ECON_MODE_PROOF_GATED);
-   assert(econ_mode_parse("safe") == -1);
-   assert(econ_mode_parse("aggressive") == -1);
+   assert(econ_mode_parse("safe") == ECON_MODE_SAFE);
+   assert(econ_mode_parse("aggressive") == ECON_MODE_AGGRESSIVE);
    assert(econ_mode_parse("aggro") == -1);
+   assert(econ_mode_parse("proof_gated") == -1);
    assert(econ_mode_parse("bogus") == -1);
-   assert(econ_mode_parse("OFF") == -1);
+   assert(econ_mode_parse("OFF") == ECON_MODE_OFF);
    assert(econ_mode_parse(NULL) == -1);
    assert(strcmp(econ_mode_name(ECON_MODE_OFF), "off") == 0);
-   assert(strcmp(econ_mode_name(ECON_MODE_PROOF_GATED), "proof_gated") == 0);
+   assert(strcmp(econ_mode_name(ECON_MODE_SAFE), "safe") == 0);
+   assert(strcmp(econ_mode_name(ECON_MODE_AGGRESSIVE), "aggressive") == 0);
 
    /* NULL-safe */
    assert(econ_reduction_master_on(NULL) == 0);
@@ -91,11 +100,10 @@ static void test_reload_class(void)
    config_t c;
    memset(&c, 0, sizeof c);
    c.economizer_mode = ECON_MODE_OFF;
-   assert(config_field_set_value(&c, econ, "proof_gated") == 0 &&
-          c.economizer_mode == ECON_MODE_PROOF_GATED);
+   assert(config_field_set_value(&c, econ, "safe") == 0 && c.economizer_mode == ECON_MODE_SAFE);
+   assert(config_field_set_value(&c, econ, "aggressive") == 0 &&
+          c.economizer_mode == ECON_MODE_AGGRESSIVE);
    assert(config_field_set_value(&c, econ, "off") == 0 && c.economizer_mode == ECON_MODE_OFF);
-   assert(config_field_set_value(&c, econ, "safe") == -1);
-   assert(config_field_set_value(&c, econ, "aggressive") == -1);
    assert(config_field_set_value(&c, econ, "bogus") == -1); /* invalid token rejected */
    cJSON *v = config_field_value_json(&c, econ);            /* reads back as a string */
    assert(cJSON_IsString(v) && strcmp(v->valuestring, "off") == 0);
@@ -118,12 +126,12 @@ int main(void)
    platform_unsetenv("AIMEE_HOME");
    platform_setenv("AIMEE_NO_CACHE", "1");
 
-   /* --- defaults: economizer OFF, Coordinate Closet on --- */
+   /* --- defaults: economizer SAFE, Coordinate Closet on --- */
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg); /* missing file -> defaults */
-      assert(cfg.economizer_mode == ECON_MODE_OFF);
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
       assert(cfg.coord_closet_enabled == 1);
    }
 
@@ -132,16 +140,16 @@ int main(void)
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(cfg.economizer_mode == ECON_MODE_OFF);
-      cfg.economizer_mode = ECON_MODE_PROOF_GATED;
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
+      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
       assert(config_save(&cfg) == 0);
 
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.economizer_mode == ECON_MODE_PROOF_GATED);
+      assert(cfg2.economizer_mode == ECON_MODE_AGGRESSIVE);
 
-      /* OFF is represented by omission and reloads to the fail-closed default. */
+      /* OFF is persisted because SAFE is the default. */
       cfg.economizer_mode = ECON_MODE_OFF;
       assert(config_save(&cfg) == 0);
       memset(&cfg2, 0, sizeof(cfg2));
@@ -153,20 +161,19 @@ int main(void)
    {
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      cJSON *root = cJSON_Parse("{\"economizer\":{\"mode\":\"proof_gated\"}}");
+      cJSON *root = cJSON_Parse("{\"economizer\":{\"mode\":\"safe\"}}");
       assert(root);
       assert(config_parse_economizer_section(&cfg, root) == 0);
-      assert(cfg.economizer_mode == ECON_MODE_PROOF_GATED);
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
       cJSON_Delete(root);
 
       const char *invalid[] = {
           "{\"economizer\":\"safe\"}",
           "{\"economizer\":\"aggressive\"}",
           "{\"economizer\":{\"enabled\":false}}",
-          "{\"economizer\":{\"mode\":\"safe\"}}",
-          "{\"economizer\":{\"mode\":\"aggressive\"}}",
+          "{\"economizer\":{\"mode\":\"proof_gated\"}}",
           "{\"economizer\":{\"mode\":\"off\",\"extra\":true}}",
-          "{\"economizer\":{\"mode\":\"off\",\"mode\":\"proof_gated\"}}",
+          "{\"economizer\":{\"mode\":\"off\",\"mode\":\"safe\"}}",
           "{\"economizer\":{\"mode\":true}}",
           "{\"economizer\":{}}",
       };
@@ -236,19 +243,19 @@ int main(void)
       assert(config_module_enabled(cfg3.module_memory, 1) == 1);     /* -1 -> env default ON */
       assert(config_module_enabled(cfg3.module_memory, 0) == 0);     /* -1 -> env default OFF */
 
-      /* modules.economizer:false hard-kills proof_gated; legacy reducers stay disabled. */
+      /* modules.economizer:false hard-kills every active mode. */
       config_t ec;
       memset(&ec, 0, sizeof(ec));
-      ec.economizer_mode = ECON_MODE_PROOF_GATED;
+      ec.economizer_mode = ECON_MODE_AGGRESSIVE;
       ec.module_economizer = 0;
       assert(econ_mode(&ec) == ECON_MODE_OFF);
       assert(econ_reduction_master_on(&ec) == 0);
       ec.module_economizer = 1;
-      assert(econ_mode(&ec) == ECON_MODE_PROOF_GATED);
-      assert(econ_reduction_master_on(&ec) == 0);
+      assert(econ_mode(&ec) == ECON_MODE_AGGRESSIVE);
+      assert(econ_reduction_master_on(&ec) == 1);
       ec.module_economizer = -1;
-      assert(econ_mode(&ec) == ECON_MODE_PROOF_GATED);
-      assert(econ_reduction_master_on(&ec) == 0);
+      assert(econ_mode(&ec) == ECON_MODE_AGGRESSIVE);
+      assert(econ_reduction_master_on(&ec) == 1);
       ec.economizer_mode = ECON_MODE_OFF;
       assert(econ_reduction_master_on(&ec) == 0);
    }
