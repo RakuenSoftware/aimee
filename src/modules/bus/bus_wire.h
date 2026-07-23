@@ -120,9 +120,15 @@ bus_wire_result_t bus_wire_validate(const bus_frame_t *f);
  *
  * So the contract is explicit. Every consumer of a decoded frame must call
  * bus_wire_check_placement with the live geometry before touching payload
- * bytes, and the host must call it on ingress before routing. Slice 3 supplies
- * the geometry; slice 4 adds the lease-generation check that bounds an arena
- * reference to a region the reader actually holds. */
+ * bytes, and the host must call it on ingress before routing.
+ *
+ * It is necessary but NOT sufficient for an arena reference. It answers "does
+ * this lie inside the arena", which is all the frame can support. It cannot
+ * answer "does this name a live region this reader holds a reference to" —
+ * that needs the lease table and its generations, which slice 4 owns (D3). An
+ * arena reference of zero is in-bounds here and may still be nonsense; only the
+ * lease check can say. A consumer must pass both gates, and slice 4's client
+ * API is where the two are made unavoidable rather than merely documented. */
 bus_wire_result_t bus_wire_check_placement(const bus_frame_t *f, uint32_t slot_size,
                                            uint64_t arena_size);
 

@@ -10,9 +10,19 @@
 # The check is a whitelist of where the bus may be named, not a blacklist of
 # shipping targets. An earlier version enumerated the shipping source-list
 # variables and searched those; that is unsound, because a bus object reaching a
-# variable nobody remembered to list would pass. Inverting it makes the check
-# complete by construction: the bus may appear in exactly the places below and
-# nowhere else in the build, so a new link edge has nowhere to hide.
+# variable nobody remembered to list would pass. Inverting it makes the textual
+# layer complete by construction: the bus may appear in exactly the places below
+# and nowhere else in the build.
+#
+# Four layers, and their honest limits:
+#   1-2. Build-graph text. Complete for anything written as a literal path.
+#        Line-oriented, so it cannot see through a multiline CMake command or a
+#        variable a shipping target consumes later.
+#   3.   Include graph. Catches a stray include before it can become a link edge.
+#   4.   Built artefacts. The backstop that reasons about the result rather than
+#        the intent — and the only layer that catches what 1-3 cannot see. It
+#        needs a build to exist; when one does not, it says so rather than
+#        passing silently, because a skipped check must never read as coverage.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,21 +31,24 @@ cd "$repo_root"
 fail=0
 note() { printf '%s\n' "$*" >&2; }
 
-# Build files where naming the bus is legitimate. Everything else must not.
-allowed_build_file() {
-   case "$1" in
-   src/tests/Rules.mk | src/tests/CMakeLists.txt) return 0 ;;
-   *) return 1 ;;
-   esac
-}
+# Build-graph references that are comments explain the boundary; they do not
+# build anything. Applied uniformly to every build file — an earlier version
+# exempted only the test files, which meant a comment in src/Makefile saying
+# *why* the bus is excluded would have failed the gate.
+#
+# Every grep feeding this is wrapped in `|| true`: under `set -o pipefail` a
+# grep that simply found nothing would otherwise take down the whole script,
+# turning "clean" into an error.
+strip_comments() { grep -vE '^[0-9]+:[[:space:]]*#' || true; }
 
 # ------------------------------------------------------- 1. make build graph
 # src/Makefile builds every shipping binary. The bus belongs to no shipping
-# target, so it must not be named there at all — not in a source list, not on an
+# target, so it must not be named there — not in a source list, not on an
 # include path, not in a link rule.
-if grep -n 'modules/bus' src/Makefile >/dev/null 2>&1; then
+hits=$({ grep -n 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments)
+if [ -n "$hits" ]; then
    note "FAIL: src/Makefile names modules/bus — the bus must not reach a shipping target"
-   grep -n 'modules/bus' src/Makefile >&2
+   printf '%s\n' "$hits" >&2
    fail=1
 fi
 
@@ -48,32 +61,32 @@ if grep -nE '^[A-Z_]*C_FLAGS[[:space:]]*[+:]?=.*-Imodules/bus' src/Makefile >/de
 fi
 
 # ------------------------------------------------------ 2. cmake build graph
-# Traverse every CMakeLists.txt, not just the top level: a shipping target may
-# be defined in a subdirectory.
-while IFS= read -r f; do
-   allowed_build_file "$f" && continue
-   if grep -n 'modules/bus' "$f" >/dev/null 2>&1; then
-      note "FAIL: $f names modules/bus"
-      grep -n 'modules/bus' "$f" >&2
-      fail=1
-   fi
-done < <(find . -name CMakeLists.txt -not -path './.git/*' -not -path './frontend/*' \
-   -not -path './webchat/*' -not -path './node_modules/*' | sed 's|^\./||')
-
-# In the two files where the bus IS allowed, it may only feed bus test targets.
-# Both the CMake and the Make test files are held to the same rule; an earlier
-# version checked only the CMake one.
-bus_uses_outside_tests() {
-   # Comment lines are excluded: they explain the boundary, they do not build
-   # anything. Everything else naming the bus must be a bus test target.
-   grep -n 'modules/bus' "$1" 2>/dev/null |
-      grep -vE '^[0-9]+:[[:space:]]*#' |
-      grep -vE 'test_bus|unit-test-bus|OBJDIR\)/modules/bus' || true
+# Every CMakeLists.txt that could define or configure a target, not just the top
+# level. Only genuinely non-build trees are excluded.
+allowed_build_file() {
+   case "$1" in
+   src/tests/Rules.mk | src/tests/CMakeLists.txt) return 0 ;;
+   *) return 1 ;;
+   esac
 }
 
+while IFS= read -r f; do
+   allowed_build_file "$f" && continue
+   hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments)
+   if [ -n "$hits" ]; then
+      note "FAIL: $f names modules/bus"
+      printf '%s\n' "$hits" >&2
+      fail=1
+   fi
+done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
+   -not -path './.git/*' -not -path '*/node_modules/*' -not -path './build/*' \
+   -not -path '*/build/*' | sed 's|^\./||')
+
+# In the two files where the bus IS allowed, it may only feed bus test targets.
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
-   hits=$(bus_uses_outside_tests "$f")
+   hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
+      { grep -vE 'test_bus|unit-test-bus|OBJDIR\)/modules/bus' || true; })
    if [ -n "$hits" ]; then
       note "FAIL: $f uses modules/bus outside a bus test target"
       printf '%s\n' "$hits" >&2
@@ -81,14 +94,9 @@ for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    fi
 done
 
-# Line-oriented matching cannot see through a multiline CMake command or a
-# variable a shipping target consumes later. That is why step 4 exists: the
-# textual checks are the pre-build signal, and the symbol check over the built
-# artefacts is the backstop that reasons about the result rather than the intent.
-
 # --------------------------------------------------------- 3. include graph
-# Only the bus itself and its tests may include a bus header. Catching a stray
-# include early means it never gets the chance to become a link edge.
+# Only the bus itself and its tests may include a bus header, in any include
+# form — bare, angle-bracketed, or path-qualified.
 while IFS= read -r hit; do
    file="${hit%%:*}"
    case "$file" in
@@ -97,21 +105,33 @@ while IFS= read -r hit; do
    esac
    note "FAIL: $hit"
    fail=1
-done < <(grep -rnE '#include[[:space:]]*[<"][^">]*bus_[a-z_]+\.h[">]|#include[[:space:]]*[<"][^">]*modules/bus/' src/ 2>/dev/null || true)
+done < <(grep -rnE '#include[[:space:]]*[<"][^">]*bus_[a-z_]+\.h[">]|#include[[:space:]]*[<"][^">]*modules/bus/' \
+   src/ 2>/dev/null || true)
 
 # ------------------------------------------------------- 4. built artefacts
-# If a build tree is present, confirm no shipping binary actually carries a bus
-# symbol. Textual checks reason about intent; this reasons about the result.
-# Binary names come from the Makefile's own target variables rather than a
-# hardcoded list, so a renamed or newly added shipping binary is covered without
-# editing this script. Absent binaries are skipped: this check strengthens the
-# gate when a build is present and never weakens it when one is not.
-shipping_bins=$(sed -nE 's/^(BINARY|SERVER|WEBCHAT|KB|GATEWAY|KB_RESOLVER)[[:space:]]*[?:]?=[[:space:]]*([^[:space:]]+).*/\2/p' \
-   src/Makefile 2>/dev/null | sort -u)
+# The shipping binary list and its paths both come from the Makefile itself, via
+# make, so that $(OBJDIR)-style variables are actually expanded. An earlier
+# version sed'd the literal right-hand side, which meant every path containing a
+# variable failed the -f test and the whole layer silently did nothing.
+shipping_bins=$(make -C src --no-print-directory \
+   --eval 'bus-print-shipping-bins:; @echo $(BINARY) $(SERVER) $(WEBCHAT) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)' \
+   bus-print-shipping-bins 2>/dev/null || true)
+
+checked=0
+missing=0
 for bin in $shipping_bins; do
-   [ -f "$bin" ] || continue
-   if nm -C --defined-only "$bin" 2>/dev/null | grep -qE '\bbus_(wire|ring|region|arena|host|client)_'; then
-      note "FAIL: built binary '$bin' defines a bus symbol"
+   path="src/$bin"
+   [ -f "$path" ] || path="$bin"
+   if [ ! -f "$path" ]; then
+      missing=$((missing + 1))
+      continue
+   fi
+   checked=$((checked + 1))
+   # Defined symbols catch a linked bus object. Undefined ones catch a shipping
+   # object that references the bus and is only waiting for someone to satisfy
+   # it — the state just before a link edge appears.
+   if nm -C "$path" 2>/dev/null | grep -qE '\bbus_(wire|ring|region|arena|host|client)_'; then
+      note "FAIL: built binary '$path' references a bus symbol"
       fail=1
    fi
 done
@@ -123,4 +143,11 @@ if [ "$fail" -ne 0 ]; then
    exit 1
 fi
 
-echo "check_bus_blast_radius: ok — no shipping target names, includes, or links the bus"
+# Report what actually ran. A skipped layer must never read as coverage, so the
+# artefact count is stated rather than implied — but its absence is not itself a
+# failure, because a fresh checkout has no build and lint must still run there.
+if [ "$checked" -gt 0 ]; then
+   echo "check_bus_blast_radius: ok — build graph clean; $checked shipping binary(s) carry no bus symbol"
+else
+   echo "check_bus_blast_radius: ok — build graph clean; artefact layer SKIPPED ($missing binary(s) not built)"
+fi

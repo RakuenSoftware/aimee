@@ -68,7 +68,10 @@ def encode(f):
         f["corr"], f["seq"], f["lts"], f["pref"],
         f["plen"], f["src"], f["dst"], 0,
     )
-    assert len(blob) == HDR_LEN, f"layout drifted: {len(blob)} != {HDR_LEN}"
+    if len(blob) != HDR_LEN:
+        # Not an assert: `python -O` strips those, and a generator whose own
+        # safety net can be compiled out would emit silently wrong vectors.
+        raise SystemExit(f"layout drifted: packed {len(blob)} bytes, expected {HDR_LEN}")
     return blob
 
 
@@ -138,7 +141,8 @@ def main():
 
     seen = set()
     for name, f in VECTORS:
-        assert name not in seen, f"duplicate vector name {name}"
+        if name in seen:
+            raise SystemExit(f"duplicate vector name {name}")
         seen.add(name)
         out.write("%s\tOK\t%s\t%s\n" % (name, encode(f).hex(), fields_str(f)))
 
