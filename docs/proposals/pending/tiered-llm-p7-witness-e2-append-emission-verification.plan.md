@@ -221,8 +221,13 @@ health signal for exactly this reason.
 
 ## 3. Emission
 
-**Log/OTLP path — all evidence bytes.** Witness records, signed checkpoints,
-their leaf snapshots, and inclusion proofs. Emission reads committed state only.
+**Status: built and PG17-validated.** `src/db2/db2_witness_emit.c` reads committed
+state only, driven from the checkpoint cadence in `src/kb/kb_witness_cadence.c`.
+
+**Log/OTLP path — all evidence bytes.** Witness records, signed checkpoints, and
+their leaf snapshots, emitted as base64 of the exact export frame so a retained
+line decodes straight into `aimee-witness-verify`. Emission reads committed state
+only.
 
 **Metrics path — numbers only.** Latest checkpoint sequence, latest checkpoint
 age, evidence count, emission backlog depth, failed-send count, and
@@ -236,6 +241,46 @@ not pretend to.
 
 Emission never blocks admission. A full or failing emission path raises an alert
 and drops nothing from the durable log, which is the system of record.
+
+**Digest parity is enforced at emission, not assumed.** Each record is rebuilt
+from its stored columns and its canonical digest compared against the stored
+`record_hash` before framing. A mismatch halts the run with
+`DB2_WITNESS_EMIT_PARITY_MISMATCH` and raises an integrity alert rather than
+publishing: evidence that does not match the store is worse than no evidence,
+because it looks well-formed yet can never match a retained copy. This discharges
+the "emission re-encode parity test" item carried forward from the E1 review.
+
+**The emission cursor is a position, not evidence.** It lives in
+`kb_vault_witness_emit_cursor`, is deliberately not WORM, and carries no integrity
+role. Advance is monotonic — a lower value is ignored, never applied — so a late or
+duplicated advance cannot rewind the stream into a re-emission storm. Losing the
+cursor entirely causes re-emission, which the offline verifier collapses as
+byte-identical duplicates.
+
+**Leaf snapshots are emitted and verified, not merely shipped.** A new
+`VAULT_WITNESS_EXPORT_SNAPSHOT` frame carries `u64 checkpoint_seq` followed by the
+exact stored snapshot bytes. The offline verifier hashes the payload and requires
+equality with the `leaf_snapshot_digest` inside that checkpoint's *signed* body, so
+a substituted or truncated snapshot cannot pass as the leaf set the signature
+committed to. A snapshot whose checkpoint is absent from the stream is reported
+`unmatched` — unverifiable, not tampered — so an operator knows to go fetch the
+checkpoint rather than treating it as an attack. Consumers predating this frame
+kind report it as an unknown frame, which was already tolerated and never counted
+as tampering.
+
+**Inclusion proofs are deliberately not emitted by default.** A proof lets a
+consumer verify one shard's inclusion without the whole leaf set; with the leaf
+snapshot emitted and digest-bound to the signature, any consumer can rebuild the
+tree and check every shard directly, which strictly subsumes it. Emitting both
+would duplicate bytes for no added assurance. The proof frame kind, wire format and
+verifier path remain in place for a consumer that wants per-shard proofs without
+the snapshot.
+
+Validated end-to-end on real PG17: records plus a signed checkpoint plus its leaf
+snapshot are emitted, and the captured bytes verify offline from the trust anchor
+alone with no database access; a single flipped byte is detected; a second run with
+nothing new appended is a no-op and a subsequent append emits exactly one record.
+The offline core is clean under ASAN+UBSAN with leak detection.
 
 ## 4. Continuous verification
 
