@@ -173,31 +173,38 @@ static void test_is_write_null_empty(void)
 
 static void test_novel_roles(void)
 {
-   /* Write roles draft/edit manuscript files. */
-   assert(delegate_role_is_write("prose") == 1);
-   assert(delegate_role_is_write("line-edit") == 1);
-   /* Read-only review roles. */
+   /* continuity and beat-check survive the persona-vs-role cull: they are real
+    * read-only inspection actions a novel persona genuinely delegates, not
+    * restatements of who the delegate is. */
    assert(delegate_role_is_write("continuity") == 0);
    assert(delegate_role_is_write("beat-check") == 0);
-   /* Read-only novel roles auto-enable tools like review/validate. */
    assert(delegate_role_auto_tools_for_invocation("continuity", -1, 0) == 1);
    assert(delegate_role_auto_tools_for_invocation("beat-check", 2, 0) == 1);
    assert(delegate_role_auto_tools_for_invocation("continuity", 1, 0) == 0);
    printf("  PASS: test_novel_roles\n");
 }
 
-static void test_songwriter_roles(void)
+/* The cull deleted the roles that only restated a persona. Writing prose or a
+ * lyric is the `draft` action performed BY a novel/songwriter persona, so these
+ * names must now be rejected outright rather than silently degrading to a
+ * read-only delegate with a generic prompt. */
+static void test_culled_persona_roles_are_rejected(void)
 {
-   /* Write roles draft/edit lyric files. */
-   assert(delegate_role_is_write("lyric") == 1);
-   assert(delegate_role_is_write("hook") == 1);
-   /* Read-only review roles. */
-   assert(delegate_role_is_write("prosody") == 0);
-   assert(delegate_role_is_write("songform") == 0);
-   /* Read-only songwriter roles auto-enable tools. */
-   assert(delegate_role_auto_tools_for_invocation("prosody", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("songform", 2, 0) == 1);
-   printf("  PASS: test_songwriter_roles\n");
+   static const char *const culled[] = {"prose",   "line-edit", "lyric",
+                                        "hook",    "prosody",   "songform"};
+   for (size_t i = 0; i < sizeof(culled) / sizeof(culled[0]); i++)
+   {
+      assert(delegate_role_removed_reason(culled[i]) != NULL);
+      /* And they must not linger as write roles, which would hand tool access
+       * to a name routing will refuse. */
+      assert(delegate_role_is_write(culled[i]) == 0);
+   }
+   /* Surviving roles are not swept up by the removal check. */
+   assert(delegate_role_removed_reason("draft") == NULL);
+   assert(delegate_role_removed_reason("continuity") == NULL);
+   assert(delegate_role_removed_reason(NULL) == NULL);
+   assert(delegate_role_removed_reason("") == NULL);
+   printf("  PASS: test_culled_persona_roles_are_rejected\n");
 }
 
 static void test_inspection_turn_policies(void)
@@ -286,7 +293,7 @@ int main(void)
    test_is_write_read_only_roles();
    test_is_write_null_empty();
    test_novel_roles();
-   test_songwriter_roles();
+   test_culled_persona_roles_are_rejected();
    test_inspection_turn_policies();
    test_apply_max_turns_policy();
    test_auto_tools_policy();
