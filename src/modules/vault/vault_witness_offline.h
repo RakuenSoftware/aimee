@@ -28,6 +28,8 @@ typedef struct
 {
    size_t frames, records, checkpoints, proofs, unknown_frames;
    size_t shards_ok, shards_broken;      /* per-shard record-chain results */
+   size_t records_duplicate;             /* byte-identical repeats (benign re-emission) */
+   size_t records_conflict;              /* SAME shard_seq, DIFFERENT record: a fork */
    size_t checkpoints_ok;                /* signature valid, key known+unrevoked */
    size_t checkpoints_bad_sig;           /* signature does not verify */
    size_t checkpoints_unknown_key;       /* signer not in anchor set */

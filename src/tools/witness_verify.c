@@ -179,7 +179,8 @@ int main(int argc, char **argv)
 
    printf("frames=%zu records=%zu checkpoints=%zu proofs=%zu unknown=%zu\n", r.frames, r.records,
           r.checkpoints, r.proofs, r.unknown_frames);
-   printf("record-chains: ok=%zu broken=%zu\n", r.shards_ok, r.shards_broken);
+   printf("record-chains: ok=%zu broken=%zu (duplicates=%zu collapsed, seq-conflicts=%zu)\n",
+          r.shards_ok, r.shards_broken, r.records_duplicate, r.records_conflict);
    printf("checkpoints: ok=%zu bad_sig=%zu unknown_key=%zu revoked=%zu\n", r.checkpoints_ok,
           r.checkpoints_bad_sig, r.checkpoints_unknown_key, r.checkpoints_revoked);
    printf("proofs: ok=%zu unmatched=%zu bad=%zu\n", r.proofs_ok, r.proofs_unmatched, r.proofs_bad);

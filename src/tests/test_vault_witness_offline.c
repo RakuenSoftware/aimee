@@ -197,9 +197,72 @@ static void test_malformed_frame(void)
                                        &(vault_witness_offline_report_t){0}) == 0);
 }
 
+
+/* A retained stream that repeats records byte-identically (re-emission after a
+ * restart, or a collector retry) must still verify clean. */
+static void test_duplicate_records_tolerated(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t head[32];
+   memset(head, 0x99, 32);
+   vault_witness_anchor_t anchor;
+   emit_shard_records("!kb", "!audit", 3);
+   emit_shard_records("!kb", "!audit", 3); /* exact re-emission of the same run */
+   emit_checkpoint_and_proof("!kb", "!audit", 3, head, priv, pub, &anchor);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.records == 6 && rep.records_duplicate == 3);
+   assert(rep.records_conflict == 0);
+   assert(rep.shards_ok == 1 && rep.shards_broken == 0);
+   assert(rep.any_tamper == 0);
+}
+
+/* Two DIFFERENT records at the same shard_seq is a fork: hard tamper evidence. */
+static void test_fork_conflict_detected(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t head[32];
+   memset(head, 0x99, 32);
+   vault_witness_anchor_t anchor;
+   emit_shard_records("!kb", "!audit", 3);
+
+   /* Emit a second, DIFFERENT record at shard_seq 2 (same position, other content). */
+   vault_witness_record_t f;
+   memset(&f, 0, sizeof f);
+   f.source = VAULT_WITNESS_SRC_REWRAP;
+   f.shard_seq = 2;
+   f.is_first_in_shard = 0;
+   f.seal_epoch = 1;
+   f.fencing_token = 1;
+   memset(f.source_hash, 0xF0, 32);       /* different content */
+   memset(f.witness_pred_hash, 0xA5, 32); /* some other predecessor */
+   snprintf(f.source_id, sizeof f.source_id, "forked");
+   snprintf(f.tenant, sizeof f.tenant, "!kb");
+   snprintf(f.provider, sizeof f.provider, "!audit");
+   snprintf(f.timestamp, sizeof f.timestamp, "2026-07-23T00:00:09Z");
+   uint8_t fw[VAULT_WITNESS_RECORD_MAX];
+   size_t fl = 0;
+   assert(vault_witness_record_encode(&f, fw, sizeof fw, &fl) == 0);
+   frame_payload(VAULT_WITNESS_EXPORT_RECORD, fw, fl);
+
+   emit_checkpoint_and_proof("!kb", "!audit", 3, head, priv, pub, &anchor);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.records_conflict == 1);
+   assert(rep.any_tamper == 1);
+}
+
 int main(void)
 {
    test_clean_stream();
+   test_duplicate_records_tolerated();
+   test_fork_conflict_detected();
    test_tampered_record();
    test_wrong_anchor();
    test_malformed_frame();

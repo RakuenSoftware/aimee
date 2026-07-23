@@ -180,10 +180,36 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
       report->any_tamper = 1;
    }
 
-   /* Per-shard record chains. */
+   /* Per-shard record chains. A retained stream may legitimately repeat records
+    * (re-emission after a restart, a collector retry), so byte-identical repeats at
+    * the same shard_seq are collapsed. Two DIFFERENT records at the same shard_seq
+    * are a fork — the attacker rewrote history — and are hard tamper evidence. */
    if (recs.n)
    {
       qsort(recs.v, recs.n, sizeof recs.v[0], rec_sort_cmp);
+      size_t w = 0;
+      for (size_t i = 0; i < recs.n; i++)
+      {
+         if (w > 0 && strcmp(recs.v[w - 1].tenant, recs.v[i].tenant) == 0 &&
+             strcmp(recs.v[w - 1].provider, recs.v[i].provider) == 0 &&
+             recs.v[w - 1].shard_seq == recs.v[i].shard_seq)
+         {
+            uint8_t da[32], db[32];
+            int same = vault_witness_record_digest(&recs.v[w - 1], da) == 0 &&
+                       vault_witness_record_digest(&recs.v[i], db) == 0 &&
+                       memcmp(da, db, 32) == 0;
+            if (same)
+               report->records_duplicate++;
+            else
+            {
+               report->records_conflict++;
+               report->any_tamper = 1;
+            }
+            continue; /* collapse either way; the conflict is already recorded */
+         }
+         recs.v[w++] = recs.v[i];
+      }
+      recs.n = w;
       size_t i = 0;
       while (i < recs.n)
       {
