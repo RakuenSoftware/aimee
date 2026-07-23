@@ -495,8 +495,11 @@ static void stage_all(int64_t fence, const uint8_t old_kek[VAULT_KEK_LEN],
    assert(check_total == CHECK_ROWS);
 
    char err[ERR_CAP] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(db2_conn(), "SELECT org_vault_rewrap_stage_finish(?1,?2)",
-                                          err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT org_vault_rewrap_stage_finish(?1,?2,x.secret_count,x.check_count,"
+                        "x.inventory_digest) FROM org_vault_rewrap_inventory_summary(?1,?2) AS x",
+                        err, sizeof(err));
    if (!st)
       die_pg("prepare stage_finish", err);
    assert(aimee_pg_bind_text(st, "?1", OP) == 0);

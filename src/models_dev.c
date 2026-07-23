@@ -18,9 +18,46 @@
 #define AIMEE_DATADIR "/usr/local/share/aimee"
 #endif
 
+/* Resolve the bundled offline snapshot.
+ *
+ * This used to return the compiled-in AIMEE_DATADIR path and nothing else,
+ * while model_registry.c carried a SECOND resolver for the same artifact that
+ * honoured $AIMEE_MODELS_DEV_SNAPSHOT and the in-tree data/ directory. The price
+ * path goes through this one, so on any uninstalled run - a dev tree, CI, a
+ * container where DATADIR was never populated - the snapshot was unreachable,
+ * every catalog price resolved to "unknown", and the fleet silently fell back to
+ * the heuristic, which publishes no prices at all. Nothing surfaced: the price
+ * fields simply fail closed and are omitted.
+ *
+ * Search the same places, in the same order, as the other resolver. Falls back
+ * to the DATADIR path when nothing exists so a diagnostic still names the
+ * location an installed build expects. */
 const char *models_dev_snapshot_path(void)
 {
-   return AIMEE_DATADIR "/models_dev_snapshot.json";
+   static char path[512];
+   if (path[0])
+      return path;
+
+   const char *env = getenv("AIMEE_MODELS_DEV_SNAPSHOT");
+   if (env && env[0])
+   {
+      snprintf(path, sizeof(path), "%s", env);
+      return path;
+   }
+
+   const char *candidates[] = {AIMEE_DATADIR "/models_dev_snapshot.json",
+                               "data/models_dev_snapshot.json", "../data/models_dev_snapshot.json",
+                               NULL};
+   for (int i = 0; candidates[i]; i++)
+   {
+      if (access(candidates[i], R_OK) == 0)
+      {
+         snprintf(path, sizeof(path), "%s", candidates[i]);
+         return path;
+      }
+   }
+   snprintf(path, sizeof(path), "%s", candidates[0]);
+   return path;
 }
 
 const char *models_dev_overrides_path(void)

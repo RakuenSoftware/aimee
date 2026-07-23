@@ -201,42 +201,45 @@ static void client_delegate_plan_usage(void)
 
 static void client_delegate_usage(void)
 {
-   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
-                   "\n"
-                   "Delegate a bounded task to a sub-agent. A persona is required.\n"
-                   "\n"
-                   "Options:\n"
-                   "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
-                   "                     qa, security, reviewer, architect, or a custom persona):\n"
-                   "                     sets its identity + principles\n"
-                   "  --json             Output result as JSON\n"
-                   "  --background       Run asynchronously (returns job ID)\n"
-                   "  --durable          Persist result to disk\n"
-                   "  --tools            Enable tool use for the delegate\n"
-                   "  --files F          Preload comma-separated file contents\n"
-                   "  --context-file F   Preload a specific file (repeatable)\n"
-                   "  --context SYMS     Preload code for comma-separated symbols via the index\n"
-                   "  --context-dir DIR  Include directory contents as context\n"
-                   "  --prompt-file PATH Read user prompt from file\n"
-                   "  --prompt-stdin     Read user prompt from stdin\n"
-                   "  --system S         Override system prompt\n"
-                   "  --max-tokens N     Limit response tokens\n"
-                   "  --max-turns N      Override the delegate turn limit\n"
-                   "  --timeout N        Timeout in milliseconds\n"
-                   "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
-                   "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
-                   "  --via AGENT        Route to a specific agent by name\n"
-                   "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
-                   "  --acp-args ARGS    Arguments passed to the --acp command\n"
-                   "  --provider NAME    Route through a specific provider\n"
-                   "  --model NAME       Override provider model\n"
-                   "  --tier N           Route to the best agent at cost tier N\n"
-                   "\n"
-                   "Subcommands:\n"
-                   "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
-                   "  aimee delegate launch <plan.json>        Queue a reviewed packet plan\n"
-                   "  aimee delegate status <job_id>           Check background task status\n"
-                   "  aimee delegate --list-roles              List available roles\n");
+   fprintf(stderr,
+           "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
+           "\n"
+           "Delegate a bounded task to a sub-agent. A persona is required.\n"
+           "\n"
+           "Options:\n"
+           "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
+           "                     qa, security, reviewer, architect, or a custom persona):\n"
+           "                     sets its identity + principles\n"
+           "  --json             Output result as JSON\n"
+           "  --background       Run asynchronously (returns job ID)\n"
+           "  --durable          Persist result to disk\n"
+           "  --tools            Enable tool use for the delegate\n"
+           "  --files F          Preload comma-separated file contents\n"
+           "  --context-file F   Preload a specific file (repeatable)\n"
+           "  --context SYMS     Preload code for comma-separated symbols via the index\n"
+           "  --context-dir DIR  Include directory contents as context\n"
+           "  --prompt-file PATH Read user prompt from file\n"
+           "  --prompt-stdin     Read user prompt from stdin\n"
+           "  --system S         Override system prompt\n"
+           "  --max-tokens N     Limit response tokens\n"
+           "  --max-turns N      Override the delegate turn limit\n"
+           "  --timeout N        Timeout in milliseconds\n"
+           "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
+           "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
+           "  --via AGENT        Route to a specific agent by name\n"
+           "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
+           "  --acp-args ARGS    Arguments passed to the --acp command\n"
+           "  --provider NAME    Route through a specific provider\n"
+           "  --model NAME       Override provider model\n"
+           "  --tier N           Route to the best agent at cost tier N\n"
+           "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
+           "                     lower max_scope are excluded (default whole_task)\n"
+           "\n"
+           "Subcommands:\n"
+           "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
+           "  aimee delegate launch <plan.json>        Queue a reviewed packet plan\n"
+           "  aimee delegate status <job_id>           Check background task status\n"
+           "  aimee delegate --list-roles              List available roles\n");
 }
 
 static void client_delegate_launch_usage(void)
@@ -713,7 +716,11 @@ static int cli_delegate_probe(void)
    if (!req)
       return -1;
    cJSON_AddStringToObject(req, "method", "agent.list");
-   cJSON *resp = cli_v1_dispatch_local(req, 3000);
+   /* Transport selection is exclusive: a configured remote must receive the
+    * probe instead of probing the co-located UDS before the real command is
+    * forwarded remotely.  Otherwise every ordinary thin-client invocation
+    * executes agent.list locally and then executes its command remotely. */
+   cJSON *resp = cli_v1_dispatch(req, 3000);
    cJSON_Delete(req);
    if (!resp)
       return -1; /* server unreachable / no route -> unknown */
@@ -832,45 +839,15 @@ static int handle_hooks(int argc, char **argv, int json_output)
       return wt_deny;
    }
 
-   const char *sock = cli_ensure_server_for_method(method);
-   if (!sock)
+   /* Exclusive transport: with a remote configured, the whole pre_tool_check
+    * (memory-file guard included) runs on the remote via cli_v1_dispatch below.
+    * The client no longer runs any local pre-check — see the memory-guard note
+    * in docs/THIN_CLIENT.md. */
+   const int use_remote = cli_v1_has_remote_endpoint();
+   const char *sock = use_remote ? NULL : cli_ensure_server_for_method(method);
+   if (!use_remote && !sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
-      /* No co-located server, but a remote store is configured: the full
-       * pre_tool_check needs local session state, yet the memory-file guard can
-       * still run against the remote (memory_redirect captures there). Enforce
-       * it so an agent can't own its own memory bytes even on a remote-only host
-       * (session-start has the analogous handle_session_start_remote path). */
-      if (deny < 0 && strcmp(phase, "pre") == 0 && cli_v1_has_remote_endpoint() && json)
-      {
-         /* memory_redirect_check captures to the configured remote endpoint and
-          * denies the raw write (fail-open spill if the store is unreachable).
-          * pre_tool_check is skipped — it needs local session state. */
-         int rc = 0;
-         cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
-         cJSON *tin = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-         if (cJSON_IsString(tn) && tn->valuestring[0] && cJSON_IsObject(tin))
-         {
-            cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
-            const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
-            char mr_msg[1024] = "";
-            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, mr_msg, sizeof(mr_msg)) ==
-                2)
-            {
-               if (cli_hook_client_uses_pretool_json())
-                  emit_pretool_deny_json(mr_msg);
-               else
-               {
-                  fprintf(stderr, "aimee: %s\n", mr_msg);
-                  rc = 2;
-               }
-            }
-         }
-         free(stdin_data);
-         cJSON_Delete(json);
-         free(tool_input_heap);
-         return rc;
-      }
       if (deny < 0)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
       free(stdin_data);
@@ -932,7 +909,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
          hmem_audit("project-unresolved", NULL, NULL, "hooks pre");
    }
 
-   cJSON *resp = cli_v1_dispatch_local(req, 5000);
+   cJSON *resp = cli_v1_dispatch(req, 5000);
    cJSON_Delete(req);
    free(stdin_data);
 

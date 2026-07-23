@@ -1927,6 +1927,13 @@ static int server_agent_route_is_down(const char *agent_name)
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
+/* Route-time DEGRADED predicate (nonzero when degraded): a half-opened breaker
+ * or intermittent failures. Not excluded - routing only PREFERS a healthy peer. */
+static int server_agent_route_is_degraded(const char *agent_name)
+{
+   return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
+}
+
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
  * a per-agent "Primary Agent Only" choice (agents.json `primary_only`) excludes
  * the agent from ALL delegation. This is the SOLE per-agent gate: it replaced the
@@ -2337,6 +2344,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates. Routing falls back to a healthy peer; only when every candidate
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
+   /* Prefer a healthy seat over a degraded one when both serve the role, so a
+    * flapping seat stops winning on price alone while healthy peers exist. */
+   agent_set_route_degraded_filter(server_agent_route_is_degraded);
    /* Delegate-policy invariants at every routing decision: the primary never
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */

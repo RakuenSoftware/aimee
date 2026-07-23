@@ -7,6 +7,8 @@
 #include "commands.h"
 #include "agent.h"
 #include "agent_adapter.h"
+#include "model_registry.h"  /* model_capability_t, MODEL_PROVIDER_MAX */
+#include "agent_tier_lint.h" /* agent_resolved_price[_at_context] */
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
@@ -412,7 +414,63 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    cJSON_AddStringToObject(obj, "model", ag->model);
    cJSON_AddStringToObject(obj, "auth_type", ag->auth_type);
    cJSON_AddStringToObject(obj, "provider", ag->provider);
+   /* Catalog (vendor) identity, which differs from `provider` (the wire shape)
+    * for a third-party model served over another vendor's API. This is the
+    * SERVER-side projection the GUI reads, so the same identity and pricing the
+    * CLI shows must be available here or the two disagree. */
+   cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
+   if (ag->model[0])
+   {
+      char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
+      snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
+      cJSON_AddStringToObject(obj, "model_ref", ref);
+      model_capability_t dcap;
+      if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
+          dcap.display_name[0])
+         cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
+   }
    cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
+   /* Effective BASE-band price ($/Mtok): operator override first, else catalog.
+    * Emitted only when both required axes resolve, so a consumer never reads an
+    * unknown price as free; cached is omitted when unpublished. `price_bands`
+    * carries the context-band schedule, without which a large request would be
+    * shown at half its applicable rate. */
+   {
+      double pin = 0.0, pout = 0.0, pcached = 0.0;
+      if (agent_resolved_price(ag, &pin, &pout, &pcached))
+      {
+         cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
+         cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
+         if (pcached > 0.0)
+            cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
+
+         model_capability_t cap;
+         if (ag->model[0] && model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
+             cap.price_band_count > 0)
+         {
+            cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
+            for (int b = 0; bands && b < cap.price_band_count; b++)
+            {
+               double bin = 0.0, bout = 0.0, bcached = 0.0;
+               int above = cap.price_bands[b].above_tokens;
+               if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
+                  continue;
+               cJSON *e = cJSON_CreateObject();
+               if (!e)
+                  continue;
+               cJSON_AddNumberToObject(e, "above_tokens", above);
+               cJSON_AddNumberToObject(e, "in_per_mtok", bin);
+               cJSON_AddNumberToObject(e, "out_per_mtok", bout);
+               if (bcached > 0.0)
+                  cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
+               cJSON_AddItemToArray(bands, e);
+            }
+         }
+      }
+      cJSON_AddBoolToObject(obj, "price_overridden",
+                            ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                                ag->price_cached_per_mtok > 0.0);
+   }
    cJSON_AddBoolToObject(obj, "enabled", ag->enabled);
    cJSON_AddBoolToObject(obj, "delegate_available", agent_is_available_for_routing(ag));
    cJSON_AddBoolToObject(obj, "tools_enabled", ag->tools_enabled);

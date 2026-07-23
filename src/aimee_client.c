@@ -80,7 +80,9 @@ static int body_requests_stream(const char *body)
 static int thinclient_keepalive_enabled(const char *path, const char *body, int is_https)
 {
    const char *value = getenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED");
-   if (!is_https || !value || (strcmp(value, "1") != 0 && strcmp(value, "true") != 0))
+   /* Default on after live validation. An explicit value other than 1/true is
+    * the process-local rollback; old servers safely answer Connection: close. */
+   if (!is_https || (value && strcmp(value, "1") != 0 && strcmp(value, "true") != 0))
       return 0;
    if (strstr(path, "/events") || strstr(path, "/stream") || strstr(path, "/live"))
       return 0;

@@ -353,6 +353,70 @@ static void test_agent_context_budget_uses_context_window(void)
    assert(agent_exec_context_budget_chars(&ag) > AGENT_CONTEXT_BUDGET);
 }
 
+/* A pinned reserve at or above the whole window is a misconfiguration. The old
+ * fallback silently advertised context_window/2 of PROMPT while still honouring
+ * the oversized pinned reply, i.e. 400k of commitments against a 200k window.
+ * Clamp the reserve instead so total commitments never exceed the window. */
+static void test_agent_context_budget_clamps_oversized_pinned_output(void)
+{
+   agent_t ag;
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "anthropic");
+   strcpy(ag.model, "claude-opus-4-8");
+   ag.middleware.context_window = 200000;
+   ag.max_tokens = 300000; /* larger than the whole window */
+
+   /* Reserve clamps to window/2, so the prompt budget is the other half and
+    * prompt + reserve == the window rather than exceeding it. */
+   size_t budget = agent_exec_context_budget_chars(&ag);
+   assert(budget == (size_t)(200000 - 200000 / 2) * 4u);
+
+   /* Exactly equal to the window is the same misconfiguration. */
+   ag.max_tokens = 200000;
+   assert(agent_exec_context_budget_chars(&ag) == (size_t)(200000 - 200000 / 2) * 4u);
+}
+
+/* An UNPINNED output reserve must not eat the window.
+ *
+ * middleware.context_window is frequently a deliberate POLICY ceiling below the
+ * model's true capability (Claude bills a premium above 200k; Codex expects
+ * <=272k), while model_max_output() reports the model's THEORETICAL maximum
+ * (128k on current frontier models). Reserving the theoretical maximum out of a
+ * policy-capped window collapsed the prompt budget: a 200k ceiling minus a 128k
+ * reserve leaves 72k, a ~62% cut. Cap an unpinned reserve at a quarter of the
+ * window; an operator who needs a long reply pins max_tokens, which is still
+ * reserved in full. */
+static void test_agent_context_budget_caps_unpinned_output_reserve(void)
+{
+   agent_t ag;
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "anthropic");
+   strcpy(ag.model, "claude-opus-4-8");
+   ag.middleware.context_window = 200000; /* deliberate policy ceiling */
+
+   /* Unpinned: the reserve is min(model ceiling, window/4), so the prompt budget
+    * is AT LEAST window - window/4 == 150000 tokens, and far above the 72000 a
+    * full 128k reserve would have left. Asserted as an invariant rather than an
+    * exact figure so the test does not pin whichever ceiling the catalog or the
+    * heuristic currently reports for this model. */
+   size_t unpinned = agent_exec_context_budget_chars(&ag);
+   assert(unpinned >= (size_t)(200000 - 200000 / 4) * 4u);
+   assert(unpinned > (size_t)72000 * 4u);
+
+   /* An explicit operator cap is a real commitment and is reserved in full. */
+   ag.max_tokens = 128000;
+   assert(agent_exec_context_budget_chars(&ag) == (size_t)(200000 - 128000) * 4u);
+
+   /* A model whose ceiling is genuinely small still reserves only that much,
+    * rather than being inflated to window/4. */
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "openai");
+   strcpy(ag.model, "gpt-4"); /* small non-reasoning ceiling */
+   ag.middleware.context_window = 1000000;
+   size_t small = agent_exec_context_budget_chars(&ag);
+   assert(small > (size_t)(1000000 - 1000000 / 4) * 4u);
+}
+
 int main(void)
 {
    test_null_hint_produces_same_as_original();
@@ -372,6 +436,8 @@ int main(void)
    test_agent_exec_context_truncates_large_prompt();
    test_agent_exec_context_ex_can_skip_kb();
    test_agent_context_budget_uses_context_window();
+   test_agent_context_budget_caps_unpinned_output_reserve();
+   test_agent_context_budget_clamps_oversized_pinned_output();
    printf("context_assembly: all tests passed\n");
    return 0;
 }

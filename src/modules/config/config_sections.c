@@ -563,6 +563,14 @@ void config_parse_search_section(config_t *cfg, cJSON *root)
          snprintf(cfg->search_searxng_url, sizeof(cfg->search_searxng_url), "%s",
                   item->valuestring);
 
+      item = cJSON_GetObjectItemCaseSensitive(srch, "backends");
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(cfg->search_backends, sizeof(cfg->search_backends), "%s", item->valuestring);
+
+      item = cJSON_GetObjectItemCaseSensitive(srch, "fetch_pages");
+      if (cJSON_IsBool(item))
+         cfg->search_fetch_pages = cJSON_IsTrue(item) ? 1 : 0;
+
       item = cJSON_GetObjectItemCaseSensitive(srch, "tavily_api_key");
       if (cJSON_IsString(item) && item->valuestring[0])
          snprintf(cfg->search_tavily_api_key, sizeof(cfg->search_tavily_api_key), "%s",
@@ -1373,6 +1381,13 @@ void config_parse_model_meta_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(model_meta_cfg, "capability_routing");
       if (cJSON_IsBool(item))
          cfg->model_meta_capability_routing = cJSON_IsTrue(item) ? 1 : 0;
+   }
+   cJSON *routing_cfg = cJSON_GetObjectItemCaseSensitive(root, "routing");
+   if (cJSON_IsObject(routing_cfg))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(routing_cfg, "prefer_local");
+      if (cJSON_IsBool(item))
+         cfg->prefer_local_agents = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
 void config_parse_db2_section(config_t *cfg, cJSON *root)

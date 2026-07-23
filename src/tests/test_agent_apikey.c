@@ -294,8 +294,12 @@ static void test_reasoning_timeout_default(void)
             /* minimax => MODEL_CAP_REASONING; no timeout_ms => reasoning default */
             "{\"name\":\"rsn\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","
             "\"endpoint\":\"https://api.minimax.io/v1/chat/completions\",\"roles\":[\"review\"]},"
-            /* mistral => not reasoning; no timeout_ms => standard default */
-            "{\"name\":\"plain\",\"provider\":\"mistral\",\"model\":\"mistral-medium-latest\","
+            /* A model the CATALOG marks non-reasoning => standard default.
+             * mistral-medium-latest used to sit here, chosen while the bundled
+             * snapshot was unreachable and the heuristic answered instead; the
+             * real catalog marks it reasoning:true, so it stopped testing the
+             * non-reasoning branch the moment the snapshot became readable. */
+            "{\"name\":\"plain\",\"provider\":\"mistral\",\"model\":\"ministral-8b-latest\","
             "\"endpoint\":\"https://api.mistral.ai/v1/chat/completions\",\"roles\":[\"review\"]},"
             /* explicit timeout always wins, even for a reasoning model */
             "{\"name\":\"pinned\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","

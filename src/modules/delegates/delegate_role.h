@@ -44,6 +44,13 @@ void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int 
  * literal — do not free it. */
 const char *delegate_role_canonicalize(const char *role);
 
+/* Non-NULL when `role` was deleted by the persona-vs-role cull, giving an
+ * operator-facing reason and the migration path. Callers should refuse the
+ * invocation rather than route it: the name would otherwise still be accepted as
+ * an arbitrary role string while its write classification, tool defaults and
+ * built-in template no longer exist. */
+const char *delegate_role_removed_reason(const char *role);
+
 /* Returns 1 if role is a write-capable role (code or refactor, including
  * aliases).  Write roles are subject to no-op edit detection. */
 int delegate_role_is_write(const char *role);

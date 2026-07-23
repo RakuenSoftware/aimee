@@ -9,6 +9,22 @@ CREATE TABLE IF NOT EXISTS diagnosis_items ( id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS ensembles ( id INTEGER PRIMARY KEY AUTOINCREMENT, template_name TEXT NOT NULL, channel TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'active', current_phase INTEGER NOT NULL DEFAULT 0, current_turn INTEGER NOT NULL DEFAULT 0, expected_agent TEXT NOT NULL DEFAULT '', expected_role TEXT NOT NULL DEFAULT '', paused_reason TEXT NOT NULL DEFAULT '', template_json TEXT NOT NULL DEFAULT '{}', assignments_json TEXT NOT NULL DEFAULT '{}', context_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_ensembles_status ON ensembles(status, updated_at DESC);
 CREATE TABLE IF NOT EXISTS context_cache ( hash TEXT PRIMARY KEY, output TEXT NOT NULL, session_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- Fetched web pages, STRIPPED TO TEXT, keyed by canonical URL.
+-- Keyed by URL alone and NOT by (url, query, budget): extraction is a
+-- deterministic pure function of (text, query, budget) that is re-run on every
+-- hit, so the cache supplies the document and never freezes a policy decision.
+-- pinned_addr is the address the egress guard validated and connected to at
+-- fetch time; a hit re-checks it against the current deny-list so tightening
+-- the policy retroactively invalidates entries it would now refuse.
+CREATE TABLE IF NOT EXISTS web_page_cache (
+  url          TEXT PRIMARY KEY,
+  body         TEXT NOT NULL,
+  byte_len     INTEGER NOT NULL DEFAULT 0,
+  pinned_addr  TEXT NOT NULL DEFAULT '',
+  fetched_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_web_page_cache_lru ON web_page_cache (last_used_at);
 CREATE TABLE IF NOT EXISTS agent_cache ( id INTEGER PRIMARY KEY, role TEXT NOT NULL, prompt TEXT NOT NULL, result TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_agent_cache_lookup ON agent_cache(role, prompt);
 CREATE TABLE IF NOT EXISTS primary_sessions ( session_id TEXT NOT NULL, agent_name TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', messages_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (session_id, agent_name, provider));

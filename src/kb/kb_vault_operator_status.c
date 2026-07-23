@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include "kb_vault_operator_status.h"
+#include "kb_vault_protected_secret.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -14,6 +15,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,13 +26,25 @@ struct kb_vault_operator_service
 {
    pthread_t thread;
    pthread_mutex_t mutex;
+   pthread_cond_t drained;
+   pthread_mutex_t mutation_mutex;
    int listen_fd;
    int wake_read_fd;
    int wake_write_fd;
    int stopping;
+   size_t active_connections;
    kb_vault_operator_status_fn read_status;
+   kb_vault_operator_mutation_fn mutate;
+   kb_vault_operator_post_wipe_fn post_wipe;
    void *opaque;
 };
+
+typedef struct
+{
+   kb_vault_operator_service_t *service;
+   int fd;
+   int mutation_owned;
+} service_connection_t;
 
 static void put_u16(unsigned char *out, uint16_t value)
 {
@@ -76,6 +90,14 @@ static int all_zero(const unsigned char *data, size_t len)
    for (size_t i = 0; i < len; ++i)
       any |= data[i];
    return any == 0;
+}
+
+static int contains_zero(const unsigned char *data, size_t len)
+{
+   for (size_t i = 0; i < len; ++i)
+      if (!data[i])
+         return 1;
+   return 0;
 }
 
 static int64_t monotonic_ms(void)
@@ -168,22 +190,6 @@ static int read_eof(int fd, int64_t deadline)
    }
 }
 
-static int immediately_has_surplus(int fd)
-{
-   unsigned char byte;
-   for (;;)
-   {
-      ssize_t n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
-      if (n > 0)
-         return 1;
-      if (n == 0 || (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)))
-         return 0;
-      if (n < 0 && errno == EINTR)
-         continue;
-      return -1;
-   }
-}
-
 static int valid_remediation(const kb_vault_operator_status_t *s)
 {
    switch (s->state)
@@ -271,6 +277,24 @@ int kb_vault_operator_request_decode(const unsigned char input[16], uint16_t *op
    return 0;
 }
 
+int kb_vault_operator_request_id_parse(const char *text, uint8_t out[16])
+{
+   if (!text || !out || strlen(text) != 32)
+      return -1;
+   for (size_t i = 0; i < 16; ++i)
+   {
+      unsigned char high = (unsigned char)text[i * 2];
+      unsigned char low = (unsigned char)text[i * 2 + 1];
+      if (!((high >= '0' && high <= '9') || (high >= 'a' && high <= 'f')) ||
+          !((low >= '0' && low <= '9') || (low >= 'a' && low <= 'f')))
+         return -1;
+      high = high <= '9' ? high - '0' : high - 'a' + 10;
+      low = low <= '9' ? low - '0' : low - 'a' + 10;
+      out[i] = (uint8_t)(high << 4 | low);
+   }
+   return 0;
+}
+
 static void status_encode(const kb_vault_operator_status_t *s, unsigned char out[80])
 {
    memset(out, 0, 80);
@@ -350,6 +374,95 @@ int kb_vault_operator_response_decode(const unsigned char *input, size_t input_l
    return payload_len ? status_decode(input + 16, status) : 0;
 }
 
+int kb_vault_operator_mutation_request_prefix_encode(kb_vault_operator_opcode_t opcode,
+                                                     const uint8_t request_id[16],
+                                                     uint32_t secret_len, unsigned char *out,
+                                                     size_t out_cap, size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   size_t prefix_len = opcode == KB_VAULT_OPERATOR_OPCODE_START ? 36u : 20u;
+   size_t payload_prefix = prefix_len - KB_VAULT_OPERATOR_HEADER_LEN;
+   if (!out || !out_len || out_cap < prefix_len || !secret_len ||
+       secret_len > KB_VAULT_OPERATOR_SECRET_MAX ||
+       (opcode != KB_VAULT_OPERATOR_OPCODE_START && opcode != KB_VAULT_OPERATOR_OPCODE_RESUME &&
+        opcode != KB_VAULT_OPERATOR_OPCODE_UNSEAL) ||
+       ((opcode == KB_VAULT_OPERATOR_OPCODE_START) != (request_id != NULL)))
+      return -1;
+   if (kb_vault_operator_request_encode(opcode, out) != 0)
+      return -1;
+   put_u32(out + 8, (uint32_t)payload_prefix + secret_len);
+   if (request_id)
+      memcpy(out + 16, request_id, 16);
+   put_u32(out + prefix_len - 4, secret_len);
+   *out_len = prefix_len;
+   return 0;
+}
+
+static int mutation_result_status_valid(kb_vault_operator_result_t result,
+                                        const kb_vault_operator_status_t *status)
+{
+   if (result < KB_VAULT_OPERATOR_RESULT_OPERATIONAL ||
+       result > KB_VAULT_OPERATOR_RESULT_UNSUPPORTED || !kb_vault_operator_status_validate(status))
+      return 0;
+   switch (result)
+   {
+   case KB_VAULT_OPERATOR_RESULT_OPERATIONAL:
+      return status->state == KB_VAULT_OPERATOR_STATE_OPERATIONAL;
+   default:
+      /* Closed operation results describe this attempt.  The independently
+       * sampled durable status may legitimately remain completed_sealed,
+       * sealed_idle, or operational (for example wrong-secret START). */
+      return 1;
+   }
+}
+
+int kb_vault_operator_mutation_response_encode(kb_vault_operator_result_t result,
+                                               const kb_vault_operator_status_t *status,
+                                               unsigned char *out, size_t out_cap, size_t *out_len)
+{
+   if (out_len)
+      *out_len = 0;
+   if (!out || !out_len || out_cap < 16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN ||
+       !mutation_result_status_valid(result, status))
+      return -1;
+   memset(out, 0, 16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN);
+   memcpy(out, response_magic, 4);
+   put_u16(out + 4, 1);
+   put_u16(out + 6, KB_VAULT_OPERATOR_TRANSPORT_OK);
+   put_u32(out + 8, KB_VAULT_OPERATOR_MUTATION_STATUS_LEN);
+   put_u16(out + 16, (uint16_t)result);
+   status_encode(status, out + 16 + KB_VAULT_OPERATOR_MUTATION_RESULT_LEN);
+   *out_len = 16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN;
+   return 0;
+}
+
+int kb_vault_operator_mutation_response_decode(const unsigned char *input, size_t input_len,
+                                               kb_vault_operator_result_t *result,
+                                               kb_vault_operator_status_t *status)
+{
+   if (result)
+      *result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+   if (status)
+      memset(status, 0, sizeof(*status));
+   if (!input || !result || !status || input_len != 16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN ||
+       memcmp(input, response_magic, 4) != 0 || get_u16(input + 4) != 1 ||
+       get_u16(input + 6) != KB_VAULT_OPERATOR_TRANSPORT_OK ||
+       get_u32(input + 8) != KB_VAULT_OPERATOR_MUTATION_STATUS_LEN || get_u32(input + 12) != 0 ||
+       !all_zero(input + 18, 14) ||
+       status_decode(input + 16 + KB_VAULT_OPERATOR_MUTATION_RESULT_LEN, status) != 0)
+      return -1;
+   uint16_t wire_result = get_u16(input + 16);
+   if (wire_result > KB_VAULT_OPERATOR_RESULT_UNSUPPORTED ||
+       !mutation_result_status_valid((kb_vault_operator_result_t)wire_result, status))
+   {
+      memset(status, 0, sizeof(*status));
+      return -1;
+   }
+   *result = (kb_vault_operator_result_t)wire_result;
+   return 0;
+}
+
 static int peer_is_root(int fd)
 {
 #if defined(__linux__) && defined(SO_PEERCRED)
@@ -376,8 +489,75 @@ static int write_response(int fd, kb_vault_operator_transport_t result,
    return write_all(fd, response, response_len, deadline);
 }
 
-int kb_vault_operator_serve_connection(int fd, kb_vault_operator_status_fn read_status,
-                                       void *opaque)
+static int write_mutation_response(int fd, kb_vault_operator_result_t result,
+                                   const kb_vault_operator_status_t *status)
+{
+   unsigned char response[16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN];
+   size_t response_len = 0;
+   int64_t deadline;
+   if (kb_vault_operator_mutation_response_encode(result, status, response, sizeof(response),
+                                                  &response_len) != 0 ||
+       deadline_after(KB_VAULT_OPERATOR_IO_TIMEOUT_MS, &deadline) != 0)
+      return -1;
+   return write_all(fd, response, response_len, deadline);
+}
+
+static int serve_mutation(int fd, uint16_t wire_opcode, uint32_t payload_len, int64_t deadline,
+                          kb_vault_operator_status_fn read_status,
+                          kb_vault_operator_mutation_fn mutate,
+                          kb_vault_operator_post_wipe_fn post_wipe, void *opaque)
+{
+   kb_vault_operator_opcode_t opcode = (kb_vault_operator_opcode_t)wire_opcode;
+   size_t prefix_len = opcode == KB_VAULT_OPERATOR_OPCODE_START ? 20u : 4u;
+   unsigned char prefix[20]; /* request ID and length only; never secret bytes */
+   kb_vault_protected_secret_t secret = {0};
+   kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+   int callback_result = -1;
+   if (!mutate || payload_len < prefix_len + 1 || payload_len > prefix_len + 4096u ||
+       read_all(fd, prefix, prefix_len, deadline) != 0)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
+   uint32_t secret_len = get_u32(prefix + prefix_len - 4);
+   if (!secret_len || secret_len > KB_VAULT_OPERATOR_SECRET_MAX ||
+       payload_len != prefix_len + secret_len)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
+   if (kb_vault_protected_secret_open(&secret, secret_len) != 0)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_INTERNAL, NULL);
+   if (read_all(fd, secret.bytes, secret_len, deadline) != 0 ||
+       kb_vault_protected_secret_set_length(&secret, secret_len) != 0 ||
+       contains_zero(secret.bytes, secret_len) || read_eof(fd, deadline) != 0)
+   {
+      kb_vault_protected_secret_close(&secret);
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
+   }
+
+   /* This is the sole point at which untrusted secret bytes cross into the
+    * orchestrator. No status or response callback runs until the arena closes. */
+   callback_result = mutate(opcode, opcode == KB_VAULT_OPERATOR_OPCODE_START ? prefix : NULL,
+                            secret.bytes, secret.length, &result, opaque);
+   kb_vault_protected_secret_close(&secret);
+   kb_vault_protected_cleanse(prefix, sizeof(prefix));
+   if (callback_result != 0 || result < KB_VAULT_OPERATOR_RESULT_OPERATIONAL ||
+       result > KB_VAULT_OPERATOR_RESULT_UNSUPPORTED)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_INTERNAL, NULL);
+   if (post_wipe && post_wipe(opcode, result, opaque) != 0)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_INTERNAL, NULL);
+   kb_vault_operator_status_t status;
+   memset(&status, 0, sizeof(status));
+   if (read_status(&status, opaque) != 0 || !mutation_result_status_valid(result, &status))
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_INTERNAL, NULL);
+   return write_mutation_response(fd, result, &status);
+}
+
+int kb_vault_operator_serve_connection_mutations(int fd, kb_vault_operator_status_fn read_status,
+                                                 kb_vault_operator_mutation_fn mutate, void *opaque)
+{
+   return kb_vault_operator_serve_connection_mutations_ex(fd, read_status, mutate, NULL, opaque);
+}
+
+int kb_vault_operator_serve_connection_mutations_ex(int fd, kb_vault_operator_status_fn read_status,
+                                                    kb_vault_operator_mutation_fn mutate,
+                                                    kb_vault_operator_post_wipe_fn post_wipe,
+                                                    void *opaque)
 {
    if (fd < 0 || !read_status || !peer_is_root(fd))
       return -1; /* Unauthorized peers receive no parse and no response. */
@@ -390,24 +570,40 @@ int kb_vault_operator_serve_connection(int fd, kb_vault_operator_status_fn read_
    int64_t deadline;
    if (deadline_after(KB_VAULT_OPERATOR_IO_TIMEOUT_MS, &deadline) != 0 ||
        read_all(fd, request, sizeof(request), deadline) != 0)
-      return -1; /* Truncated/slow header: deliberately silent. */
+      return -1;
    uint16_t opcode = 0;
    uint32_t payload_len = 0;
    if (kb_vault_operator_request_decode(request, &opcode, &payload_len) != 0)
-      return -1; /* Bad magic/version/reserved: deliberately silent. */
-   int surplus = immediately_has_surplus(fd);
-   if (payload_len || surplus > 0)
-      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
-   if (surplus < 0)
       return -1;
+   if (opcode == KB_VAULT_OPERATOR_OPCODE_START || opcode == KB_VAULT_OPERATOR_OPCODE_RESUME ||
+       opcode == KB_VAULT_OPERATOR_OPCODE_UNSEAL)
+   {
+      if (!mutate)
+      {
+         if (payload_len || read_eof(fd, deadline) != 0)
+            return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
+         return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_UNSUPPORTED_OPCODE, NULL);
+      }
+      return serve_mutation(fd, opcode, payload_len, deadline, read_status, mutate, post_wipe,
+                            opaque);
+   }
+   if (payload_len)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
+   if (read_eof(fd, deadline) != 0)
+      return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_BAD_FRAME, NULL);
    if (opcode != KB_VAULT_OPERATOR_OPCODE_STATUS)
       return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_UNSUPPORTED_OPCODE, NULL);
-
    kb_vault_operator_status_t status;
    memset(&status, 0, sizeof(status));
    if (read_status(&status, opaque) != 0 || !kb_vault_operator_status_validate(&status))
       return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_INTERNAL, NULL);
    return write_response(fd, KB_VAULT_OPERATOR_TRANSPORT_OK, &status);
+}
+
+int kb_vault_operator_serve_connection(int fd, kb_vault_operator_status_fn read_status,
+                                       void *opaque)
+{
+   return kb_vault_operator_serve_connection_mutations_ex(fd, read_status, NULL, NULL, opaque);
 }
 
 static int exact_runtime_directory(void)
@@ -462,6 +658,66 @@ static int service_stopping(kb_vault_operator_service_t *s)
    return stopping;
 }
 
+static int service_read_status(kb_vault_operator_status_t *status, void *opaque)
+{
+   service_connection_t *connection = opaque;
+   kb_vault_operator_service_t *s = connection->service;
+   int rc = s->read_status(status, s->opaque);
+   if (connection->mutation_owned)
+   {
+      connection->mutation_owned = 0;
+      pthread_mutex_unlock(&s->mutation_mutex);
+   }
+   return rc;
+}
+
+static int service_mutate(kb_vault_operator_opcode_t opcode, const uint8_t request_id[16],
+                          const uint8_t *secret, size_t secret_len,
+                          kb_vault_operator_result_t *result, void *opaque)
+{
+   service_connection_t *connection = opaque;
+   kb_vault_operator_service_t *s = connection->service;
+   if (pthread_mutex_trylock(&s->mutation_mutex) != 0)
+   {
+      *result = KB_VAULT_OPERATOR_RESULT_BUSY;
+      return 0;
+   }
+   connection->mutation_owned = 1;
+   int rc = s->mutate(opcode, request_id, secret, secret_len, result, s->opaque);
+   return rc;
+}
+
+static int service_post_wipe(kb_vault_operator_opcode_t opcode, kb_vault_operator_result_t result,
+                             void *opaque)
+{
+   service_connection_t *connection = opaque;
+   kb_vault_operator_service_t *s = connection->service;
+   return s->post_wipe(opcode, result, s->opaque);
+}
+
+static void *service_connection_main(void *opaque)
+{
+   service_connection_t *connection = opaque;
+   kb_vault_operator_service_t *s = connection->service;
+   int fd = connection->fd;
+   (void)kb_vault_operator_serve_connection_mutations_ex(
+       fd, service_read_status, s->mutate ? service_mutate : NULL,
+       s->post_wipe ? service_post_wipe : NULL, connection);
+   if (connection->mutation_owned)
+   {
+      connection->mutation_owned = 0;
+      pthread_mutex_unlock(&s->mutation_mutex);
+   }
+   (void)shutdown(fd, SHUT_RDWR);
+   (void)close(fd);
+   pthread_mutex_lock(&s->mutex);
+   if (--s->active_connections == 0)
+      pthread_cond_broadcast(&s->drained);
+   pthread_mutex_unlock(&s->mutex);
+   free(connection);
+   return NULL;
+}
+
 static void *service_main(void *opaque)
 {
    kb_vault_operator_service_t *s = opaque;
@@ -485,9 +741,29 @@ static void *service_main(void *opaque)
             continue;
          break;
       }
-      (void)kb_vault_operator_serve_connection(fd, s->read_status, s->opaque);
-      (void)shutdown(fd, SHUT_RDWR);
-      (void)close(fd);
+      service_connection_t *connection = calloc(1, sizeof(*connection));
+      pthread_t worker;
+      if (!connection)
+      {
+         close(fd);
+         continue;
+      }
+      connection->service = s;
+      connection->fd = fd;
+      pthread_mutex_lock(&s->mutex);
+      ++s->active_connections;
+      pthread_mutex_unlock(&s->mutex);
+      if (pthread_create(&worker, NULL, service_connection_main, connection) != 0)
+      {
+         free(connection);
+         close(fd);
+         pthread_mutex_lock(&s->mutex);
+         if (--s->active_connections == 0)
+            pthread_cond_broadcast(&s->drained);
+         pthread_mutex_unlock(&s->mutex);
+         continue;
+      }
+      (void)pthread_detach(worker);
    }
    return NULL;
 }
@@ -496,6 +772,28 @@ kb_vault_operator_service_t *
 kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn read_status,
                                 void *opaque)
 {
+   return kb_vault_operator_service_start_mutations_ex(inherited_fd, read_status, NULL, NULL,
+                                                       opaque);
+}
+
+kb_vault_operator_service_t *
+kb_vault_operator_service_start_mutations(int inherited_fd, kb_vault_operator_status_fn read_status,
+                                          kb_vault_operator_mutation_fn mutate, void *opaque)
+{
+   return kb_vault_operator_service_start_mutations_ex(inherited_fd, read_status, mutate, NULL,
+                                                       opaque);
+}
+
+kb_vault_operator_service_t *kb_vault_operator_service_start_mutations_ex(
+    int inherited_fd, kb_vault_operator_status_fn read_status, kb_vault_operator_mutation_fn mutate,
+    kb_vault_operator_post_wipe_fn post_wipe, void *opaque)
+{
+   if (post_wipe && !mutate)
+   {
+      if (inherited_fd == KB_VAULT_OPERATOR_LISTEN_FD)
+         (void)close(inherited_fd);
+      return NULL;
+   }
    if (!read_status || !validate_listener(inherited_fd))
    {
       if (inherited_fd == KB_VAULT_OPERATOR_LISTEN_FD)
@@ -528,6 +826,8 @@ kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn re
    s->wake_read_fd = wake[0];
    s->wake_write_fd = wake[1];
    s->read_status = read_status;
+   s->mutate = mutate;
+   s->post_wipe = post_wipe;
    s->opaque = opaque;
    if (pthread_mutex_init(&s->mutex, NULL) != 0)
    {
@@ -537,8 +837,29 @@ kb_vault_operator_service_start(int inherited_fd, kb_vault_operator_status_fn re
       free(s);
       return NULL;
    }
+   if (pthread_cond_init(&s->drained, NULL) != 0)
+   {
+      pthread_mutex_destroy(&s->mutex);
+      close(wake[0]);
+      close(wake[1]);
+      close(inherited_fd);
+      free(s);
+      return NULL;
+   }
+   if (pthread_mutex_init(&s->mutation_mutex, NULL) != 0)
+   {
+      pthread_cond_destroy(&s->drained);
+      pthread_mutex_destroy(&s->mutex);
+      close(wake[0]);
+      close(wake[1]);
+      close(inherited_fd);
+      free(s);
+      return NULL;
+   }
    if (pthread_create(&s->thread, NULL, service_main, s) != 0)
    {
+      pthread_mutex_destroy(&s->mutation_mutex);
+      pthread_cond_destroy(&s->drained);
       pthread_mutex_destroy(&s->mutex);
       close(wake[0]);
       close(wake[1]);
@@ -558,10 +879,16 @@ void kb_vault_operator_service_stop(kb_vault_operator_service_t *s)
    pthread_mutex_unlock(&s->mutex);
    unsigned char wake = 1;
    (void)write(s->wake_write_fd, &wake, 1);
-   (void)pthread_join(s->thread, NULL); /* Current status callback drains first. */
+   (void)pthread_join(s->thread, NULL);
+   pthread_mutex_lock(&s->mutex);
+   while (s->active_connections)
+      pthread_cond_wait(&s->drained, &s->mutex);
+   pthread_mutex_unlock(&s->mutex);
    (void)close(s->listen_fd);
    (void)close(s->wake_read_fd);
    (void)close(s->wake_write_fd);
+   pthread_mutex_destroy(&s->mutation_mutex);
+   pthread_cond_destroy(&s->drained);
    pthread_mutex_destroy(&s->mutex);
    free(s);
 }
@@ -643,6 +970,151 @@ kb_vault_operator_status_client(kb_vault_operator_status_t *status)
    return kb_vault_operator_status_exit_mapping(status);
 }
 
+static int read_operator_secret(int secret_stdin, kb_vault_protected_secret_t *secret)
+{
+   int fd = STDIN_FILENO;
+   int close_fd = 0;
+   int terminal_changed = 0;
+   struct termios saved;
+   if (!secret_stdin)
+   {
+      fd = open("/dev/tty", O_RDWR | O_CLOEXEC | O_NOCTTY);
+      if (fd < 0 || tcgetattr(fd, &saved) != 0)
+      {
+         if (fd >= 0)
+            close(fd);
+         return -1;
+      }
+      struct termios hidden = saved;
+      hidden.c_lflag &= (tcflag_t) ~(ECHO | ECHONL);
+      if (tcsetattr(fd, TCSAFLUSH, &hidden) != 0)
+      {
+         close(fd);
+         return -1;
+      }
+      terminal_changed = 1;
+      close_fd = 1;
+      static const char prompt[] = "TPM authorization secret: ";
+      if (write(fd, prompt, sizeof(prompt) - 1) != (ssize_t)(sizeof(prompt) - 1))
+         goto fail;
+   }
+   if (kb_vault_protected_secret_open(secret, KB_VAULT_OPERATOR_SECRET_MAX) != 0)
+      goto fail;
+   size_t length = 0;
+   while (length < secret->capacity)
+   {
+      ssize_t n = read(fd, secret->bytes + length, 1);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n == 0)
+         break;
+      if (n != 1 || secret->bytes[length] == 0)
+         goto fail;
+      if (secret->bytes[length] == '\n')
+      {
+         secret->bytes[length] = 0;
+         break;
+      }
+      ++length;
+   }
+   if (length == secret->capacity)
+   {
+      unsigned char trailing = 0;
+      ssize_t n;
+      do
+         n = read(fd, &trailing, 1);
+      while (n < 0 && errno == EINTR);
+      if (n < 0 || n > 1 || (n == 1 && trailing != '\n'))
+      {
+         kb_vault_protected_cleanse(&trailing, sizeof(trailing));
+         goto fail;
+      }
+      kb_vault_protected_cleanse(&trailing, sizeof(trailing));
+   }
+   if (terminal_changed)
+   {
+      static const char newline[] = "\n";
+      (void)write(fd, newline, 1);
+      if (tcsetattr(fd, TCSAFLUSH, &saved) != 0)
+         goto fail_without_terminal;
+      terminal_changed = 0;
+   }
+   if (close_fd)
+      close(fd);
+   if (kb_vault_protected_secret_set_length(secret, length) != 0)
+   {
+      kb_vault_protected_secret_close(secret);
+      return -1;
+   }
+   return 0;
+
+fail:
+   if (terminal_changed)
+   {
+      (void)tcsetattr(fd, TCSAFLUSH, &saved);
+      terminal_changed = 0;
+   }
+fail_without_terminal:
+   if (close_fd)
+      close(fd);
+   kb_vault_protected_secret_close(secret);
+   return -1;
+}
+
+kb_vault_operator_client_result_t
+kb_vault_operator_mutation_client(kb_vault_operator_opcode_t opcode, const uint8_t request_id[16],
+                                  int secret_stdin, kb_vault_operator_result_t *result,
+                                  kb_vault_operator_status_t *status)
+{
+   if (result)
+      *result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+   if (status)
+      memset(status, 0, sizeof(*status));
+   if (!result || !status ||
+       (opcode != KB_VAULT_OPERATOR_OPCODE_START && opcode != KB_VAULT_OPERATOR_OPCODE_RESUME &&
+        opcode != KB_VAULT_OPERATOR_OPCODE_UNSEAL) ||
+       ((opcode == KB_VAULT_OPERATOR_OPCODE_START) != (request_id != NULL)))
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   kb_vault_protected_secret_t secret = {0};
+   if (read_operator_secret(secret_stdin != 0, &secret) != 0)
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   int fd = connect_fixed();
+   unsigned char prefix[36];
+   size_t prefix_len = 0;
+   int64_t deadline;
+   int ok =
+       fd >= 0 &&
+       kb_vault_operator_mutation_request_prefix_encode(opcode, request_id, (uint32_t)secret.length,
+                                                        prefix, sizeof(prefix), &prefix_len) == 0 &&
+       deadline_after(KB_VAULT_OPERATOR_IO_TIMEOUT_MS, &deadline) == 0 &&
+       write_all(fd, prefix, prefix_len, deadline) == 0 &&
+       write_all(fd, secret.bytes, secret.length, deadline) == 0 && shutdown(fd, SHUT_WR) == 0;
+   kb_vault_protected_secret_close(&secret);
+   kb_vault_protected_cleanse(prefix, sizeof(prefix));
+   unsigned char response[16u + KB_VAULT_OPERATOR_MUTATION_STATUS_LEN];
+   if (ok)
+      ok = read_all(fd, response, 16, deadline) == 0;
+   uint32_t payload_len = ok ? get_u32(response + 8) : 0;
+   if (ok && payload_len <= KB_VAULT_OPERATOR_MUTATION_STATUS_LEN)
+      ok = read_all(fd, response + 16, payload_len, deadline) == 0 && read_eof(fd, deadline) == 0;
+   else
+      ok = 0;
+   if (fd >= 0)
+      close(fd);
+   if (!ok || payload_len != KB_VAULT_OPERATOR_MUTATION_STATUS_LEN ||
+       kb_vault_operator_mutation_response_decode(response, 16u + payload_len, result, status) != 0)
+   {
+      memset(status, 0, sizeof(*status));
+      *result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+      return KB_VAULT_OPERATOR_CLIENT_TRANSPORT_FAILURE;
+   }
+   if (*result == KB_VAULT_OPERATOR_RESULT_OPERATIONAL)
+      return KB_VAULT_OPERATOR_CLIENT_OK;
+   if (*result == KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE)
+      return KB_VAULT_OPERATOR_CLIENT_INTEGRITY_FAILURE;
+   return KB_VAULT_OPERATOR_CLIENT_ACTION_REQUIRED;
+}
+
 kb_vault_operator_client_result_t
 kb_vault_operator_status_exit_mapping(const kb_vault_operator_status_t *status)
 {
@@ -707,6 +1179,18 @@ const char *kb_vault_operator_remediation_name(kb_vault_operator_remediation_t r
    return remediation >= 0 && remediation <= 8 ? names[remediation] : NULL;
 }
 
+const char *kb_vault_operator_result_name(kb_vault_operator_result_t result)
+{
+   static const char *const names[] = {
+       "operational",       "safe_retry",          "busy",
+       "wrong_secret",      "backend_unavailable", "recovery_required",
+       "integrity_failure", "invalid_state",       "unsupported"};
+   return result >= KB_VAULT_OPERATOR_RESULT_OPERATIONAL &&
+                  result <= KB_VAULT_OPERATOR_RESULT_UNSUPPORTED
+              ? names[result]
+              : NULL;
+}
+
 int kb_vault_operator_status_format(const kb_vault_operator_status_t *status, int json, char *out,
                                     size_t out_cap)
 {
@@ -738,6 +1222,45 @@ int kb_vault_operator_status_format(const kb_vault_operator_status_t *status, in
                    status->flags & 1 ? operation_id : "null", status->flags & 1 ? "\"" : "");
    else
       n = snprintf(out, out_cap, "vault=%s remediation=%s operation=%s\n",
+                   kb_vault_operator_state_name(status->state),
+                   kb_vault_operator_remediation_name(status->remediation),
+                   kb_vault_operator_operation_name(status->operation_state));
+   return n >= 0 && (size_t)n < out_cap ? n : -1;
+}
+
+int kb_vault_operator_mutation_format(kb_vault_operator_result_t result,
+                                      const kb_vault_operator_status_t *status, int json, char *out,
+                                      size_t out_cap)
+{
+   const char *result_name = kb_vault_operator_result_name(result);
+   if (!out || !out_cap || !result_name || !mutation_result_status_valid(result, status))
+      return -1;
+   char operation_id[33];
+   static const char hex[] = "0123456789abcdef";
+   for (size_t i = 0; i < 16; ++i)
+   {
+      operation_id[i * 2] = hex[status->operation_id[i] >> 4];
+      operation_id[i * 2 + 1] = hex[status->operation_id[i] & 15];
+   }
+   operation_id[32] = '\0';
+   int n;
+   if (json)
+      n = snprintf(out, out_cap,
+                   "{\"result\":\"%s\",\"state\":\"%s\",\"operation_state\":\"%s\","
+                   "\"remediation\":\"%s\",\"operation_present\":%s,\"seal_epoch\":%llu,"
+                   "\"control_fence\":%llu,\"old_generation\":%llu,\"new_generation\":%llu,"
+                   "\"last_opened_fence\":%llu,\"operation_id\":%s%s%s}\n",
+                   result_name, kb_vault_operator_state_name(status->state),
+                   kb_vault_operator_operation_name(status->operation_state),
+                   kb_vault_operator_remediation_name(status->remediation),
+                   status->flags & 1 ? "true" : "false", (unsigned long long)status->seal_epoch,
+                   (unsigned long long)status->control_fence,
+                   (unsigned long long)status->old_generation,
+                   (unsigned long long)status->new_generation,
+                   (unsigned long long)status->last_opened_fence, status->flags & 1 ? "\"" : "",
+                   status->flags & 1 ? operation_id : "null", status->flags & 1 ? "\"" : "");
+   else
+      n = snprintf(out, out_cap, "result=%s vault=%s remediation=%s operation=%s\n", result_name,
                    kb_vault_operator_state_name(status->state),
                    kb_vault_operator_remediation_name(status->remediation),
                    kb_vault_operator_operation_name(status->operation_state));

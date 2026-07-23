@@ -123,6 +123,31 @@ static void test_principal_scope_excludes_other_operator(void)
    printf("  PASS: test_principal_scope_excludes_other_operator\n");
 }
 
+/* Regression: a session can be returned by the DB-level search because the query
+ * matched session_id / agent_name / provider (or structured content that
+ * message_text cannot read) while NO message body actually contains it. In that
+ * case the tool must not report message 0 as "the match". */
+static void test_no_message_match_reports_no_match(void)
+{
+   cJSON *args = cJSON_CreateObject();
+   /* "chatgpt" is the provider of every seeded session but appears in no message. */
+   cJSON_AddStringToObject(args, "query", "chatgpt");
+   cJSON *res = call_tool(args);
+   cJSON *sessions = cJSON_GetObjectItemCaseSensitive(res, "sessions");
+   assert(cJSON_IsArray(sessions));
+   assert(cJSON_GetArraySize(sessions) > 0);
+   cJSON *s0 = cJSON_GetArrayItem(sessions, 0);
+   cJSON *match = cJSON_GetObjectItemCaseSensitive(s0, "match");
+   int mid = cJSON_GetObjectItemCaseSensitive(match, "message_id")->valueint;
+   const char *snip = cJSON_GetObjectItemCaseSensitive(match, "snippet")->valuestring;
+   printf("    [diag] provider-only query -> message_id=%d snippet=\"%.40s\"\n", mid, snip);
+   assert(mid == -1);
+   assert(snip[0] == 0);
+   cJSON_Delete(res);
+   cJSON_Delete(args);
+   printf("  PASS: test_no_message_match_reports_no_match\n");
+}
+
 int main(void)
 {
    assert(db1_init(":memory:") == 0);
@@ -132,6 +157,7 @@ int main(void)
    test_scroll_returns_anchor_window();
    test_hidden_sources_excluded_unless_included();
    test_principal_scope_excludes_other_operator();
+   test_no_message_match_reports_no_match();
    printf("session_search_tool: all tests passed\n");
    return 0;
 }

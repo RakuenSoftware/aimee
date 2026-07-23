@@ -1059,11 +1059,27 @@ typedef struct config
     * search_max_results: default result count (0 = use WEB_SEARCH_DEFAULT_MAX_RESULTS = 5)
     * search_searxng_url: required when backend = "searxng", e.g. "https://searxng.example.com"
     * search_tavily_api_key: required when backend = "tavily"
+    * search_backends: optional comma-separated list enabling multi-engine fanout
+    * search_fetch_pages: -1 unset (default on), 0 off, 1 on
     */
    char search_backend[32];
    int search_max_results;
    char search_searxng_url[512];
    char search_tavily_api_key[256];
+   /* search_backends: optional comma-separated engine list for multi-engine
+    * fanout, e.g. "duckduckgo,searxng". When empty, search_backend is used
+    * alone. Engines missing their required credential are skipped rather than
+    * failing the search, so listing an engine you have not configured yet
+    * degrades to the ones you have.
+    *
+    * Fanout is OFF unless this is set: it multiplies latency and outbound
+    * requests, and a default install has exactly one usable engine
+    * (duckduckgo) so it would buy nothing. */
+   char search_backends[256];
+   /* search_fetch_pages: fetch the top results and return extracted page text
+    * instead of only engine snippets. 0 = off, 1 = on, -1/unset = built-in
+    * default (on). See WEB_SEARCH_FETCH_PAGES_DEFAULT. */
+   int search_fetch_pages;
 
    /* Tool result compaction settings.
     * compact_enabled: 0 = off, 1 = on (default when unset).
@@ -1301,9 +1317,10 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
-   /* Live transport rollout controls (transport.*). All default off so a new
-    * binary stays on the established one-shot, uncompressed wire behavior
-    * until an operator selects a measured canary cohort. */
+   /* Live transport controls (transport.*). The measured defaults enable KB
+    * pooling and resident-client keep-alive; either can be set false for the
+    * one-shot rollback path. gzip stays default-off until a link profile meets
+    * both the wire-reduction and latency promotion gates. */
    int transport_kb_pool_enabled;
    int transport_server_keepalive_enabled;
    int transport_thinclient_gzip_enabled;
@@ -1947,8 +1964,23 @@ typedef struct config
 
    /* Model metadata refresh (model_meta.*).
     * model_meta_refresh_minutes: interval for background models.dev cache refresh; default 60.
-    * model_meta_capability_routing: 0 = cost-tier only (default), 1 = filter by capability flags.
+    * model_meta_capability_routing: 1 = filter by capability flags (default),
+    *   0 = cost-tier only. When on, a candidate must satisfy the packet's
+    *   required capabilities and minimum context window; when nothing does,
+    *   routing escalates to the most capable seat rather than failing.
     */
+   /* routing.prefer_local: try FREE local delegates first whenever one is
+    * eligible, before falling back to paid remote seats. Off by default.
+    *
+    * This is an ORDERING preference among agents that already satisfy the packet
+    * - never a relaxation of eligibility. A local agent still cannot exceed its
+    * declared max_scope: local tokens are free, which removes the COST argument
+    * for over-selecting, but not the wall-clock one. A local model failing
+    * whole-task work still burns a session, a review and an escalation, and still
+    * produces a bad diff. So "free" changes which seat is preferred, not which
+    * seats are eligible. */
+   int prefer_local_agents;
+
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 

@@ -17,7 +17,7 @@
 #include "code_collect.h"         /* §6 live: git_resolve_default_sha + change gate */
 #include "db2/kb_runtime_state.h" /* stored last-indexed default-branch SHA */
 #include "memory.h"
-#include "kb/kb_rrf.h"
+#include "kb_rrf.h"
 #include "db2/lessons.h"        /* §3 actuation: earned-trust tie-break */
 #include "kb/lessons_reflect.h" /* reflect the ledger into per-node trust */
 #include <time.h>

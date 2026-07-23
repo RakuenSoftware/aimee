@@ -179,8 +179,15 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    if (cfg->max_background_processes > 0)
       cJSON_AddNumberToObject(root, "max_background_processes", cfg->max_background_processes);
 
-   /* model_meta.* (defaults refresh_minutes=60, capability_routing=0) */
-   if (cfg->model_meta_refresh_minutes != 60 || cfg->model_meta_capability_routing)
+   if (cfg->prefer_local_agents)
+   {
+      cJSON *rt = cJSON_AddObjectToObject(root, "routing");
+      if (rt)
+         cJSON_AddBoolToObject(rt, "prefer_local", 1);
+   }
+
+   /* model_meta.* (defaults refresh_minutes=60, capability_routing=1) */
+   if (cfg->model_meta_refresh_minutes != 60 || !cfg->model_meta_capability_routing)
    {
       cJSON *mm = cJSON_AddObjectToObject(root, "model_meta");
       if (mm)
@@ -193,7 +200,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0])
+       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -206,6 +213,10 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
          if (cfg->search_tavily_api_key[0])
             cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
+         if (cfg->search_backends[0])
+            cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
+         if (cfg->search_fetch_pages >= 0)
+            cJSON_AddBoolToObject(sr, "fetch_pages", cfg->search_fetch_pages ? 1 : 0);
       }
    }
 

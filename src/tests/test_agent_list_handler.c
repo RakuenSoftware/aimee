@@ -321,6 +321,58 @@ static void test_http_probe_preserves_discovery_and_plain_execution(void)
    printf("  PASS: HTTP probe preserves model/slot discovery and plain execution\n");
 }
 
+/* The SERVER projection is what the GUI reads. It must carry the same identity
+ * and pricing the CLI shows, or the two disagree about what an agent is and what
+ * it costs. `provider` alone is ambiguous for a third-party model served over
+ * another vendor's API, so catalog_provider and a canonical provider:model ref
+ * are both required. */
+static void test_list_exposes_catalog_identity_and_pricing(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":["
+                /* Anthropic WIRE format, MiniMax VENDOR. */
+                "{\"name\":\"MiniMax-M3\",\"provider\":\"anthropic\","
+                "\"endpoint\":\"https://api.minimax.io/anthropic\","
+                "\"model\":\"MiniMax-M3\",\"auth_type\":\"bearer\","
+                "\"api_key\":\"k\",\"roles\":[\"all\"]},"
+                /* Operator-priced agent: the override must win over the catalog. */
+                "{\"name\":\"priced\",\"provider\":\"anthropic\","
+                "\"endpoint\":\"https://api.anthropic.com\","
+                "\"model\":\"claude-opus-4-8\",\"auth_type\":\"bearer\","
+                "\"api_key\":\"k\",\"price_in_per_mtok\":1.5,"
+                "\"price_out_per_mtok\":2.5,\"roles\":[\"all\"]}"
+                "]}\n");
+   reset_capture();
+
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   assert(cJSON_IsArray(agents) && cJSON_GetArraySize(agents) == 2);
+
+   cJSON *mm = cJSON_GetArrayItem(agents, 0);
+   /* Wire provider is untouched; catalog identity is the vendor. */
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "provider")),
+                 "anthropic") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "catalog_provider")),
+                 "minimax") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(mm, "model_ref")),
+                 "minimax:MiniMax-M3") == 0);
+
+   cJSON *pr = cJSON_GetArrayItem(agents, 1);
+   cJSON *pin = cJSON_GetObjectItemCaseSensitive(pr, "price_base_in_per_mtok");
+   cJSON *pout = cJSON_GetObjectItemCaseSensitive(pr, "price_base_out_per_mtok");
+   assert(cJSON_IsNumber(pin) && pin->valuedouble == 1.5);
+   assert(cJSON_IsNumber(pout) && pout->valuedouble == 2.5);
+   cJSON *ovr = cJSON_GetObjectItemCaseSensitive(pr, "price_overridden");
+   assert(cJSON_IsBool(ovr) && cJSON_IsTrue(ovr));
+
+   /* The unpriced-override agent reports the catalog rate as NOT overridden. */
+   cJSON *ovr0 = cJSON_GetObjectItemCaseSensitive(mm, "price_overridden");
+   assert(cJSON_IsBool(ovr0) && !cJSON_IsTrue(ovr0));
+
+   printf("  PASS: list exposes catalog identity and pricing\n");
+}
+
 int main(void)
 {
    printf("agent_list_handler:\n");
@@ -332,6 +384,7 @@ int main(void)
    test_cli_probe_failure_and_no_run_are_observable();
    test_unknown_backend_fails_closed();
    test_http_probe_preserves_discovery_and_plain_execution();
+   test_list_exposes_catalog_identity_and_pricing();
    printf("all agent_list_handler tests passed\n");
    return 0;
 }
