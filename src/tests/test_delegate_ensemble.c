@@ -1128,6 +1128,33 @@ static void test_panel_authorization_resolves_random_first(void)
    printf("  test_panel_authorization_resolves_random_first: ok\n");
 }
 
+static void test_panel_aggregator_random_compatibility(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 2;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "panelist");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "outside");
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 1;
+   snprintf(cfg.ensemble_reference_models[0], 128, "panelist");
+   ensemble_filter_panel_authorization(&cfg, &acfg);
+   assert(strcmp(cfg.ensemble_aggregator, "panelist") == 0);
+
+   config_t random_cfg;
+   memset(&random_cfg, 0, sizeof(random_cfg));
+   random_cfg.ensemble_reference_count = 1;
+   snprintf(random_cfg.ensemble_reference_models[0], 128, "panelist");
+   snprintf(random_cfg.ensemble_aggregator, sizeof(random_cfg.ensemble_aggregator), "$random");
+   ensemble_filter_panel_authorization(&random_cfg, &acfg);
+   assert(strcmp(random_cfg.ensemble_aggregator, "outside") == 0);
+   printf("  test_panel_aggregator_random_compatibility: ok\n");
+}
+
 static void test_panel_excludes_primary(void)
 {
    /* The PRIMARY agent (config.provider) is never seated on — nor allowed to
@@ -1644,6 +1671,7 @@ int main(void)
    test_default_panel_excludes_claude_cli();
    test_panel_filter_drops_unauthorized_claude();
    test_panel_authorization_resolves_random_first();
+   test_panel_aggregator_random_compatibility();
    test_panel_excludes_primary();
    test_panel_filter_drops_unavailable();
    test_panel_persona_name_assignment();

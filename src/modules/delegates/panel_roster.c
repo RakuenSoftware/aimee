@@ -18,6 +18,11 @@ static int seat_is_random(const char *seat)
    return !seat || !seat[0] || strcmp(seat, PANEL_RANDOM_SEAT) == 0;
 }
 
+static int aggregator_is_random(const char *aggregator)
+{
+   return aggregator && strcmp(aggregator, PANEL_RANDOM_SEAT) == 0;
+}
+
 int aimee_panelist_eligible(const config_t *cfg, const agent_t *agent)
 {
    if (!cfg || !agent || !agent->enabled || !agent->name[0])
@@ -100,7 +105,7 @@ void aimee_panel_roster_resolve_random(config_t *cfg, const agent_config_t *agen
    cfg->ensemble_reference_count = n;
    cfg->ensemble_reference_persona_count = n;
 
-   if (seat_is_random(cfg->ensemble_aggregator))
+   if (aggregator_is_random(cfg->ensemble_aggregator))
    {
       int idx = delegate_pick_for_role((agent_config_t *)agents, "review", used, nused);
       if (idx >= 0)
