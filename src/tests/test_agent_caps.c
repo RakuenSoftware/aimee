@@ -839,6 +839,97 @@ void test_no_escalation_when_capability_routing_disabled(void)
    printf("  PASS: test_no_escalation_when_capability_routing_disabled\n");
 }
 
+/* Slice-1 evidence: does enabling model_meta_capability_routing change routing
+ * for a fleet shaped like the live one? Four agents, three at tier 0 all
+ * declaring roles ["all"], one premium default at tier 1 — the configuration
+ * that made the premium seat unreachable in the first place.
+ *
+ * This is a BEHAVIOUR-DIFF test, not an aspiration: it pins what the flag
+ * actually does today so the flip is an informed decision rather than a hope. */
+void test_capability_routing_flag_behaviour_diff(void)
+{
+   agent_config_t cfg;
+   config_t off, on;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&off, 0, sizeof(off));
+   memset(&on, 0, sizeof(on));
+   on.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 4;
+   strcpy(cfg.default_agent, "claude");
+
+   /* Premium default, tier 1, 200k policy ceiling. */
+   strcpy(cfg.agents[0].name, "claude");
+   strcpy(cfg.agents[0].provider, "claude"); /* CLI provider name */
+   strcpy(cfg.agents[0].model, "claude-opus-4-8");
+   strcpy(cfg.agents[0].roles[0], "all");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 1;
+   cfg.agents[0].middleware.context_window = 200000;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   /* Three tier-0 peers, all claiming every role. */
+   struct
+   {
+      const char *name, *provider, *model, *endpoint;
+      int ctx;
+   } cheap[] = {
+       {"codex", "chatgpt", "gpt-5.6-sol", "https://chatgpt.com/backend-api/codex", 272000},
+       {"MiniMax-M3", "anthropic", "MiniMax-M3", "https://api.minimax.io/anthropic", 0},
+       {"kimi", "anthropic", "kimi-k2.7-code", "https://api.kimi.com/coding/", 0},
+   };
+   for (int i = 0; i < 3; i++)
+   {
+      agent_t *ag = &cfg.agents[i + 1];
+      strcpy(ag->name, cheap[i].name);
+      strcpy(ag->provider, cheap[i].provider);
+      strcpy(ag->model, cheap[i].model);
+      strcpy(ag->endpoint, cheap[i].endpoint);
+      strcpy(ag->roles[0], "all");
+      ag->role_count = 1;
+      ag->enabled = 1;
+      ag->tools_enabled = 1;
+      ag->cost_tier = 0;
+      ag->middleware.context_window = cheap[i].ctx;
+      strcpy(ag->api_key, "k");
+   }
+
+   /* A SMALL packet: every agent qualifies, so both modes pick a tier-0 peer.
+    * The premium default stays unreachable for delegation either way — that is
+    * a cost_tier problem, not something the capability flag fixes. */
+   agent_t *r_off = agent_route_with_caps(&cfg, "review", &off, 0, 0);
+   agent_t *r_on = agent_route_with_caps(&cfg, "review", &on, 0, 0);
+   assert(r_off && r_on);
+   assert(r_off->cost_tier == 0 && r_on->cost_tier == 0);
+
+   /* A LARGE packet (300k). With the flag OFF, capability is never consulted, so
+    * routing can hand it to an agent whose window cannot hold it. With the flag
+    * ON, only agents that can actually hold it survive. This is the flag's whole
+    * value, and the reason the catalog-identity work had to land first: without
+    * it MiniMax/kimi resolved a wrong or zero window. */
+   r_off = agent_route_with_caps(&cfg, "review", &off, 0, 300000);
+   r_on = agent_route_with_caps(&cfg, "review", &on, 0, 300000);
+   assert(r_off && r_on);
+   /* OFF: cheapest-first regardless of whether it fits. */
+   assert(r_off->cost_tier == 0);
+   /* ON: whatever is chosen must genuinely hold 300k, or be the escalation
+    * target when nothing does. Both are acceptable; silently picking a seat that
+    * cannot hold the prompt is not. */
+   {
+      model_capability_t cap;
+      int ctx = r_on->middleware.context_window;
+      if (ctx <= 0 && model_capability_get(agent_catalog_provider(r_on), r_on->model, &cap))
+         ctx = cap.context_window;
+      /* MiniMax-M3 (1M) is the only seat here that holds 300k. */
+      assert(ctx >= 300000);
+      assert(strcmp(r_on->name, "MiniMax-M3") == 0);
+   }
+
+   printf("  PASS: test_capability_routing_flag_behaviour_diff\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as

@@ -42,6 +42,7 @@ void test_primary_turn_reaches_default_above_min_tier(void);
 void test_primary_turn_default_must_still_satisfy_caps(void);
 void test_catalog_provider_endpoint_parser_edges(void);
 void test_request_max_tokens_clamped_to_context_window(void);
+void test_capability_routing_flag_behaviour_diff(void);
 void test_capability_gate_escalates_instead_of_failing(void);
 void test_no_escalation_when_capability_routing_disabled(void);
 
@@ -1009,13 +1010,32 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
    assert(routed_a != synth);
 
    /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
-    * at the cheapest tier, so the local synth (the default agent) is routable. */
+    * at the cheapest tier, so the local synth is ROUTABLE again.
+    *
+    * Both peers now sit at tier 0, and agent_pick_balanced() round-robins them
+    * on a PROCESS-WIDE static cursor. Asserting a single call returns synth was
+    * therefore an assertion about cursor parity, not about masking — it passed
+    * only because of how many routing calls happened to run before it, and any
+    * new test elsewhere in the binary could flip it. The property that actually
+    * matters is that synth is reachable at all, so sample the rotation. */
    codex->backend[0] = '\0';
    codex->cli_kind[0] = '\0';
    codex->cli_cmd[0] = '\0';
    snprintf(codex->provider, sizeof(codex->provider), "chatgpt");
    snprintf(codex->auth_type, sizeof(codex->auth_type), "codex-oauth");
-   assert(agent_route(&cfg, "execute") == synth);
+   int saw_synth = 0, saw_codex = 0;
+   for (int i = 0; i < 8; i++)
+   {
+      agent_t *r = agent_route(&cfg, "execute");
+      if (r == synth)
+         saw_synth = 1;
+      else if (r == codex)
+         saw_codex = 1;
+      else
+         assert(0 && "routed to an unexpected agent");
+   }
+   assert(saw_synth); /* the masking bug would make this impossible */
+   assert(saw_codex); /* and both peers share the tier, so both must appear */
 
    if (old_path)
    {
@@ -3190,6 +3210,7 @@ int main(void)
    test_primary_turn_default_must_still_satisfy_caps();
    test_catalog_provider_endpoint_parser_edges();
    test_request_max_tokens_clamped_to_context_window();
+   test_capability_routing_flag_behaviour_diff();
    test_capability_gate_escalates_instead_of_failing();
    test_no_escalation_when_capability_routing_disabled();
    test_agent_config_cache_detects_same_mtime_rewrite();
