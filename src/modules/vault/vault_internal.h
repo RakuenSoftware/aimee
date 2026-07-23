@@ -103,6 +103,10 @@ typedef struct
     * reuse inherited provider locks, sessions, handles, or plaintext caches;
     * the process must exec before using custody again. */
    void (*after_fork_child)(void *ctx);
+   /* Read only process-local provider state.  This callback must not perform
+    * backend I/O and must honor timeout_ms while acquiring its own state lock.
+    * Kept last so legacy positional provider initializers remain compatible. */
+   int (*local_status)(void *ctx, unsigned timeout_ms);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────

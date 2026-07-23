@@ -2475,7 +2475,8 @@ CREATE TABLE IF NOT EXISTS kb_vault_control (
   seal_epoch       BIGINT NOT NULL DEFAULT 1 CHECK (seal_epoch > 0),
   maintenance_kind TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_kind) <= 64),
   maintenance_id   TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_id) <= 200),
-  fencing_token    BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  fencing_token    BIGINT NOT NULL DEFAULT 1 CHECK (fencing_token > 0),
+  last_opened_rewrap_fence BIGINT NOT NULL DEFAULT 0,
   updated_at       TEXT NOT NULL DEFAULT (pg_now_text()),
   CHECK ((maintenance_kind = '') = (maintenance_id = '')),
   CHECK (sealed OR (maintenance_kind = '' AND maintenance_id = ''))
@@ -3551,6 +3552,245 @@ DROP INDEX IF EXISTS idx_kb_vault_rewrap_one_active;
 CREATE UNIQUE INDEX idx_kb_vault_rewrap_one_active
   ON kb_vault_rewrap_operation((true))
   WHERE state NOT IN ('aborted','recovery_required','completed');
+
+-- P7-reseal-d3a: reserve a durable acknowledgement marker before an operator
+-- mutation exists.  The migration deliberately refuses to guess whether open
+-- control means that older terminal work was safely finalized.
+DO $p7_d3a_marker_migration$
+DECLARE
+  c RECORD;
+  v_duplicate BIGINT;
+  v_obligations BIGINT;
+  v_active BIGINT;
+  v_max_fence BIGINT;
+  v_marker BIGINT;
+  v_marker_type OID;
+  v_marker_notnull BOOLEAN;
+  v_marker_nulls BIGINT;
+  v_index_ok BOOLEAN;
+  v_relevant public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(-7046029254386353131::BIGINT);
+  SELECT a.atttypid,a.attnotnull INTO v_marker_type,v_marker_notnull
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid='public.kb_vault_control'::pg_catalog.regclass
+     AND a.attname='last_opened_rewrap_fence' AND NOT a.attisdropped;
+  IF FOUND THEN
+    IF v_marker_type<>'pg_catalog.int8'::pg_catalog.regtype THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    SELECT count(*) INTO v_marker_nulls FROM public.kb_vault_control
+     WHERE last_opened_rewrap_fence IS NULL;
+    IF v_marker_nulls<>0 THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    -- A type-correct partial install with no NULL data is safe to normalize.
+    ALTER TABLE public.kb_vault_control
+      ALTER COLUMN last_opened_rewrap_fence SET DEFAULT 0;
+    ALTER TABLE public.kb_vault_control
+      ALTER COLUMN last_opened_rewrap_fence SET NOT NULL;
+  ELSE
+    ALTER TABLE public.kb_vault_control
+      ADD COLUMN last_opened_rewrap_fence BIGINT NOT NULL DEFAULT 0;
+  END IF;
+  -- The post-D3a control fence begins at one.  Normalize a valid legacy or
+  -- partial install transactionally so future singleton restoration cannot
+  -- recreate the retired zero-fence shape.
+  ALTER TABLE public.kb_vault_control
+    ALTER COLUMN fencing_token SET DEFAULT 1;
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1 FOR UPDATE;
+
+  SELECT count(*) INTO v_duplicate FROM (
+    SELECT o.fencing_token FROM public.kb_vault_rewrap_operation o
+     GROUP BY o.fencing_token HAVING count(*)<>1
+  ) duplicates;
+  SELECT count(*) INTO v_obligations FROM public.kb_vault_rewrap_operation o
+   WHERE o.state IN ('completed','recovery_required')
+     AND o.fencing_token>c.last_opened_rewrap_fence;
+  SELECT count(*) INTO v_active FROM public.kb_vault_rewrap_operation o
+   WHERE o.state NOT IN ('aborted','recovery_required','completed');
+  SELECT COALESCE(max(o.fencing_token),0) INTO v_max_fence
+    FROM public.kb_vault_rewrap_operation o;
+  SELECT count(*) INTO v_marker FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token=c.last_opened_rewrap_fence AND o.state='completed';
+
+  IF v_duplicate<>0 OR v_active>1 OR v_max_fence>c.fencing_token OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE octet_length(o.actor) NOT BETWEEN 1 AND 575 OR
+                    octet_length(o.request_id) NOT BETWEEN 1 AND 200 OR
+                    o.actor ~ '[[:cntrl:]]' OR o.request_id ~ '[[:cntrl:]]') OR
+     c.last_opened_rewrap_fence<0 OR c.last_opened_rewrap_fence>c.fencing_token OR
+     (c.last_opened_rewrap_fence=0 AND v_marker<>0) OR
+     (c.last_opened_rewrap_fence>0 AND v_marker<>1) OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE o.state='recovery_required'
+                AND o.fencing_token<=c.last_opened_rewrap_fence) OR
+     (NOT c.sealed AND c.last_opened_rewrap_fence=0 AND v_obligations<>0) OR
+     (v_obligations>1) OR
+     (v_obligations=1 AND EXISTS (
+       SELECT 1 FROM public.kb_vault_rewrap_operation obligation
+        JOIN public.kb_vault_rewrap_operation later
+          ON later.fencing_token>obligation.fencing_token
+       WHERE obligation.state IN ('completed','recovery_required'))) THEN
+    RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED'
+      USING ERRCODE='55000';
+  END IF;
+  IF v_obligations=1 THEN
+    SELECT * INTO STRICT v_relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>c.last_opened_rewrap_fence
+       AND o.state IN ('completed','recovery_required');
+    IF v_active<>0 OR v_relevant.fencing_token<>v_max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'' OR c.maintenance_id<>'' OR
+       c.fencing_token<>v_relevant.fencing_token+1 OR
+       c.seal_epoch<>v_relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  ELSIF v_active=1 THEN
+    SELECT * INTO STRICT v_relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.state NOT IN ('aborted','recovery_required','completed');
+    IF v_relevant.fencing_token<=c.last_opened_rewrap_fence OR
+       v_relevant.fencing_token<>v_max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'tpm2-reseal' OR c.maintenance_id<>v_relevant.operation_id OR
+       c.fencing_token<>v_relevant.fencing_token OR c.seal_epoch<>v_relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  ELSIF c.maintenance_kind<>'' OR c.maintenance_id<>'' THEN
+    RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+  END IF;
+  IF c.fencing_token=0 THEN
+    IF v_max_fence<>0 THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    UPDATE public.kb_vault_control SET fencing_token=1 WHERE singleton=1;
+  END IF;
+
+  ALTER TABLE public.kb_vault_control
+    DROP CONSTRAINT IF EXISTS kb_vault_control_fencing_token_check;
+  ALTER TABLE public.kb_vault_control
+    ADD CONSTRAINT kb_vault_control_fencing_token_check CHECK (fencing_token > 0);
+  ALTER TABLE public.kb_vault_control
+    DROP CONSTRAINT IF EXISTS kb_vault_control_last_opened_rewrap_fence_check;
+  ALTER TABLE public.kb_vault_control
+    ADD CONSTRAINT kb_vault_control_last_opened_rewrap_fence_check CHECK
+      (last_opened_rewrap_fence >= 0 AND last_opened_rewrap_fence <= fencing_token);
+
+  IF pg_catalog.to_regclass('public.idx_kb_vault_rewrap_fencing_token') IS NULL THEN
+    CREATE UNIQUE INDEX idx_kb_vault_rewrap_fencing_token
+      ON public.kb_vault_rewrap_operation(fencing_token);
+  ELSE
+    SELECT i.indisunique AND i.indisvalid AND i.indisready AND i.indpred IS NULL AND
+           i.indexprs IS NULL AND i.indnkeyatts=1 AND i.indnatts=1 AND
+           i.indkey[0]=a.attnum AND am.amname='btree'
+      INTO v_index_ok
+      FROM pg_catalog.pg_class idx
+      JOIN pg_catalog.pg_namespace ni ON ni.oid=idx.relnamespace
+      JOIN pg_catalog.pg_index i ON i.indexrelid=idx.oid
+      JOIN pg_catalog.pg_class tbl ON tbl.oid=i.indrelid
+      JOIN pg_catalog.pg_namespace nt ON nt.oid=tbl.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=tbl.oid AND a.attname='fencing_token'
+      JOIN pg_catalog.pg_am am ON am.oid=idx.relam
+     WHERE ni.nspname='public' AND idx.relname='idx_kb_vault_rewrap_fencing_token'
+       AND nt.nspname='public' AND tbl.relname='kb_vault_rewrap_operation';
+    IF v_index_ok IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'P7_D3A_FENCE_INDEX_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  END IF;
+END
+$p7_d3a_marker_migration$;
+
+-- The only D3a database facade.  It returns a closed, secret-free control and
+-- operation tuple and rejects history that could hide a recovery obligation.
+-- Keep it out of public so schema USAGE is itself part of the capability.  The
+-- hardened grant phase pins the schema/function owner and future-function
+-- defaults; this immediate revoke also closes the schema-only/dev install.
+CREATE SCHEMA IF NOT EXISTS aimee_kb_vault_orchestrator_api;
+REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
+CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
+RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN,control_fence BIGINT,
+  last_opened_fence BIGINT,operation_id TEXT,operation_state TEXT,
+  operation_seal_epoch BIGINT,operation_fence BIGINT,old_generation BIGINT,
+  new_generation BIGINT,failure_class TEXT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE
+  c public.kb_vault_control%ROWTYPE;
+  relevant public.kb_vault_rewrap_operation%ROWTYPE;
+  marker_rows BIGINT; obligation_rows BIGINT; active_rows BIGINT;
+  max_fence BIGINT; greater_rows BIGINT;
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT * INTO STRICT c FROM public.kb_vault_control x WHERE x.singleton=1 FOR SHARE;
+
+  IF c.seal_epoch<1 OR c.fencing_token<1 OR c.last_opened_rewrap_fence<0 OR
+     c.last_opened_rewrap_fence>c.fencing_token OR
+     ((c.maintenance_kind='')<>(c.maintenance_id='')) OR
+     (NOT c.sealed AND (c.maintenance_kind<>'' OR c.maintenance_id<>'')) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE octet_length(o.actor) NOT BETWEEN 1 AND 575 OR
+                    octet_length(o.request_id) NOT BETWEEN 1 AND 200 OR
+                    o.actor ~ '[[:cntrl:]]' OR o.request_id ~ '[[:cntrl:]]') THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  SELECT count(*) INTO marker_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token=c.last_opened_rewrap_fence AND o.state='completed';
+  IF (c.last_opened_rewrap_fence=0 AND marker_rows<>0) OR
+     (c.last_opened_rewrap_fence>0 AND marker_rows<>1) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  SELECT count(*) INTO obligation_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token>c.last_opened_rewrap_fence
+     AND o.state IN ('completed','recovery_required');
+  SELECT count(*) INTO active_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.state NOT IN ('aborted','recovery_required','completed');
+  SELECT COALESCE(max(o.fencing_token),0) INTO max_fence
+    FROM public.kb_vault_rewrap_operation o;
+  IF max_fence>c.fencing_token OR obligation_rows>1 OR active_rows>1 OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE o.state='recovery_required'
+                AND o.fencing_token<=c.last_opened_rewrap_fence) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  IF obligation_rows=1 THEN
+    SELECT * INTO STRICT relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>c.last_opened_rewrap_fence
+       AND o.state IN ('completed','recovery_required');
+    SELECT count(*) INTO greater_rows FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>relevant.fencing_token;
+    IF greater_rows<>0 OR active_rows<>0 OR NOT c.sealed OR
+       c.maintenance_kind<>'' OR c.maintenance_id<>'' OR
+       c.fencing_token<>relevant.fencing_token+1 OR
+       c.seal_epoch<>relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+    END IF;
+  ELSIF active_rows=1 THEN
+    SELECT * INTO STRICT relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.state NOT IN ('aborted','recovery_required','completed');
+    IF relevant.fencing_token<=c.last_opened_rewrap_fence OR
+       relevant.fencing_token<>max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'tpm2-reseal' OR c.maintenance_id<>relevant.operation_id OR
+       c.fencing_token<>relevant.fencing_token OR c.seal_epoch<>relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+    END IF;
+  ELSIF c.maintenance_kind<>'' OR c.maintenance_id<>'' THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  RETURN QUERY SELECT c.seal_epoch,c.sealed,c.fencing_token,c.last_opened_rewrap_fence,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.operation_id END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.state END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.seal_epoch END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.fencing_token END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.old_generation END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.new_generation END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.failure_class END;
+END
+$$;
+REVOKE ALL ON FUNCTION
+  aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status() FROM PUBLIC;
 
 CREATE TABLE IF NOT EXISTS kb_vault_rewrap_dek_stage (
   operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,

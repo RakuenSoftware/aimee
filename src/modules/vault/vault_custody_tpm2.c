@@ -17,6 +17,7 @@
  * domain-separation step, NOT password-hardening — the operator secret is a
  * high-entropy credential and the TPM's dictionary-attack protection is ON). */
 #include "vault_custody_tpm2.h"
+#include "vault_server_key.h"
 #include <string.h>
 
 static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
@@ -49,6 +50,7 @@ static void tpm2_set_err(char *errbuf, size_t errlen, const char *msg)
 #include <sys/file.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <tss2/tss2_esys.h>
@@ -972,6 +974,45 @@ static int tpm2_is_sealed(void *vctx)
    return s;
 }
 
+/* D3a status is deliberately local-only: it does not initialize TCTI/ESYS,
+ * inspect the blob, read NV, or otherwise touch the TPM. */
+static int tpm2_local_status(void *vctx, unsigned timeout_ms)
+{
+   tpm2_ctx_t *ctx = vctx;
+   if (tpm2_process_ready() != 0 || !ctx || timeout_ms == 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+
+   struct timespec start, now, pause = {.tv_nsec = 1000L * 1000L};
+   if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
+      return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+   for (;;)
+   {
+      int lock_rc = pthread_mutex_trylock(&ctx->mu);
+      if (lock_rc == 0)
+         break;
+      if (lock_rc != EBUSY || clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+         return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+      uint64_t elapsed_ms = (uint64_t)(now.tv_sec - start.tv_sec) * 1000U;
+      if (now.tv_nsec >= start.tv_nsec)
+         elapsed_ms += (uint64_t)(now.tv_nsec - start.tv_nsec) / 1000000U;
+      else
+         elapsed_ms -= (uint64_t)(start.tv_nsec - now.tv_nsec) / 1000000U;
+      if (elapsed_ms >= timeout_ms)
+         return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+      (void)nanosleep(&pause, NULL);
+   }
+
+   int result;
+   if ((ctx->sealed != 0 && ctx->sealed != 1) || (ctx->kek_ready != 0 && ctx->kek_ready != 1) ||
+       ctx->sealed == ctx->kek_ready)
+      result = VAULT_CUSTODY_LOCAL_MALFORMED;
+   else
+      result = ctx->sealed ? VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED
+                           : VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED;
+   pthread_mutex_unlock(&ctx->mu);
+   return result;
+}
+
 /* Unseal one already-parsed PolicyNV-bound object while ctx->mu is held. The
  * plaintext is published only after the TPM policy and the embedded/live
  * generation checks all pass. This primitive deliberately does not touch the
@@ -1142,6 +1183,7 @@ static const vault_custody_provider_t g_tpm2_provider = {
     .is_sealed = tpm2_is_sealed,
     .unseal = tpm2_unseal,
     .seal = tpm2_seal,
+    .local_status = tpm2_local_status,
     .after_fork_child = tpm2_after_fork_child_impl,
 };
 
@@ -2018,6 +2060,13 @@ static int stub_seal(void *vctx)
    return 0; /* already sealed: no-op success */
 }
 
+static int stub_local_status(void *vctx, unsigned timeout_ms)
+{
+   (void)vctx;
+   (void)timeout_ms;
+   return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
+}
+
 static const vault_custody_provider_t g_tpm2_stub = {
     .name = "tpm2",
     .ctx = NULL,
@@ -2026,6 +2075,7 @@ static const vault_custody_provider_t g_tpm2_stub = {
     .is_sealed = stub_is_sealed,
     .unseal = stub_unseal,
     .seal = stub_seal,
+    .local_status = stub_local_status,
 };
 
 const vault_custody_provider_t *vault_custody_tpm2_provider(void)
