@@ -518,7 +518,9 @@ static int parse_payload(cJSON *payload, const unsigned char *raw, size_t raw_n,
       if ((i == 0 || i == 4 || i == 12 || i == 13) ? !cJSON_IsNumber(v[i]) : !cJSON_IsString(v[i]))
          return 0;
    if (strcmp(v[1]->valuestring, issuer) != 0 || strcmp(v[2]->valuestring, audience) != 0 ||
-       !identity_key(v[3]->valuestring) || !ascii_token(v[5]->valuestring, 1, 64) ||
+       !identity_key(v[3]->valuestring) ||
+       (strcmp(v[5]->valuestring, "remote_writes") != 0 &&
+        strcmp(v[5]->valuestring, "remote_reads") != 0) ||
        !ascii_token(v[6]->valuestring, 16, 128) || !ascii_token(v[7]->valuestring, 1, 128) ||
        !lower_hex(v[8]->valuestring, 64, 64) ||
        !exact_secret(v[8]->valuestring, request_sha256, 64) ||

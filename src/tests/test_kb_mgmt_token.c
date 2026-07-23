@@ -218,11 +218,40 @@ static void roundtrip(unsigned bits)
    EVP_PKEY_free(key);
 }
 
+static void remote_reads_roundtrip(void)
+{
+   EVP_PKEY *key = new_rsa(2048);
+   signer_t signer = {key, 0, 0, 0};
+   kb_mgmt_token_claims_t c = claims();
+   c.capability = KB_MGMT_TOKEN_CAP_REMOTE_READS;
+   char token[KB_MGMT_TOKEN_WIRE_MAX + 1];
+   size_t token_n = 0;
+   assert(kb_mgmt_token_build(&c, sign_rs256, &signer, token, sizeof(token), &token_n) ==
+          KB_MGMT_TOKEN_OK);
+   const char *dot1 = strchr(token, '.');
+   const char *dot2 = dot1 ? strchr(dot1 + 1, '.') : NULL;
+   assert(dot1 && dot2);
+   char *wire = unb64(dot1 + 1, (size_t)(dot2 - dot1 - 1));
+   assert(strstr(wire, "\"cap\":\"remote_reads\"") != NULL);
+   assert(strstr(wire, "remote_writes") == NULL);
+   free(wire);
+
+   char *keys = jwks(key);
+   server_mgmt_token_claims_t verified;
+   assert(server_mgmt_token_verify(token, token_n, keys, c.issuer, c.audience, c.peer_issuer,
+                                   c.peer_serial, c.peer_fingerprint, c.request_sha256, NOW,
+                                   &verified));
+   assert(strcmp(verified.capability, "remote_reads") == 0);
+   free(keys);
+   EVP_PKEY_free(key);
+}
+
 int main(void)
 {
    roundtrip(2048);
    roundtrip(4096);
    roundtrip(8192);
+   remote_reads_roundtrip();
 
    EVP_PKEY *key = new_rsa(2048);
    signer_t signer = {key, 0, 0, 0};
