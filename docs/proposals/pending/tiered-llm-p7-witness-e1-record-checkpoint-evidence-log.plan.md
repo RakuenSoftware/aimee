@@ -302,6 +302,33 @@ call sites**, which means E2 modifies the reseal orchestrator and the D3b open
 function, not only the admission path. E1 §7's "no admission gating" exclusion is
 about E1's own scope; it does not narrow E2's obligation to a single ledger.
 
+**The three call sites have different transaction shapes, and this was verified
+against the code rather than assumed:**
+
+- **Reseal and D3b open are already in-transaction and are the easy cases.**
+  Every `org_vault_rewrap_worm_append` call site is a `PERFORM` inside a SQL
+  SECURITY DEFINER function (`src/db2/schema.sql`, the `intent`, `resealed`,
+  `completed`, `abort`, and `recovery_required` transitions), and both
+  `kb_vault_open_event` inserts are likewise inside definer functions. Adding the
+  witness append to those functions is same-transaction by construction — no
+  restructuring, no new transaction boundary.
+- **The admission path needs the witness append moved inside an existing
+  transaction.** `db2_kb_audit_append` (`src/db2/kb_audit_worm.c:44`) issues its
+  own `BEGIN`, reads the current head, computes the row hash in C, inserts, and
+  commits. It is a self-contained transaction that a caller cannot join. E2 adds
+  the witness insert and shard advance *inside that function, before its commit*.
+  This is a modification to an existing function, not a new transaction wrapped
+  around it — wrapping would leave the same crash window this invariant exists to
+  close.
+
+One caution carried forward for E2: that function establishes its sequence and
+predecessor with a read-then-insert (`SELECT … ORDER BY seq DESC LIMIT 1`,
+then `INSERT`), which is not itself safe against concurrent appenders. The
+witness shard advance must **not** copy that pattern — it uses the atomic
+`UPDATE … SET seq = seq + 1 … RETURNING` on the shard row (§6). Whether the
+pre-existing audit-chain pattern needs hardening is a separate question this
+umbrella does not open, but E2 must not inherit it.
+
 E1's validation gate proves the atomicity for all three ledgers, and it is an E2
 release prerequisite — not something E3's kill matrix is expected to discover.
 
