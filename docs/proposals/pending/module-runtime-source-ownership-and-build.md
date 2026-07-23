@@ -1,6 +1,6 @@
 # Proposal: make module ownership drive source, builds, config, and documentation
 
-- **State:** PENDING — roundtable-approved 2026-07-20; slices 27–28 implemented; physical
+- **State:** PENDING — roundtable-approved 2026-07-20; slices 27–29 implemented; physical
   profile omission and the remaining module migrations still await project acceptance
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
 - **Owns:** descriptor schema/validation, physical source ownership, generated Make/CMake and
@@ -24,6 +24,13 @@ objects remain linked. Slice 28 adds startup-only runtime registration: disabled
 are absent from raw method discovery/dispatch and HTTP matching, while disabled roundtable MCP tools are
 absent from served and meta-tool discovery and reject direct invocation. Profile-driven object omission
 remains required before the proposal's physical-absence contract is complete.
+Slice 29 makes the roundtable descriptor a mechanically complete inventory of its owner-local translation
+units and private headers. `ownership_complete: true` enforces set equality against the filesystem and
+requires the canonical module document. As policy, incomplete descriptors must not be used by the future
+generator; mechanical enforcement is deferred to the build-generation slice.
+This slice does not claim generated target membership or object omission. Those remain the next build
+slice, including explicit provider seams for Make-only server composition and parity checks only where
+both build systems own the same target.
 The owner API is `roundtable_module_enabled`; workflows map its disabled result through
 `WFE_PANEL_MODULE_DISABLED` to a permanent step failure rather than a transient provider retry.
 Resuming or redispatching that disabled gate re-evaluates activation and, while still disabled,
@@ -45,11 +52,11 @@ Temporary forwarding headers and root allowlists have owners, expiries, and may 
 
 ## Descriptor contract
 
-Every descriptor declares identity, kind, required/optional state, default selection, runtime
-toggle support, dependencies, required components, providers, source and public-header globs,
-config ownership/read evidence, routes/commands/protocols, data ownership, tests, docs, and
-compatibility aliases. Invalid, duplicate, cyclic, unowned, or incomplete descriptors fail before
-build generation.
+Descriptor v1 currently declares identity, dependencies, activation metadata, explicit source/private-
+header/public-header/test/document paths, and the opt-in completeness latch. The target schema will also
+declare kind, required components, providers, config ownership/read evidence, routes/commands/protocols,
+data ownership, and compatibility aliases. Before build generation consumes that expanded schema,
+invalid, duplicate, cyclic, unowned, or incomplete descriptors must fail validation.
 
 Config read evidence is compiler-derived, not trusted descriptor prose. The inventory maps each key
 to a compiled non-test read expression and its owning object/symbol; nonexistent files/lines,

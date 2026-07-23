@@ -28,6 +28,13 @@ Consumers include `ensemble` CLI/MCP/API routes, server authoring pipelines, swe
 workflow roundtable gates, and the frontend Roundtable surface. Workflows may await a result, but retain
 their own durable state, triggers, approvals, and scheduling.
 
+The descriptor is the checked inventory for all owner-local roundtable translation units and private
+headers. `ownership_complete: true` makes additions, removals, and stale declarations fail validation;
+the descriptor also names the direct ensemble, chair, preset, seat-resolution, pipeline, and verification
+tests plus this canonical module document. Server, workflow, DB, and protocol integration tests remain
+with their composing layers. This inventory does not yet select emitted objects or make the module
+physically absent from a build profile.
+
 ## Providers and readiness
 
 Panel providers are resolved from configured agents, `roundtable_preset` eligibility/authorization/availability filters,
@@ -105,7 +112,7 @@ produce a typed incomplete/failure result rather than invented consensus.
 Report `roundtable` mode, preset, seat/provider identity, eligibility/availability reason, round/pass,
 quorum/convergence, chair use, bounded token/cost totals, capture identifier, and safe failure class.
 Exclude prompts, diffs, private panel content, credentials, and raw model responses. Diagnostics must
-distinguish descriptor-disabled, provider-unready, non-converged, and workflow-consumer failures.
+distinguish startup-config-disabled, provider-unready, non-converged, and workflow-consumer failures.
 
 ## Compatibility
 

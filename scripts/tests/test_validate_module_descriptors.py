@@ -199,6 +199,9 @@ class DescriptorTests(unittest.TestCase):
         runtime_empty = self.required()
         runtime_empty["runtime_toggle"] = {}
         self.assert_rule(runtime_empty, "runtime-toggle-shape")
+        complete_type = self.required()
+        complete_type["ownership_complete"] = 1
+        self.assert_rule(complete_type, "ownership-complete-type")
 
     def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
         report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
@@ -240,8 +243,124 @@ class DescriptorTests(unittest.TestCase):
         report = validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
-            {"sources": 2, "public_headers": 2, "tests": 1, "docs": 1},
+            {"sources": 2, "private_headers": 0, "public_headers": 2, "tests": 1,
+             "docs": 1},
         )
+
+    def test_roundtable_complete_ownership_mutations(self) -> None:
+        cases = (
+            ("sources", "src/modules/roundtable/roundtable_verify.c"),
+            ("private_headers", "src/modules/roundtable/roundtable_verify.h"),
+        )
+        for field, relative in cases:
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                self.mutate_descriptor(
+                    repo, "roundtable",
+                    lambda value, field=field, relative=relative:
+                        value[field].remove(relative),
+                )
+                with self.subTest(field=field), self.assertRaisesRegex(
+                    validator.DescriptorError,
+                    rf"rule=ownership-complete pointer=/{field}.*missing=.*{Path(relative).name}",
+                ):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+        for name in ("undeclared.c", "undeclared.h"):
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                (repo / "src/modules/roundtable" / name).write_text("/* planted */\n",
+                                                                    encoding="utf-8")
+                role = "sources" if name.endswith(".c") else "private_headers"
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    validator.DescriptorError,
+                    rf"rule=ownership-complete pointer=/{role}.*missing=.*{name}",
+                ):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+    def test_complete_ownership_requires_canonical_doc(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            self.mutate_descriptor(repo, "roundtable",
+                                   lambda value: value.__setitem__("docs", []))
+            with self.assertRaisesRegex(
+                validator.DescriptorError, r"rule=ownership-complete pointer=/docs"
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_complete_ownership_excludes_undeclared_public_headers(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            public = repo / "src/modules/roundtable/include/aimee/roundtable/public.h"
+            public.parent.mkdir(parents=True)
+            public.write_text("/* public contract */\n", encoding="utf-8")
+            self.assertEqual(
+                validator.validate_roots(repo, [Path("src/modules")]), 26
+            )
+        finally:
+            tmp.cleanup()
+
+    def test_complete_ownership_rejects_undeclared_symlink(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            link = repo / "src/modules/roundtable/alias.h"
+            link.symlink_to(repo / "src/modules/roundtable/roundtable_types.h")
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-complete-symlink pointer=/private_headers.*alias.h",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_complete_ownership_symlink_variants_fail_stably(self) -> None:
+        cases = (
+            ("declared.h", "roundtable_types.h", True, "ownership-path-symlink"),
+            ("broken.h", "missing.h", False, "ownership-complete-symlink"),
+            ("directory.h", ".", False, "ownership-complete-symlink"),
+        )
+        for name, target, declared, rule in cases:
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                relative = f"src/modules/roundtable/{name}"
+                (repo / relative).symlink_to(target)
+                if declared:
+                    self.mutate_descriptor(
+                        repo,
+                        "roundtable",
+                        lambda value, relative=relative:
+                            value["private_headers"].append(relative),
+                    )
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    validator.DescriptorError,
+                    rf"rule={rule} pointer=/private_headers",
+                ):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+    def test_public_header_cannot_be_declared_private(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        descriptor["private_headers"] = [descriptor["public_headers"][0]]
+        with self.assertRaisesRegex(
+            validator.DescriptorError,
+            r"rule=ownership-role-boundary pointer=/private_headers/0",
+        ):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
 
     def test_ownership_duplicate_and_cross_role_mutations(self) -> None:
         descriptor = json.loads(
