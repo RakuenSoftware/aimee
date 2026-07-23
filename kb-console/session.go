@@ -120,8 +120,11 @@ func (s *sessionStore) get(id string) (*session, error) {
 		return nil, errors.New("no session")
 	}
 	now := time.Now()
-	if now.Unix() > expires || now.Unix()-lastSeen > int64(sessionIdleTimeout.Seconds()) {
+	if now.Unix() >= expires || now.Unix()-lastSeen > int64(sessionIdleTimeout.Seconds()) {
 		_, _ = s.db.Exec(`DELETE FROM sessions WHERE id=?`, id)
+		if s.vault != nil {
+			s.vault.del(id)
+		}
 		return nil, errors.New("session expired")
 	}
 	sess.breakGlass = bg == 1

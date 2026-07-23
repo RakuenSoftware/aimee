@@ -48,3 +48,25 @@ func TestRetainOIDCCredentialCompensatesSessionOnCapacityFailure(t *testing.T) {
 		t.Fatal("failed credential insertion left a durable session")
 	}
 }
+
+func TestSessionExpiryCleansCredentialVault(t *testing.T) {
+	srv := newTestServer(t, "http://127.0.0.1:1")
+	exp := time.Now().Add(time.Hour)
+	p := &principal{iss: "iss", sub: "sub", expires: exp}
+	sess, err := srv.sessions.create(p, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.sessions.db.Exec(`UPDATE sessions SET expires=? WHERE id=?`, time.Now().Add(-time.Second).Unix(), sess.id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.sessions.get(sess.id); err == nil {
+		t.Fatal("expired session remained available")
+	}
+	if _, ok := srv.oidcTokens.get(sess); ok {
+		t.Fatal("expired session left its OIDC credential in memory")
+	}
+}
