@@ -12,6 +12,17 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+func TestDiscussionPromptUsesJSONIdentityEscaping(t *testing.T) {
+	prompt := buildDiscussionPrompt("run\x01\"\\", "hash\x02", 1, nil, nil)
+	if strings.Contains(prompt, `\x01`) || strings.Contains(prompt, `\x02`) {
+		t.Fatalf("discussion identity used Go quoting instead of JSON escaping: %q", prompt)
+	}
+	if !strings.Contains(prompt, `"run_id":"run\u0001\"\\"`) ||
+		!strings.Contains(prompt, `"artifact_hash":"hash\u0002"`) {
+		t.Fatalf("discussion response contract lacks JSON-escaped identity: %q", prompt)
+	}
+}
+
 type discussionTestAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest
