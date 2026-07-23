@@ -509,6 +509,25 @@ static int read_projection_token(const char *s, size_t max, int model)
    return 1;
 }
 
+static int read_object_exact(const cJSON *object, const char *const *names, size_t count)
+{
+   if (!cJSON_IsObject(object) || !names || !count || count > 32)
+      return 0;
+   uint32_t seen = 0;
+   size_t fields = 0;
+   for (const cJSON *field = object->child; field; field = field->next)
+   {
+      size_t i = 0;
+      while (i < count && (!field->string || strcmp(field->string, names[i])))
+         ++i;
+      if (i == count || (seen & (UINT32_C(1) << i)))
+         return 0;
+      seen |= UINT32_C(1) << i;
+      ++fields;
+   }
+   return fields == count && seen == (UINT32_C(1) << count) - 1;
+}
+
 static int read_projection_valid(const char *wire, size_t len, const char *server, int64_t team)
 {
    if (!wire || !len || len > 32768 || memchr(wire, 0, len))
@@ -518,10 +537,11 @@ static int read_projection_valid(const char *wire, size_t len, const char *serve
    cJSON *sid = root ? cJSON_GetObjectItemCaseSensitive(root, "server_id") : NULL;
    cJSON *tid = root ? cJSON_GetObjectItemCaseSensitive(root, "team") : NULL;
    cJSON *agents = root ? cJSON_GetObjectItemCaseSensitive(root, "agents") : NULL;
+   static const char *const root_fields[] = {"server_id", "team", "agents"};
    char team_token[48];
    int team_n = snprintf(team_token, sizeof(team_token), "\"team\":%lld", (long long)team);
-   int valid = root && end == wire + len && cJSON_IsObject(root) && root->child &&
-               root->child->next && root->child->next->next && !root->child->next->next->next &&
+   int valid = root && end == wire + len &&
+               read_object_exact(root, root_fields, sizeof(root_fields) / sizeof(root_fields[0])) &&
                cJSON_IsString(sid) && !strcmp(cJSON_GetStringValue(sid), server) &&
                cJSON_IsNumber(tid) && tid->valuedouble == (double)team && cJSON_IsArray(agents) &&
                cJSON_GetArraySize(agents) <= SERVER_MGMT_READ_AGENT_MAX && team_n > 0 &&
@@ -537,16 +557,18 @@ static int read_projection_valid(const char *wire, size_t len, const char *serve
       cJSON *delegate = cJSON_GetObjectItemCaseSensitive(agent, "delegate_available");
       cJSON *primary = cJSON_GetObjectItemCaseSensitive(agent, "primary_only");
       cJSON *parallel = cJSON_GetObjectItemCaseSensitive(agent, "max_parallel");
+      static const char *const agent_fields[] = {
+          "name",         "provider",    "model", "enabled", "delegate_available",
+          "primary_only", "max_parallel"};
       const char *name_s = cJSON_IsString(name) ? cJSON_GetStringValue(name) : NULL;
       const char *provider_s = cJSON_IsString(provider) ? cJSON_GetStringValue(provider) : NULL;
       const char *model_s = cJSON_IsString(model) ? cJSON_GetStringValue(model) : NULL;
-      size_t fields = 0;
-      for (cJSON *field = cJSON_IsObject(agent) ? agent->child : NULL; field; field = field->next)
-         fields++;
-      if (!valid || fields != 7 || !read_projection_token(name_s, 63, 0) ||
-          !read_projection_token(provider_s, 15, 0) || !read_projection_token(model_s, 127, 1) ||
-          !cJSON_IsBool(enabled) || !cJSON_IsBool(delegate) || !cJSON_IsBool(primary) ||
-          !cJSON_IsNumber(parallel) || parallel->valuedouble < 0 || parallel->valuedouble > 1024 ||
+      if (!valid ||
+          !read_object_exact(agent, agent_fields, sizeof(agent_fields) / sizeof(agent_fields[0])) ||
+          !read_projection_token(name_s, 63, 0) || !read_projection_token(provider_s, 15, 0) ||
+          !read_projection_token(model_s, 127, 1) || !cJSON_IsBool(enabled) ||
+          !cJSON_IsBool(delegate) || !cJSON_IsBool(primary) || !cJSON_IsNumber(parallel) ||
+          parallel->valuedouble < 0 || parallel->valuedouble > 1024 ||
           parallel->valuedouble != (double)parallel->valueint ||
           (previous && strcmp(previous, name_s) >= 0))
       {
@@ -564,6 +586,9 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
                                                 size_t cap)
 {
    (void)unused;
+   if (!actor || !actor->authenticated || team_id < 1 || !server_id || !out || cap < 2)
+      return KB_MANAGEMENT_READ_INVALID;
+   out[0] = 0;
    kb_management_cert_lifecycle_t *lifecycle = NULL;
    kb_management_health_server_config_t server_cfg = {0};
    kb_mgmt_status_client_config_t authority = {0};
@@ -606,6 +631,7 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    char challenge[512] = {0}, staple[KB_MGMT_STATUS_JSON_MAX + 1] = {0};
    char status_request[1024] = {0};
    char headers[KB_MGMT_TOKEN_WIRE_MAX + KB_MGMT_STATUS_JSON_MAX + 96] = {0};
+   char *server_response = NULL;
    void *session = NULL;
    int loaded = 0, http_status = 0;
    kb_management_read_result_t result = KB_MANAGEMENT_READ_UNAVAILABLE;
@@ -743,13 +769,16 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
                 staple);
    if (n < 0 || (size_t)n >= sizeof(headers))
       goto done;
-   if (kb_management_action_server_request_production(
-           NULL, session, "GET", "/v1/management/read/agents", "", headers, deadline, out, cap,
-           &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE)
+   server_response = calloc(32769, 1);
+   if (!server_response)
       goto done;
-   size_t response_len = strnlen(out, cap);
-   if (http_status != 200 || response_len == cap ||
-       !read_projection_valid(out, response_len, server_id, team_id))
+   if (kb_management_action_server_request_production(
+           NULL, session, "GET", "/v1/management/read/agents", "", headers, deadline,
+           server_response, 32769, &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE)
+      goto done;
+   size_t response_len = strnlen(server_response, 32769);
+   if (http_status != 200 || response_len == 32769 ||
+       !read_projection_valid(server_response, response_len, server_id, team_id))
    {
       result = http_status == 403                         ? KB_MANAGEMENT_READ_DENIED
                : http_status == 409                       ? KB_MANAGEMENT_READ_CONFLICT
@@ -757,6 +786,9 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
                                                           : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
    }
+   if (response_len >= cap)
+      goto done;
+   memcpy(out, server_response, response_len + 1);
    result = KB_MANAGEMENT_READ_OK;
 done:
    if (session)
@@ -767,6 +799,11 @@ done:
    OPENSSL_cleanse(&active, sizeof(active));
    OPENSSL_cleanse(&bearer, sizeof(bearer));
    OPENSSL_cleanse(status_public_key, sizeof(status_public_key));
+   if (server_response)
+   {
+      OPENSSL_cleanse(server_response, 32769);
+      free(server_response);
+   }
    return result;
 }
 

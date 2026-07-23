@@ -71,17 +71,26 @@ END $$;
 RESET ROLE;
 
 SET LOCAL ROLE aimee_kb_runtime;
-DO $$ DECLARE r RECORD; BEGIN
-  SELECT * INTO STRICT r FROM public.kb_management_read_token_readback(
-    repeat('9',64),repeat('a',64));
-  IF r.jwt IS NULL OR r.jwt_sha256<>sha256(convert_to(r.jwt,'UTF8')) THEN
-    RAISE EXCEPTION 'P5-D2a retained readback mismatch';
-  END IF;
+DO $$ BEGIN
+  BEGIN
+    PERFORM * FROM public.kb_management_read_token_readback(repeat('9',64),repeat('a',64));
+    RAISE EXCEPTION 'ordinary runtime read retained bearer bytes';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   BEGIN
     PERFORM * FROM public.kb_management_read_authority_claim(
       repeat('9',64),repeat('a',64),repeat('d',64),5);
     RAISE EXCEPTION 'ordinary runtime invoked authority claim';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+END $$;
+RESET ROLE;
+
+SET LOCAL ROLE aimee_kb_token_authority_runtime;
+DO $$ DECLARE r RECORD; BEGIN
+  SELECT * INTO STRICT r FROM public.kb_management_read_authority_readback(
+    repeat('9',64),repeat('a',64));
+  IF r.jwt IS NULL OR r.jwt_sha256<>sha256(convert_to(r.jwt,'UTF8')) THEN
+    RAISE EXCEPTION 'P5-D2a retained authority readback mismatch';
+  END IF;
 END $$;
 RESET ROLE;
 

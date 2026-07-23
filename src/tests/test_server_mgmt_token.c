@@ -504,15 +504,13 @@ int main(void)
    assert(strcmp(claims.subject, "oidc:https%3A//idp.example:user%3A42") == 0);
    assert(strcmp(claims.kid, "management-1") == 0);
 
-   char *read_raw = replace_once(raw, "\"cap\":\"remote_writes\"",
-                                 "\"cap\":\"remote_reads\"");
-   char *read_jwt = mint(key, "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"management-1\"}",
-                         read_raw);
-   assert(verify(read_jwt, strlen(read_jwt), jwks, NOW, &claims));
-   assert(strcmp(claims.capability, "remote_reads") == 0);
-   assert(server_mgmt_token_verify_read_claims_ex(
-              read_jwt, strlen(read_jwt), jwks, issuer, audience, peer_issuer, peer_serial,
-              fingerprint, NOW, &claims) == SERVER_MGMT_TOKEN_OK);
+   char *read_raw = replace_once(raw, "\"cap\":\"remote_writes\"", "\"cap\":\"remote_reads\"");
+   char *read_jwt =
+       mint(key, "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"management-1\"}", read_raw);
+   assert(!verify(read_jwt, strlen(read_jwt), jwks, NOW, &claims));
+   assert(server_mgmt_token_verify_read_claims_ex(read_jwt, strlen(read_jwt), jwks, issuer,
+                                                  audience, peer_issuer, peer_serial, fingerprint,
+                                                  NOW, &claims) == SERVER_MGMT_TOKEN_OK);
    assert(!strcmp(claims.capability, "remote_reads") &&
           !strcmp(claims.request_sha256, request_hash));
    memset(&claims, 0xa5, sizeof(claims));
@@ -524,8 +522,7 @@ int main(void)
    free(read_jwt);
    free(read_raw);
 
-   char *unknown_cap = replace_once(raw, "\"cap\":\"remote_writes\"",
-                                    "\"cap\":\"remote_execute\"");
+   char *unknown_cap = replace_once(raw, "\"cap\":\"remote_writes\"", "\"cap\":\"remote_execute\"");
    expect_payload_reject(key, jwks, unknown_cap);
    free(unknown_cap);
 

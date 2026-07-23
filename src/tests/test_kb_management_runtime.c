@@ -35,6 +35,7 @@ static int block_reconcile;
 static int reconcile_entered;
 static int read_fixture_enabled;
 static int read_sequence;
+static int read_response_mode;
 static kb_mgmt_token_authority_ipc_result_t token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
 static kb_http_servers_read_handler_fn captured_read_handler;
 static unsigned char read_status_private_key[32];
@@ -212,11 +213,17 @@ kb_management_action_transport_t kb_management_action_server_request_production(
       assert(!strcmp(method, "GET") && session == (void *)0x3456 && headers &&
              strstr(headers, "Authorization: Bearer signed-read-token\r\n") &&
              strstr(headers, "X-Aimee-Management-Status: {") && read_sequence == 2);
-      assert(snprintf(response, cap,
-                      "{\"server_id\":\"srv-1\",\"team\":7,\"agents\":[{\"name\":\"agent-a\","
-                      "\"provider\":\"openai\",\"model\":\"gpt-5\",\"enabled\":true,"
-                      "\"delegate_available\":false,\"primary_only\":false,"
-                      "\"max_parallel\":1}]}") > 0);
+      const char *projection =
+          read_response_mode == 1
+              ? "{\"server_id\":\"srv-1\",\"server_id\":\"srv-1\",\"agents\":[],\"team\":7}"
+          : read_response_mode == 2
+              ? "{\"server_id\":\"srv-1\",\"team\":7,\"agents\":[{\"name\":\"agent-a\","
+                "\"name\":\"agent-a\",\"model\":\"gpt-5\",\"enabled\":true,"
+                "\"delegate_available\":false,\"primary_only\":false,\"max_parallel\":1}]}"
+              : "{\"server_id\":\"srv-1\",\"team\":7,\"agents\":[{\"name\":\"agent-a\","
+                "\"provider\":\"openai\",\"model\":\"gpt-5\",\"enabled\":true,"
+                "\"delegate_available\":false,\"primary_only\":false,\"max_parallel\":1}]}";
+      assert(snprintf(response, cap, "%s", projection) > 0);
       read_sequence = 3;
       *status = 200;
       return KB_MANAGEMENT_ACTION_SENT_RESPONSE;
@@ -642,6 +649,15 @@ int main(void)
    assert(read_rc == KB_MANAGEMENT_READ_OK);
    assert(read_sequence == 3); /* token authority precedes status proof and dispatch */
    assert(strstr(read_out, "\"name\":\"agent-a\""));
+   for (read_response_mode = 1; read_response_mode <= 2; ++read_response_mode)
+   {
+      read_sequence = 0;
+      memset(read_out, 'x', sizeof(read_out));
+      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out)) ==
+             KB_MANAGEMENT_READ_INTEGRITY);
+      assert(read_sequence == 3 && read_out[0] == 0);
+   }
+   read_response_mode = 0;
    read_fixture_enabled = 0;
    reconcile_result = KB_MANAGEMENT_CERT_UNAVAILABLE;
    kb_management_runtime_tick(INT64_MAX - 30);

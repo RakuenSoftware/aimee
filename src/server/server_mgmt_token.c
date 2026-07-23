@@ -602,7 +602,8 @@ verify_core(const char *jwt, size_t jwt_len, const char *jwks_json, const char *
    if (selected != KEY_SELECT_OK || !key ||
        !verify_signature(key, jwt, (size_t)(dot2 - jwt), signature, signature_n) ||
        !parse_payload(payload, payload_raw, payload_n, expected_issuer, expected_audience,
-                      peer_issuer, peer_serial, peer_fingerprint, request_sha256, now, &candidate) ||
+                      peer_issuer, peer_serial, peer_fingerprint, request_sha256, now,
+                      &candidate) ||
        (required_capability && strcmp(candidate.capability, required_capability)))
       goto done;
    *out = candidate;
@@ -635,7 +636,7 @@ server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_js
       return SERVER_MGMT_TOKEN_INVALID;
    }
    return verify_core(jwt, jwt_len, jwks_json, expected_issuer, expected_audience, peer_issuer,
-                      peer_serial, peer_fingerprint, request_sha256, NULL, now, out);
+                      peer_serial, peer_fingerprint, request_sha256, "remote_writes", now, out);
 }
 
 server_mgmt_token_result_t server_mgmt_token_verify_read_claims_ex(

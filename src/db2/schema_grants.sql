@@ -684,8 +684,8 @@ BEGIN
       TO aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
       public.kb_management_read_publication_generation(),
-      public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT),
-      public.kb_management_read_token_readback(TEXT,TEXT) TO aimee_kb_runtime;
+      public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT)
+      TO aimee_kb_runtime;
   END IF;
 END
 $$;

@@ -356,9 +356,10 @@ Preserve the four-role authority split: `aimee_kb_token_authority_definer`,
 `aimee_kb_token_authority_runtime`, `aimee_kb_token_authority_store_owner`, and ordinary
 `aimee_kb_runtime`. They are NOINHERIT, have no cross-membership or usable SET ROLE path, and
 owner/definer roles are NOLOGIN where applicable. Ordinary runtime can execute only the exact
-read-intent creation/readback functions; it cannot update the table, execute authority admission,
-or read authority key material. Authority runtime can execute only fixed admission/finalization
-functions. Definer functions perform exact typed reads, row locks, and allowed transitions, set a
+publication-generation and read-intent creation functions; it cannot update the table, execute
+authority admission/readback, retrieve retained bearer bytes, or read authority key material.
+Authority runtime can execute only fixed admission/finalization/readback functions. Definer
+functions perform exact typed reads, row locks, and allowed transitions, set a
 safe search path, and are owned/granted narrowly. The table uses ENABLE and FORCE RLS with no
 broad direct DML grants.
 

@@ -102,7 +102,7 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
     setMessage('');
     setAgents([]);
     try {
-      const result = await apiGet<{ server_id: string; team: number; agents: FleetAgent[] }>(
+      const result = await apiGet<{ server_id: string; team: unknown; agents: FleetAgent[] }>(
         `/v1/servers/${encodeURIComponent(selected)}/agents?team=${teamID}`,
       );
       // JSON numbers cannot preserve every positive int64 team id. The KB has already

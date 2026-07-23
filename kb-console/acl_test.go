@@ -53,6 +53,7 @@ func TestConsoleAdminAllows_Denied(t *testing.T) {
 		{"POST", "/v1/enrollments//revoke"},          // empty id segment
 		{"GET", "/v1/%65nrollments"},                 // encoded literal
 		{"GET", "/v1/enrollments?all=1"},             // stray query
+		{"GET", "/v1/servers/s1/agents"},             // OIDC fleet credential only
 		{"GET", "v1/enrollments"},                    // missing leading slash
 		{"GET", ""},
 		{"", "/v1/enrollments"},

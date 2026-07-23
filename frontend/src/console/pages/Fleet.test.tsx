@@ -110,6 +110,27 @@ describe('Fleet interactions', () => {
     expect(await screen.findByText('agent.one')).toBeTruthy();
     expect(screen.getByText('gpt-5')).toBeTruthy();
     expect(mocks.get).toHaveBeenLastCalledWith('/v1/servers/server-1/agents?team=7');
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.ack).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates an in-flight agents read and reports policy denial without mutation ACK', async () => {
+    let rejectRead!: (error: Error) => void;
+    mocks.get.mockResolvedValueOnce({ servers: [server] }).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { rejectRead = reject; }),
+    );
+    render(<FleetHarness />);
+    await loadFleet();
+    fireEvent.click(screen.getByRole('button', { name: 'server-1' }));
+    const load = screen.getByRole('button', { name: 'Load agents' });
+    fireEvent.click(load);
+    expect((load as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(load);
+    expect(mocks.get).toHaveBeenCalledTimes(2);
+    rejectRead(new ApiError(403));
+    expect(await screen.findByText('Denied by team or server management policy.')).toBeTruthy();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.ack).not.toHaveBeenCalled();
   });
 
   it('requires confirmation and sends each confirmed action once', async () => {

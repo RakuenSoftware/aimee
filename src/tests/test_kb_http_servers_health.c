@@ -86,6 +86,25 @@ static kb_management_read_result_t read_handler_fn(void *ctx, const kb_principal
    return read_result;
 }
 
+static kb_management_read_result_t blocking_read_handler(void *ctx, const kb_principal_t *actor,
+                                                         int64_t team, const char *server,
+                                                         char *out, size_t cap)
+{
+   (void)ctx;
+   (void)actor;
+   (void)team;
+   (void)server;
+   (void)out;
+   (void)cap;
+   pthread_mutex_lock(&block_mu);
+   callback_entered = 1;
+   pthread_cond_broadcast(&block_cv);
+   while (!callback_release)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   return KB_MANAGEMENT_READ_OK;
+}
+
 int db2_server_registry_list(int64_t team, db2_server_row_t *rows, int max)
 {
    got_list_team = team;
@@ -275,10 +294,9 @@ static void test_read_route(void)
    assert(route("POST", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 405);
    assert(route("GET", "/v1/servers/server-a/agents", "x=1&team=9", out, sizeof(out)) == 400);
    assert(route("GET", "/v1/servers/server-a/agents", "team=%39", out, sizeof(out)) == 400);
-   assert(route("GET", "/v1/servers/server-a/agents", "team=9&team=9", out, sizeof(out)) ==
+   assert(route("GET", "/v1/servers/server-a/agents", "team=9&team=9", out, sizeof(out)) == 400);
+   assert(route_body("GET", "/v1/servers/server-a/agents", "team=9", "{}", out, sizeof(out)) ==
           400);
-   assert(route_body("GET", "/v1/servers/server-a/agents", "team=9", "{}", out,
-                     sizeof(out)) == 400);
    static const struct
    {
       kb_management_read_result_t result;
@@ -346,6 +364,25 @@ static void *action_unregister_thread(void *opaque)
    return NULL;
 }
 
+static void *read_route_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   char out[256];
+   set_actor();
+   r->status = route("GET", "/v1/servers/server-a/agents", "team=1", out, sizeof(out));
+   kb_reqctx_clear();
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
+static void *read_unregister_thread(void *opaque)
+{
+   thread_result_t *r = opaque;
+   r->status = kb_http_servers_read_unregister(blocking_read_handler, (void *)0x9753);
+   atomic_store(&r->done, 1);
+   return NULL;
+}
+
 static void test_unregister_waits_for_borrow(void)
 {
    pthread_t request_tid, unregister_tid;
@@ -405,6 +442,37 @@ static void test_action_unregister_waits_for_borrow(void)
    assert(request.status == 200 && unreg.status == 0);
 }
 
+static void test_read_unregister_waits_for_borrow(void)
+{
+   pthread_t request_tid, unregister_tid;
+   thread_result_t request = {0}, unreg = {0};
+   char out[256];
+   callback_entered = 0;
+   callback_release = 0;
+   assert(kb_http_servers_read_register(blocking_read_handler, (void *)0x9753) == 0);
+   assert(pthread_create(&request_tid, NULL, read_route_thread, &request) == 0);
+   pthread_mutex_lock(&block_mu);
+   while (!callback_entered)
+      pthread_cond_wait(&block_cv, &block_mu);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_create(&unregister_tid, NULL, read_unregister_thread, &unreg) == 0);
+   usleep(20000);
+   assert(!atomic_load(&unreg.done));
+   set_actor();
+   assert(route("GET", "/v1/servers/server-b/agents", "team=1", out, sizeof(out)) == 503);
+   assert(kb_http_servers_read_register(read_handler_fn, (void *)0x2468) == -1);
+   kb_reqctx_clear();
+   pthread_mutex_lock(&block_mu);
+   callback_release = 1;
+   pthread_cond_broadcast(&block_cv);
+   pthread_mutex_unlock(&block_mu);
+   assert(pthread_join(request_tid, NULL) == 0);
+   assert(pthread_join(unregister_tid, NULL) == 0);
+   assert(request.status == 200 && unreg.status == 0);
+   assert(kb_http_servers_read_register(read_handler_fn, (void *)0x2468) == 0);
+   assert(kb_http_servers_read_unregister(read_handler_fn, (void *)0x2468) == 0);
+}
+
 int main(void)
 {
    test_route_mapping();
@@ -413,6 +481,7 @@ int main(void)
    test_read_route();
    test_unregister_waits_for_borrow();
    test_action_unregister_waits_for_borrow();
+   test_read_unregister_waits_for_borrow();
    kb_reqctx_clear();
    puts("kb_http_servers_health: all tests passed");
    return 0;

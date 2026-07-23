@@ -31,7 +31,7 @@ static void *read_ctx;
 static unsigned read_inflight;
 static int read_unregistering;
 
-static void read_correlation(char out[44])
+static int read_correlation(char out[44])
 {
    static const char alphabet[] =
        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -39,9 +39,9 @@ static void read_correlation(char out[44])
    memset(random, 0, sizeof(random));
    if (RAND_bytes(random, sizeof(random)) != 1)
    {
-      memset(out, 'A', 43);
-      out[43] = 0;
-      return;
+      OPENSSL_cleanse(random, sizeof(random));
+      out[0] = 0;
+      return -1;
    }
    uint32_t accumulator = 0;
    unsigned bits = 0;
@@ -60,6 +60,7 @@ static void read_correlation(char out[44])
    out[n++] = alphabet[(accumulator << 4) & 63];
    out[n] = 0;
    OPENSSL_cleanse(random, sizeof(random));
+   return 0;
 }
 
 int kb_http_servers_read_register(kb_http_servers_read_handler_fn handler, void *ctx)
@@ -387,11 +388,12 @@ static int action_dispatch(const kb_principal_t *actor, int64_t team, const char
    return status;
 }
 
-static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *server,
-                         char *out, int cap)
+static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *server, char *out,
+                         int cap)
 {
    char correlation[44];
-   read_correlation(correlation);
+   memset(out, 0, (size_t)cap);
+   int have_correlation = !read_correlation(correlation);
    pthread_mutex_lock(&read_mu);
    kb_http_servers_read_handler_fn handler = read_handler;
    void *ctx = read_ctx;
@@ -400,10 +402,14 @@ static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *
    pthread_mutex_unlock(&read_mu);
    if (!handler)
    {
-      snprintf(out, (size_t)cap,
-               "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\","
-               "\"correlation_id\":\"%s\"}}",
-               correlation);
+      if (have_correlation)
+         snprintf(out, (size_t)cap,
+                  "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\","
+                  "\"correlation_id\":\"%s\"}}",
+                  correlation);
+      else
+         snprintf(out, (size_t)cap,
+                  "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\"}}");
       return 503;
    }
    kb_management_read_result_t rc = handler(ctx, actor, team, server, out, (size_t)cap);
@@ -413,22 +419,31 @@ static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *
    pthread_mutex_unlock(&read_mu);
    if (rc == KB_MANAGEMENT_READ_OK)
       return 200;
-   int status = rc == KB_MANAGEMENT_READ_INVALID ? 400
-                : rc == KB_MANAGEMENT_READ_DENIED ? 403
+   memset(out, 0, (size_t)cap);
+   int status = rc == KB_MANAGEMENT_READ_INVALID     ? 400
+                : rc == KB_MANAGEMENT_READ_DENIED    ? 403
                 : rc == KB_MANAGEMENT_READ_NOT_FOUND ? 404
-                : rc == KB_MANAGEMENT_READ_CONFLICT ? 409
+                : rc == KB_MANAGEMENT_READ_CONFLICT  ? 409
                 : rc == KB_MANAGEMENT_READ_INTEGRITY ? 502
                                                      : 503;
-   const char *code = status == 400 ? "invalid_request" : status == 403 ? "forbidden"
-                      : status == 404 ? "not_found" : status == 409 ? "conflict"
-                      : status == 502 ? "integrity" : "unavailable";
-   const char *message = status == 400 ? "Invalid request." : status == 403 ? "Forbidden."
-                         : status == 404 ? "Not found." : status == 409 ? "Request conflict."
+   const char *code = status == 400   ? "invalid_request"
+                      : status == 403 ? "forbidden"
+                      : status == 404 ? "not_found"
+                      : status == 409 ? "conflict"
+                      : status == 502 ? "integrity"
+                                      : "unavailable";
+   const char *message = status == 400   ? "Invalid request."
+                         : status == 403 ? "Forbidden."
+                         : status == 404 ? "Not found."
+                         : status == 409 ? "Request conflict."
                          : status == 502 ? "Integrity verification failed."
                                          : "Service unavailable.";
-   snprintf(out, (size_t)cap,
-            "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}",
-            code, message, correlation);
+   if (have_correlation)
+      snprintf(out, (size_t)cap,
+               "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}", code,
+               message, correlation);
+   else
+      snprintf(out, (size_t)cap, "{\"error\":{\"code\":\"%s\",\"message\":\"%s\"}}", code, message);
    return status;
 }
 
@@ -464,7 +479,7 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
       char t[32];
       int64_t team;
       int team_query = (is_action || is_read) ? (q_exact_team(qs, t, sizeof(t)) ? -1 : 1)
-                                 : q_unique(qs, "team", t, sizeof(t));
+                                              : q_unique(qs, "team", t, sizeof(t));
       if (team_query == 0)
       {
          snprintf(out, cap, "{\"error\":\"team is required\"}");
