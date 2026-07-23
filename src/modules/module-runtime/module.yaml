@@ -5,6 +5,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/module-runtime/extension.c",
     "src/modules/module-runtime/pre_llm_hook.c"

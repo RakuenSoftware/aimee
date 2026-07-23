@@ -266,6 +266,8 @@ class DescriptorTests(unittest.TestCase):
             ("audit", "sources", "src/modules/audit/audit_action.c"),
             ("audit", "sources", "src/modules/audit/audit_worm.c"),
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
+            ("module-runtime", "sources", "src/modules/module-runtime/extension.c"),
+            ("module-runtime", "sources", "src/modules/module-runtime/pre_llm_hook.c"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -284,7 +286,8 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit"):
+        for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
+                           "module-runtime"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -302,8 +305,21 @@ class DescriptorTests(unittest.TestCase):
                 finally:
                     tmp.cleanup()
 
+    def test_latched_descriptors_declare_complete_ownership(self) -> None:
+        """The latch itself is the control; mutation coverage below assumes it stays set."""
+        for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
+                           "module-runtime"):
+            descriptor = json.loads(
+                (REPO_ROOT / "src/modules" / identifier / "module.yaml").read_text(
+                    encoding="utf-8"
+                )
+            )
+            with self.subTest(identifier=identifier):
+                self.assertIs(descriptor.get("ownership_complete"), True)
+
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("roundtable", "ir", "translation", "skills", "audit"):
+        for identifier in ("roundtable", "ir", "translation", "skills", "audit",
+                           "module-runtime"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
