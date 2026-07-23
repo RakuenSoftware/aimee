@@ -47,9 +47,9 @@ typedef enum
 } server_mgmt_endpoint_jti_result_t;
 
 typedef int (*server_mgmt_endpoint_token_fn)(void *, const server_mgmt_endpoint_request_t *,
-                                              const char *, server_mgmt_token_claims_t *);
+                                             const char *, server_mgmt_token_claims_t *);
 typedef int (*server_mgmt_endpoint_staple_fn)(void *, const server_mgmt_endpoint_request_t *,
-                                               uint64_t *, char staple_digest[65]);
+                                              uint64_t *, char staple_digest[65]);
 typedef server_mgmt_checkpoint_result_t (*server_mgmt_endpoint_checkpoint_fn)(
     void *, const server_mgmt_endpoint_request_t *, const server_mgmt_token_claims_t *, uint64_t,
     const char *);
@@ -57,7 +57,7 @@ typedef server_mgmt_endpoint_jti_result_t (*server_mgmt_endpoint_jti_fn)(
     void *, const server_mgmt_endpoint_request_t *, const server_mgmt_token_claims_t *);
 typedef int (*server_mgmt_endpoint_remote_writes_fn)(void *);
 typedef int (*server_mgmt_endpoint_audit_fn)(void *, const server_mgmt_token_claims_t *,
-                                              const server_mgmt_action_t *, int, int);
+                                             const server_mgmt_action_t *, int, int);
 typedef int (*server_mgmt_endpoint_action_fn)(void *, const server_mgmt_action_t *);
 /* apply returns 0=applied, 1=proved no effect, 2=effect unknown. */
 
@@ -87,8 +87,9 @@ int server_mgmt_endpoint_dispatch(const server_mgmt_endpoint_request_t *,
 int server_mgmt_endpoint_render(const server_mgmt_endpoint_result_t *, char *, size_t);
 
 /* Production strict status-authority checkpoint client. */
-server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
-    const server_mgmt_endpoint_request_t *, const server_mgmt_token_claims_t *, uint64_t,
-    const char *staple_digest);
+server_mgmt_checkpoint_result_t
+server_mgmt_checkpoint_client_verify(const server_mgmt_endpoint_request_t *,
+                                     const server_mgmt_token_claims_t *, uint64_t,
+                                     const char *staple_digest);
 
 #endif

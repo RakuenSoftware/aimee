@@ -69,8 +69,8 @@ int server_mgmt_action_parse(const char *body, size_t body_len, server_mgmt_acti
       else
          fields = 99;
    }
-   int ok = fields == 2 && cJSON_IsString(action) && cJSON_IsString(agent) &&
-            action->valuestring && agent->valuestring &&
+   int ok = fields == 2 && cJSON_IsString(action) && cJSON_IsString(agent) && action->valuestring &&
+            agent->valuestring &&
             (!strcmp(action->valuestring, "agent.enable") ||
              !strcmp(action->valuestring, "agent.disable"));
    size_t agent_len = ok ? strnlen(agent->valuestring, sizeof(out->agent)) : 0;
@@ -122,11 +122,11 @@ int server_mgmt_endpoint_dispatch(const server_mgmt_endpoint_request_t *rq,
    char staple_digest[65] = {0};
    if (!out)
       return 500;
-   if (!rq || !d || !d->verify_token || !d->verify_and_consume_staple ||
-       !d->verify_checkpoint || !d->consume_jti || !d->remote_writes || !d->audit || !d->apply ||
-       !rq->peer || !rq->server_id || !rq->expected_issuer || !rq->local_fingerprint ||
-       !rq->peer->management_profile || strcmp(rq->peer->cn, "p5-kb-management") ||
-       !rq->jwt || !rq->jwt_len || !rq->staple || !rq->staple_len ||
+   if (!rq || !d || !d->verify_token || !d->verify_and_consume_staple || !d->verify_checkpoint ||
+       !d->consume_jti || !d->remote_writes || !d->audit || !d->apply || !rq->peer ||
+       !rq->server_id || !rq->expected_issuer || !rq->local_fingerprint ||
+       !rq->peer->management_profile || strcmp(rq->peer->cn, "p5-kb-management") || !rq->jwt ||
+       !rq->jwt_len || !rq->staple || !rq->staple_len ||
        server_mgmt_action_parse(rq->body, rq->body_len, &action) != 0)
       return finish(out, 403, "denied", "none");
    memset(&claims, 0, sizeof(claims));
@@ -158,7 +158,7 @@ int server_mgmt_endpoint_dispatch(const server_mgmt_endpoint_request_t *rq,
    if (d->audit(d->ctx, &claims, &action, 1, effect == 0 ? 0 : (effect == 1 ? -1 : -2)) != 0)
       return finish(out, effect == 1 ? 500 : 502, effect == 1 ? "failed" : "indeterminate",
                     effect == 1 ? "none" : "unknown");
-   return effect == 0 ? finish(out, 200, "succeeded", "applied")
+   return effect == 0   ? finish(out, 200, "succeeded", "applied")
           : effect == 1 ? finish(out, 500, "failed", "none")
                         : finish(out, 502, "indeterminate", "unknown");
 }
@@ -167,7 +167,6 @@ int server_mgmt_endpoint_render(const server_mgmt_endpoint_result_t *r, char *ou
 {
    if (!r || !r->result || !r->effect || !out || !cap)
       return -1;
-   int n = snprintf(out, cap, "{\"result\":\"%s\",\"effect\":\"%s\"}", r->result,
-                    r->effect);
+   int n = snprintf(out, cap, "{\"result\":\"%s\",\"effect\":\"%s\"}", r->result, r->effect);
    return n >= 0 && (size_t)n < cap ? n : -1;
 }

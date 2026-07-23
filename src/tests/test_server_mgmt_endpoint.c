@@ -27,7 +27,7 @@ static int token(void *v, const server_mgmt_endpoint_request_t *r, const char *d
    return f->token;
 }
 static int staple(void *v, const server_mgmt_endpoint_request_t *r, uint64_t *generation,
-                   char digest[65])
+                  char digest[65])
 {
    fixture_t *f = v;
    mark(f, 'S');
@@ -37,9 +37,9 @@ static int staple(void *v, const server_mgmt_endpoint_request_t *r, uint64_t *ge
    digest[64] = 0;
    return f->staple;
 }
-static server_mgmt_checkpoint_result_t checkpoint(
-    void *v, const server_mgmt_endpoint_request_t *r, const server_mgmt_token_claims_t *c,
-    uint64_t generation, const char *digest)
+static server_mgmt_checkpoint_result_t checkpoint(void *v, const server_mgmt_endpoint_request_t *r,
+                                                  const server_mgmt_token_claims_t *c,
+                                                  uint64_t generation, const char *digest)
 {
    fixture_t *f = v;
    mark(f, 'C');
@@ -47,7 +47,7 @@ static server_mgmt_checkpoint_result_t checkpoint(
    return (server_mgmt_checkpoint_result_t)f->checkpoint;
 }
 static server_mgmt_endpoint_jti_result_t jti(void *v, const server_mgmt_endpoint_request_t *r,
-                                              const server_mgmt_token_claims_t *c)
+                                             const server_mgmt_token_claims_t *c)
 {
    fixture_t *f = v;
    mark(f, 'J');
@@ -76,8 +76,7 @@ static int apply(void *v, const server_mgmt_action_t *a)
    return f->apply;
 }
 
-static void run(fixture_t *f, int status, const char *result, const char *effect,
-                const char *order)
+static void run(fixture_t *f, int status, const char *result, const char *effect, const char *order)
 {
    server_tls_peer_cert_t peer = {.management_profile = 1};
    snprintf(peer.cn, sizeof(peer.cn), "%s", "p5-kb-management");
@@ -115,10 +114,10 @@ int main(void)
    assert(server_mgmt_action_parse(nul_agent, strlen(nul_agent), &a) != 0);
    assert(!strcmp(a.canonical, "{\"action\":\"agent.disable\",\"agent\":\"a-1\"}"));
    assert(strlen(a.digest) == 64);
-   const char *bad[] = {"{}", "{\"action\":\"agent.enable\"}",
-                        "{\"action\":\"agent.enable\",\"agent\":\"a/b\"}",
-                        "{\"action\":\"agent.enable\",\"agent\":\"a\",\"x\":\"y\"}",
-                        "{\"action\":\"agent.enable\",\"action\":\"agent.enable\",\"agent\":\"a\"}"};
+   const char *bad[] = {
+       "{}", "{\"action\":\"agent.enable\"}", "{\"action\":\"agent.enable\",\"agent\":\"a/b\"}",
+       "{\"action\":\"agent.enable\",\"agent\":\"a\",\"x\":\"y\"}",
+       "{\"action\":\"agent.enable\",\"action\":\"agent.enable\",\"agent\":\"a\"}"};
    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
       assert(server_mgmt_action_parse(bad[i], strlen(bad[i]), &a) != 0);
 

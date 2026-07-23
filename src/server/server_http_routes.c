@@ -181,8 +181,8 @@ static int management_staple_verify(void *ctx, const server_mgmt_endpoint_reques
                !strcmp(st.purpose, "management.action.v1");
    server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume_purpose(
        &st, rq->peer, rq->server_id, "management.action.v1", (uint64_t)rq->now, shape);
-   if (rc != SERVER_MGMT_NONCE_OK || !SHA256((const unsigned char *)rq->staple, rq->staple_len,
-                                             digest))
+   if (rc != SERVER_MGMT_NONCE_OK ||
+       !SHA256((const unsigned char *)rq->staple, rq->staple_len, digest))
       return -1;
    for (size_t i = 0; i < sizeof(digest); i++)
       snprintf(staple_digest + i * 2, 3, "%02x", digest[i]);
@@ -190,28 +190,40 @@ static int management_staple_verify(void *ctx, const server_mgmt_endpoint_reques
    return 0;
 }
 
-static server_mgmt_checkpoint_result_t management_checkpoint(
-    void *ctx, const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *claims,
-    uint64_t generation, const char *digest)
+static server_mgmt_checkpoint_result_t
+management_checkpoint(void *ctx, const server_mgmt_endpoint_request_t *rq,
+                      const server_mgmt_token_claims_t *claims, uint64_t generation,
+                      const char *digest)
 {
    (void)ctx;
    return server_mgmt_checkpoint_client_verify(rq, claims, generation, digest);
 }
 
-static server_mgmt_endpoint_jti_result_t management_jti(
-    void *ctx, const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *c)
+static server_mgmt_endpoint_jti_result_t management_jti(void *ctx,
+                                                        const server_mgmt_endpoint_request_t *rq,
+                                                        const server_mgmt_token_claims_t *c)
 {
    (void)ctx;
    server_management_jti_t token = {
-       c->jti,          c->issuer,          c->kid,          c->audience,
-       c->subject,      c->team_id,         c->capability,   c->peer_issuer,
-       c->peer_serial,  c->peer_fingerprint, c->request_sha256, c->correlation_id,
-       c->issued_at,    c->expires_at,
+       c->jti,
+       c->issuer,
+       c->kid,
+       c->audience,
+       c->subject,
+       c->team_id,
+       c->capability,
+       c->peer_issuer,
+       c->peer_serial,
+       c->peer_fingerprint,
+       c->request_sha256,
+       c->correlation_id,
+       c->issued_at,
+       c->expires_at,
    };
    server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
    return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
           : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
-                                                : SERVER_MGMT_JTI_FAILED;
+                                               : SERVER_MGMT_JTI_FAILED;
 }
 
 static int management_remote_writes(void *ctx)
@@ -224,10 +236,10 @@ static int management_audit(void *ctx, const server_mgmt_token_claims_t *c,
                             const server_mgmt_action_t *a, int outcome, int status)
 {
    (void)ctx;
-   return outcome ? server_mgmt_audit_outcome(c->subject, a->agent, c->capability, c->jti,
-                                               a->digest, status)
-                  : server_mgmt_audit_intent(c->subject, a->agent, c->capability, c->jti,
-                                              a->digest);
+   return outcome
+              ? server_mgmt_audit_outcome(c->subject, a->agent, c->capability, c->jti, a->digest,
+                                          status)
+              : server_mgmt_audit_intent(c->subject, a->agent, c->capability, c->jti, a->digest);
 }
 
 static int management_apply(void *ctx, const server_mgmt_action_t *a)
@@ -255,12 +267,21 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
    const char *jwt = server_http_identity_bearer();
    const char *staple = server_http_identity_status_staple();
    server_mgmt_endpoint_request_t request = {
-       rq->body, (size_t)rq->body_len, jwt, strlen(jwt), staple, strlen(staple), issuer, target,
-       peer, local_fp, (int64_t)time(NULL),
+       rq->body,
+       (size_t)rq->body_len,
+       jwt,
+       strlen(jwt),
+       staple,
+       strlen(staple),
+       issuer,
+       target,
+       peer,
+       local_fp,
+       (int64_t)time(NULL),
    };
    server_mgmt_endpoint_deps_t deps = {
-       management_token_verify, management_staple_verify, management_checkpoint, management_jti,
-       management_remote_writes, management_audit, management_apply, NULL,
+       management_token_verify,  management_staple_verify, management_checkpoint, management_jti,
+       management_remote_writes, management_audit,         management_apply,      NULL,
    };
    server_mgmt_endpoint_result_t result;
    int status = server_mgmt_endpoint_dispatch(&request, &deps, &result);

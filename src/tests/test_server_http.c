@@ -42,9 +42,10 @@ int audit_worm_append(const char *role, const char *principal, const char *actio
    return 0;
 }
 
-server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
-    const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *claims,
-    uint64_t generation, const char *digest)
+server_mgmt_checkpoint_result_t
+server_mgmt_checkpoint_client_verify(const server_mgmt_endpoint_request_t *rq,
+                                     const server_mgmt_token_claims_t *claims, uint64_t generation,
+                                     const char *digest)
 {
    (void)rq;
    (void)claims;
@@ -59,7 +60,9 @@ int server_mgmt_checkpoint_client_start(const server_http_management_config_t *c
    return 0;
 }
 
-void server_mgmt_checkpoint_client_stop(void) {}
+void server_mgmt_checkpoint_client_stop(void)
+{
+}
 
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
@@ -885,13 +888,22 @@ int main(void)
    /* --- Dedicated management environment packet and bind policy. --- */
    {
       static const char *const vars[] = {
-          "AIMEE_SERVER_MGMT_BIND",    "AIMEE_SERVER_MGMT_PORT",       "AIMEE_SERVER_MGMT_TLS_CERT",
-          "AIMEE_SERVER_MGMT_TLS_KEY", "AIMEE_SERVER_MGMT_CLIENT_CA",  "AIMEE_SERVER_ID",
-          "AIMEE_MGMT_STATUS_KEY_ID",  "AIMEE_MGMT_STATUS_PUBLIC_KEY",
-          "AIMEE_SERVER_MGMT_STATUS_ENDPOINT", "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
-          "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN", "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN",
-          "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT", "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
-          "AIMEE_SERVER_MGMT_ISSUER", "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE",
+          "AIMEE_SERVER_MGMT_BIND",
+          "AIMEE_SERVER_MGMT_PORT",
+          "AIMEE_SERVER_MGMT_TLS_CERT",
+          "AIMEE_SERVER_MGMT_TLS_KEY",
+          "AIMEE_SERVER_MGMT_CLIENT_CA",
+          "AIMEE_SERVER_ID",
+          "AIMEE_MGMT_STATUS_KEY_ID",
+          "AIMEE_MGMT_STATUS_PUBLIC_KEY",
+          "AIMEE_SERVER_MGMT_STATUS_ENDPOINT",
+          "AIMEE_SERVER_MGMT_STATUS_CA_FILE",
+          "AIMEE_SERVER_MGMT_STATUS_LEAF_PIN",
+          "AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_CERT",
+          "AIMEE_SERVER_MGMT_STATUS_CLIENT_KEY",
+          "AIMEE_SERVER_MGMT_ISSUER",
+          "AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE",
       };
       for (size_t i = 0; i < sizeof(vars) / sizeof(vars[0]); i++)
          unsetenv(vars[i]);
@@ -982,22 +994,21 @@ int main(void)
                                                   strlen(challenge)) == 1);
       assert(server_http_management_framing_valid("GET", "/v1/management/health", health,
                                                   strlen(health)) == 1);
-      assert(server_http_management_action_framing_valid(
-                 "POST", "/v1/management/action/challenge", action_challenge,
-                 strlen(action_challenge)) == 1);
+      assert(server_http_management_action_framing_valid("POST", "/v1/management/action/challenge",
+                                                         action_challenge,
+                                                         strlen(action_challenge)) == 1);
       assert(server_http_management_action_framing_valid("POST", "/v1/management/action", action,
                                                          strlen(action)) == 1);
       const char closing_challenge[] =
           "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
           "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
       assert(!server_http_management_action_framing_valid(
-          "POST", "/v1/management/action/challenge", closing_challenge,
-          strlen(closing_challenge)));
+          "POST", "/v1/management/action/challenge", closing_challenge, strlen(closing_challenge)));
       char duplicate_auth[1024];
       snprintf(duplicate_auth, sizeof(duplicate_auth), "%.*sAuthorization: Bearer second\r\n\r\n",
                (int)(strlen(action) - 2), action);
-      assert(!server_http_management_action_framing_valid(
-          "POST", "/v1/management/action", duplicate_auth, strlen(duplicate_auth)));
+      assert(!server_http_management_action_framing_valid("POST", "/v1/management/action",
+                                                          duplicate_auth, strlen(duplicate_auth)));
       const char duplicate[] = "GET /v1/management/health HTTP/1.1\r\nContent-Length: 0\r\n"
                                "Content-Length: 0\r\n\r\n";
       const char duplicate_status[] =

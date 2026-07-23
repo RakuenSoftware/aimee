@@ -24,13 +24,14 @@ int server_mgmt_status_init(void)
 
 int server_mgmt_nonce_issue_purpose(const server_tls_peer_cert_t *p, const char *target,
                                     const char *purpose, uint64_t now,
-                                    unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN], uint64_t *expires)
+                                    unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN],
+                                    uint64_t *expires)
 {
    sqlite3 *db = db1_conn();
    if (!db || !p || !p->issuer[0] || !p->serial_norm[0] || strlen(p->fingerprint) != 64 ||
        strlen(p->channel_binding) != 64 || !target || !target[0] || strlen(target) > 127 ||
-       !purpose || (strcmp(purpose, "management.health.v1") &&
-                    strcmp(purpose, "management.action.v1")) ||
+       !purpose ||
+       (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1")) ||
        !nonce || !expires || now > INT64_MAX - NONCE_TTL || RAND_bytes(nonce, 32) != 1)
       return SERVER_MGMT_NONCE_INVALID;
    if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
@@ -90,9 +91,9 @@ int server_mgmt_nonce_issue(const server_tls_peer_cert_t *p, const char *target,
    return server_mgmt_nonce_issue_purpose(p, target, "management.health.v1", now, nonce, expires);
 }
 
-server_mgmt_nonce_result_t server_mgmt_nonce_consume_purpose(
-    const kb_mgmt_status_t *st, const server_tls_peer_cert_t *p, const char *target,
-    const char *purpose, uint64_t now, int valid)
+server_mgmt_nonce_result_t
+server_mgmt_nonce_consume_purpose(const kb_mgmt_status_t *st, const server_tls_peer_cert_t *p,
+                                  const char *target, const char *purpose, uint64_t now, int valid)
 {
    sqlite3 *db = db1_conn();
    if (!db || !st || !p || !target || !purpose ||
@@ -195,9 +196,9 @@ int server_mgmt_status_hwm_advance(uint64_t generation)
    sqlite3_stmt *q = NULL;
    if (!db || generation > INT64_MAX ||
        sqlite3_prepare_v2(db,
-                         "UPDATE server_mgmt_status_hwm SET generation=?1 "
-                         "WHERE singleton=1 AND generation<=?1",
-                         -1, &q, NULL) != SQLITE_OK)
+                          "UPDATE server_mgmt_status_hwm SET generation=?1 "
+                          "WHERE singleton=1 AND generation<=?1",
+                          -1, &q, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int64(q, 1, (sqlite3_int64)generation);
    int rc = sqlite3_step(q) == SQLITE_DONE && sqlite3_changes(db) == 1 ? 0 : -1;

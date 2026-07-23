@@ -165,24 +165,19 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
 {
    kb_mgmt_status_t staple;
    char nonce[48], issuer[808];
-   size_t serial_len = rq && rq->peer
-                           ? strnlen(rq->peer->serial_norm,
-                                     sizeof(rq->peer->serial_norm))
-                           : 0;
-   size_t issuer_len = rq && rq->peer
-                           ? strnlen(rq->peer->issuer, sizeof(rq->peer->issuer))
-                           : 0;
+   size_t serial_len =
+       rq && rq->peer ? strnlen(rq->peer->serial_norm, sizeof(rq->peer->serial_norm)) : 0;
+   size_t issuer_len = rq && rq->peer ? strnlen(rq->peer->issuer, sizeof(rq->peer->issuer)) : 0;
    if (out && cap)
       out[0] = 0;
    if (digest)
       digest[0] = 0;
    if (!rq || !claims || !rq->staple || !rq->peer || !out || !cap || !digest ||
        !lower_hex(staple_digest, 64) || !lower_hex(claims->correlation_id, 64) ||
-       !lower_hex(claims->jti, 64) || !lower_hex(claims->request_sha256, 64) ||
-       serial_len < 1 || serial_len >= sizeof(rq->peer->serial_norm) ||
-       !lower_hex(rq->peer->serial_norm, serial_len) ||
-       issuer_len < 1 || issuer_len >= sizeof(rq->peer->issuer) ||
-       !ascii_token(rq->server_id, 127) ||
+       !lower_hex(claims->jti, 64) || !lower_hex(claims->request_sha256, 64) || serial_len < 1 ||
+       serial_len >= sizeof(rq->peer->serial_norm) ||
+       !lower_hex(rq->peer->serial_norm, serial_len) || issuer_len < 1 ||
+       issuer_len >= sizeof(rq->peer->issuer) || !ascii_token(rq->server_id, 127) ||
        rq->staple_len < 1 || rq->staple_len > KB_MGMT_STATUS_JSON_MAX ||
        strnlen(rq->staple, rq->staple_len + 1) != rq->staple_len ||
        !lower_hex(rq->peer->fingerprint, 64) ||
@@ -191,16 +186,15 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
        b64url(staple.nonce, sizeof(staple.nonce), nonce, sizeof(nonce)) ||
        b64url((const unsigned char *)rq->peer->issuer, issuer_len, issuer, sizeof(issuer)))
       return -1;
-   int n = snprintf(
-       out, cap,
-       "{\"version\":\"1\",\"purpose\":\"management.action.v1\",\"nonce\":\"%s\","
-       "\"caller_issuer_b64\":\"%s\",\"caller_serial\":\"%s\","
-       "\"caller_fingerprint\":\"%s\",\"target\":\"%s\","
-       "\"staple_generation\":\"%llu\",\"staple_sha256\":\"%s\","
-       "\"correlation_id\":\"%s\",\"jti\":\"%s\",\"request_sha256\":\"%s\"}",
-       nonce, issuer, rq->peer->serial_norm, rq->peer->fingerprint, rq->server_id,
-       (unsigned long long)generation, staple_digest, claims->correlation_id, claims->jti,
-       claims->request_sha256);
+   int n = snprintf(out, cap,
+                    "{\"version\":\"1\",\"purpose\":\"management.action.v1\",\"nonce\":\"%s\","
+                    "\"caller_issuer_b64\":\"%s\",\"caller_serial\":\"%s\","
+                    "\"caller_fingerprint\":\"%s\",\"target\":\"%s\","
+                    "\"staple_generation\":\"%llu\",\"staple_sha256\":\"%s\","
+                    "\"correlation_id\":\"%s\",\"jti\":\"%s\",\"request_sha256\":\"%s\"}",
+                    nonce, issuer, rq->peer->serial_norm, rq->peer->fingerprint, rq->server_id,
+                    (unsigned long long)generation, staple_digest, claims->correlation_id,
+                    claims->jti, claims->request_sha256);
    unsigned char raw[32];
    if (n < 0 || (size_t)n >= cap || (size_t)n > KB_MGMT_CHECKPOINT_JSON_MAX ||
        !SHA256((const unsigned char *)out, (size_t)n, raw))
@@ -223,8 +217,8 @@ static int real_transport(void *ctx, const server_mgmt_checkpoint_material_t *m,
    char actual[65] = {0};
    int pinned = kb_tls_peer_fingerprint(session.ssl, actual, sizeof(actual)) == 0 &&
                 server_mgmt_checkpoint_pin_matches(actual, m->leaf_pin, m->secondary_leaf_pin);
-   int rc = pinned ? kb_mgmt_client_session_checkpoint_deadline(
-                         &session, body, deadline, response, cap, status)
+   int rc = pinned ? kb_mgmt_client_session_checkpoint_deadline(&session, body, deadline, response,
+                                                                cap, status)
                    : -2;
    kb_mgmt_client_session_close(&session);
    OPENSSL_cleanse(actual, sizeof(actual));
@@ -247,7 +241,8 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify_with(
    if (now_ms == UINT64_MAX || now_ms > UINT64_MAX - 5000)
       return SERVER_MGMT_CHECKPOINT_UNAVAILABLE;
    int status = 0;
-   int tr = transport(transport_ctx, m, request, now_ms + 5000, response, sizeof(response), &status);
+   int tr =
+       transport(transport_ctx, m, request, now_ms + 5000, response, sizeof(response), &status);
    if (tr == -2)
       return SERVER_MGMT_CHECKPOINT_DENIED;
    if (tr != 0)
@@ -266,8 +261,7 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify_with(
    kb_mgmt_checkpoint_t checkpoint;
    uint64_t hwm = 0;
    time_t wall_now = time(NULL);
-   if (kb_mgmt_checkpoint_from_json(response, &checkpoint) ||
-       wall_now < 0 ||
+   if (kb_mgmt_checkpoint_from_json(response, &checkpoint) || wall_now < 0 ||
        server_mgmt_status_hwm(&hwm) != 0 ||
        kb_mgmt_checkpoint_validate(&checkpoint, (uint64_t)wall_now, hwm) != 0 ||
        strcmp(checkpoint.key_id, m->key_id) ||
@@ -295,8 +289,7 @@ int server_mgmt_checkpoint_client_start(const server_http_management_config_t *c
    }
    int ok = kb_mgmt_endpoint_validate(c->status_endpoint) == 0 &&
             lower_hex(c->status_leaf_pin, 64) &&
-            (!c->status_secondary_leaf_pin[0] ||
-             lower_hex(c->status_secondary_leaf_pin, 64)) &&
+            (!c->status_secondary_leaf_pin[0] || lower_hex(c->status_secondary_leaf_pin, 64)) &&
             c->status_key_id[0] && strlen(c->status_key_id) <= 64 &&
             decode_key(c->status_public_key, runtime.public_key) == 0 &&
             read_root_file(c->status_ca, runtime.ca, sizeof(runtime.ca)) == 0 &&
@@ -306,8 +299,7 @@ int server_mgmt_checkpoint_client_start(const server_http_management_config_t *c
    {
       snprintf(runtime.endpoint, sizeof(runtime.endpoint), "%s", c->status_endpoint);
       snprintf(runtime.pin, sizeof(runtime.pin), "%s", c->status_leaf_pin);
-      snprintf(runtime.secondary, sizeof(runtime.secondary), "%s",
-               c->status_secondary_leaf_pin);
+      snprintf(runtime.secondary, sizeof(runtime.secondary), "%s", c->status_secondary_leaf_pin);
       snprintf(runtime.key_id, sizeof(runtime.key_id), "%s", c->status_key_id);
       runtime.configured = 1;
    }
@@ -341,9 +333,10 @@ void server_mgmt_checkpoint_client_stop(void)
    pthread_mutex_unlock(&runtime.mutex);
 }
 
-server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
-    const server_mgmt_endpoint_request_t *rq, const server_mgmt_token_claims_t *claims,
-    uint64_t generation, const char *staple_digest)
+server_mgmt_checkpoint_result_t
+server_mgmt_checkpoint_client_verify(const server_mgmt_endpoint_request_t *rq,
+                                     const server_mgmt_token_claims_t *claims, uint64_t generation,
+                                     const char *staple_digest)
 {
    pthread_mutex_lock(&runtime.mutex);
    if (!runtime.configured || runtime.stopping)
@@ -353,8 +346,9 @@ server_mgmt_checkpoint_result_t server_mgmt_checkpoint_client_verify(
    }
    runtime.active++;
    server_mgmt_checkpoint_material_t material = {
-       runtime.endpoint, runtime.ca, runtime.cert, runtime.key, runtime.pin,
-       runtime.secondary[0] ? runtime.secondary : NULL, runtime.key_id, runtime.public_key,
+       runtime.endpoint, runtime.ca,         runtime.cert,
+       runtime.key,      runtime.pin,        runtime.secondary[0] ? runtime.secondary : NULL,
+       runtime.key_id,   runtime.public_key,
    };
    pthread_mutex_unlock(&runtime.mutex);
    server_mgmt_checkpoint_result_t result = server_mgmt_checkpoint_client_verify_with(

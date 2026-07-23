@@ -205,8 +205,7 @@ static void test_action_route(void)
           405);
    assert(route_body("POST", "/v1/servers/server-a/actions", "team=9",
                      "{\"action\":\"agent.run\",\"agent\":\"alpha\"}", out, sizeof(out)) == 400);
-   static const char nul_body[] =
-       "{\"action\":\"agent.enable\",\"agent\":\"alpha\"}\0trailing";
+   static const char nul_body[] = "{\"action\":\"agent.enable\",\"agent\":\"alpha\"}\0trailing";
    assert(kb_http_servers_route_ex("POST", "/v1/servers/server-a/actions", "team=9", nul_body,
                                    sizeof(nul_body) - 1, out, sizeof(out)) == 400);
    assert(action_calls == 1);

@@ -14,7 +14,7 @@
 #include "server_conn_io.h"    /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"        /* native TLS termination (phase 1b) */
 #include "server_mgmt_checkpoint_client.h"
-#include "pki.h"               /* P8a per-request durable cert revocation/expiry re-check */
+#include "pki.h"                       /* P8a per-request durable cert revocation/expiry re-check */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -1086,7 +1086,7 @@ static int g_tls_fd = -1;            /* optional native-TLS listener (phase 1b) 
 static int g_management_tls_fd = -1; /* dedicated required-mTLS management listener */
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
-int g_remote_writes = 0; /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+int g_remote_writes = 0;             /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
 static server_http_rate_state_t g_rate_state = {0, 0};
 static pthread_mutex_t g_rate_lock =
     PTHREAD_MUTEX_INITIALIZER; /* guards g_rate_state across conns */
@@ -1581,8 +1581,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
         (server_http_management_health_route(method, path) &&
          !server_http_management_framing_valid(method, path, buf, management_header_len)) ||
         (server_http_management_action_route(method, path) &&
-         !server_http_management_action_framing_valid(method, path, buf,
-                                                      management_header_len))))
+         !server_http_management_action_framing_valid(method, path, buf, management_header_len))))
    {
       send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
       return;

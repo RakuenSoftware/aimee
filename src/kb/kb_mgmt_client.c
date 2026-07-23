@@ -318,8 +318,8 @@ static int session_request_deadline(kb_mgmt_client_session_t *s, const char *met
          size_t exact = (size_t)(end + 4 - raw) + content_length;
          int status = response_status(raw, end);
          if (status < 0 || (!strcmp(path, "/v1/management/challenge") && !reusable) ||
-             (!strcmp(path, "/v1/management/action-checkpoint") && reusable) ||
-             total != exact || memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
+             (!strcmp(path, "/v1/management/action-checkpoint") && reusable) || total != exact ||
+             memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
              monotonic_ms() >= deadline)
             break;
          memcpy(resp, end + 4, content_length);
@@ -339,8 +339,8 @@ done:
 }
 
 int kb_mgmt_client_session_checkpoint_deadline(kb_mgmt_client_session_t *s, const char *body,
-                                                uint64_t deadline, char *resp, size_t cap,
-                                                int *status_out)
+                                               uint64_t deadline, char *resp, size_t cap,
+                                               int *status_out)
 {
    return session_request_deadline(s, "POST", "/v1/management/action-checkpoint", body, NULL,
                                    deadline, resp, cap, status_out, 1, NULL);

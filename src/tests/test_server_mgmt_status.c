@@ -60,15 +60,14 @@ int main(void)
 
    memset(&s, 0, sizeof(s));
    uint64_t action_expiry = 0;
-   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.action.v1", 100,
-                                          s.nonce, &action_expiry) == SERVER_MGMT_NONCE_OK);
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.action.v1", 100, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
    s.revocation_generation = 4;
-   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) ==
-          SERVER_MGMT_NONCE_MISMATCH);
+   assert(server_mgmt_nonce_consume(&s, &p, "server-1", 101, 1) == SERVER_MGMT_NONCE_MISMATCH);
    assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.action.v1", 101, 1) ==
           SERVER_MGMT_NONCE_NOT_FOUND);
-   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.action.v1", 100,
-                                          s.nonce, &action_expiry) == SERVER_MGMT_NONCE_OK);
+   assert(server_mgmt_nonce_issue_purpose(&p, "server-1", "management.action.v1", 100, s.nonce,
+                                          &action_expiry) == SERVER_MGMT_NONCE_OK);
    assert(server_mgmt_nonce_consume_purpose(&s, &p, "server-1", "management.action.v1", 101, 1) ==
           SERVER_MGMT_NONCE_OK);
 

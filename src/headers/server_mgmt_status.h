@@ -34,9 +34,11 @@ server_mgmt_nonce_result_t server_mgmt_nonce_consume(const kb_mgmt_status_t *,
                                                      const server_tls_peer_cert_t *,
                                                      const char *target_server_id, uint64_t now,
                                                      int signature_and_shape_valid);
-server_mgmt_nonce_result_t server_mgmt_nonce_consume_purpose(
-    const kb_mgmt_status_t *, const server_tls_peer_cert_t *, const char *target_server_id,
-    const char *purpose, uint64_t now, int signature_and_shape_valid);
+server_mgmt_nonce_result_t server_mgmt_nonce_consume_purpose(const kb_mgmt_status_t *,
+                                                             const server_tls_peer_cert_t *,
+                                                             const char *target_server_id,
+                                                             const char *purpose, uint64_t now,
+                                                             int signature_and_shape_valid);
 
 int server_mgmt_status_hwm(uint64_t *generation);
 int server_mgmt_status_hwm_advance(uint64_t generation);
