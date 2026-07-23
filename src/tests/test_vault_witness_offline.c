@@ -1,0 +1,208 @@
+#include "modules/vault/vault_witness_offline.h"
+
+#include <assert.h>
+#include <openssl/evp.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "modules/vault/vault_witness_checkpoint.h"
+#include "modules/vault/vault_witness_export.h"
+#include "modules/vault/vault_witness_merkle.h"
+#include "modules/vault/vault_witness_proof.h"
+#include "modules/vault/vault_witness_record.h"
+
+/* A growable stream builder. */
+static uint8_t g_stream[65536];
+static size_t g_len;
+
+static void reset_stream(void)
+{
+   g_len = 0;
+}
+
+static void frame_payload(vault_witness_export_kind_t kind, const uint8_t *payload, size_t plen)
+{
+   uint8_t frame[8192];
+   size_t flen = 0;
+   assert(vault_witness_export_frame(kind, payload, plen, frame, sizeof frame, &flen) == 0);
+   assert(g_len + flen <= sizeof g_stream);
+   memcpy(g_stream + g_len, frame, flen);
+   g_len += flen;
+}
+
+static void gen_keypair(uint8_t priv[32], uint8_t pub[32])
+{
+   EVP_PKEY *pkey = NULL;
+   EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
+   assert(ctx && EVP_PKEY_keygen_init(ctx) == 1 && EVP_PKEY_keygen(ctx, &pkey) == 1);
+   size_t l = 32;
+   assert(EVP_PKEY_get_raw_private_key(pkey, priv, &l) == 1);
+   l = 32;
+   assert(EVP_PKEY_get_raw_public_key(pkey, pub, &l) == 1);
+   EVP_PKEY_free(pkey);
+   EVP_PKEY_CTX_free(ctx);
+}
+
+/* Emit a chained record run for one shard. */
+static void emit_shard_records(const char *tenant, const char *provider, size_t n)
+{
+   uint8_t prev[32];
+   for (size_t i = 0; i < n; i++)
+   {
+      vault_witness_record_t r;
+      memset(&r, 0, sizeof r);
+      r.source = VAULT_WITNESS_SRC_REWRAP;
+      r.shard_seq = i + 1;
+      r.is_first_in_shard = (i == 0);
+      r.seal_epoch = 1;
+      r.fencing_token = 1;
+      memset(r.source_hash, (int)(0x20 + i), 32);
+      snprintf(r.source_id, sizeof r.source_id, "s%zu", i);
+      snprintf(r.tenant, sizeof r.tenant, "%s", tenant);
+      snprintf(r.provider, sizeof r.provider, "%s", provider);
+      snprintf(r.timestamp, sizeof r.timestamp, "2026-07-23T00:00:%02zuZ", i % 60);
+      if (i == 0)
+         assert(vault_witness_genesis_sentinel(tenant, provider, r.witness_pred_hash) == 0);
+      else
+         memcpy(r.witness_pred_hash, prev, 32);
+      assert(vault_witness_record_digest(&r, prev) == 0);
+      uint8_t wire[VAULT_WITNESS_RECORD_MAX];
+      size_t wl = 0;
+      assert(vault_witness_record_encode(&r, wire, sizeof wire, &wl) == 0);
+      frame_payload(VAULT_WITNESS_EXPORT_RECORD, wire, wl);
+   }
+}
+
+/* Build a one-leaf SMT for a shard head, sign a checkpoint over it, emit both the
+ * checkpoint and an inclusion proof. Returns the anchor for verification. */
+static void emit_checkpoint_and_proof(const char *tenant, const char *provider, uint64_t seq,
+                                      const uint8_t head[32], const uint8_t priv[32],
+                                      const uint8_t pub[32], vault_witness_anchor_t *anchor)
+{
+   vault_witness_leaf_t leaf;
+   assert(vault_witness_shard_key_hash(tenant, provider, leaf.key) == 0);
+   assert(vault_witness_leaf_hash(tenant, provider, seq, head, leaf.hash) == 0);
+   uint8_t root[32];
+   assert(vault_witness_merkle_root(&leaf, 1, root) == 0);
+
+   vault_witness_checkpoint_t cp;
+   memset(&cp, 0, sizeof cp);
+   cp.version = 1;
+   cp.seq = 1;
+   cp.has_predecessor = 0;
+   cp.shard_count = 1;
+   cp.sig_alg = VAULT_WITNESS_SIG_ED25519;
+   cp.sig_version = 1;
+   memcpy(cp.root, root, 32);
+   memset(cp.leaf_snapshot_digest, 0x55, 32);
+   uint8_t key_id[16];
+   memset(key_id, 0xC0, 16);
+   memcpy(cp.signer_key_id, key_id, 16);
+   snprintf(cp.created_at, sizeof cp.created_at, "2026-07-23T00:00:00Z");
+   assert(vault_witness_checkpoint_sign_ed25519(&cp, priv) == 0);
+
+   uint8_t cw[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   size_t cl = 0;
+   assert(vault_witness_checkpoint_encode(&cp, cw, sizeof cw, &cl) == 0);
+   frame_payload(VAULT_WITNESS_EXPORT_CHECKPOINT, cw, cl);
+
+   vault_witness_proof_t p;
+   memset(&p, 0, sizeof p);
+   p.checkpoint_seq = 1;
+   snprintf(p.tenant, sizeof p.tenant, "%s", tenant);
+   snprintf(p.provider, sizeof p.provider, "%s", provider);
+   p.sequence = seq;
+   memcpy(p.head_hash, head, 32);
+   assert(vault_witness_merkle_proof(&leaf, 1, 0, p.path) == 0);
+   uint8_t pw[VAULT_WITNESS_PROOF_WIRE_MAX];
+   size_t pl = 0;
+   assert(vault_witness_proof_encode(&p, pw, sizeof pw, &pl) == 0);
+   frame_payload(VAULT_WITNESS_EXPORT_PROOF, pw, pl);
+
+   memset(anchor, 0, sizeof *anchor);
+   memcpy(anchor->key_id, key_id, 16);
+   memcpy(anchor->ed25519_pub, pub, 32);
+}
+
+static void test_clean_stream(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t head[32];
+   memset(head, 0x99, 32);
+   vault_witness_anchor_t anchor;
+   emit_shard_records("!kb", "!audit", 4);
+   emit_checkpoint_and_proof("!kb", "!audit", 4, head, priv, pub, &anchor);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.any_tamper == 0);
+   assert(rep.records == 4 && rep.shards_ok == 1 && rep.shards_broken == 0);
+   assert(rep.checkpoints == 1 && rep.checkpoints_ok == 1);
+   assert(rep.proofs == 1 && rep.proofs_ok == 1 && rep.proofs_bad == 0);
+   assert(rep.malformed == 0);
+}
+
+static void test_tampered_record(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t head[32];
+   memset(head, 0x99, 32);
+   vault_witness_anchor_t anchor;
+   emit_shard_records("!kb", "!audit", 4);
+   emit_checkpoint_and_proof("!kb", "!audit", 4, head, priv, pub, &anchor);
+
+   /* Corrupt a byte inside the first record's frame payload (a hash region). Flip a
+    * byte well past the export + record headers so it lands in a hash field. */
+   g_stream[16 + 60] ^= 0xFF;
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.any_tamper == 1);
+}
+
+static void test_wrong_anchor(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t head[32];
+   memset(head, 0x99, 32);
+   vault_witness_anchor_t anchor;
+   emit_shard_records("!kb", "!audit", 2);
+   emit_checkpoint_and_proof("!kb", "!audit", 4, head, priv, pub, &anchor);
+
+   /* Verify with a different pubkey -> checkpoint signature fails. */
+   uint8_t priv2[32], pub2[32];
+   gen_keypair(priv2, pub2);
+   vault_witness_anchor_t bad = anchor;
+   memcpy(bad.ed25519_pub, pub2, 32);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &bad, 1, &rep) == 0);
+   assert(rep.checkpoints_bad_sig == 1 && rep.any_tamper == 1);
+}
+
+static void test_malformed_frame(void)
+{
+   reset_stream();
+   /* A truncated frame header. */
+   uint8_t junk[10] = {0};
+   assert(vault_witness_offline_verify(junk, sizeof junk, NULL, 0,
+                                       &(vault_witness_offline_report_t){0}) == 0);
+}
+
+int main(void)
+{
+   test_clean_stream();
+   test_tampered_record();
+   test_wrong_anchor();
+   test_malformed_frame();
+   printf("test_vault_witness_offline: all passed\n");
+   return 0;
+}

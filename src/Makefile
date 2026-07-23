@@ -334,7 +334,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 # as KB_VAULT_OBJS below, kb/-prefixed objects). db2/vault_pg.c (the kb Postgres store)
 # rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
 # DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
-VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_proof.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
+VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_offline.c modules/vault/vault_witness_proof.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
   modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
@@ -766,6 +766,17 @@ server: retire-obsolete-binaries $(SERVER) $(KB) $(KB_RESOLVER) $(FORWARDER)
 # Convenience alias so `make kb` (and the WITH_TPM2 dry-run gate) builds just the
 # aimee-kb sidecar image.
 kb: $(KB) $(KB_RESOLVER)
+
+# aimee-witness-verify: standalone OFFLINE witness verifier (no kb, no db, no net).
+WITNESS_VERIFY = ../aimee-witness-verify$(EXEEXT)
+WITNESS_VERIFY_OBJS = $(OBJDIR)/tools/witness_verify.o \
+  $(OBJDIR)/modules/vault/vault_witness_offline.o $(OBJDIR)/modules/vault/vault_witness_verify.o \
+  $(OBJDIR)/modules/vault/vault_witness_record.o $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+  $(OBJDIR)/modules/vault/vault_witness_checkpoint.o $(OBJDIR)/modules/vault/vault_witness_export.o \
+  $(OBJDIR)/modules/vault/vault_witness_proof.o
+$(WITNESS_VERIFY): $(WITNESS_VERIFY_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ -lcrypto
+witness-verify: $(WITNESS_VERIFY)
 
 # Lean build: size-optimized, stripped binary for minimal deployments.
 # Uses -Os (size opt), -g0 (no debug info), -s (strip symbols), and
