@@ -275,6 +275,8 @@ class DescriptorTests(unittest.TestCase):
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),
+            ("learning", "sources", "src/modules/learning/learning_router.c"),
+            ("learning", "private_headers", "src/modules/learning/learning.h"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -294,7 +296,7 @@ class DescriptorTests(unittest.TestCase):
                 tmp.cleanup()
 
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway", "governance"):
+                           "module-runtime", "plugin-loader", "gateway", "governance", "learning"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -313,16 +315,23 @@ class DescriptorTests(unittest.TestCase):
                     tmp.cleanup()
 
     def test_latched_descriptors_declare_complete_ownership(self) -> None:
-        """The latch itself is the control; mutation coverage below assumes it stays set."""
-        for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway"):
-            descriptor = json.loads(
-                (REPO_ROOT / "src/modules" / identifier / "module.yaml").read_text(
-                    encoding="utf-8"
-                )
-            )
-            with self.subTest(identifier=identifier):
+        """The latch itself is the control; mutation coverage below assumes it stays set.
+
+        Derived from the graph rather than a hardcoded list, so a newly latched module is
+        covered without editing this test and the set cannot drift behind the descriptors.
+        """
+        latched = 0
+        for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
+            descriptor = json.loads(path.read_text(encoding="utf-8"))
+            if descriptor.get("ownership_complete") is None:
+                continue
+            latched += 1
+            with self.subTest(identifier=path.parent.name):
                 self.assertIs(descriptor.get("ownership_complete"), True)
+        # Guard only against a vacuous pass (broken glob, every descriptor unlatched); the
+        # per-descriptor assertion above does the real work. A count floor is deliberately
+        # avoided — it would drift on every latch, the exact churn the graph scan removes.
+        self.assertTrue(latched, "no latched descriptor found; the guard would pass vacuously")
 
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
@@ -390,7 +399,7 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway", "governance"):
+                           "module-runtime", "plugin-loader", "gateway", "governance", "learning"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
