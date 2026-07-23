@@ -77,6 +77,12 @@ is now the suite index and shared contract; it does not duplicate the child prop
     anonymous or ambient attach — an arbitrary local process cannot connect, enumerate, publish, or
     subscribe. Admission is least-privilege (an admitted participant is still confined to its declared,
     authorized event kinds) and fail-closed (a refused attach is denied and audited).
+18. **Delivery is per-subscription observer routing, not broadcast.** Core routes each event only to
+    the modules registered as authorized observers of that event kind (observer pattern); a module
+    never receives, and cannot enumerate, traffic for event kinds it did not subscribe to and is not
+    authorized for. A subscription is honored only when the descriptor declares it and execution
+    policy authorizes it. The single full-stream observer is core's own governance/audit tap, which
+    is trust-kernel infrastructure, not a feature module.
 
 ## Shared terms
 
@@ -221,6 +227,35 @@ promiscuous endpoint any process can dial (shared invariant 17).
 This contract sets the admission invariant and its reuse of existing identity machinery; the
 mechanics of the local endpoint, the handshake, and out-of-process module attachment are owned by
 `module-runtime` and `plugin-loader` in their documents.
+
+### Subscription and routing (observer pattern)
+
+Admission decides *whether* a participant is on the bus; routing decides *what it receives*. These
+are separate, and both are least-privilege. The bus is **not** a shared channel every admitted
+module reads in full — that would make admission the only wall and let any module observe `memory`
+traffic, delegate invocations, or another module's events. Instead the bus follows an **observer
+pattern with authorization-scoped routing** (shared invariant 18):
+
+- **Core is the subject and router; modules are observers.** A module registers as an observer of
+  the specific event kinds it handles, and receives the replies to its own requests. Core maintains
+  the observer set per event kind and delivers each event only to that set. Nothing reaches a module
+  it did not subscribe to.
+- **Subscription is authorized at subscribe time.** Core honors a subscription only when the
+  module's descriptor declares that subscribe edge *and* `execution-policy` authorizes it for the
+  module's principal. An undeclared or unauthorized subscription is refused, fail-closed and audited
+  — a module cannot opt into arbitrary traffic, and there is no "all events" subscription available
+  to any module.
+- **Request/reply is point-to-point.** A correlated request is delivered to the one serving module,
+  and its reply to the one requester; neither is fanned out to other observers.
+- **The reference monitor is the one exception.** Core's governance/audit tap observes the full
+  stream because it *is* the trust kernel's observation point, not a feature module. This is how the
+  "single loggable, governable" seam (invariant 13) coexists with module compartmentalization: the
+  reference monitor sees everything; every principal sees only its authorized slice.
+
+The security payoff is least privilege by construction: a compromised or malicious module can
+observe only the event kinds it was already authorized for, and can inject only its declared,
+authorized kinds. Widening what a module can see or send is a descriptor-plus-policy change,
+reviewable and audited, not an ambient consequence of being on the bus.
 
 ### Record, replay, and debugging
 

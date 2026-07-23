@@ -155,6 +155,15 @@ admitted under the service principal at load; out-of-process or externally autho
 Admission is least-privilege — an admitted participant still reaches only its declared, authorized
 event kinds — and a refused attach is denied and audited.
 
+**Subscription routing (shared invariant 18).** Delivery is observer-pattern, not broadcast.
+`module-runtime` maintains, per event kind, the set of registered authorized observers and routes
+each event only to that set; a request and its reply are delivered point-to-point to the serving
+module and the requester. A subscription is admitted only when the descriptor declares the subscribe
+edge and `execution-policy` authorizes it for the module's principal — there is no all-events
+subscription for any module, and an undeclared or unauthorized subscription is refused, fail-closed
+and audited. The sole full-stream observer is core's governance/audit tap, which is trust-kernel
+infrastructure, not a feature module.
+
 ## Installation, capability publication, and replay (2026-07-23 amendment)
 
 `module-runtime` owns installation as well as the bus. Three rules follow from the suite amendment:
@@ -240,4 +249,5 @@ logic or a second provider implementation.
 - {id: 16, tier: integration, check: "scripts/test_event_replay.sh --capture-per-service-stream --deterministic-same-events-same-order --capture-or-stub-nondeterminism --replay-reproduces-run --capture-obeys-audit-redaction-and-principal-scope"}
 - {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --untrusted-principal --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
 - {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --require-attested-identity --reuse-vault-principal-and-cert-cn-classes --no-anonymous-or-ambient-attach --refuse-unauthenticated-process-connect-enumerate-publish-subscribe --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --restricted-local-endpoint-for-out-of-process --fail-closed-and-audited"}
+- {id: 19, tier: integration, check: "scripts/test_bus_routing.sh --observer-pattern --per-event-kind-observer-set --deliver-only-to-authorized-observers --no-all-events-subscription --request-reply-point-to-point --subscribe-requires-descriptor-edge-and-execution-policy --refuse-undeclared-or-unauthorized-subscription-fail-closed-audited --module-cannot-observe-or-enumerate-others-traffic --only-governance-audit-tap-sees-full-stream"}
 ```
