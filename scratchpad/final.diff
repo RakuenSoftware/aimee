@@ -1,0 +1,575 @@
+diff --git a/src/models_dev_cache.c b/src/models_dev_cache.c
+index 36d12cda..e2359c0a 100644
+--- a/src/models_dev_cache.c
++++ b/src/models_dev_cache.c
+@@ -193,6 +193,27 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
+       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
+                                 &band.cache_read_per_mtok);
+ 
++      /* Duplicate threshold FIRST: last definition wins and consumes no slot.
++       * Checking this before the capacity logic matters — at capacity, an
++       * eviction pass would otherwise discard a replacement for the largest
++       * threshold, or evict a distinct band to make room for an entry that
++       * needed none, losing real data and spuriously marking the schedule
++       * truncated. */
++      int dup = -1;
++      for (int k = 0; k < out->price_band_count; k++)
++      {
++         if (out->price_bands[k].above_tokens == band.above_tokens)
++         {
++            dup = k;
++            break;
++         }
++      }
++      if (dup >= 0)
++      {
++         out->price_bands[dup] = band;
++         continue;
++      }
++
+       /* Insertion sort, ascending. When full, keep the LOWEST thresholds and
+        * flag the schedule as truncated rather than dropping whichever entries
+        * happened to arrive last: taking the first N in input order silently
+@@ -212,12 +233,6 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
+          out->price_bands[i] = out->price_bands[i - 1];
+          i--;
+       }
+-      /* Duplicate threshold: last definition wins, no new slot consumed. */
+-      if (i > 0 && out->price_bands[i - 1].above_tokens == band.above_tokens)
+-      {
+-         out->price_bands[i - 1] = band;
+-         continue;
+-      }
+       out->price_bands[i] = band;
+       out->price_band_count++;
+    }
+diff --git a/src/server/agent_bridge.c b/src/server/agent_bridge.c
+index fbc6c71a..94554feb 100644
+--- a/src/server/agent_bridge.c
++++ b/src/server/agent_bridge.c
+@@ -117,18 +117,32 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
+    }
+    cJSON_AddItemToObject(req, "models", models);
+ }
+-/* Never promise the provider more output than the agent's context window can
+- * hold. A pinned max_tokens at or above the window is a misconfiguration: the
+- * reply alone would consume the whole context, leaving nothing for the prompt.
+- * agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but that
+- * is a local calculation - without this the request still carried the oversized
+- * limit, so a 200k-window agent pinned at 300k asked for 300k of output. */
++/* Reject the gross misconfiguration where the OUTPUT limit alone would consume
++ * the entire context window, leaving no room for any prompt at all.
++ *
++ * Scope, precisely: this function does NOT know the request's prompt size, so it
++ * cannot and does not guarantee `prompt + output <= window`. It only bounds the
++ * case that is invalid regardless of prompt — an output cap at or above the
++ * whole window. Half the window is a policy choice for that case, not a derived
++ * bound. agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but
++ * that is a local calculation; without this the REQUEST still carried the
++ * oversized limit, so a 200k-window agent pinned at 300k asked for 300k output.
++ *
++ * The window is the agent's effective ceiling: the operator's policy value when
++ * set, else the model catalog. Consulting only middleware.context_window left a
++ * catalogued 8k model with no override accepting a pinned 300k. */
+ static int agent_clamp_to_context(const agent_t *agent, int tokens)
+ {
+    if (!agent || tokens <= 0)
+       return tokens;
+    int window = agent->middleware.context_window;
+-   if (window > 0 && tokens >= window)
++   if (window <= 0)
++   {
++      model_capability_t cap;
++      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
++         window = cap.context_window;
++   }
++   if (window > 1 && tokens >= window)
+       return window / 2;
+    return tokens;
+ }
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index 9982b8d8..e8d169fc 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -1962,6 +1962,9 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char
+    return -1;
+ }
+ 
++static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
++                                          unsigned required_caps, int min_context);
++
+ /* A PRIMARY (user-facing) turn must reach the configured default agent whatever
+  * its cost_tier. The default is the operator's "most capable seat" choice, and a
+  * user must never be handed a weaker model just because a cheaper peer exists —
+@@ -2000,8 +2003,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
+       for (int i = 0; i < cfg->agent_count; i++)
+       {
+          agent_t *peer = &cfg->agents[i];
+-         if (!peer->enabled || !agent_supports_role(peer, role) ||
+-             !agent_is_available_for_routing(peer))
++         if (!agent_route_candidate_eligible(peer, role, 0, 0))
+             continue;
+          if (min_tier < 0 || peer->cost_tier < min_tier)
+             min_tier = peer->cost_tier;
+@@ -2009,8 +2011,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
+       for (int i = 0; i < cfg->agent_count; i++)
+       {
+          agent_t *peer = &cfg->agents[i];
+-         if (peer == ag || !peer->enabled || !agent_supports_role(peer, role) ||
+-             !agent_is_available_for_routing(peer))
++         if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0))
+             continue;
+          if (peer->cost_tier == min_tier &&
+              strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+@@ -2257,6 +2258,23 @@ static int agent_effective_context(const agent_t *ag)
+  * precisely the seat the capability gate just rejected. Prefer the configured
+  * default (the operator's most-capable choice), then the largest effective
+  * context window, then the highest cost_tier as a capability proxy. */
++/* The single candidate-eligibility predicate shared by ordinary routing and
++ * escalation. Factored so the two cannot DRIFT: escalation re-deriving its own
++ * copy would silently bypass any gate added to the normal pass later. Note the
++ * policy filter (primary_only), the health filter, and the Claude-CLI structural
++ * rule all live inside agent_is_available_for_routing(), so they are enforced
++ * here for both paths. `min_context` is the only axis escalation relaxes. */
++static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
++                                          unsigned required_caps, int min_context)
++{
++   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
++       !agent_is_available_for_routing(ag))
++      return 0;
++   if (required_caps || min_context > 0)
++      return agent_satisfies_required_caps(ag, required_caps, min_context);
++   return 1;
++}
++
+ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsigned required_caps)
+ {
+    agent_t *best = NULL;
+@@ -2265,23 +2283,19 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
+    if (cfg->default_agent[0])
+    {
+       agent_t *def = agent_find(cfg, cfg->default_agent);
+-      if (def && def->enabled && agent_supports_role(def, role) &&
+-          agent_is_available_for_routing(def) &&
+-          agent_satisfies_required_caps(def, required_caps, 0))
++      if (def && agent_route_candidate_eligible(def, role, required_caps, 0))
+          return def;
+    }
+ 
+    for (int i = 0; i < cfg->agent_count; i++)
+    {
+       agent_t *ag = &cfg->agents[i];
+-      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+-         continue;
+       /* Escalation only helps a DEGREE shortfall - the prompt exceeds every
+        * window - where a bigger seat is a genuine best effort. It cannot help a
+        * KIND shortfall: if no agent has tools, none can be conjured, and
+        * dispatching anyway trades a clear, actionable config error for a doomed
+        * request. So required_caps still bind; only min_context is relaxed. */
+-      if (!agent_satisfies_required_caps(ag, required_caps, 0))
++      if (!agent_route_candidate_eligible(ag, role, required_caps, 0))
+          continue;
+       int ctx = agent_effective_context(ag);
+       if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
+diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
+index cc762957..ea343413 100644
+--- a/src/tests/test_agent.c
++++ b/src/tests/test_agent.c
+@@ -42,8 +42,10 @@ void test_primary_turn_reaches_default_above_min_tier(void);
+ void test_primary_turn_default_must_still_satisfy_caps(void);
+ void test_catalog_provider_endpoint_parser_edges(void);
+ void test_request_max_tokens_clamped_to_context_window(void);
++void test_capability_routing_flag_behaviour_diff(void);
+ void test_capability_gate_escalates_instead_of_failing(void);
+ void test_no_escalation_when_capability_routing_disabled(void);
++void test_escalation_respects_policy_and_health_gates(void);
+ 
+ /* Defined in test_agent_responses.c (split out to keep this file under the
+  * 2000-line hard limit); called from main() below. */
+@@ -1009,13 +1011,32 @@ static void test_local_synth_not_masked_by_tmux_codex(void)
+    assert(routed_a != synth);
+ 
+    /* Case B — the fix: codex in its correct HTTP (chatgpt) shape. No tmux backend
+-    * at the cheapest tier, so the local synth (the default agent) is routable. */
++    * at the cheapest tier, so the local synth is ROUTABLE again.
++    *
++    * Both peers now sit at tier 0, and agent_pick_balanced() round-robins them
++    * on a PROCESS-WIDE static cursor. Asserting a single call returns synth was
++    * therefore an assertion about cursor parity, not about masking — it passed
++    * only because of how many routing calls happened to run before it, and any
++    * new test elsewhere in the binary could flip it. The property that actually
++    * matters is that synth is reachable at all, so sample the rotation. */
+    codex->backend[0] = '\0';
+    codex->cli_kind[0] = '\0';
+    codex->cli_cmd[0] = '\0';
+    snprintf(codex->provider, sizeof(codex->provider), "chatgpt");
+    snprintf(codex->auth_type, sizeof(codex->auth_type), "codex-oauth");
+-   assert(agent_route(&cfg, "execute") == synth);
++   int saw_synth = 0, saw_codex = 0;
++   for (int i = 0; i < 8; i++)
++   {
++      agent_t *r = agent_route(&cfg, "execute");
++      if (r == synth)
++         saw_synth = 1;
++      else if (r == codex)
++         saw_codex = 1;
++      else
++         assert(0 && "routed to an unexpected agent");
++   }
++   assert(saw_synth); /* the masking bug would make this impossible */
++   assert(saw_codex); /* and both peers share the tier, so both must appear */
+ 
+    if (old_path)
+    {
+@@ -3190,8 +3211,10 @@ int main(void)
+    test_primary_turn_default_must_still_satisfy_caps();
+    test_catalog_provider_endpoint_parser_edges();
+    test_request_max_tokens_clamped_to_context_window();
++   test_capability_routing_flag_behaviour_diff();
+    test_capability_gate_escalates_instead_of_failing();
+    test_no_escalation_when_capability_routing_disabled();
++   test_escalation_respects_policy_and_health_gates();
+    test_agent_config_cache_detects_same_mtime_rewrite();
+    test_agent_adapter_registry();
+    test_agent_config_deletion_guard();
+diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
+index 197f1f8c..773ef87b 100644
+--- a/src/tests/test_agent_caps.c
++++ b/src/tests/test_agent_caps.c
+@@ -725,9 +725,24 @@ void test_request_max_tokens_clamped_to_context_window(void)
+    assert(agent_request_max_tokens(&ag, 500000) == 100000);
+    assert(agent_request_max_tokens(&ag, 4096) == 4096);
+ 
+-   /* With no configured window there is nothing to clamp against. */
++   /* With no operator override the CATALOG window is the ceiling. Consulting
++    * only middleware.context_window left a catalogued small-window model
++    * accepting an oversized pinned cap. claude-opus-4-8 resolves >= 200000, so
++    * a 300000 pin is still a misconfiguration and is clamped. */
+    ag.middleware.context_window = 0;
+    ag.max_tokens = 300000;
++   {
++      model_capability_t cap;
++      assert(model_capability_get(agent_catalog_provider(&ag), ag.model, &cap) != 0);
++      assert(cap.context_window > 0);
++      assert(agent_request_max_tokens(&ag, 0) == cap.context_window / 2);
++   }
++
++   /* A model with NO known window anywhere has nothing to clamp against. */
++   memset(&ag, 0, sizeof(ag));
++   strcpy(ag.provider, "anthropic");
++   strcpy(ag.model, "totally-unknown-model-qqq");
++   ag.max_tokens = 300000;
+    assert(agent_request_max_tokens(&ag, 0) == 300000);
+ 
+    printf("  PASS: test_request_max_tokens_clamped_to_context_window\n");
+@@ -813,6 +828,64 @@ void test_capability_gate_escalates_instead_of_failing(void)
+    printf("  PASS: test_capability_gate_escalates_instead_of_failing\n");
+ }
+ 
++/* Escalation must not re-admit an agent the ordinary pass excluded for POLICY or
++ * HEALTH reasons. Review raised this as a High — that escalation reconstructs
++ * eligibility and could bypass primary_only or the Claude-CLI structural gate.
++ * These assert the actual behaviour: both live inside
++ * agent_is_available_for_routing(), which escalation calls, so neither is
++ * bypassed. Written because the claim deserved evidence either way. */
++static int esc_policy_excludes_all(const agent_t *ag)
++{
++   (void)ag;
++   return 1; /* exclude every agent */
++}
++
++static int esc_health_down_all(const char *name)
++{
++   (void)name;
++   return 1; /* every agent DOWN */
++}
++
++void test_escalation_respects_policy_and_health_gates(void)
++{
++   agent_config_t cfg;
++   config_t sys_cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   memset(&sys_cfg, 0, sizeof(sys_cfg));
++   sys_cfg.model_meta_capability_routing = 1;
++
++   cfg.agent_count = 1;
++   strcpy(cfg.default_agent, "only"); /* also exercises the fast path */
++   strcpy(cfg.agents[0].name, "only");
++   strcpy(cfg.agents[0].provider, "openai");
++   strcpy(cfg.agents[0].model, "gpt-4"); /* 8192 window, far below the ask */
++   strcpy(cfg.agents[0].roles[0], "review");
++   cfg.agents[0].role_count = 1;
++   cfg.agents[0].enabled = 1;
++   cfg.agents[0].tools_enabled = 1;
++   strcpy(cfg.agents[0].api_key, "k");
++
++   /* Baseline: an impossible context requirement escalates to this agent. */
++   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
++
++   /* POLICY excluded (this is how primary_only is enforced) -> no route, not an
++    * escalation that ignores the policy. */
++   agent_set_route_policy_filter(esc_policy_excludes_all);
++   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
++   agent_set_route_policy_filter(NULL);
++
++   /* HEALTH down -> likewise no route. */
++   agent_set_route_health_filter(esc_health_down_all);
++   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
++   agent_set_route_health_filter(NULL);
++
++   /* Gates cleared: escalation works again, proving the NULLs above were the
++    * gates and not some unrelated failure. */
++   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
++
++   printf("  PASS: test_escalation_respects_policy_and_health_gates\n");
++}
++
+ /* Escalation is gated on capability routing: with the flag OFF, plain cost-tier
+  * routing must be byte-identical to before. */
+ void test_no_escalation_when_capability_routing_disabled(void)
+@@ -839,6 +912,97 @@ void test_no_escalation_when_capability_routing_disabled(void)
+    printf("  PASS: test_no_escalation_when_capability_routing_disabled\n");
+ }
+ 
++/* Slice-1 evidence: does enabling model_meta_capability_routing change routing
++ * for a fleet shaped like the live one? Four agents, three at tier 0 all
++ * declaring roles ["all"], one premium default at tier 1 — the configuration
++ * that made the premium seat unreachable in the first place.
++ *
++ * This is a BEHAVIOUR-DIFF test, not an aspiration: it pins what the flag
++ * actually does today so the flip is an informed decision rather than a hope. */
++void test_capability_routing_flag_behaviour_diff(void)
++{
++   agent_config_t cfg;
++   config_t off, on;
++   memset(&cfg, 0, sizeof(cfg));
++   memset(&off, 0, sizeof(off));
++   memset(&on, 0, sizeof(on));
++   on.model_meta_capability_routing = 1;
++
++   cfg.agent_count = 4;
++   strcpy(cfg.default_agent, "claude");
++
++   /* Premium default, tier 1, 200k policy ceiling. */
++   strcpy(cfg.agents[0].name, "claude");
++   strcpy(cfg.agents[0].provider, "claude"); /* CLI provider name */
++   strcpy(cfg.agents[0].model, "claude-opus-4-8");
++   strcpy(cfg.agents[0].roles[0], "all");
++   cfg.agents[0].role_count = 1;
++   cfg.agents[0].enabled = 1;
++   cfg.agents[0].tools_enabled = 1;
++   cfg.agents[0].cost_tier = 1;
++   cfg.agents[0].middleware.context_window = 200000;
++   strcpy(cfg.agents[0].api_key, "k");
++
++   /* Three tier-0 peers, all claiming every role. */
++   struct
++   {
++      const char *name, *provider, *model, *endpoint;
++      int ctx;
++   } cheap[] = {
++       {"codex", "chatgpt", "gpt-5.6-sol", "https://chatgpt.com/backend-api/codex", 272000},
++       {"MiniMax-M3", "anthropic", "MiniMax-M3", "https://api.minimax.io/anthropic", 0},
++       {"kimi", "anthropic", "kimi-k2.7-code", "https://api.kimi.com/coding/", 0},
++   };
++   for (int i = 0; i < 3; i++)
++   {
++      agent_t *ag = &cfg.agents[i + 1];
++      strcpy(ag->name, cheap[i].name);
++      strcpy(ag->provider, cheap[i].provider);
++      strcpy(ag->model, cheap[i].model);
++      strcpy(ag->endpoint, cheap[i].endpoint);
++      strcpy(ag->roles[0], "all");
++      ag->role_count = 1;
++      ag->enabled = 1;
++      ag->tools_enabled = 1;
++      ag->cost_tier = 0;
++      ag->middleware.context_window = cheap[i].ctx;
++      strcpy(ag->api_key, "k");
++   }
++
++   /* A SMALL packet: every agent qualifies, so both modes pick a tier-0 peer.
++    * The premium default stays unreachable for delegation either way — that is
++    * a cost_tier problem, not something the capability flag fixes. */
++   agent_t *r_off = agent_route_with_caps(&cfg, "review", &off, 0, 0);
++   agent_t *r_on = agent_route_with_caps(&cfg, "review", &on, 0, 0);
++   assert(r_off && r_on);
++   assert(r_off->cost_tier == 0 && r_on->cost_tier == 0);
++
++   /* A LARGE packet (300k). With the flag OFF, capability is never consulted, so
++    * routing can hand it to an agent whose window cannot hold it. With the flag
++    * ON, only agents that can actually hold it survive. This is the flag's whole
++    * value, and the reason the catalog-identity work had to land first: without
++    * it MiniMax/kimi resolved a wrong or zero window. */
++   r_off = agent_route_with_caps(&cfg, "review", &off, 0, 300000);
++   r_on = agent_route_with_caps(&cfg, "review", &on, 0, 300000);
++   assert(r_off && r_on);
++   /* OFF: cheapest-first regardless of whether it fits. */
++   assert(r_off->cost_tier == 0);
++   /* ON: whatever is chosen must genuinely hold 300k, or be the escalation
++    * target when nothing does. Both are acceptable; silently picking a seat that
++    * cannot hold the prompt is not. */
++   {
++      model_capability_t cap;
++      int ctx = r_on->middleware.context_window;
++      if (ctx <= 0 && model_capability_get(agent_catalog_provider(r_on), r_on->model, &cap))
++         ctx = cap.context_window;
++      /* MiniMax-M3 (1M) is the only seat here that holds 300k. */
++      assert(ctx >= 300000);
++      assert(strcmp(r_on->name, "MiniMax-M3") == 0);
++   }
++
++   printf("  PASS: test_capability_routing_flag_behaviour_diff\n");
++}
++
+ /* agent_default_primary must never hand back a disabled seat: a disabled
+  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
+  * primary and every ingress request that doesn't name a model fast-fails as
+diff --git a/src/tests/test_agent_request_build.c b/src/tests/test_agent_request_build.c
+index 2a682bd2..2329ee4e 100644
+--- a/src/tests/test_agent_request_build.c
++++ b/src/tests/test_agent_request_build.c
+@@ -15,6 +15,8 @@
+ 
+ #include "agent_request_build.h"
+ #include "model_provider.h"
++#include "model_registry.h"
++#include "agent_config.h"
+ #include "cJSON.h"
+ 
+ int model_max_output(const char *provider, const char *model_id)
+@@ -28,6 +30,23 @@ model_provider_t *model_provider_get(const char *name)
+    (void)name;
+    return NULL;
+ }
++/* agent_request_max_tokens() clamps an oversized output cap against the agent's
++ * effective context window, falling back to the catalog when no operator
++ * override is set. These goldens pin WIRE SHAPE, not capability resolution, so
++ * report "no catalog entry" and let the middleware value (unset here) decide. */
++const char *agent_catalog_provider(const agent_t *agent)
++{
++   if (!agent)
++      return "";
++   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
++}
++int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
++{
++   (void)provider;
++   (void)model_id;
++   (void)out;
++   return 0;
++}
+ 
+ static agent_t mk_agent(const char *provider, const char *model)
+ {
+diff --git a/src/tests/test_models_dev.c b/src/tests/test_models_dev.c
+index 268f0bb9..fc6e5092 100644
+--- a/src/tests/test_models_dev.c
++++ b/src/tests/test_models_dev.c
+@@ -7,6 +7,7 @@
+ #include <unistd.h>
+ #include "aimee.h"
+ #include "models_dev.h"
++#include "model_registry.h"
+ 
+ static void test_cache_lookup_hit(void)
+ {
+@@ -118,6 +119,89 @@ static void test_cache_lookup_nested_api_schema(void)
+    rmdir(tmpdir);
+ }
+ 
++/* Band-schedule edge cases introduced by the capacity/eviction logic. Review
++ * found duplicate handling at capacity silently losing data, and none of the
++ * overflow paths were covered. */
++static void test_price_band_capacity_and_duplicates(void)
++{
++   char tmpdir[256];
++   snprintf(tmpdir, sizeof(tmpdir), "/tmp/test-md-bands-XXXXXX");
++   assert(mkdtemp(tmpdir) != NULL);
++   char dir[512], path[600];
++   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
++   mkdir(dir, 0755);
++   snprintf(dir, sizeof(dir), "%s/.cache/aimee", tmpdir);
++   mkdir(dir, 0755);
++   snprintf(path, sizeof(path), "%s/models_dev.json", dir);
++
++   /* Ten DESCENDING thresholds against a capacity of eight, then a duplicate of
++    * a middle one and a duplicate of the largest retained. Descending order is
++    * the case that a naive "keep the first N" would corrupt by discarding the
++    * LOWEST bands, leaving mid-size requests on the base rate. */
++   const char *json =
++       "{\"v\":{\"models\":{\"m\":{"
++       "  \"limit\":{\"context\":2000000},"
++       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
++       "    {\"input\":100,\"output\":100,\"tier\":{\"type\":\"context\",\"size\":1000}},"
++       "    {\"input\":90,\"output\":90,\"tier\":{\"type\":\"context\",\"size\":900}},"
++       "    {\"input\":80,\"output\":80,\"tier\":{\"type\":\"context\",\"size\":800}},"
++       "    {\"input\":70,\"output\":70,\"tier\":{\"type\":\"context\",\"size\":700}},"
++       "    {\"input\":60,\"output\":60,\"tier\":{\"type\":\"context\",\"size\":600}},"
++       "    {\"input\":50,\"output\":50,\"tier\":{\"type\":\"context\",\"size\":500}},"
++       "    {\"input\":40,\"output\":40,\"tier\":{\"type\":\"context\",\"size\":400}},"
++       "    {\"input\":30,\"output\":30,\"tier\":{\"type\":\"context\",\"size\":300}},"
++       "    {\"input\":20,\"output\":20,\"tier\":{\"type\":\"context\",\"size\":200}},"
++       "    {\"input\":10,\"output\":10,\"tier\":{\"type\":\"context\",\"size\":100}},"
++       /* duplicate of a MIDDLE retained threshold: must overwrite in place */
++       "    {\"input\":11,\"output\":11,\"tier\":{\"type\":\"context\",\"size\":200}},"
++       /* threshold INT_MAX: rejected (above+1 would overflow, and a band applies
++        * strictly ABOVE its threshold so it could never be selected) */
++       "    {\"input\":99,\"output\":99,"
++       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
++       /* non-context tier type: skipped rather than guessed at */
++       "    {\"input\":77,\"output\":77,\"tier\":{\"type\":\"tokens\",\"size\":50}}"
++       "  ]}}}}}";
++   FILE *f = fopen(path, "w");
++   assert(f);
++   fputs(json, f);
++   fclose(f);
++   setenv("HOME", tmpdir, 1);
++
++   model_capability_t c;
++   memset(&c, 0, sizeof(c));
++   assert(models_dev_cache_lookup("v", "m", &c) == 1);
++
++   assert(c.price_band_count == MODEL_PRICE_BANDS_MAX);
++   assert(c.price_bands_truncated == 1); /* ten distinct > capacity of eight */
++
++   /* Ascending, and the LOWEST thresholds were the ones kept. */
++   for (int i = 1; i < c.price_band_count; i++)
++      assert(c.price_bands[i].above_tokens > c.price_bands[i - 1].above_tokens);
++   assert(c.price_bands[0].above_tokens == 100);
++   assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens == 800);
++
++   /* The middle duplicate overwrote in place: 200 now prices 11, and no distinct
++    * band was evicted to accommodate it. */
++   for (int i = 0; i < c.price_band_count; i++)
++   {
++      if (c.price_bands[i].above_tokens == 200)
++         assert(c.price_bands[i].in_per_mtok == 11.0);
++   }
++
++   /* INT_MAX and the non-context tier were both rejected. */
++   for (int i = 0; i < c.price_band_count; i++)
++   {
++      assert(c.price_bands[i].above_tokens != 2147483647);
++      assert(c.price_bands[i].above_tokens != 50);
++   }
++
++   unlink(path);
++   rmdir(dir);
++   snprintf(dir, sizeof(dir), "%s/.cache", tmpdir);
++   rmdir(dir);
++   rmdir(tmpdir);
++}
++
+ static void test_cache_lookup_miss(void)
+ {
+    model_capability_t caps;
+@@ -146,6 +230,8 @@ int main(void)
+    printf("cache_hit OK, ");
+    test_cache_lookup_nested_api_schema();
+    printf("nested_api OK, ");
++   test_price_band_capacity_and_duplicates();
++   printf("bands OK, ");
+    test_cache_lookup_miss();
+    printf("cache_miss OK, ");
+    test_cache_lookup_null_guard();

@@ -1,0 +1,1165 @@
+diff --git a/scripts/check-models-dev-snapshot.py b/scripts/check-models-dev-snapshot.py
+new file mode 100644
+index 00000000..27f2cbbc
+--- /dev/null
++++ b/scripts/check-models-dev-snapshot.py
+@@ -0,0 +1,92 @@
++#!/usr/bin/env python3
++"""Guard the bundled models.dev snapshot against silent rot.
++
++data/models_dev_snapshot.json is the OFFLINE capability/price fallback: it
++answers lookups when ~/.cache/aimee/models_dev.json is absent (air-gapped
++install, first run, no network). It previously drifted to 10 hand-maintained
++entries, none of which were current models, so every lookup silently fell
++through to the built-in heuristic — which publishes no prices at all and cannot
++distinguish model families.
++
++This checks STRUCTURE and FLEET COVERAGE, deliberately not freshness: asserting
++"the newest model exists" would fail the build every time a vendor ships, which
++teaches people to disable the check. Regenerate with:
++
++    python3 scripts/gen-models-dev-snapshot.py
++"""
++
++import json
++import os
++import sys
++
++SNAPSHOT = os.path.join(os.path.dirname(__file__), "..", "data", "models_dev_snapshot.json")
++
++# Vendor keys agent_derive_catalog_provider() resolves to. A snapshot missing one
++# of these cannot answer for agents that derive to it.
++REQUIRED_PROVIDERS = ["anthropic", "openai", "minimax", "moonshotai"]
++
++# Each must resolve with a usable context window and both price axes, or the
++# offline path silently degrades to the heuristic for the live fleet.
++REQUIRED_MODELS = [
++    ("anthropic", "claude-opus-4-8"),
++    ("minimax", "MiniMax-M3"),
++    ("moonshotai", "kimi-k2.7-code"),
++    ("openai", "gpt-5.6-sol"),
++]
++
++
++def fail(msg):
++    print(f"models-dev-snapshot: {msg}", file=sys.stderr)
++    return 1
++
++
++def main():
++    try:
++        with open(SNAPSHOT) as f:
++            snap = json.load(f)
++    except Exception as e:  # noqa: BLE001 - report any load failure identically
++        return fail(f"cannot read {SNAPSHOT}: {e}")
++
++    if not isinstance(snap, dict) or not snap:
++        return fail("snapshot is empty or not an object")
++
++    # Must be the NESTED schema: only it carries `reasoning` and `name`, so a
++    # flat snapshot cannot express MODEL_CAP_REASONING or a display label.
++    for pid, prov in snap.items():
++        if "/" in pid:
++            return fail(f"flat-schema key {pid!r}; regenerate with "
++                        "scripts/gen-models-dev-snapshot.py")
++        if not isinstance(prov, dict) or not isinstance(prov.get("models"), dict):
++            return fail(f"provider {pid!r} has no models object")
++
++    missing = [p for p in REQUIRED_PROVIDERS if p not in snap]
++    if missing:
++        return fail(f"missing required provider(s): {', '.join(missing)}")
++
++    errors = []
++    for pid, mid in REQUIRED_MODELS:
++        m = snap.get(pid, {}).get("models", {}).get(mid)
++        if not isinstance(m, dict):
++            errors.append(f"{pid}/{mid}: absent")
++            continue
++        ctx = (m.get("limit") or {}).get("context")
++        cost = m.get("cost") or {}
++        if not isinstance(ctx, int) or ctx <= 0:
++            errors.append(f"{pid}/{mid}: no usable limit.context")
++        if not isinstance(cost.get("input"), (int, float)) or cost["input"] <= 0:
++            errors.append(f"{pid}/{mid}: no cost.input")
++        if not isinstance(cost.get("output"), (int, float)) or cost["output"] <= 0:
++            errors.append(f"{pid}/{mid}: no cost.output")
++
++    if errors:
++        for e in errors:
++            print(f"models-dev-snapshot: {e}", file=sys.stderr)
++        return fail("regenerate with scripts/gen-models-dev-snapshot.py")
++
++    total = sum(len(p["models"]) for p in snap.values())
++    print(f"models-dev-snapshot: ok ({len(snap)} providers, {total} models)")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/scripts/gen-models-dev-snapshot.py b/scripts/gen-models-dev-snapshot.py
+new file mode 100644
+index 00000000..99296965
+--- /dev/null
++++ b/scripts/gen-models-dev-snapshot.py
+@@ -0,0 +1,124 @@
++#!/usr/bin/env python3
++"""Regenerate data/models_dev_snapshot.json from the live models.dev registry.
++
++The snapshot is aimee's OFFLINE fallback: it answers model capability lookups
++when ~/.cache/aimee/models_dev.json is absent or stale (air-gapped installs,
++first run, no network). It had drifted to 10 hand-maintained entries, none of
++which were current models, so in practice every lookup fell through to the
++built-in heuristic.
++
++Emits the NESTED models.dev schema rather than the older flat
++{"provider/model": {...}} form. Both are read (models_dev_cache.c), but only the
++nested form carries `reasoning` and the human-facing `name` — the flat schema has
++no field for either, so a flat snapshot cannot express MODEL_CAP_REASONING or a
++display label.
++
++Curated to the providers aimee can actually route to, and to non-deprecated
++models, to keep the bundled artifact small.
++
++Usage:  python3 scripts/gen-models-dev-snapshot.py [--out PATH]
++        python3 scripts/gen-models-dev-snapshot.py --from-file api.json
++"""
++
++import argparse
++import json
++import sys
++import urllib.request
++
++DEFAULT_URL = "https://models.dev/api.json"
++DEFAULT_OUT = "data/models_dev_snapshot.json"
++
++# Providers aimee has a wire path to, plus the vendor keys its agents resolve to
++# (see agent_derive_catalog_provider in src/server/agent_config.c).
++KEEP_PROVIDERS = [
++    "anthropic",
++    "openai",
++    "google",
++    "mistral",
++    "minimax",
++    "moonshotai",
++    "openrouter",
++    "deepseek",
++    "zai",
++    "groq",
++    "cerebras",
++    "ollama",
++    "llama",
++]
++
++# Fields the C reader consumes (fill_cap_from_nested). Anything else is dropped
++# so the snapshot does not balloon with data nothing reads.
++KEEP_MODEL_FIELDS = ["name", "limit", "cost", "tool_call", "reasoning", "modalities",
++                     "open_weights", "knowledge"]
++
++
++def prune_model(m):
++    out = {k: m[k] for k in KEEP_MODEL_FIELDS if k in m}
++    # cost carries per-context-band tiers that nothing reads yet; keep the base
++    # axes plus cache_read, drop the bands to hold the artifact down.
++    cost = out.get("cost")
++    if isinstance(cost, dict):
++        # `tiers` carries CONTEXT-BAND prices and must be kept: several providers
++        # charge more above a threshold, and dropping it would make the snapshot
++        # report a large-context model at half its applicable rate. The legacy
++        # `context_over_200k` alias is dropped instead — its key does not encode
++        # the real threshold (sol's is 272000, MiniMax-M3's is 512000), so the C
++        # reader ignores it and only reads tiers[].tier.size.
++        out["cost"] = {k: v for k, v in cost.items()
++                       if k in ("input", "output", "cache_read", "cache_write", "tiers")}
++    return out
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--url", default=DEFAULT_URL)
++    ap.add_argument("--out", default=DEFAULT_OUT)
++    ap.add_argument("--from-file", help="read the registry from disk instead of fetching "
++                                        "(reproducible builds, air-gapped regeneration)")
++    args = ap.parse_args()
++
++    if args.from_file:
++        with open(args.from_file) as f:
++            registry = json.load(f)
++    else:
++        # models.dev rejects the stdlib default agent with HTTP 403.
++        req = urllib.request.Request(args.url, headers={"User-Agent": "aimee-snapshot/1"})
++        with urllib.request.urlopen(req, timeout=30) as r:
++            registry = json.load(r)
++
++    snapshot = {}
++    kept_models = 0
++    for pid in KEEP_PROVIDERS:
++        prov = registry.get(pid)
++        if not isinstance(prov, dict):
++            continue
++        models = prov.get("models")
++        if not isinstance(models, dict):
++            continue
++        keep = {}
++        for mid, m in models.items():
++            if not isinstance(m, dict) or m.get("deprecated"):
++                continue
++            keep[mid] = prune_model(m)
++        if not keep:
++            continue
++        entry = {"models": keep}
++        if isinstance(prov.get("name"), str):
++            entry["name"] = prov["name"]
++        snapshot[pid] = entry
++        kept_models += len(keep)
++
++    if kept_models == 0:
++        print("refusing to write an empty snapshot", file=sys.stderr)
++        return 1
++
++    with open(args.out, "w") as f:
++        json.dump(snapshot, f, indent=1, sort_keys=True)
++        f.write("\n")
++
++    print(f"wrote {args.out}: {len(snapshot)} providers, {kept_models} models")
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/src/Makefile b/src/Makefile
+index 62816a25..0b2bf232 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -673,7 +673,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS) $(STATUS_AUTHORIT
+            $(CLI_OBJS) $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(KB_OBJS) $(GATEWAY_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(PLATFORM_OBJS) $(PLATFORM_AGENT_OBJS)
+ DEPS = $(ALL_OBJS:.o=.d)
+ 
+-.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check p1-rls-gate-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
++.PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check p1-rls-gate-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
+ 
+ all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+ 
+@@ -1416,7 +1416,7 @@ clean:
+ # you genuinely need a different binary.
+ CLANG_FORMAT ?= clang-format-19
+ 
+-lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check p1-tenant-guard-check
++lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check
+ 
+ # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
+ # so a new entry can never silently run without RLS on the SQLite shim.
+@@ -1457,6 +1457,14 @@ lessons-isolation-check:
+ md-store-retired-check:
+ 	@python3 ../scripts/check-md-store-retired.py
+ 
++# The bundled models.dev snapshot is the OFFLINE capability/price fallback. It
++# had rotted to 10 stale entries with no current model, so every offline lookup
++# silently degraded to the heuristic (which carries no prices at all). Checks
++# structure + fleet coverage, NOT freshness - a freshness gate would fail the
++# build whenever a vendor ships and would simply get disabled.
++models-dev-snapshot-check:
++	@python3 ../scripts/check-models-dev-snapshot.py
++
+ # Structural guard for the code-vector-graph fusion eval corpus + ablation
+ # matrix (>=100 queries, all categories, well-formed; baseline+full_fusion arms).
+ # Cheap, no DB — keeps the production corpus runnable as it is labelled.
+diff --git a/src/agent_tier_lint.c b/src/agent_tier_lint.c
+index 7c403236..ae90570f 100644
+--- a/src/agent_tier_lint.c
++++ b/src/agent_tier_lint.c
+@@ -3,6 +3,7 @@
+ #include "agent_tier_lint.h"
+ #include "agent_config.h"
+ #include "model_registry.h"
++#include <limits.h>
+ #include <string.h>
+ 
+ /* Effective $/Mtok for an agent: operator override first, catalog second. The
+@@ -50,6 +51,82 @@ int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_
+    return 1;
+ }
+ 
++/* Effective context ceiling: the operator's policy window when set, else the
++ * model's catalogued capability. This is how far a request can actually go, and
++ * therefore which bands are reachable. */
++static int agent_effective_context_ceiling(const agent_t *agent, const model_capability_t *cap)
++{
++   if (agent->middleware.context_window > 0)
++      return agent->middleware.context_window;
++   return cap ? cap->context_window : 0;
++}
++
++int agent_resolved_price_at_context(const agent_t *agent, int context_tokens, double *in_per_mtok,
++                                    double *out_per_mtok, double *cached_per_mtok)
++{
++   if (!agent)
++      return 0;
++
++   model_capability_t cap;
++   int have_cap =
++       agent->model[0] && model_capability_get(agent_catalog_provider(agent), agent->model, &cap);
++
++   double in_price = have_cap ? cap.cost_in_per_mtok : 0.0;
++   double out_price = have_cap ? cap.cost_out_per_mtok : 0.0;
++   double cached_price = have_cap ? cap.cost_cache_read_per_mtok : 0.0;
++
++   /* Highest band whose threshold this request exceeds. Bands are ascending. */
++   if (have_cap && context_tokens > 0)
++   {
++      for (int i = 0; i < cap.price_band_count; i++)
++      {
++         if (context_tokens > cap.price_bands[i].above_tokens)
++         {
++            in_price = cap.price_bands[i].in_per_mtok;
++            out_price = cap.price_bands[i].out_per_mtok;
++            cached_price = cap.price_bands[i].cache_read_per_mtok;
++         }
++      }
++   }
++
++   /* The operator override states what THEY pay and so wins at every band. */
++   if (agent->price_in_per_mtok > 0.0)
++      in_price = agent->price_in_per_mtok;
++   if (agent->price_out_per_mtok > 0.0)
++      out_price = agent->price_out_per_mtok;
++   if (agent->price_cached_per_mtok > 0.0)
++      cached_price = agent->price_cached_per_mtok;
++
++   if (cached_per_mtok)
++      *cached_per_mtok = cached_price > 0.0 ? cached_price : 0.0;
++   if (in_price <= 0.0 || out_price <= 0.0)
++      return 0;
++   if (in_per_mtok)
++      *in_per_mtok = in_price;
++   if (out_per_mtok)
++      *out_per_mtok = out_price;
++   return 1;
++}
++
++int agent_has_reachable_price_band(const agent_t *agent)
++{
++   if (!agent || !agent->model[0])
++      return 0;
++   /* A full operator override makes the vendor schedule irrelevant. */
++   if (agent->price_in_per_mtok > 0.0 && agent->price_out_per_mtok > 0.0)
++      return 0;
++   model_capability_t cap;
++   if (!model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
++      return 0;
++   int ceiling = agent_effective_context_ceiling(agent, &cap);
++   for (int i = 0; i < cap.price_band_count; i++)
++   {
++      if (ceiling <= 0 || ceiling > cap.price_bands[i].above_tokens)
++         return 1;
++   }
++   return 0;
++}
++
+ /* Could these two agents ever be candidates for the SAME route? Comparing tiers
+  * across agents that never compete is a false positive: routing never chooses
+  * between them, so "routing prefers the more expensive model" would be untrue
+@@ -58,17 +135,38 @@ int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_
+  * grants to every agent regardless of its declared list. */
+ static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
+ {
++   /* Declared roles, either direction, plus the "all" wildcard. */
+    for (int i = 0; i < a->role_count; i++)
+    {
+       const char *role = a->roles[i];
+-      if (!role[0])
+-         continue;
+-      if (strcmp(role, "all") == 0 || agent_has_role(b, role) || agent_is_exec_role(b, role))
++      if (role[0] && (strcmp(role, "all") == 0 || agent_has_role(b, role)))
+          return 1;
+    }
+    for (int i = 0; i < b->role_count; i++)
+    {
+-      if (b->roles[i][0] && strcmp(b->roles[i], "all") == 0)
++      const char *role = b->roles[i];
++      if (role[0] && (strcmp(role, "all") == 0 || agent_has_role(a, role)))
++         return 1;
++   }
++
++   /* IMPLICIT overlap. agent_supports_role() also admits any agent for an exec
++    * role, so two agents with entirely disjoint declared roles still compete for
++    * every exec role both accept. Iterating only declared roles missed this and
++    * suppressed real conflicts: an agent declaring "explain" and one declaring
++    * "summarize" are both routable for review/code/test.
++    *
++    * The default exec set is internal to agent_config.c, so probe through the
++    * public predicate with the roles actually in use rather than duplicating the
++    * table here — a copy would silently drift. */
++   static const char *const probe_roles[] = {
++       "deploy", "validate",   "test",  "diagnose",   "execute", "review",
++       "code",   "refactor",   "draft", "implement",  "explain", "summarize",
++       "format", "search",     NULL,
++   };
++   for (int i = 0; probe_roles[i]; i++)
++   {
++      if ((agent_has_role(a, probe_roles[i]) || agent_is_exec_role(a, probe_roles[i])) &&
++          (agent_has_role(b, probe_roles[i]) || agent_is_exec_role(b, probe_roles[i])))
+          return 1;
+    }
+    return 0;
+@@ -125,6 +223,24 @@ int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t
+          if (!agents_compete_for_a_role(a, b))
+             continue;
+ 
++         /* ... and the ordering does not depend on request size. When either
++          * agent can reach a context band its applicable rate changes with the
++          * request, so a single comparison cannot support the definitive advice
++          * "routing prefers the more expensive model". Require the dominance to
++          * hold at the TOP band too; if it does not, stay silent rather than
++          * issue advice that is wrong for part of the operating range. */
++         if (agent_has_reachable_price_band(a) || agent_has_reachable_price_band(b))
++         {
++            double a_in_top = 0.0, a_out_top = 0.0, b_in_top = 0.0, b_out_top = 0.0;
++            /* INT_MAX selects the highest band each model publishes. */
++            if (!agent_resolved_price_at_context(a, INT_MAX, &a_in_top, &a_out_top, NULL) ||
++                !agent_resolved_price_at_context(b, INT_MAX, &b_in_top, &b_out_top, NULL))
++               continue;
++            if (!(a_in_top >= b_in_top && a_out_top >= b_out_top &&
++                  (a_in_top > b_in_top || a_out_top > b_out_top)))
++               continue;
++         }
++
+          if (out && found < max)
+          {
+             agent_tier_conflict_t *c = &out[found];
+diff --git a/src/cmd_agent.c b/src/cmd_agent.c
+index 83b21b7f..4e895b9b 100644
+--- a/src/cmd_agent.c
++++ b/src/cmd_agent.c
+@@ -5,6 +5,9 @@
+ #include "agent.h"
+ #include "agent_config.h"
+ #include "agent_tier_lint.h" /* agent_resolved_price */
++#include "model_registry.h"
++#include <math.h>
++#include <errno.h>
+ #include "agent_tunnel.h"
+ #include "commands.h"
+ #include "hardware_probe.h"
+@@ -241,6 +244,32 @@ static int ag_probe_models(const char *endpoint, const char *requested_model, ch
+    return status;
+ }
+ 
++/* Strict $/Mtok parse: finite, non-negative, fully consumed. Rejects "nan",
++ * "inf", trailing junk, and the empty string. atof() would accept or silently
++ * zero all of these, and a NaN override defeats every `<=` comparison in the
++ * price resolver, making an unset price look set. */
++static int ag_parse_price(const char *s, double *out)
++{
++   if (!s || !s[0])
++      return 0;
++   errno = 0;
++   char *end = NULL;
++   double v = strtod(s, &end);
++   if (errno != 0 || end == s || (end && *end != '\0'))
++      return 0;
++   if (!isfinite(v) || v < 0.0)
++      return 0;
++   *out = v;
++   return 1;
++}
++
++static int ag_price_usage(const char *flag, const char *value)
++{
++   fprintf(stderr, "aimee: %s expects a finite non-negative number ($ per million tokens), got '%s'\n",
++           flag, value ? value : "");
++   return 1;
++}
++
+ static int ag_probe_slots(const char *endpoint, int *slots_out, int *ctx_out, char *errbuf,
+                           size_t errbuf_len)
+ {
+@@ -402,12 +431,40 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
+             double pin = 0.0, pout = 0.0, pcached = 0.0;
+             if (agent_resolved_price(ag, &pin, &pout, &pcached))
+             {
+-               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
+-               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
++               /* BASE-BAND rate. Named so a consumer cannot mistake it for the
++                * effective price of a large request: several providers charge
++                * more above a context threshold, and this figure is only correct
++                * below the first band. `price_bands` carries the rest. */
++               cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
++               cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
+                /* Omitted entirely when unpublished, so a consumer cannot mistake
+                 * an absent cache rate for a free one. */
+                if (pcached > 0.0)
+-                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
++                  cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
++
++               model_capability_t cap;
++               if (ag->model[0] &&
++                   model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
++                   cap.price_band_count > 0)
++               {
++                  cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
++                  for (int b = 0; bands && b < cap.price_band_count; b++)
++                  {
++                     double bin = 0.0, bout = 0.0, bcached = 0.0;
++                     int above = cap.price_bands[b].above_tokens;
++                     if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
++                        continue;
++                     cJSON *e = cJSON_CreateObject();
++                     if (!e)
++                        continue;
++                     cJSON_AddNumberToObject(e, "above_tokens", above);
++                     cJSON_AddNumberToObject(e, "in_per_mtok", bin);
++                     cJSON_AddNumberToObject(e, "out_per_mtok", bout);
++                     if (bcached > 0.0)
++                        cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
++                     cJSON_AddItemToArray(bands, e);
++                  }
++               }
+             }
+             cJSON_AddBoolToObject(obj, "price_overridden",
+                                   ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+@@ -453,7 +510,7 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
+             char cached[32] = "";
+             if (pcached > 0.0)
+                snprintf(cached, sizeof(cached), " cached=$%.2f", pcached);
+-            snprintf(price, sizeof(price), " in=$%.2f out=$%.2f%s%s", pin, pout, cached,
++            snprintf(price, sizeof(price), " base in=$%.2f out=$%.2f%s%s", pin, pout, cached,
+                      (ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
+                       ag->price_cached_per_mtok > 0.0)
+                          ? " *"
+@@ -806,13 +863,24 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
+       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
+          ag->cost_tier = atoi(argv[++i]);
+       /* Price overrides ($/Mtok). Only meaningful when this deployment does not
+-       * pay the published catalog rate. */
++       * pay the published catalog rate. Parsed strictly: atof() would turn
++       * "garbage" into 0 (silently meaning "unset") and would accept "nan" and
++       * "inf", which then defeat every ordered comparison downstream. */
+       else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
+-         ag->price_in_per_mtok = atof(argv[++i]);
++      {
++         if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
++            return ag_price_usage("--price-in", argv[i]);
++      }
+       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
+-         ag->price_out_per_mtok = atof(argv[++i]);
++      {
++         if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
++            return ag_price_usage("--price-out", argv[i]);
++      }
+       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
+-         ag->price_cached_per_mtok = atof(argv[++i]);
++      {
++         if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
++            return ag_price_usage("--price-cached", argv[i]);
++      }
+       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
+          ag->tools_enabled = 1;
+       else if (strcmp(argv[i], "--max-turns") == 0 && i + 1 < argc)
+diff --git a/src/headers/agent_tier_lint.h b/src/headers/agent_tier_lint.h
+index 5f08bf81..12f2ac19 100644
+--- a/src/headers/agent_tier_lint.h
++++ b/src/headers/agent_tier_lint.h
+@@ -66,6 +66,25 @@ extern "C"
+    int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
+                             double *cached_per_mtok);
+ 
++   /* Same, but for a request of `context_tokens`. Several providers charge more
++    * above a context threshold (gpt-5.6-sol doubles above 272k), so the BASE
++    * rate returned by agent_resolved_price() is only correct for requests below
++    * the first band. Use this wherever the request size is known; use the base
++    * form only for a headline figure, and label it as such.
++    *
++    * An operator price override, when present, applies at EVERY band: the
++    * operator is stating what they pay, which supersedes the vendor's schedule
++    * rather than being scaled by it. context_tokens <= 0 means "unknown", which
++    * resolves to the base rate. */
++   int agent_resolved_price_at_context(const agent_t *agent, int context_tokens,
++                                       double *in_per_mtok, double *out_per_mtok,
++                                       double *cached_per_mtok);
++
++   /* Does this agent have context-band pricing that its configured context
++    * ceiling can actually reach? Used to avoid asserting a definitive price
++    * ordering for an agent whose applicable rate depends on request size. */
++   int agent_has_reachable_price_band(const agent_t *agent);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/src/headers/agent_types.h b/src/headers/agent_types.h
+index 43ad3780..68311cc7 100644
+--- a/src/headers/agent_types.h
++++ b/src/headers/agent_types.h
+@@ -263,7 +263,16 @@ typedef struct
+     * marginal token cost differs from the published API rate, negotiated or
+     * committed-use pricing, a self-hosted model whose real cost is compute, or a
+     * gateway that resells at its own margin. Both axes are independent, so a
+-    * deployment may override only one. */
++    * deployment may override only one.
++    *
++    * KNOWN LIMITS:
++    *  - 0 always means "unset, fall back to the catalog", so a genuinely FREE
++    *    model cannot be expressed as 0. Such an agent is simply skipped by the
++    *    price lint (no finding), which is the safe direction.
++    *  - These fields are NOT round-trip safe across binary versions: an older
++    *    binary loads agents.json, ignores these members, and drops them on its
++    *    next save. Mixed-version operation against one config will silently lose
++    *    pricing overrides. */
+    double price_in_per_mtok;
+    double price_out_per_mtok;
+    double price_cached_per_mtok;
+diff --git a/src/headers/model_registry.h b/src/headers/model_registry.h
+index 80690637..db66e6ee 100644
+--- a/src/headers/model_registry.h
++++ b/src/headers/model_registry.h
+@@ -38,6 +38,28 @@ enum
+  * min_context instead, rather than hard-failing the whole task fleet-wide. */
+ #define MODEL_CAP_MODALITY_SOFT (MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_AUDIO)
+ 
++/* Context-band pricing. Several providers charge more once a request's context
++ * exceeds a threshold — gpt-5.6-sol doubles to $10/$45 above 272k, MiniMax-M3
++ * above 512k — so price is a function of (model, context size), not one number
++ * per model. Treating the base rate as authoritative would display and compare a
++ * large-context agent at HALF its applicable rate.
++ *
++ * NOTE the registry also publishes a legacy `context_over_200k` key whose NAME
++ * does not encode the real threshold (sol's is 272000, MiniMax-M3's is 512000).
++ * Only the structured `tiers[].tier.size` is authoritative; the legacy alias is
++ * ignored. Of 5728 catalogued models, 252 publish bands: 245 with one and 7 with
++ * two, all of type "context". */
++#define MODEL_PRICE_BANDS_MAX 4
++
++typedef struct
++{
++   /* The band applies when the request context EXCEEDS this many tokens. */
++   int above_tokens;
++   double in_per_mtok;
++   double out_per_mtok;
++   double cache_read_per_mtok;
++} model_price_band_t;
++
+ typedef struct
+ {
+    char provider[MODEL_PROVIDER_MAX];
+@@ -50,6 +72,10 @@ typedef struct
+     * it dominates real spend on any prompt-caching workload and cannot be
+     * approximated by the input rate. 0 = the source published none. */
+    double cost_cache_read_per_mtok;
++   /* Bands above the base rate, ascending by `above_tokens`. Empty (count 0)
++    * means a single flat price at every context size. */
++   model_price_band_t price_bands[MODEL_PRICE_BANDS_MAX];
++   int price_band_count;
+    unsigned flags;
+    char modalities[64];
+    char knowledge_cutoff[16];
+diff --git a/src/models_dev_cache.c b/src/models_dev_cache.c
+index f57355e9..23802a89 100644
+--- a/src/models_dev_cache.c
++++ b/src/models_dev_cache.c
+@@ -21,6 +21,10 @@ static int json_int_checked(cJSON *v, int *out)
+    double d = v->valuedouble;
+    if (!(d >= 0.0) || d > 2147483647.0) /* also rejects NaN */
+       return 0;
++   /* Must be integral: a context window of 199999.9 is malformed data, and
++    * silently truncating it would contradict the reject-don't-truncate rule. */
++   if (d != (double)(long long)d)
++      return 0;
+    *out = (int)d;
+    return 1;
+ }
+@@ -105,14 +109,23 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
+ {
+    char key[256];
+    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
+-   /* Flat form wins when it is a USABLE object. Mere presence must not suppress
+-    * the nested lookup: a null, string, or otherwise malformed flat value would
+-    * otherwise mask a perfectly good nested entry and yield empty capabilities. */
++   /* Flat form wins only when it carries USABLE content. Mere presence must not
++    * suppress the nested lookup: a null, a string, or an EMPTY object would
++    * otherwise mask a perfectly good nested entry and return zeroed
++    * capabilities — which downstream reads as "no context window, no price". */
+    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
+-   if (!cJSON_IsObject(entry))
+-      return lookup_in_nested_json(root, provider, model_id, out);
+-   fill_cap_from_json(entry, provider, model_id, out);
+-   return 1;
++   if (cJSON_IsObject(entry))
++   {
++      model_capability_t flat;
++      fill_cap_from_json(entry, provider, model_id, &flat);
++      if (flat.context_window > 0 || flat.max_output > 0 || flat.cost_in_per_mtok > 0.0 ||
++          flat.cost_out_per_mtok > 0.0 || flat.flags != 0)
++      {
++         *out = flat;
++         return 1;
++      }
++   }
++   return lookup_in_nested_json(root, provider, model_id, out);
+ }
+ 
+ /* ---- models.dev live api.json (NESTED) ----------------------------------
+@@ -133,6 +146,60 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
+  *
+  * Reading both keeps the atomic-rename download and leaves the override format
+  * untouched, instead of rewriting bytes we did not author. */
++/* Context-band prices from `cost.tiers[]`.
++ *
++ * Only the structured tier entries are read. The registry also publishes a
++ * `context_over_200k` alias, but its KEY DOES NOT ENCODE THE THRESHOLD —
++ * gpt-5.6-sol's real boundary is 272000 and MiniMax-M3's is 512000, both under
++ * that same key — so trusting the name would price large-context requests at the
++ * wrong band. Only `tier.type == "context"` is understood; any other tier type
++ * is skipped rather than guessed at. Bands are kept ascending so a lookup can
++ * take the last one whose threshold the context exceeds. */
++static void fill_price_bands(cJSON *cost, model_capability_t *out)
++{
++   cJSON *tiers = cJSON_GetObjectItemCaseSensitive(cost, "tiers");
++   if (!cJSON_IsArray(tiers))
++      return;
++
++   cJSON *t;
++   cJSON_ArrayForEach(t, tiers)
++   {
++      if (out->price_band_count >= MODEL_PRICE_BANDS_MAX)
++         break;
++      if (!cJSON_IsObject(t))
++         continue;
++      cJSON *spec = cJSON_GetObjectItemCaseSensitive(t, "tier");
++      if (!cJSON_IsObject(spec))
++         continue;
++      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(spec, "type"));
++      if (!type || strcmp(type, "context") != 0)
++         continue;
++      int above = 0;
++      if (!json_int_checked(cJSON_GetObjectItemCaseSensitive(spec, "size"), &above) || above <= 0)
++         continue;
++
++      model_price_band_t band;
++      memset(&band, 0, sizeof(band));
++      band.above_tokens = above;
++      /* A band with no usable input/output price tells us nothing. */
++      if (!json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "input"), &band.in_per_mtok) ||
++          !json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "output"), &band.out_per_mtok))
++         continue;
++      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
++                                &band.cache_read_per_mtok);
++
++      /* Insertion sort: the array is at most MODEL_PRICE_BANDS_MAX long. */
++      int i = out->price_band_count;
++      while (i > 0 && out->price_bands[i - 1].above_tokens > band.above_tokens)
++      {
++         out->price_bands[i] = out->price_bands[i - 1];
++         i--;
++      }
++      out->price_bands[i] = band;
++      out->price_band_count++;
++   }
++}
++
+ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char *model_id,
+                                  model_capability_t *out)
+ {
+@@ -157,6 +224,7 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char
+                                 &out->cost_out_per_mtok);
+       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "cache_read"),
+                                 &out->cost_cache_read_per_mtok);
++      fill_price_bands(cost, out);
+    }
+ 
+    /* models.dev spells tool use "tool_call". REASONING has no flat-schema
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index e3e270fc..be92ddb4 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -12,6 +12,7 @@
+ #include "cJSON.h"
+ #include "json_fluent.h"
+ #include <ctype.h>
++#include <math.h>
+ #include <pthread.h>
+ #include <stdatomic.h>
+ #include <stdlib.h>
+@@ -911,14 +912,17 @@ int agent_load_config(agent_config_t *cfg)
+ 
+          /* Operator price override ($/Mtok); absent or negative leaves it unset
+           * so the catalog answers. */
++         /* isfinite() matters: a parser can yield +inf from an overflowing
++          * literal, and a non-finite price defeats every ordered comparison in
++          * the resolver, making an unset axis look set. */
+          v = cJSON_GetObjectItem(a, "price_in_per_mtok");
+-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
++         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+             ag->price_in_per_mtok = v->valuedouble;
+          v = cJSON_GetObjectItem(a, "price_out_per_mtok");
+-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
++         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+             ag->price_out_per_mtok = v->valuedouble;
+          v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
+-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
++         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
+             ag->price_cached_per_mtok = v->valuedouble;
+ 
+          v = cJSON_GetObjectItem(a, "max_tokens");
+@@ -1978,6 +1982,25 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
+    if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+        !agent_is_available_for_routing(ag))
+       return NULL;
++
++   /* Session affinity outranks the default. A tmux agent holds a STATEFUL
++    * session; switching a user mid-conversation to an HTTP peer abandons it.
++    * The tier-filtered pass below has always preferred tmux, so returning the
++    * default before that check would silently break session continuity for a
++    * user whose default happens to be an HTTP agent. Only bypass cost_tier
++    * here — that is the ordering this fix is about — not the tmux preference. */
++   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
++   {
++      for (int i = 0; i < cfg->agent_count; i++)
++      {
++         agent_t *peer = &cfg->agents[i];
++         if (peer == ag || !peer->enabled || !agent_supports_role(peer, role) ||
++             !agent_is_available_for_routing(peer))
++            continue;
++         if (strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
++            return NULL; /* let the normal pass pick the stateful session */
++      }
++   }
+    return ag;
+ }
+ 
+diff --git a/src/server/agent_context_budget.c b/src/server/agent_context_budget.c
+index c42fa3fd..6b5d5cc0 100644
+--- a/src/server/agent_context_budget.c
++++ b/src/server/agent_context_budget.c
+@@ -21,7 +21,11 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
+     *
+     * So an UNPINNED reserve is capped at a quarter of the window. A caller that
+     * genuinely needs a long reply pins max_tokens (or passes an explicit
+-    * per-request budget, which never reaches this function). */
++    * per-request budget, which never reaches this function).
++    *
++    * NOTE this returns a PROMPT budget only. It does not itself constrain what
++    * the provider may emit, so an unpinned reply can still exceed the quarter
++    * reserved here; request construction owns the output cap. */
+    int output_tokens = agent->max_tokens;
+    if (output_tokens <= 0)
+    {
+@@ -30,6 +34,14 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
+       output_tokens = (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling
+                                                                         : reserve_cap;
+    }
++   /* A pinned reserve at or above the whole window is a misconfiguration: there
++    * is no room left for a prompt. Clamp the RESERVE to half the window rather
++    * than inventing budget - the previous fallback silently advertised a 100k
++    * prompt alongside a 300k pinned reply against a 200k window, i.e. 400k of
++    * commitments against a 200k ceiling. Halving keeps a usable prompt while
++    * never claiming more total room than the window allows. */
++   if (output_tokens >= agent->middleware.context_window)
++      output_tokens = agent->middleware.context_window / 2;
+    int prompt_tokens = agent->middleware.context_window - output_tokens;
+    if (prompt_tokens <= 0)
+       prompt_tokens = agent->middleware.context_window / 2;
+diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
+index 3a2267e8..7f3fcb1c 100644
+--- a/src/tests/test_agent_caps.c
++++ b/src/tests/test_agent_caps.c
+@@ -583,6 +583,32 @@ void test_primary_turn_reaches_default_above_min_tier(void)
+    strcpy(cfg.agents[0].roles[0], "explain");
+    assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+ 
++   /* Session affinity outranks the default: a tmux agent holds a STATEFUL
++    * session, so a primary turn must not be yanked to an HTTP default and
++    * abandon it. Only cost_tier is bypassed, never the tmux preference.
++    *
++    * A tmux agent is only ROUTABLE when tmux is actually installed
++    * (agent_routing_block_reason returns MISSING_COMMAND otherwise), so this
++    * assertion is environment-dependent and is skipped rather than weakened
++    * into something that passes for the wrong reason. */
++   if (access("/usr/bin/tmux", X_OK) == 0 || access("/bin/tmux", X_OK) == 0)
++   {
++      strcpy(cfg.agents[0].roles[0], "review");
++      strcpy(cfg.agents[1].roles[0], "review");
++      strcpy(cfg.agents[1].backend, AGENT_BACKEND_TMUX_CLI);
++      strcpy(cfg.agents[1].cli_cmd, "sh"); /* on PATH so only tmux gates it */
++      assert(agent_route(&cfg, "review") == &cfg.agents[1]);
++
++      /* With no tmux peer the default wins again. */
++      cfg.agents[1].backend[0] = '\0';
++      cfg.agents[1].cli_cmd[0] = '\0';
++      assert(agent_route(&cfg, "review") == &cfg.agents[0]);
++   }
++   else
++   {
++      printf("  SKIP: tmux session-affinity assertion (tmux not installed)\n");
++   }
++
+    agent_routing_set_primary_turn(0);
+    printf("  PASS: test_primary_turn_reaches_default_above_min_tier\n");
+ }
+diff --git a/src/tests/test_agent_tier_lint.c b/src/tests/test_agent_tier_lint.c
+index a4617f19..da7917af 100644
+--- a/src/tests/test_agent_tier_lint.c
++++ b/src/tests/test_agent_tier_lint.c
+@@ -87,7 +87,32 @@ static void seed_priced_catalog(void)
+                       "                      \"outputCost\":5.0,\"tools\":true},"
+                       /* Output price ABSENT: partial data, not a known zero. */
+                       "\"testvendor/partial\":{\"contextWindow\":100000,\"inputCost\":1.0,"
+-                      "                      \"tools\":true}"
++                      "                      \"tools\":true},"
++                      /* Banded models use the NESTED schema, the only form that
++                       * carries cost.tiers. Mirrors gpt-5.6-sol: base $5/$30,
++                       * doubling above 272k. */
++                      "\"banded\": {\"models\": {"
++                      "  \"sol_like\": {\"limit\":{\"context\":1050000},"
++                      "     \"cost\":{\"input\":5.0,\"output\":30.0,\"cache_read\":0.5,"
++                      "       \"tiers\":[{\"input\":10.0,\"output\":45.0,\"cache_read\":1.0,"
++                      "         \"tier\":{\"type\":\"context\",\"size\":272000}}]},"
++                      "     \"tool_call\":true},"
++                      /* Flat-priced peer, dearer than sol_like's BASE band but
++                       * cheaper than its top band: the ordering flips. */
++                      "  \"flat_mid\": {\"limit\":{\"context\":1050000},"
++                      "     \"cost\":{\"input\":7.0,\"output\":35.0},\"tool_call\":true},"
++                      /* Dearer than sol_like at EVERY band. */
++                      "  \"flat_dear\": {\"limit\":{\"context\":1050000},"
++                      "     \"cost\":{\"input\":20.0,\"output\":90.0},\"tool_call\":true},"
++                      /* Two bands, to prove ascending selection. */
++                      "  \"two_band\": {\"limit\":{\"context\":1000000},"
++                      "     \"cost\":{\"input\":1.0,\"output\":2.0,"
++                      "       \"tiers\":[{\"input\":4.0,\"output\":8.0,"
++                      "         \"tier\":{\"type\":\"context\",\"size\":500000}},"
++                      "        {\"input\":2.0,\"output\":4.0,"
++                      "         \"tier\":{\"type\":\"context\",\"size\":100000}}]},"
++                      "     \"tool_call\":true}"
++                      "}}"
+                       "}";
+    FILE *f = fopen(path, "w");
+    assert(f);
+@@ -298,14 +323,21 @@ static void test_non_competing_roles_not_flagged(void)
+    memset(&cfg, 0, sizeof(cfg));
+    add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
+    add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
+-   /* Disjoint, NON-exec roles: neither can serve the other's work. */
++   /* Disjoint declared roles AND disjoint exec sets: only then do they truly
++    * never compete. Constraining exec_roles is essential — with the DEFAULT exec
++    * set both agents are routable for review/code/test and so DO compete, which
++    * an earlier version of this test wrongly encoded as "no competition". */
+    snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
++   snprintf(cfg.agents[0].exec_roles[0], sizeof(cfg.agents[0].exec_roles[0]), "%s", "explain");
++   cfg.agents[0].exec_role_count = 1;
+    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
++   snprintf(cfg.agents[1].exec_roles[0], sizeof(cfg.agents[1].exec_roles[0]), "%s", "summarize");
++   cfg.agents[1].exec_role_count = 1;
+ 
+    agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+    assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+ 
+-   /* Sharing a role restores the finding. */
++   /* Sharing a declared role restores the finding. */
+    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "explain");
+    assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+ 
+@@ -414,6 +446,148 @@ static void test_cached_price_axis(void)
+    printf("  PASS: test_cached_price_axis\n");
+ }
+ 
++/* Two agents with entirely disjoint DECLARED roles still compete through the
++ * default exec-role set, which agent_supports_role() grants to every agent.
++ * Iterating declared roles alone missed that and suppressed real conflicts. */
++static void test_implicit_exec_role_competition_is_detected(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
++   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
++   /* Disjoint declared roles, but NO exec_roles override -> both inherit the
++    * default exec set and are routable for review/code/test alike. */
++   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
++   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
++
++   printf("  PASS: test_implicit_exec_role_competition_is_detected\n");
++}
++
++/* Context-band pricing. Several providers charge more once a request exceeds a
++ * threshold, so the base rate is only correct below the first band. The
++ * authoritative threshold is cost.tiers[].tier.size — the registry's legacy
++ * `context_over_200k` key name does NOT encode it (the real boundary is 272000
++ * for gpt-5.6-sol and 512000 for MiniMax-M3), which is why that alias is
++ * ignored entirely. */
++static void test_price_bands_resolve_by_context(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "sol_like", "banded", "sol_like", 0);
++
++   double in = 0.0, out = 0.0, cached = 0.0;
++
++   /* Below the threshold: base band. */
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 1000, &in, &out, &cached) == 1);
++   assert(in == 5.0 && out == 30.0 && cached == 0.5);
++
++   /* Exactly AT the threshold is still base: the band applies ABOVE it. */
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 272000, &in, &out, &cached) == 1);
++   assert(in == 5.0 && out == 30.0);
++
++   /* One token above flips to the band. */
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 272001, &in, &out, &cached) == 1);
++   assert(in == 10.0 && out == 45.0 && cached == 1.0);
++
++   /* Unknown context resolves to base, as does the plain accessor. */
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 0, &in, &out, NULL) == 1);
++   assert(in == 5.0);
++   assert(agent_resolved_price(&cfg.agents[0], &in, &out, NULL) == 1);
++   assert(in == 5.0 && out == 30.0);
++
++   printf("  PASS: test_price_bands_resolve_by_context\n");
++}
++
++/* Bands are stored ascending regardless of the order the registry lists them,
++ * so a lookup can take the last threshold the context exceeds. */
++static void test_price_bands_sorted_ascending(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "two_band", "banded", "two_band", 0);
++
++   model_capability_t cap;
++   assert(model_capability_get("banded", "two_band", &cap) != 0);
++   assert(cap.price_band_count == 2);
++   /* Declared 500000 first, then 100000 — must be stored ascending. */
++   assert(cap.price_bands[0].above_tokens == 100000);
++   assert(cap.price_bands[1].above_tokens == 500000);
++
++   double in = 0.0, out = 0.0;
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 50000, &in, &out, NULL) == 1);
++   assert(in == 1.0);
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 200000, &in, &out, NULL) == 1);
++   assert(in == 2.0);
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 900000, &in, &out, NULL) == 1);
++   assert(in == 4.0);
++
++   printf("  PASS: test_price_bands_sorted_ascending\n");
++}
++
++/* The lint must not issue definitive advice when the ordering DEPENDS on request
++ * size: sol_like is cheaper than flat_mid at base ($5/$30 vs $7/$35) but dearer
++ * above 272k ($10/$45). Telling the operator to re-tier would be wrong for part
++ * of the operating range, so the pair is left alone. */
++static void test_band_dependent_ordering_is_not_flagged(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   /* flat_mid at the CHEAPER tier while dearer at base => a base-only
++    * comparison would report a conflict. */
++   add_agent(&cfg, "flat_mid_t0", "banded", "flat_mid", 0);
++   add_agent(&cfg, "sol_like_t1", "banded", "sol_like", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
++
++   printf("  PASS: test_band_dependent_ordering_is_not_flagged\n");
++}
++
++/* When the dominance holds at EVERY band the finding is still reported: banded
++ * pricing must not become a blanket excuse to say nothing. */
++static void test_band_stable_ordering_is_still_flagged(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   /* flat_dear ($20/$90) is dearer than sol_like at base AND above 272k. */
++   add_agent(&cfg, "flat_dear_t0", "banded", "flat_dear", 0);
++   add_agent(&cfg, "sol_like_t1", "banded", "sol_like", 1);
++
++   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
++   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
++   assert(strcmp(out[0].cheaper_tier_agent, "flat_dear_t0") == 0);
++
++   printf("  PASS: test_band_stable_ordering_is_still_flagged\n");
++}
++
++/* A policy ceiling at or below the first threshold makes the band unreachable,
++ * so the agent's price is effectively flat and definitive advice is fine. */
++static void test_unreachable_band_is_ignored(void)
++{
++   agent_config_t cfg;
++   memset(&cfg, 0, sizeof(cfg));
++   add_agent(&cfg, "capped", "banded", "sol_like", 0);
++   cfg.agents[0].middleware.context_window = 272000; /* cannot exceed the band */
++   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 0);
++
++   cfg.agents[0].middleware.context_window = 400000; /* can exceed it */
++   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 1);
++
++   /* A full operator override makes the vendor schedule irrelevant. */
++   cfg.agents[0].price_in_per_mtok = 1.0;
++   cfg.agents[0].price_out_per_mtok = 2.0;
++   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 0);
++   /* ...and that override applies at every band, not just the base. */
++   double in = 0.0, out = 0.0;
++   assert(agent_resolved_price_at_context(&cfg.agents[0], 900000, &in, &out, NULL) == 1);
++   assert(in == 1.0 && out == 2.0);
++
++   printf("  PASS: test_unreachable_band_is_ignored\n");
++}
++
+ int main(void)
+ {
+    printf("agent_tier_lint:\n");
+@@ -427,9 +601,15 @@ int main(void)
+    test_equal_axis_dominance_is_flagged();
+    test_partial_price_data_is_not_compared();
+    test_non_competing_roles_not_flagged();
++   test_implicit_exec_role_competition_is_detected();
+    test_operator_price_override_wins();
+    test_price_override_per_axis();
+    test_cached_price_axis();
++   test_price_bands_resolve_by_context();
++   test_price_bands_sorted_ascending();
++   test_band_dependent_ordering_is_not_flagged();
++   test_band_stable_ordering_is_still_flagged();
++   test_unreachable_band_is_ignored();
+    test_guards();
+    printf("agent_tier_lint: all tests passed\n");
+    return 0;
+diff --git a/src/tests/test_context_assembly.c b/src/tests/test_context_assembly.c
+index 8db0ec8c..fdd68dc9 100644
+--- a/src/tests/test_context_assembly.c
++++ b/src/tests/test_context_assembly.c
+@@ -353,6 +353,29 @@ static void test_agent_context_budget_uses_context_window(void)
+    assert(agent_exec_context_budget_chars(&ag) > AGENT_CONTEXT_BUDGET);
+ }
+ 
++/* A pinned reserve at or above the whole window is a misconfiguration. The old
++ * fallback silently advertised context_window/2 of PROMPT while still honouring
++ * the oversized pinned reply, i.e. 400k of commitments against a 200k window.
++ * Clamp the reserve instead so total commitments never exceed the window. */
++static void test_agent_context_budget_clamps_oversized_pinned_output(void)
++{
++   agent_t ag;
++   memset(&ag, 0, sizeof(ag));
++   strcpy(ag.provider, "anthropic");
++   strcpy(ag.model, "claude-opus-4-8");
++   ag.middleware.context_window = 200000;
++   ag.max_tokens = 300000; /* larger than the whole window */
++
++   /* Reserve clamps to window/2, so the prompt budget is the other half and
++    * prompt + reserve == the window rather than exceeding it. */
++   size_t budget = agent_exec_context_budget_chars(&ag);
++   assert(budget == (size_t)(200000 - 200000 / 2) * 4u);
++
++   /* Exactly equal to the window is the same misconfiguration. */
++   ag.max_tokens = 200000;
++   assert(agent_exec_context_budget_chars(&ag) == (size_t)(200000 - 200000 / 2) * 4u);
++}
++
+ /* An UNPINNED output reserve must not eat the window.
+  *
+  * middleware.context_window is frequently a deliberate POLICY ceiling below the
+@@ -414,6 +437,7 @@ int main(void)
+    test_agent_exec_context_ex_can_skip_kb();
+    test_agent_context_budget_uses_context_window();
+    test_agent_context_budget_caps_unpinned_output_reserve();
++   test_agent_context_budget_clamps_oversized_pinned_output();
+    printf("context_assembly: all tests passed\n");
+    return 0;
+ }

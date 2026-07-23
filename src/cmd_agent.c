@@ -422,6 +422,22 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
           * `provider` (the wire shape) for a third-party model served over
           * another vendor's API. Surfaced so the GUI can show provider+model. */
          cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
+         /* Canonical `provider:model` reference (the form model_capability_resolve_ref
+          * parses and `aimee model show` accepts) plus the catalog's human label,
+          * so any surface that must name a SPECIFIC model — roundtable seats,
+          * routing attribution, a picker — can show provider+model without
+          * hand-maintained strings. display_name is omitted when the catalog has
+          * none rather than echoing the id, so a consumer can tell them apart. */
+         if (ag->model[0])
+         {
+            char ref[MODEL_PROVIDER_MAX + MAX_MODEL_LEN + 2];
+            snprintf(ref, sizeof(ref), "%s:%s", agent_catalog_provider(ag), ag->model);
+            cJSON_AddStringToObject(obj, "model_ref", ref);
+            model_capability_t dcap;
+            if (model_capability_get(agent_catalog_provider(ag), ag->model, &dcap) &&
+                dcap.display_name[0])
+               cJSON_AddStringToObject(obj, "model_display_name", dcap.display_name);
+         }
          cJSON_AddNumberToObject(obj, "cost_tier", ag->cost_tier);
          /* Effective price ($/Mtok): operator override when set, else catalog.
           * Emitted only when BOTH axes resolve, so a consumer never reads an

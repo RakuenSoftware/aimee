@@ -1588,6 +1588,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
 
 $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
+                               $(OBJDIR)/agent_tier_lint.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
                                $(OBJDIR)/tests/support/vault_service_stub.o \
                                $(OBJDIR)/tests/support/oauth_tokens_stub.o \
