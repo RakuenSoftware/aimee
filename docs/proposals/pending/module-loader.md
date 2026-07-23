@@ -7,8 +7,8 @@
   the sandbox host runtimes (OS-sandboxed process and WebAssembly), and the loaded-module lifecycle
   by which an external or user-authored module is started, health-checked, upgraded, and stopped.
 - **Consumes (does not own):** the shared-memory bus, admission authority, capability state, and
-  routing (`module-runtime`/core); `execution-policy` authorization; `audit`; the bus wire spec and
-  its C/Go reference implementations; and, when selected, `governance` executable-artifact signing/trust
+  routing (`module-runtime`/core); `execution-policy` authorization; `audit`; the bus-client spec and
+  its C/Go reference clients; and, when selected, `governance` executable-artifact signing/trust
   ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md)).
 - **Renames:** the taxonomy's former `plugin-loader` optional ID (suite 2026-07-23 amendment).
 - **Date:** 2026-07-23

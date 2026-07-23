@@ -141,11 +141,14 @@ is now the suite index and shared contract; it does not duplicate the child prop
   subscribes to, and may request, plus the bus wire format that carries them. It is the only surface
   another participant may invoke, and it replaces the C public header as the enforced dependency edge
   between separate-program participants.
+- The **bus host** is the single in-source (C) implementation of the bus — the shared segment,
+  admission/handle handshake, observer routing, and the governance/audit tap. It is contained only by
+  the two bus-hosting services, the Runtime and the Control Plane; it is not a public, reimplementable
+  spec, and there is exactly one of it.
 - The **bus client** is the per-language library that lets a module attach the shared-memory bus,
-  encode/decode events in the wire format, and publish/subscribe/request. The wire spec plus its
-  reference implementations in **C** (the bus host/broker and C client) and **Go** (the first-party
-  module client) are what make any language a module host; a cross-language conformance suite proves
-  the spec is implementation-independent.
+  encode/decode events in the wire format, and publish/subscribe/request. The bus-client spec is
+  language-neutral, with reference clients in **C** and **Go** and a cross-language conformance suite,
+  which is what makes any language a module host.
 - A **hub module** is a module (canonically `memory`) that is an allowed dependency of many other
   modules and itself depends on no feature module — a sink in the dependency graph.
 - The **object closure** term extends per axis: the **C object closure** is the selected `.o` set
@@ -432,9 +435,9 @@ whatever language its author chose.
 
 - [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
   owns the polyglot build (C core plus separate module programs from one descriptor graph), the event
-  contract schema, the bus wire spec with its C and Go reference implementations and cross-language
-  conformance suite, bus ownership, and dependency enforcement re-expressed as authorized event
-  publication/subscription rather than only a C link/symbol graph.
+  contract schema, the single in-source (C) bus host and the bus-client spec with its C and Go
+  reference clients and cross-language conformance suite, bus ownership, and dependency enforcement
+  re-expressed as authorized event publication/subscription rather than only a C link/symbol graph.
 - [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) owns the final
   core-vs-module carving of the eighteen IDs, the trust-kernel placement, and a round-trip proof whose
   stages flow as bus events across the boundary within the performance budget.
