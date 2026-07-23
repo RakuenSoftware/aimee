@@ -1,6 +1,7 @@
 # P5-D2a management-read trust core and bounded agents projection
 
-- **State:** proposed for roundtable review.
+- **State:** completed 2026-07-23; roundtable-converged and validated on PostgreSQL 17 plus the
+  CT260-to-CT262 production mTLS topology.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–4.
 - **Depends on:** P5-B3 management mTLS/status channel, P5-C2 token authority, P5-C3
   checkpoint/action composition, and P5-D1 OIDC-preserving fleet console.
@@ -418,3 +419,23 @@ absence, and ordinary-member/cross-team/break-glass/console-admin/wrong-cert/rev
 authority-outage/generic-route failure. Prove reads remain available with `remote_writes=off` and
 fail when the read runtime is absent. Finish with an adversarial frozen branch review and merge to
 `testing` before beginning D2b.
+
+## Delivery evidence
+
+- The frozen digest/token/status/checkpoint composition, strict agent projection, external kb
+  route, server management-listener route, OIDC-only console drill-down, OpenAPI surfaces, and
+  least-privilege PostgreSQL authority landed as one bounded branch.
+- A successful runtime composition test exercises challenge → authoritative publication
+  generation → immutable intent → isolated token authority → signed status → final primary
+  snapshot → exact management read → closed projection. Adversarial cases cover read-token/write
+  separation, duplicate projection members, rejected-response isolation, authority-result mapping,
+  route grammar, and unregister races.
+- A fresh real PostgreSQL 17 database passed schema installation, FORCE-RLS/grant boundaries,
+  authoritative publication generation, retained-bearer isolation, read intent, authority
+  admission/finalization/readback, and WORM key-use checks.
+- Exact archived candidate builds passed on CT260 and CT262. The production management listener on
+  CT262 passed CT260 mTLS challenge issuance and fail-closed invalid-token dispatch with random
+  correlation identifiers. Production server/kb builds, focused C tests, Go tests, frontend tests,
+  API conformance, and diff hygiene passed.
+- Four logical adversarial branch roundtables were resolved; the focused correction review
+  converged with `No issues found`.

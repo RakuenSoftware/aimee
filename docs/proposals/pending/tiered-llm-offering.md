@@ -5,7 +5,7 @@
 
 ## Delivery status (as of 2026-07-23)
 
-44 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
+45 verified, roundtable-converged, real-PG17 / swtpm / ASAN / fuzz-validated slices merged to
 `testing`. Completed per-slice implementation plans live in `docs/proposals/done/`.
 
 | P | Status | Merged slices | Remaining |
@@ -20,6 +20,10 @@
 | **P8** thin-client mTLS | 🟡 partial | **P8a** per-request durable cert revocation (invariant #5) | **P8b/c** client-cert presentation + ramp + enrollment |
 | **P9** Telemetry tiering | 🟡 partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
 | **P10** Shared vault core | ✅ done | core extraction, kb Postgres store, custody selection + seal barrier | — (hardening tracked under P7) |
+
+P5-D2a is complete: isolated management-read authority, nonce/status/checkpoint composition,
+bounded agent projection, and the OIDC-only fleet drill-down. P5 now continues with D2b's explicit
+safe config projection and close-out.
 
 Remaining work is integration/topology (P2b-b server forwarding/streaming, P5-D2 bounded management reads, P8b/c) plus
 the remaining P7 reseal reconciler/enablement — validatable on the dedicated integration
