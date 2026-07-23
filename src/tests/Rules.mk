@@ -1893,7 +1893,7 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status-client: \
 
 $(TESTPREFIX)/unit-test-kb-management-runtime: \
     $(OBJDIR)/tests/test_kb_management_runtime.o \
-    $(OBJDIR)/kb/kb_management_runtime.o
+    $(OBJDIR)/kb/kb_management_runtime.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-http-servers-health: \

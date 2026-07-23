@@ -4,6 +4,7 @@
 #include "kb/kb_mgmt_status_client.h"
 #include "kb/kb_workload_helper_posix.h"
 #include "kb_workload_provider.h"
+#include "kb_mgmt_status.h"
 #include "db2/management_read_journal.h"
 #include "server/server_mgmt_read.h"
 
@@ -36,6 +37,7 @@ static int read_fixture_enabled;
 static int read_sequence;
 static kb_mgmt_token_authority_ipc_result_t token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
 static kb_http_servers_read_handler_fn captured_read_handler;
+static unsigned char read_status_private_key[32];
 
 db2_management_read_result_t db2_management_read_publication_generation(int64_t *out)
 {
@@ -202,6 +204,20 @@ kb_management_action_transport_t kb_management_action_server_request_production(
    {
       assert(!strcmp(method, "POST") && session == (void *)0x3456 && !headers);
       snprintf(response, cap, "challenge");
+      *status = 200;
+      return KB_MANAGEMENT_ACTION_SENT_RESPONSE;
+   }
+   if (read_fixture_enabled && !strcmp(path, "/v1/management/read/agents"))
+   {
+      assert(!strcmp(method, "GET") && session == (void *)0x3456 && headers &&
+             strstr(headers, "Authorization: Bearer signed-read-token\r\n") &&
+             strstr(headers, "X-Aimee-Management-Status: {") && read_sequence == 2);
+      assert(snprintf(response, cap,
+                      "{\"server_id\":\"srv-1\",\"team\":7,\"agents\":[{\"name\":\"agent-a\","
+                      "\"provider\":\"openai\",\"model\":\"gpt-5\",\"enabled\":true,"
+                      "\"delegate_available\":false,\"primary_only\":false,"
+                      "\"max_parallel\":1}]}") > 0);
+      read_sequence = 3;
       *status = 200;
       return KB_MANAGEMENT_ACTION_SENT_RESPONSE;
    }
@@ -390,13 +406,25 @@ kb_mgmt_status_client_adapter(void *ctx, const kb_management_cert_bundle_t *bund
    (void)request;
    (void)request_len;
    (void)deadline;
-   (void)response;
-   (void)cap;
-   (void)status;
    if (read_fixture_enabled)
    {
       assert(read_sequence == 1);
+      kb_mgmt_status_t proof = {.version = 1,
+                                .issued_at = (uint64_t)time(NULL),
+                                .expires_at = (uint64_t)time(NULL) + 5,
+                                .revocation_generation = 7};
+      snprintf(proof.key_id, sizeof(proof.key_id), "status-key");
+      snprintf(proof.caller_issuer, sizeof(proof.caller_issuer), "/CN=kb-ca");
+      snprintf(proof.caller_serial_norm, sizeof(proof.caller_serial_norm), "01af");
+      memset(proof.caller_fingerprint, 'a', 64);
+      snprintf(proof.target_server_id, sizeof(proof.target_server_id), "srv-1");
+      memset(proof.target_mgmt_fingerprint, 'b', 64);
+      snprintf(proof.purpose, sizeof(proof.purpose), "management.read.v1");
+      assert(!kb_mgmt_status_sign(&proof, read_status_private_key));
+      assert(!kb_mgmt_status_to_json(&proof, response, cap));
+      *status = 200;
       read_sequence = 2;
+      return KB_MANAGEMENT_HEALTH_OK;
    }
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
@@ -460,7 +488,7 @@ static void write_ca(char path[64], int garbage)
    EVP_PKEY_CTX_free(key_ctx);
 }
 
-static void set_packet(const char *ca_path)
+static void set_packet(const char *ca_path, const char *status_public_hex)
 {
    setenv("AIMEE_KB_MGMT_INSTALLATION_ID", "00000000000000000000000000000000", 1);
    setenv("AIMEE_KB_MGMT_CUSTODIED_CA_DIR", "/tmp/custodied", 1);
@@ -476,8 +504,7 @@ static void set_packet(const char *ca_path)
    setenv("AIMEE_KB_MGMT_STATUS_LEAF_PIN",
           "1111111111111111111111111111111111111111111111111111111111111111", 1);
    setenv("AIMEE_MGMT_STATUS_KEY_ID", "status-key", 1);
-   setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY",
-          "2222222222222222222222222222222222222222222222222222222222222222", 1);
+   setenv("AIMEE_MGMT_STATUS_PUBLIC_KEY", status_public_hex, 1);
    setenv("AIMEE_KB_MGMT_TOKEN_AUTHORITY_SOCKET", KB_MGMT_TOKEN_AUTHORITY_SOCKET_PATH, 1);
    setenv("AIMEE_KB_MGMT_TOKEN_AUTHORITY_GID", "1000", 1);
    setenv("AIMEE_KB_MGMT_TOKEN_ISSUER", "https://issuer.example", 1);
@@ -502,6 +529,22 @@ static void *stop_thread(void *unused)
 int main(void)
 {
    char ca_path[64], garbage_path[64];
+   char status_public_hex[65];
+   unsigned char status_public_key[32];
+   EVP_PKEY_CTX *status_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_ED25519, NULL);
+   EVP_PKEY *status_key = NULL;
+   size_t key_len = 32;
+   assert(status_ctx && EVP_PKEY_keygen_init(status_ctx) == 1 &&
+          EVP_PKEY_keygen(status_ctx, &status_key) == 1 &&
+          EVP_PKEY_get_raw_private_key(status_key, read_status_private_key, &key_len) == 1 &&
+          key_len == 32);
+   key_len = 32;
+   assert(EVP_PKEY_get_raw_public_key(status_key, status_public_key, &key_len) == 1 &&
+          key_len == 32);
+   for (size_t i = 0; i < 32; ++i)
+      assert(snprintf(status_public_hex + i * 2, 3, "%02x", status_public_key[i]) == 2);
+   EVP_PKEY_free(status_key);
+   EVP_PKEY_CTX_free(status_ctx);
    write_ca(ca_path, 0);
    write_ca(garbage_path, 1);
    clear_packet();
@@ -519,12 +562,12 @@ int main(void)
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_DISABLED);
    clear_packet();
 
-   set_packet(garbage_path);
+   set_packet(garbage_path, status_public_hex);
    assert(kb_management_runtime_start() == -1);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_DISABLED);
    clear_packet();
 
-   set_packet(ca_path);
+   set_packet(ca_path, status_public_hex);
    provider_result = KB_WORKLOAD_UNAVAILABLE;
    int registrations = register_calls;
    assert(kb_management_runtime_start() == 0);
@@ -596,8 +639,9 @@ int main(void)
    read_sequence = 0;
    kb_management_read_result_t read_rc =
        captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out));
-   assert(read_rc == KB_MANAGEMENT_READ_UNAVAILABLE);
-   assert(read_sequence == 2); /* token authority precedes the fresh status proof */
+   assert(read_rc == KB_MANAGEMENT_READ_OK);
+   assert(read_sequence == 3); /* token authority precedes status proof and dispatch */
+   assert(strstr(read_out, "\"name\":\"agent-a\""));
    read_fixture_enabled = 0;
    reconcile_result = KB_MANAGEMENT_CERT_UNAVAILABLE;
    kb_management_runtime_tick(INT64_MAX - 30);
