@@ -16,7 +16,7 @@ attested identities, and `vault_capability` limits delegated access. Direct call
 implementations outside these facades are boundary violations rather than alternate public APIs.
 
 The descriptor declares this module's twelve sources, thirteen module-root headers, eleven direct
-tests, and this document; it does not yet set `ownership_complete`. All thirteen headers are declared
+tests, and this document; it sets `ownership_complete: true`. All thirteen headers are declared
 as `private_headers` because they live at the module root rather than under
 `src/modules/vault/include/aimee/vault/`, the layout the header-layout checker treats as private;
 `vault_internal.h` is the backend-seam header and has no paired source. The four custody backends
@@ -28,9 +28,10 @@ pkcs11 sources between a real implementation and a fail-closed stub rather than 
 thin `aimee` client reaches (`vault_capability.c`, `vault_crypto.c`, `vault_kek_cache.c`,
 `vault_principal.c`, `vault_service.c`, `vault_store.c`) and omits the four custody backends,
 `vault_hwm.c`, and `vault_server_key.c`, the same intentional thin-client boundary recorded for
-gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the audit;
-latching follows in a separate slice so the completeness audit does not review declarations authored
-in the same change.
+gateway, learning, and workspace. `docs/validation/core-modularization-slice-46.md` records the declaration audit and
+`docs/validation/core-modularization-slice-47.md` the completeness audit; the two were split so the
+latch reviews declarations merged on their own first. Adding a new module-local source or module-root
+header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 

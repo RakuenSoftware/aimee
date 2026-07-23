@@ -656,6 +656,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains eleven vault rows.",
       "independent_review": "The slice-decision roundtable confirmed the subject-over-name exclusion of the five other-module tests, directed that the orphan pkcs11 test stay undeclared and flagged, and directed that the WITH_TPM2-gated tpm2 harness be declared as the only test of the real tpm2 custody source. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-46.md", "docs/modules/vault.md", "src/modules/vault/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
+    },
+    {
+      "slice": 47,
+      "state": "present_and_verified",
+      "disposition": "Set ownership_complete on the vault descriptor against the declarations slice 46 authored and reviewed on their own, the latch half of the pair for the fourth Class B module, and exercised the private_headers set-equality check against a thirteen-element set that includes the unpaired vault_internal.h backend-seam header.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The latch asserts the descriptor covers the module root as it stands, twelve sources and thirteen module-root headers, not that the server, KB, or DB2 vault code outside the module root has been moved in", "CMake compiles six of the twelve sources and omits the four custody backends, vault_hwm.c, and vault_server_key.c, the same intentional thin-client boundary recorded for gateway, audit, learning, and workspace", "test_vault_custody_pkcs11.c remains an orphan no target builds, flagged for a later cleanup"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Latching in the same slice that declared the files was rejected on roundtable direction, so the completeness audit reviews declarations merged on their own first rather than claims written in the same change.",
+        "revisit": "The remaining five Class B modules follow the same declaration-then-latch pair; a later cleanup wires or deletes the orphan pkcs11 test, and a separate header-layout slice may relocate vault headers under a canonical include tree."
+      },
+      "consumers": ["descriptor-envelope and module-inventory CI", "the remaining Class B declaration and latch slices", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains vault-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on a thirteen-element header set that includes an unpaired backend-seam header.",
+      "independent_review": "The slice-decision roundtable approved the declaration scope in slice 46, including the subject-over-name test exclusions and the tpm2-harness claim; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-47.md", "docs/modules/vault.md", "src/modules/vault/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }
