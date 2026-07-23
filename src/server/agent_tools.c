@@ -113,19 +113,22 @@ static _Thread_local agent_toolset_bound_t g_effective_tool_state = TOOLSET_BOUN
 void agent_tools_bind_effective_toolset(int tools_on, const char *explicit_override,
                                         const char *role)
 {
-   if (!tools_on)
-   {
-      /* tools_enabled:false is the existing all-or-nothing off path: route
-       * straight to clear() without ever entering a bound state. */
-      agent_tools_clear_effective_toolset();
-      return;
-   }
-
    /* Step into bound_empty FIRST so the old list is unreachable immediately,
-    * even if a pooled worker was returned to us without a prior clear. */
+    * even if a pooled worker was returned to us without a prior clear — and
+    * for the tools_off case so the state stays a bound-empty snapshot for
+    * the whole turn instead of falling back to the legacy unbound path.
+    * Only the unconditional end-of-turn clear() re-enters UNBOUND. */
    g_effective_tool_state = TOOLSET_BOUND_EMPTY;
    memset(g_effective_tool_names, 0, sizeof(g_effective_tool_names));
    g_effective_tool_count = 0;
+
+   if (!tools_on)
+   {
+      /* tools_enabled:false: deny the whole tool surface (POSIX disclosure and
+       * native dispatch both read this snapshot), bracket by clear() at the
+       * end of the turn. */
+      return;
+   }
 
    const char *selected = explicit_override;
    if (!selected || !selected[0])

@@ -106,12 +106,13 @@ const char *agent_tools_dispatch_role(void);
  * delegate_worker brackets the server-delegate turn lifecycle with bind/clear.
  * bind() resolves one ordered, duplicate-free list of tool names from
  * (explicit_override || AIMEE_ACTIVE_TOOLSET || toolset_for_delegate_role(role))
- * when tools are on, otherwise routes straight to clear(). Both POSIX
- * disclosure (agent_tools_filter_for_role) and native dispatch
- * (agent_tools_tool_allowed_for_role) read that single thread-local list for
- * the whole turn; clear() drops the bracket back to unbound. Pooled worker
- * threads must call clear() on every exit path so a leftover binding cannot
- * re-scope the next delegate's tools. */
+ * when tools are on; when tools are off it leaves the snapshot bound-empty so
+ * both POSIX disclosure and native dispatch deny the whole tool surface for
+ * the turn. Both readers see a single thread-local snapshot built once at
+ * bind time; clear() drops the bracket back to unbound and is reserved for
+ * unconditional end-of-turn cleanup. Pooled worker threads must call clear()
+ * on every exit path so a leftover binding cannot re-scope the next
+ * delegate's tools. */
 void agent_tools_bind_effective_toolset(int tools_on, const char *explicit_override,
                                         const char *role);
 void agent_tools_clear_effective_toolset(void);
