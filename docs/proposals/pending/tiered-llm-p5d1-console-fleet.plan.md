@@ -1,6 +1,7 @@
 # P5-D1 console fleet and OIDC-preserving proxy
 
-- **State:** proposed; initial plan-review findings incorporated.
+- **State:** approved for implementation; plan review converged in jobs 8902–8903 after the
+  audience/`azp`, vault-compensation, canonical-team, and response-overflow corrections.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§3–4.
 - **Depends on:** P5-A registry, P5-B3 live health channel, and P5-C3 action composition.
 - **Followed by:** P5-D2 bounded agents/config reads and P5 close-out.
