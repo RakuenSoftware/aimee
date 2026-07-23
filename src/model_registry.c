@@ -934,9 +934,18 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
       }
    }
 
-   /* models.dev cache (disk cache → bundled snapshot). */
+   /* models.dev cache (disk cache → bundled snapshot). Both cache readers set
+    * the capability FLAGS from the registry's modalities object but leave the
+    * derived `modalities` string empty, so fill it here rather than in each
+    * reader - every other source already arrives with it populated, and a
+    * consumer reading the field would otherwise see "" only for catalogued
+    * models. This went unnoticed while the bundled snapshot was unreachable and
+    * these lookups never succeeded. */
    if (models_dev_cache_lookup(lookup_provider, lookup_model, out))
+   {
+      capability_set_modalities(out);
       return 1;
+   }
 
    return model_capability_get_heuristic(lookup_provider, lookup_model, out);
 }

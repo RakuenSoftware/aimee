@@ -844,8 +844,22 @@ agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, in
          continue; /* same class of seat: re-running it proves nothing */
       if (!agent_route_candidate_eligible(ag, role, required_caps, 0, scope))
          continue;
+      /* Rank by the operator's DECLARED capability ordering (cost_tier), using
+       * the context window only to break ties.
+       *
+       * This deliberately differs from agent_route_escalate, which ranks by
+       * window: that path exists for a DEGREE shortfall - the prompt exceeds
+       * every window - so a bigger seat is the genuine best effort. This path is
+       * a MISPLACEMENT correction: verification failed because the seat was not
+       * good enough, and a larger window does not make a cheaper model better at
+       * the work. Ranking by window here sent escalations to a cheaper seat that
+       * merely had more context - with real catalog data a mid-tier model can
+       * easily out-window the top seat - which is the opposite of "escalate to
+       * the most capable" and would burn the one-shot allowance on a seat of
+       * roughly the class that just failed. */
       int ctx = agent_effective_context(ag);
-      if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
+      if (!best || ag->cost_tier > best->cost_tier ||
+          (ag->cost_tier == best->cost_tier && ctx > best_ctx))
       {
          best = ag;
          best_ctx = ctx;

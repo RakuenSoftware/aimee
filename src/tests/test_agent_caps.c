@@ -728,15 +728,24 @@ void test_request_max_tokens_clamped_to_context_window(void)
 
    /* With no operator override the CATALOG window is the ceiling. Consulting
     * only middleware.context_window left a catalogued small-window model
-    * accepting an oversized pinned cap. claude-opus-4-8 resolves >= 200000, so
-    * a 300000 pin is still a misconfiguration and is clamped. */
+    * accepting an oversized pinned cap.
+    *
+    * Derive the over-pin from the resolved window rather than hardcoding one:
+    * this previously pinned 300000 against claude-opus-4-8 on the assumption it
+    * resolved to ~200000, which held only while the bundled snapshot was
+    * unreachable and the heuristic answered. The real catalog gives it a far
+    * larger window, so 300000 stopped being an over-pin and the clamp went
+    * untested. */
    ag.middleware.context_window = 0;
-   ag.max_tokens = 300000;
    {
       model_capability_t cap;
       assert(model_capability_get(agent_catalog_provider(&ag), ag.model, &cap) != 0);
       assert(cap.context_window > 0);
+      ag.max_tokens = cap.context_window; /* unambiguously above half the window */
       assert(agent_request_max_tokens(&ag, 0) == cap.context_window / 2);
+      /* A pin BELOW the ceiling is honoured rather than raised. */
+      ag.max_tokens = cap.context_window / 4;
+      assert(agent_request_max_tokens(&ag, 0) == cap.context_window / 4);
    }
 
    /* A model with NO known window anywhere has nothing to clamp against. */
@@ -1759,6 +1768,20 @@ void test_escalation_target_selection(void)
     * under-shoot, and over-selecting beats laddering. */
    agent_t *tgt = agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_UNSET);
    assert(tgt == &cfg.agents[2]);
+
+   /* The DEAREST seat wins even when a cheaper one has a bigger window. This
+    * fixture is the realistic case, not a contrived one: `mid` is sonnet-class
+    * and the catalog gives that family a larger window than the 400000 pinned on
+    * the top seat, so ranking escalation by context window - as this did - sent
+    * the correction to a seat of roughly the class that just failed. A bigger
+    * window does not make a cheaper model better at work it already failed. */
+   {
+      int saved = cfg.agents[1].middleware.context_window;
+      cfg.agents[1].middleware.context_window = 900000; /* out-windows `dear` */
+      assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_UNSET) ==
+             &cfg.agents[2]);
+      cfg.agents[1].middleware.context_window = saved;
+   }
 
    /* Never the same class of seat: a target must be strictly dearer. */
    assert(agent_route_escalation_target(&cfg, "code", 3, 0, AGENT_SCOPE_UNSET) == NULL);
