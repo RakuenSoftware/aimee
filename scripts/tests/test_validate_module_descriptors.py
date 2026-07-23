@@ -260,6 +260,9 @@ class DescriptorTests(unittest.TestCase):
             ("translation", "sources",
              "src/modules/translation/aimee_backend_openai.c"),
             ("translation", "sources", "src/modules/translation/aimee_ir_stream.c"),
+            ("skills", "sources", "src/modules/skills/skill.c"),
+            ("skills", "sources", "src/modules/skills/skill_rollback.c"),
+            ("skills", "sources", "src/modules/skills/skill_review.c"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -278,7 +281,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("roundtable", "protocols", "ir", "translation"):
+        for identifier in ("roundtable", "protocols", "ir", "translation", "skills"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -297,7 +300,7 @@ class DescriptorTests(unittest.TestCase):
                     tmp.cleanup()
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("roundtable", "ir", "translation"):
+        for identifier in ("roundtable", "ir", "translation", "skills"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)

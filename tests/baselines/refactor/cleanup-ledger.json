@@ -418,6 +418,23 @@
       "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains translation source-family, planted-file, and missing-document failures.",
       "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-32.md", "docs/modules/translation.md", "src/modules/translation/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 33,
+      "state": "present_and_verified",
+      "disposition": "Completed the validator-enforced required-core skills module-root ownership domain after proving all three sources have shipping consumers, recording the two canonical public headers and two direct tests, and separating four test-facing public declarations as focused API or activation cleanup candidates.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["Make and CMake retain separate source inventories until descriptor-driven generation", "skill_trigger_matches_content and skill_name_is_valid remain public test contracts despite internal production use", "skill_record_activation and skill_metrics remain unwired telemetry exports pending activation-or-deletion review"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide whether the three sources ship and whether their public surface contains self-tested-only features.",
+        "revisit": "Privatize test-facing helpers where possible and either wire or delete activation telemetry in a focused behavior and compatibility slice."
+      },
+      "consumers": ["skill CLI and server surfaces", "delegates", "session briefing", "guardrails", "protocol adapters", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, stored data, or runtime behavior changes; descriptor validation gains skills-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "The slice decision roundtable approved the bounded ownership-completion plan without findings; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-33.md", "docs/modules/skills.md", "src/modules/skills/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }
