@@ -30,7 +30,7 @@ Control Plane, and over time.
 Today the client does not merely fail to *learn* the feature set — it **contains** it. `commands[]`
 (`src/cmd_table.c:139`) is a compiled table of 84 entries, each binding a CLI verb, its help text,
 and its tier to a `cmd_*` function pointer resident in the client binary. `route_capabilities`
-(`src/server/server_http.c:653`) and the Control Plane equivalent (`src/kb/http/kb_http.c:173`)
+(`src/server/server_http.c:642`) and the Control Plane equivalent (`src/kb/http/kb_http.c:173`)
 answer with a hardcoded string list independent of what is compiled in, selected, enabled, or ready,
 and nothing consumes either. The consequence is the cost this proposal exists to remove: **shipping a
 module means shipping a client**. Every release drags the thin client along, and a deployment cannot
@@ -39,7 +39,7 @@ attached to it.
 
 The one surface that already works correctly shows the shape of the fix. MCP `tools/list` holds no
 local catalog; it forwards `mcp.tools_list` to the Runtime and returns what the Runtime reports
-(`src/cli_mcp_serve.c:308`), and `handle_initialize` advertises `listChanged` precisely because the
+(`src/cli_mcp_serve.c:315`), and `handle_initialize` advertises `listChanged` precisely because the
 presented set is not the client's to know (`src/cli_mcp_serve.c:271`). A new server-side tool appears
 in a stale client with no client change. This proposal generalizes that property to every surface a
 module can offer, and makes it a contract rather than an accident.
@@ -127,7 +127,7 @@ Runtime, a Runtime tracking every client — and to hold credentials for connect
 registration inverts all three: the registrant knows exactly one address, initiates the only
 connection, and authenticates itself under the transport class it already holds. This also matches
 the transport that exists — the thin client's remote path probes and attaches to its Runtime and has
-no Control Plane connection at all (`remote_health_ok`, `src/cli_remote.c:306`) — and it keeps the
+no Control Plane connection at all (`remote_health_ok`, `src/cli_remote.c:307`) — and it keeps the
 Control Plane reachable from a network position clients cannot reach.
 
 ## What is registered
@@ -204,11 +204,19 @@ Incumbent-preserving is a security requirement, not a tie-break preference. With
 claimants on conflict would hand any admitted module a **denial-of-service primitive**: claim the
 verb, tool name, or route of an incumbent it wants silenced, and the incumbent's surface disappears
 even though the attacker's own registration failed. Refusal must never cost the incumbent anything.
-Registration order is therefore load-bearing and must be deterministic for a given profile, so a
-conflict is a stable, reproducible error rather than a race. Replacing an incumbent's key is possible
-only through a separately authorized **transactional replacement** — withdraw-then-claim as one
-atomic operation, permitted only to a principal authorized for the incumbent capability — never as a
-side effect of an ordinary registration.
+Replacing an incumbent's key is possible only through a separately authorized **transactional
+replacement** — withdraw-then-claim as one atomic operation, permitted only to a principal authorized
+for the incumbent capability — never as a side effect of an ordinary registration.
+
+Because "incumbent" is decided by order, the order is specified rather than left to whoever wins a
+race. Uniqueness is enforced by **the authority that holds the merged closure** — the Runtime — since
+it is the only party that sees both services' keys. Admission order is: Control-Plane capabilities
+first, then Runtime-local capabilities, then within each group the descriptor graph's profile order,
+which is already deterministic for a given profile. So when a Runtime module and a Control-Plane
+module claim the same key, the Control-Plane claimant is the incumbent and the Runtime one is
+refused — the same way on every start, on every node, with the same profile. A conflict is a stable,
+reproducible configuration error surfaced at startup, not an intermittent one that depends on which
+service finished attaching first.
 
 Separately, core **reserves** the names of the verbs it owns (the attach/remote, identity/enrollment,
 health, help, and version verbs) plus a reserved prefix; a module descriptor claiming a reserved name
@@ -236,23 +244,18 @@ envelope:
   heartbeat_ms: {type: uint32, required: true}          # required iff mode == notified
   half_open_after_ms: {type: uint32, required: true}    # required iff mode == notified
   reconnect_deadline_ms: {type: uint32, required: true} # required iff mode == notified
-  # Validity relations, enforced by the validator and re-checked by the registrant.
-  # A projection violating any of these is malformed and fails closed:
-  #   half_open_after_ms  >  heartbeat_ms          (detect only after a heartbeat is genuinely late)
-  #   stale_after_ms      >  revalidate_after_ms   (ordinary revalidation keeps a healthy peer live)
-  #   stale_after_ms      >= propagation_bound_ms  (never withdraw faster than change can arrive)
-  # Derived, not transmitted — each hop's contribution to the end-to-end bound:
-  #   bounded-revalidation hop: revalidate_after_ms
-  #   notified hop (healthy):   heartbeat_ms
-  #   notified hop (failed):    half_open_after_ms + reconnect_deadline_ms + revalidate_after_ms
-  # The failure path includes the post-fallback revalidation delay: detecting a dead
-  # stream and giving up on reconnect does not itself deliver the change.
+  round_trip_budget_ms: {type: uint32, required: true}  # p99 allowance for one conditional exchange
+  hop_bound_ms: {type: uint32, required: true}          # THIS hop's worst-case contribution
+  propagation_bound_ms: {type: uint32, required: true}  # end-to-end: this hop + all upstream hops
 capability:
   id: {type: capability_id, required: true}
   kind: {enum: [required, optional], required: true}
   state: {enum: [absent, selected, disabled, starting, ready, degraded,
                  unavailable, stopping, failed], required: true}
   unavailable_reason: {enum: [dependency, stale, schema_too_old, policy], required: false}
+  # Legal only when state is one of {unavailable, degraded, failed}; the validator rejects
+  # a reason on any other state (e.g. `ready` + `dependency`) as a contradictory record.
+  # `degraded` carries `dependency` only when a soft dependency is unready.
   # `provenance` is deliberately NOT a field of the client-visible projection.
   # It exists only in an authority's internal merged closure and on the
   # Runtime↔Control-Plane edge. See "Topology is not projected downward".
@@ -302,6 +305,29 @@ route:
   path: {type: normalized_path, required: true}
 web:
   surface: {type: web_surface_enum, required: true}   # closed enum owned by the product boundary
+bounds:
+  # hop_bound_ms is COMPUTED by the authority, not configured independently, and the
+  # validator recomputes it. Every term includes the round trip that actually delivers
+  # the change: an interval elapsing is not a delivery.
+  #   bounded-revalidation hop: revalidate_after_ms + round_trip_budget_ms
+  #   notified hop (healthy):   heartbeat_ms + round_trip_budget_ms
+  #   notified hop (failed):    half_open_after_ms + reconnect_deadline_ms
+  #                             + revalidate_after_ms + round_trip_budget_ms
+  #   hop_bound_ms := max(healthy, failed)   -- the worst case, since a stream may be dead
+  #
+  # propagation_bound_ms is the sum ALONG THE ACTUAL CHAIN, not a single constant:
+  #   propagation_bound_ms := hop_bound_ms + upstream.propagation_bound_ms
+  # An authority with no upstream (a Control Plane) reports propagation_bound_ms == hop_bound_ms.
+  # A Runtime adds its own hop to the value its Control Plane advertised, so the client's
+  # figure is the true module→consumer worst case over the topology in force.
+  #
+  # Validity relations, enforced by the validator and re-checked by the registrant.
+  # A projection violating any of these is malformed and fails closed:
+  #   half_open_after_ms > heartbeat_ms        (detect only after a heartbeat is genuinely late)
+  #   stale_after_ms     > revalidate_after_ms (ordinary revalidation keeps a healthy peer live)
+  #   stale_after_ms     >= propagation_bound_ms (never withdraw faster than change can arrive)
+  #   hop_bound_ms       == the computation above (recomputed, not trusted)
+  #   propagation_bound_ms >= hop_bound_ms
 limits:
   name_token: {charset: "[a-z0-9][a-z0-9-]*", max_bytes: 64, nfc: true}
   bounded_string: {max_bytes: 4096, nfc: true, control_chars: forbidden}
@@ -312,6 +338,11 @@ limits:
   max_surfaces_per_capability: 16
   max_capabilities_per_projection: 4096
   max_projection_bytes: 4194304
+  # advisory_ext is module-controlled, so it is bounded per capability AND in aggregate.
+  # The per-entry and per-map caps alone bound one record; without an authority-wide cap a
+  # module could register many capabilities each at the maximum and amplify server memory.
+  max_advisory_bytes_per_capability: 4096
+  max_advisory_bytes_per_authority: 16777216
 ```
 
 Two consequences worth stating, because they are the reason the checks are decidable:
@@ -454,6 +485,17 @@ locally against it, and forwards the invocation to the Runtime over the existing
 already does. Failure to satisfy the declared schema is a client-side typed error naming the offending
 argument; the client does not guess, coerce, or forward an invocation it cannot validate.
 
+**A capability record is rendered even when it carries no surfaces.** The effective set is enumerated
+from **capability records**, not from surfaces. This distinction is load-bearing: a capability that is
+`unavailable` — because a hard dependency is not ready, because its projection is stale, or because it
+requires a schema the client cannot express — has its surfaces omitted, so a dispatcher that built its
+view by walking surfaces would render *nothing* and the capability would vanish silently. That would
+contradict the guarantee that the user is told which capabilities were lost and why. So whenever a
+record is present in the projection, the consumer is shown its `id`, `state`, and
+`unavailable_reason`, with its surfaces absent and un-invocable. "Not offered" and "not mentioned" are
+different outcomes: a capability outside the projection entirely is absent (see *Absent means
+absent*), while a capability inside it that cannot currently be used is **visibly** unusable.
+
 **Local execution is out of scope.** Some surfaces genuinely need the client's own machine — the
 filesystem, the TTY, an editor integration. This proposal does **not** define a client-side native
 handler mechanism for them; those surfaces remain core-owned client verbs. Introducing module-supplied
@@ -465,13 +507,13 @@ execution; the descriptor validator rejects it.
 
 The Runtime and the Control Plane each serve the projection over their existing `/v1` surface,
 mirroring the fail-closed **readiness provider** pattern already in place
-(`server_http_set_ready_provider`, `src/server/server_http.c:667`; `/v1/ready`) rather than the static
+(`server_http_set_ready_provider`, `src/server/server_http.c:669`; `/v1/ready`) rather than the static
 string list. A registered provider samples the live closure **off** the request path; with no provider
 registered the surface fails closed exactly as `/v1/ready` does today, advertising nothing rather than
 advertising a stale list.
 
 - **On registration.** The thin client already probes `GET /v1/health` and pins the Runtime cert when
-  it attaches (`src/cli_remote.c:304`, `remote_pin_cert`/`remote_set`). Registration extends that
+  it attaches (`src/cli_remote.c:321`, `remote_pin_cert`/`remote_set`). Registration extends that
   attach: the client presents its capability declaration and records the returned projection with its
   `epoch`/`generation`. The Runtime registers with the Control Plane the same way at its own startup
   and on reconnect.
@@ -488,12 +530,25 @@ advertising a stale list.
     re-establish the stream within the reconnect deadline reverts to bounded revalidation rather than
     waiting on a stream that may never speak again.
 
-    A notified hop contributes `heartbeat_ms` on the healthy path and
-    `half_open_after_ms + reconnect_deadline_ms + revalidate_after_ms` on the failure path. The final
-    term is not optional bookkeeping: detecting a dead stream and abandoning reconnection does not by
-    itself deliver the change — the first post-fallback revalidation does. Omitting it would let a
-    conformance test certify a bound the specified behavior cannot meet. A silently broken stream
-    therefore degrades to the revalidation bound; it never degrades to never.
+  **Only semantic changes advance a generation.** Advancing on *any* descriptor edit would make a
+  reworded help string wake every attached client and cascade a refetch down the whole chain — a
+  notification storm for a change that alters nothing a client can act on. So the fields split:
+  changes to `verb_path`, `aliases`, arg `name`/`form`/`type`/`enum_values`/`repeated`/`required`,
+  `tier`, `hidden`, `tool.name`, `route.method`/`path`, `web.surface`, any capability `state`, or any
+  dependency list are **semantic** and advance the generation. Changes confined to `help`,
+  `long_help`, `description`, or `advisory_ext` are **cosmetic**: they are carried in the next
+  projection a registrant fetches for any other reason, and never trigger one on their own.
+
+    A notified hop contributes `heartbeat_ms + round_trip_budget_ms` on the healthy path and
+    `half_open_after_ms + reconnect_deadline_ms + revalidate_after_ms + round_trip_budget_ms` on the
+    failure path, and its advertised `hop_bound_ms` is the **worse** of the two, since a registrant
+    cannot know in advance whether its stream is alive. Two terms here are easy to drop and both are
+    load-bearing: the post-fallback revalidation, because detecting a dead stream and abandoning
+    reconnection does not by itself deliver the change; and the round trip, because an interval
+    elapsing is not a delivery either — the conditional exchange still has to complete. Omitting
+    either would let a conformance test certify a bound the specified behavior cannot meet on any
+    real network. A silently broken stream therefore degrades to the revalidation bound; it never
+    degrades to never.
   - **Bounded revalidation.** Where no stream can be held, the registrant revalidates conditionally
     on a **bounded interval** the authority states in the projection (a cheap generation-only
     request that returns not-modified in the common case).
@@ -552,6 +607,13 @@ Runtime↔Control-Plane edge and in operator-facing surfaces, which are not this
 Generalized: a registrant is told what it may *use*, never what its authority is *made of*. Any
 future field naming another service, its address, its health, or a capability's origin belongs on the
 upstream edge, not in the downward projection.
+
+**Single-Runtime scope.** This holds for the three-edge chain defined here, in which each registrant
+has exactly one authority. It is *not* established for a topology where Runtimes exchange
+projections with each other — in a mesh or federation, provenance would travel sideways and a peer
+would learn another peer's composition. Peer-Runtime and multi-Runtime topologies are out of scope
+and require their own proposal with their own disclosure analysis; nothing here should be read as
+having cleared them.
 
 ## Merge and re-advertisement
 
@@ -716,18 +778,18 @@ The non-obvious ones, made concrete:
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "scripts/check_capability_advertisement.sh --projection-only --equals-module-runtime-closure --forbid-static-capability-list src/server/server_http.c,src/kb/http/kb_http.c --require-generation-epoch-schema-version --require-typed-state --omitted-optional-absent --disabled-only-for-selected"}
 - {id: 2, tier: mechanical, check: "scripts/check_capability_advertisement.sh --authorization-scoped --require-transport-class-scoping bearer,cert-cn --scope-surfaces-with-capability --forbid-unauthorized-capability-leak --no-second-authorization-model"}
-- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --conform-to-normative-wire-schema-v1 --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --arg-types-from-closed-scalar-set --forbid-general-json-schema-dialect --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
+- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --conform-to-normative-wire-schema-v1 --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --arg-types-from-closed-scalar-set --forbid-general-json-schema-dialect --assert-state-reason-validity-relation --reject-reason-on-ready-state --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
 - {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --client-binary-hash-identical-when-module-added"}
-- {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --capture-from-before-start-to-after-exit --assert-no-client-to-control-packet-observed --scan-config-env-argv-for-control-address-and-credential plaintext,percent,base64 --measure-propagation-latency-vs-sum-of-hop-bounds --assert-addition-discovered-within-bound --both-modes notified,bounded-revalidation --healthy-notified-hop-bound-equals-heartbeat --failed-notified-hop-bound-equals-halfopen-plus-reconnect-plus-revalidate --assert-failure-path-includes-post-fallback-revalidation --drop-stream-falls-back-to-revalidation --half-open-stream-detected-within-deadline"}
+- {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --capture-from-before-start-to-after-exit --assert-no-client-to-control-packet-observed --scan-config-env-argv-for-control-address-and-credential plaintext,percent,base64 --measure-propagation-latency-vs-sum-of-hop-bounds --assert-addition-discovered-within-bound --both-modes notified,bounded-revalidation --healthy-notified-hop-bound-equals-heartbeat-plus-roundtrip --failed-notified-hop-bound-equals-halfopen-plus-reconnect-plus-revalidate-plus-roundtrip --hop-bound-is-worse-of-healthy-and-failed --assert-failure-path-includes-post-fallback-revalidation --assert-bound-includes-round-trip --measure-against-same-bound-validator-enforces --cosmetic-help-edit-does-not-advance-generation --semantic-edit-does-advance-generation --drop-stream-falls-back-to-revalidation --half-open-stream-detected-within-deadline"}
 - {id: 6, tier: integration, check: "scripts/test_capability_advertisement.sh --on-registration-snapshot --generation-advances-on-closure-state-and-surface-change --epoch-change-forces-refetch --stale-window-exceeds-revalidation-interval --stale-window-fails-closed --control-outage-withdraws-only-control-provenance-and-hard-dependents --assert-independent-runtime-local-capabilities-remain-available --soft-dependent-degrades-with-fallback-not-unavailable --assert-outage-surfaces-to-client-as-dependency-reason --registration-refused-when-neither-mode-available"}
 - {id: 7, tier: integration, check: "scripts/test_capability_advertisement.sh --merge-at-runtime --hard-dependency-not-ready-suppresses-dependent --soft-dependency-not-ready-degrades-with-declared-fallback --soft-dependency-never-suppresses --cross-service-both-directions --shared-id-takes-weaker-state --conflicting-shared-descriptor-fails-closed --effective-set-equals-ready-closure-under-hard-deps"}
-- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-addition-invisible --critical-addition-yields-unavailable-reason schema_too_old --per-capability-not-per-connection-refusal --other-capabilities-unaffected --assert-authority-rejects-invocation-of-schema-too-old-capability --older-representation-derived-not-hand-maintained --unknown-surface-kind-dropped --unknown-state-fails-closed --unmarked-field-defaults-critical --removed-or-critical-change-bumps-schema-version --below-minimum-version-refuses-registration-with-typed-error"}
+- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-ext-addition-invisible-to-old-client --new-defined-field-yields-unavailable-reason schema_too_old --unknown-key-at-defined-position-yields-schema-too-old --advisory-ext-is-only-unknown-key-position --assert-unavailable-record-with-empty-surfaces-still-enumerated-to-consumer --assert-id-state-and-reason-shown-to-user --per-capability-not-per-connection-refusal --other-capabilities-unaffected --assert-authority-rejects-invocation-of-schema-too-old-capability --older-representation-derived-not-hand-maintained --unknown-surface-kind-dropped --unknown-state-fails-closed --defined-field-addition-bumps-schema-version --below-minimum-version-refuses-registration-with-typed-error"}
 - {id: 9, tier: integration, check: "scripts/test_capability_advertisement.sh --consumer mcp --consumer acp --consumer cli --re-advertise-effective-set --generic-dispatch-from-descriptor --invalid-args-typed-error-not-forwarded --emit-change-on-effective-set-change --absent-capability-returns-typed-capability-absent --disabled-and-unknown-externally-identical"}
 - {id: 10, tier: integration, check: "scripts/test_advertisement_noninterference.sh --two-principals-differing-scope --change-outside-scope-b --assert-no-generation-advance-for-b --assert-no-event-for-b --assert-byte-identical-projection-for-b --assert-scope-filter-precedes-per-capability-work --per-scope-generation-derived-from-projection-content --no-wallclock-timing-assertion"}
-- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --duplicate-claim-rejects-later-registration-atomically --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
-- {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-nfc --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --enforce-schema-v1-numeric-limits name_token,bounded_string,capability_id,normalized_path,max_args_per_surface,max_surfaces_per_capability,max_capabilities_per_projection,max_projection_bytes --linearity-by-closed-scalar-arg-model --enforced-at-validator-and-client"}
+- {id: 11, tier: integration, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --uniqueness-enforced-at-merged-closure-holder --admission-order control-plane-then-runtime-then-profile-order --colliding-keys-across-services-fixture --same-incumbent-on-every-start --duplicate-claim-rejects-later-registration-atomically --assert-incumbent-surface-still-advertised-after-conflict --assert-conflict-cannot-withdraw-incumbent --deterministic-registration-order --replacement-only-via-authorized-transactional-op --audit-record-emitted"}
+- {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-nfc --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --enforce-schema-v1-numeric-limits name_token,bounded_string,capability_id,normalized_path,max_args_per_surface,max_surfaces_per_capability,max_capabilities_per_projection,max_projection_bytes,max_advisory_bytes_per_capability,max_advisory_bytes_per_authority --assert-per-authority-advisory-aggregate-bound --linearity-by-closed-scalar-arg-model --enforced-at-validator-and-client"}
 - {id: 13, tier: mechanical, check: "scripts/check_projection_topology_nondisclosure.sh --client-visible-schema-has-no-provenance-field --client-visible-reason-enum dependency,stale,schema_too_old,policy --forbid-upstream-reason-codes-downward --forbid-service-name-address-or-health-field --assert-upstream-outage-projects-as-dependency --diff-client-projection-vs-internal-closure"}
-- {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --assert-stale-at-least-propagation-bound --reject-malformed-envelope-fail-closed"}
+- {id: 14, tier: mechanical, check: "scripts/check_envelope_deadlines.sh --require-heartbeat-halfopen-reconnect-roundtrip-when-notified --assert-half-open-greater-than-heartbeat --assert-stale-greater-than-revalidate --recompute-hop-bound-and-reject-mismatch --assert-propagation-bound-equals-hop-plus-upstream-over-actual-topology --assert-stale-at-least-propagation-bound --control-plane-propagation-bound-equals-its-hop-bound --reject-malformed-envelope-fail-closed"}
 ```
 
 ## Review status
@@ -757,6 +819,25 @@ have suppressed capabilities whose *soft* dependency was unready (contradicting 
 change notification optional on network edges, used an authority-wide generation that leaked
 cross-scope activity, treated every additive descriptor field as compatible, and asserted a
 client-local-execution ban with no decidable property behind it.
+
+*Revision 4 → 5* (roundtable run `…_1784825942_51`, 3 blocking + 6 suggestions + 2 nits): an
+`unavailable` capability has its surfaces omitted, and a dispatcher enumerating *surfaces* would have
+rendered nothing at all — silently losing the capability the client was supposed to be told about;
+the effective set is now enumerated from capability records, so an unusable capability is visibly
+unusable rather than absent. The validity relations referenced a `propagation_bound_ms` that was
+never a field, so the relation could not be enforced; it and `hop_bound_ms` are now stated envelope
+fields the validator recomputes, summed along the actual chain rather than read from one constant.
+The hop bounds counted only intervals, not the round trip that delivers the change, so a conformance
+test could certify a bound no real network meets; `round_trip_budget_ms` is now a term in every hop
+bound and the hop advertises the worse of its healthy and failed paths. Adopted with them: generation
+advances only on *semantic* descriptor changes, so a reworded help string no longer storms every
+client; canonical-key admission order is specified (Control-Plane, then Runtime, then profile order)
+so "incumbent" is not decided by a race; `advisory_ext` gains a per-authority aggregate bound against
+server-side amplification; `unavailable_reason` gains a state-validity relation; and multi-Runtime
+topologies are explicitly out of scope, since provenance would travel sideways in a mesh. Cited line
+numbers were re-verified against the branch and four were wrong (`server_http.c` 653→642, 667→669;
+`cli_mcp_serve.c` 308→315; `cli_remote.c` 306→307, 304→321) — note the review's own proposed
+replacement for the first was also wrong, so each was checked against the symbol rather than adopted.
 
 *Revision 3 → 4* (roundtable run `…_1784823160_37`, 4 blocking): revision 3's own outage fix
 introduced a `provenance` field into the **client-visible** projection, disclosing both that a
