@@ -64,6 +64,24 @@ type passVerifier struct{}
 
 func (passVerifier) Verify(context.Context, string) error { return nil }
 
+type transientGateRunner struct {
+	mu       sync.Mutex
+	next     Runner
+	failures []string
+}
+
+func (r *transientGateRunner) Run(ctx context.Context, request StepRequest) (StepResult, error) {
+	r.mu.Lock()
+	if request.Node.ID == "plan_gate" && len(r.failures) > 0 {
+		reason := r.failures[0]
+		r.failures = r.failures[1:]
+		r.mu.Unlock()
+		return StepResult{Status: StepPending, PauseReason: reason, Detail: "injected transient " + reason}, nil
+	}
+	r.mu.Unlock()
+	return r.next.Run(ctx, request)
+}
+
 type e2eForge struct{}
 
 func (e2eForge) Push(ctx context.Context, _, workdir, branch string) error {
@@ -251,13 +269,18 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, err := New(store, artifacts, workflowDir, runner)
+	recoveringRunner := &transientGateRunner{next: runner, failures: []string{"roundtable_discussion", "roundtable_chairman"}}
+	eng, err := New(store, artifacts, workflowDir, recoveringRunner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scheduler := NewScheduler(store, eng, 2, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	scheduler.pollEvery = 20 * time.Millisecond
+	scheduler.transientPauses = []transientPause{
+		{reason: "roundtable_discussion", backoff: 100 * time.Millisecond},
+		{reason: "roundtable_chairman", backoff: 100 * time.Millisecond},
+	}
 	done := make(chan struct{})
 	go func() { scheduler.Run(ctx); close(done) }()
 	shutdown := func() { cancel(); <-done }
@@ -274,6 +297,27 @@ nodes:
 		if item.State == "accepted" {
 			if item.PRRef == "" {
 				t.Fatal("final PR ref was not persisted")
+			}
+			recoveringRunner.mu.Lock()
+			remainingFailures := len(recoveringRunner.failures)
+			recoveringRunner.mu.Unlock()
+			if remainingFailures != 0 {
+				t.Fatalf("%d transient roundtable failures were not exercised", remainingFailures)
+			}
+			events, err := store.Events(context.Background(), rootID, 0, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := map[string]bool{}
+			for _, event := range events {
+				if event.Kind == "pause" {
+					seen[event.Detail] = true
+				}
+			}
+			for _, reason := range []string{"roundtable_discussion: injected transient roundtable_discussion", "roundtable_chairman: injected transient roundtable_chairman"} {
+				if !seen[reason] {
+					t.Fatalf("missing transient recovery event %q: %+v", reason, events)
+				}
 			}
 			shutdown = func() {}
 			cancel()

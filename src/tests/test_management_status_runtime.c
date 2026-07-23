@@ -11,6 +11,7 @@ enum
    MODE_PRE_ROLE,
    MODE_POST_ROLE,
    MODE_LOOKUP,
+   MODE_CHECKPOINT,
    MODE_STARTUP,
 };
 
@@ -25,6 +26,7 @@ static int g_closed, g_in_tx, g_rollbacks, g_commits, g_set_role;
 static int g_search_path, g_row_security, g_guc_failure;
 static int g_pre_ok = 1, g_post_ok = 1, g_lookup_denied, g_lookup_error, g_lookup_extra;
 static int g_lookup_policy_denied;
+static int g_lookup_conflict;
 static int g_lookup_malformed, g_startup_malformed;
 static unsigned g_bind_mask;
 
@@ -92,11 +94,12 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *connection, const char *sql, char *error
    (void)error;
    (void)error_len;
    assert(connection == &g_stmt);
-   g_stmt.mode = strstr(sql, "pre_role_ok")      ? MODE_PRE_ROLE
-                 : strstr(sql, "post_role_ok")   ? MODE_POST_ROLE
-                 : strstr(sql, "status_lookup")  ? MODE_LOOKUP
-                 : strstr(sql, "startup_status") ? MODE_STARTUP
-                                                 : MODE_NONE;
+   g_stmt.mode = strstr(sql, "pre_role_ok")         ? MODE_PRE_ROLE
+                 : strstr(sql, "post_role_ok")      ? MODE_POST_ROLE
+                 : strstr(sql, "status_lookup")     ? MODE_LOOKUP
+                 : strstr(sql, "action_checkpoint") ? MODE_CHECKPOINT
+                 : strstr(sql, "startup_status")    ? MODE_STARTUP
+                                                    : MODE_NONE;
    assert(g_stmt.mode != MODE_NONE);
    if (g_stmt.mode == MODE_PRE_ROLE || g_stmt.mode == MODE_POST_ROLE)
    {
@@ -107,6 +110,8 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *connection, const char *sql, char *error
    }
    else if (g_stmt.mode == MODE_LOOKUP)
       assert(strstr(sql, "public.kb_management_status_lookup"));
+   else if (g_stmt.mode == MODE_CHECKPOINT)
+      assert(strstr(sql, "public.kb_management_action_checkpoint"));
    else if (g_stmt.mode == MODE_STARTUP)
       assert(strstr(sql, "public.kb_management_status_key_startup_status"));
    g_stmt.step = 0;
@@ -124,9 +129,9 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *error, size_t error_l
    (void)error;
    (void)error_len;
    assert(stmt == &g_stmt);
-   if (stmt->mode == MODE_LOOKUP && g_lookup_error)
+   if ((stmt->mode == MODE_LOOKUP || stmt->mode == MODE_CHECKPOINT) && g_lookup_error)
       return AIMEE_PG_ERR;
-   if (stmt->mode == MODE_LOOKUP && g_lookup_denied)
+   if ((stmt->mode == MODE_LOOKUP || stmt->mode == MODE_CHECKPOINT) && g_lookup_denied)
       return AIMEE_PG_DONE;
    if (stmt->step++ == 0)
       return AIMEE_PG_ROW;
@@ -138,15 +143,25 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *error, size_t error_l
 const char *aimee_pg_sqlstate(const aimee_pg_stmt_t *stmt)
 {
    assert(stmt == &g_stmt);
-   return g_lookup_policy_denied ? "28000" : (g_lookup_error ? "08006" : "");
+   return g_lookup_policy_denied ? "28000"
+                                 : (g_lookup_conflict ? "23505" : (g_lookup_error ? "08006" : ""));
 }
 
 int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *key, const char *value)
 {
-   assert(stmt == &g_stmt && stmt->mode == MODE_LOOKUP && key && value);
+   assert(stmt == &g_stmt && (stmt->mode == MODE_LOOKUP || stmt->mode == MODE_CHECKPOINT) && key &&
+          value);
    int number = key[1] - '0';
-   assert(key[0] == '?' && number >= 1 && number <= 5 && key[2] == '\0');
+   assert(key[0] == '?' && number >= 1 && number <= (stmt->mode == MODE_LOOKUP ? 5 : 7) &&
+          key[2] == '\0');
    g_bind_mask |= 1u << (unsigned)(number - 1);
+   return 0;
+}
+
+int aimee_pg_bind_int64(aimee_pg_stmt_t *stmt, const char *key, int64_t value)
+{
+   assert(stmt == &g_stmt && stmt->mode == MODE_CHECKPOINT && !strcmp(key, "?8") && value == 9);
+   g_bind_mask |= 1u << 7;
    return 0;
 }
 
@@ -170,6 +185,8 @@ const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int column)
       return g_post_ok ? "t" : "f";
    if (stmt->mode == MODE_LOOKUP)
       return column == 1 ? (g_lookup_malformed ? "BAD" : fp) : "";
+   if (stmt->mode == MODE_CHECKPOINT)
+      return column == 0 ? "t" : "";
    if (stmt->mode == MODE_STARTUP)
    {
       if (column == 1)
@@ -189,6 +206,8 @@ int64_t aimee_pg_column_int64(aimee_pg_stmt_t *stmt, int column)
    assert(stmt == &g_stmt);
    if (stmt->mode == MODE_LOOKUP)
       return g_lookup_malformed ? 0 : 9;
+   if (stmt->mode == MODE_CHECKPOINT)
+      return column == 1 ? 12 : 0;
    assert(stmt->mode == MODE_STARTUP);
    return column == 0 ? 7 : 2;
 }
@@ -264,6 +283,9 @@ int main(void)
               &runtime, "issuer", "01", caller_fp, "server-1", "management.health.v1", &generation,
               target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
    assert(g_bind_mask == 0x1fu && generation == 9 && strlen(target_fp) == 64);
+   assert(db2_management_status_runtime_lookup(
+              &runtime, "issuer", "01", caller_fp, "server-1", "management.action.v1", &generation,
+              target_fp, sizeof(target_fp)) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
 
    g_lookup_denied = 1;
    assert(db2_management_status_runtime_lookup(
@@ -297,6 +319,27 @@ int main(void)
    assert(db2_management_status_runtime_lookup(&runtime, "issuer", "01", "bad", "server-1",
                                                "management.health.v1", &generation, target_fp,
                                                sizeof(target_fp)) < 0);
+
+   int revoked = 0;
+   assert(db2_management_status_runtime_action_checkpoint(
+              &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
+              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_OK);
+   assert(g_bind_mask == 0xffu && revoked == 1 && generation == 12);
+   g_lookup_policy_denied = 1;
+   g_lookup_error = 1;
+   assert(db2_management_status_runtime_action_checkpoint(
+              &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
+              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_DENIED);
+   assert(!revoked && !generation);
+   g_lookup_policy_denied = 0;
+   g_lookup_error = 0;
+   g_lookup_conflict = 1;
+   g_lookup_error = 1;
+   assert(db2_management_status_runtime_action_checkpoint(
+              &runtime, "server-issuer", "02", caller_fp, "server-1", "caller-issuer", "01",
+              caller_fp, 9, &revoked, &generation) == DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT);
+   g_lookup_conflict = 0;
+   g_lookup_error = 0;
 
    db2_management_status_runtime_startup_t startup;
    assert(db2_management_status_runtime_startup_begin(&runtime, &startup) == 0);

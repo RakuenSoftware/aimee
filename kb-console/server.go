@@ -15,14 +15,16 @@ import (
 const sessionCookie = "kbc_session"
 
 type server struct {
-	cfg      *config
-	auth     *authenticator
-	sessions *sessionStore
-	kbBearer string
-	kbClient *http.Client
-	spa      []byte // cached SPA bytes (read once at startup)
-	spaCSP   string // CSP for the SPA route, with inline-content hashes
-	logins   *rateLimiter
+	cfg              *config
+	auth             *authenticator
+	sessions         *sessionStore
+	kbBearer         string
+	kbClient         *http.Client
+	oidcTokens       *credentialVault
+	fleetOIDCEnabled bool
+	spa              []byte // cached SPA bytes (read once at startup)
+	spaCSP           string // CSP for the SPA route, with inline-content hashes
+	logins           *rateLimiter
 }
 
 var (
@@ -89,6 +91,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/session", s.handleSession)
+	mux.HandleFunc("/api/fleet/ack", s.handleFleetAck)
 	mux.HandleFunc("/api/", s.handleAPI)
 	mux.HandleFunc("/", s.handleSPA)
 	return s.securityHeaders(mux)
@@ -116,6 +119,18 @@ func (s *server) requireSession(r *http.Request) (*session, error) {
 		return nil, err
 	}
 	return s.sessions.get(c.Value)
+}
+
+func (s *server) retainOIDCCredential(sess *session, p *principal, raw string) error {
+	if s.oidcTokens == nil {
+		s.sessions.del(sess.id)
+		return errors.New("OIDC credential vault unavailable")
+	}
+	if err := s.oidcTokens.put(sess.id, sess.iss, sess.sub, p.expires, raw); err != nil {
+		s.sessions.del(sess.id)
+		return err
+	}
+	return nil
 }
 
 // handleLogin accepts an OIDC id_token (primary) or, when the presence-flag is
@@ -175,6 +190,14 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session create failed"})
 		return
 	}
+	if !breakGlass {
+		if s.retainOIDCCredential(sess, p, req.IDToken) != nil {
+			req.IDToken = ""
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "OIDC session capacity unavailable"})
+			return
+		}
+		req.IDToken = ""
+	}
 	s.logins.reset(ipKey)
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: sess.id, Path: "/",
@@ -185,7 +208,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		action = "break_glass_login"
 	}
 	recordAudit(auditEvent{Actor: p.sub, Iss: p.iss, Action: action, SourceIP: clientIP(r)})
-	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": breakGlass})
+	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": breakGlass, "fleet_indeterminate": false})
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +227,40 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": sess.breakGlass})
+	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": sess.breakGlass,
+		"fleet_indeterminate": sess.fleetIndeterminate})
+}
+
+func (s *server) handleFleetAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	sess, err := s.requireSession(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if tok := r.Header.Get("X-CSRF-Token"); tok == "" || !constEq(tok, sess.csrf) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "csrf token mismatch"})
+		return
+	}
+	ackToken := r.Header.Get("X-Aimee-Fleet-Ack")
+	if ackToken == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "fleet acknowledgement token required"})
+		return
+	}
+	acknowledged, err := s.sessions.acknowledgeFleetMutation(sess.id, ackToken)
+	if err != nil {
+		s.sessions.del(sess.id)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet acknowledgement unavailable; sign in again"})
+		return
+	}
+	if !acknowledged {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no matching fleet result awaiting acknowledgement"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
 }
 
 func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {

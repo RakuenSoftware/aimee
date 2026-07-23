@@ -1889,7 +1889,15 @@ int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *
 
    char lease_owner[32];
    snprintf(lease_owner, sizeof(lease_owner), "%d", (int)getpid());
-   int job_id = db1_agent_job_create(role, prompt, "", lease_owner);
+   /* A positive `via` pin is already an assignment, even if execution must wait
+    * for provider capacity. Persist it at creation so the Go control plane's
+    * unassigned-job lease cannot cancel a correctly seated roundtable member
+    * merely because its worker has not started yet. Generic routing remains
+    * empty until the worker actually selects an eligible agent. */
+   cJSON *jvia = cJSON_GetObjectItemCaseSensitive(req, "via");
+   const char *initial_agent =
+       cJSON_IsString(jvia) && jvia->valuestring[0] ? jvia->valuestring : "";
+   int job_id = db1_agent_job_create(role, prompt, initial_agent, lease_owner);
    if (job_id <= 0)
    {
       compute_ctx_free(cctx);

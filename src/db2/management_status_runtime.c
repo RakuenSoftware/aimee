@@ -199,7 +199,9 @@ int db2_management_status_runtime_lookup(db2_management_status_runtime_t *runtim
    if (!runtime || !runtime->connection || runtime->transaction_active ||
        aimee_pg_in_transaction(runtime->connection) || !printable(issuer, 1, 600) ||
        !lower_hex(serial_norm, 1, 128) || !lower_hex(fingerprint, 64, 64) ||
-       !token(target, 1, 127) || !purpose || strcmp(purpose, "management.health.v1") != 0 ||
+       !token(target, 1, 127) || !purpose ||
+       (strcmp(purpose, "management.health.v1") != 0 &&
+        strcmp(purpose, "management.action.v1") != 0) ||
        !generation || !target_fingerprint || target_fingerprint_len < 65)
       return DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
 
@@ -251,6 +253,73 @@ int db2_management_status_runtime_lookup(db2_management_status_runtime_t *runtim
    {
       *generation = 0;
       target_fingerprint[0] = '\0';
+   }
+   return rc;
+}
+
+int db2_management_status_runtime_action_checkpoint(
+    db2_management_status_runtime_t *runtime, const char *peer_issuer, const char *peer_serial,
+    const char *peer_fingerprint, const char *target, const char *caller_issuer,
+    const char *caller_serial, const char *caller_fingerprint, int64_t staple_generation,
+    int *revoked, int64_t *generation)
+{
+   if (revoked)
+      *revoked = 0;
+   if (generation)
+      *generation = 0;
+   if (!runtime || !runtime->connection || runtime->transaction_active ||
+       aimee_pg_in_transaction(runtime->connection) || !printable(peer_issuer, 1, 600) ||
+       !lower_hex(peer_serial, 1, 128) || !lower_hex(peer_fingerprint, 64, 64) ||
+       !token(target, 1, 127) || !printable(caller_issuer, 1, 600) ||
+       !lower_hex(caller_serial, 1, 128) || !lower_hex(caller_fingerprint, 64, 64) ||
+       staple_generation < 1 || !revoked || !generation)
+      return DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
+   char error[256] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(runtime->connection,
+                        "SELECT revoked,generation FROM public.kb_management_action_checkpoint("
+                        "?1,?2,?3,?4,?5,?6,?7,?8)",
+                        error, sizeof(error));
+   if (!stmt)
+      return DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
+   if (aimee_pg_bind_text(stmt, "?1", peer_issuer) || aimee_pg_bind_text(stmt, "?2", peer_serial) ||
+       aimee_pg_bind_text(stmt, "?3", peer_fingerprint) || aimee_pg_bind_text(stmt, "?4", target) ||
+       aimee_pg_bind_text(stmt, "?5", caller_issuer) ||
+       aimee_pg_bind_text(stmt, "?6", caller_serial) ||
+       aimee_pg_bind_text(stmt, "?7", caller_fingerprint) ||
+       aimee_pg_bind_int64(stmt, "?8", staple_generation))
+   {
+      aimee_pg_finalize(stmt);
+      return DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
+   }
+   aimee_pg_step_t first = aimee_pg_step(stmt, error, sizeof(error));
+   const char *state = first == AIMEE_PG_ERR ? aimee_pg_sqlstate(stmt) : NULL;
+   int rc = DB2_MANAGEMENT_STATUS_RUNTIME_ERROR;
+   if (first == AIMEE_PG_ERR && state && !strcmp(state, "28000"))
+      rc = DB2_MANAGEMENT_STATUS_RUNTIME_DENIED;
+   else if (first == AIMEE_PG_ERR && state && !strcmp(state, "23505"))
+      rc = DB2_MANAGEMENT_STATUS_RUNTIME_CONFLICT;
+   else if (first == AIMEE_PG_ROW)
+   {
+      int found_revoked = 0;
+      int64_t found_generation = aimee_pg_column_int64(stmt, 1);
+      if (bool_text(aimee_pg_column_text(stmt, 0), &found_revoked) || found_generation < 1 ||
+          aimee_pg_step(stmt, error, sizeof(error)) != AIMEE_PG_DONE)
+         rc = DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY;
+      else
+      {
+         *revoked = found_revoked;
+         *generation = found_generation;
+         rc = DB2_MANAGEMENT_STATUS_RUNTIME_OK;
+      }
+   }
+   else if (first == AIMEE_PG_DONE)
+      rc = DB2_MANAGEMENT_STATUS_RUNTIME_INTEGRITY;
+   aimee_pg_finalize(stmt);
+   if (rc != DB2_MANAGEMENT_STATUS_RUNTIME_OK)
+   {
+      *revoked = 0;
+      *generation = 0;
    }
    return rc;
 }

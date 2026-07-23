@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 80
+Total endpoints: 82
 
 ## Endpoints
 
@@ -997,6 +997,48 @@ Responses:
 - `200` — Search results
 - `400` — Bad request (missing query)
 - `401` — Unauthorized
+
+### `GET /v1/servers`
+
+List registered servers for one team
+
+Returns the primary-backed, tenant-scoped server registry view.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Bounded server registry list
+- `400` — Invalid or missing team
+- `401` — Authentication required
+- `403` — Actor is not authorized for the requested team
+- `503` — Registry unavailable
+
+### `POST /v1/servers/{server_id}/actions`
+
+Enable or disable one agent on one registered server
+
+Executes one identity-propagating, journaled management action. The server's remote_writes policy remains authoritative and the request is never safely retryable after an ambiguous dispatch.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Action succeeded
+- `400` — Invalid team or action envelope
+- `401` — Authentication required
+- `403` — Actor, team, capability, or server policy denied the action
+- `404` — Server not found
+- `409` — Replay, registry conflict, or unresolved prior intent
+- `502` — Action result is indeterminate
+- `503` — Management runtime or dependency unavailable
 
 ### `GET /v1/servers/{server_id}/health`
 

@@ -33,6 +33,7 @@ typedef struct
    uint16_t bound_port;
    SSL_CTX *tls;
    kb_mgmt_status_listener_handler_fn handle;
+   kb_mgmt_status_listener_handler_fn handle_checkpoint;
    void *opaque;
    pthread_t accept_thread;
    pthread_t workers[KB_MGMT_STATUS_LISTENER_WORKERS];
@@ -82,10 +83,12 @@ static int ows_value(const unsigned char *begin, const unsigned char *end, const
    return strlen(expected) == n && memcmp(begin, expected, n) == 0;
 }
 
-kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, size_t len,
-                                                       const char **body, size_t *body_len)
+kb_mgmt_status_http_result_t kb_mgmt_status_http_parse_route(const unsigned char *in, size_t len,
+                                                             kb_mgmt_status_route_t *route,
+                                                             const char **body, size_t *body_len)
 {
-   static const char request_line[] = "POST /v1/management/status HTTP/1.1\r\n";
+   static const char status_line[] = "POST /v1/management/status HTTP/1.1\r\n";
+   static const char checkpoint_line[] = "POST /v1/management/action-checkpoint HTTP/1.1\r\n";
    const unsigned char *header_end = NULL;
    size_t header_len = 0, content_len = 0, header_count = 0;
    int hosts = 0, lengths = 0, content_types = 0;
@@ -93,9 +96,11 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
       *body = NULL;
    if (body_len)
       *body_len = 0;
-   if ((!in && len) || !body || !body_len)
+   if (route)
+      *route = 0;
+   if ((!in && len) || !route || !body || !body_len)
       return KB_MGMT_STATUS_HTTP_BAD;
-   if (len > KB_MGMT_STATUS_HTTP_HEADER_MAX + 4 + KB_MGMT_STATUS_HTTP_BODY_MAX)
+   if (len > KB_MGMT_STATUS_HTTP_HEADER_MAX + 4 + KB_MGMT_CHECKPOINT_HTTP_BODY_MAX)
       return KB_MGMT_STATUS_HTTP_TOO_LARGE;
    for (size_t i = 0; i < len; ++i)
    {
@@ -114,11 +119,27 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
    if (!header_end)
       return len > KB_MGMT_STATUS_HTTP_HEADER_MAX ? KB_MGMT_STATUS_HTTP_TOO_LARGE
                                                   : KB_MGMT_STATUS_HTTP_MORE;
-   if (header_len > KB_MGMT_STATUS_HTTP_HEADER_MAX || header_len < sizeof(request_line) - 1 ||
-       memcmp(in, request_line, sizeof(request_line) - 1) != 0)
+   if (header_len > KB_MGMT_STATUS_HTTP_HEADER_MAX)
+      return KB_MGMT_STATUS_HTTP_TOO_LARGE;
+   size_t request_line_len = 0, body_cap = 0;
+   if (header_len >= sizeof(status_line) - 1 &&
+       memcmp(in, status_line, sizeof(status_line) - 1) == 0)
+   {
+      *route = KB_MGMT_STATUS_ROUTE_STATUS;
+      request_line_len = sizeof(status_line) - 1;
+      body_cap = KB_MGMT_STATUS_HTTP_BODY_MAX;
+   }
+   else if (header_len >= sizeof(checkpoint_line) - 1 &&
+            memcmp(in, checkpoint_line, sizeof(checkpoint_line) - 1) == 0)
+   {
+      *route = KB_MGMT_STATUS_ROUTE_ACTION_CHECKPOINT;
+      request_line_len = sizeof(checkpoint_line) - 1;
+      body_cap = KB_MGMT_CHECKPOINT_HTTP_BODY_MAX;
+   }
+   else
       return KB_MGMT_STATUS_HTTP_BAD;
 
-   const unsigned char *p = in + sizeof(request_line) - 1;
+   const unsigned char *p = in + request_line_len;
    const unsigned char *last = header_end - 2;
    while (p < last)
    {
@@ -171,7 +192,7 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
                return KB_MGMT_STATUS_HTTP_BAD;
             content_len = content_len * 10 + (size_t)(*q - '0');
          }
-         if (content_len > KB_MGMT_STATUS_HTTP_BODY_MAX)
+         if (content_len > body_cap)
             return KB_MGMT_STATUS_HTTP_TOO_LARGE;
       }
       else if (name_len == 12 && strncasecmp((const char *)p, "Content-Type", 12) == 0)
@@ -182,6 +203,7 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
       else if ((name_len == 17 && strncasecmp((const char *)p, "Transfer-Encoding", 17) == 0) ||
                (name_len == 6 && strncasecmp((const char *)p, "Expect", 6) == 0) ||
                (name_len == 7 && strncasecmp((const char *)p, "Upgrade", 7) == 0) ||
+               (name_len == 16 && strncasecmp((const char *)p, "Proxy-Connection", 16) == 0) ||
                (name_len == 10 && strncasecmp((const char *)p, "Connection", 10) == 0))
          return KB_MGMT_STATUS_HTTP_BAD;
       p = e + 2;
@@ -195,6 +217,17 @@ kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, 
    *body = (const char *)(in + header_len);
    *body_len = content_len;
    return KB_MGMT_STATUS_HTTP_COMPLETE;
+}
+
+kb_mgmt_status_http_result_t kb_mgmt_status_http_parse(const unsigned char *in, size_t len,
+                                                       const char **body, size_t *body_len)
+{
+   kb_mgmt_status_route_t route = 0;
+   kb_mgmt_status_http_result_t rc =
+       kb_mgmt_status_http_parse_route(in, len, &route, body, body_len);
+   return rc == KB_MGMT_STATUS_HTTP_COMPLETE && route != KB_MGMT_STATUS_ROUTE_STATUS
+              ? KB_MGMT_STATUS_HTTP_BAD
+              : rc;
 }
 
 static int64_t monotonic_ms(void)
@@ -246,12 +279,13 @@ static int ssl_has_http11_alpn(SSL *ssl)
 }
 
 static int ssl_read_request(SSL *ssl, int fd, int64_t deadline, unsigned char *buffer, size_t cap,
-                            const char **body, size_t *body_len)
+                            kb_mgmt_status_route_t *route, const char **body, size_t *body_len)
 {
    size_t used = 0;
    for (;;)
    {
-      kb_mgmt_status_http_result_t parsed = kb_mgmt_status_http_parse(buffer, used, body, body_len);
+      kb_mgmt_status_http_result_t parsed =
+          kb_mgmt_status_http_parse_route(buffer, used, route, body, body_len);
       if (parsed == KB_MGMT_STATUS_HTTP_COMPLETE)
          return SSL_pending(ssl) == 0 ? 0 : -1;
       if (parsed != KB_MGMT_STATUS_HTTP_MORE || used == cap)
@@ -372,16 +406,23 @@ static void *worker_main(void *opaque)
          memset(&peer, 0, sizeof(peer));
          if (kb_mgmt_status_peer_verify(ssl, &peer) == 1)
          {
-            unsigned char input[KB_MGMT_STATUS_HTTP_HEADER_MAX + 4 + KB_MGMT_STATUS_HTTP_BODY_MAX];
+            unsigned char
+                input[KB_MGMT_STATUS_HTTP_HEADER_MAX + 4 + KB_MGMT_CHECKPOINT_HTTP_BODY_MAX];
             const char *body = NULL;
             size_t body_len = 0;
-            if (ssl_read_request(ssl, conn.fd, deadline, input, sizeof(input), &body, &body_len) ==
-                0)
+            kb_mgmt_status_route_t route = 0;
+            if (ssl_read_request(ssl, conn.fd, deadline, input, sizeof(input), &route, &body,
+                                 &body_len) == 0)
             {
                char response[4096];
                memset(response, 0, sizeof(response));
-               kb_mgmt_status_listener_result_t result = s->handle(
-                   arg->worker_id, &peer, body, body_len, response, sizeof(response), s->opaque);
+               kb_mgmt_status_listener_handler_fn handler =
+                   route == KB_MGMT_STATUS_ROUTE_ACTION_CHECKPOINT ? s->handle_checkpoint
+                                                                   : s->handle;
+               kb_mgmt_status_listener_result_t result =
+                   handler ? handler(arg->worker_id, &peer, body, body_len, response,
+                                     sizeof(response), s->opaque)
+                           : KB_MGMT_STATUS_LISTENER_INVALID;
                if (result == KB_MGMT_STATUS_LISTENER_OK && memchr(response, 0, sizeof(response)))
                   send_response(ssl, conn.fd, deadline, 200, "OK", response);
                else if (result == KB_MGMT_STATUS_LISTENER_INVALID)
@@ -559,6 +600,7 @@ int kb_mgmt_status_listener_start(const kb_mgmt_status_listener_config_t *cfg)
                                               : ntohs(((struct sockaddr_in6 *)&bound)->sin6_port);
    s->tls = cfg->tls;
    s->handle = cfg->handle;
+   s->handle_checkpoint = cfg->handle_checkpoint;
    s->opaque = cfg->opaque;
    s->head = s->count = 0;
    atomic_store(&s->stopping, 0);

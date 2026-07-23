@@ -217,12 +217,13 @@ ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
 # a uniform owner (e.g. SmoothNAS smoothfs tiers force uid 1000). The entrypoint
 # stays root (for webchat PAM) and drops the server to this user.
 RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
-    && mkdir -p /var/lib/aimee-workspaces \
+    && mkdir -p /var/lib/aimee-workspaces /mnt/media/cores \
+    && chmod 1777 /mnt/media/cores \
     && chown aimee:aimee /var/lib/aimee-workspaces
 # Durable mirror-tier state (AIMEE_WORKSPACES_DIR). Declaring it a VOLUME means an
 # anonymous volume persists the checkouts across `docker run` recreations even
 # when no named volume is mounted; operators can bind/name it for backups.
-VOLUME /var/lib/aimee-workspaces
+VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
@@ -251,8 +252,11 @@ COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
 COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
 COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
+COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
+COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
-RUN chmod +x /usr/local/bin/aimee-server-entrypoint
+RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
+    /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh
 
 # Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the

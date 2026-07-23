@@ -1292,6 +1292,45 @@ char *cli_session_make_name(const char *agent_name, const char *role)
    return name;
 }
 
+char *cli_session_make_execution_name(const char *agent_name, int configured_reuse,
+                                      const char *bound_session_id, int session_override,
+                                      const char *delegation_id, int force_isolation,
+                                      int *reuse_out)
+{
+   const char *agent = agent_name && agent_name[0] ? agent_name : "agent";
+   const int have_session = session_override && bound_session_id && bound_session_id[0];
+
+   /* A delegation id is already the durable identity of one child job. It must
+    * win even for background/op-run work, where no client session override is
+    * bound. Otherwise every such job falls into the agent's shared pane. */
+   if (delegation_id && delegation_id[0])
+   {
+      if (reuse_out)
+         *reuse_out = 0;
+      return cli_session_make_name(have_session ? bound_session_id : agent, delegation_id);
+   }
+   if (have_session && !force_isolation)
+   {
+      if (reuse_out)
+         *reuse_out = 1;
+      return cli_session_make_name(bound_session_id, "cli");
+   }
+   if (configured_reuse && !force_isolation)
+   {
+      if (reuse_out)
+         *reuse_out = 1;
+      return cli_session_make_name(agent, "shared");
+   }
+
+   static volatile int s_counter = 0;
+   char tmp[CLI_SESSION_NAME_MAX];
+   snprintf(tmp, sizeof(tmp), "aimee-%s-%d-%d", agent, (int)getpid(),
+            __sync_fetch_and_add(&s_counter, 1));
+   if (reuse_out)
+      *reuse_out = 0;
+   return strdup(tmp);
+}
+
 char *cli_session_strip_ansi(const char *raw)
 {
    if (!raw)
