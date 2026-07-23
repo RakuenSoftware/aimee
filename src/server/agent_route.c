@@ -280,7 +280,6 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
-
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
    static unsigned cursor;
@@ -402,8 +401,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
    if (!agent_routing_primary_turn() || !cfg->default_agent[0])
       return NULL;
    agent_t *ag = agent_find(cfg, cfg->default_agent);
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
-       !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
       return NULL;
 
    /* Session affinity outranks the default. A tmux agent holds a STATEFUL
@@ -433,8 +431,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
          agent_t *peer = &cfg->agents[i];
          if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0, AGENT_SCOPE_UNSET))
             continue;
-         if (peer->cost_tier == min_tier &&
-             strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+         if (peer->cost_tier == min_tier && strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
             return NULL; /* the normal pass will pick this stateful session */
       }
    }
@@ -781,16 +778,15 @@ static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
                                           unsigned required_caps, int min_context,
                                           agent_scope_t scope)
 {
-   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
-       !agent_is_available_for_routing(ag))
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
       return 0;
    if (required_caps || min_context > 0)
       return agent_satisfies_required_caps(ag, required_caps, min_context, scope);
    return agent_scope_admits(ag, scope);
 }
 
-static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role,
-                                     unsigned required_caps, agent_scope_t scope)
+static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsigned required_caps,
+                                     agent_scope_t scope)
 {
    agent_t *best = NULL;
    int best_ctx = -1;
@@ -905,8 +901,7 @@ static const char *default_exec_roles[] = {
      * delegates nothing at all (policy "none") and novel is read-only and
      * declares only continuity/beat-check/review/research, so no persona could
      * ever reach them — yet every agent was exec-eligible for them by default. */
-    "deploy",     "validate", "diagnose", "execute", "review",
-    "code",       "refactor", "draft",
+    "deploy", "validate", "diagnose", "execute", "review", "code", "refactor", "draft",
     /* Novel-mode read-only checks the novel persona genuinely delegates. */
     "continuity", "beat-check"};
 #define DEFAULT_EXEC_ROLE_COUNT 10
@@ -929,4 +924,3 @@ int agent_is_exec_role(const agent_t *agent, const char *role)
    }
    return 0;
 }
-

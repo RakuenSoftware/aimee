@@ -157,9 +157,9 @@ int agent_request_max_tokens(const agent_t *agent, int requested)
    /* Catalog identity, not the wire provider: a third-party vendor on another
     * vendor's API otherwise resolves the wrong capability row and gets the
     * non-reasoning 8192 output ceiling instead of its real one. */
-   return agent_clamp_to_context(agent, model_max_output(agent ? agent_catalog_provider(agent)
-                                                              : NULL,
-                                                        agent ? agent->model : NULL));
+   return agent_clamp_to_context(
+       agent,
+       model_max_output(agent ? agent_catalog_provider(agent) : NULL, agent ? agent->model : NULL));
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,

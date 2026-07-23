@@ -33,8 +33,7 @@ verify_outcome_t verify_classify(int exec_rc)
     * failure, and suppressing escalation for it is exactly the mistake this
     * classification exists to avoid, just in the other direction. Linux signals
     * run to SIGRTMAX (64), so 129..192 is the credible band. */
-   if (exec_rc == 126 || exec_rc == 127 || exec_rc == 124 ||
-       (exec_rc >= 129 && exec_rc <= 192))
+   if (exec_rc == 126 || exec_rc == 127 || exec_rc == 124 || (exec_rc >= 129 && exec_rc <= 192))
       return VERIFY_OUTCOME_INFRA_ERROR;
    return VERIFY_OUTCOME_FAILED;
 }

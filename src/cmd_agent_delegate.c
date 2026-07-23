@@ -1781,8 +1781,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
                agent_result_t esc_result;
                memset(&esc_result, 0, sizeof(esc_result));
-               int esc_rc =
-                   agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens, &esc_result);
+               int esc_rc = agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens,
+                                                 &esc_result);
                free(esc_prompt);
                for (int i = 0; i < cfg.agent_count && i < MAX_AGENTS; i++)
                   cfg.agents[i].enabled = saved_enabled[i];

@@ -69,7 +69,8 @@ static int openai_fetch_models(model_provider_t *p, char ***models_out, int *n_o
    return 0;
 }
 
-static const char *openai_routable_models[] = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", NULL};
+static const char *openai_routable_models[] = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                                               NULL};
 
 model_provider_t openai_provider = {
     .name = "openai",

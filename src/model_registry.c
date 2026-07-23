@@ -95,10 +95,19 @@ typedef struct
 } detect_entry_t;
 
 static const detect_entry_t g_detect[] = {
-    {"claude", "anthropic"}, {"gpt-", "openai"},         {"gpt4", "openai"},     {"o1", "openai"},
-    {"o3", "openai"},        {"text-davinci", "openai"}, {"gemini", "gemini"},   {"palm", "gemini"},
-    {"mistral", "mistral"},  {"codestral", "mistral"},   {"minimax", "minimax"},
-    {"kimi", "moonshotai"},  {NULL, NULL},
+    {"claude", "anthropic"},
+    {"gpt-", "openai"},
+    {"gpt4", "openai"},
+    {"o1", "openai"},
+    {"o3", "openai"},
+    {"text-davinci", "openai"},
+    {"gemini", "gemini"},
+    {"palm", "gemini"},
+    {"mistral", "mistral"},
+    {"codestral", "mistral"},
+    {"minimax", "minimax"},
+    {"kimi", "moonshotai"},
+    {NULL, NULL},
 };
 
 const char *model_detect_provider(const char *model_id)

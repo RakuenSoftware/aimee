@@ -265,7 +265,8 @@ static int ag_parse_price(const char *s, double *out)
 
 static int ag_price_usage(const char *flag, const char *value)
 {
-   fprintf(stderr, "aimee: %s expects a finite non-negative number ($ per million tokens), got '%s'\n",
+   fprintf(stderr,
+           "aimee: %s expects a finite non-negative number ($ per million tokens), got '%s'\n",
            flag, value ? value : "");
    return 1;
 }

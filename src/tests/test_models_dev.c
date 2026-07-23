@@ -67,18 +67,17 @@ static void test_cache_lookup_nested_api_schema(void)
    mkdir(cache_parent, 0755);
    mkdir(cache_dir, 0755);
 
-   const char *json =
-       "{\"minimax\": {\"name\": \"MiniMax\", \"models\": {"
-       "  \"MiniMax-M3\": {\"name\": \"MiniMax M3\","
-       "    \"limit\": {\"context\": 1000000, \"output\": 128000},"
-       "    \"cost\": {\"input\": 0.3, \"output\": 1.2},"
-       "    \"tool_call\": true, \"reasoning\": true,"
-       "    \"modalities\": {\"input\": [\"text\", \"image\"]}}}},"
-       " \"openai\": {\"models\": {"
-       "  \"gpt-5.6-sol\": {\"name\": \"GPT-5.6 Sol\","
-       "    \"limit\": {\"context\": 1050000, \"output\": 128000},"
-       "    \"cost\": {\"input\": 5.0, \"output\": 30.0},"
-       "    \"tool_call\": true, \"reasoning\": true}}}}";
+   const char *json = "{\"minimax\": {\"name\": \"MiniMax\", \"models\": {"
+                      "  \"MiniMax-M3\": {\"name\": \"MiniMax M3\","
+                      "    \"limit\": {\"context\": 1000000, \"output\": 128000},"
+                      "    \"cost\": {\"input\": 0.3, \"output\": 1.2},"
+                      "    \"tool_call\": true, \"reasoning\": true,"
+                      "    \"modalities\": {\"input\": [\"text\", \"image\"]}}}},"
+                      " \"openai\": {\"models\": {"
+                      "  \"gpt-5.6-sol\": {\"name\": \"GPT-5.6 Sol\","
+                      "    \"limit\": {\"context\": 1050000, \"output\": 128000},"
+                      "    \"cost\": {\"input\": 5.0, \"output\": 30.0},"
+                      "    \"tool_call\": true, \"reasoning\": true}}}}";
    FILE *f = fopen(cache_path, "w");
    assert(f);
    fputs(json, f);
@@ -259,14 +258,13 @@ static void test_price_band_exact_capacity_and_intmax(void)
    assert(c.price_bands[MODEL_PRICE_BANDS_MAX - 1].in_per_mtok == 88.0);
 
    /* INT_MAX with FREE capacity: only parser rejection can keep it out now. */
-   const char *json2 =
-       "{\"v\":{\"models\":{\"m\":{"
-       "  \"limit\":{\"context\":2000000},"
-       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
-       "    {\"input\":9,\"output\":9,"
-       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
-       "    {\"input\":5,\"output\":5,\"tier\":{\"type\":\"context\",\"size\":500}}"
-       "  ]}}}}}";
+   const char *json2 = "{\"v\":{\"models\":{\"m\":{"
+                       "  \"limit\":{\"context\":2000000},"
+                       "  \"cost\":{\"input\":1.0,\"output\":2.0,\"tiers\":["
+                       "    {\"input\":9,\"output\":9,"
+                       "     \"tier\":{\"type\":\"context\",\"size\":2147483647}},"
+                       "    {\"input\":5,\"output\":5,\"tier\":{\"type\":\"context\",\"size\":500}}"
+                       "  ]}}}}}";
    f = fopen(path, "w");
    assert(f);
    fputs(json2, f);

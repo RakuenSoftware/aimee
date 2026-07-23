@@ -1734,8 +1734,7 @@ void test_escalation_target_selection(void)
    tgt = agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_WHOLE_TASK);
    assert(tgt == &cfg.agents[1]); /* dear is now ineligible; mid takes it */
    /* ...and bounded work can still reach it. */
-   assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_BOUNDED) ==
-          &cfg.agents[2]);
+   assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_BOUNDED) == &cfg.agents[2]);
    cfg.agents[2].max_scope = AGENT_SCOPE_UNSET;
 
    /* A disabled or role-mismatched seat is not a target. */

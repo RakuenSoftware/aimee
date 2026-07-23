@@ -128,42 +128,42 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
     * own, so it simply has no siblings. */
    const char *own_reg = ag->registration;
    for (int pass = 0; pass < 2 && rc != 0; pass++)
-   for (int i = 0; i < cfg->agent_count && rc != 0; i++)
-   {
-      agent_t *peer = &cfg->agents[i];
-      int same_reg = own_reg[0] && strcmp(own_reg, peer->registration) == 0;
-      if ((pass == 0) != (same_reg != 0))
-         continue;
-      if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
-          !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
-          agent_is_named_in_fallback_chain(cfg, peer->name))
-         continue;
-      if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)
+      for (int i = 0; i < cfg->agent_count && rc != 0; i++)
       {
-         aimee_log(LOG_DEBUG, "agent", "skipping DOWN same-tier agent '%s'", peer->name);
-         continue;
+         agent_t *peer = &cfg->agents[i];
+         int same_reg = own_reg[0] && strcmp(own_reg, peer->registration) == 0;
+         if ((pass == 0) != (same_reg != 0))
+            continue;
+         if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
+             !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
+             agent_is_named_in_fallback_chain(cfg, peer->name))
+            continue;
+         if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)
+         {
+            aimee_log(LOG_DEBUG, "agent", "skipping DOWN same-tier agent '%s'", peer->name);
+            continue;
+         }
+
+         peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+
+         free(out->response);
+         out->response = NULL;
+         out->error[0] = '\0';
+
+         aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
+                   peer->name, pass == 0 ? "same" : "other");
+         /* Through the single guarded executor: enforces peer->max_parallel and
+          * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
+          * non-zero so the loop simply moves to the next same-tier peer. */
+         rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                                 0.3, 1 /* use_tools */, out);
+         if (rc == 0)
+         {
+            ag = peer;
+            if (current)
+               *current = peer;
+         }
       }
-
-      peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
-
-      free(out->response);
-      out->response = NULL;
-      out->error[0] = '\0';
-
-      aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
-                peer->name, pass == 0 ? "same" : "other");
-      /* Through the single guarded executor: enforces peer->max_parallel and
-       * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
-       * non-zero so the loop simply moves to the next same-tier peer. */
-      rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                              0.3, 1 /* use_tools */, out);
-      if (rc == 0)
-      {
-         ag = peer;
-         if (current)
-            *current = peer;
-      }
-   }
    agent_dispatch_set_fail_fast(0);
 
    return rc;

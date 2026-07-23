@@ -388,8 +388,12 @@ static const struct
    const char *domain;
    const char *vendor;
 } g_catalog_vendor_domains[] = {
-    {"minimax.io", "minimax"},    {"minimaxi.com", "minimax"}, {"minimax.com", "minimax"},
-    {"kimi.com", "moonshotai"},   {"moonshot.cn", "moonshotai"}, {"moonshot.ai", "moonshotai"},
+    {"minimax.io", "minimax"},
+    {"minimaxi.com", "minimax"},
+    {"minimax.com", "minimax"},
+    {"kimi.com", "moonshotai"},
+    {"moonshot.cn", "moonshotai"},
+    {"moonshot.ai", "moonshotai"},
     {NULL, NULL},
 };
 
@@ -403,7 +407,10 @@ static const struct
    const char *wire;
    const char *vendor;
 } g_catalog_provider_aliases[] = {
-    {"claude", "anthropic"}, {"chatgpt", "openai"}, {"codex", "openai"}, {NULL, NULL},
+    {"claude", "anthropic"},
+    {"chatgpt", "openai"},
+    {"codex", "openai"},
+    {NULL, NULL},
 };
 
 /* Vendor namespaces as they appear in gateway/OpenRouter model ids
@@ -413,8 +420,11 @@ static const struct
    const char *ns;
    const char *vendor;
 } g_catalog_vendor_namespaces[] = {
-    {"minimax", "minimax"},   {"moonshotai", "moonshotai"}, {"moonshot", "moonshotai"},
-    {"kimi", "moonshotai"},   {NULL, NULL},
+    {"minimax", "minimax"},
+    {"moonshotai", "moonshotai"},
+    {"moonshot", "moonshotai"},
+    {"kimi", "moonshotai"},
+    {NULL, NULL},
 };
 
 /* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
@@ -1170,8 +1180,9 @@ int agent_load_config(agent_config_t *cfg)
             ag->max_scope = agent_scope_from_string(v->valuestring);
             if (ag->max_scope == AGENT_SCOPE_UNSET)
             {
-               LOG_ERROR("agent", "agents.json: agent '%s' has unknown max_scope '%s'; "
-                                  "use \"bounded\" or \"whole_task\"",
+               LOG_ERROR("agent",
+                         "agents.json: agent '%s' has unknown max_scope '%s'; "
+                         "use \"bounded\" or \"whole_task\"",
                          ag->name, v->valuestring);
                cJSON_Delete(root);
                return -1;

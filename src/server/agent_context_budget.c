@@ -31,8 +31,8 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
    {
       int model_ceiling = model_max_output(agent_catalog_provider(agent), agent->model);
       int reserve_cap = agent->middleware.context_window / 4;
-      output_tokens = (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling
-                                                                        : reserve_cap;
+      output_tokens =
+          (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling : reserve_cap;
    }
    /* A pinned reserve at or above the whole window is a misconfiguration: there
     * is no room left for a prompt. Clamp the RESERVE to half the window so the

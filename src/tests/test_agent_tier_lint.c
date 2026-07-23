@@ -32,10 +32,10 @@ int agent_is_exec_role(const agent_t *agent, const char *role)
 {
    /* Same default set as agent_config.c: these 18 roles are granted to every
     * agent regardless of its declared roles list. */
-   static const char *defaults[] = {"deploy",  "validate",   "test",  "diagnose",   "execute",
-                                    "review",  "code",       "refactor", "draft",   "implement",
-                                    "continuity", "prose",   "line-edit", "beat-check",
-                                    "lyric",   "hook",       "prosody", "songform"};
+   static const char *defaults[] = {
+       "deploy",    "validate",   "test",  "diagnose",  "execute",    "review",
+       "code",      "refactor",   "draft", "implement", "continuity", "prose",
+       "line-edit", "beat-check", "lyric", "hook",      "prosody",    "songform"};
    if (agent->exec_role_count > 0)
    {
       for (int i = 0; i < agent->exec_role_count; i++)
@@ -316,7 +316,7 @@ static void test_partial_price_data_is_not_compared(void)
 {
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);      /* 10 / 50 */
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);       /* 10 / 50 */
    add_agent(&cfg, "partial_at_tier1", "testvendor", "partial", 1); /* 1 / absent */
 
    agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
@@ -364,7 +364,7 @@ static void test_operator_price_override_wins(void)
 {
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);  /* catalog 10 / 50 */
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);   /* catalog 10 / 50 */
    add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1); /* catalog 1 / 5  */
 
    agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];

@@ -45,9 +45,8 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
  * arbitrary role string while its semantics (write classification, tool
  * defaults, built-in template) have all been removed - which would silently hand
  * back a read-only delegate with a generic prompt. */
-static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric",
-                                              "hook",    "prosody",   "songform",
-                                              NULL};
+static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric", "hook",
+                                              "prosody", "songform",  NULL};
 
 const char *delegate_role_removed_reason(const char *role)
 {
