@@ -12,6 +12,17 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+func TestDiscussionPromptUsesJSONIdentityEscaping(t *testing.T) {
+	prompt := buildDiscussionPrompt("run\x01\"\\", "hash\x02", 1, nil, nil)
+	if strings.Contains(prompt, `\x01`) || strings.Contains(prompt, `\x02`) {
+		t.Fatalf("discussion identity used Go quoting instead of JSON escaping: %q", prompt)
+	}
+	if !strings.Contains(prompt, `"run_id":"run\u0001\"\\"`) ||
+		!strings.Contains(prompt, `"artifact_hash":"hash\u0002"`) {
+		t.Fatalf("discussion response contract lacks JSON-escaped identity: %q", prompt)
+	}
+}
+
 type discussionTestAgents struct {
 	mu       sync.Mutex
 	requests []DelegateRequest
@@ -89,6 +100,19 @@ func TestDiscussionRejectsIncompleteBallots(t *testing.T) {
 	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if !strings.Contains(errText, "discussion quorum 0/2") {
 		t.Fatalf("incomplete ballots counted as successful: %q", errText)
+	}
+}
+
+func TestDiscussionRejectsStaleRunAndArtifactIdentity(t *testing.T) {
+	analysis := discussionAnalysis("blocking")
+	issueID := makeDiscussionIssues(analysis.Feedback.Findings)[0].ID
+	agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) {
+		return fmt.Sprintf(`{"run_id":"another-run","artifact_hash":"stale","positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
+	}}
+	runner := &NativeRunner{agents: agents}
+	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	if !strings.Contains(errText, "discussion quorum 0/2") {
+		t.Fatalf("stale discussion ballots counted as successful: %q", errText)
 	}
 }
 

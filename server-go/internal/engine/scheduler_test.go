@@ -237,3 +237,106 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 		t.Fatalf("item=%+v", item)
 	}
 }
+
+func TestSchedulerReconciliationCancelsRunningOrphan(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, item := range []db1.CreateWorkItem{
+		{ID: "wi_terminal_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_running_orphan", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_root"},
+	} {
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Reproduce the old single-row terminal transition while the child already
+	// has a scheduler execution context.
+	if err := store.Finish(t.Context(), "wi_terminal_root", "slices", "stopped", "operator_stop", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, nil, 1, nil)
+	cancelled := false
+	scheduler.cancels["wi_running_orphan"] = func() { cancelled = true }
+	scheduler.fill(t.Context())
+	if !cancelled {
+		t.Fatal("reconciled running descendant was not locally cancelled")
+	}
+	child, err := store.WorkItem(t.Context(), "wi_running_orphan")
+	if err != nil || child.State != "stopped" {
+		t.Fatalf("child=%+v err=%v", child, err)
+	}
+}
+
+func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	registry, err := wfe.NewRegistry(workflowDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := registry.Save("one", []byte("name: one\nnodes:\n  - id: work\n    block: author.proposal\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []db1.CreateWorkItem{
+		{ID: "wi_live_root", Repo: "repo", ProposalPath: "live-root", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work"},
+		{ID: "wi_live_orphan", Repo: "repo", ProposalPath: "live-child", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work", ParentID: "wi_live_root"},
+	} {
+		if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Keep the parent schedulable in lifecycle terms but parked so the child is
+	// deterministically the execution that enters the blocking runner.
+	if err := store.Park(t.Context(), "wi_live_root", "work", "manual", 0); err != nil {
+		t.Fatal(err)
+	}
+	runner := &blockingRunner{started: make(chan string, 2), release: make(chan struct{})}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, eng, 2, nil)
+	scheduler.pollEvery = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go scheduler.Run(ctx)
+	if started := waitStarted(t, runner.started); started != "wi_live_orphan" {
+		t.Fatalf("running item=%s want orphan descendant", started)
+	}
+	// Reproduce a terminal root written by the old single-item stop while its
+	// descendant is genuinely blocked inside a scheduler-owned execution.
+	if err := store.Finish(t.Context(), "wi_live_root", "work", "stopped", "operator_stop", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		item, err := store.WorkItem(t.Context(), "wi_live_orphan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduler.mu.Lock()
+		_, running := scheduler.running["wi_live_orphan"]
+		scheduler.mu.Unlock()
+		if item.State == "stopped" && !running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("running orphan was not reconciled and cancelled")
+}

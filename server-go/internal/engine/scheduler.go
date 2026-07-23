@@ -18,6 +18,7 @@ type Scheduler struct {
 	policySource      func() RunPolicy
 	pollEvery         time.Duration
 	transientPauses   []transientPause
+	cancelTerminal    func(context.Context) (int, error)
 	log               *slog.Logger
 
 	mu      sync.Mutex
@@ -53,6 +54,13 @@ func (s *Scheduler) SetConcurrencySource(source func() int) {
 func (s *Scheduler) SetPolicySource(source func() RunPolicy) {
 	s.mu.Lock()
 	s.policySource = source
+	s.mu.Unlock()
+	s.Notify()
+}
+
+func (s *Scheduler) SetTerminalCancellation(cancel func(context.Context) (int, error)) {
+	s.mu.Lock()
+	s.cancelTerminal = cancel
 	s.mu.Unlock()
 	s.Notify()
 }
@@ -115,6 +123,7 @@ func (s *Scheduler) fill(ctx context.Context) {
 	s.mu.Lock()
 	policySource := s.policySource
 	concurrencySource := s.concurrencySource
+	cancelTerminal := s.cancelTerminal
 	concurrency := s.concurrency
 	s.mu.Unlock()
 	if policySource != nil {
@@ -132,6 +141,21 @@ func (s *Scheduler) fill(ctx context.Context) {
 			} else if abandoned > 0 {
 				s.log.Info("abandoned exhausted stale wall caps", "count", abandoned)
 			}
+		}
+	}
+	if stopped, err := s.db.ReconcileOrphanedDescendants(ctx); err != nil {
+		s.log.Error("reconcile orphaned workflow descendants", "error", err)
+	} else if len(stopped) > 0 {
+		for _, workItemID := range stopped {
+			s.Cancel(workItemID)
+		}
+		s.log.Warn("stopped orphaned workflow descendants", "count", len(stopped))
+	}
+	if cancelTerminal != nil {
+		if cancelled, err := cancelTerminal(ctx); err != nil {
+			s.log.Error("cancel terminal workflow delegate jobs", "cancelled", cancelled, "error", err)
+		} else if cancelled > 0 {
+			s.log.Info("cancelled terminal workflow delegate jobs", "count", cancelled)
 		}
 	}
 	for _, pause := range s.transientPauses {
