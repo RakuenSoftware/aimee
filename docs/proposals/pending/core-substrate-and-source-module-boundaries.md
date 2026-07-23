@@ -436,9 +436,11 @@ whatever language its author chose.
 - [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) owns the final
   core-vs-module carving of the eighteen IDs, the trust-kernel placement, and a round-trip proof whose
   stages flow as bus events across the boundary within the performance budget.
-- [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) gains the bus as a
-  single, uniform capture and enforcement seam, replacing the seven scattered enforcer sinks its A2
-  inventory routes into the chain one by one.
+- [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md) uses the bus as a
+  single, uniform capture and enforcement seam, replacing the seven scattered enforcer sinks that
+  the in-flight [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) routes
+  into the chain one by one — consuming that work's ledger and attestation surface without modifying
+  it (it is mid-implementation).
 - [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) is the
   discovery and readiness mechanism modules use to reach each other, not only the thin client.
 
@@ -559,6 +561,12 @@ rather than making that safety property optional.
    2–5's capability-state, config, product, and protocol contracts and adds no taxonomy. It was
    drafted after the 2026-07-20 suite review and awaits its own roundtable review; it does not
    inherit the suite approvals.
+9. [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md) owns governance and
+   audit over the module event bus: the single tap that captures every inter-module event, authorizes
+   action-class events, and feeds the durable ledger and attestation bundle. It consumes the in-flight
+   [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) (mid-implementation)
+   without modifying it, and lands after both the event bus and that work's A1–A5. Later-drafted
+   consuming child; awaits its own review.
 
 `git-core-contract.md` is a required forthcoming child of proposal 3 and must be accepted before
 the Git migration slice begins. It owns Git API, event-production, mutation, security,

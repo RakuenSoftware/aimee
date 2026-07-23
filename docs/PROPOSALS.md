@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 20 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 21 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — twenty proposals (all but one not yet implemented).
+The genuinely open work — twenty-one proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -98,6 +98,12 @@ The genuinely open work — twenty proposals (all but one not yet implemented).
   client merges both services under the dependency law and re-advertises the effective set to its
   consumer (MCP/ACP handshake, CLI/web). Drafted 2026-07-23; awaits its own review.
   **Route / Translate / Constrain-Verify / Gate-Promote.**
+- [Govern and capture the module event bus as one uniform seam](proposals/pending/event-bus-governance-and-capture.md)
+  — consuming child of the core-substrate suite. The core-owned governance/audit tap on the module
+  event bus becomes the single capture and enforcement seam: every inter-module event is recorded,
+  action-class events are authorized before delivery, and the stream feeds the durable ledger and
+  `aimee audit attest`. Consumes the in-flight `governance-attestable-enforcement` (mid-implementation)
+  without modifying it. Drafted 2026-07-23; awaits its own review. **Enforce / Gate-Promote / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
