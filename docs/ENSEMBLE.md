@@ -63,8 +63,8 @@ A foundational finding also stops after one cycle when the seats agree or one
 position already has a strict majority. Only an explicitly disputed
 foundational finding may continue to another cycle, and subsequent cycles carry
 only those contested stable issue IDs. Discussion ends when a strict majority
-forms; deadline or quorum loss parks the workflow visibly rather than fabricating
-consensus. Deterministic synthesis retains findings unless a strict majority
+forms; deadline or quorum loss parks the workflow visibly for scheduler retry
+rather than fabricating consensus. Deterministic synthesis retains findings unless a strict majority
 rejects them.
 The denominator is the successful seated participants that return a complete,
 valid ballot in that discussion cycle. Abstentions remain in that denominator
@@ -77,8 +77,10 @@ The chairman is one configured, enabled review agent selected visibly in the
 Roundtable GUI. It receives the original request, reviewed artifact, independent
 reports, and deterministic feedback, then submits one final structured verdict.
 There is no chairman retry across the roster: an unavailable chairman, malformed
-verdict, stage mismatch, or missing original-request alignment parks the workflow
-visibly. With the chairman disabled, deterministic synthesis is final.
+verdict, stage mismatch, or contradictory verdict parks the workflow visibly for
+scheduler retry with a new execution version. A valid `changes` verdict with
+`drifted` or `unclear` alignment is refinement feedback, not an execution failure.
+With the chairman disabled, deterministic synthesis is final.
 
 Every review must explicitly report `original_request_alignment` as `aligned`,
 `drifted`, or `unclear`, with a comparison to the originating request. A useful

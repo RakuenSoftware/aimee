@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -269,7 +270,13 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		if reason == "" {
 			reason = "runner_pending"
 		}
-		if err := e.db.Park(ctx, item.ID, node.ID, reason, step.CostUSD); err != nil {
+		detail := strings.TrimSpace(step.Detail)
+		if detail == "" {
+			detail = reason
+		} else {
+			detail = reason + ": " + safeDiagnostic(detail)
+		}
+		if err := e.db.ParkWithDetail(ctx, item.ID, node.ID, reason, detail, step.CostUSD); err != nil {
 			return out, err
 		}
 		out.Parked, out.PauseReason = true, reason
