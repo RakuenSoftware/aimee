@@ -121,6 +121,40 @@ the deny-list files. Revision 1's evidence was a grep, which is how the
 
 ### Identity: parent subject, candidate key
 
+> **Correction (Revision 6).** Revisions 2-5 left this section open to being read
+> as "the candidate key becomes the emitted span citation". That reading is
+> wrong and would have made Slice 3 unlandable. Design review established three
+> independent reasons:
+>
+> 1. **It breaks the byte-identity gate.** `append_untrusted_span` emits
+>    `ref#N` where `N` is the 1-based chunk index. A digest reaching that
+>    argument changes the first line of every span, so the differential oracle
+>    fails immediately.
+> 2. **It breaks a public contract.** `span=N` is an input parameter callers
+>    pass back to retrieve a specific span, and `ref#N` in the response is how
+>    they correlate it. Swapping the cited id for an opaque digest silently
+>    breaks any caller that round-trips or quotes it.
+> 3. **It makes a stable handle brittle.** The chunk index survives changes to
+>    the chunker, to `html_to_text` whitespace handling, and to Unicode
+>    normalization. A content digest does not.
+>
+> **Binding rule for Slice 3 and Slice 5:** candidate keys are *internal to
+> fusion* and are **never emitted**. The span citation, the `idx` argument to
+> `append_untrusted_span`, the footer counts, and the `span=N` input handle all
+> remain the 1-based chunk index from `chunk_text`. The chunk-index to
+> candidate-key mapping is private to the selection pipeline and is rebuilt on
+> every `tool_web_read` call.
+>
+> The digest specification below therefore describes an **internal** key. It is
+> retained because fusion still needs a stable per-candidate identity within a
+> single invocation, but nothing in it reaches the output.
+>
+> Deliberately not solved: a chunk index is not a stable handle *across* calls,
+> because a re-segmented page renumbers spans. Promoting the digest to fix that
+> would create two problems now (byte-identity failure, breaking change) to
+> pre-empt one that no current feature has. Revisit only if a cross-call rerank
+> feature is actually built.
+
 The ranked candidate is a **chunk**, not a page: `chunk_text` emits up to
 `WEBREAD_MAX_CHUNKS 400` spans of ~`WEBREAD_CHUNK 480` bytes. Revision 1 used the
 URL as the candidate key, which cannot address them.
