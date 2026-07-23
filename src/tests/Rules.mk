@@ -2527,7 +2527,11 @@ $(TESTPREFIX)/unit-test-kb-doc-hash: $(OBJDIR)/tests/test_kb_doc_hash.o \
 # Event-bus wire codec (feature tree slice 1). Pure: no DB, no shared memory.
 # BUS_VECTOR_DIR points at the committed golden vectors so the binary can run
 # from any cwd; those bytes are the cross-language conformance authority (D8).
-$(OBJDIR)/tests/test_bus_wire.o: C_FLAGS += -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
+# -Imodules/bus is scoped to the bus objects, never global: a global include
+# path would put bus headers on every shipping translation unit and leak the
+# D7 boundary the blast-radius gate exists to hold.
+$(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/tests/test_bus_wire.o: C_FLAGS += -Imodules/bus -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
 $(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
                                   $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
