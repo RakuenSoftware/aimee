@@ -10,6 +10,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/workspace/cli_workspace_serve.c",
     "src/modules/workspace/workspace.c",
