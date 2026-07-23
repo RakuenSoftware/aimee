@@ -238,9 +238,11 @@ static void remote_reads_roundtrip(void)
 
    char *keys = jwks(key);
    server_mgmt_token_claims_t verified;
-   assert(server_mgmt_token_verify(token, token_n, keys, c.issuer, c.audience, c.peer_issuer,
-                                   c.peer_serial, c.peer_fingerprint, c.request_sha256, NOW,
-                                   &verified));
+   assert(server_mgmt_token_verify_read_claims_ex(token, token_n, keys, c.issuer, c.audience,
+                                                  c.peer_issuer, c.peer_serial,
+                                                  c.peer_fingerprint, NOW, &verified) ==
+          SERVER_MGMT_TOKEN_OK);
+   assert(strcmp(verified.request_sha256, c.request_sha256) == 0);
    assert(strcmp(verified.capability, "remote_reads") == 0);
    free(keys);
    EVP_PKEY_free(key);
