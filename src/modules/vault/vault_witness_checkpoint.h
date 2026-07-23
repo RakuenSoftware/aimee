@@ -91,6 +91,23 @@ int vault_witness_checkpoint_signable(const vault_witness_checkpoint_t *cp, uint
  * a predecessor reference by later checkpoints. Returns 0/-1. */
 int vault_witness_checkpoint_digest(const vault_witness_checkpoint_t *cp, uint8_t digest[32]);
 
+/* Largest a full encoded checkpoint can be (signable body + 64-byte signature). */
+#define VAULT_WITNESS_CHECKPOINT_WIRE_MAX 640
+
+/* Full wire form for emission and offline consumption: the canonical signable body
+ * followed by the 64-byte signature. Deterministic. Returns 0 on success and sets
+ * *out_len, -1 on invalid checkpoint or small buffer. */
+int vault_witness_checkpoint_encode(const vault_witness_checkpoint_t *cp, uint8_t *out, size_t cap,
+                                    size_t *out_len);
+
+/* Decode and validate a full wire checkpoint into `cp`. Rejects a bad label,
+ * wrong version, unknown sig_alg, declared lengths that do not fit, a set
+ * has_predecessor with a zero digest mismatch, or a missing signature. The decoded
+ * checkpoint can be re-verified with vault_witness_checkpoint_verify. Returns 0/-1;
+ * `cp` is cleansed on failure. */
+int vault_witness_checkpoint_decode(const uint8_t *wire, size_t wire_len,
+                                    vault_witness_checkpoint_t *cp);
+
 /* Sign the checkpoint's signable body with a raw Ed25519 private key, filling
  * cp->signature and setting sig_alg = Ed25519. A helper for tests and E2's signer;
  * not a production caller in E1. Returns 0/-1. */

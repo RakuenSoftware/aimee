@@ -141,9 +141,53 @@ static void test_digest_stability(void)
    assert(vault_witness_checkpoint_digest(&first, d) == 0);
 }
 
+static void test_encode_decode(void)
+{
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   vault_witness_checkpoint_t cp = fixture();
+   assert(vault_witness_checkpoint_sign_ed25519(&cp, priv) == 0);
+
+   uint8_t wire[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   size_t len = 0;
+   assert(vault_witness_checkpoint_encode(&cp, wire, sizeof wire, &len) == 0);
+
+   vault_witness_checkpoint_t back;
+   assert(vault_witness_checkpoint_decode(wire, len, &back) == 0);
+
+   /* The decoded checkpoint verifies against the same anchor. */
+   vault_witness_anchor_t anchor;
+   memset(&anchor, 0, sizeof anchor);
+   memcpy(anchor.key_id, cp.signer_key_id, VAULT_WITNESS_SIGNER_KEY_ID_LEN);
+   memcpy(anchor.ed25519_pub, pub, 32);
+   assert(vault_witness_checkpoint_verify(&back, &anchor, 1) == VAULT_WITNESS_CP_OK);
+
+   /* Digests agree, confirming full-field round-trip. */
+   uint8_t d1[32], d2[32];
+   assert(vault_witness_checkpoint_digest(&cp, d1) == 0);
+   assert(vault_witness_checkpoint_digest(&back, d2) == 0);
+   assert(memcmp(d1, d2, 32) == 0);
+
+   /* Decoder rejections: truncated, trailing byte, corrupt label. */
+   vault_witness_checkpoint_t junk;
+   assert(vault_witness_checkpoint_decode(wire, len - 1, &junk) == -1);
+   uint8_t bad[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   memcpy(bad, wire, len);
+   assert(vault_witness_checkpoint_decode(bad, len + 1, &junk) == -1);
+   memcpy(bad, wire, len);
+   bad[4] ^= 0xFF; /* first label byte */
+   assert(vault_witness_checkpoint_decode(bad, len, &junk) == -1);
+   /* A flipped signature byte still decodes structurally but fails verify. */
+   memcpy(bad, wire, len);
+   bad[len - 1] ^= 0xFF;
+   assert(vault_witness_checkpoint_decode(bad, len, &back) == 0);
+   assert(vault_witness_checkpoint_verify(&back, &anchor, 1) == VAULT_WITNESS_CP_BAD_SIG);
+}
+
 int main(void)
 {
    test_sign_verify();
+   test_encode_decode();
    test_unknown_and_revoked_key();
    test_rotation_retained_key();
    test_continuity();

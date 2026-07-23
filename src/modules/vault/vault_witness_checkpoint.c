@@ -113,6 +113,111 @@ int vault_witness_checkpoint_digest(const vault_witness_checkpoint_t *cp, uint8_
    return 0;
 }
 
+static uint16_t get_u16(const uint8_t *p)
+{
+   return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+static uint32_t get_u32(const uint8_t *p)
+{
+   return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+static uint64_t get_u64(const uint8_t *p)
+{
+   uint64_t v = 0;
+   for (unsigned i = 0; i < 8; i++)
+      v = (v << 8) | p[i];
+   return v;
+}
+
+int vault_witness_checkpoint_encode(const vault_witness_checkpoint_t *cp, uint8_t *out, size_t cap,
+                                    size_t *out_len)
+{
+   if (!out || !out_len)
+      return -1;
+   *out_len = 0;
+   size_t body = 0;
+   if (vault_witness_checkpoint_signable(cp, out, cap, &body) != 0)
+      return -1;
+   if (cap < body + VAULT_WITNESS_ED25519_SIG_LEN)
+      return -1;
+   memcpy(out + body, cp->signature, VAULT_WITNESS_ED25519_SIG_LEN);
+   *out_len = body + VAULT_WITNESS_ED25519_SIG_LEN;
+   return 0;
+}
+
+int vault_witness_checkpoint_decode(const uint8_t *wire, size_t wire_len,
+                                    vault_witness_checkpoint_t *cp)
+{
+   if (!cp)
+      return -1;
+   OPENSSL_cleanse(cp, sizeof *cp);
+   if (!wire)
+      return -1;
+   size_t label_len = strlen(VAULT_WITNESS_CHECKPOINT_LABEL);
+   /* Fixed portion after the length-prefixed label: version(2) seq(8) root(32)
+    * has_pred(1) pred(32) shard_count(8) leaf_digest(32) key_id(16) sig_alg(2)
+    * sig_version(2) created_at_len(4) ... created_at(N) sig(64). */
+   size_t off = 0;
+   if (wire_len < 4)
+      return -1;
+   if (get_u32(wire) != label_len)
+      return -1;
+   off = 4;
+   if (off + label_len > wire_len ||
+       CRYPTO_memcmp(wire + off, VAULT_WITNESS_CHECKPOINT_LABEL, label_len) != 0)
+      return -1;
+   off += label_len;
+   const size_t fixed = 2 + 8 + 32 + 1 + 32 + 8 + 32 + VAULT_WITNESS_SIGNER_KEY_ID_LEN + 2 + 2 + 4;
+   if (off + fixed > wire_len)
+      return -1;
+
+   vault_witness_checkpoint_t tmp;
+   memset(&tmp, 0, sizeof tmp);
+   tmp.version = get_u16(wire + off);
+   off += 2;
+   tmp.seq = get_u64(wire + off);
+   off += 8;
+   memcpy(tmp.root, wire + off, 32);
+   off += 32;
+   tmp.has_predecessor = wire[off++] ? 1 : 0;
+   memcpy(tmp.predecessor_digest, wire + off, 32);
+   off += 32;
+   tmp.shard_count = get_u64(wire + off);
+   off += 8;
+   memcpy(tmp.leaf_snapshot_digest, wire + off, 32);
+   off += 32;
+   memcpy(tmp.signer_key_id, wire + off, VAULT_WITNESS_SIGNER_KEY_ID_LEN);
+   off += VAULT_WITNESS_SIGNER_KEY_ID_LEN;
+   tmp.sig_alg = get_u16(wire + off);
+   off += 2;
+   tmp.sig_version = get_u16(wire + off);
+   off += 2;
+   uint32_t ca_len = get_u32(wire + off);
+   off += 4;
+   if (ca_len > VAULT_WITNESS_CP_CREATED_AT_MAX || off + ca_len + VAULT_WITNESS_ED25519_SIG_LEN != wire_len)
+      return -1;
+   if (memchr(wire + off, 0, ca_len) != NULL)
+      return -1;
+   memcpy(tmp.created_at, wire + off, ca_len);
+   tmp.created_at[ca_len] = '\0';
+   off += ca_len;
+   memcpy(tmp.signature, wire + off, VAULT_WITNESS_ED25519_SIG_LEN);
+
+   /* Re-encoding must reproduce the input, which also enforces checkpoint_valid
+    * (the has_pred/zero-digest, version, sig_alg, created_at rules). */
+   uint8_t re[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   size_t re_len = 0;
+   if (vault_witness_checkpoint_encode(&tmp, re, sizeof re, &re_len) != 0 || re_len != wire_len ||
+       CRYPTO_memcmp(re, wire, wire_len) != 0)
+   {
+      OPENSSL_cleanse(&tmp, sizeof tmp);
+      return -1;
+   }
+   *cp = tmp;
+   OPENSSL_cleanse(&tmp, sizeof tmp);
+   return 0;
+}
+
 int vault_witness_checkpoint_sign_ed25519(vault_witness_checkpoint_t *cp,
                                           const uint8_t priv[VAULT_WITNESS_ED25519_PRIV_LEN])
 {
