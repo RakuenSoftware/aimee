@@ -378,7 +378,12 @@ int server_http_management_action_framing_valid(const char *method, const char *
             body_len = body_len * 10 + (size_t)(v[i] - '0');
       }
       else if (n == 10 && !strncasecmp(line, "Connection", n))
-         conn = ++conn == 1 && vn == 5 && !strncasecmp(v, "close", 5) ? conn : 99;
+      {
+         int challenge = !strcmp(path, "/v1/management/action/challenge");
+         int exact = challenge ? vn == 10 && !strncasecmp(v, "keep-alive", 10)
+                               : vn == 5 && !strncasecmp(v, "close", 5);
+         conn = ++conn == 1 && exact ? conn : 99;
+      }
       else if (n == 13 && !strncasecmp(line, "Authorization", n))
          auth = ++auth == 1 && vn > 7 && vn <= 4096 && !strncasecmp(v, "Bearer ", 7) ? auth : 99;
       else if (n == 25 && !strncasecmp(line, "X-Aimee-Management-Status", n))

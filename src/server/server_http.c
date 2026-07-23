@@ -1117,6 +1117,64 @@ static int g_management_tls_fd = -1; /* dedicated required-mTLS management liste
 static char g_bearer[256] = "";      /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;         /* TCP requests / 60s (0 = unlimited) */
 static int g_remote_writes = 0;      /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
+static pthread_mutex_t g_management_action_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_management_action_idle = PTHREAD_COND_INITIALIZER;
+static unsigned g_management_action_active;
+/* Direct route unit tests run without a listener. A real listener start resets
+ * this state, while stop closes the gate before it tears down any dependency. */
+static int g_management_action_stopping;
+
+int server_http_management_action_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int ok = !g_management_action_stopping;
+   if (ok)
+      g_management_action_active++;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return ok ? 0 : -1;
+}
+
+int server_http_management_action_allowed(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   int allowed = !g_management_action_stopping;
+   pthread_mutex_unlock(&g_management_action_lock);
+   return allowed;
+}
+
+void server_http_management_action_end(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   if (g_management_action_active)
+      g_management_action_active--;
+   if (!g_management_action_active)
+      pthread_cond_broadcast(&g_management_action_idle);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_start(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 0;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_shutdown_begin(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
+void server_http_management_actions_stop_and_wait(void)
+{
+   pthread_mutex_lock(&g_management_action_lock);
+   g_management_action_stopping = 1;
+   while (g_management_action_active)
+      pthread_cond_wait(&g_management_action_idle, &g_management_action_lock);
+   pthread_mutex_unlock(&g_management_action_lock);
+}
+
 int server_http_remote_writes(void)
 {
    return g_remote_writes;
@@ -2446,6 +2504,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       }
    }
 
+   server_http_management_actions_start();
    atomic_store(&g_running, 1);
    /* The listener thread runs dispatch-backed /v1 routes inline (rh_dispatch_op
     * -> loopback_rpc -> server_dispatch -> handler), whose call chains carry
@@ -2465,6 +2524,7 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       pthread_attr_destroy(lattr_p);
    if (prc != 0)
    {
+      server_http_management_actions_stop_and_wait();
       if (management.enabled)
          server_http_management_set_error("management listener thread");
       atomic_store(&g_running, 0);
@@ -2500,6 +2560,10 @@ void server_http_stop(void)
 {
    pthread_mutex_lock(&g_listener_lifecycle_lock);
    atomic_store(&g_running, 0);
+   /* Reject the final dispatch seam of every action that has not already
+    * entered the handler, then join the complete request lifetime before
+    * tearing down its checkpoint-client credentials. */
+   server_http_management_actions_shutdown_begin();
    /* Wake poll/accept without releasing descriptor numbers yet. Closing first
     * would let an unrelated thread reuse a number while the old accept loop
     * still holds it in its poll snapshot. */
@@ -2516,6 +2580,7 @@ void server_http_stop(void)
       pthread_join(g_thread, NULL);
       g_thread_active = 0;
    }
+   server_http_management_actions_stop_and_wait();
    close_listener_fd(&g_listen_fd);
    close_listener_fd(&g_tcp_fd);
    close_listener_fd(&g_tls_fd);

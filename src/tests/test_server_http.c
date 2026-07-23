@@ -341,6 +341,19 @@ int main(void)
       assert(!strcmp(resp, "{\"result\":\"denied\",\"effect\":\"none\"}"));
    }
 
+   /* Shutdown closes the full-action gate before dependency teardown. An
+    * already-admitted request remains accounted for until its final response. */
+   {
+      server_http_management_actions_start();
+      assert(server_http_management_action_begin() == 0);
+      server_http_management_actions_shutdown_begin();
+      assert(!server_http_management_action_allowed());
+      assert(server_http_management_action_begin() != 0);
+      server_http_management_action_end();
+      server_http_management_actions_stop_and_wait();
+      server_http_management_actions_start();
+   }
+
    /* --- GET /v1/version reports the build version --- */
    {
       int st = server_http_route("GET", "/v1/version", NULL, 0, resp, sizeof(resp));
@@ -960,7 +973,7 @@ int main(void)
                             "Connection: keep-alive\r\n\r\n";
       const char action_challenge[] =
           "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
-          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
       const char action[] =
           "POST /v1/management/action HTTP/1.1\r\nHost: server.test\r\n"
           "Content-Type: application/json\r\nContent-Length: 42\r\nConnection: close\r\n"
@@ -974,6 +987,12 @@ int main(void)
                  strlen(action_challenge)) == 1);
       assert(server_http_management_action_framing_valid("POST", "/v1/management/action", action,
                                                          strlen(action)) == 1);
+      const char closing_challenge[] =
+          "POST /v1/management/action/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      assert(!server_http_management_action_framing_valid(
+          "POST", "/v1/management/action/challenge", closing_challenge,
+          strlen(closing_challenge)));
       char duplicate_auth[1024];
       snprintf(duplicate_auth, sizeof(duplicate_auth), "%.*sAuthorization: Bearer second\r\n\r\n",
                (int)(strlen(action) - 2), action);

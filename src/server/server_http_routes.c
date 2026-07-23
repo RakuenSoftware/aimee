@@ -53,6 +53,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
+
+/* Narrow-link route tests intentionally omit server_agent.c.  The shipped
+ * server provides the strong, commit-aware implementation. */
+__attribute__((weak)) int server_agent_management_set_enabled(const char *name, int enabled)
+{
+   (void)name;
+   (void)enabled;
+   return -1;
+}
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
 #include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
@@ -208,7 +217,7 @@ static server_mgmt_endpoint_jti_result_t management_jti(
 static int management_remote_writes(void *ctx)
 {
    (void)ctx;
-   return server_http_remote_writes();
+   return server_http_management_action_allowed() ? server_http_remote_writes() : 0;
 }
 
 static int management_audit(void *ctx, const server_mgmt_token_claims_t *c,
@@ -224,25 +233,21 @@ static int management_audit(void *ctx, const server_mgmt_token_claims_t *c,
 static int management_apply(void *ctx, const server_mgmt_action_t *a)
 {
    (void)ctx;
-   char request[192], response[2048];
-   int n = snprintf(request, sizeof(request), "{\"method\":\"%s\",\"args\":[\"%s\"]}",
-                    a->action, a->agent);
    uint32_t required = server_capability_for_method(a->action);
-   if (n < 0 || (size_t)n >= sizeof(request) || !required)
+   if (!required)
       return 1;
-   if (loopback_rpc(request, n, response, sizeof(response), required) != 200)
-      return 2;
-   cJSON *root = cJSON_Parse(response);
-   cJSON *status = root ? cJSON_GetObjectItemCaseSensitive(root, "status") : NULL;
-   int ok = root && !(cJSON_IsString(status) && !strcmp(status->valuestring, "error")) &&
-            !cJSON_GetObjectItemCaseSensitive(root, "error");
-   int result = root ? (ok ? 0 : 1) : 2;
-   cJSON_Delete(root);
-   return result;
+   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "agent.enable")) == 0
+              ? 0
+              : 1;
 }
 
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
+   if (server_http_management_action_begin() != 0)
+   {
+      snprintf(resp, (size_t)cap, "{\"result\":\"failed\",\"effect\":\"none\"}");
+      return 500;
+   }
    const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
    const char *target = getenv("AIMEE_SERVER_ID");
    const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
@@ -260,7 +265,11 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
    server_mgmt_endpoint_result_t result;
    int status = server_mgmt_endpoint_dispatch(&request, &deps, &result);
    if (server_mgmt_endpoint_render(&result, resp, (size_t)cap) < 0)
+   {
+      server_http_management_action_end();
       return err_json(resp, cap, 500, "management response unavailable");
+   }
+   server_http_management_action_end();
    return status;
 }
 
@@ -330,7 +339,10 @@ static int rh_management_challenge(const route_req_t *rq, char *resp, int cap)
 
 static int rh_management_action_challenge(const route_req_t *rq, char *resp, int cap)
 {
-   return rh_management_challenge_purpose(rq, resp, cap, "management.action.v1");
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.action.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   return status;
 }
 
 static int rh_management_health(const route_req_t *rq, char *resp, int cap)

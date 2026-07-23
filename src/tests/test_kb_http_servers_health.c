@@ -106,7 +106,7 @@ static int route_body(const char *method, const char *path, const char *query, c
                       char *out, int cap)
 {
    memset(out, 0, (size_t)cap);
-   return kb_http_servers_route_ex(method, path, query, body, out, cap);
+   return kb_http_servers_route_ex(method, path, query, body, body ? strlen(body) : 0, out, cap);
 }
 
 static void set_actor(void)
@@ -205,6 +205,10 @@ static void test_action_route(void)
           405);
    assert(route_body("POST", "/v1/servers/server-a/actions", "team=9",
                      "{\"action\":\"agent.run\",\"agent\":\"alpha\"}", out, sizeof(out)) == 400);
+   static const char nul_body[] =
+       "{\"action\":\"agent.enable\",\"agent\":\"alpha\"}\0trailing";
+   assert(kb_http_servers_route_ex("POST", "/v1/servers/server-a/actions", "team=9", nul_body,
+                                   sizeof(nul_body) - 1, out, sizeof(out)) == 400);
    assert(action_calls == 1);
    assert(kb_http_servers_action_unregister(action_handler_fn, (void *)0x4321) == 0);
    assert(route_body("POST", "/v1/servers/server-a/actions", "team=9", body, out, sizeof(out)) ==

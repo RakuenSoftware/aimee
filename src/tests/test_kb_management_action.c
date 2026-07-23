@@ -9,7 +9,7 @@
 typedef struct
 {
    int stage, intents, snapshots, opens, requests, authority, tokens, outcomes, closes, clears;
-   int ambiguous_intent, ambiguous_outcome, replay, invalid_active;
+   int ambiguous_intent, ambiguous_outcome, replay, invalid_active, newer_staple;
    kb_mgmt_token_authority_ipc_result_t token_result;
    kb_management_action_transport_t action_transport;
    const char *response;
@@ -199,8 +199,10 @@ static kb_management_health_result_t authority(void *ctx, const kb_management_ce
    assert(f->stage == 4 && bundle->leaf_pem_len && deadline == 9000);
    f->authority++;
    assert(raw && len && strstr(raw, "\"purpose\":\"management.action.v1\""));
-   kb_mgmt_status_t s = {
-       .version = 1, .issued_at = 1000, .expires_at = 1010, .revocation_generation = 3};
+   kb_mgmt_status_t s = {.version = 1,
+                         .issued_at = 1000,
+                         .expires_at = 1010,
+                         .revocation_generation = f->newer_staple ? 4 : 3};
    memset(s.nonce, 0, 32);
    snprintf(s.key_id, sizeof(s.key_id), "status-1");
    snprintf(s.caller_issuer, sizeof(s.caller_issuer), "CN=client-ca");
@@ -355,6 +357,10 @@ int main(void)
    reset(&f);
    f.invalid_active = 1;
    assert(run(&f) == KB_MANAGEMENT_ACTION_UNAVAILABLE && f.opens == 0 && f.clears == 1);
+   reset(&f);
+   f.newer_staple = 1;
+   assert(run(&f) == KB_MANAGEMENT_ACTION_UNAVAILABLE && f.tokens == 0 && f.requests == 1 &&
+          f.outcomes == 1);
    for (int denied = KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID;
         denied <= KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED; denied++)
    {

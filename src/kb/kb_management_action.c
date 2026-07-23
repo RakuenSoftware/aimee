@@ -217,6 +217,7 @@ static int status_matches(const char *json, const unsigned char nonce[32],
              strcmp(s.target_server_id, intent->target_server_id) ||
              CRYPTO_memcmp(s.target_mgmt_fingerprint, intent->target_mgmt_fingerprint, 64) ||
              strcmp(s.purpose, ACTION_PURPOSE) ||
+             s.revocation_generation != (uint64_t)intent->revocation_generation ||
              kb_mgmt_status_validate(&s, now, (uint64_t)intent->revocation_generation) ||
              kb_mgmt_status_verify_signature(&s, d->status_public_key);
    OPENSSL_cleanse(&s, sizeof(s));

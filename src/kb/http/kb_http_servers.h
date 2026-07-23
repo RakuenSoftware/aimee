@@ -24,5 +24,6 @@ int kb_http_servers_action_register(kb_http_servers_action_handler_fn, void *);
 int kb_http_servers_action_unregister(kb_http_servers_action_handler_fn, void *);
 
 int kb_http_servers_route(const char *, const char *, const char *, char *, int);
-int kb_http_servers_route_ex(const char *, const char *, const char *, const char *, char *, int);
+int kb_http_servers_route_ex(const char *, const char *, const char *, const char *, size_t, char *,
+                             int);
 #endif

@@ -319,7 +319,7 @@ static int action_status(kb_management_action_result_t rc)
 }
 
 static int action_dispatch(const kb_principal_t *actor, int64_t team, const char *server,
-                           const char *body, char *out, int cap)
+                           const char *body, size_t body_len, char *out, int cap)
 {
    pthread_mutex_lock(&action_mu);
    kb_http_servers_action_handler_fn handler = action_handler;
@@ -332,7 +332,7 @@ static int action_dispatch(const kb_principal_t *actor, int64_t team, const char
       snprintf(out, (size_t)cap, "{\"error\":\"server action unavailable\"}");
       return 503;
    }
-   kb_management_action_result_t rc = handler(ctx, actor, team, server, body, strlen(body));
+   kb_management_action_result_t rc = handler(ctx, actor, team, server, body, body_len);
    pthread_mutex_lock(&action_mu);
    action_inflight--;
    if (!action_inflight)
@@ -346,7 +346,7 @@ static int action_dispatch(const kb_principal_t *actor, int64_t team, const char
 }
 
 int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const char *body,
-                             char *out, int cap)
+                             size_t body_len, char *out, int cap)
 {
    if (!m || !p || !out || cap <= 0)
       return -1;
@@ -401,13 +401,13 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
       if (is_action)
       {
          kb_management_action_body_t parsed;
-         if (!body || kb_management_action_body_parse(body, strlen(body), &parsed))
+         if (!body || kb_management_action_body_parse(body, body_len, &parsed))
          {
             snprintf(out, (size_t)cap, "{\"error\":\"invalid action\"}");
             return 400;
          }
          OPENSSL_cleanse(&parsed, sizeof(parsed));
-         return action_dispatch(actor, team, sid, body, out, cap);
+         return action_dispatch(actor, team, sid, body, body_len, out, cap);
       }
       return health_dispatch(actor, team, sid, out, cap);
    }
@@ -479,5 +479,5 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
 
 int kb_http_servers_route(const char *m, const char *p, const char *qs, char *out, int cap)
 {
-   return kb_http_servers_route_ex(m, p, qs, NULL, out, cap);
+   return kb_http_servers_route_ex(m, p, qs, NULL, 0, out, cap);
 }
