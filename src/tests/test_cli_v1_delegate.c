@@ -237,6 +237,32 @@ static cJSON *marshal_roundtable_with_stdin(int argc, char **argv, const char *i
    return req;
 }
 
+static char *read_limited_with_stdin(const char *input, size_t limit)
+{
+   int old_stdin = dup(STDIN_FILENO);
+   int pipefd[2];
+   assert(old_stdin >= 0 && pipe(pipefd) == 0);
+   assert(write(pipefd[1], input, strlen(input)) == (ssize_t)strlen(input));
+   close(pipefd[1]);
+   assert(dup2(pipefd[0], STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(pipefd[0]);
+   char *result = marshal_read_stdin_limited(limit);
+   assert(dup2(old_stdin, STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(old_stdin);
+   return result;
+}
+
+static void test_roundtable_stdin_limit_is_inclusive(void)
+{
+   char *exact = read_limited_with_stdin("12345678", 8);
+   assert(exact != NULL && strcmp(exact, "12345678") == 0);
+   free(exact);
+   assert(read_limited_with_stdin("123456789", 8) == NULL);
+   printf("  PASS: test_roundtable_stdin_limit_is_inclusive\n");
+}
+
 static void test_roundtable_stdin_is_authoritative_artifact(void)
 {
    char *argv[] = {
@@ -1335,6 +1361,7 @@ int main(void)
    test_delegate_roundtable_context_file_folded_into_prompt();
    test_roundtable_stdin_is_authoritative_artifact();
    test_roundtable_path_is_read_not_forwarded();
+   test_roundtable_stdin_limit_is_inclusive();
    test_delegate_prompt_stdin_marshaled();
    test_delegate_status_multiple_ids_marshaled();
    test_delegate_log_rejects_ignored_args();

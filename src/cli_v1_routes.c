@@ -1415,20 +1415,23 @@ static char *marshal_read_file_limited(const char *path, size_t limit)
 
 static char *marshal_read_stdin_limited(size_t limit)
 {
-   size_t cap = 4096;
+   size_t cap = limit < 4095 ? limit + 1 : 4096;
    size_t len = 0;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
    for (;;)
    {
-      if (len + 1024 >= cap)
+      if (len == limit)
       {
-         if (cap >= limit + 1)
-         {
-            free(buf);
-            return NULL;
-         }
+         int extra = fgetc(stdin);
+         if (extra == EOF && !ferror(stdin))
+            break;
+         free(buf);
+         return NULL;
+      }
+      if (len + 1024 >= cap && cap < limit + 1)
+      {
          size_t next = cap * 2;
          if (next > limit + 1)
             next = limit + 1;
