@@ -538,7 +538,18 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
          off += n;
    }
 
-   /* Append newline-separated extra headers */
+   /* Append extra headers, one per line.
+    *
+    * Callers use BOTH conventions for the separator: some pass "A: x\nB: y",
+    * others pass "A: x\r\n". Splitting on '\n' alone leaves a trailing '\r' on
+    * every line of the second form, which is then re-terminated here and emits
+    * "A: x\r\r\n" -- a bare CR inside the header block.
+    *
+    * Lenient origins ignore that; CDNs do not. Measured live: with a trailing
+    * "\r\n" Accept header, example.com returned 200 while
+    * raw.githubusercontent.com and en.wikipedia.org both returned 400. That is
+    * why page reads failed against real sites while search (which happened to
+    * use bare '\n') worked. Trim the CR so both conventions are accepted. */
    if (extra_headers && extra_headers[0])
    {
       char tmp[512];
@@ -547,6 +558,9 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
       char *line = strtok_r(tmp, "\n", &saveptr);
       while (line)
       {
+         size_t ll = strlen(line);
+         while (ll > 0 && (line[ll - 1] == '\r' || line[ll - 1] == ' '))
+            line[--ll] = '\0';
          if (line[0])
          {
             int n = snprintf(req + off, cap - (size_t)off, "%s\r\n", line);

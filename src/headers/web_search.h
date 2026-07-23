@@ -32,6 +32,20 @@ typedef struct
  */
 char *web_search(const char *query, int max_results);
 
+/* web_search with optional page fusion.
+ *
+ * fetch_pages   non-zero: fetch the top results through the guarded egress path
+ *               and append query-relevant extracted spans after the (unchanged)
+ *               snippet block. Off by default -- fetching pages turns a ~1s
+ *               search into several seconds.
+ * extract_query optional; when NULL or empty the search query is used. Useful
+ *               when the caller wants something the search terms do not express,
+ *               e.g. "return the README verbatim".
+ *
+ * Posix only for the fusion half: it needs the pinned-connect egress path. On
+ * Windows fetch_pages is ignored and the snippet block is returned unchanged. */
+char *web_search_ex(const char *query, int max_results, int fetch_pages, const char *extract_query);
+
 /*
  * web_search_format_results: build the text block from a result array.
  * Exposed for unit tests.

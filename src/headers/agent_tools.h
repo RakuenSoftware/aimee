@@ -121,6 +121,22 @@ agent_git_write_fn agent_tools_git_write_provider(void);
 /* 1 if `name` is one of the git-write tools that ride the seam above. */
 int agent_tools_is_git_write(const char *name);
 
+/* Validate that the built-in tool table and the egress declaration registry
+ * (modules/workflows/tool_egress.c) cover EXACTLY the same set of tools.
+ *
+ * This is the invariant that makes the externalization gate fail closed: a tool
+ * added to the table without a declaration, or a declaration naming a tool that
+ * no longer exists, is a startup error rather than a silent gate bypass.
+ *
+ * Checks, in order:
+ *   - every built-in has a declaration, and it is not TOOL_EGRESS_UNSET;
+ *   - every non-alias declaration names a real built-in;
+ *   - no built-in name appears twice in either set.
+ *
+ * Returns 0 when the invariant holds. On failure returns -1 and, when `err` is
+ * non-NULL, writes a human-readable reason naming the offending tool. */
+int agent_tools_validate_egress_table(char *err, size_t err_len);
+
 /* MCP-derived tools ────────────────────────────────────────────────────────
  *
  * aimee's MCP dispatch table is the single source of truth for which tools exist.
