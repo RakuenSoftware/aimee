@@ -298,17 +298,23 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 
 static int mgmt_b64url(const unsigned char *in, size_t n, char *out, size_t cap)
 {
-   size_t need = 4 * ((n + 2) / 3);
-   if (!in || !out || cap <= need)
+   unsigned char encoded[65];
+   size_t padded = 4 * ((n + 2) / 3);
+   size_t padding = n % 3 ? 3 - (n % 3) : 0;
+   size_t need = padded - padding;
+   if (!in || !out || padded + 1 > sizeof(encoded) || cap <= need)
       return -1;
-   int got = EVP_EncodeBlock((unsigned char *)out, in, (int)n);
+   int got = EVP_EncodeBlock(encoded, in, (int)n);
    if (got <= 0)
       return -1;
-   for (int i = 0; i < got; i++)
-      out[i] = out[i] == '+' ? '-' : (out[i] == '/' ? '_' : out[i]);
-   while (got > 0 && out[got - 1] == '=')
+   while (got > 0 && encoded[got - 1] == '=')
       got--;
+   if ((size_t)got != need)
+      return -1;
+   for (int i = 0; i < got; i++)
+      out[i] = encoded[i] == '+' ? '-' : (encoded[i] == '/' ? '_' : (char)encoded[i]);
    out[got] = '\0';
+   OPENSSL_cleanse(encoded, sizeof(encoded));
    return 0;
 }
 
