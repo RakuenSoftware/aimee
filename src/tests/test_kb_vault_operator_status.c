@@ -1,7 +1,9 @@
 #include "kb_vault_operator_status.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -155,9 +157,20 @@ static void test_root_socketpair(void)
       unsigned char denied_request[16];
       assert(kb_vault_operator_request_encode(KB_VAULT_OPERATOR_OPCODE_STATUS, denied_request) ==
              0);
-      assert(write(denied_pair[0], denied_request, sizeof(denied_request)) ==
-             (ssize_t)sizeof(denied_request));
-      assert(shutdown(denied_pair[0], SHUT_WR) == 0);
+      /* The send RACES the rejection, and losing that race is the correct
+       * behaviour being tested: the server refuses the peer without reading and
+       * closes, so our write can land fully, land short, or fail outright with
+       * EPIPE/ECONNRESET. Asserting a full write asserted a scheduling order --
+       * it held on an idle machine and failed a few percent of the time under
+       * CPU contention, which is exactly what a parallel CI test run creates.
+       *
+       * The invariant is that the peer is rejected and NEVER answered, which the
+       * checks below carry. Whether the request reached the socket is not part
+       * of it, so only a genuinely unexpected errno fails here. */
+      ssize_t sent = write(denied_pair[0], denied_request, sizeof(denied_request));
+      assert(sent >= 0 || errno == EPIPE || errno == ECONNRESET);
+      /* Likewise ENOTCONN: the half-close is a no-op once the peer is gone. */
+      assert(shutdown(denied_pair[0], SHUT_WR) == 0 || errno == ENOTCONN);
       assert(read(denied_pair[0], denied_request, 1) <= 0); /* EOF or reset, never a response. */
       close(denied_pair[0]);
       assert(pthread_join(denied_thread, NULL) == 0 && denied.result == -1);
@@ -246,6 +259,12 @@ static void test_root_strict_framing(void)
 
 int main(void)
 {
+   /* Writing to a socket the server has already closed raises SIGPIPE, which
+    * kills the process before write() can return the EPIPE the caller handles.
+    * That is the same race as the one described in test_root_socketpair, just
+    * reaching us as a signal instead of an errno -- under load it showed up as
+    * a bare exit 141 with no output at all. */
+   signal(SIGPIPE, SIG_IGN);
    test_codec();
    test_bounded_frame_fuzz();
    test_root_socketpair();
