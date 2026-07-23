@@ -26,7 +26,7 @@ static const char *PRESET_JSON = "{"
                                  "  \"max_cost_usd\": 1.5,"
                                  "  \"max_rounds\": 3,"
                                  "  \"converge_threshold\": 2,"
-                                 "  \"deadline_ms\": 360000,"
+                                 "  \"deadline_ms\": 600000,"
                                  "  \"discussion\": true,"
                                  "  \"turns\": \"parallel\","
                                  "  \"pipeline\": {"
@@ -58,7 +58,7 @@ static void check_fields(const roundtable_preset_t *p)
    assert(p->max_cost_usd == 1.5);
    assert(p->max_rounds == 3);
    assert(p->converge_threshold == 2);
-   assert(p->deadline_ms == 360000);
+   assert(p->deadline_ms == 600000);
    assert(p->discussion == 1);
    assert(strcmp(p->turns, "parallel") == 0);
    assert(strcmp(p->pipeline_done_bar, "zero_blocking") == 0);
@@ -178,7 +178,7 @@ int main(void)
    assert(cfg.ensemble_min_successful == 2);
    assert(cfg.roundtable_max_rounds == 3);
    assert(cfg.roundtable_converge_threshold == 2);
-   assert(cfg.roundtable_deadline_ms == 360000);
+   assert(cfg.roundtable_deadline_ms == 600000);
    assert(strcmp(cfg.roundtable_turns, "parallel") == 0);
    assert(cfg.roundtable_pipeline_gate_ttl_h == 24);
    assert(strcmp(cfg.roundtable_default, "deep-review") == 0);

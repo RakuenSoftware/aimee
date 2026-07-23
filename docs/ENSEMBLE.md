@@ -70,7 +70,7 @@ The denominator is the successful seated participants that return a complete,
 valid ballot in that discussion cycle. Abstentions remain in that denominator
 but do not by themselves count as disagreement or extend discussion. The saved
 `deadline_ms` is the overall analysis-plus-Discussion-plus-Chairman budget; an
-omitted or zero legacy value is normalized to 360 seconds.
+omitted or zero value is normalized to 600 seconds.
 The runtime treats that overall deadline as one work-conserving budget shared by
 analysis, Discussion, and Chairman. It does not divide the deadline into equal
 phase slices: enabled providers can have materially different normal latency,

@@ -68,8 +68,21 @@ func TestDirectFallbackHardCapsTwoAndLeavesRoutingToDelegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if panel.Acquired || len(panel.Seats) != 2 || panel.Seats[0].Selector != "" || panel.Seats[1].Selector != "" {
+	if panel.Acquired || len(panel.Seats) != 2 || panel.Seats[0].Selector != "" || panel.Seats[1].Selector != "" || panel.DeadlineMS != 600000 {
 		t.Fatalf("panel=%+v", panel)
+	}
+}
+
+func TestConfiguredRoundtableDefaultsToTenMinuteSafetyBound(t *testing.T) {
+	dir := t.TempDir()
+	writePreset(t, dir, preset{Name: "default", Seats: []presetSeat{{Selector: "$random"}}})
+	store, _ := NewStore(dir, func() (string, error) { return "default", nil })
+	panel, err := store.Resolve("", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.DeadlineMS != 600000 {
+		t.Fatalf("deadline_ms=%d, want 600000", panel.DeadlineMS)
 	}
 }
 

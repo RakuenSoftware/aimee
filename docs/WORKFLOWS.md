@@ -130,7 +130,7 @@ backstops, while operator and convergence parks are never auto-resumed.
 Strict majority is measured over successful seats returning a complete valid
 ballot in that cycle; abstentions remain in the denominator but do not alone
 extend discussion. The preset's `deadline_ms` covers analysis, Discussion, and
-Chairman together, with zero/omitted legacy values normalized to 360 seconds.
+Chairman together, with zero/omitted values normalized to 600 seconds.
 That deadline is one work-conserving budget: the runtime waits for every analysis
 seat to return, fail, or reach the configured deadline instead of silently
 dividing it into much shorter phase slices. Later phases receive the remaining
