@@ -76,6 +76,9 @@ func testDelegateGroup(ctx context.Context, requests []DelegateRequest, run func
 		go func(i int) {
 			defer wg.Done()
 			result, err := run(ctx, requests[i])
+			if err == nil && requests[i].Role == roundtableDelegateRole {
+				result.Response = withTestRoundtableIdentity(result.Response, requests[i])
+			}
 			out[i].Response, out[i].CostUSD, out[i].Err = result.Response, result.CostUSD, err
 			if out[i].Err == nil {
 				out[i].Participant = fmt.Sprintf("test-participant:%d", i)
@@ -84,6 +87,21 @@ func testDelegateGroup(ctx context.Context, requests []DelegateRequest, run func
 	}
 	wg.Wait()
 	return out
+}
+
+func withTestRoundtableIdentity(response string, request DelegateRequest) string {
+	var object map[string]any
+	if json.Unmarshal([]byte(response), &object) != nil {
+		return response
+	}
+	if _, ok := object["run_id"]; !ok {
+		object["run_id"] = request.WorkItemID
+	}
+	if _, ok := object["artifact_hash"]; !ok {
+		object["artifact_hash"] = request.ArtifactHash
+	}
+	encoded, _ := json.Marshal(object)
+	return string(encoded)
 }
 
 func (a *concurrentPanelAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
@@ -136,7 +154,7 @@ func (a *repairingReviewAgents) DelegateGroup(_ context.Context, requests []Dele
 	}
 	return []DelegateGroupResult{{
 		Participant: "opaque-seat-token",
-		Response:    `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+		Response:    withTestRoundtableIdentity(`{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, requests[0]),
 		CostUSD:     0.25,
 	}}
 }
@@ -735,6 +753,17 @@ func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.
 		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
 			t.Fatalf("review request received another run's artifact: %+v", request)
 		}
+	}
+}
+
+func TestDirectRoundtableRejectsStalePanelIdentityWithoutChairman(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"run_id":"another-run","artifact_hash":"stale-hash","artifact_stage":"frozen_diff","original_request_alignment":{"status":"aligned","summary":"looks right"},"verdict":"approve","findings":[]}`}
+	runner := &NativeRunner{agents: agents}
+	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
+		Artifact: strings.Repeat("diff --git a/a b/a\n", 4), RunID: "review-current",
+	})
+	if err == nil || !strings.Contains(err.Error(), "identity mismatch") || result.ParticipantsUsed != 0 || !result.Degraded {
+		t.Fatalf("stale panel response accepted: result=%+v err=%v", result, err)
 	}
 }
 

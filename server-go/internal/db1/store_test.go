@@ -118,6 +118,44 @@ func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
 	if len(mappings) != terminalCancellationBatchSize {
 		t.Fatalf("mappings=%d want bounded batch %d", len(mappings), terminalCancellationBatchSize)
 	}
+	second, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != terminalCancellationBatchSize || second[0].JobID != terminalCancellationBatchSize+1 || second[1].JobID != terminalCancellationBatchSize+2 {
+		t.Fatalf("second batch did not rotate past failed jobs: %+v", second)
+	}
+}
+
+func TestPausedParentIsNotReconciledOrCancelledAsTerminal(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	if _, err := store.db.ExecContext(ctx, `CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_paused_parent", Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_paused_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_parent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Park(ctx, "wi_paused_parent", "slices", "manual", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveWorkflowDelegateJob(ctx, "wi_paused_parent:slices:v1:hash", "wi_paused_parent", 81, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO agent_jobs(id,status) VALUES(81,'running')`); err != nil {
+		t.Fatal(err)
+	}
+	orphans, err := store.ReconcileOrphanedDescendants(ctx)
+	if err != nil || len(orphans) != 0 {
+		t.Fatalf("paused parent reconciled descendants: ids=%v err=%v", orphans, err)
+	}
+	mappings, err := store.TerminalDelegateJobs(ctx)
+	if err != nil || len(mappings) != 0 {
+		t.Fatalf("paused parent selected for cancellation: mappings=%v err=%v", mappings, err)
+	}
 }
 
 func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {

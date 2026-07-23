@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
   job_id INTEGER NOT NULL,
   work_item_id TEXT NOT NULL DEFAULT '',
   participant_token TEXT NOT NULL DEFAULT '',
+  cancel_attempts INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
@@ -132,6 +133,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 	}
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN participant_token TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN work_item_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN cancel_attempts INTEGER NOT NULL DEFAULT 0`)
 	// Recover structural ownership for mappings written before work_item_id was
 	// stored explicitly. The longest prefix prevents one workflow ID from
 	// claiming a descendant's mapping.
@@ -167,7 +169,7 @@ func (s *Store) SaveWorkflowDelegateJob(ctx context.Context, key, workItemID str
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id,work_item_id,participant_token) VALUES(?,?,?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,work_item_id=excluded.work_item_id,participant_token=excluded.participant_token,updated_at=datetime('now')`, key, id, workItemID, participant)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id,work_item_id,participant_token) VALUES(?,?,?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,work_item_id=excluded.work_item_id,participant_token=excluded.participant_token,cancel_attempts=0,updated_at=datetime('now')`, key, id, workItemID, participant)
 	return err
 }
 
@@ -183,16 +185,21 @@ const terminalCancellationBatchSize = 8
 // cancellation is acknowledged makes a crash between lifecycle commit and
 // cancellation recoverable on the next scheduler fill.
 func (s *Store) TerminalDelegateJobs(ctx context.Context) ([]DelegateJobMapping, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT mapping.execution_key,mapping.job_id
-FROM lifecycle_delegate_job mapping
-JOIN lifecycle_work_item item ON item.work_item_id=mapping.work_item_id
-JOIN agent_jobs job ON job.id=mapping.job_id
-WHERE item.state<>'active' AND job.status IN ('pending','running')
-ORDER BY mapping.job_id LIMIT ?`, terminalCancellationBatchSize)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT mapping.execution_key,mapping.job_id
+FROM lifecycle_delegate_job mapping
+JOIN lifecycle_work_item item ON item.work_item_id=mapping.work_item_id
+JOIN agent_jobs job ON job.id=mapping.job_id
+WHERE item.state IN ('accepted','rejected','stopped','abandoned')
+  AND job.status IN ('pending','running')
+ORDER BY mapping.cancel_attempts,mapping.job_id LIMIT ?`, terminalCancellationBatchSize)
+	if err != nil {
+		return nil, err
+	}
 	var mappings []DelegateJobMapping
 	for rows.Next() {
 		var mapping DelegateJobMapping
@@ -201,7 +208,21 @@ ORDER BY mapping.job_id LIMIT ?`, terminalCancellationBatchSize)
 		}
 		mappings = append(mappings, mapping)
 	}
-	return mappings, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, mapping := range mappings {
+		if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_delegate_job SET cancel_attempts=cancel_attempts+1,updated_at=datetime('now') WHERE execution_key=? AND job_id=?`, mapping.ExecutionKey, mapping.JobID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return mappings, nil
 }
 
 func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
@@ -977,7 +998,7 @@ WITH RECURSIVE orphan(id) AS (
   SELECT child.work_item_id
   FROM lifecycle_work_item child
   JOIN lifecycle_work_item parent ON parent.work_item_id=child.parent_id
-  WHERE child.state='active' AND parent.state<>'active'
+  WHERE child.state='active' AND parent.state IN ('accepted','rejected','stopped','abandoned')
   UNION
   SELECT child.work_item_id
   FROM lifecycle_work_item child JOIN orphan parent ON child.parent_id=parent.id
@@ -1018,7 +1039,7 @@ WITH RECURSIVE orphan(id) AS (
   SELECT child.work_item_id
   FROM lifecycle_work_item child
   JOIN lifecycle_work_item parent ON parent.work_item_id=child.parent_id
-  WHERE child.state='active' AND parent.state<>'active'
+  WHERE child.state='active' AND parent.state IN ('accepted','rejected','stopped','abandoned')
   UNION
   SELECT child.work_item_id
   FROM lifecycle_work_item child JOIN orphan parent ON child.parent_id=parent.id

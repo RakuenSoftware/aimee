@@ -92,6 +92,19 @@ func TestDiscussionRejectsIncompleteBallots(t *testing.T) {
 	}
 }
 
+func TestDiscussionRejectsStaleRunAndArtifactIdentity(t *testing.T) {
+	analysis := discussionAnalysis("blocking")
+	issueID := makeDiscussionIssues(analysis.Feedback.Findings)[0].ID
+	agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) {
+		return fmt.Sprintf(`{"run_id":"another-run","artifact_hash":"stale","positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
+	}}
+	runner := &NativeRunner{agents: agents}
+	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	if !strings.Contains(errText, "discussion quorum 0/2") {
+		t.Fatalf("stale discussion ballots counted as successful: %q", errText)
+	}
+}
+
 func TestDiscussionOrdinaryDisagreementDoesNotExtend(t *testing.T) {
 	analysis := discussionAnalysis("blocking")
 	issueID := makeDiscussionIssues(analysis.Feedback.Findings)[0].ID

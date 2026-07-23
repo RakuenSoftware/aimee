@@ -54,9 +54,9 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-#define SHTTP_MAX_BODY (128 * 1024 * 1024)
-#define SHTTP_BACKLOG  16
-
+#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define SHTTP_BACKLOG             16
 /* ── per-session persona store ──────────────────────────────────────────── */
 
 #define SHTTP_MAX_SESSIONS 256
@@ -1914,8 +1914,6 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
    }
-
-   /* Read the case-insensitive Content-Length body without truncation. */
    char *body = NULL;
    int body_len = 0;
    char clbuf[32] = "";
@@ -1924,13 +1922,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
       errno = 0;
       char *clend = NULL;
       long declared = strtol(clbuf, &clend, 10);
+      int route_limit =
+          !strcmp(path, "/v1/roundtable/review") ? SHTTP_MAX_ROUNDTABLE_BODY : SHTTP_MAX_BODY;
       int invalid = errno == ERANGE || clend == clbuf || *clend != '\0' || declared < 0;
-      if (invalid || declared > SHTTP_MAX_BODY)
+      if (invalid || declared > route_limit)
       {
          server_http_keepalive_set(0);
          send_response(fd, invalid ? 400 : 413,
                        invalid ? "{\"error\":\"invalid content length\"}"
-                               : "{\"error\":\"request body exceeds 128 MiB limit\"}",
+                               : "{\"error\":\"request body exceeds route limit\"}",
                        request_id);
          return;
       }
