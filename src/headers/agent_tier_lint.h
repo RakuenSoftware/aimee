@@ -66,6 +66,25 @@ extern "C"
    int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_per_mtok,
                             double *cached_per_mtok);
 
+   /* Same, but for a request of `context_tokens`. Several providers charge more
+    * above a context threshold (gpt-5.6-sol doubles above 272k), so the BASE
+    * rate returned by agent_resolved_price() is only correct for requests below
+    * the first band. Use this wherever the request size is known; use the base
+    * form only for a headline figure, and label it as such.
+    *
+    * An operator price override, when present, applies at EVERY band: the
+    * operator is stating what they pay, which supersedes the vendor's schedule
+    * rather than being scaled by it. context_tokens <= 0 means "unknown", which
+    * resolves to the base rate. */
+   int agent_resolved_price_at_context(const agent_t *agent, int context_tokens,
+                                       double *in_per_mtok, double *out_per_mtok,
+                                       double *cached_per_mtok);
+
+   /* Does this agent have context-band pricing that its configured context
+    * ceiling can actually reach? Used to avoid asserting a definitive price
+    * ordering for an agent whose applicable rate depends on request size. */
+   int agent_has_reachable_price_band(const agent_t *agent);
+
 #ifdef __cplusplus
 }
 #endif

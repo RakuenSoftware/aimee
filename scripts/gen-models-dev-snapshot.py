@@ -58,8 +58,14 @@ def prune_model(m):
     # axes plus cache_read, drop the bands to hold the artifact down.
     cost = out.get("cost")
     if isinstance(cost, dict):
+        # `tiers` carries CONTEXT-BAND prices and must be kept: several providers
+        # charge more above a threshold, and dropping it would make the snapshot
+        # report a large-context model at half its applicable rate. The legacy
+        # `context_over_200k` alias is dropped instead — its key does not encode
+        # the real threshold (sol's is 272000, MiniMax-M3's is 512000), so the C
+        # reader ignores it and only reads tiers[].tier.size.
         out["cost"] = {k: v for k, v in cost.items()
-                       if k in ("input", "output", "cache_read", "cache_write")}
+                       if k in ("input", "output", "cache_read", "cache_write", "tiers")}
     return out
 
 

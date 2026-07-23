@@ -146,6 +146,60 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
  *
  * Reading both keeps the atomic-rename download and leaves the override format
  * untouched, instead of rewriting bytes we did not author. */
+/* Context-band prices from `cost.tiers[]`.
+ *
+ * Only the structured tier entries are read. The registry also publishes a
+ * `context_over_200k` alias, but its KEY DOES NOT ENCODE THE THRESHOLD —
+ * gpt-5.6-sol's real boundary is 272000 and MiniMax-M3's is 512000, both under
+ * that same key — so trusting the name would price large-context requests at the
+ * wrong band. Only `tier.type == "context"` is understood; any other tier type
+ * is skipped rather than guessed at. Bands are kept ascending so a lookup can
+ * take the last one whose threshold the context exceeds. */
+static void fill_price_bands(cJSON *cost, model_capability_t *out)
+{
+   cJSON *tiers = cJSON_GetObjectItemCaseSensitive(cost, "tiers");
+   if (!cJSON_IsArray(tiers))
+      return;
+
+   cJSON *t;
+   cJSON_ArrayForEach(t, tiers)
+   {
+      if (out->price_band_count >= MODEL_PRICE_BANDS_MAX)
+         break;
+      if (!cJSON_IsObject(t))
+         continue;
+      cJSON *spec = cJSON_GetObjectItemCaseSensitive(t, "tier");
+      if (!cJSON_IsObject(spec))
+         continue;
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(spec, "type"));
+      if (!type || strcmp(type, "context") != 0)
+         continue;
+      int above = 0;
+      if (!json_int_checked(cJSON_GetObjectItemCaseSensitive(spec, "size"), &above) || above <= 0)
+         continue;
+
+      model_price_band_t band;
+      memset(&band, 0, sizeof(band));
+      band.above_tokens = above;
+      /* A band with no usable input/output price tells us nothing. */
+      if (!json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "input"), &band.in_per_mtok) ||
+          !json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "output"), &band.out_per_mtok))
+         continue;
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
+                                &band.cache_read_per_mtok);
+
+      /* Insertion sort: the array is at most MODEL_PRICE_BANDS_MAX long. */
+      int i = out->price_band_count;
+      while (i > 0 && out->price_bands[i - 1].above_tokens > band.above_tokens)
+      {
+         out->price_bands[i] = out->price_bands[i - 1];
+         i--;
+      }
+      out->price_bands[i] = band;
+      out->price_band_count++;
+   }
+}
+
 static void fill_cap_from_nested(cJSON *entry, const char *provider, const char *model_id,
                                  model_capability_t *out)
 {
@@ -170,6 +224,7 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char 
                                 &out->cost_out_per_mtok);
       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "cache_read"),
                                 &out->cost_cache_read_per_mtok);
+      fill_price_bands(cost, out);
    }
 
    /* models.dev spells tool use "tool_call". REASONING has no flat-schema

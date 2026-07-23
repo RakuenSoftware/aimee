@@ -3,6 +3,7 @@
 #include "agent_tier_lint.h"
 #include "agent_config.h"
 #include "model_registry.h"
+#include <limits.h>
 #include <string.h>
 
 /* Effective $/Mtok for an agent: operator override first, catalog second. The
@@ -48,6 +49,82 @@ int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_
    if (out_per_mtok)
       *out_per_mtok = out_price;
    return 1;
+}
+
+/* Effective context ceiling: the operator's policy window when set, else the
+ * model's catalogued capability. This is how far a request can actually go, and
+ * therefore which bands are reachable. */
+static int agent_effective_context_ceiling(const agent_t *agent, const model_capability_t *cap)
+{
+   if (agent->middleware.context_window > 0)
+      return agent->middleware.context_window;
+   return cap ? cap->context_window : 0;
+}
+
+int agent_resolved_price_at_context(const agent_t *agent, int context_tokens, double *in_per_mtok,
+                                    double *out_per_mtok, double *cached_per_mtok)
+{
+   if (!agent)
+      return 0;
+
+   model_capability_t cap;
+   int have_cap =
+       agent->model[0] && model_capability_get(agent_catalog_provider(agent), agent->model, &cap);
+
+   double in_price = have_cap ? cap.cost_in_per_mtok : 0.0;
+   double out_price = have_cap ? cap.cost_out_per_mtok : 0.0;
+   double cached_price = have_cap ? cap.cost_cache_read_per_mtok : 0.0;
+
+   /* Highest band whose threshold this request exceeds. Bands are ascending. */
+   if (have_cap && context_tokens > 0)
+   {
+      for (int i = 0; i < cap.price_band_count; i++)
+      {
+         if (context_tokens > cap.price_bands[i].above_tokens)
+         {
+            in_price = cap.price_bands[i].in_per_mtok;
+            out_price = cap.price_bands[i].out_per_mtok;
+            cached_price = cap.price_bands[i].cache_read_per_mtok;
+         }
+      }
+   }
+
+   /* The operator override states what THEY pay and so wins at every band. */
+   if (agent->price_in_per_mtok > 0.0)
+      in_price = agent->price_in_per_mtok;
+   if (agent->price_out_per_mtok > 0.0)
+      out_price = agent->price_out_per_mtok;
+   if (agent->price_cached_per_mtok > 0.0)
+      cached_price = agent->price_cached_per_mtok;
+
+   if (cached_per_mtok)
+      *cached_per_mtok = cached_price > 0.0 ? cached_price : 0.0;
+   if (in_price <= 0.0 || out_price <= 0.0)
+      return 0;
+   if (in_per_mtok)
+      *in_per_mtok = in_price;
+   if (out_per_mtok)
+      *out_per_mtok = out_price;
+   return 1;
+}
+
+int agent_has_reachable_price_band(const agent_t *agent)
+{
+   if (!agent || !agent->model[0])
+      return 0;
+   /* A full operator override makes the vendor schedule irrelevant. */
+   if (agent->price_in_per_mtok > 0.0 && agent->price_out_per_mtok > 0.0)
+      return 0;
+   model_capability_t cap;
+   if (!model_capability_get(agent_catalog_provider(agent), agent->model, &cap))
+      return 0;
+   int ceiling = agent_effective_context_ceiling(agent, &cap);
+   for (int i = 0; i < cap.price_band_count; i++)
+   {
+      if (ceiling <= 0 || ceiling > cap.price_bands[i].above_tokens)
+         return 1;
+   }
+   return 0;
 }
 
 /* Could these two agents ever be candidates for the SAME route? Comparing tiers
@@ -145,6 +222,24 @@ int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t 
          /* ... and they actually compete for the same work. */
          if (!agents_compete_for_a_role(a, b))
             continue;
+
+         /* ... and the ordering does not depend on request size. When either
+          * agent can reach a context band its applicable rate changes with the
+          * request, so a single comparison cannot support the definitive advice
+          * "routing prefers the more expensive model". Require the dominance to
+          * hold at the TOP band too; if it does not, stay silent rather than
+          * issue advice that is wrong for part of the operating range. */
+         if (agent_has_reachable_price_band(a) || agent_has_reachable_price_band(b))
+         {
+            double a_in_top = 0.0, a_out_top = 0.0, b_in_top = 0.0, b_out_top = 0.0;
+            /* INT_MAX selects the highest band each model publishes. */
+            if (!agent_resolved_price_at_context(a, INT_MAX, &a_in_top, &a_out_top, NULL) ||
+                !agent_resolved_price_at_context(b, INT_MAX, &b_in_top, &b_out_top, NULL))
+               continue;
+            if (!(a_in_top >= b_in_top && a_out_top >= b_out_top &&
+                  (a_in_top > b_in_top || a_out_top > b_out_top)))
+               continue;
+         }
 
          if (out && found < max)
          {

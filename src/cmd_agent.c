@@ -5,6 +5,7 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tier_lint.h" /* agent_resolved_price */
+#include "model_registry.h"
 #include <math.h>
 #include <errno.h>
 #include "agent_tunnel.h"
@@ -430,12 +431,40 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
             double pin = 0.0, pout = 0.0, pcached = 0.0;
             if (agent_resolved_price(ag, &pin, &pout, &pcached))
             {
-               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
-               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
+               /* BASE-BAND rate. Named so a consumer cannot mistake it for the
+                * effective price of a large request: several providers charge
+                * more above a context threshold, and this figure is only correct
+                * below the first band. `price_bands` carries the rest. */
+               cJSON_AddNumberToObject(obj, "price_base_in_per_mtok", pin);
+               cJSON_AddNumberToObject(obj, "price_base_out_per_mtok", pout);
                /* Omitted entirely when unpublished, so a consumer cannot mistake
                 * an absent cache rate for a free one. */
                if (pcached > 0.0)
-                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
+                  cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
+
+               model_capability_t cap;
+               if (ag->model[0] &&
+                   model_capability_get(agent_catalog_provider(ag), ag->model, &cap) &&
+                   cap.price_band_count > 0)
+               {
+                  cJSON *bands = cJSON_AddArrayToObject(obj, "price_bands");
+                  for (int b = 0; bands && b < cap.price_band_count; b++)
+                  {
+                     double bin = 0.0, bout = 0.0, bcached = 0.0;
+                     int above = cap.price_bands[b].above_tokens;
+                     if (!agent_resolved_price_at_context(ag, above + 1, &bin, &bout, &bcached))
+                        continue;
+                     cJSON *e = cJSON_CreateObject();
+                     if (!e)
+                        continue;
+                     cJSON_AddNumberToObject(e, "above_tokens", above);
+                     cJSON_AddNumberToObject(e, "in_per_mtok", bin);
+                     cJSON_AddNumberToObject(e, "out_per_mtok", bout);
+                     if (bcached > 0.0)
+                        cJSON_AddNumberToObject(e, "cached_per_mtok", bcached);
+                     cJSON_AddItemToArray(bands, e);
+                  }
+               }
             }
             cJSON_AddBoolToObject(obj, "price_overridden",
                                   ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
@@ -481,7 +510,7 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
             char cached[32] = "";
             if (pcached > 0.0)
                snprintf(cached, sizeof(cached), " cached=$%.2f", pcached);
-            snprintf(price, sizeof(price), " in=$%.2f out=$%.2f%s%s", pin, pout, cached,
+            snprintf(price, sizeof(price), " base in=$%.2f out=$%.2f%s%s", pin, pout, cached,
                      (ag->price_in_per_mtok > 0.0 || ag->price_out_per_mtok > 0.0 ||
                       ag->price_cached_per_mtok > 0.0)
                          ? " *"

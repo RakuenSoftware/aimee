@@ -38,6 +38,28 @@ enum
  * min_context instead, rather than hard-failing the whole task fleet-wide. */
 #define MODEL_CAP_MODALITY_SOFT (MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_AUDIO)
 
+/* Context-band pricing. Several providers charge more once a request's context
+ * exceeds a threshold — gpt-5.6-sol doubles to $10/$45 above 272k, MiniMax-M3
+ * above 512k — so price is a function of (model, context size), not one number
+ * per model. Treating the base rate as authoritative would display and compare a
+ * large-context agent at HALF its applicable rate.
+ *
+ * NOTE the registry also publishes a legacy `context_over_200k` key whose NAME
+ * does not encode the real threshold (sol's is 272000, MiniMax-M3's is 512000).
+ * Only the structured `tiers[].tier.size` is authoritative; the legacy alias is
+ * ignored. Of 5728 catalogued models, 252 publish bands: 245 with one and 7 with
+ * two, all of type "context". */
+#define MODEL_PRICE_BANDS_MAX 4
+
+typedef struct
+{
+   /* The band applies when the request context EXCEEDS this many tokens. */
+   int above_tokens;
+   double in_per_mtok;
+   double out_per_mtok;
+   double cache_read_per_mtok;
+} model_price_band_t;
+
 typedef struct
 {
    char provider[MODEL_PROVIDER_MAX];
@@ -50,6 +72,10 @@ typedef struct
     * it dominates real spend on any prompt-caching workload and cannot be
     * approximated by the input rate. 0 = the source published none. */
    double cost_cache_read_per_mtok;
+   /* Bands above the base rate, ascending by `above_tokens`. Empty (count 0)
+    * means a single flat price at every context size. */
+   model_price_band_t price_bands[MODEL_PRICE_BANDS_MAX];
+   int price_band_count;
    unsigned flags;
    char modalities[64];
    char knowledge_cutoff[16];

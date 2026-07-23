@@ -87,7 +87,32 @@ static void seed_priced_catalog(void)
                       "                      \"outputCost\":5.0,\"tools\":true},"
                       /* Output price ABSENT: partial data, not a known zero. */
                       "\"testvendor/partial\":{\"contextWindow\":100000,\"inputCost\":1.0,"
-                      "                      \"tools\":true}"
+                      "                      \"tools\":true},"
+                      /* Banded models use the NESTED schema, the only form that
+                       * carries cost.tiers. Mirrors gpt-5.6-sol: base $5/$30,
+                       * doubling above 272k. */
+                      "\"banded\": {\"models\": {"
+                      "  \"sol_like\": {\"limit\":{\"context\":1050000},"
+                      "     \"cost\":{\"input\":5.0,\"output\":30.0,\"cache_read\":0.5,"
+                      "       \"tiers\":[{\"input\":10.0,\"output\":45.0,\"cache_read\":1.0,"
+                      "         \"tier\":{\"type\":\"context\",\"size\":272000}}]},"
+                      "     \"tool_call\":true},"
+                      /* Flat-priced peer, dearer than sol_like's BASE band but
+                       * cheaper than its top band: the ordering flips. */
+                      "  \"flat_mid\": {\"limit\":{\"context\":1050000},"
+                      "     \"cost\":{\"input\":7.0,\"output\":35.0},\"tool_call\":true},"
+                      /* Dearer than sol_like at EVERY band. */
+                      "  \"flat_dear\": {\"limit\":{\"context\":1050000},"
+                      "     \"cost\":{\"input\":20.0,\"output\":90.0},\"tool_call\":true},"
+                      /* Two bands, to prove ascending selection. */
+                      "  \"two_band\": {\"limit\":{\"context\":1000000},"
+                      "     \"cost\":{\"input\":1.0,\"output\":2.0,"
+                      "       \"tiers\":[{\"input\":4.0,\"output\":8.0,"
+                      "         \"tier\":{\"type\":\"context\",\"size\":500000}},"
+                      "        {\"input\":2.0,\"output\":4.0,"
+                      "         \"tier\":{\"type\":\"context\",\"size\":100000}}]},"
+                      "     \"tool_call\":true}"
+                      "}}"
                       "}";
    FILE *f = fopen(path, "w");
    assert(f);
@@ -441,6 +466,128 @@ static void test_implicit_exec_role_competition_is_detected(void)
    printf("  PASS: test_implicit_exec_role_competition_is_detected\n");
 }
 
+/* Context-band pricing. Several providers charge more once a request exceeds a
+ * threshold, so the base rate is only correct below the first band. The
+ * authoritative threshold is cost.tiers[].tier.size — the registry's legacy
+ * `context_over_200k` key name does NOT encode it (the real boundary is 272000
+ * for gpt-5.6-sol and 512000 for MiniMax-M3), which is why that alias is
+ * ignored entirely. */
+static void test_price_bands_resolve_by_context(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "sol_like", "banded", "sol_like", 0);
+
+   double in = 0.0, out = 0.0, cached = 0.0;
+
+   /* Below the threshold: base band. */
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 1000, &in, &out, &cached) == 1);
+   assert(in == 5.0 && out == 30.0 && cached == 0.5);
+
+   /* Exactly AT the threshold is still base: the band applies ABOVE it. */
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 272000, &in, &out, &cached) == 1);
+   assert(in == 5.0 && out == 30.0);
+
+   /* One token above flips to the band. */
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 272001, &in, &out, &cached) == 1);
+   assert(in == 10.0 && out == 45.0 && cached == 1.0);
+
+   /* Unknown context resolves to base, as does the plain accessor. */
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 0, &in, &out, NULL) == 1);
+   assert(in == 5.0);
+   assert(agent_resolved_price(&cfg.agents[0], &in, &out, NULL) == 1);
+   assert(in == 5.0 && out == 30.0);
+
+   printf("  PASS: test_price_bands_resolve_by_context\n");
+}
+
+/* Bands are stored ascending regardless of the order the registry lists them,
+ * so a lookup can take the last threshold the context exceeds. */
+static void test_price_bands_sorted_ascending(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "two_band", "banded", "two_band", 0);
+
+   model_capability_t cap;
+   assert(model_capability_get("banded", "two_band", &cap) != 0);
+   assert(cap.price_band_count == 2);
+   /* Declared 500000 first, then 100000 — must be stored ascending. */
+   assert(cap.price_bands[0].above_tokens == 100000);
+   assert(cap.price_bands[1].above_tokens == 500000);
+
+   double in = 0.0, out = 0.0;
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 50000, &in, &out, NULL) == 1);
+   assert(in == 1.0);
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 200000, &in, &out, NULL) == 1);
+   assert(in == 2.0);
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 900000, &in, &out, NULL) == 1);
+   assert(in == 4.0);
+
+   printf("  PASS: test_price_bands_sorted_ascending\n");
+}
+
+/* The lint must not issue definitive advice when the ordering DEPENDS on request
+ * size: sol_like is cheaper than flat_mid at base ($5/$30 vs $7/$35) but dearer
+ * above 272k ($10/$45). Telling the operator to re-tier would be wrong for part
+ * of the operating range, so the pair is left alone. */
+static void test_band_dependent_ordering_is_not_flagged(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   /* flat_mid at the CHEAPER tier while dearer at base => a base-only
+    * comparison would report a conflict. */
+   add_agent(&cfg, "flat_mid_t0", "banded", "flat_mid", 0);
+   add_agent(&cfg, "sol_like_t1", "banded", "sol_like", 1);
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   printf("  PASS: test_band_dependent_ordering_is_not_flagged\n");
+}
+
+/* When the dominance holds at EVERY band the finding is still reported: banded
+ * pricing must not become a blanket excuse to say nothing. */
+static void test_band_stable_ordering_is_still_flagged(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   /* flat_dear ($20/$90) is dearer than sol_like at base AND above 272k. */
+   add_agent(&cfg, "flat_dear_t0", "banded", "flat_dear", 0);
+   add_agent(&cfg, "sol_like_t1", "banded", "sol_like", 1);
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+   assert(strcmp(out[0].cheaper_tier_agent, "flat_dear_t0") == 0);
+
+   printf("  PASS: test_band_stable_ordering_is_still_flagged\n");
+}
+
+/* A policy ceiling at or below the first threshold makes the band unreachable,
+ * so the agent's price is effectively flat and definitive advice is fine. */
+static void test_unreachable_band_is_ignored(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "capped", "banded", "sol_like", 0);
+   cfg.agents[0].middleware.context_window = 272000; /* cannot exceed the band */
+   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 0);
+
+   cfg.agents[0].middleware.context_window = 400000; /* can exceed it */
+   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 1);
+
+   /* A full operator override makes the vendor schedule irrelevant. */
+   cfg.agents[0].price_in_per_mtok = 1.0;
+   cfg.agents[0].price_out_per_mtok = 2.0;
+   assert(agent_has_reachable_price_band(&cfg.agents[0]) == 0);
+   /* ...and that override applies at every band, not just the base. */
+   double in = 0.0, out = 0.0;
+   assert(agent_resolved_price_at_context(&cfg.agents[0], 900000, &in, &out, NULL) == 1);
+   assert(in == 1.0 && out == 2.0);
+
+   printf("  PASS: test_unreachable_band_is_ignored\n");
+}
+
 int main(void)
 {
    printf("agent_tier_lint:\n");
@@ -458,6 +605,11 @@ int main(void)
    test_operator_price_override_wins();
    test_price_override_per_axis();
    test_cached_price_axis();
+   test_price_bands_resolve_by_context();
+   test_price_bands_sorted_ascending();
+   test_band_dependent_ordering_is_not_flagged();
+   test_band_stable_ordering_is_still_flagged();
+   test_unreachable_band_is_ignored();
    test_guards();
    printf("agent_tier_lint: all tests passed\n");
    return 0;

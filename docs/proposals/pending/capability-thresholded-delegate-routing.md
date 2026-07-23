@@ -399,7 +399,12 @@ So `gpt-5.6-sol` **doubles** to $10/$45 above 272k, and MiniMax-M3 doubles above
 confirms the operator's constraint is not a preference but a real billing cliff, and it means
 price is a function of (model, context band), not one number per model.
 
-Not yet consumed: `model_capability_t` holds a single price triple. Implications for later
+**RESOLVED 2026-07-23** — bands are now modelled; what follows was the gap.
+Correction: the MiniMax-M3 threshold is **512,000**, not 200,000. The registry's
+`context_over_200k` key name does not encode the real threshold (sol's is 272,000),
+so only the structured `cost.tiers[].tier.size` is authoritative.
+
+Superseded gap description: `model_capability_t` held a single price triple. Implications for later
 slices — a routing decision that pushes a packet across a band changes the price by 2x, so any
 cost comparison must know which band the packet lands in; and §7's economizer interaction is
 sharper, since a context-reducing transform that crosses a band downward is a genuine, provable
