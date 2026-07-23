@@ -118,6 +118,7 @@ if(WIN32)
     set(PLATFORM_AGENT_SRCS
         ${AIMEE_SRC_DIR}/windows/agent_runtime.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
+        ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/windows/cmd_infra.c
@@ -169,6 +170,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
+        ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
@@ -228,6 +230,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
+        ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
@@ -282,6 +285,7 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/cli_client.c
         ${AIMEE_SRC_DIR}/windows/memory.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
+        ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
 elseif(APPLE)
     set(CLIENT_SUPPORT_SRCS

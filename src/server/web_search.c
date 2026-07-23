@@ -10,6 +10,7 @@
 #include "agent_exec.h"
 #include "config.h"
 #include "http_retry.h"
+#include "web_egress.h"
 #include "dstr.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -265,7 +266,11 @@ static char *backend_duckduckgo(const char *query, int max_results)
        "Accept: text/html,application/xhtml+xml";
 
    char *html = NULL;
-   int status = agent_http_get(url, ddg_headers, &html, 15000);
+   /* Guarded path (web_egress.h). The endpoint is a compile-time constant today,
+    * but routing it here means adding a caller cannot miss the guard. */
+   const char *eg_err = NULL;
+   html = web_egress_fetch(url, WEB_EGRESS_UNTRUSTED, ddg_headers, 15000, 0, &eg_err);
+   int status = html ? 200 : -1;
    if (status < 0 || !html)
    {
       free(html);
@@ -299,7 +304,14 @@ static char *backend_searxng(const char *query, int max_results, const char *bas
    free(encoded);
 
    char *resp = NULL;
-   int status = agent_http_get(url, NULL, &resp, 15000);
+   /* Operator-configured endpoint. Validated like any other destination; a
+    * private address is permitted only when the DEPLOYMENT opted in via
+    * AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT. config.set is capability-gated, but an
+    * admin-capable session pointing this at a metadata address would exfiltrate
+    * instance credentials through something that looks like search. */
+   const char *eg_err = NULL;
+   resp = web_egress_fetch(url, WEB_EGRESS_CONFIGURED, NULL, 15000, 0, &eg_err);
+   int status = resp ? 200 : -1;
    if (status < 0 || !resp)
    {
       free(resp);
