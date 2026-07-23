@@ -33,6 +33,8 @@
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "server_mgmt_status.h"
 #include "server_mgmt_endpoint.h"
+#include "server_mgmt_read_endpoint.h"
+#include "server_http_mgmt_read_routes.h"
 #include "server_mgmt_jwks_cache.h"
 #include "server_management_jti.h"
 #include "server_mgmt_audit.h"
@@ -84,6 +86,7 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
 #include <openssl/evp.h>
 #include <openssl/sha.h>
+#include <openssl/rand.h>
 #include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
 #include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
 #include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
@@ -296,17 +299,23 @@ static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 
 static int mgmt_b64url(const unsigned char *in, size_t n, char *out, size_t cap)
 {
-   size_t need = 4 * ((n + 2) / 3);
-   if (!in || !out || cap <= need)
+   unsigned char encoded[65];
+   size_t padded = 4 * ((n + 2) / 3);
+   size_t padding = n % 3 ? 3 - (n % 3) : 0;
+   size_t need = padded - padding;
+   if (!in || !out || padded + 1 > sizeof(encoded) || cap <= need)
       return -1;
-   int got = EVP_EncodeBlock((unsigned char *)out, in, (int)n);
+   int got = EVP_EncodeBlock(encoded, in, (int)n);
    if (got <= 0)
       return -1;
-   for (int i = 0; i < got; i++)
-      out[i] = out[i] == '+' ? '-' : (out[i] == '/' ? '_' : out[i]);
-   while (got > 0 && out[got - 1] == '=')
+   while (got > 0 && encoded[got - 1] == '=')
       got--;
+   if ((size_t)got != need)
+      return -1;
+   for (int i = 0; i < got; i++)
+      out[i] = encoded[i] == '+' ? '-' : (encoded[i] == '/' ? '_' : (char)encoded[i]);
    out[got] = '\0';
+   OPENSSL_cleanse(encoded, sizeof(encoded));
    return 0;
 }
 
@@ -324,6 +333,12 @@ static int mgmt_hex_key(const char *hex, unsigned char key[32])
       key[i] = (unsigned char)((a << 4) | b);
    }
    return 0;
+}
+
+static int rh_management_read_agents(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return server_http_mgmt_read_agents(resp, cap);
 }
 
 static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, int cap,
@@ -346,8 +361,13 @@ static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, in
    char enc[48];
    if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
       return err_json(resp, cap, 503, "management challenge unavailable");
-   snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
-            (unsigned long long)expiry);
+   if (!strcmp(purpose, "management.read.v1"))
+      snprintf(resp, (size_t)cap,
+               "{\"nonce\":\"%s\",\"purpose\":\"management.read.v1\",\"expires_at\":%llu}", enc,
+               (unsigned long long)expiry);
+   else
+      snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
+               (unsigned long long)expiry);
    if (!strcmp(purpose, "management.health.v1"))
       server_http_keepalive_set(1);
    return 200;
@@ -363,6 +383,17 @@ static int rh_management_action_challenge(const route_req_t *rq, char *resp, int
    int status = rh_management_challenge_purpose(rq, resp, cap, "management.action.v1");
    if (status == 200)
       server_http_keepalive_set(1);
+   return status;
+}
+
+static int rh_management_read_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   else
+      status = server_http_mgmt_read_error(
+          status == 401 ? SERVER_MGMT_READ_FORBIDDEN : SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
    return status;
 }
 
@@ -1697,8 +1728,11 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
     {"POST", "/v1/management/action/challenge", NULL, RM_EXACT, NULL, 0,
      rh_management_action_challenge},
+    {"POST", "/v1/management/read/challenge", NULL, RM_EXACT, NULL, 0,
+     rh_management_read_challenge},
     {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
+    {"GET", "/v1/management/read/agents", NULL, RM_EXACT, NULL, 0, rh_management_read_agents},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},

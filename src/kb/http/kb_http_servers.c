@@ -5,6 +5,7 @@
 #include "kb_reqctx.h"
 #include "cJSON.h"
 #include <openssl/crypto.h>
+#include <openssl/rand.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -23,6 +24,75 @@ static kb_http_servers_action_handler_fn action_handler;
 static void *action_ctx;
 static unsigned action_inflight;
 static int action_unregistering;
+static pthread_mutex_t read_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t read_cv = PTHREAD_COND_INITIALIZER;
+static kb_http_servers_read_handler_fn read_handler;
+static void *read_ctx;
+static unsigned read_inflight;
+static int read_unregistering;
+
+static int read_correlation(char out[44])
+{
+   static const char alphabet[] =
+       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+   unsigned char random[32];
+   memset(random, 0, sizeof(random));
+   if (RAND_bytes(random, sizeof(random)) != 1)
+   {
+      OPENSSL_cleanse(random, sizeof(random));
+      out[0] = 0;
+      return -1;
+   }
+   uint32_t accumulator = 0;
+   unsigned bits = 0;
+   size_t n = 0;
+   for (size_t i = 0; i < sizeof(random); ++i)
+   {
+      accumulator = (accumulator << 8) | random[i];
+      bits += 8;
+      while (bits >= 6)
+      {
+         bits -= 6;
+         out[n++] = alphabet[(accumulator >> bits) & 63];
+         accumulator &= bits ? (1U << bits) - 1U : 0U;
+      }
+   }
+   out[n++] = alphabet[(accumulator << 4) & 63];
+   out[n] = 0;
+   OPENSSL_cleanse(random, sizeof(random));
+   return 0;
+}
+
+int kb_http_servers_read_register(kb_http_servers_read_handler_fn handler, void *ctx)
+{
+   if (!handler)
+      return -1;
+   pthread_mutex_lock(&read_mu);
+   int rc = !read_handler && !read_unregistering && !read_inflight ? 0 : -1;
+   if (!rc)
+      read_handler = handler, read_ctx = ctx;
+   pthread_mutex_unlock(&read_mu);
+   return rc;
+}
+
+int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn handler, void *ctx)
+{
+   pthread_mutex_lock(&read_mu);
+   if (!handler || read_handler != handler || read_ctx != ctx || read_unregistering)
+   {
+      pthread_mutex_unlock(&read_mu);
+      return -1;
+   }
+   read_unregistering = 1;
+   read_handler = NULL;
+   read_ctx = NULL;
+   while (read_inflight)
+      pthread_cond_wait(&read_cv, &read_mu);
+   read_unregistering = 0;
+   pthread_cond_broadcast(&read_cv);
+   pthread_mutex_unlock(&read_mu);
+   return 0;
+}
 
 int kb_http_servers_action_register(kb_http_servers_action_handler_fn handler, void *ctx)
 {
@@ -318,6 +388,65 @@ static int action_dispatch(const kb_principal_t *actor, int64_t team, const char
    return status;
 }
 
+static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *server, char *out,
+                         int cap)
+{
+   char correlation[44];
+   memset(out, 0, (size_t)cap);
+   int have_correlation = !read_correlation(correlation);
+   pthread_mutex_lock(&read_mu);
+   kb_http_servers_read_handler_fn handler = read_handler;
+   void *ctx = read_ctx;
+   if (handler)
+      read_inflight++;
+   pthread_mutex_unlock(&read_mu);
+   if (!handler)
+   {
+      if (have_correlation)
+         snprintf(out, (size_t)cap,
+                  "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\","
+                  "\"correlation_id\":\"%s\"}}",
+                  correlation);
+      else
+         snprintf(out, (size_t)cap,
+                  "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\"}}");
+      return 503;
+   }
+   kb_management_read_result_t rc = handler(ctx, actor, team, server, out, (size_t)cap);
+   pthread_mutex_lock(&read_mu);
+   if (!--read_inflight)
+      pthread_cond_broadcast(&read_cv);
+   pthread_mutex_unlock(&read_mu);
+   if (rc == KB_MANAGEMENT_READ_OK)
+      return 200;
+   memset(out, 0, (size_t)cap);
+   int status = rc == KB_MANAGEMENT_READ_INVALID     ? 400
+                : rc == KB_MANAGEMENT_READ_DENIED    ? 403
+                : rc == KB_MANAGEMENT_READ_NOT_FOUND ? 404
+                : rc == KB_MANAGEMENT_READ_CONFLICT  ? 409
+                : rc == KB_MANAGEMENT_READ_INTEGRITY ? 502
+                                                     : 503;
+   const char *code = status == 400   ? "invalid_request"
+                      : status == 403 ? "forbidden"
+                      : status == 404 ? "not_found"
+                      : status == 409 ? "conflict"
+                      : status == 502 ? "integrity"
+                                      : "unavailable";
+   const char *message = status == 400   ? "Invalid request."
+                         : status == 403 ? "Forbidden."
+                         : status == 404 ? "Not found."
+                         : status == 409 ? "Request conflict."
+                         : status == 502 ? "Integrity verification failed."
+                                         : "Service unavailable.";
+   if (have_correlation)
+      snprintf(out, (size_t)cap,
+               "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}", code,
+               message, correlation);
+   else
+      snprintf(out, (size_t)cap, "{\"error\":{\"code\":\"%s\",\"message\":\"%s\"}}", code, message);
+   return status;
+}
+
 int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const char *body,
                              size_t body_len, char *out, int cap)
 {
@@ -335,9 +464,10 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
          return -1;
       int is_health = !strcmp(slash, "/health");
       int is_action = !strcmp(slash, "/actions");
-      if (!is_health && !is_action)
+      int is_read = !strcmp(slash, "/agents");
+      if (!is_health && !is_action && !is_read)
          return -1;
-      if ((is_health && strcmp(m, "GET")) || (is_action && strcmp(m, "POST")))
+      if (((is_health || is_read) && strcmp(m, "GET")) || (is_action && strcmp(m, "POST")))
          return 405;
       memcpy(sid, id, (size_t)(slash - id));
       sid[slash - id] = 0;
@@ -348,8 +478,8 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
       }
       char t[32];
       int64_t team;
-      int team_query = is_action ? (q_exact_team(qs, t, sizeof(t)) ? -1 : 1)
-                                 : q_unique(qs, "team", t, sizeof(t));
+      int team_query = (is_action || is_read) ? (q_exact_team(qs, t, sizeof(t)) ? -1 : 1)
+                                              : q_unique(qs, "team", t, sizeof(t));
       if (team_query == 0)
       {
          snprintf(out, cap, "{\"error\":\"team is required\"}");
@@ -381,6 +511,12 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
          }
          OPENSSL_cleanse(&parsed, sizeof(parsed));
          return action_dispatch(actor, team, sid, body, body_len, out, cap);
+      }
+      if (is_read)
+      {
+         if ((body && body_len) || body_len)
+            return 400;
+         return read_dispatch(actor, team, sid, out, cap);
       }
       return health_dispatch(actor, team, sid, out, cap);
    }

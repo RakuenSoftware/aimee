@@ -13,7 +13,8 @@ extern "C"
 
    typedef enum
    {
-      KB_MGMT_TOKEN_CAP_REMOTE_WRITES = 1
+      KB_MGMT_TOKEN_CAP_REMOTE_WRITES = 1,
+      KB_MGMT_TOKEN_CAP_REMOTE_READS = 2
    } kb_mgmt_token_capability_t;
 
    typedef struct

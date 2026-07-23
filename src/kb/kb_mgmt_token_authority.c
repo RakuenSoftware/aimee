@@ -93,7 +93,9 @@ int kb_mgmt_token_authority_record_valid(const kb_mgmt_token_authority_record_t 
    if (!r || (r->newly_admitted != 0 && r->newly_admitted != 1) ||
        !exact_hex(r->correlation_id, sizeof(r->correlation_id), 64) ||
        !exact_hex(r->jti, sizeof(r->jti), 64) || r->team_id < 1 ||
-       !canonical_actor(r->actor_identity) || r->capability != KB_MGMT_TOKEN_CAP_REMOTE_WRITES ||
+       !canonical_actor(r->actor_identity) ||
+       (r->capability != KB_MGMT_TOKEN_CAP_REMOTE_WRITES &&
+        r->capability != KB_MGMT_TOKEN_CAP_REMOTE_READS) ||
        !fixed_text(r->target_server_id, sizeof(r->target_server_id), 1, 127, 1) ||
        !exact_hex(r->request_sha256, sizeof(r->request_sha256), 64) ||
        !fixed_text(r->token_issuer, sizeof(r->token_issuer), 1, 255, 0) ||

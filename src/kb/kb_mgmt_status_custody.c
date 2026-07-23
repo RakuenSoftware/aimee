@@ -246,10 +246,17 @@ kb_mgmt_status_custody_sign_checkpoint(kb_mgmt_checkpoint_t *checkpoint,
    }
    cleanup.mutex_locked = 1;
    pthread_cleanup_push(custody_cleanup, &cleanup);
-   if (kb_mgmt_checkpoint_transcript(checkpoint, transcript, sizeof(transcript), &transcript_len) ||
-       hash_domain("management.action.checkpoint.request.v1\n", transcript, transcript_len,
-                   request_hash) ||
-       hash_domain("management.action.checkpoint.use.v1\n", transcript, transcript_len, use_hash))
+   const char *request_domain = !strcmp(request->purpose, "management.read.v1")
+                                    ? "management.read.checkpoint.request.v1\n"
+                                    : "management.action.checkpoint.request.v1\n";
+   const char *use_domain = !strcmp(request->purpose, "management.read.v1")
+                                ? "management.read.checkpoint.use.v1\n"
+                                : "management.action.checkpoint.use.v1\n";
+   if ((strcmp(request->purpose, "management.action.v1") &&
+        strcmp(request->purpose, "management.read.v1")) ||
+       kb_mgmt_checkpoint_transcript(checkpoint, transcript, sizeof(transcript), &transcript_len) ||
+       hash_domain(request_domain, transcript, transcript_len, request_hash) ||
+       hash_domain(use_domain, transcript, transcript_len, use_hash))
       goto checkpoint_done;
    hex32(request_hash, request_digest);
    hex32(use_hash, use_id);

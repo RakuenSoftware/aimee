@@ -47,6 +47,10 @@ server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bu
                                                             size_t trust_bundle_len, int64_t now,
                                                             char *jwks_out, size_t jwks_cap,
                                                             size_t *jwks_len);
+server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_current_generation(const char *trust_bundle,
+                                                                          size_t trust_bundle_len,
+                                                                          int64_t now,
+                                                                          int64_t *generation);
 
 typedef int (*server_mgmt_jwks_fetch_fn)(void *ctx, char *envelope_out, size_t envelope_cap,
                                          size_t *envelope_len);
@@ -65,6 +69,12 @@ server_mgmt_token_result_t server_mgmt_token_verify_cached(
     const char *jwt, size_t jwt_len, const char *trust_bundle, size_t trust_bundle_len,
     const char *expected_issuer, const char *expected_audience, const char *peer_issuer,
     const char *peer_serial, const char *peer_fingerprint, const char *request_sha256, int64_t now,
+    server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out);
+
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_cached(
+    const char *jwt, size_t jwt_len, const char *trust_bundle, size_t trust_bundle_len,
+    const char *expected_issuer, const char *expected_audience, const char *peer_issuer,
+    const char *peer_serial, const char *peer_fingerprint, int64_t now,
     server_mgmt_jwks_fetch_fn fetch, void *fetch_ctx, server_mgmt_token_claims_t *out);
 
 #endif

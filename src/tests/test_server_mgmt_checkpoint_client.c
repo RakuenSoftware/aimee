@@ -69,6 +69,7 @@ typedef struct
    int bad_key;
    int bad_signature;
    int malformed_error;
+   const char *expected_purpose;
    int calls;
 } fake_t;
 
@@ -87,7 +88,10 @@ static int fake_transport(void *opaque, const server_mgmt_checkpoint_material_t 
    fake_t *f = opaque;
    f->calls++;
    assert(m && deadline > 0);
-   assert(strstr(request, "{\"version\":\"1\",\"purpose\":\"management.action.v1\"") == request);
+   const char *purpose = f->expected_purpose ? f->expected_purpose : "management.action.v1";
+   char prefix[96];
+   assert(snprintf(prefix, sizeof(prefix), "{\"version\":\"1\",\"purpose\":\"%s\"", purpose) > 0);
+   assert(strstr(request, prefix) == request);
    if (f->transport_rc)
       return f->transport_rc;
    *status = f->status ? f->status : 200;
@@ -215,32 +219,32 @@ int main(void)
    fake.bad_digest = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.bad_digest = 0;
    fake.bad_signature = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.bad_signature = 0;
    fake.stale = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.stale = 0;
    fake.bad_key = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.bad_key = 0;
    fake.generation_delta = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.generation_delta = 0;
    fake.status = 400;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.status = 403;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
@@ -248,7 +252,7 @@ int main(void)
    fake.status = 409;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.status = 503;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
@@ -256,13 +260,21 @@ int main(void)
    fake.malformed_error = 1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_UNAVAILABLE);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
    fake.status = 0;
    fake.malformed_error = 0;
    fake.transport_rc = -2;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
+
+   fake.transport_rc = 0;
+   fake.expected_purpose = "management.read.v1";
+   snprintf(claims.capability, sizeof(claims.capability), "remote_reads");
+   make_staple(7, staple);
+   rq.staple_len = strlen(staple);
+   assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
+                                                    7, staple_digest) == SERVER_MGMT_CHECKPOINT_OK);
 
    make_staple(6, staple);
    rq.staple_len = strlen(staple);
@@ -270,8 +282,8 @@ int main(void)
    fake.generation_delta = -1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     6, staple_digest) ==
-          SERVER_MGMT_CHECKPOINT_DENIED);
-   assert(fake.calls == 15);
+          SERVER_MGMT_CHECKPOINT_INTEGRITY);
+   assert(fake.calls == 16);
    assert(server_mgmt_status_hwm_advance(9) == 0);
    assert(server_mgmt_status_hwm_advance(8) == -1);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 9);

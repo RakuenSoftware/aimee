@@ -10,6 +10,16 @@ export interface FleetServer {
   version: string;
 }
 
+export interface FleetAgent {
+  name: string;
+  provider: string;
+  model: string;
+  enabled: boolean;
+  delegate_available: boolean;
+  primary_only: boolean;
+  max_parallel: number;
+}
+
 const maxInt64 = 9223372036854775807n;
 
 export function canonicalTeam(value: string): string | null {
@@ -32,7 +42,7 @@ export function managementAvailable(server: FleetServer): boolean {
 
 export function fleetError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 403) return 'Denied by team policy or the server remote_writes policy.';
+    if (error.status === 403) return 'Denied by team or server management policy.';
     if (error.status === 401) return 'OIDC session expired. Sign in again.';
     if (error.status === 409) return 'A prior management intent is unresolved; it was not retried.';
     if (error.status === 502) return 'The management result is ambiguous; it was not retried.';
@@ -50,6 +60,7 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
   const [team, setTeam] = useState('');
   const [servers, setServers] = useState<FleetServer[]>([]);
   const [selected, setSelected] = useState('');
+  const [agents, setAgents] = useState<FleetAgent[]>([]);
   const [agent, setAgent] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -59,6 +70,7 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
     setTeam(value);
     setServers([]);
     setSelected('');
+    setAgents([]);
     setMessage('');
   }
 
@@ -70,6 +82,36 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
       const result = await apiGet<{ servers: FleetServer[] }>(`/v1/servers?team=${teamID}`);
       setServers(result.servers ?? []);
       setSelected('');
+      setAgents([]);
+    } catch (error) {
+      setMessage(fleetError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function selectServer(serverID: string) {
+    setSelected(serverID);
+    setAgents([]);
+    setMessage('');
+  }
+
+  async function loadAgents() {
+    if (!teamID || !selected || busy) return;
+    setBusy(true);
+    setMessage('');
+    setAgents([]);
+    try {
+      const result = await apiGet<{ server_id: string; team: unknown; agents: FleetAgent[] }>(
+        `/v1/servers/${encodeURIComponent(selected)}/agents?team=${teamID}`,
+      );
+      // JSON numbers cannot preserve every positive int64 team id. The KB has already
+      // authenticated and bound the exact canonical query value; keep the UI check to
+      // fields it can compare without precision loss.
+      if (result.server_id !== selected || !Array.isArray(result.agents)) {
+        throw new Error('invalid fleet agent response');
+      }
+      setAgents(result.agents);
     } catch (error) {
       setMessage(fleetError(error));
     } finally {
@@ -146,7 +188,7 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
         <tbody>
           {servers.map((server) => (
             <tr key={server.server_id}>
-              <td><button disabled={busy} onClick={() => setSelected(server.server_id)}>{server.server_id}</button></td>
+              <td><button disabled={busy} onClick={() => selectServer(server.server_id)}>{server.server_id}</button></td>
               <td>{server.status}</td><td>{server.health}</td><td>{server.version}</td>
               <td>{managementAvailable(server) ? 'Configured' : 'Unavailable'}</td>
               <td><button disabled={busy} onClick={() => liveHealth(server.server_id)}>Verify</button></td>
@@ -156,13 +198,28 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
       </table>
       {mutationBlocked && <p className="kbc-error">Further mutations are blocked for this session. Resolve the prior result before signing in again.</p>}
       {selected && (
-        <fieldset>
-          <legend>Agent action on {selected}</legend>
-          <label>Agent <input value={agent} onChange={(e) => setAgent(e.target.value)} /></label>
-          <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.enable')}>Enable</button>
-          <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.disable')}>Disable</button>
-          {agent && !validAgent(agent) && <p className="kbc-error">Agent names use 1–63 letters, digits, dot, underscore, or dash.</p>}
-        </fieldset>
+        <>
+          <fieldset>
+            <legend>Agents on {selected}</legend>
+            <button disabled={busy} onClick={loadAgents}>Load agents</button>
+            {agents.length > 0 && <table>
+              <thead><tr><th>Name</th><th>Provider</th><th>Model</th><th>Enabled</th><th>Delegate</th><th>Primary only</th><th>Parallel</th></tr></thead>
+              <tbody>{agents.map((item) => <tr key={item.name}>
+                <td>{item.name}</td><td>{item.provider}</td><td>{item.model}</td>
+                <td>{item.enabled ? 'Yes' : 'No'}</td>
+                <td>{item.delegate_available ? 'Yes' : 'No'}</td>
+                <td>{item.primary_only ? 'Yes' : 'No'}</td><td>{item.max_parallel}</td>
+              </tr>)}</tbody>
+            </table>}
+          </fieldset>
+          <fieldset>
+            <legend>Agent action on {selected}</legend>
+            <label>Agent <input value={agent} onChange={(e) => setAgent(e.target.value)} /></label>
+            <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.enable')}>Enable</button>
+            <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.disable')}>Disable</button>
+            {agent && !validAgent(agent) && <p className="kbc-error">Agent names use 1–63 letters, digits, dot, underscore, or dash.</p>}
+          </fieldset>
+        </>
       )}
     </section>
   );

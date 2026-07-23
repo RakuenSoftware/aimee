@@ -40,6 +40,7 @@ var consoleAdminACL = []aclEntry{
 var fleetACL = []aclEntry{
 	{"GET", "/v1/servers"},
 	{"GET", "/v1/servers/{id}/health"},
+	{"GET", "/v1/servers/{id}/agents"},
 	{"POST", "/v1/servers/{id}/actions"},
 }
 

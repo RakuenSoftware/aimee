@@ -139,7 +139,8 @@ kb_mgmt_status_authority_result_t kb_mgmt_status_request_from_json(const char *r
    if (count != 4 || seen != 0x0fu || nonce_decode(values[0], out->nonce) != 0 ||
        !ascii_token(values[1], 1, 127) || !lower_hex(values[2], 64, 64) ||
        (strcmp(values[3], "management.health.v1") != 0 &&
-        strcmp(values[3], "management.action.v1") != 0) ||
+        strcmp(values[3], "management.action.v1") != 0 &&
+        strcmp(values[3], "management.read.v1") != 0) ||
        copy_field(out->target_server_id, sizeof(out->target_server_id), values[1]) != 0 ||
        copy_field(out->target_mgmt_fingerprint, sizeof(out->target_mgmt_fingerprint), values[2]) !=
            0 ||
@@ -177,7 +178,8 @@ kb_mgmt_status_authority_issue(const kb_mgmt_status_request_t *r, const char *is
        !ascii_token(r->target_server_id, 1, 127) ||
        !lower_hex(r->target_mgmt_fingerprint, 64, 64) ||
        (strcmp(r->purpose, "management.health.v1") != 0 &&
-        strcmp(r->purpose, "management.action.v1") != 0) ||
+        strcmp(r->purpose, "management.action.v1") != 0 &&
+        strcmp(r->purpose, "management.read.v1") != 0) ||
        !printable(issuer, 1, 600) || !lower_hex(serial, 1, 128) ||
        !lower_hex(fingerprint, 64, 64) || !ascii_token(key_id, 1, 64) || now == 0 ||
        now > UINT64_MAX - 10)
@@ -298,7 +300,8 @@ kb_mgmt_checkpoint_request_from_json(const char *raw, size_t raw_len,
       v[i] = cJSON_GetStringValue(p);
       p = p->next;
    }
-   if (p || end != copy + raw_len || strcmp(v[0], "1") || strcmp(v[1], "management.action.v1") ||
+   if (p || end != copy + raw_len || strcmp(v[0], "1") ||
+       (strcmp(v[1], "management.action.v1") && strcmp(v[1], "management.read.v1")) ||
        nonce_decode(v[2], out->nonce) || !lower_hex(v[4], 1, 128) || !lower_hex(v[5], 64, 64) ||
        !ascii_token(v[6], 1, 127) || uint64_string(v[7], &out->staple_generation) ||
        !lower_hex(v[8], 64, 64) || !lower_hex(v[9], 64, 64) || !lower_hex(v[10], 64, 64) ||
@@ -311,6 +314,7 @@ kb_mgmt_checkpoint_request_from_json(const char *raw, size_t raw_len,
       goto bad_checkpoint;
    issuer[issuer_len] = 0;
    if (!printable((const char *)issuer, 1, 600) ||
+       copy_field(out->purpose, sizeof(out->purpose), v[1]) ||
        copy_field(out->caller_issuer, sizeof(out->caller_issuer), (const char *)issuer) ||
        copy_field(out->caller_serial_norm, sizeof(out->caller_serial_norm), v[4]) ||
        copy_field(out->caller_fingerprint, sizeof(out->caller_fingerprint), v[5]) ||
@@ -318,17 +322,17 @@ kb_mgmt_checkpoint_request_from_json(const char *raw, size_t raw_len,
        copy_field(out->staple_sha256, sizeof(out->staple_sha256), v[8]) ||
        copy_field(out->correlation_id, sizeof(out->correlation_id), v[9]) ||
        copy_field(out->jti, sizeof(out->jti), v[10]) ||
-       copy_field(out->action_request_sha256, sizeof(out->action_request_sha256), v[11]))
+       copy_field(out->operation_request_sha256, sizeof(out->operation_request_sha256), v[11]))
       goto bad_checkpoint;
    /* Exact raw spelling is part of the signed decision digest. */
    char canonical[KB_MGMT_CHECKPOINT_JSON_MAX + 1];
    int n = snprintf(canonical, sizeof(canonical),
-                    "{\"version\":\"1\",\"purpose\":\"management.action.v1\",\"nonce\":\"%s\","
+                    "{\"version\":\"1\",\"purpose\":\"%s\",\"nonce\":\"%s\","
                     "\"caller_issuer_b64\":\"%s\",\"caller_serial\":\"%s\","
                     "\"caller_fingerprint\":\"%s\",\"target\":\"%s\","
                     "\"staple_generation\":\"%s\",\"staple_sha256\":\"%s\","
                     "\"correlation_id\":\"%s\",\"jti\":\"%s\",\"request_sha256\":\"%s\"}",
-                    v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]);
+                    v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11]);
    if (n < 0 || (size_t)n != raw_len || CRYPTO_memcmp(canonical, raw, raw_len))
       goto bad_checkpoint;
    unsigned char digest[32];
@@ -360,7 +364,8 @@ kb_mgmt_status_authority_result_t kb_mgmt_checkpoint_authority_issue(
        !lower_hex(r->caller_serial_norm, 1, 128) || !lower_hex(r->caller_fingerprint, 64, 64) ||
        !ascii_token(r->target_server_id, 1, 127) || r->staple_generation < 1 ||
        !lower_hex(r->staple_sha256, 64, 64) || !lower_hex(r->correlation_id, 64, 64) ||
-       !lower_hex(r->jti, 64, 64) || !lower_hex(r->action_request_sha256, 64, 64) ||
+       (strcmp(r->purpose, "management.action.v1") && strcmp(r->purpose, "management.read.v1")) ||
+       !lower_hex(r->jti, 64, 64) || !lower_hex(r->operation_request_sha256, 64, 64) ||
        !lower_hex(r->canonical_sha256, 64, 64) || !now || now > UINT64_MAX - 5)
       return KB_MGMT_STATUS_AUTHORITY_INVALID;
    int revoked = 0;
