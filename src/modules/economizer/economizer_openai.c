@@ -161,17 +161,22 @@ static int parse_layout(const char *json, const char *model, econ_openai_endpoin
    return ok ? 0 : -1;
 }
 
-static int evidence_valid(const econ_token_evidence_t *evidence,
-                          const econ_openai_context_t *context, const char *json,
-                          econ_openai_endpoint_t endpoint)
+static econ_reason_t evidence_reason(const econ_token_evidence_t *evidence,
+                                     const econ_openai_context_t *context, const char *json,
+                                     econ_openai_endpoint_t endpoint)
 {
-   return evidence && context && json && evidence->cookie == ECON_TOKEN_EVIDENCE_COOKIE &&
-          evidence->provider == ECON_PROVIDER_OPENAI &&
-          evidence->endpoint_id == (uint32_t)endpoint &&
-          evidence->model_snapshot_id == context->model_snapshot_id &&
-          evidence->tokenizer_id == context->tokenizer_id &&
-          evidence->source == ECON_TOKEN_SOURCE_LOCAL_EXACT &&
-          evidence->serialized_buffer == json && evidence->serialized_size == strlen(json);
+   if (!evidence || !context || !json || evidence->cookie != ECON_TOKEN_EVIDENCE_COOKIE ||
+       evidence->provider != ECON_PROVIDER_OPENAI || evidence->endpoint_id != (uint32_t)endpoint ||
+       evidence->model_snapshot_id != context->model_snapshot_id ||
+       evidence->tokenizer_id != context->tokenizer_id || evidence->serialized_buffer != json ||
+       evidence->serialized_size != strlen(json))
+      return ECON_REASON_TOKENIZER_NOT_LOCAL_EXACT;
+   if (evidence->source == ECON_TOKEN_SOURCE_REMOTE_EXACT_UNPRICED)
+      return ECON_REASON_REMOTE_TOKEN_COUNT_UNPRICED;
+   if (evidence->source == ECON_TOKEN_SOURCE_REMOTE_ESTIMATE)
+      return ECON_REASON_REMOTE_TOKEN_COUNT;
+   return evidence->source == ECON_TOKEN_SOURCE_LOCAL_EXACT ? ECON_REASON_NONE
+                                                            : ECON_REASON_TOKENIZER_NOT_LOCAL_EXACT;
 }
 
 static int prices_valid(const econ_openai_prices_t *prices)
@@ -227,9 +232,14 @@ econ_openai_plan_t econ_openai_gpt56_plan(const econ_openai_plan_input_t *input)
       return plan_result(ECON_REASON_INVALID_IDENTITY);
    if (input->endpoint != ECON_OPENAI_RESPONSES && input->endpoint != ECON_OPENAI_CHAT_COMPLETIONS)
       return plan_result(ECON_REASON_UNSUPPORTED_ENDPOINT);
-   if (!evidence_valid(input->baseline_tokens, context, input->baseline_json, input->endpoint) ||
-       !evidence_valid(input->candidate_tokens, context, input->candidate_json, input->endpoint))
-      return plan_result(ECON_REASON_TOKENIZER_NOT_LOCAL_EXACT);
+   econ_reason_t baseline_evidence =
+       evidence_reason(input->baseline_tokens, context, input->baseline_json, input->endpoint);
+   econ_reason_t candidate_evidence =
+       evidence_reason(input->candidate_tokens, context, input->candidate_json, input->endpoint);
+   if (baseline_evidence != ECON_REASON_NONE)
+      return plan_result(baseline_evidence);
+   if (candidate_evidence != ECON_REASON_NONE)
+      return plan_result(candidate_evidence);
    if (!prices_valid(&context->prices) || context->safety_margin < 0)
       return plan_result(ECON_REASON_PRICING_UNAVAILABLE);
 
