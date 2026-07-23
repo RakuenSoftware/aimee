@@ -6,5 +6,40 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/config/config.c",
+    "src/modules/config/config_charter.c",
+    "src/modules/config/config_database.c",
+    "src/modules/config/config_fields.c",
+    "src/modules/config/config_kb_curator.c",
+    "src/modules/config/config_kb_maintenance.c",
+    "src/modules/config/config_learning.c",
+    "src/modules/config/config_memory.c",
+    "src/modules/config/config_mode.c",
+    "src/modules/config/config_plugin.c",
+    "src/modules/config/config_save.c",
+    "src/modules/config/config_sections.c",
+    "src/modules/config/config_server_api.c",
+    "src/modules/config/config_skills.c",
+    "src/modules/config/config_trigger.c"
+  ],
+  "private_headers": [
+    "src/modules/config/config.h",
+    "src/modules/config/config_database.h",
+    "src/modules/config/config_fields.h",
+    "src/modules/config/config_internal.h",
+    "src/modules/config/config_learning.h",
+    "src/modules/config/config_memory.h",
+    "src/modules/config/config_sections.h"
+  ],
+  "tests": [
+    "src/tests/test_config.c",
+    "src/tests/test_config_economizer.c",
+    "src/tests/test_config_snapshot.c",
+    "src/tests/test_config_surface.c"
+  ],
+  "docs": [
+    "docs/modules/config.md"
+  ]
 }
