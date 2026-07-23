@@ -99,4 +99,48 @@ BEGIN
   RAISE NOTICE 'WITNESS OK: audit (vault.key_use) witnessed once with source predecessor';
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- Destructive head-vs-log cross-check: build a dedicated shard, verify it intact,
+-- then forge a log row + advance the head and confirm verify_shard AND the
+-- leaf-set builder both refuse (P7W01). Runs in this isolated (thrown-away) DB
+-- because it permanently corrupts a shard.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE r1 RECORD; r2 RECORD; v_head BYTEA; v_forged BYTEA;
+BEGIN
+  SELECT * INTO r1 FROM public.org_vault_witness_append(
+    0::smallint,'1','forge-t','forge-p','','p','','g','2026-07-23T00:00:00Z',
+    decode(repeat('a1',32),'hex'), false, NULL);
+  SELECT * INTO r2 FROM public.org_vault_witness_append(
+    0::smallint,'2','forge-t','forge-p','','p','','g','2026-07-23T00:00:01Z',
+    decode(repeat('a2',32),'hex'), false, NULL);
+
+  v_head := public.org_vault_witness_verify_shard('forge-t','forge-p');
+  IF v_head IS NULL OR v_head <> r2.record_hash THEN
+    RAISE EXCEPTION 'WITNESS FAIL: intact shard did not verify';
+  END IF;
+
+  -- Forge: INSERT a row whose record_hash does not match its fields, advance head.
+  v_forged := decode(repeat('ee',32),'hex');
+  INSERT INTO public.kb_vault_witness_log(tenant,provider,shard_seq,source_kind,source_id,
+    source_hash,has_source_pred,source_pred_hash,witness_pred_hash,record_hash,event_ts,
+    seal_epoch,fencing_token)
+  VALUES('forge-t','forge-p',3,0,'forged',decode(repeat('11',32),'hex'),false,
+    decode(repeat('00',32),'hex'),v_head,v_forged,'2026-07-23T00:00:02Z',1,1);
+  UPDATE public.kb_vault_witness_shard SET seq=3, head_hash=v_forged
+    WHERE tenant='forge-t' AND provider='forge-p';
+
+  BEGIN
+    PERFORM public.org_vault_witness_verify_shard('forge-t','forge-p');
+    RAISE EXCEPTION 'WITNESS FAIL: forged row not caught by verify_shard';
+  EXCEPTION WHEN sqlstate 'P7W01' THEN NULL;
+  END;
+  BEGIN
+    PERFORM count(*) FROM public.org_vault_witness_checkpoint_leaves();
+    RAISE EXCEPTION 'WITNESS FAIL: leaves built over a forged shard';
+  EXCEPTION WHEN sqlstate 'P7W01' THEN NULL;
+  END;
+  RAISE NOTICE 'WITNESS OK: head-vs-log cross-check catches a forged row';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_wiring_pg_test: all checks passed'; END $$;
