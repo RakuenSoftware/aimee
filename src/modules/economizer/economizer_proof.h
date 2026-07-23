@@ -34,6 +34,7 @@ extern "C"
       ECON_REASON_INVALID_ARGUMENT,
       ECON_REASON_INVALID_IDENTITY,
       ECON_REASON_INVALID_SCENARIO_COUNT,
+      ECON_REASON_INVALID_SCENARIO_COVERAGE,
       ECON_REASON_INVALID_MONEY_BOUND,
       ECON_REASON_MONEY_OVERFLOW,
       ECON_REASON_REGISTRY_UNVERIFIED,
@@ -77,6 +78,7 @@ extern "C"
 
    typedef struct
    {
+      uint32_t scenario_id;
       uint32_t cache_outcome;
       econ_token_buckets_t baseline_lower_tokens;
       econ_token_buckets_t baseline_upper_tokens;
@@ -98,6 +100,11 @@ extern "C"
       uint64_t contract_versions;
       uint64_t transform_id;
       uint64_t transform_version;
+      /* A signed scenario-set contract. Each set assigns stable IDs in the
+       * range [0, ECON_MAX_SCENARIOS); coverage names the exhaustive set that
+       * a proof must carry exactly once. */
+      uint64_t scenario_set_id;
+      uint64_t scenario_coverage;
    } econ_registry_key_t;
 
 #define ECON_MAX_SCENARIOS 16u
@@ -139,6 +146,13 @@ extern "C"
    uint64_t econ_registry_generation(void);
    size_t econ_registry_entry_count(void);
    int econ_registry_signature_valid(void);
+
+   /* Verify detached registry artifact bytes. This grants no membership and is
+    * exposed so tests and release tooling can prove that any one-byte mutation
+    * of the manifest, public key, or signature fails closed. */
+   int econ_registry_artifact_signature_valid(const void *manifest, size_t manifest_len,
+                                              const void *public_key, size_t public_key_len,
+                                              const void *signature, size_t signature_len);
 
    /* Canonical tuple serialization used by signed registry manifests. This is
     * data formatting only and grants no registry membership. */

@@ -50,6 +50,22 @@ extern "C"
                                  econ_dispatch_lease_t *lease);
    void econ_dispatch_lease_end(econ_dispatch_lease_t *lease);
 
+   /* Production first-write call sites must declare leases with this macro so
+    * every normal/early return releases the read lock. The explicit begin/end
+    * API remains available for tests and for compilers without cleanup support;
+    * such call sites must use one cleanup label. */
+   static inline void econ_dispatch_lease_cleanup(econ_dispatch_lease_t *lease)
+   {
+      econ_dispatch_lease_end(lease);
+   }
+#if defined(__GNUC__) || defined(__clang__)
+#define ECON_DISPATCH_LEASE_SCOPED(name)                                                           \
+   econ_dispatch_lease_t name __attribute__((cleanup(econ_dispatch_lease_cleanup))) =              \
+       ECON_DISPATCH_LEASE_INIT
+#else
+#define ECON_DISPATCH_LEASE_SCOPED(name) econ_dispatch_lease_t name = ECON_DISPATCH_LEASE_INIT
+#endif
+
 #ifdef __cplusplus
 }
 #endif

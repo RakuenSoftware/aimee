@@ -18,6 +18,14 @@ static void sleep_ms(long milliseconds)
       ;
 }
 
+static int scoped_lease_early_return(econ_dispatch_state_t *state,
+                                     const econ_dispatch_facts_t *facts)
+{
+   ECON_DISPATCH_LEASE_SCOPED(lease);
+   assert(econ_dispatch_lease_begin(state, facts, &lease) == 1);
+   return 17;
+}
+
 static void test_json_compaction_preserves_non_whitespace_bytes(void)
 {
    static const char source[] =
@@ -203,6 +211,18 @@ static void test_first_write_lease_linearizes_invalidation(void)
    econ_dispatch_state_destroy(state);
 }
 
+static void test_scoped_lease_releases_on_early_return(void)
+{
+   econ_dispatch_facts_t current = facts();
+   econ_dispatch_state_t *state = NULL;
+   assert(econ_dispatch_state_create(&current, &state) == 0);
+   assert(scoped_lease_early_return(state, &current) == 17);
+   econ_dispatch_facts_t next = current;
+   next.registry_generation++;
+   assert(econ_dispatch_state_replace(state, &next) == 0);
+   econ_dispatch_state_destroy(state);
+}
+
 int main(void)
 {
    test_json_compaction_preserves_non_whitespace_bytes();
@@ -211,6 +231,7 @@ int main(void)
    test_json_deterministic_whitespace_property();
    test_provenance_is_bound_and_one_shot();
    test_first_write_lease_linearizes_invalidation();
+   test_scoped_lease_releases_on_early_return();
    puts("economizer_activation: ALL PASS");
    return 0;
 }

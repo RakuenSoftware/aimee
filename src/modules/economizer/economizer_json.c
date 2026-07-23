@@ -472,6 +472,9 @@ econ_json_result_t econ_json_compact(const void *input, size_t input_len, uint8_
    *output_len = 0;
    if (!input_len || input_len > ECON_JSON_MAX_INPUT)
       return input_len > ECON_JSON_MAX_INPUT ? ECON_JSON_TOO_LARGE : ECON_JSON_INVALID_SYNTAX;
+   /* parse_value is the validation boundary for the byte-copy pass below. It
+    * validates the complete RFC 8259 document, UTF-8, escapes, depth, and
+    * duplicate decoded names before any output allocation or copying occurs. */
    parser_t p = {.s = input, .n = input_len, .p = 0};
    econ_json_result_t r = parse_value(&p, 0);
    if (r != ECON_JSON_OK)

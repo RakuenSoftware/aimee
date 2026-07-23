@@ -1,7 +1,7 @@
 # Lossless JSON economizer transform and activation gate
 
 - **State:** in progress
-- **Review status:** ROUND TABLE IN PROGRESS
+- **Review status:** ROUND TABLE APPROVED (3/3, zero findings)
 - **Date:** 2026-07-22
 - **Normative gate:** `provider-neutral-economizer-safety-spec.md`
 
@@ -35,6 +35,12 @@ Both pristine and candidate provider requests must be completely serialized befo
 cache control, route, model, service tier, output limit, header, field order, or protected byte may
 change. The transform is deterministic, but determinism and JSON data-model equivalence are only
 admission facts; neither is a cost proof.
+
+The signed registry tuple also binds a scenario-set identity and exact coverage bitmap. Every
+scenario ID must appear exactly once, the proof count must equal the signed coverage cardinality,
+and the candidate upper bound plus margin must be below both its paired baseline lower bound and
+the minimum baseline lower bound across the complete set. A caller cannot authorize a favorable
+subset of the signed cache/pricing outcomes.
 
 ## Provider activation matrix
 
@@ -80,4 +86,30 @@ An individual provider entry may be signed only when all of these are true:
 5. live canaries reconcile provider usage and billing without exceeding the authorized bound; and
 6. a separate roundtable review converges on the exact signed registry entry.
 
+Only the authenticated internal provider planner may construct a proof or assign scenario IDs. No
+public request field, plugin, recalled artifact, or caller-supplied cost bound may populate the
+authorization object. Production first-write call sites must use the scoped dispatch-lease guard;
+raw begin/end calls are reserved for tests and must share one cleanup label.
+
 Until then, proof-gated mode continues to send the pristine request and produces no savings claim.
+
+## Review and validation record
+
+The configured `e2efix` roundtable first identified four blocking hardening gaps. The implementation
+added scoped lease cleanup, detached Ed25519 tamper tests, signed exhaustive scenario coverage, and a
+direct proof-gated pristine-byte parity test. The follow-up review converged with three participants,
+zero failures, no degradation, and zero findings (artifact
+`33863eed117bdb09e85695c6e8a7498537726f8a6775e12d1df148fa6648b77d`).
+
+Validation completed on the merged-forward branch includes:
+
+- full lint, focused OpenAI/Anthropic/proof/config/wire/CLI tests, and ASAN/UBSAN activation tests;
+- fresh Optane-backed Debian 13 CT 265 builds and the complete focused suite;
+- fresh provider CT 266 byte capture showing identical off/proof-gated OpenAI and Anthropic request
+  bodies on their production routes;
+- a real GPT-5.6 paired canary returning identical output and provider-reported usage: 403 prompt
+  tokens and 7 completion tokens in both modes.
+
+No real Anthropic billing canary was available from the configured credentials. That is not an
+activation exception: the Anthropic registry remains empty, so the production behavior is pristine
+pass-through and makes no savings claim.
