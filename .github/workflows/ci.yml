@@ -142,6 +142,14 @@ jobs:
           ./aimee-server --version
           ./aimee-kb --version
           test -x ./aimee-webchat
+      # A configured remote is an exclusive transport: no local probe, no local
+      # execution, no local fallback. The test is black-box (temp HOME, a local
+      # HTTP stand-in, and a unix-socket sentinel that must never be contacted),
+      # needs only the client this job already built, and runs in seconds. It
+      # also lives in the `integration-tests` make target, which no workflow
+      # invokes — without this step the guarantee is unenforced in CI.
+      - name: Thin-client remote exclusivity
+        run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
 
   build-integrity:
     runs-on: ubuntu-latest

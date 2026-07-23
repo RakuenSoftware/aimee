@@ -176,10 +176,18 @@ int main(void)
       /* git co-change backfill defaults on: index scan seeds co_edited edges that
        * blast radius already reads (incremental/idempotent). */
       assert(cfg.code_cochange_git_enabled == 1);
-      assert(cfg.transport_kb_pool_enabled == 0);
-      assert(cfg.transport_server_keepalive_enabled == 0);
+      assert(cfg.transport_kb_pool_enabled == 1);
+      assert(cfg.transport_server_keepalive_enabled == 1);
       assert(cfg.transport_thinclient_gzip_enabled == 0);
       assert(cfg.transport_kb_gzip_enabled == 0);
+      cJSON *rollback_root = cJSON_CreateObject();
+      cJSON *rollback_transport = cJSON_AddObjectToObject(rollback_root, "transport");
+      cJSON_AddBoolToObject(rollback_transport, "kb_pool_enabled", 0);
+      cJSON_AddBoolToObject(rollback_transport, "server_keepalive_enabled", 0);
+      config_parse_transport_section(&cfg, rollback_root);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      cJSON_Delete(rollback_root);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);

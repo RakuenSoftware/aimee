@@ -40,6 +40,41 @@ A remote endpoint is "tcp" (`http(s)://host:port`) vs. a co-located unix socket.
 The behaviors below activate only for a **remote tcp** endpoint; co-located use
 is unchanged.
 
+### Exclusive transport selection
+
+A configured remote is an **exclusive** choice for a thin-client command that
+reaches the `/v1` API: the request goes to the remote, with no probe of a
+co-located unix socket and no fallback between them. One such invocation cannot
+be served partly by the remote and partly by a local server.
+
+Ordinary `/v1` command routing was already remote-aware; this closes the gap for
+the commands that were still pinned to the local socket:
+
+| Command | With a remote configured |
+| --- | --- |
+| `aimee hooks pre` / `hooks post` | dispatched to the remote |
+| `aimee session-start` | served by the remote, selected before any local availability probe |
+| `aimee optimize points\|baseline\|replay\|run\|compare` | dispatched to the remote |
+| delegate-availability probe (ordinary startup) | dispatched to the remote |
+
+When the remote is **unreachable**:
+
+- `aimee optimize …` fails. It does not fall back to a co-located server, so a
+  mistyped or down endpoint surfaces as an error rather than silently reporting
+  some other server's data.
+- `aimee hooks …` still **fails open** (the tool call is allowed). That is the
+  established policy-server-unavailable behavior, not a local fallback — no
+  local socket is contacted either way.
+
+For local execution, clear the remote (`aimee remote clear`, or drop `--server` /
+`AIMEE_SERVER_URL` / `AIMEE_API_ENDPOINT` from the environment).
+
+The memory-file guard is unaffected. On a remote-only host the pre-tool hook used
+to run a narrowed local path that enforced only the `memory_redirect` check,
+because the full `pre_tool_check` needed local session state. The full check now
+runs on the remote instead, so the guard is enforced by the server rather than
+partially reimplemented on the client.
+
 ### Server write posture
 
 Mutating `/v1` calls require the server to allow remote writes. Set it in the

@@ -797,8 +797,14 @@ static void config_set_defaults(config_t *cfg)
    cfg->cache_aware_rewrite_hard_context_threshold = 0.85;
    cfg->cache_aware_rewrite_max_defer_turns = 20;
    cfg->cache_aware_rewrite_segment_check_turns = 5;
-   cfg->transport_kb_pool_enabled = 0;
-   cfg->transport_server_keepalive_enabled = 0;
+   /* Live three-node mTLS validation promoted connection reuse to the default:
+    * pooled server->KB requests cut warm p50 from 4.762 ms to 1.589 ms, while
+    * resident thin-client keep-alive cut p50 from 4.900 ms to 0.109 ms.
+    * Both remain independently rollbackable through their transport settings. */
+   cfg->transport_kb_pool_enabled = 1;
+   cfg->transport_server_keepalive_enabled = 1;
+   /* gzip saved wire bytes but increased latency on the measured LAN, so both
+    * compression directions remain opt-in pending a qualifying remote profile. */
    cfg->transport_thinclient_gzip_enabled = 0;
    cfg->transport_kb_gzip_enabled = 0;
    cfg->cost_reward_enabled = 0;
