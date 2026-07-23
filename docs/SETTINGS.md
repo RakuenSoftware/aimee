@@ -50,7 +50,11 @@ economizer:
 
 `modules.economizer: false` is an authoritative hard-kill that forces the effective mode to
 `off`. Provider cache controls are never changed, and retries reuse the selected exact-length wire
-snapshot. See [The aimee Economizer](features/economizer.md).
+snapshot. `safe` is JSON-semantic rather than byte-preserving: it removes only insignificant
+whitespace from a fresh strict JSON tool result, and otherwise passes the original through.
+`aggressive` is explicitly lossy and does not guarantee a lower provider bill. See
+[The aimee Economizer](features/economizer.md) for request-path behavior, provider cache constraints,
+limits, API configuration, and troubleshooting.
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -102,7 +106,8 @@ economizer:
 aimee config set economizer.mode safe
 ```
 
-Use `off` for byte-for-byte pass-through or `aggressive` when lossy context reduction is acceptable.
+Use `off` for economizer pass-through or `aggressive` when lossy context reduction and possible
+provider-cache churn are acceptable.
 See [features/economizer.md](features/economizer.md) for the provider and safety boundaries.
 
 ## When a change takes effect

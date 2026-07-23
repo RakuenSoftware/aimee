@@ -338,7 +338,8 @@ VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_kek_check.c m
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
                   modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c modules/vault/vault_custody_kms.c \
                   modules/vault/vault_capability.c
-KB_VAULT_SRCS = $(VAULT_CORE_SRCS) modules/vault/vault_reseal_orchestrator.c
+KB_VAULT_SRCS = $(VAULT_CORE_SRCS) modules/vault/vault_mutation_budget.c \
+                modules/vault/vault_reseal_orchestrator.c
 KB_VAULT_OBJS = $(KB_VAULT_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
 # P7-tpm2a: the real tpm2 custody provider is BUILD-GUARDED. The default build
@@ -472,8 +473,11 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
            kb/kb_management_action.c kb/kb_management_runtime.c shared/management_read.c
 KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
-KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_tpm_runtime_lock.c \
-           db2/vault_operator_status_runtime.c
+KB_SRCS += kb/kb_vault_operator_status.c kb/kb_vault_protected_secret.c \
+           kb/kb_vault_activation_latch.c kb/kb_vault_operator_mutation.c \
+           kb/kb_vault_operator_runtime.c \
+           kb/kb_vault_tpm_runtime_lock.c \
+           db2/vault_operator_status_runtime.c db2/vault_operator_rewrap_runtime.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
 # P5-B1c online authority. This hand-maintained closure intentionally excludes

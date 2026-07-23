@@ -43,7 +43,8 @@ BEGIN
     org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER),
     org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
     org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
-    org_vault_rewrap_digests(TEXT), org_vault_rewrap_stage_finish(TEXT,BIGINT),
+    org_vault_rewrap_digests(TEXT), org_vault_rewrap_inventory_summary(TEXT,BIGINT),
+    org_vault_rewrap_stage_finish(TEXT,BIGINT,BIGINT,BIGINT,BYTEA),
     org_vault_rewrap_mark_committing(TEXT,BIGINT),
     org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
     org_vault_rewrap_promote(TEXT,BIGINT),
@@ -333,6 +334,36 @@ DECLARE
   role_name TEXT;
   schema_name TEXT;
   fn RECORD;
+  fn_signature TEXT;
+  orchestrator_functions CONSTANT TEXT[] := ARRAY[
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_dispatch(text,text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_reserve(text,text,text,bigint,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_active()',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(text,text,text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed_active(text,text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_current_check_page(bytea,integer)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(text,text,text,bigint,bigint,bytea,bytea,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_open_idle(text,text,bigint,bigint,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_open_event(text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_snapshot(text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_record_prepared(text,bigint,bytea,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_secret_page(text,bigint,bigint,integer)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_check_page(text,bigint,bytea,integer)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_dek(text,bigint,bigint,text,text,text,bigint,bytea,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_check(text,bigint,text,bytea,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_inventory_summary(text,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(text,bigint,bigint,bigint,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_committing(text,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_resealed(text,bigint,bytea)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_promote(text,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_abort(text,bigint,text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_recovery_required(text,bigint,text)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_summary(text,bigint)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_secret_page(text,bigint,bigint,integer)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_check_page(text,bigint,bytea,integer)',
+    'aimee_kb_vault_orchestrator_api.org_vault_rewrap_complete(text,bigint,bytea,bytea,bytea)'
+  ];
   edge RECORD;
   owned RECORD;
 BEGIN
@@ -463,16 +494,29 @@ BEGIN
   ALTER SCHEMA aimee_kb_vault_orchestrator_api OWNER TO aimee_kb_owner;
   ALTER TABLE public.kb_vault_control OWNER TO aimee_kb_owner;
   ALTER TABLE public.kb_vault_rewrap_operation OWNER TO aimee_kb_owner;
-  ALTER FUNCTION
-    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
-    OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_rewrap_worm OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_vault_open_event OWNER TO aimee_kb_owner;
+  ALTER FUNCTION public.org_vault_open_event_worm_block() OWNER TO aimee_kb_owner;
+  FOR fn IN
+    SELECT p.oid::regprocedure AS signature
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='aimee_kb_vault_orchestrator_api'
+  LOOP
+    EXECUTE format('ALTER FUNCTION %s OWNER TO aimee_kb_owner',fn.signature);
+  END LOOP;
   -- The SECURITY DEFINER resolves only explicitly-qualified public relations.
   -- PUBLIC schema usage is revoked globally above, so grant the function owner
   -- the resolution privilege it needs without exposing it to the capability.
   GRANT USAGE ON SCHEMA public TO aimee_kb_owner;
   -- PostgreSQL row-locking SELECTs also require UPDATE authority.
-  GRANT SELECT,UPDATE ON TABLE public.kb_vault_control,
-    public.kb_vault_rewrap_operation TO aimee_kb_owner;
+  GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE public.kb_vault_control,
+    public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
+    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+    public.kb_vault_open_event TO aimee_kb_owner;
+  GRANT SELECT ON TABLE public.org_vault_rotation,public.org_vault_salt,
+    public.org_vault_secret TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_owner;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api
     FROM aimee_kb_vault_orchestrator_login,aimee_kb_runtime;
@@ -490,11 +534,13 @@ BEGIN
 
   REVOKE ALL ON TABLE public.kb_vault_control,
     public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
-    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM PUBLIC;
+    public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+    public.kb_vault_open_event FROM PUBLIC;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
     REVOKE ALL ON TABLE public.kb_vault_control,
       public.kb_vault_rewrap_operation,public.kb_vault_rewrap_dek_stage,
-      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm FROM aimee_kb_runtime;
+      public.kb_vault_rewrap_check_stage,public.kb_vault_rewrap_worm,
+      public.kb_vault_open_event FROM aimee_kb_runtime;
   END IF;
 
   FOR fn IN
@@ -506,10 +552,24 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
       EXECUTE format('REVOKE ALL ON FUNCTION %s FROM aimee_kb_runtime',fn.signature);
     END IF;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aimee_kb_owner',fn.signature);
   END LOOP;
-  GRANT EXECUTE ON FUNCTION
-    aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
-    TO aimee_kb_vault_orchestrator;
+  IF (SELECT pg_catalog.count(*) FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='aimee_kb_vault_orchestrator_api') <>
+       pg_catalog.cardinality(orchestrator_functions) OR
+     EXISTS (SELECT 1 FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='aimee_kb_vault_orchestrator_api'
+         AND (p.oid::pg_catalog.regprocedure)::TEXT <> ALL(orchestrator_functions)) THEN
+    RAISE EXCEPTION 'P7_D3B_ORCHESTRATOR_CAPABILITY_DRIFT' USING ERRCODE='55000';
+  END IF;
+  FOREACH fn_signature IN ARRAY orchestrator_functions LOOP
+    IF pg_catalog.to_regprocedure(fn_signature) IS NULL THEN
+      RAISE EXCEPTION 'P7_D3B_ORCHESTRATOR_CAPABILITY_MISSING' USING ERRCODE='55000';
+    END IF;
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO aimee_kb_vault_orchestrator',fn_signature);
+  END LOOP;
 END
 $p7_d3a_orchestrator_grants$;
 
