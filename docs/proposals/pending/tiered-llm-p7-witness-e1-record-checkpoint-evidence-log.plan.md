@@ -171,10 +171,13 @@ them wrong produces evidence that is worse than none:
   would let a checkpoint that later loses a unique-index race reach a consumer,
   who would then hold a signed root that was never committed — and would trust
   it, since it verifies. Emission reads from committed state only.
-- Checkpoint signing is **fenced**: the signer takes the `kb_vault_control`
-  fence and revalidates it in the signing transaction, so a split or failover
-  cannot produce two instances both scanning and both signing `seq = N+1`. The
-  loser aborts before signing rather than after. Predecessor linkage is by digest,
+- Checkpoint signing is **fenced, and the fence check is the first statement of
+  the signing transaction** under the `kb_vault_control` row lock. Signing is
+  gated on its success, so a split or failover cannot produce two instances both
+  scanning and both signing `seq = N+1`; the loser aborts *before* signing, not
+  after. Revalidating only at commit would let a loser sign under a stale fence
+  and leave a signature over the wrong epoch in memory to be cleansed — or leaked
+  if the process dies between sign and commit. Predecessor linkage is by digest,
   not sequence, so a duplicate-sequence race is otherwise silent. The invariant this
 design satisfies is "checkpoint cost is off the hot path and bounded by a stated
 ceiling" — not "no scan exists."
@@ -182,6 +185,14 @@ ceiling" — not "no scan exists."
 Because different shards have unrelated key-hash prefixes, their leaves are
 disjoint and concurrent advances never contend on shared tree state; there is no
 tree state on the advance path at all.
+
+**The checkpoint transaction runs at least REPEATABLE READ.** The head-vs-log
+cross-check below compares a stored head against one recomputed by walking the
+log; at READ COMMITTED a concurrent append could advance the head mid-walk and
+the comparison would fire `head_log_mismatch` on a perfectly healthy append —
+the same benign-race false alarm the `stale_fence` rule was careful to avoid. A
+snapshot-stable isolation level makes the walk and the head read see one
+consistent point in time.
 
 **The rebuild must cross-check the shard heads against the log, or the shard-head
 table stops being a paper trail.** Removing the durable node table has a cost
@@ -197,7 +208,9 @@ So before signing, the checkpoint **recomputes each shard's head by walking the
 evidence log forward from the previous checkpoint's recorded head** and compares
 it to `kb_vault_witness_shard.head_hash`. A mismatch is a typed
 `head_log_mismatch` failure that aborts the checkpoint and raises an integrity
-alert; it never signs. The walk is O(records appended in the cadence), which is
+alert; it never signs. A shard with no records since the previous checkpoint has
+nothing to walk and its recomputed head equals its stored head by definition —
+the vacuous case is a pass, never a false alarm. The walk is O(records appended in the cadence), which is
 work the system already did once, and it hard-fails only on actual divergence.
 
 This is what keeps the "locally inconsistent tampering is detected immediately"
@@ -298,7 +311,10 @@ encoding is fixed here and unit-tested against a stored vector rather than left
 to the implementer. E1 defines the proof format, generation, and
 verification. Proofs are emitted alongside checkpoints on the log path (§3) — a
 signed root a consumer cannot connect to any shard is not independently
-verifiable, which is the whole point.
+verifiable, which is the whole point. A checkpoint whose proofs failed to emit is
+reported as a half-export, not silently left as a signed root with no shards a
+consumer can attach — the failed-send alerting names this case explicitly rather
+than folding it into a generic emission error.
 
 E1 defines the format, canonical serialization, leaf encoding, root computation,
 proof format, digest, and verification entry points. E1 does **not** wire
@@ -605,7 +621,9 @@ at E2 would discard the precedent E1's gate exists to set.
 - Checkpoint rebuild cross-check: a shard head that disagrees with the head
   recomputed by walking the evidence log aborts with typed `head_log_mismatch`
   and never signs; injected head tampering is caught even when every local
-  artifact is mutually consistent.
+  artifact is mutually consistent. A shard with no records in the cadence passes
+  the cross-check without a false alarm, and a healthy append landing mid-walk
+  under REPEATABLE READ does not trip it.
 - Inclusion-proof sibling order: a stored vector pins left/right at each depth
   from the key-hash bits; a proof with two levels transposed fails to reproduce
   the root.
@@ -693,8 +711,11 @@ at E2 would discard the precedent E1's gate exists to set.
   sample the stream. The umbrella's no-over-claim invariant is judged
   by the words that ship, so a gate reads them back.
 - No new production symbol reachable from admission, HTTP routing, or the reseal
-  orchestrator; asserted by a link-level or symbol-level check rather than by
-  review.
+  orchestrator; asserted by a link-level or symbol-level check against the
+  **production** link map. The check targets the production binary, not the test
+  binary — §6 and §8 deliberately link the append function into the test binary
+  to exercise it under concurrency, so a check run against the test link map
+  would trip on its own harness.
 
 ## 9. Deferred to later slices
 

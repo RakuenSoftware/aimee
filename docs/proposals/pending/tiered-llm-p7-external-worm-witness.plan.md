@@ -187,7 +187,10 @@ because those copies are already gone from the host's reach.
   E2 therefore wires the witness call into the reseal orchestrator and the D3b
   open function as well as admission; covering only admission does not satisfy
   this. It is an E2 release prerequisite, not something E3's kill matrix
-  discovers.
+  discovers. **A future slice that adds a fourth source ledger inherits this
+  obligation**, and a CI gate asserts that every source discriminator the witness
+  record accepts has a wired-in transactional call site — the "outbox" naming
+  trap that hid the reseal transaction shape will otherwise recur.
 - **Comparison is operator-driven, and the docs say so.** No automated
   cross-consumer comparator is in scope. What this umbrella guarantees is that
   the material needed for comparison exists, is signed, and is independently

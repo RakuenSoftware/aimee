@@ -56,8 +56,8 @@ commit — that is the invariant working, not an error to swallow.
 
 **Reachability is enforced by tooling, not review.** E1's gate asserted no
 production symbol reaches the witness code. E2 asserts the inverse by the same
-link-level or symbol-level check: the witness append symbol is reachable from
-exactly these three call sites and nowhere else. A softer assertion here would
+link-level or symbol-level check against the **production** link map: the witness
+append symbol is reachable from exactly these three call sites and nowhere else. A softer assertion here would
 discard the precedent E1's gate exists to set.
 
 ## 2. Checkpoint cadence
@@ -158,8 +158,11 @@ result — that is precisely the shape an attacker would hide a fork behind.
   admission, reseal, and D3b open each either commit source-plus-witness together
   or neither.
 - `witness_concurrency_exhausted` aborts the source event.
-- Two instances racing to sign the same checkpoint sequence: the loser aborts
-  before signing; no emitted checkpoint is ever uncommitted.
+- Two instances racing to sign the same checkpoint sequence: the fence check is
+  the first statement, the loser aborts before signing, and no emitted checkpoint
+  is ever uncommitted.
+- The checkpoint transaction runs at REPEATABLE READ or stricter; a healthy
+  append landing mid-walk does not trip `head_log_mismatch`.
 - Checkpoint cross-check catches injected shard-head tampering.
 - Boot fails closed on missing, empty, malformed, and revoked-key anchor sets.
 
