@@ -755,8 +755,7 @@ void config_parse_modules_section(config_t *cfg, cJSON *root)
    }
 }
 
-/* Parse the only supported public shape: economizer: {mode: off|proof_gated}.
- * Explicit legacy values fail activation; they never map to a new mode. */
+/* Parse the public shape: economizer: {mode: off|safe|aggressive}. */
 int config_parse_economizer_section(config_t *cfg, cJSON *root)
 {
    cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
@@ -764,8 +763,8 @@ int config_parse_economizer_section(config_t *cfg, cJSON *root)
       return 0;
    if (!cJSON_IsObject(econ))
    {
-      fprintf(stderr, "aimee: config error: scalar economizer values are no longer supported; use "
-                      "economizer: {mode: off|proof_gated}\n");
+      fprintf(stderr, "aimee: config error: economizer must be an object; use "
+                      "economizer: {mode: off|safe|aggressive}\n");
       return -1;
    }
 
@@ -787,16 +786,15 @@ int config_parse_economizer_section(config_t *cfg, cJSON *root)
    }
    if (fields != 1 || !cJSON_IsString(mode) || !mode->valuestring)
    {
-      fprintf(stderr, "aimee: config error: economizer.mode must be exactly off or proof_gated\n");
+      fprintf(stderr, "aimee: config error: economizer.mode must be off, safe, or aggressive\n");
       return -1;
    }
    int parsed = econ_mode_parse(mode->valuestring);
    if (parsed < 0)
    {
       fprintf(stderr,
-              "aimee: config error: economizer mode \"%s\" is unsupported; legacy "
-              "safe/aggressive modes cannot be migrated automatically; choose off or "
-              "proof_gated explicitly\n",
+              "aimee: config error: economizer mode \"%s\" is unsupported; choose "
+              "off, safe, or aggressive\n",
               mode->valuestring);
       return -1;
    }

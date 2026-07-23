@@ -1,7 +1,8 @@
 # Tool-output condensation (retired from live requests)
 
-> **Current status:** the helper remains as isolated deterministic code, but every production
-> request caller is removed. Neither `off` nor `proof_gated` enables it. A retrieval pointer is not
+> **Current status:** the command-aware spill-and-recall helper remains isolated from production
+> request paths. Neither `off` nor `safe` enables it. `aggressive` uses the general lossy context
+> reducer, not this retired helper. A retrieval pointer is not
 > mechanically equivalent to presenting the original bytes to the model, and page-back cost cannot
 > be bounded before dispatch. Re-enablement requires a separately reviewed transform contract and
 > signed registry entry.
@@ -25,10 +26,11 @@ There is no configuration that activates condensation. The current economizer su
 
 ```yaml
 economizer:
-  mode: off             # off | proof_gated
+  mode: safe             # off | safe | aggressive
 ```
 
-Both modes leave tool output pristine in production. See [SETTINGS.md](../SETTINGS.md) and
+Off and safe leave non-JSON tool output pristine; safe may remove insignificant whitespace from a
+strict JSON result before first dispatch. See [SETTINGS.md](../SETTINGS.md) and
 [the economizer overview](economizer.md).
 
 ## What it does

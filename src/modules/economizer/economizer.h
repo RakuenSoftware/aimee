@@ -11,8 +11,9 @@
 #define DEC_ECONOMIZER_H 1
 
 #include "economizer_proof.h" /* provider-specific cost-proof gate; empty live registry */
-#include "context_reduce.h" /* context_reduce(), reduce_config_t / reduce_result_t / seams */
-#include "context_fold.h"   /* context_fold_view / context_compress_view, fold_config_t */
-#include "tool_condense.h"  /* tool_condense_apply / _recall / _enabled, family parsers */
+#include "economizer_json.h"  /* strict fresh-tool-result JSON compaction */
+#include "context_reduce.h"   /* context_reduce(), reduce_config_t / reduce_result_t / seams */
+#include "context_fold.h"     /* context_fold_view / context_compress_view, fold_config_t */
+#include "tool_condense.h"    /* tool_condense_apply / _recall / _enabled, family parsers */
 
 #endif /* DEC_ECONOMIZER_H */

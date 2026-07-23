@@ -335,7 +335,7 @@ int config_load(config_t *cfg)
       cfg->module_memory = cfg->module_governance = -1;
       cfg->module_delegates = cfg->module_workflows = -1;
       cfg->module_economizer = 1;
-      cfg->economizer_mode = g_proof_gated ? ECON_MODE_PROOF_GATED : ECON_MODE_OFF;
+      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
    }
    return 0;
 }

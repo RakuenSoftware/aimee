@@ -1,5 +1,11 @@
 # Lossless JSON economizer transform and activation gate
 
+> **Superseded for runtime policy (2026-07-23):** the exhaustive monetary-proof gate described
+> below is retained as research history. The shipped interface is now `off`, `safe`, and
+> `aggressive`. Safe admits only deterministic strict-JSON whitespace compaction at the fresh local
+> tool-result boundary; aggressive owns lossy reduction. See
+> [the economizer overview](../../features/economizer.md).
+
 - **State:** in progress
 - **Review status:** ROUND TABLE APPROVED (3/3, zero findings)
 - **Date:** 2026-07-22
