@@ -707,6 +707,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains config-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first applied to a fifteen-element declared source set, the largest so far.",
       "independent_review": "The slice-decision roundtable approved the declaration scope in slice 48 with no findings; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-49.md", "docs/modules/config.md", "src/modules/config/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 50,
+      "state": "present_and_verified",
+      "disposition": "Declared the git descriptor's twenty-six sources, eighteen module-root private headers, fourteen direct tests, and document without setting ownership_complete, the declaration half of the pair for the sixth and largest-by-file-count Class B module, keeping the ownership latch orthogonal to the separate git-core-contract governance.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["CMake compiles twelve of the twenty-six sources, the eight git_verify_* and four mcp_git_* the thin client reaches, and omits the fourteen credential/OAuth/ops/forge-vault/host/org-repos/PR-API sources, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, vault, and config", "Three declared tests (test_git_oauth_device, test_git_oauth_gh, test_git_org_repos) are CTest-only, recorded make:false ctest:true, the inverse asymmetry audit records for its action and ledger tests", "test_forge_app_token.c is excluded because its subject src/forge_app_token.c is a root-level non-module source; test_forge_credentials_live.c is excluded as a supplementary live integration harness whose source forge_credentials.c already has a unit test", "git_verify_internal.h and mcp_git.h are unpaired seam/shared headers declared private; the git-core-contract proposal and its approval evidence are untouched"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Claiming test_forge_app_token.c or test_forge_credentials_live.c by their forge name, or excluding the CTest-only oauth and org-repos tests because Make does not build them, was rejected: the first two exercise a non-module source or are supplementary integration, and the CTest-only three drive git-module sources.",
+        "revisit": "Slice 51 latches git; a separate header-layout slice may relocate git headers under a canonical include tree."
+      },
+      "consumers": ["server, kb, cmd, and MCP git consumers", "the git latch slice", "remaining Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains fourteen git rows including three CTest-only rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions and caught a header-count arithmetic error (sixteen paired plus two unpaired equals eighteen, not seventeen plus two), which is corrected in the written declaration. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-50.md", "docs/modules/git.md", "src/modules/git/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }

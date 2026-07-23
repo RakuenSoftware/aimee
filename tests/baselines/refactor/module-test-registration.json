@@ -82,6 +82,90 @@
     {
       "ctest": false,
       "make": true,
+      "module": "git",
+      "test": "src/tests/test_forge_credentials.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_cred_inject.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_forge_vault.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_host_resolve.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_oauth_device.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_oauth_gh.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_ops.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_org_repos.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_pr_ci_grade.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_project.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_ssh_agent.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_verify_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_verify_select.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_mcp_git.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "governance",
       "test": "src/tests/test_response_governance_stage.c"
     },
