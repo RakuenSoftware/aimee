@@ -351,7 +351,7 @@ management_read_status(void *ctx, const server_mgmt_read_request_t *rq,
          if (consumed == SERVER_MGMT_NONCE_STORAGE)
             return SERVER_MGMT_READ_UNAVAILABLE;
       }
-      return SERVER_MGMT_READ_FORBIDDEN;
+      return SERVER_MGMT_READ_INTEGRITY;
    }
    uint64_t hwm = 0;
    int valid = server_mgmt_status_hwm(&hwm) == 0 &&
@@ -372,7 +372,7 @@ management_read_status(void *ctx, const server_mgmt_read_request_t *rq,
                        consumed == SERVER_MGMT_NONCE_EXPIRED ||
                        consumed == SERVER_MGMT_NONCE_ROLLBACK
                  ? SERVER_MGMT_READ_CONFLICT
-                 : SERVER_MGMT_READ_FORBIDDEN;
+                 : SERVER_MGMT_READ_INTEGRITY;
    if (!SHA256((const unsigned char *)rq->staple, rq->staple_len, digest))
       return SERVER_MGMT_READ_INTEGRITY;
    memcpy(proof->nonce, st.nonce, sizeof(proof->nonce));
@@ -397,7 +397,7 @@ static server_mgmt_read_result_t management_read_token(void *ctx,
        rq->peer->issuer, rq->peer->serial_norm, rq->peer->fingerprint, rq->now,
        kb_client_mtls_management_jwks_fetch, NULL, claims);
    OPENSSL_cleanse(trust, sizeof(trust));
-   return rc == SERVER_MGMT_TOKEN_OK ? SERVER_MGMT_READ_OK : SERVER_MGMT_READ_FORBIDDEN;
+   return rc == SERVER_MGMT_TOKEN_OK ? SERVER_MGMT_READ_OK : SERVER_MGMT_READ_INTEGRITY;
 }
 
 static int management_read_load(void *ctx, server_mgmt_read_agent_t *out, size_t cap,
@@ -446,9 +446,14 @@ static int management_read_error(server_mgmt_read_result_t result, char *resp, i
                       : result == SERVER_MGMT_READ_CONFLICT ? "conflict"
                       : result == SERVER_MGMT_READ_INTEGRITY ? "integrity"
                                                              : "unavailable";
+   const char *message = result == SERVER_MGMT_READ_FORBIDDEN ? "Forbidden."
+                         : result == SERVER_MGMT_READ_CONFLICT ? "Request conflict."
+                         : result == SERVER_MGMT_READ_INTEGRITY
+                             ? "Integrity verification failed."
+                             : "Service unavailable.";
    snprintf(resp, (size_t)cap,
-            "{\"error\":{\"code\":\"%s\",\"correlation_id\":\"%s\"}}", code,
-            correlation);
+            "{\"error\":{\"code\":\"%s\",\"message\":\"%s\",\"correlation_id\":\"%s\"}}",
+            code, message, correlation);
    return status;
 }
 
@@ -540,6 +545,10 @@ static int rh_management_read_challenge(const route_req_t *rq, char *resp, int c
    int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.v1");
    if (status == 200)
       server_http_keepalive_set(1);
+   else
+      status = management_read_error(status == 401 ? SERVER_MGMT_READ_FORBIDDEN
+                                                   : SERVER_MGMT_READ_UNAVAILABLE,
+                                     resp, cap);
    return status;
 }
 

@@ -96,6 +96,22 @@ describe('Fleet interactions', () => {
     expect(await screen.findByText('Fleet request failed (HTTP 503).')).toBeTruthy();
   });
 
+  it('loads the bounded agents drill-down with the OIDC fleet route', async () => {
+    mocks.get.mockResolvedValueOnce({ servers: [server] }).mockResolvedValueOnce({
+      server_id: 'server-1', team: 7, agents: [{
+        name: 'agent.one', provider: 'openai', model: 'gpt-5', enabled: true,
+        delegate_available: false, primary_only: true, max_parallel: 2,
+      }],
+    });
+    render(<FleetHarness />);
+    await loadFleet();
+    fireEvent.click(screen.getByRole('button', { name: 'server-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load agents' }));
+    expect(await screen.findByText('agent.one')).toBeTruthy();
+    expect(screen.getByText('gpt-5')).toBeTruthy();
+    expect(mocks.get).toHaveBeenLastCalledWith('/v1/servers/server-1/agents?team=7');
+  });
+
   it('requires confirmation and sends each confirmed action once', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
     render(<FleetHarness />);
@@ -151,7 +167,7 @@ describe('Fleet interactions', () => {
     await loadFleet();
     await selectAgent();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
-    expect(await screen.findByText('Denied by team policy or the server remote_writes policy.')).toBeTruthy();
+    expect(await screen.findByText('Denied by team or server management policy.')).toBeTruthy();
     expect(mocks.ack).toHaveBeenCalledTimes(1);
     expect(mocks.ack).toHaveBeenCalledWith('denial-ack');
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(false);
