@@ -9,6 +9,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/vault/vault_capability.c",
     "src/modules/vault/vault_crypto.c",
