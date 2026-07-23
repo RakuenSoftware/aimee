@@ -339,6 +339,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-kek-check \
                $(TESTPREFIX)/unit-test-vault-reseal-receipt \
                $(TESTPREFIX)/unit-test-vault-witness-record \
+               $(TESTPREFIX)/unit-test-vault-witness-merkle \
                $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
@@ -3691,6 +3692,10 @@ $(TESTPREFIX)/unit-test-vault-reseal-receipt: $(OBJDIR)/tests/test_vault_reseal_
 
 $(TESTPREFIX)/unit-test-vault-witness-record: $(OBJDIR)/tests/test_vault_witness_record.o \
                               $(OBJDIR)/modules/vault/vault_witness_record.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-merkle: $(OBJDIR)/tests/test_vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-mutation-budget: \
