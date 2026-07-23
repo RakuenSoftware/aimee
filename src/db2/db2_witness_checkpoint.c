@@ -262,6 +262,15 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
          goto rollback;
    }
 
+   /* No non-empty shards yet: nothing to checkpoint. The cadence treats this as a
+    * benign no-op, so an idle kb does not accrue empty heartbeat checkpoints. The
+    * chain begins at the first checkpoint that covers real activity. */
+   if (n == 0)
+   {
+      rc = DB2_WITNESS_CP_EMPTY;
+      goto rollback;
+   }
+
    /* Finalize the stored snapshot as count || body, so leaf_snapshot_digest is
     * SHA-256 over exactly the stored bytes (a verifier recomputes it directly). */
    {

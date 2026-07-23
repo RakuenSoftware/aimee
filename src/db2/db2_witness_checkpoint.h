@@ -23,6 +23,7 @@ extern "C"
 typedef enum
 {
    DB2_WITNESS_CP_OK = 0,       /* a checkpoint was signed and persisted */
+   DB2_WITNESS_CP_EMPTY,        /* no non-empty shards: nothing to checkpoint (no-op) */
    DB2_WITNESS_CP_TRANSIENT,    /* no connection / retryable serialization failure */
    DB2_WITNESS_CP_HEAD_MISMATCH,/* head_log_mismatch (P7W01): a shard head diverged */
    DB2_WITNESS_CP_CEILING,      /* checkpoint_shard_ceiling_exceeded (P7W02) */

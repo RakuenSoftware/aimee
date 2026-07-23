@@ -4,6 +4,7 @@
 #include "config_database.h"
 #include "css_render_cmd.h"
 #include "db2/code_index.h"
+#include "kb_witness_cadence.h"
 #include "kb_auth_oidc.h"
 #include "kb_oidc_jwks_fleet.h"
 #include "kb_identity.h"
@@ -2090,6 +2091,7 @@ int main(int argc, char **argv)
          next_egress_recovery = now + 5;
       }
       kb_management_runtime_tick((int64_t)now);
+      kb_witness_cadence_tick(now); /* P7-witness-e2: periodic checkpoint cadence */
       struct timespec ts = {.tv_sec = 0, .tv_nsec = 200L * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
