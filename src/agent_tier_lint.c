@@ -224,9 +224,11 @@ static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
     * public predicate with the roles actually in use rather than duplicating the
     * table here — a copy would silently drift. */
    static const char *const probe_roles[] = {
-       "deploy", "validate",   "test",  "diagnose",   "execute", "review",
-       "code",   "refactor",   "draft", "implement",  "explain", "summarize",
-       "format", "search",     NULL,
+       /* Canonical roles only — `test`/`implement` are aliases and were removed
+        * from default_exec_roles, so probing them here would never match. */
+       "deploy", "validate", "diagnose",   "execute", "review",   "code",
+       "refactor", "draft",  "explain",    "summarize", "format", "search",
+       "continuity", "beat-check", NULL,
    };
    for (int i = 0; probe_roles[i]; i++)
    {

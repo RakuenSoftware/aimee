@@ -997,3 +997,60 @@ These were present before this work and are the reason it was worth doing:
   verified instead.
 - The delegate-fallback path has no unit coverage (it dispatches for real); the
   same-registration ordering is verified through its exported prefix helper.
+
+
+## 10. Role taxonomy: cull done, redesign sequenced (2026-07-23)
+
+### Evidence
+
+Sampled 40 delegate jobs across the full job-id range (2026-07-18..07-23, not just the current
+session). Only FOUR role values appear in six days of real use:
+
+| role | n | what the prompts actually ask |
+|---|---|---|
+| `review` | 31 | almost entirely one shape: *"Review the complete artifact against the complete original request. ARTIFACT STAGE: plan\|frozen_diff"* |
+| `draft` | 5 | SWE-bench style bounded bug fixes, and best-of-N patch selection — not prose drafting |
+| `code` | 2 | *"Implement the complete approved task in this worktree, run the repository verification"* |
+| `roundtable` | 1 | adversarial panel review — **declared nowhere**, works by falling through |
+
+Caveat: 40 jobs, one operator, six days. Enough to show what IS used; not enough to prove
+what is never needed.
+
+### Done
+
+Culled the six persona-shaped roles (`prose`, `line-edit`, `lyric`, `hook`, `prosody`,
+`songform`) and the two alias entries (`test`, `implement`) — see the commit for the
+persona-vs-role reasoning. `continuity` and `beat-check` kept: the novel persona genuinely
+delegates them.
+
+### NOT done, with reasons
+
+An architect panel recommended culling `explain`, `execute`, `summarize`, `format`, `search`,
+`diagnose` and folding `refactor` into `code`. **I did not act on that**, because the panel's
+own precondition — "search all personas, agent declarations, callers, tests and configuration
+before removal" — fails when actually run: every one of those roles has 10–49 live code
+references, and `refactor`, `execute`, `search`, `diagnose` and `validate` are declared by
+built-in personas.
+
+It also recommended culling `deploy` as having "no template, no route". **That is wrong**:
+`cmd_hooks.c:485-491` assigns `role = "deploy"` from hook input, so it is routed. Kept.
+
+### Sequenced redesign (not started)
+
+1. **`artifact_gate` with a structured `stage`.** The strongest data-backed change: 31 of 40
+   observed jobs are a staged artifact-vs-request gate whose stage lives in PROMPT TEXT, so
+   routing cannot see the most informative signal in the sample. Must roll out atomically —
+   add the role to every agent intended to receive it, THEN switch callers, or exact role
+   filtering leaves jobs unroutable.
+2. **`roundtable` becomes an orchestration MODE, not a role.** It describes how several agents
+   are coordinated, not a capability one agent supplies. It is an undeclared production
+   dependency today; migrate the invocation before removing the fall-through.
+3. **A `scope` axis (`bounded` | `whole_task`) as routing METADATA, not roles.** The panel
+   explicitly rejected `code_simple`/`code_complex`: scope is more stable and auditable than
+   subjective difficulty (a single-file bug can be hard; a repo-wide mechanical change can be
+   easy), and difficulty roles multiply combinatorially while coupling tiers to prompt labels.
+   The observed data supports the distinction — bounded benchmark fixes versus whole-worktree
+   implementation — but is too small to calibrate tier thresholds. Collect telemetry first.
+
+Each step changes agent ELIGIBILITY, so none is a template-only edit, and none can be verified
+from this worktree against the live server.
