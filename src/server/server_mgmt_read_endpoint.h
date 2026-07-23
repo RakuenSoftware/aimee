@@ -34,6 +34,7 @@ typedef struct
    const char *local_fingerprint;
    uint64_t publication_generation;
    int64_t now;
+   server_mgmt_read_selector_t selector;
 } server_mgmt_read_request_t;
 
 typedef server_mgmt_read_result_t (*server_mgmt_read_status_fn)(void *,
@@ -46,6 +47,7 @@ typedef server_mgmt_read_result_t (*server_mgmt_read_checkpoint_fn)(
     void *, const server_mgmt_read_request_t *, const server_mgmt_token_claims_t *,
     const server_mgmt_read_status_proof_t *);
 typedef int (*server_mgmt_read_load_fn)(void *, server_mgmt_read_agent_t *, size_t, size_t *);
+typedef int (*server_mgmt_read_load_config_fn)(void *, server_mgmt_read_config_t *);
 
 typedef struct
 {
@@ -53,6 +55,7 @@ typedef struct
    server_mgmt_read_token_fn verify_token;
    server_mgmt_endpoint_jti_fn consume_jti;
    server_mgmt_read_load_fn load_agents;
+   server_mgmt_read_load_config_fn load_config;
    server_mgmt_read_checkpoint_fn verify_checkpoint;
    void *ctx;
 } server_mgmt_read_deps_t;

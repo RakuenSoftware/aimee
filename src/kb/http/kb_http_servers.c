@@ -389,7 +389,7 @@ static int action_dispatch(const kb_principal_t *actor, int64_t team, const char
 }
 
 static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *server, char *out,
-                         int cap)
+                         int cap, server_mgmt_read_selector_t selector)
 {
    char correlation[44];
    memset(out, 0, (size_t)cap);
@@ -412,7 +412,7 @@ static int read_dispatch(const kb_principal_t *actor, int64_t team, const char *
                   "{\"error\":{\"code\":\"unavailable\",\"message\":\"Service unavailable.\"}}");
       return 503;
    }
-   kb_management_read_result_t rc = handler(ctx, actor, team, server, out, (size_t)cap);
+   kb_management_read_result_t rc = handler(ctx, actor, team, server, selector, out, (size_t)cap);
    pthread_mutex_lock(&read_mu);
    if (!--read_inflight)
       pthread_cond_broadcast(&read_cv);
@@ -464,7 +464,9 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
          return -1;
       int is_health = !strcmp(slash, "/health");
       int is_action = !strcmp(slash, "/actions");
-      int is_read = !strcmp(slash, "/agents");
+      int is_agents = !strcmp(slash, "/agents");
+      int is_config = !strcmp(slash, "/config");
+      int is_read = is_agents || is_config;
       if (!is_health && !is_action && !is_read)
          return -1;
       if (((is_health || is_read) && strcmp(m, "GET")) || (is_action && strcmp(m, "POST")))
@@ -516,7 +518,9 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
       {
          if ((body && body_len) || body_len)
             return 400;
-         return read_dispatch(actor, team, sid, out, cap);
+         return read_dispatch(actor, team, sid, out, cap,
+                              is_agents ? SERVER_MGMT_READ_SELECTOR_AGENTS
+                                        : SERVER_MGMT_READ_SELECTOR_CONFIG);
       }
       return health_dispatch(actor, team, sid, out, cap);
    }

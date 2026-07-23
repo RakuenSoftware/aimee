@@ -115,21 +115,47 @@ static int put_u64(transcript_t *t, uint64_t v)
    return put(t, b, sizeof(b));
 }
 
+const char *server_mgmt_read_selector_name(server_mgmt_read_selector_t selector)
+{
+   return selector == SERVER_MGMT_READ_SELECTOR_AGENTS   ? "agents"
+          : selector == SERVER_MGMT_READ_SELECTOR_CONFIG ? "config"
+                                                         : NULL;
+}
+
+const char *server_mgmt_read_selector_purpose(server_mgmt_read_selector_t selector)
+{
+   return selector == SERVER_MGMT_READ_SELECTOR_AGENTS   ? "management.read.v1"
+          : selector == SERVER_MGMT_READ_SELECTOR_CONFIG ? "management.read.config.v1"
+                                                         : NULL;
+}
+
+int server_mgmt_read_selector_path(server_mgmt_read_selector_t selector, const char *server_id,
+                                   char *out, size_t cap)
+{
+   const char *name = server_mgmt_read_selector_name(selector);
+   if (out && cap)
+      out[0] = 0;
+   if (!name || !out || !cap || !identifier(server_id, 127))
+      return -1;
+   int n = snprintf(out, cap, "/v1/servers/%s/%s", server_id, name);
+   return n > 0 && (size_t)n < cap ? n : -1;
+}
+
 int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *in, char out[65])
 {
    static const unsigned char domain[] = "aimee-mgmt-read-v1";
    transcript_t t = {{0}, 0};
    char path[160];
+   const char *selector = in ? server_mgmt_read_selector_name(in->selector) : NULL;
    if (out)
       out[0] = 0;
-   if (!in || !out || !in->nonce || !identifier(in->server_id, 127) || in->team_id <= 0 ||
-       !canonical_text(in->kb_issuer, 511) || !lower_hex(in->kb_serial, 79) ||
+   if (!in || !out || !selector || !in->nonce || !identifier(in->server_id, 127) ||
+       in->team_id <= 0 || !canonical_text(in->kb_issuer, 511) || !lower_hex(in->kb_serial, 79) ||
        !canonical_text(in->server_issuer, 511) || !lower_hex(in->server_serial, 79))
       return -1;
-   int path_n = snprintf(path, sizeof(path), "/v1/servers/%s/agents", in->server_id);
-   if (path_n <= 0 || (size_t)path_n >= sizeof(path) ||
+   if (server_mgmt_read_selector_path(in->selector, in->server_id, path, sizeof(path)) < 0 ||
        !put(&t, domain, sizeof(domain)) || /* includes the required NUL */
-       !put_u16_text(&t, "GET") || !put_u16_text(&t, path) || !put_u16_text(&t, "agents") ||
+       !put_u16_text(&t, "GET") || !put_u16_text(&t, path) || !put_u16_text(&t, selector) ||
        !put_u16_text(&t, in->server_id) || !put_u64(&t, (uint64_t)in->team_id) ||
        !put(&t, in->nonce, 32) || !put_u16_text(&t, in->kb_issuer) ||
        !put_u16_text(&t, in->kb_serial) || !put_u16_text(&t, in->server_issuer) ||
@@ -225,6 +251,64 @@ int server_mgmt_read_project(const char *server_id, int64_t team_id,
 fail:
    cJSON_Delete(team_raw);
    cJSON_Delete(items);
+   cJSON_Delete(root);
+   return -1;
+}
+
+int server_mgmt_read_project_config(const char *server_id, int64_t team_id,
+                                    const server_mgmt_read_config_t *config, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = 0;
+   if (!out || !cap || !identifier(server_id, 127) || team_id <= 0 || !config || config->mtls < 0 ||
+       config->mtls > 2 || config->remote_writes < 0 || config->remote_writes > 2 ||
+       (config->cli_session_forwarding != 0 && config->cli_session_forwarding != 1) ||
+       (config->require_aimee_git != 0 && config->require_aimee_git != 1) ||
+       strnlen(config->client_transport, sizeof(config->client_transport)) >=
+           sizeof(config->client_transport))
+      return -1;
+   const char *mtls[] = {"off", "optional", "required"};
+   const char *writes[] = {"off", "data", "full"};
+   const char *transport = config->client_transport;
+   if (!transport[0] || !strcmp(transport, "socket"))
+      transport = "socket";
+   else if (strcmp(transport, "http") && strcmp(transport, "auto"))
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON *projected = root ? cJSON_CreateObject() : NULL;
+   char team[32];
+   int team_n = snprintf(team, sizeof(team), "%lld", (long long)team_id);
+   cJSON *team_raw = team_n > 0 && (size_t)team_n < sizeof(team) ? cJSON_CreateRaw(team) : NULL;
+   if (!root || !projected || !team_raw || !cJSON_AddStringToObject(root, "server_id", server_id))
+      goto config_fail;
+   cJSON_AddItemToObject(root, "team", team_raw);
+   team_raw = NULL;
+   cJSON_AddItemToObject(root, "config", projected);
+   projected = NULL;
+   cJSON *object = cJSON_GetObjectItemCaseSensitive(root, "config");
+   if (!cJSON_AddStringToObject(object, "mtls", mtls[config->mtls]) ||
+       !cJSON_AddStringToObject(object, "remote_writes", writes[config->remote_writes]) ||
+       !cJSON_AddStringToObject(object, "client_transport", transport) ||
+       !cJSON_AddBoolToObject(object, "cli_session_forwarding", config->cli_session_forwarding) ||
+       !cJSON_AddBoolToObject(object, "require_aimee_git", config->require_aimee_git))
+      goto config_fail;
+   char *json = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!json)
+      return -1;
+   size_t n = strlen(json);
+   if (n >= cap || n > SERVER_MGMT_READ_BODY_MAX)
+   {
+      free(json);
+      return -1;
+   }
+   memcpy(out, json, n + 1);
+   free(json);
+   return (int)n;
+config_fail:
+   cJSON_Delete(team_raw);
+   cJSON_Delete(projected);
    cJSON_Delete(root);
    return -1;
 }

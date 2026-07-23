@@ -4,6 +4,7 @@
 #include "kb_identity.h"
 #include "kb/kb_management_health_exchange.h"
 #include "kb/kb_management_action.h"
+#include "management_read.h"
 
 #include <stdint.h>
 
@@ -24,8 +25,11 @@ typedef enum
    KB_MANAGEMENT_READ_INTEGRITY,
    KB_MANAGEMENT_READ_INVALID
 } kb_management_read_result_t;
-typedef kb_management_read_result_t (*kb_http_servers_read_handler_fn)(
-    void *, const kb_principal_t *, int64_t, const char *, char *, size_t);
+typedef kb_management_read_result_t (*kb_http_servers_read_handler_fn)(void *,
+                                                                       const kb_principal_t *,
+                                                                       int64_t, const char *,
+                                                                       server_mgmt_read_selector_t,
+                                                                       char *, size_t);
 
 /* The management runtime is the sole production owner. Registration is only
  * permitted while no owner (or retiring owner) exists. Unregister prevents new

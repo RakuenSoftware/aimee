@@ -27,6 +27,12 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export async function apiGetText(path: string): Promise<string> {
+  const r = await fetch(`/api${path}`, { credentials: 'same-origin' });
+  if (!r.ok) throw new ApiError(r.status);
+  return r.text();
+}
+
 export async function apiSend<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(`/api${path}`, {
     method,

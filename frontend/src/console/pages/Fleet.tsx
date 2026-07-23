@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { acknowledgeFleetMutation, apiGet, fleetSend, ApiError } from '../api';
+import { useRef, useState } from 'react';
+import { acknowledgeFleetMutation, apiGet, apiGetText, fleetSend, ApiError } from '../api';
 
 export interface FleetServer {
   server_id: string;
@@ -20,6 +20,20 @@ export interface FleetAgent {
   max_parallel: number;
 }
 
+export interface FleetSafeConfig {
+  mtls: 'off' | 'optional' | 'required';
+  remote_writes: 'off' | 'data' | 'full';
+  client_transport: 'socket' | 'http' | 'auto';
+  cli_session_forwarding: boolean;
+  require_aimee_git: boolean;
+}
+
+interface FleetSafeConfigResponse {
+  server_id: string;
+  team: string;
+  config: FleetSafeConfig;
+}
+
 const maxInt64 = 9223372036854775807n;
 
 export function canonicalTeam(value: string): string | null {
@@ -38,6 +52,19 @@ export function validAgent(value: string): boolean {
 
 export function managementAvailable(server: FleetServer): boolean {
   return server.status === 'active' && server.mgmt_cert_cn.length > 0 && server.endpoint.length > 0;
+}
+
+export function parseSafeConfigResponse(raw: string): FleetSafeConfigResponse | null {
+  const matches = [...raw.matchAll(/"team":([1-9][0-9]{0,18})(?=,)/g)];
+  if (matches.length !== 1 || matches[0].index === undefined || !canonicalTeam(matches[0][1])) return null;
+  const match = matches[0];
+  const valueStart = match.index + '"team":'.length;
+  const normalized = `${raw.slice(0, valueStart)}"${match[1]}"${raw.slice(valueStart + match[1].length)}`;
+  try {
+    return JSON.parse(normalized) as FleetSafeConfigResponse;
+  } catch {
+    return null;
+  }
 }
 
 export function fleetError(error: unknown): string {
@@ -61,82 +88,136 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
   const [servers, setServers] = useState<FleetServer[]>([]);
   const [selected, setSelected] = useState('');
   const [agents, setAgents] = useState<FleetAgent[]>([]);
+  const [safeConfig, setSafeConfig] = useState<FleetSafeConfig | null>(null);
   const [agent, setAgent] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const selectionEpoch = useRef(0);
   const teamID = canonicalTeam(team);
 
+  function beginRequest(): boolean {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(true);
+    return true;
+  }
+
+  function endRequest() {
+    busyRef.current = false;
+    setBusy(false);
+  }
+
   function changeTeam(value: string) {
+    selectionEpoch.current += 1;
     setTeam(value);
     setServers([]);
     setSelected('');
     setAgents([]);
+    setSafeConfig(null);
     setMessage('');
   }
 
   async function loadFleet() {
-    if (!teamID) return;
-    setBusy(true);
+    if (!teamID || !beginRequest()) return;
+    const requestEpoch = selectionEpoch.current;
     setMessage('');
     try {
       const result = await apiGet<{ servers: FleetServer[] }>(`/v1/servers?team=${teamID}`);
+      if (requestEpoch !== selectionEpoch.current) return;
       setServers(result.servers ?? []);
       setSelected('');
       setAgents([]);
+      setSafeConfig(null);
     } catch (error) {
-      setMessage(fleetError(error));
+      if (requestEpoch === selectionEpoch.current) setMessage(fleetError(error));
     } finally {
-      setBusy(false);
+      endRequest();
     }
   }
 
   function selectServer(serverID: string) {
+    selectionEpoch.current += 1;
     setSelected(serverID);
     setAgents([]);
+    setSafeConfig(null);
     setMessage('');
   }
 
   async function loadAgents() {
-    if (!teamID || !selected || busy) return;
-    setBusy(true);
+    if (!teamID || !selected || !beginRequest()) return;
+    const requestedServer = selected;
+    const requestEpoch = selectionEpoch.current;
     setMessage('');
     setAgents([]);
     try {
       const result = await apiGet<{ server_id: string; team: unknown; agents: FleetAgent[] }>(
-        `/v1/servers/${encodeURIComponent(selected)}/agents?team=${teamID}`,
+        `/v1/servers/${encodeURIComponent(requestedServer)}/agents?team=${teamID}`,
       );
       // JSON numbers cannot preserve every positive int64 team id. The KB has already
       // authenticated and bound the exact canonical query value; keep the UI check to
       // fields it can compare without precision loss.
-      if (result.server_id !== selected || !Array.isArray(result.agents)) {
+      if (requestEpoch !== selectionEpoch.current) return;
+      if (result.server_id !== requestedServer || !Array.isArray(result.agents)) {
         throw new Error('invalid fleet agent response');
       }
       setAgents(result.agents);
     } catch (error) {
-      setMessage(fleetError(error));
+      if (requestEpoch === selectionEpoch.current) setMessage(fleetError(error));
     } finally {
-      setBusy(false);
+      endRequest();
+    }
+  }
+
+  async function loadConfig() {
+    if (!teamID || !selected || !beginRequest()) return;
+    const requestedTeam = teamID;
+    const requestedServer = selected;
+    const requestEpoch = selectionEpoch.current;
+    setMessage('');
+    setSafeConfig(null);
+    try {
+      const result = parseSafeConfigResponse(await apiGetText(
+        `/v1/servers/${encodeURIComponent(requestedServer)}/config?team=${requestedTeam}`,
+      ));
+      if (requestEpoch !== selectionEpoch.current) return;
+      const config = result?.config;
+      if (!result || result.server_id !== requestedServer || result.team !== requestedTeam || !config ||
+          !['off', 'optional', 'required'].includes(config.mtls) ||
+          !['off', 'data', 'full'].includes(config.remote_writes) ||
+          !['socket', 'http', 'auto'].includes(config.client_transport) ||
+          typeof config.cli_session_forwarding !== 'boolean' ||
+          typeof config.require_aimee_git !== 'boolean') {
+        throw new Error('invalid fleet config response');
+      }
+      setSafeConfig(config);
+    } catch (error) {
+      if (requestEpoch === selectionEpoch.current) setMessage(fleetError(error));
+    } finally {
+      endRequest();
     }
   }
 
   async function liveHealth(serverID: string) {
-    if (!teamID || busy) return;
-    setBusy(true);
+    if (!teamID || !beginRequest()) return;
+    const requestEpoch = selectionEpoch.current;
     setMessage('');
     try {
       await apiGet(`/v1/servers/${encodeURIComponent(serverID)}/health?team=${teamID}`);
-      setMessage(`${serverID} passed live management health verification.`);
+      if (requestEpoch === selectionEpoch.current)
+        setMessage(`${serverID} passed live management health verification.`);
     } catch (error) {
-      setMessage(fleetError(error));
+      if (requestEpoch === selectionEpoch.current) setMessage(fleetError(error));
     } finally {
-      setBusy(false);
+      endRequest();
     }
   }
 
   async function mutate(action: 'agent.enable' | 'agent.disable') {
-    if (!teamID || !selected || !validAgent(agent) || busy || mutationBlocked) return;
+    if (!teamID || !selected || !validAgent(agent) || busyRef.current || mutationBlocked) return;
     if (!window.confirm(`${action === 'agent.enable' ? 'Enable' : 'Disable'} ${agent} on ${selected}?`)) return;
-    setBusy(true);
+    if (!beginRequest()) return;
+    const requestEpoch = selectionEpoch.current;
     setMessage('');
     try {
       const ack = await fleetSend('POST', `/v1/servers/${encodeURIComponent(selected)}/actions?team=${teamID}`, {
@@ -147,10 +228,12 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
         await acknowledgeFleetMutation(ack);
       } catch {
         onMutationBlocked();
-        setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
+        if (requestEpoch === selectionEpoch.current)
+          setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
         return;
       }
-      setMessage(`${action} succeeded for ${agent} on ${selected}.`);
+      if (requestEpoch === selectionEpoch.current)
+        setMessage(`${action} succeeded for ${agent} on ${selected}.`);
     } catch (error) {
       // Management mutations are intentionally never retried here.
       if (error instanceof ApiError && error.status !== 409 && error.status !== 502) {
@@ -160,15 +243,16 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
           await acknowledgeFleetMutation(error.fleetAck);
         } catch {
           onMutationBlocked();
-          setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
+          if (requestEpoch === selectionEpoch.current)
+            setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
           return;
         }
       } else {
         onMutationBlocked();
       }
-      setMessage(fleetError(error));
+      if (requestEpoch === selectionEpoch.current) setMessage(fleetError(error));
     } finally {
-      setBusy(false);
+      endRequest();
     }
   }
 
@@ -210,6 +294,20 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
                 <td>{item.delegate_available ? 'Yes' : 'No'}</td>
                 <td>{item.primary_only ? 'Yes' : 'No'}</td><td>{item.max_parallel}</td>
               </tr>)}</tbody>
+            </table>}
+          </fieldset>
+          <fieldset>
+            <legend>Safe configuration on {selected}</legend>
+            <button disabled={busy} onClick={loadConfig}>Load config</button>
+            {safeConfig && <table>
+              <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+              <tbody>
+                <tr><td>mTLS</td><td>{safeConfig.mtls}</td></tr>
+                <tr><td>Remote writes</td><td>{safeConfig.remote_writes}</td></tr>
+                <tr><td>Client transport</td><td>{safeConfig.client_transport}</td></tr>
+                <tr><td>CLI session forwarding</td><td>{safeConfig.cli_session_forwarding ? 'On' : 'Off'}</td></tr>
+                <tr><td>Require Aimee Git</td><td>{safeConfig.require_aimee_git ? 'On' : 'Off'}</td></tr>
+              </tbody>
             </table>}
           </fieldset>
           <fieldset>

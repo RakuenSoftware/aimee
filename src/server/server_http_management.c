@@ -95,7 +95,9 @@ int server_http_management_read_route(const char *method, const char *path)
 {
    return method && path &&
           ((!strcmp(method, "POST") && !strcmp(path, "/v1/management/read/challenge")) ||
-           (!strcmp(method, "GET") && !strcmp(path, "/v1/management/read/agents")));
+           (!strcmp(method, "POST") && !strcmp(path, "/v1/management/read/config/challenge")) ||
+           (!strcmp(method, "GET") && (!strcmp(path, "/v1/management/read/agents") ||
+                                       !strcmp(path, "/v1/management/read/config"))));
 }
 
 int server_http_management_route(const char *method, const char *path)
@@ -530,7 +532,8 @@ int server_http_management_read_framing_valid(const char *method, const char *pa
       }
       else if (n == 10 && !strncasecmp(line, "Connection", n))
       {
-         int challenge = !strcmp(path, "/v1/management/read/challenge");
+         int challenge = !strcmp(path, "/v1/management/read/challenge") ||
+                         !strcmp(path, "/v1/management/read/config/challenge");
          int exact = challenge ? vn == 10 && !strncasecmp(v, "keep-alive", 10)
                                : vn == 5 && !strncasecmp(v, "close", 5);
          conn = ++conn == 1 && exact ? conn : 99;
@@ -550,7 +553,8 @@ int server_http_management_read_framing_valid(const char *method, const char *pa
          return 0;
       line = eol + 2;
    }
-   int challenge = !strcmp(path, "/v1/management/read/challenge");
+   int challenge = !strcmp(path, "/v1/management/read/challenge") ||
+                   !strcmp(path, "/v1/management/read/config/challenge");
    return host == 1 && cl == 1 && body_len == 0 && conn == 1 &&
           (challenge ? ct == 1 && auth == 0 && staple == 0 : ct == 0 && auth == 1 && staple == 1);
 }

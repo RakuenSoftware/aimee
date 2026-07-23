@@ -1852,7 +1852,7 @@ $(TESTPREFIX)/unit-test-server-mgmt-read: $(OBJDIR)/tests/test_server_mgmt_read.
 $(TESTPREFIX)/unit-test-server-mgmt-read-source: \
     $(OBJDIR)/tests/test_server_mgmt_read_source.o \
     $(OBJDIR)/server/server_mgmt_read_source.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
 $(TESTPREFIX)/unit-test-server-mgmt-read-endpoint: \
     $(OBJDIR)/tests/test_server_mgmt_read_endpoint.o \

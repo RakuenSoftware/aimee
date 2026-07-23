@@ -93,14 +93,16 @@ db2_management_read_result_t db2_management_read_publication_generation(int64_t 
 
 db2_management_read_result_t
 db2_management_read_intent_start(const kb_principal_t *principal, int64_t team, const char *server,
-                                 const char *external_path, const uint8_t nonce[32],
-                                 const char *digest, const char *issuer, const char *installation,
-                                 int ttl, db2_management_read_intent_t *out)
+                                 server_mgmt_read_selector_t selector, const char *external_path,
+                                 const uint8_t nonce[32], const char *digest, const char *issuer,
+                                 const char *installation, int ttl,
+                                 db2_management_read_intent_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
-   if (!principal || !out || team < 1 || !server || !external_path || !nonce || !digest ||
-       !issuer || !installation || ttl < 1 || ttl > 90)
+   const char *selector_name = server_mgmt_read_selector_name(selector);
+   if (!principal || !out || team < 1 || !server || !selector_name || !external_path || !nonce ||
+       !digest || !issuer || !installation || ttl < 1 || ttl > 90)
       return DB2_MANAGEMENT_READ_INVALID;
    char corr[65], jti[65];
    if (platform_random_hex(corr, 64) || platform_random_hex(jti, 64))
@@ -114,14 +116,15 @@ db2_management_read_intent_start(const kb_principal_t *principal, int64_t team, 
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(db2_conn(),
                         "SELECT * FROM public.kb_management_read_intent_start(?1,?2,?3,?4,"
-                        "'agents','GET',?5,?6,?7,?8,?9,?10)",
+                        "?5,'GET',?6,?7,?8,?9,?10,?11)",
                         error, sizeof(error));
    int bound = !st || aimee_pg_bind_text(st, "?1", corr) || aimee_pg_bind_text(st, "?2", jti) ||
                aimee_pg_bind_int64(st, "?3", team) || aimee_pg_bind_text(st, "?4", server) ||
-               aimee_pg_bind_text(st, "?5", external_path) ||
-               aimee_pg_bind_blob(st, "?6", nonce, 32) || aimee_pg_bind_text(st, "?7", digest) ||
-               aimee_pg_bind_text(st, "?8", issuer) || aimee_pg_bind_int(st, "?9", ttl) ||
-               aimee_pg_bind_text(st, "?10", installation);
+               aimee_pg_bind_text(st, "?5", selector_name) ||
+               aimee_pg_bind_text(st, "?6", external_path) ||
+               aimee_pg_bind_blob(st, "?7", nonce, 32) || aimee_pg_bind_text(st, "?8", digest) ||
+               aimee_pg_bind_text(st, "?9", issuer) || aimee_pg_bind_int(st, "?10", ttl) ||
+               aimee_pg_bind_text(st, "?11", installation);
    aimee_pg_step_t step = bound ? AIMEE_PG_ERR : aimee_pg_step(st, error, sizeof(error));
    db2_management_read_result_t rc = DB2_MANAGEMENT_READ_UNAVAILABLE;
    db2_management_read_intent_t candidate = {0};

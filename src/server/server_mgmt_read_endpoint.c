@@ -35,11 +35,14 @@ server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_reque
                                                     size_t cap, size_t *out_len)
 {
    if (!rq || !deps || !out || !cap || !out_len || !deps->verify_and_consume_status ||
-       !deps->verify_token || !deps->consume_jti || !deps->load_agents ||
-       !deps->verify_checkpoint || !rq->jwt || !rq->jwt_len || !rq->staple || !rq->staple_len ||
-       !rq->expected_issuer || !rq->server_id || !rq->peer || !rq->peer->management_profile ||
-       strcmp(rq->peer->cn, "p5-kb-management") || !rq->local_issuer || !rq->local_serial ||
-       !rq->local_fingerprint || !rq->publication_generation || rq->now < 0)
+       !deps->verify_token || !deps->consume_jti || !deps->verify_checkpoint || !rq->jwt ||
+       !rq->jwt_len || !rq->staple || !rq->staple_len || !rq->expected_issuer || !rq->server_id ||
+       !rq->peer || !rq->peer->management_profile || strcmp(rq->peer->cn, "p5-kb-management") ||
+       !rq->local_issuer || !rq->local_serial || !rq->local_fingerprint ||
+       !rq->publication_generation || rq->now < 0 ||
+       !server_mgmt_read_selector_name(rq->selector) ||
+       (rq->selector == SERVER_MGMT_READ_SELECTOR_AGENTS && !deps->load_agents) ||
+       (rq->selector == SERVER_MGMT_READ_SELECTOR_CONFIG && !deps->load_config))
       return fail(out, cap, out_len, SERVER_MGMT_READ_INTEGRITY);
 
    server_mgmt_read_status_proof_t proof;
@@ -71,6 +74,7 @@ server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_reque
        rq->local_serial,
        proof.revocation_generation,
        rq->publication_generation,
+       rq->selector,
    };
    char expected_digest[65];
    if (server_mgmt_read_digest(&digest_input, expected_digest) != 0 ||
@@ -95,13 +99,26 @@ server_mgmt_read_result_t server_mgmt_read_dispatch(const server_mgmt_read_reque
    if (jti != SERVER_MGMT_JTI_OK)
       return fail(out, cap, out_len, SERVER_MGMT_READ_UNAVAILABLE);
 
-   server_mgmt_read_agent_t agents[SERVER_MGMT_READ_AGENT_MAX];
-   size_t count = 0;
-   memset(agents, 0, sizeof(agents));
-   if (deps->load_agents(deps->ctx, agents, SERVER_MGMT_READ_AGENT_MAX, &count) != 0 ||
-       count > SERVER_MGMT_READ_AGENT_MAX)
-      return fail(out, cap, out_len, SERVER_MGMT_READ_UNAVAILABLE);
-   int n = server_mgmt_read_project(rq->server_id, claims.team_id, agents, count, out, cap);
+   int n = -1;
+   if (rq->selector == SERVER_MGMT_READ_SELECTOR_AGENTS)
+   {
+      server_mgmt_read_agent_t agents[SERVER_MGMT_READ_AGENT_MAX];
+      size_t count = 0;
+      memset(agents, 0, sizeof(agents));
+      if (deps->load_agents(deps->ctx, agents, SERVER_MGMT_READ_AGENT_MAX, &count) != 0 ||
+          count > SERVER_MGMT_READ_AGENT_MAX)
+         return fail(out, cap, out_len, SERVER_MGMT_READ_UNAVAILABLE);
+      n = server_mgmt_read_project(rq->server_id, claims.team_id, agents, count, out, cap);
+   }
+   else
+   {
+      server_mgmt_read_config_t config;
+      memset(&config, 0, sizeof(config));
+      if (deps->load_config(deps->ctx, &config) != 0)
+         return fail(out, cap, out_len, SERVER_MGMT_READ_UNAVAILABLE);
+      n = server_mgmt_read_project_config(rq->server_id, claims.team_id, &config, out, cap);
+      OPENSSL_cleanse(&config, sizeof(config));
+   }
    if (n < 0)
       return fail(out, cap, out_len, SERVER_MGMT_READ_UNAVAILABLE);
 
