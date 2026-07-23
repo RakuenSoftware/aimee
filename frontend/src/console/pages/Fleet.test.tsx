@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
 import Fleet, { canonicalTeam, managementAvailable, validAgent, type FleetServer } from './Fleet';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), send: vi.fn(), ack: vi.fn() }));
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
-  return { ...actual, apiGet: mocks.get, apiSend: mocks.send };
+  return { ...actual, apiGet: mocks.get, apiSend: mocks.send, acknowledgeFleetMutation: mocks.ack };
 });
 
 const server: FleetServer = {
@@ -50,6 +50,7 @@ async function selectAgent() {
 beforeEach(() => {
   mocks.get.mockReset();
   mocks.send.mockReset();
+  mocks.ack.mockReset().mockResolvedValue(undefined);
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
 
@@ -109,6 +110,7 @@ describe('Fleet interactions', () => {
     expect(mocks.send).toHaveBeenCalledWith('POST', '/v1/servers/server-1/actions?team=7', {
       action: 'agent.disable', agent: 'agent.one',
     });
+    expect(mocks.ack).toHaveBeenCalledTimes(1);
   });
 
   it('blocks in-flight duplicates and redispatch after an ambiguous failure', async () => {

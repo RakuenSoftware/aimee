@@ -135,7 +135,7 @@ func (s *sessionStore) get(id string) (*session, error) {
 		return nil, errors.New("session expired")
 	}
 	sess.breakGlass = bg == 1
-	sess.fleetIndeterminate = fleetIndeterminate == 1
+	sess.fleetIndeterminate = fleetIndeterminate != 0
 	sess.created = time.Unix(created, 0)
 	sess.lastSeen = time.Unix(lastSeen, 0)
 	sess.expires = time.Unix(expires, 0)
@@ -158,8 +158,8 @@ func (s *sessionStore) claimFleetMutation(id string) (bool, error) {
 	return n == 1, nil
 }
 
-func (s *sessionStore) clearFleetMutation(id string) error {
-	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=0 WHERE id=?`, id)
+func (s *sessionStore) transitionFleetMutation(id string, from, to int) error {
+	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=? WHERE id=? AND fleet_indeterminate=?`, to, id, from)
 	if err != nil {
 		return err
 	}

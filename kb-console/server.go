@@ -91,6 +91,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/session", s.handleSession)
+	mux.HandleFunc("/api/fleet/ack", s.handleFleetAck)
 	mux.HandleFunc("/api/", s.handleAPI)
 	mux.HandleFunc("/", s.handleSPA)
 	return s.securityHeaders(mux)
@@ -228,6 +229,28 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": sess.breakGlass,
 		"fleet_indeterminate": sess.fleetIndeterminate})
+}
+
+func (s *server) handleFleetAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	sess, err := s.requireSession(r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if tok := r.Header.Get("X-CSRF-Token"); tok == "" || !constEq(tok, sess.csrf) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "csrf token mismatch"})
+		return
+	}
+	if err := s.sessions.transitionFleetMutation(sess.id, 2, 0); err != nil {
+		s.sessions.del(sess.id)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "no definite fleet result awaiting acknowledgement"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
 }
 
 func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {

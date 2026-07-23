@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiGet, apiSend, ApiError } from '../api';
+import { acknowledgeFleetMutation, apiGet, apiSend, ApiError } from '../api';
 
 export interface FleetServer {
   server_id: string;
@@ -101,6 +101,13 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
         action,
         agent,
       });
+      try {
+        await acknowledgeFleetMutation();
+      } catch {
+        onMutationBlocked();
+        setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
+        return;
+      }
       setMessage(`${action} succeeded for ${agent} on ${selected}.`);
     } catch (error) {
       // Management mutations are intentionally never retried here.

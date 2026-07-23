@@ -36,6 +36,15 @@ export async function apiSend<T = unknown>(method: string, path: string, body?: 
   return r.json() as Promise<T>;
 }
 
+export async function acknowledgeFleetMutation(): Promise<void> {
+  const r = await fetch('/api/fleet/ack', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'X-CSRF-Token': csrfToken },
+  });
+  if (!r.ok) throw new ApiError(r.status);
+}
+
 export interface SessionInfo {
   csrf: string;
   break_glass: boolean;

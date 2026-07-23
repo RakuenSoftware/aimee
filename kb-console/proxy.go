@@ -86,7 +86,7 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, body)
 	if err != nil {
 		if fleetMutation {
-			s.clearFleetMutationOrDelete(sess)
+			s.transitionFleetMutationOrDelete(sess, 1, 0)
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "proxy build failed"})
 		return
@@ -115,20 +115,24 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	if resp.StatusCode == http.StatusUnauthorized && fleetRoute {
 		s.sessions.del(sess.id)
 	}
+	if fleetMutation && !keepFleetLatch && resp.StatusCode != http.StatusUnauthorized {
+		if !s.transitionFleetMutationOrDelete(sess, 1, 2) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet result latch unavailable; sign in again"})
+			return
+		}
+	}
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, writeErr := w.Write(payload)
-	if fleetMutation && writeErr == nil && !keepFleetLatch && resp.StatusCode != http.StatusUnauthorized {
-		s.clearFleetMutationOrDelete(sess)
-	}
+	_, _ = w.Write(payload)
 }
 
-func (s *server) clearFleetMutationOrDelete(sess *session) {
-	if err := s.sessions.clearFleetMutation(sess.id); err != nil {
+func (s *server) transitionFleetMutationOrDelete(sess *session, from, to int) bool {
+	if err := s.sessions.transitionFleetMutation(sess.id, from, to); err != nil {
 		s.sessions.del(sess.id)
-		return
+		return false
 	}
-	sess.fleetIndeterminate = false
+	sess.fleetIndeterminate = to != 0
+	return true
 }

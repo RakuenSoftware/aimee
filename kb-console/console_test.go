@@ -210,6 +210,18 @@ func TestFleetMutationLatchClearsAfterDefiniteDenial(t *testing.T) {
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("definite denial %d status = %d", i, w.Code)
 		}
+		latched, err := srv.sessions.get(sess.id)
+		if err != nil || !latched.fleetIndeterminate {
+			t.Fatalf("definite response was not held for browser acknowledgement: %+v err=%v", latched, err)
+		}
+		ack := httptest.NewRequest(http.MethodPost, "/api/fleet/ack", nil)
+		ack.Header.Set("X-CSRF-Token", sess.csrf)
+		ack.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+		ackW := httptest.NewRecorder()
+		srv.handleFleetAck(ackW, ack)
+		if ackW.Code != http.StatusOK {
+			t.Fatalf("definite denial %d acknowledgement status = %d", i, ackW.Code)
+		}
 	}
 	if upstreamCalls != 2 {
 		t.Fatalf("definite denials reached upstream %d times, want 2", upstreamCalls)
