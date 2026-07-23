@@ -142,8 +142,10 @@ is now the suite index and shared contract; it does not duplicate the child prop
   another participant may invoke, and it replaces the C public header as the enforced dependency edge
   between separate-program participants.
 - The **bus client** is the per-language library that lets a module attach the shared-memory bus,
-  encode/decode events in the wire format, and publish/subscribe/request. A reference client SDK and
-  the wire spec are what make any language a module host.
+  encode/decode events in the wire format, and publish/subscribe/request. The wire spec plus its
+  reference implementations in **C** (the bus host/broker and C client) and **Go** (the first-party
+  module client) are what make any language a module host; a cross-language conformance suite proves
+  the spec is implementation-independent.
 - A **hub module** is a module (canonically `memory`) that is an allowed dependency of many other
   modules and itself depends on no feature module — a sink in the dependency graph.
 - The **object closure** term extends per axis: the **C object closure** is the selected `.o` set
@@ -430,9 +432,9 @@ whatever language its author chose.
 
 - [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
   owns the polyglot build (C core plus separate module programs from one descriptor graph), the event
-  contract schema, the bus wire spec and reference client SDK, bus ownership, and dependency
-  enforcement re-expressed as authorized event publication/subscription rather than only a C
-  link/symbol graph.
+  contract schema, the bus wire spec with its C and Go reference implementations and cross-language
+  conformance suite, bus ownership, and dependency enforcement re-expressed as authorized event
+  publication/subscription rather than only a C link/symbol graph.
 - [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) owns the final
   core-vs-module carving of the eighteen IDs, the trust-kernel placement, and a round-trip proof whose
   stages flow as bus events across the boundary within the performance budget.

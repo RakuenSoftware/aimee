@@ -2,15 +2,15 @@
 
 - **State:** PENDING — roundtable-approved 2026-07-20; **amended 2026-07-23 (post-approval)** for the
   C-core / separate-module-program boundary and the shared-memory event bus. The amendment adds the
-  polyglot build, the event contract schema, the bus wire spec and reference client SDK, bus
-  ownership, and dependency enforcement over the bus; it reopens this child for re-review and does not
-  inherit the 2026-07-20 approval.
+  polyglot build, the event contract schema, the bus wire spec with C and Go reference
+  implementations, bus ownership, and dependency enforcement over the bus; it reopens this child for
+  re-review and does not inherit the 2026-07-20 approval.
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
 - **Owns:** descriptor schema/validation, physical source ownership, generated build inputs (C
   Make/CMake **and** per-language module program builds) and ownership-map outputs, the event contract
-  schema, the bus wire spec and reference client SDK, and bus ownership, include/type/symbol/link
-  **and event publish/subscribe** dependency enforcement, and complete individual
-  module-documentation gates
+  schema, the bus wire spec, its **reference implementations in C and Go** and a cross-language
+  conformance suite, and bus ownership, include/type/symbol/link **and event publish/subscribe**
+  dependency enforcement, and complete individual module-documentation gates
 - **Implementation dependency:** feature-liveness dispositions identify what should move
 - **Date:** 2026-07-20 (amended 2026-07-23)
 
@@ -136,12 +136,24 @@ core-contract audit test proves the ledger remains required independently of gov
 ## Event contract schema and the bus (2026-07-23 amendment)
 
 `module-runtime` owns the shared-memory event bus, its schema registry, and — because modules are
-separate programs in any language — the **bus wire spec and a reference client SDK**. The wire spec
-defines the shared-memory ring layout and the event encoding; the reference SDK is the first-party
-(Go) bus client, and the spec is complete enough to implement a client in another language. Each
-module declares its event contract in the descriptor: the event kinds it **publishes**, the kinds it
-**subscribes to**, and the kinds it may **request** (correlated request/reply). The generator emits,
-from those declarations, the typed event stubs and a producer/consumer edge map. An event kind has
+separate programs in any language — the **bus wire spec plus two reference implementations, in C and
+Go**. The wire spec defines the shared-memory ring/segment layout, the admission/handle handshake,
+and the event encoding. The two reference implementations validate the spec by construction:
+
+- The **C reference** is authoritative for the bus **host/broker** — core owns the bus, is C, and
+  hosts the shared segment, the admission handoff, observer routing, and the governance/audit tap —
+  and provides the **C client** used by core-side participants and any C-authored module.
+- The **Go reference** is the first-party **Go client** every Go module links to attach the bus,
+  encode/decode events, and publish/subscribe/request.
+
+The spec is validated by these **two independent implementations, not defined by one**: a
+cross-language conformance suite runs shared wire-vector fixtures against both, and an interop test
+exercises a C host with Go and C clients on one segment exchanging events in both directions. Passing
+the same vectors is what makes "any language" credible — a third-language client is written against
+the spec and the vectors, not by reading either reference. Each module declares its event contract in
+the descriptor: the event kinds it **publishes**, the kinds it **subscribes to**, and the kinds it
+may **request** (correlated request/reply). The generator emits, from those declarations, the typed
+event stubs and a producer/consumer edge map. An event kind has
 exactly one owning publisher module; a request kind has exactly one serving module. The bus
 authorizes and taps every event through the trust kernel (see
 [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)); no module-to-module
@@ -267,5 +279,6 @@ logic or a second provider implementation.
 - {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --shared-segment-not-mappable-by-arbitrary-process --grant-handle-and-queues-only-on-admission --require-attested-identity --reuse-vault-principal-cert-cn-and-governance-artifact-trust --verify-external-artifact-before-start --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --refused-module-not-started-holds-no-handle --fail-closed-and-audited"}
 - {id: 19, tier: integration, check: "scripts/test_bus_routing.sh --observer-pattern --per-event-kind-observer-set --deliver-only-to-authorized-observers --module-maps-only-own-queues --no-all-events-subscription --request-reply-point-to-point --subscribe-requires-descriptor-edge-and-execution-policy --refuse-undeclared-or-unauthorized-subscription-fail-closed-audited --module-cannot-observe-or-enumerate-others-traffic --only-governance-audit-tap-sees-full-stream"}
 - {id: 20, tier: integration, check: "scripts/test_execution_model.sh --separate-programs-no-cross-language-link --forbid-cgo --forbid-go-native-plugin --trusted-runs-own-process-own-queues --untrusted-os-sandbox-or-wasm --sandbox-cannot-read-core-vault-or-other-module-memory --module-crash-does-not-take-down-core-or-peers --independent-fault-domain"}
-- {id: 21, tier: integration, check: "scripts/test_polyglot_module.sh --reference-client-sdk --wire-spec-conformance --build-non-go-reference-module --interoperates-over-bus --admitted-and-routed-like-any-module --proves-language-neutral-boundary"}
+- {id: 21, tier: integration, check: "scripts/test_polyglot_module.sh --reference-clients c,go --wire-spec-conformance --build-non-reference-language-module --interoperates-over-bus --admitted-and-routed-like-any-module --proves-language-neutral-boundary"}
+- {id: 22, tier: integration, check: "scripts/test_bus_reference_impls.sh --c-reference-host-broker-and-client --go-reference-client --both-pass-shared-wire-vector-fixtures --spec-validated-by-two-independent-impls-not-one --interop-c-host-with-go-and-c-clients --bidirectional-event-exchange --third-language-client-from-spec-and-vectors-only"}
 ```
