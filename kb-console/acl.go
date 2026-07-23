@@ -37,6 +37,12 @@ var consoleAdminACL = []aclEntry{
 	{"GET", "/v1/audit/actions"},
 }
 
+var fleetACL = []aclEntry{
+	{"GET", "/v1/servers"},
+	{"GET", "/v1/servers/{id}/health"},
+	{"POST", "/v1/servers/{id}/actions"},
+}
+
 // segMatches matches one path segment against one pattern segment.
 func segMatches(pat, seg string) bool {
 	if pat == "{id}" {
@@ -70,13 +76,24 @@ func pathMatches(pattern, path string) bool {
 // consoleAdminAllows reports whether the console may proxy (method, path) with the
 // console-admin credential. path must already have its query string stripped.
 func consoleAdminAllows(method, path string) bool {
+	return aclAllows(consoleAdminACL, method, path)
+}
+
+func fleetAllows(method, path string) bool {
+	if len(path) > 1 && strings.HasSuffix(path, "/") {
+		return false
+	}
+	return aclAllows(fleetACL, method, path)
+}
+
+func aclAllows(entries []aclEntry, method, path string) bool {
 	if method == "" || path == "" || path[0] != '/' {
 		return false
 	}
 	if len(path) >= 512 { // parity with kb_route_acl.c: overlong → deny, never truncate
 		return false
 	}
-	for _, e := range consoleAdminACL {
+	for _, e := range entries {
 		if e.method == method && pathMatches(e.pattern, path) {
 			return true
 		}

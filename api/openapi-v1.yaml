@@ -1069,6 +1069,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /servers:
+    get:
+      operationId: listFleetServers
+      summary: List registered servers for one team
+      description: Returns the primary-backed, tenant-scoped server registry view.
+      parameters:
+        - name: team
+          in: query
+          required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        "200":
+          description: Bounded server registry list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [servers]
+                properties:
+                  servers:
+                    type: array
+                    maxItems: 64
+                    items:
+                      type: object
+                      required: [server_id, cert_cn, mgmt_cert_cn, endpoint, status, health, version]
+                      properties:
+                        server_id: { type: string }
+                        cert_cn: { type: string }
+                        mgmt_cert_cn: { type: string }
+                        endpoint: { type: string }
+                        status: { type: string }
+                        health: { type: string }
+                        version: { type: string }
+        "400": { description: Invalid or missing team }
+        "401": { description: Authentication required }
+        "403": { description: Actor is not authorized for the requested team }
+        "503": { description: Registry unavailable }
+
   /servers/{server_id}/health:
     get:
       operationId: getServerLiveHealth
@@ -1141,6 +1183,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /servers/{server_id}/actions:
+    post:
+      operationId: executeServerManagementAction
+      summary: Enable or disable one agent on one registered server
+      description: >-
+        Executes one identity-propagating, journaled management action. The server's
+        remote_writes policy remains authoritative and the request is never safely retryable
+        after an ambiguous dispatch.
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 127
+            pattern: "^[A-Za-z0-9._-]+$"
+        - name: team
+          in: query
+          required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, agent]
+              properties:
+                action: { type: string, enum: [agent.enable, agent.disable] }
+                agent: { type: string, minLength: 1, maxLength: 63, pattern: "^[A-Za-z0-9._-]+$" }
+      responses:
+        "200": { description: Action succeeded }
+        "400": { description: Invalid team or action envelope }
+        "401": { description: Authentication required }
+        "403": { description: "Actor, team, capability, or server policy denied the action" }
+        "404": { description: Server not found }
+        "409": { description: "Replay, registry conflict, or unresolved prior intent" }
+        "502": { description: Action result is indeterminate }
+        "503": { description: Management runtime or dependency unavailable }
 
   /console/overview:
     get:

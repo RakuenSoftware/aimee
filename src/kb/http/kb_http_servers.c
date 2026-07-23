@@ -1,5 +1,6 @@
 #include "kb_http_servers.h"
 #include "../../db2/server_registry.h"
+#include "db2_tenant.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_reqctx.h"
 #include "cJSON.h"
@@ -238,34 +239,6 @@ static int q_exact_team(const char *s, char *out, size_t cap)
    return 0;
 }
 
-/* Preserve the pre-B3b list-route behavior: the first value wins, duplicate
- * values are ignored, and the copied value is truncated to the legacy buffer. */
-static int q_list_legacy(const char *s, const char *k, char *o, size_t n)
-{
-   if (!s || !k || !o || n == 0)
-      return 0;
-   size_t key_len = strlen(k);
-   while (*s)
-   {
-      if (*s == '&')
-         s++;
-      const char *end = strchr(s, '&');
-      size_t segment_len = end ? (size_t)(end - s) : strlen(s);
-      if (segment_len > key_len && !memcmp(s, k, key_len) && s[key_len] == '=')
-      {
-         snprintf(o, n, "%s", s + key_len + 1);
-         char *amp = strchr(o, '&');
-         if (amp)
-            *amp = 0;
-         return 1;
-      }
-      if (!end)
-         break;
-      s = end + 1;
-   }
-   return 0;
-}
-
 static int positive_team(const char *text, int64_t *team_out)
 {
    if (!text || !team_out || text[0] < '1' || text[0] > '9')
@@ -416,21 +389,40 @@ int kb_http_servers_route_ex(const char *m, const char *p, const char *qs, const
    if (strcmp(m, "GET"))
       return 405;
    char t[32];
-   if (!q_list_legacy(qs, "team", t, sizeof(t)))
-   {
-      snprintf(out, cap, "{\"error\":\"team is required\"}");
-      return 400;
-   }
-   char *e;
-   long long team = strtoll(t, &e, 10);
-   if (!*t || *e || team <= 0)
+   if (q_exact_team(qs, t, sizeof(t)) != 0)
    {
       snprintf(out, cap, "{\"error\":\"invalid team\"}");
       return 400;
    }
+   int64_t team;
+   if (positive_team(t, &team) != 0)
+   {
+      snprintf(out, cap, "{\"error\":\"invalid team\"}");
+      return 400;
+   }
+   const kb_principal_t *actor = kb_reqctx_actor();
+   if (!actor || !actor->authenticated)
+   {
+      snprintf(out, (size_t)cap, "{\"error\":\"authentication required\"}");
+      return 401;
+   }
+   int scope_rc = db2_tenant_scope_begin(actor, team);
+   if (scope_rc != 0)
+   {
+      snprintf(out, (size_t)cap,
+               scope_rc == DB2_ERR_TENANT_DENIED ? "{\"error\":\"team access denied\"}"
+                                                 : "{\"error\":\"tenant scope unavailable\"}");
+      return scope_rc == DB2_ERR_TENANT_DENIED ? 403 : 503;
+   }
    db2_server_row_t rows[64];
    int n = db2_server_registry_list(team, rows, 64);
    if (n < 0)
+   {
+      db2_tenant_scope_rollback();
+      snprintf(out, cap, "{\"error\":\"registry unavailable\"}");
+      return 503;
+   }
+   if (db2_tenant_scope_commit() != 0)
    {
       snprintf(out, cap, "{\"error\":\"registry unavailable\"}");
       return 503;
