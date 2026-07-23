@@ -597,6 +597,15 @@ ENV_DESC = {
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
     "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Gate remote (TCP) write methods: `off` | `data` | `full`."),
+    "AIMEE_WEB_READ_SELECTOR": (
+        "Server runtime",
+        "Experimental span-selection strategy for `web_read`. Unset (the default) uses the "
+        "original byte-reservation selector. `legs` uses the leg-based adapter, which is "
+        "verified to produce byte-identical output. `fusion` uses weighted reciprocal-rank "
+        "fusion, which reorders results and is a deliberate behaviour change. Matched exactly "
+        "-- any other value, including different casing or trailing spaces, falls back to the "
+        "default.",
+    ),
     "AIMEE_WEBCHAT_GIT": ("Server runtime", "Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and \"Sign in with GitHub\" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR."),
     "AIMEE_WEBCHAT_EDITOR": ("Server runtime", "Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images)."),
     "AIMEE_WEBCHAT_EDITOR_BIN": ("Server runtime", "Override path to the code-server binary used for the in-browser editor."),
