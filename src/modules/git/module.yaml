@@ -13,6 +13,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/git/forge_credentials.c",
     "src/modules/git/git_cred_inject.c",
