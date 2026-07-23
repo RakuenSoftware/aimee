@@ -1129,12 +1129,12 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* OFF is the default. Persist proof_gated in the explicit nested public shape. */
-   if (cfg->economizer_mode == ECON_MODE_PROOF_GATED)
+   /* SAFE is the default. Persist either non-default choice explicitly. */
+   if (cfg->economizer_mode != ECON_MODE_SAFE)
    {
       cJSON *econ = cJSON_AddObjectToObject(root, "economizer");
       if (econ)
-         cJSON_AddStringToObject(econ, "mode", "proof_gated");
+         cJSON_AddStringToObject(econ, "mode", econ_mode_name(cfg->economizer_mode));
    }
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,

@@ -16,7 +16,7 @@ typedef enum
    CFG_BOOL,
    CFG_INT,
    CFG_FLOAT,
-   CFG_ECON_MODE /* int enum stored, but get/set as "off|proof_gated" */
+   CFG_ECON_MODE /* int enum stored, but get/set as "off|safe|aggressive" */
 } config_field_type_t;
 
 /* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.

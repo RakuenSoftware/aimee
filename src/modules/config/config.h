@@ -2098,17 +2098,19 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
 
-/* The only economizer modes. OFF is the baseline; PROOF_GATED freezes the
- * completed body behind the signed-empty-registry fence. */
+/* Economizer policy. SAFE permits only deterministic, mechanically lossless
+ * transforms of fresh local content. AGGRESSIVE additionally permits the
+ * existing lossy history/tool-result reducers. */
 typedef enum
 {
    ECON_MODE_OFF = 0,
-   ECON_MODE_PROOF_GATED = 1
+   ECON_MODE_SAFE = 1,
+   ECON_MODE_AGGRESSIVE = 2
 } econ_mode_t;
 
 int econ_mode(const config_t *cfg);
-const char *econ_mode_name(int mode); /* "off"/"proof_gated" */
-int econ_mode_parse(const char *s);   /* mode, or -1 for legacy/unknown */
+const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
+int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
 /* Semantic-guardrails escalation mode — the single control that replaced the
  * enabled/dry_run/advisory_only/allow_ml_only_block quad. */
@@ -2122,8 +2124,7 @@ enum
 const char *guardrails_semantic_mode_name(int mode); /* "off"/"dry_run"/"advisory"/"enforce" */
 int guardrails_semantic_mode_parse(const char *s);   /* string -> GSEM_MODE_* (OFF on unknown) */
 
-/* Legacy reduction gates remain temporarily for isolated old modules. They are
- * hard-disabled in every mode and have no production request-path caller. */
+/* Reduction gates used by the existing context economizer. */
 int econ_reduction_master_on(const config_t *cfg);
 int econ_gateway_mutate_on(const config_t *cfg);
 
@@ -2137,10 +2138,11 @@ int econ_gateway_mutate_on(const config_t *cfg);
  * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
 int config_module_enabled(int config_tristate, int env_default);
 
-/* Deprecated compatibility shape for isolated legacy unit tests. econ_preset()
- * always zeroes it; no mode can reactivate these levers. */
+/* Internal policy levers. SAFE enables only json_compact. AGGRESSIVE enables
+ * the legacy lossy reducers as well. */
 typedef struct
 {
+   int json_compact;
    int history_fold;
    int compress;
    int command_filter;

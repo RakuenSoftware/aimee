@@ -35,21 +35,22 @@ request), unless noted otherwise below.
 
 ### Context economizer: `economizer.mode`
 
-The economizer has one fail-closed mode control:
+The economizer has one mode control:
 
 ```yaml
 economizer:
-  mode: off             # off | proof_gated (default: off)
+  mode: safe             # off | safe | aggressive (default: safe)
 ```
 
 | Mode | What it does |
 | --- | --- |
-| `off` (default) | Sends the completed provider body without economizer registry work. |
-| `proof_gated` | Validates the signed transform registry and freezes the selected body behind an immutable exact-length wire snapshot. The current registry is empty, so only pristine bytes can be selected. |
+| `off` | Disables economizer transforms. |
+| `safe` (default) | Deterministically compacts strict JSON from a fresh local tool result before its first provider dispatch. It does not rewrite history or cache controls. |
+| `aggressive` | Adds the existing lossy history and tool-output reducers on supported OpenAI-family routes. Native Anthropic history is not mutated. |
 
 `modules.economizer: false` is an authoritative hard-kill that forces the effective mode to
-`off`. Legacy folding, condensation, compression, gateway mutation, and restore/resend are
-disconnected from production request paths. See [The aimee Economizer](features/economizer.md).
+`off`. Provider cache controls are never changed, and retries reuse the selected exact-length wire
+snapshot. See [The aimee Economizer](features/economizer.md).
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -90,19 +91,19 @@ and is not affected by this key.
 
 ## Choosing an economizer mode
 
-The economizer defaults to `off`. To enable its proof fence, set `economizer.mode`:
+The economizer defaults to `safe`. Select any tier with `economizer.mode`:
 
 ```yaml
 economizer:
-  mode: proof_gated
+  mode: safe
 ```
 
 ```sh
-aimee config set economizer.mode proof_gated
+aimee config set economizer.mode safe
 ```
 
-Explicit legacy `safe` and `aggressive` values are rejected rather than mapped. See
-[features/economizer.md](features/economizer.md) for the migration and safety contract.
+Use `off` for byte-for-byte pass-through or `aggressive` when lossy context reduction is acceptable.
+See [features/economizer.md](features/economizer.md) for the provider and safety boundaries.
 
 ## When a change takes effect
 

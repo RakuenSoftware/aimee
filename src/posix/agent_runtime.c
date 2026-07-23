@@ -20,6 +20,7 @@
 #include "gateway_delegate.h"
 #include "gateway_policy.h"
 #include "http_retry.h"
+#include "economizer.h"
 #include "economizer_wire_snapshot.h"
 #include "log.h"
 #include "middleware.h"
@@ -86,6 +87,31 @@ static int agent_delegation_stopped(char *buf, size_t bufsz)
    if (buf && bufsz > 0)
       snprintf(buf, bufsz, "delegate %s (%s)", reason, delegation_id);
    return 1;
+}
+
+/* Apply the SAFE contract at the authenticated local-tool completion boundary.
+ * The result has not crossed a provider boundary yet. econ_json_compact removes
+ * only RFC 8259 whitespace outside strings and succeeds only when strictly
+ * shorter; malformed/non-JSON output remains byte-identical. */
+static char *agent_economize_fresh_tool_result(char *result)
+{
+   if (!result)
+      return NULL;
+   config_t cfg;
+   econ_preset_t preset;
+   if (config_load(&cfg) != 0)
+      return result;
+   econ_preset(&cfg, &preset);
+   if (!preset.json_compact)
+      return result;
+
+   uint8_t *compacted = NULL;
+   size_t compacted_len = 0;
+   if (econ_json_compact(result, strlen(result), &compacted, &compacted_len) != ECON_JSON_OK)
+      return result;
+   (void)compacted_len; /* output is NUL-terminated for the existing tool-result surface */
+   free(result);
+   return (char *)compacted;
 }
 
 static int agent_durable_cancelled(char *buf, size_t bufsz)
@@ -568,6 +594,11 @@ native_provider_http:
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
 
+   /* Persistent only within this agent loop; AGGRESSIVE may freeze a reduced
+    * prefix across turns. SAFE never enters context_reduce. */
+   reduce_state_t agent_reduce_state;
+   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
+
    while (turn < max_t)
    {
       /* Stop before issuing a fourth provider request without evidence. The
@@ -718,18 +749,66 @@ native_provider_http:
       fb_agent.require_initial_tool_call = agent_require_initial_tool_choice(
           agent->require_initial_tool_call, successful_tool_calls, active_tools != NULL);
 
+      /* AGGRESSIVE opts into the existing lossy context reducers on OpenAI-family
+       * routes. SAFE never touches previously sent history, and native Anthropic
+       * history is never reduced because its exact prefix controls cache reuse. */
+      reduce_result_t agent_reduce_result;
+      memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+      int reduce_active = 0;
+      {
+         config_t ecfg;
+         econ_preset_t preset;
+         if (config_load(&ecfg) == 0)
+            econ_preset(&ecfg, &preset);
+         else
+            memset(&preset, 0, sizeof preset);
+         if (!anthropic && (preset.history_fold || preset.compress))
+         {
+            reduce_config_t rcfg;
+            memset(&rcfg, 0, sizeof rcfg);
+            rcfg.delegate_seam = 1;
+            rcfg.history_fold = preset.history_fold && !chatgpt;
+            rcfg.compress = preset.compress;
+            rcfg.freeze_guard_enabled = 1;
+            rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
+            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
+            rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
+            rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
+            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes;
+            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes;
+            rcfg.fold.register_enabled = ecfg.fold_register_enabled;
+            rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
+            rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
+            rcfg.fold.closet.max_ratio_pct = ecfg.coord_closet_max_ratio_pct;
+            rcfg.fold.closet.denylist =
+                ecfg.coord_closet_denylist[0] ? ecfg.coord_closet_denylist : NULL;
+            agent_reduce_state.reduced = 0;
+            agent_reduce_state.turn = turn;
+            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
+                               &agent_reduce_state, &agent_reduce_result) == 0 &&
+                agent_reduce_result.mutated && agent_reduce_result.messages)
+               reduce_active = 1;
+            else if (!reduce_active)
+            {
+               context_reduce_result_free(&agent_reduce_result);
+               memset(&agent_reduce_result, 0, sizeof agent_reduce_result);
+            }
+         }
+      }
+      cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
+
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
       if (chatgpt)
-         req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
+         req = agent_build_request_responses(&fb_agent, eff_messages, active_tools, sys);
       else if (anthropic)
       {
-         track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-         req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
+         track_anthropic_payload_rewrite(driver, &fb_agent, eff_messages, sys);
+         req = agent_build_request_anthropic(&fb_agent, eff_messages, active_tools, sys, tok,
                                              temperature);
       }
       else
-         req = agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
+         req = agent_build_request_openai(&fb_agent, eff_messages, active_tools, tok, temperature);
 
       /* Universal-gateway P4: run aimee's own outbound call through the same request
        * pipeline the proxy ingresses use, so a config-enabled tool-policing policy
@@ -742,11 +821,13 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
+         context_reduce_result_free(&agent_reduce_result);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
+      context_reduce_result_free(&agent_reduce_result);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");
@@ -789,15 +870,14 @@ native_provider_http:
                                         api_call_count);
       }
       config_t econ_cfg;
-      int proof_gated =
-          config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) == ECON_MODE_PROOF_GATED;
+      int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
       econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
                                      : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
                                      : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
                                                                  : ECON_WIRE_OPENAI_CHAT;
       econ_wire_snapshot_t *wire_snapshot = NULL;
       econ_wire_bytes_t wire_body;
-      if (econ_wire_select(proof_gated, wire_route, body, strlen(body), &wire_snapshot,
+      if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
                            &wire_body) != 0)
       {
          snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
@@ -850,8 +930,8 @@ native_provider_http:
             }
             econ_wire_snapshot_t *fb_snapshot = NULL;
             econ_wire_bytes_t fb_wire_body;
-            if (econ_wire_select(proof_gated, wire_route, fb_body, strlen(fb_body), &fb_snapshot,
-                                 &fb_wire_body) != 0)
+            if (econ_wire_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                 &fb_snapshot, &fb_wire_body) != 0)
             {
                snprintf(out->error, sizeof(out->error),
                         "economizer wire fence unavailable for fallback");
@@ -1504,6 +1584,7 @@ native_provider_http:
          }
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
+         result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
             if (dj > 0)
