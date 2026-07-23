@@ -15,6 +15,22 @@ orchestration, or a GUI's navigation and presentation.
 `restart_required` verdict. Module/provider owners remain responsible for consuming their values and
 registering a re-applier when bound state can safely change live.
 
+The descriptor declares this module's fifteen sources, seven module-root headers, four direct tests,
+and this document; it does not yet set `ownership_complete`. All seven headers are declared as
+`private_headers` because they live at the module root rather than under
+`src/modules/config/include/aimee/config/`, the layout the header-layout checker treats as private;
+`config_internal.h` is the internal seam header and has no paired source, and nine section-parser
+sources (charter, kb-curator, kb-maintenance, mode, plugin, save, server-api, skills, trigger) declare
+through `config.h`, `config_sections.h`, and `config_internal.h` rather than a paired header.
+`config_fields.h` is declared private today but is a cross-cutting get/set allowlist reached by the cmd
+and server layers, so it is a public-header candidate for a future header-layout slice; an
+ownership-declaration slice moves nothing. Make compiles all fifteen sources; CMake compiles the twelve
+the thin `aimee` client reaches and omits `config_fields.c`, `config_mode.c`, and `config_server_api.c`
+whose callers are cmd/server/TLS-side, the same intentional thin-client boundary recorded for gateway,
+learning, workspace, and vault. `docs/validation/core-modularization-slice-48.md` records the audit;
+latching follows in a separate slice so the completeness audit does not review declarations authored in
+the same change.
+
 ## Dependencies and consumers
 
 - `module-runtime`: supplies the required module identity, lifecycle, and readiness model whose active capabilities constrain configuration surfaces.
@@ -80,10 +96,17 @@ when no live server snapshot exists.
 
 ## Tests and failure behavior
 
-`test_config.c`, `test_cmd_config.c`, `test_config_surface.c`, `test_config_snapshot.c`, config parser
-suites, and frontend setup/settings tests cover defaults, validation, round trips, projections, reload,
-and UI assumptions. Missing files yield defaults; malformed or invalid reload input keeps the running
-snapshot; failed save/set returns an error; unrecognized typed keys are rejected rather than persisted.
+The descriptor's four direct tests are `test_config.c` (the config core), `test_config_surface.c` (a
+characterization net auto-derived from `config.c`'s parse surface), `test_config_snapshot.c` (the live
+snapshot double-buffer/seqlock in `config.c`, including a concurrent torn-read stress), and
+`test_config_economizer.c` (config's resolution of the `economizer: off|safe|aggressive` setting — a
+`config_fields`/`config.c` concern, not the economizer module; it links the core object bundle and no
+economizer object). Adjacent tests such as `test_cmd_config.c` and frontend setup/settings tests
+exercise the cmd and UI layers and are not claimed here. Of the four, `test_config.c` is registered
+with CTest and the other three run under Make alone. Together they cover defaults, validation, round
+trips, projections, reload, and UI assumptions. Missing files yield defaults; malformed or invalid
+reload input keeps the running snapshot; failed save/set returns an error; unrecognized typed keys are
+rejected rather than persisted.
 
 ## Operational diagnostics
 

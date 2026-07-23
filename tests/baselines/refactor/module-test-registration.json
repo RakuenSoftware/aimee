@@ -26,6 +26,30 @@
       "test": "src/tests/test_audit_worm_chain.c"
     },
     {
+      "ctest": true,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_economizer.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_snapshot.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_surface.c"
+    },
+    {
       "ctest": false,
       "make": true,
       "module": "delegates",

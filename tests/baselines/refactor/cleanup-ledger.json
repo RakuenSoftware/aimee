@@ -673,6 +673,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains vault-specific missing-source, missing-private-header, planted-source/header, missing-document, and cleared-latch failures, the first exercising set-equality on a thirteen-element header set that includes an unpaired backend-seam header.",
       "independent_review": "The slice-decision roundtable approved the declaration scope in slice 46, including the subject-over-name test exclusions and the tpm2-harness claim; this slice adds only the completeness assertion. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-47.md", "docs/modules/vault.md", "src/modules/vault/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 48,
+      "state": "present_and_verified",
+      "disposition": "Declared the config descriptor's fifteen sources, seven module-root private headers, four direct tests, and document without setting ownership_complete, the declaration half of the pair for the fifth Class B module, a required-core and heavily depended-upon module with a clean structure and no orphan or cross-module test ambiguity.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["CMake compiles twelve of the fifteen sources and omits config_fields.c, config_mode.c, and config_server_api.c whose callers are cmd/server/TLS-side, the same intentional thin-client boundary recorded for gateway, audit, learning, workspace, and vault", "config_fields.h is declared private per the current layout but is a cross-cutting get/set allowlist reached by cmd and server layers, a public-header candidate for a future header-layout slice", "config_internal.h is the internal seam header with no paired source, and nine section-parser sources declare through config.h, config_sections.h, and config_internal.h rather than a paired header", "test_config_economizer.c is a config test of the economizer setting resolution, not an economizer-module test; adjacent test_cmd_config.c and frontend settings tests are not claimed"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Excluding test_config_economizer.c by its name, or fixing the CMake three-source omission as drift, was rejected: the test's subject is config's economizer-setting resolution and links the core bundle, and the omission is the established thin-client boundary evidenced by green thin-client CMake builds.",
+        "revisit": "Slice 49 latches config; a separate header-layout slice may promote config_fields.h to a canonical public header given its cross-module reach."
+      },
+      "consumers": ["nearly every module that declares config as a dependency", "the cmd and server config surfaces", "the config latch slice", "remaining Class B declaration slices"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains four config rows.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions with no findings: test_config_economizer.c is a config test by subject and link evidence, the CMake three-source omission is an intentional thin-client boundary, and config_fields.h and config_internal.h are correctly declared private with the config_fields.h promotion noted for a future slice. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-48.md", "docs/modules/config.md", "src/modules/config/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }
