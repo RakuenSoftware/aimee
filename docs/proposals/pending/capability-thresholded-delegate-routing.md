@@ -1,6 +1,6 @@
 # Proposal: Capability-thresholded delegate routing
 
-- **State:** PENDING — design only, no code in this PR
+- **State:** PARTIALLY DELIVERED — see §9. Slices 0, 0b, 0c and 1 are implemented; Slice 2 (competence) and Slice 4 (bandit) are not.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Supersedes:** nothing. Extends the existing `agent_route_with_caps()` path.
@@ -908,3 +908,62 @@ exactly this — it reported quote-accuracy as unverified because it could not r
   relabeling (§7, still open). Because no seat successfully used repository tools, no round-1
   finding certifies shipped behavior; the load-bearing one was independently verified by hand.
 - **Round 2:** not yet run. Required before this leaves PENDING.
+
+
+## 9. Delivery record (2026-07-23)
+
+Implemented on branch `rewrite/go-server-wfe`, each slice reviewed by roundtable and
+fixed before the next. Unit targets green throughout; ASAN/UBSAN/leak clean on the routing
+and pricing code.
+
+### Delivered
+
+| area | what landed |
+|---|---|
+| Catalog identity | `agent_t.catalog_provider` separates vendor from wire shape; host-label URI parsing; CLI provider-name aliases (`claude`->`anthropic`, `chatgpt`/`codex`->`openai`) |
+| models.dev | nested api.json reader (the downloaded cache previously resolved NOTHING); regenerated snapshot, 526 models; `lint` guard against rot |
+| Pricing | three axes (cached/input/output), operator override per axis, context-band schedule, `cost_tier` vs price lint in `aimee doctor` |
+| Routing | primary turn reaches its default seat; capability routing ON by default; fail-upward escalation; same-registration fallback preference |
+| Provider-general | `"models": [...]` or `"models": "auto"` expands one registration into per-model targets with derived tiers |
+| Identity | `provider:model` refs and catalog display names in roundtable attribution, the server projection (GUI) and the CLI |
+
+### Live defects found and fixed along the way
+
+These were present before this work and are the reason it was worth doing:
+
+- Every capability lookup for MiniMax and Kimi missed, so both lost
+  `MODEL_CAP_REASONING` and ran on the SHORT per-call timeout — whose symptom the code
+  itself documents as "slow completions cut off and retried as spurious read failures".
+- `claude` and `codex` resolved **no capability flags at all** and an **8192-token output
+  ceiling** (true: 128000), because their provider strings are CLI/product names, not
+  catalog vendors.
+- MiniMax-M3 resolved a 200k context window against a true 1M; kimi resolved **0**, which
+  the gate then treated as passing.
+- `agent_route()` made the premium default **unreachable for every role**, including on a
+  user-facing primary turn.
+- The bundled offline snapshot held 10 stale entries and not one current model.
+
+### Not delivered
+
+- **Slice 2 — competence axis and role split.** Blocked on its own prerequisite: role
+  filtering is bypassed twice (three of four live agents declare `roles: ["all"]`, and
+  `agent_supports_role()` admits any agent for the 18 default exec roles), so splitting
+  `code_simple`/`code_complex` changes nothing until that is closed.
+- **Slice 4 — bandit reconciliation.** The existing `cheapest`/`premium` DB2 bandit
+  (`server_compute.c`) is still capability-blind.
+- **Registration-scoped health keys.** Health keys on the agent name, which is now unique
+  per model, so a failing sol cannot mark terra down. Two registrations of the SAME
+  provider with different credentials would still share model-level health.
+- **Context bands are read but not consumed by cost decisions** beyond the lint.
+
+### Validation gaps — stated plainly
+
+- Full CI has never run on this branch.
+- **Nothing is verified against the live server.** `aimee doctor` and `aimee agent list`
+  both dispatch through `/v1`, so the tier lint and the server JSON projection are
+  compile- and unit-verified only.
+- `~/.cache/aimee/models_dev.json` does not exist on the development host, so a real
+  refresh populating the cache has never been observed; the offline snapshot path is
+  verified instead.
+- The delegate-fallback path has no unit coverage (it dispatches for real); the
+  same-registration ordering is verified through its exported prefix helper.
