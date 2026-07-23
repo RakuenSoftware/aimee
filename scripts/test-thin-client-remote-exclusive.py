@@ -65,6 +65,10 @@ class LocalUdsSentinel:
     def __init__(self, path: pathlib.Path) -> None:
         self.contacts = 0
         self._path = path
+        # `contacts` is written on the accept thread and read on the test
+        # thread; guard both so the counter has no unsynchronized access, matching
+        # RemoteHandler.
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(str(path))
@@ -82,7 +86,8 @@ class LocalUdsSentinel:
             except TimeoutError:
                 continue
             with conn:
-                self.contacts += 1
+                with self._lock:
+                    self.contacts += 1
                 # Bound the handler: a contact that connects without sending
                 # would otherwise block the accept loop forever, so nothing
                 # queued behind it could be counted.
@@ -110,8 +115,9 @@ class LocalUdsSentinel:
         # The probe was served, so every connection queued before it was too.
         # Both increments happened on the sentinel thread; this read is ordered
         # after them by the probe's own completed response.
-        self.contacts -= 1
-        return self.contacts
+        with self._lock:
+            self.contacts -= 1
+            return self.contacts
 
     def close(self) -> None:
         self._stop.set()

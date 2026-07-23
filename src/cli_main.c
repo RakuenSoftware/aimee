@@ -836,6 +836,10 @@ static int handle_hooks(int argc, char **argv, int json_output)
       return wt_deny;
    }
 
+   /* Exclusive transport: with a remote configured, the whole pre_tool_check
+    * (memory-file guard included) runs on the remote via cli_v1_dispatch below.
+    * The client no longer runs any local pre-check — see the memory-guard note
+    * in docs/THIN_CLIENT.md. */
    const int use_remote = cli_v1_has_remote_endpoint();
    const char *sock = use_remote ? NULL : cli_ensure_server_for_method(method);
    if (!use_remote && !sock)
