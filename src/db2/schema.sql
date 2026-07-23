@@ -5742,8 +5742,36 @@ BEGIN
   RETURN v_last;
 END; $$;
 
+-- Checkpoint leaf-set builder (E2). In one snapshot (the caller runs REPEATABLE
+-- READ), enforces the 2^20 shard ceiling, cross-checks EVERY shard's head against
+-- its log (org_vault_witness_verify_shard, which raises P7W01 head_log_mismatch),
+-- and returns the verified (tenant, provider, seq, head_hash) leaves for the C
+-- signer to compute leaf hashes, build the depth-64 SMT root, and sign. Empty
+-- shards (seq 0, no records) are skipped — they contribute no leaf. Raises P7W02
+-- checkpoint_shard_ceiling_exceeded above the ceiling; the caller maps it to a
+-- typed alert and does not sign.
+CREATE OR REPLACE FUNCTION org_vault_witness_checkpoint_leaves()
+RETURNS TABLE(tenant TEXT, provider TEXT, seq BIGINT, head_hash BYTEA)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v_count BIGINT; s RECORD;
+BEGIN
+  SELECT count(*) INTO v_count FROM public.kb_vault_witness_shard sh WHERE sh.seq > 0;
+  IF v_count > 1048576 THEN
+    RAISE EXCEPTION 'checkpoint_shard_ceiling_exceeded: % shards', v_count USING ERRCODE='P7W02';
+  END IF;
+  FOR s IN SELECT sh.tenant, sh.provider, sh.seq, sh.head_hash
+           FROM public.kb_vault_witness_shard sh WHERE sh.seq > 0
+           ORDER BY sh.tenant, sh.provider
+  LOOP
+    PERFORM public.org_vault_witness_verify_shard(s.tenant, s.provider);
+    tenant := s.tenant; provider := s.provider; seq := s.seq; head_hash := s.head_hash;
+    RETURN NEXT;
+  END LOOP;
+END; $$;
+
 REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_leaves() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
@@ -5760,7 +5788,8 @@ BEGIN
       public.org_vault_witness_genesis(TEXT,TEXT),
       public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
       public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
-      public.org_vault_witness_verify_shard(TEXT,TEXT)
+      public.org_vault_witness_verify_shard(TEXT,TEXT),
+      public.org_vault_witness_checkpoint_leaves()
       FROM aimee_kb_runtime;
   END IF;
 END $$;

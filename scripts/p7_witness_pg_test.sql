@@ -138,9 +138,31 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 6. Head-vs-log cross-check: org_vault_witness_verify_shard confirms an intact
+-- 6. Checkpoint leaf-set builder over intact shards: returns one leaf for the
+--    acme/anthropic shard (the only witness shard after sections 1-5), with the
+--    verified head. Must run BEFORE section 7 forges that shard.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_n BIGINT; v_head BYTEA; v_leafhead BYTEA;
+BEGIN
+  SELECT count(*) INTO v_n FROM public.org_vault_witness_checkpoint_leaves();
+  IF v_n <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: expected 1 checkpoint leaf, got %', v_n;
+  END IF;
+  SELECT l.head_hash INTO v_leafhead FROM public.org_vault_witness_checkpoint_leaves() l LIMIT 1;
+  SELECT head_hash INTO v_head FROM public.kb_vault_witness_shard
+    WHERE tenant='acme' AND provider='anthropic';
+  IF v_leafhead <> v_head THEN
+    RAISE EXCEPTION 'WITNESS FAIL: checkpoint leaf head does not match shard head';
+  END IF;
+  RAISE NOTICE 'WITNESS OK: checkpoint leaf-set builder over intact shards';
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Head-vs-log cross-check: org_vault_witness_verify_shard confirms an intact
 --    shard (from section 2) and catches a forged log row + advanced head — the
---    exact attack the shard-head table (mutable, INSERT-allowed) exposes.
+--    exact attack the shard-head table (mutable, INSERT-allowed) exposes. The
+--    leaf-set builder must also refuse (P7W01) once a shard is forged.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE v_head BYTEA; v_forged BYTEA;
@@ -169,6 +191,14 @@ BEGIN
     RAISE EXCEPTION 'WITNESS FAIL: forged row was not caught by verify_shard';
   EXCEPTION WHEN sqlstate 'P7W01' THEN
     NULL; -- expected head_log_mismatch
+  END;
+
+  -- The leaf-set builder cross-checks every shard, so it too must now refuse.
+  BEGIN
+    PERFORM count(*) FROM public.org_vault_witness_checkpoint_leaves();
+    RAISE EXCEPTION 'WITNESS FAIL: checkpoint leaves built over a forged shard';
+  EXCEPTION WHEN sqlstate 'P7W01' THEN
+    NULL; -- expected head_log_mismatch propagated from verify_shard
   END;
   RAISE NOTICE 'WITNESS OK: head-vs-log cross-check catches a forged row';
 END $$;
