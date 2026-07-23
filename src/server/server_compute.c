@@ -206,8 +206,8 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
    cJSON *cost_known = cJSON_GetObjectItemCaseSensitive(resp, "cost_known");
    /* An absent or false cost_known means the delegate produced no measurement.
     * Leave the stored cost unknown rather than recording a false zero. */
-   int has_cost = cJSON_IsTrue(cost_known) && cJSON_IsNumber(cost_usd) &&
-                  cost_usd->valuedouble >= 0.0;
+   int has_cost =
+       cJSON_IsTrue(cost_known) && cJSON_IsNumber(cost_usd) && cost_usd->valuedouble >= 0.0;
    if (db1_agent_job_complete(cctx->background_job_id, job_status, cursor_turn, result, has_cost,
                               has_cost ? cost_usd->valuedouble : 0.0) != 0)
       aimee_log(LOG_ERROR, "delegate", "background job %d terminal status/cost write failed",
@@ -889,8 +889,7 @@ void delegate_worker(void *arg)
             if (max_cost_usd != 0.0)
             {
                size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
-               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX
-                                                                    : (int)bytes + 32768;
+               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
                char cost_err[256] = "";
                if (max_cost_usd < 0.0 ||
                    delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
@@ -1358,8 +1357,8 @@ void delegate_worker(void *arg)
    int cost_limit_failed = 0;
    if (max_cost_usd != 0.0)
    {
-      size_t input_bytes = strlen(run_prompt ? run_prompt : "") +
-                           strlen(system_prompt ? system_prompt : "");
+      size_t input_bytes =
+          strlen(run_prompt ? run_prompt : "") + strlen(system_prompt ? system_prompt : "");
       /* One byte per token is a conservative tokenizer-independent ceiling.
        * Reserve additional input for tool schemas/provider framing that is not
        * present in the two prompt strings. */
@@ -1369,8 +1368,8 @@ void delegate_worker(void *arg)
                              : (int)input_bytes + (int)framing_tokens;
       char cost_err[256] = "";
       if (max_cost_usd < 0.0 ||
-          delegate_apply_cost_limit(target_agent, max_cost_usd, input_tokens, &max_tokens,
-                                    cost_err, sizeof(cost_err)) != 0)
+          delegate_apply_cost_limit(target_agent, max_cost_usd, input_tokens, &max_tokens, cost_err,
+                                    sizeof(cost_err)) != 0)
       {
          snprintf(result.error, sizeof(result.error), "%s",
                   max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);

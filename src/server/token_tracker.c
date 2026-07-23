@@ -231,15 +231,12 @@ double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int
 }
 
 int token_cost_ceiling(const char *model, double max_cost_usd, int conservative_input_tokens,
-                       int existing_output_limit, int *out_output_tokens,
-                       int *out_total_tokens)
+                       int existing_output_limit, int *out_output_tokens, int *out_total_tokens)
 {
    if (!out_output_tokens || !out_total_tokens || !model || !model[0] || max_cost_usd <= 0.0 ||
        conservative_input_tokens < 0)
       return -1;
-   token_usage_t input_unit = {.input_tokens = 1,
-                               .cache_write_tokens = 1,
-                               .cache_read_tokens = 1};
+   token_usage_t input_unit = {.input_tokens = 1, .cache_write_tokens = 1, .cache_read_tokens = 1};
    token_usage_t output_unit = {.output_tokens = 1};
    int priced = 0;
    double input_unit_cost = token_estimate_cost_ex(model, &input_unit, &priced);

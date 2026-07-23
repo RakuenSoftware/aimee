@@ -88,12 +88,11 @@ static int agent_job_write(int job_id, const char *status, int cursor_turn, cons
     * Cost is written in the same statement as the terminal status: a poller that
     * observes a terminal job must never be able to read the default zero and
     * commit it durably as measured spend. */
-   static const char *sql =
-       "UPDATE agent_jobs SET status = ?4, cursor = ?5, result = ?6,"
-       " cost_usd = CASE WHEN ?1 THEN ?2 ELSE cost_usd END,"
-       " cost_known = CASE WHEN ?1 THEN 1 ELSE cost_known END,"
-       " updated_at = datetime('now')"
-       " WHERE id = ?3 AND (status != 'cancelled' OR ?4 = 'done')";
+   static const char *sql = "UPDATE agent_jobs SET status = ?4, cursor = ?5, result = ?6,"
+                            " cost_usd = CASE WHEN ?1 THEN ?2 ELSE cost_usd END,"
+                            " cost_known = CASE WHEN ?1 THEN 1 ELSE cost_known END,"
+                            " updated_at = datetime('now')"
+                            " WHERE id = ?3 AND (status != 'cancelled' OR ?4 = 'done')";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -292,12 +291,13 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
       return -1;
 
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "SELECT id, role, prompt, agent_name, participant_token, status, "
-                            "result, COALESCE(cursor, ''),"
-                            " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
-                            " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
-                            " COALESCE(cost_usd, 0), COALESCE(cost_known, 0), created_at, updated_at"
-                            " FROM agent_jobs WHERE id = ?";
+   static const char *sql =
+       "SELECT id, role, prompt, agent_name, participant_token, status, "
+       "result, COALESCE(cursor, ''),"
+       " COALESCE(lease_owner, ''), COALESCE(heartbeat_at, ''),"
+       " COALESCE(current_tool, ''), COALESCE(api_call_count, 0),"
+       " COALESCE(cost_usd, 0), COALESCE(cost_known, 0), created_at, updated_at"
+       " FROM agent_jobs WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, job_id);
