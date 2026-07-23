@@ -137,8 +137,12 @@ needs to decide whether a capability is available and how to invoke it.
 
 **Capability state**: the capability `id`; its `kind` (`required` | `optional`); its typed `state`
 (the module-runtime lifecycle value — `absent`, `selected`, `disabled`, `starting`, `ready`,
-`degraded`, `unavailable`, `stopping`, `failed`); the declared `depends_on` capability ids that gate
-it; and the `generation` at which its state last changed.
+`degraded`, `unavailable`, `stopping`, `failed`); its dependencies, carried as two **separate** lists
+per suite invariant 16 — `hard_depends_on` and `soft_depends_on` — and the `generation` at which its
+state last changed. A soft dependency additionally carries the `fallback` identifier its module
+declared, so a consumer can be told which reduced behavior is in force rather than inferring it.
+The two lists are never merged into one `depends_on`: they gate differently (see *Dependency law*),
+and collapsing them would suppress a capability the parent contract requires to keep working.
 
 **Surface descriptors**: for each surface the capability offers, a typed descriptor sufficient for a
 client that has never heard of the module to present and dispatch it. Surface kinds:
@@ -158,9 +162,72 @@ what it is for. The client's generic dispatcher decides how to render it and whe
 This is the boundary that keeps a static client from becoming a code-delivery channel: registration
 transports *descriptions*, never behavior.
 
+### Each kind's permitted behavior is closed, not open-ended
+
+"Declarative only" is not self-enforcing: a surface can require client-local behavior implicitly, by
+naming something the client must resolve, render, or shape locally. So each kind's descriptor schema
+is **closed** — a fixed field set, each field with a fixed type and a fixed meaning — and the
+permitted client behavior for that kind is fixed with it:
+
+| kind | the client is permitted to | and nothing else |
+|---|---|---|
+| `cli` | parse args against the declared schema, validate, forward the invocation to its authority | no local file/TTY/editor/process access, no local resolution of an argument's meaning |
+| `tool` | present name/description/schema over MCP, forward the call on invoke | no local execution, no client-side schema rewriting |
+| `route` | display or proxy the declared method+path to its authority | no client-authored request shaping, no alternate host |
+| `web` | render the surface identifier from a **closed enumeration** the product boundary owns | no free-form identifier, no URL, no markup |
+
+A descriptor field whose value the client would have to *interpret* to act — a path, a URL, a
+hostname, a command line, a MIME type, a renderer name, a free-form `web` identifier — is not in any
+kind's schema, and the descriptor validator rejects a descriptor carrying one. This is what makes
+"the validator rejects a surface requiring client-local execution" a decidable property rather than
+an aspiration: the check is schema conformance against a closed field set, not intent detection.
+
+### Surface keys are globally unique and core-reserved names are refused
+
+Capability ids are unique, but two *different* capabilities can still claim the same invocable name —
+the same CLI verb or alias, the same MCP tool name, the same method+path. That is ambiguous dispatch
+at best and surface impersonation at worst: a module claiming `remote` or `login` would shadow a
+core verb the user trusts. So each kind has a **canonical key** that is unique across the entire
+merged closure, not merely within a capability:
+
+- `cli` — the fully-qualified verb path, and independently every alias, in one flat namespace
+- `tool` — the tool name
+- `route` — the (method, normalized path) pair
+- `web` — the enumerated surface identifier
+
+A canonical key claimed by two capabilities is a **registration error**: the authority refuses the
+later registration, reports the conflict naming both claimants, and advertises neither surface. It
+does not pick a winner, order-resolve, or silently rename. Separately, core **reserves** the names of
+the verbs it owns (the attach/remote, identity/enrollment, health, help, and version verbs) plus a
+reserved prefix; a module descriptor claiming a reserved name is rejected at validation, before it
+can ever be registered. Aliases are checked identically to verbs — an alias is a claim on the
+namespace, and alias-shadowing is the cheapest impersonation path.
+
+### Descriptor content is untrusted input
+
+Forbidding executable content does not make module-authored *text* safe: this content is rendered
+into a terminal and parsed by a client. Every string field is normalized and bounded — a required
+Unicode normalization form, no C0/C1 control characters or ANSI escape sequences, no bidirectional
+or zero-width overrides, no confusable-script mixing within a canonical key, and a declared maximum
+length. Every schema field is bounded in size, nesting depth, and total node count, and a schema
+whose validation cost is not linear in input size is rejected. The client renders help and
+descriptions control-safe regardless, on the assumption that an authority may itself be compromised.
+Limits are enforced at the descriptor validator *and* re-enforced at the client, because the two
+trust different parties.
+
 **Document envelope**: the service `role` (`runtime` | `control`), `version`, an `epoch` identifying
-this process instance, a monotonic `generation` bumped on any change, and the projection
-`schema_version`.
+this process instance, a monotonic **per-scope** `generation`, and the projection `schema_version`.
+
+The `generation` is **not** authority-wide. An authority-wide counter bumped on *any* change would
+leak the existence and activity rate of capabilities a caller is not authorized to see: watching the
+number advance without any visible change tells the caller that something it cannot see just moved,
+which is exactly the disclosure the authorization scoping exists to prevent. Instead each authorized
+projection carries a generation derived from **that projection's own content**, advancing only when
+the bytes that scope would observe change. Two scopes therefore have unrelated generation sequences,
+and neither can infer the other's activity from its own. Change notifications are likewise emitted
+per scope and only for scopes whose projection actually changed; a caller receives no event, and no
+observable timing difference, for a change confined to capabilities outside its projection. This
+noninterference property is stated as invariant 9 and tested, not assumed.
 
 Surface declarations live in the module descriptor and are owned by
 [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md) —
@@ -189,18 +256,29 @@ them; it is not broken by their existence.
 
 **Compatibility rules that make version independence real:**
 
-1. **Unknown fields are ignored, not fatal.** A client encountering a descriptor field it does not
-   know renders the capability without it.
+1. **Only advisory fields may be ignored; every other unknown fails closed.** Ignoring an unknown
+   field is safe exactly when the field cannot change what the client *does* — it is presentation
+   metadata. It is unsafe when the field constrains validation, routing, authorization, or
+   invocation, because ignoring it means acting without a constraint the author required. So the
+   envelope marks each descriptor field `advisory` or `critical`, and the rule splits: an unknown
+   **advisory** field is ignored and the capability is rendered without it; an unknown **critical**
+   field makes that capability **unavailable** to that client, with a typed reason naming the field.
+   A client is never asked to guess which kind it met. `critical` is the default for a field whose
+   marking is itself missing, so an authority cannot downgrade a constraint by omission.
 2. **Unknown surface kinds are dropped, not fatal.** A capability offering only surface kinds the
    client cannot render is omitted from that client's effective set; a capability offering a mix is
    presented through the kinds it can render.
 3. **Unknown state values fail closed.** A lifecycle state the client does not recognize is treated as
    not-`ready`, so a newer state name can never be mistaken for availability.
-4. **Additive by default; removal and semantic change are versioned.** Adding a capability, a surface,
-   a surface kind, or a descriptor field does not bump `schema_version`. Removing a field, narrowing
-   its meaning, or changing a state's semantics does, and the Runtime serves the highest
-   `schema_version` at or below what the client declared, or refuses the registration with a typed
-   error naming the required client version.
+4. **Additive-advisory is free; anything behavioral is negotiated.** Adding a capability, a surface,
+   or an **advisory** field does not bump `schema_version`. Adding a **critical** field, removing any
+   field, narrowing a meaning, or changing a state's semantics **does** — a behavior- or
+   security-affecting addition is a version change even though it is additive, because an older
+   client cannot honor it. The Runtime serves the highest `schema_version` at or below what the client
+   declared, or refuses the registration with a typed error naming the required client version. The
+   N→N+k guarantee this proposal claims is therefore bounded precisely: an N client keeps working
+   across any number of *advisory* additions and new modules, and is told — never silently degraded —
+   when a capability needs a newer client.
 5. **The client ships no module knowledge.** No module name, verb, tool name, route, help string, or
    argument schema is compiled into the client. `commands[]` reduces to the verbs core owns —
    attach/remote, identity and enrollment, health, help, version, and the generic dispatcher itself —
@@ -238,21 +316,40 @@ advertising a stale list.
   attach: the client presents its capability declaration and records the returned projection with its
   `epoch`/`generation`. The Runtime registers with the Control Plane the same way at its own startup
   and on reconnect.
-- **On change.** A registrant keeps its projection current without polling hot: it revalidates against
-  the authority's `generation` (conditional fetch keyed on the generation as an entity tag), and where
-  a live stream already exists, a change event carries the new `generation` and the registrant
-  refetches. A change to the closure, to any advertised state, or to any surface descriptor bumps
-  `generation`. An `epoch` change (process restart) forces a full refetch and drops the cached view.
-- **Change propagates down the whole chain.** A module state change bumps its host service's
-  `generation`; if that service is a Control Plane, the change bumps the registered Runtime's merged
-  `generation`, which bumps what attached clients see, which fires the consumer protocol's
-  capability-change signal. One module transition reaches the consumer through the chain without any
-  hop polling another.
-- **Freshness is bounded and fail-closed.** A projection older than a bounded freshness window, or one
+- **On change — every network edge has a defined mechanism, not an optional one.** Each network
+  registration edge (client→Runtime, Runtime→Control Plane) operates in exactly one of two modes,
+  chosen at registration and reported in the projection so both ends know which is in force:
+  - **Notified.** The authority holds an open change stream to the registrant and pushes the new
+    per-scope `generation` on change; the registrant then refetches conditionally. This is the
+    default whenever the transport supports it.
+  - **Bounded revalidation.** Where no stream can be held, the registrant revalidates conditionally
+    on a **bounded interval** the authority states in the projection (a cheap generation-only
+    request that returns not-modified in the common case).
+
+  A registration that can establish neither mode is refused with a typed error rather than admitted
+  in a mode where change would never arrive. A change to the closure, to any advertised state, or to
+  any surface descriptor advances the affected scopes' `generation`. An `epoch` change (process
+  restart) forces a full refetch and drops the cached view.
+- **Additions propagate, not only withdrawals.** Freshness expiry alone can only *withdraw* a
+  capability the client already knows about; it can never reveal a capability that appeared after the
+  last fetch. That is why revalidation is mandatory rather than a fallback: without it a client would
+  keep serving a correct-but-shrinking view forever and never pick up a newly installed module —
+  which is precisely the upgrade case this proposal exists to serve. Discovery of additions is
+  therefore bounded by the same interval as detection of removals.
+- **Propagation latency is bounded end-to-end and stated.** A module state change advances its host
+  service's affected scopes; if that service is a Control Plane, it advances the registered Runtime's
+  merged projection, which advances what attached clients see, which fires the consumer protocol's
+  capability-change signal. Each hop is either notified or bounded, so the worst-case
+  module→consumer latency is the **sum of the hops' bounds** — a stated, testable number, not an
+  unquantified "without polling" claim. No hop polls another hot; a hop in bounded mode issues one
+  conditional generation check per interval.
+- **Freshness is bounded and fail-closed.** A projection older than its freshness window, or one
   whose authority is unreachable, is **stale**: capabilities that cannot be confirmed `ready` at the
   current generation are re-advertised as **unavailable**, never served from a stale cache as if live.
-  Loss of the Control Plane degrades the Runtime's merged closure, which degrades what clients are
-  offered; it does not silently freeze either.
+  The freshness window is required to exceed the revalidation interval, so ordinary revalidation
+  keeps a healthy client live and only genuine loss of contact degrades it. Loss of the Control Plane
+  degrades the Runtime's merged closure, which degrades what clients are offered; it does not
+  silently freeze either.
 
 ## Merge and re-advertisement
 
@@ -261,12 +358,26 @@ effective set. Merging at the Runtime rather than at each client means the cross
 law is evaluated once, consistently, by the party that holds both views — and it is what lets the
 client remain ignorant of the Control Plane entirely.
 
-- **Dependency law across services.** A capability is offered only when it and every `depends_on`
-  capability it declares are `ready` — including dependencies satisfied on the *other* service. A
-  Runtime capability depending on a Control-Plane capability is offered only if the Control Plane
-  advertises that dependency `ready`; a dependency in any non-`ready` state suppresses its dependent.
-  This is the suite dependency law
-  (`core-substrate-and-source-module-boundaries.md` invariants 1–4) evaluated at the Runtime seam.
+- **Dependency law across services — hard suppresses, soft degrades.** The parent suite's invariant
+  16 governs dependencies, and it draws a distinction this seam must preserve: a **hard** dependency
+  is required, while a **soft** dependency is used-if-present and its dependent "must function
+  without it via a declared fallback". Readiness gating therefore splits:
+  - a capability is offered only when it and every capability in its `hard_depends_on` list are
+    `ready` — including dependencies satisfied on the *other* service; a hard dependency in any
+    non-`ready` state suppresses its dependent;
+  - a `soft_depends_on` entry that is not `ready` **never suppresses** its dependent. The capability
+    is offered in `degraded` state, carrying the `fallback` its module declared, so the consumer is
+    told which reduced behavior is in force. Suppressing it here would break the parent's guarantee
+    that a soft dependency never blocks its dependent.
+
+  **Scope note.** Invariant 16 is an *install-time* rule (what may be installed and removed). The
+  parent suite states no *runtime readiness closure* over that graph. This proposal therefore
+  **defines** the runtime gating above as a consuming refinement of invariant 16 — it does not merely
+  restate a parent rule, and it must be reviewed as new normative content. It introduces no new
+  dependency edge: it evaluates readiness over exactly the hard/soft edges the descriptor graph
+  already declares. (An earlier revision cited "invariants 1–4" as the dependency law; those
+  invariants govern the core/optional taxonomy and say nothing about readiness. The citation was
+  wrong and is corrected here.)
 - **Identity collision is resolved at the merge, deterministically.** Capability ids are global under
   the suite taxonomy, so the same id advertised by both services is the same capability; its merged
   state is the **weaker** of the two (any non-`ready` contribution yields non-`ready`), and its surface
@@ -300,7 +411,9 @@ dependency, and a client never advertises one, for the same reason and through t
    forbids a 200 body that says `ready:false`.
 3. Omitted optional modules are absent from the projection; only selected-but-off modules are
    `disabled`.
-4. No registrant is offered a capability whose dependencies are not `ready` across the merged services.
+4. No registrant is offered a capability whose **hard** dependencies are not `ready` across the merged
+   services; a capability whose **soft** dependency is not `ready` is offered `degraded` with its
+   declared fallback, never suppressed.
 5. Every projection is generation-stamped; a registrant that cannot confirm the current generation
    treats affected capabilities as unavailable.
 6. A registrant contacts only its own authority. The thin client issues no Control Plane request and
@@ -309,6 +422,15 @@ dependency, and a client never advertises one, for the same reason and through t
    or code reference, and no client-side handler binding.
 8. The client binary contains no module-specific verb, tool name, route, help text, or argument
    schema; adding a module changes no client source.
+9. **Noninterference across scopes.** A caller's `generation`, the change events it receives, and the
+   observable timing of its requests are functions of its own authorized projection alone. A change
+   confined to capabilities outside a caller's scope produces no advance, no event, and no timing
+   signal for that caller.
+10. **Canonical-key uniqueness.** No two capabilities in the merged closure claim the same canonical
+    key for a kind, and no module claims a core-reserved name or prefix; a violation refuses the
+    registration and advertises neither claimant rather than resolving to one.
+11. **No silent behavioral downgrade.** A capability carrying a `critical` field the client does not
+    understand is unavailable with a typed reason, never rendered as if the field were absent.
 
 ## Non-goals
 
@@ -328,23 +450,80 @@ dependency, and a client never advertises one, for the same reason and through t
 
 ## Binding checks
 
+The scripts named below are **implementation deliverables of this proposal**, not claims that those
+files exist today — the same convention every sibling in this suite follows. What a proposal owes at
+review time is not the script but the **observable pass condition** each check asserts, so the check
+cannot later be satisfied by a script that merely exits zero. Each check below therefore states its
+fixture and its decision procedure; a flag name alone is not an acceptance criterion.
+
+The non-obvious ones, made concrete:
+
+- **Closure equality** (check 1) compares the served projection against the closure the descriptor
+  graph and activation filtering produce for the same profile, over a fixture set of profiles
+  including `core`, `runtime`, `control`, `full`, and full-minus-one. Pass is set equality of
+  (id, kind, state, hard deps, soft deps, surfaces) — not a subset, and not a spot check.
+- **"No second authorization model"** (check 2) is decided structurally, not by intent: the
+  projection filter must reach its allow/deny decision solely through the existing gateway
+  identity/capability gate, proven by a call-graph assertion that the projection path contains no
+  authorization decision site not reachable from that gate, plus a differential fixture where a
+  capability's visibility changes if and only if the gateway gate's answer changes.
+- **"Client source unchanged when a module is added"** (check 4) builds the client from an unmodified
+  source tree, adds a fixture module to the service, and asserts the module's `cli`/`tool` surfaces
+  are usable through that same client binary — the artifact is bit-identical, so "unchanged" is a
+  hash comparison, not a review judgement.
+- **Propagation latency** (check 5) is measured, not asserted: a fixture module transitions state,
+  and the elapsed time until the consumer observes the change must be at or below the sum of the
+  configured per-hop bounds, in both notified and bounded-revalidation modes. The test also asserts
+  the *addition* case — a module installed after the client attached becomes visible within that same
+  bound — since expiry alone cannot discover additions.
+- **No-client-to-Control-Plane** (check 5) is decided by network observation: the client is run with
+  the Control Plane reachable only through an observed path, and the test fails if any packet from
+  the client reaches it, and separately asserts no Control Plane address or credential exists in the
+  client's configuration or memory.
+- **Noninterference** (check 10) is a differential test: two principals with different authorized
+  scopes attach; a change confined to capabilities outside principal B's scope must produce no
+  generation advance, no event, and no response-timing difference for B beyond a stated tolerance.
+- **N→N+k compatibility** (check 8) uses two real builds, not a mocked version string: client at N,
+  service at N+1, with the N+1 service adding an advisory field, a critical field, a new surface
+  kind, and a new module. Pass requires the advisory addition invisible, the critical addition
+  producing typed unavailability, the new kind dropped, and the new module usable.
+
 ```yaml acceptance
 - {id: 1, tier: mechanical, check: "scripts/check_capability_advertisement.sh --projection-only --equals-module-runtime-closure --forbid-static-capability-list src/server/server_http.c,src/kb/http/kb_http.c --require-generation-epoch-schema-version --require-typed-state --omitted-optional-absent --disabled-only-for-selected"}
 - {id: 2, tier: mechanical, check: "scripts/check_capability_advertisement.sh --authorization-scoped --require-transport-class-scoping bearer,cert-cn --scope-surfaces-with-capability --forbid-unauthorized-capability-leak --no-second-authorization-model"}
-- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --derived-from-descriptors-only --kinds cli,tool,route,web --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding --reject-client-local-execution-surface"}
-- {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --client-source-unchanged-when-module-added"}
-- {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --assert-no-client-to-control-request --assert-client-holds-no-control-address-or-credential --module-change-propagates-to-consumer-without-polling"}
-- {id: 6, tier: integration, check: "scripts/test_capability_advertisement.sh --on-registration-snapshot --generation-bumps-on-closure-state-and-surface-change --epoch-change-forces-refetch --stale-window-fails-closed --unreachable-control-degrades-runtime-merge-not-freezes"}
-- {id: 7, tier: integration, check: "scripts/test_capability_advertisement.sh --merge-at-runtime --cross-service-dependency-gating --dependent-suppressed-when-dependency-not-ready --shared-id-takes-weaker-state --conflicting-shared-descriptor-fails-closed --require-effective-set-equals-ready-closure-under-deps"}
-- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --client-version N --service-version N+1 --new-module-usable-without-client-release --unknown-field-ignored --unknown-surface-kind-dropped --unknown-state-fails-closed --removed-field-bumps-schema-version --incompatible-schema-refused-with-typed-error"}
+- {id: 3, tier: mechanical, check: "scripts/check_surface_descriptors.sh --derived-from-descriptors-only --kinds cli,tool,route,web --closed-schema-per-kind --reject-unknown-field --reject-interpretable-value path,url,host,commandline,mimetype,renderer --web-identifier-from-closed-enum --declarative-only --forbid-executable-content --forbid-template-language --forbid-client-handler-binding"}
+- {id: 4, tier: mechanical, check: "scripts/check_static_thin_client.sh --command-table src/cmd_table.c --allow-core-verbs-only --forbid-module-verb --forbid-module-tool-name --forbid-module-route --forbid-module-help-text --forbid-module-arg-schema --client-binary-hash-identical-when-module-added"}
+- {id: 5, tier: integration, check: "scripts/test_registration_chain.sh --module-to-host --runtime-to-control --client-to-runtime --registrant-contacts-only-its-authority --assert-no-client-to-control-packet-observed --assert-no-control-address-or-credential-in-client --measure-propagation-latency-vs-sum-of-hop-bounds --assert-addition-discovered-within-bound --both-modes notified,bounded-revalidation"}
+- {id: 6, tier: integration, check: "scripts/test_capability_advertisement.sh --on-registration-snapshot --generation-advances-on-closure-state-and-surface-change --epoch-change-forces-refetch --stale-window-exceeds-revalidation-interval --stale-window-fails-closed --unreachable-control-degrades-runtime-merge-not-freezes --registration-refused-when-neither-mode-available"}
+- {id: 7, tier: integration, check: "scripts/test_capability_advertisement.sh --merge-at-runtime --hard-dependency-not-ready-suppresses-dependent --soft-dependency-not-ready-degrades-with-declared-fallback --soft-dependency-never-suppresses --cross-service-both-directions --shared-id-takes-weaker-state --conflicting-shared-descriptor-fails-closed --effective-set-equals-ready-closure-under-hard-deps"}
+- {id: 8, tier: integration, check: "scripts/test_static_thin_client.sh --real-builds --client-version N --service-version N+1 --new-module-usable-without-client-release --advisory-addition-invisible --critical-addition-yields-typed-unavailable --unknown-surface-kind-dropped --unknown-state-fails-closed --unmarked-field-defaults-critical --removed-or-critical-change-bumps-schema-version --incompatible-schema-refused-with-typed-error"}
 - {id: 9, tier: integration, check: "scripts/test_capability_advertisement.sh --consumer mcp --consumer acp --consumer cli --re-advertise-effective-set --generic-dispatch-from-descriptor --invalid-args-typed-error-not-forwarded --emit-change-on-effective-set-change --absent-capability-returns-typed-capability-absent --disabled-and-unknown-externally-identical"}
+- {id: 10, tier: integration, check: "scripts/test_advertisement_noninterference.sh --two-principals-differing-scope --change-outside-scope-b --assert-no-generation-advance-for-b --assert-no-event-for-b --assert-no-timing-signal-beyond-tolerance --per-scope-generation-derived-from-projection-content"}
+- {id: 11, tier: mechanical, check: "scripts/check_surface_keys.sh --canonical-key-per-kind cli,tool,route,web --unique-across-merged-closure --aliases-share-verb-namespace --core-reserved-names-and-prefix-refused --duplicate-claim-refuses-registration-and-advertises-neither"}
+- {id: 12, tier: mechanical, check: "scripts/check_descriptor_content_safety.sh --require-unicode-normalization --forbid-c0-c1-and-ansi-escapes --forbid-bidi-and-zero-width --forbid-confusable-script-mixing-in-canonical-keys --max-string-length --max-schema-size-depth-nodes --reject-superlinear-schema --enforced-at-validator-and-client"}
 ```
 
 ## Review status
 
 Freshly drafted 2026-07-23. This proposal has **not** been through the suite roundtable and does not
 inherit the 2026-07-20 approvals; it must complete its own technical-writing, architecture,
-adversarial, and verification review before acceptance. It adds a consuming runtime surface and does
-not modify the suite taxonomy, shared invariants, or any parent contract; if review finds that its
-surface-descriptor requirements amend the `module-runtime` descriptor contract rather than consume it,
-that content must move to `module-runtime` rather than be amended here.
+adversarial, and verification review before acceptance.
+
+It does not modify the suite taxonomy or any shared invariant. It does, however, add normative
+content beyond a pure projection, and review must treat these as new rather than inherited:
+
+1. **Runtime readiness gating** over the hard/soft dependency graph. Invariant 16 is an install-time
+   rule; the parent states no runtime readiness closure, so the gating in *Merge and re-advertisement*
+   is defined here as a consuming refinement, over exactly the edges the descriptor graph declares.
+2. **Canonical surface keys, the core-reserved namespace, and closed per-kind schemas**, which
+   constrain what a module descriptor may declare. If review finds these amend the `module-runtime`
+   descriptor contract rather than consume it, that content moves to `module-runtime` rather than
+   being amended here.
+3. **Per-scope generations and the noninterference property** (invariant 9), which constrain how an
+   authority computes and emits change signals.
+
+Revision history: the first draft cited "invariants 1–4" as the suite dependency law, carried an
+undifferentiated `depends_on` that would have suppressed capabilities whose *soft* dependency was
+unready (contradicting invariant 16), left change notification optional on network edges, used an
+authority-wide generation that leaked cross-scope activity, and treated every additive descriptor
+field as compatible. Roundtable review found each; this revision corrects them.
