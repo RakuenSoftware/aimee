@@ -3,7 +3,8 @@
  * IR owns only the data returned by a panel provider. Deliberation policy,
  * provider selection, execution, convergence, and result destruction belong to
  * the provider. The producing provider owns artifact and must expose the
- * matching release operation; copying this struct does not copy that storage. */
+ * matching release operation. A shallow struct copy is a non-owning view of
+ * that same allocation and must never release artifact independently. */
 #ifndef AIMEE_IR_PANEL_RESULT_H
 #define AIMEE_IR_PANEL_RESULT_H 1
 

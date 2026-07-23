@@ -26,6 +26,8 @@ These contracts own the provider-neutral message model, its allocation and acces
 and bounded panel findings, evidence, answered questions, coverage gaps, and result status. IR does not
 own panel seats, turns, convergence, deadlines, cancellation callbacks, provider selection, activation,
 or result destruction; those are provider behavior rather than messages.
+The optional `roundtable` provider produces this panel result today, while core serializers, evidence
+replay, and workflows consume it without depending on roundtable's private execution headers.
 The legacy-named rescue, serve, shadow, and stream files remain outside this ownership set because
 they mix canonical operations with translation or comparison behavior. A later behavior-separation slice
 must split those responsibilities before assigning them to IR or translation. IR does not own provider
@@ -66,9 +68,9 @@ boundary into or out of `aimee_request_t` and `aimee_response_t`.
 ## Data and migrations
 
 Most IR values are per-turn heap state released by `aimee_request_free` or `aimee_response_free`.
-`aimee_panel_result_t` is copy-safe except for its borrowed `artifact` pointer: the producing provider
-allocates that storage and exposes the matching release operation, so a struct copy never transfers or
-duplicates artifact ownership.
+The producing provider owns `aimee_panel_result_t.artifact` and exposes the matching result-release
+operation. A shallow struct copy is a non-owning view of that allocation: it neither transfers nor
+duplicates ownership and must never release `artifact` independently.
 Persisted transcripts, shadow comparisons, metrics, and run events are owned by their storage modules but
 must retain block type/order, tool identifiers, stop reason, usage, and model semantics. Structure changes
 therefore require explicit schema and wire compatibility review.

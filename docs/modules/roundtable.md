@@ -17,6 +17,8 @@ handing the result to general response composition or a consuming workflow.
 Provider-neutral output shapes live in required IR's `aimee/ir/panel_result.h`. The private
 `roundtable_types.h` owns only roundtable mode, turn, and option policy plus temporary aliases used by the
 optional implementation; required consumers cannot include that compatibility header.
+Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
+`AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 
 ## Dependencies and consumers
 
@@ -88,8 +90,9 @@ State includes named JSON presets, DB1 ensemble/session records, panel assignmen
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
-The roundtable provider allocates `aimee_panel_result_t.artifact` and releases it through
-`delegate_roundtable_result_free`; IR defines the message layout but does not own that lifecycle behavior.
+The roundtable provider owns the `aimee_panel_result_t.artifact` allocation and releases it exactly once
+through `delegate_roundtable_result_free`; shallow result copies are non-owning views. IR defines the
+message layout but does not own that lifecycle behavior.
 
 ## Security and privacy
 

@@ -47,7 +47,9 @@ typedef struct
    const char *parent_session_id;
 } roundtable_opts_t;
 
-/* Private migration aliases. New code uses the AIMEE_* and aimee_* IR names. */
+/* Private compatibility names for IR-owned message types and bounds. Required
+ * code uses the AIMEE_* and aimee_* names. These aliases do not change artifact
+ * ownership: the producing provider's release operation frees it exactly once. */
 #define EV_NONE   AIMEE_REVIEW_EVIDENCE_NONE
 #define EV_SYMBOL AIMEE_REVIEW_EVIDENCE_SYMBOL
 #define EV_REFS   AIMEE_REVIEW_EVIDENCE_REFS
