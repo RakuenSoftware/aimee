@@ -515,6 +515,8 @@ BEGIN
     public.kb_vault_open_event TO aimee_kb_owner;
   GRANT SELECT ON TABLE public.org_vault_rotation,public.org_vault_salt,
     public.org_vault_secret TO aimee_kb_owner;
+  GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_owner;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
   REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api
     FROM aimee_kb_vault_orchestrator_login,aimee_kb_runtime;

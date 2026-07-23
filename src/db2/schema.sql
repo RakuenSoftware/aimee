@@ -5215,6 +5215,8 @@ BEGIN
   INSERT INTO public.kb_vault_open_event(event_id,event_kind,operation_id,request_id,actor,
     operation_fence,opened_epoch,opened_fence,row_hash)
   VALUES(eid,'completed_opened',p_op,p_request,p_actor,p_fence,ne,nf,rh);
+  PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.completed',
+    eid,'allow',p_op);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION
@@ -5283,6 +5285,8 @@ BEGIN
   INSERT INTO public.kb_vault_open_event(event_id,event_kind,operation_id,request_id,actor,
     operation_fence,opened_epoch,opened_fence,row_hash)
   VALUES(eid,'idle_opened',NULL,p_request,p_actor,NULL,ne,nf,rh);
+  PERFORM public.kb_audit_worm_append('operator',p_actor,'vault.rewrap.open.idle',
+    eid,'allow',p_request);
   RETURN QUERY SELECT ne,nf,eid,rh;
 END $$;
 REVOKE ALL ON FUNCTION

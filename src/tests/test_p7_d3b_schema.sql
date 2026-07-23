@@ -107,7 +107,20 @@ BEGIN
   END IF;
 END $$;
 RESET ROLE;
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.kb_audit_event
+       WHERE action='vault.rewrap.open.completed')<>1 THEN
+    RAISE EXCEPTION 'completed open primary audit mismatch';
+  END IF;
+END $$;
 ROLLBACK;
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM public.kb_audit_event
+             WHERE action='vault.rewrap.open.completed') THEN
+    RAISE EXCEPTION 'completed open audit escaped rollback';
+  END IF;
+END $$;
 
 BEGIN;
 INSERT INTO public.kb_vault_rewrap_operation(operation_id,request_id,actor,state,seal_epoch,
@@ -148,14 +161,41 @@ BEGIN
   IF e.row_hash<>r.row_hash OR e.actor<>'uid:0' OR e.event_kind<>'idle_opened' THEN
     RAISE EXCEPTION 'open event readback mismatch';
   END IF;
-  SELECT * INTO STRICT e FROM aimee_kb_vault_orchestrator_api.org_vault_open_idle(
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.kb_audit_event
+       WHERE action='vault.rewrap.open.idle')<>1 THEN
+    RAISE EXCEPTION 'idle open primary audit mismatch';
+  END IF;
+  PERFORM public.kb_audit_worm_append('test','test','unrelated.audit','test','allow','');
+END $$;
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$
+DECLARE r RECORD; e RECORD;
+BEGIN
+  SELECT * INTO STRICT r FROM aimee_kb_vault_orchestrator_api.org_vault_open_idle(
     'uid:0','ffeeddccbbaa99887766554433221100',10,10,0);
+  SELECT * INTO STRICT e FROM aimee_kb_vault_orchestrator_api.org_vault_open_event(r.event_id);
   IF e.event_id<>r.event_id OR e.row_hash<>r.row_hash THEN
-    RAISE EXCEPTION 'idle open replay mismatch';
+    RAISE EXCEPTION 'idle open replay mismatch after audit head advance';
   END IF;
 END $$;
 RESET ROLE;
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.kb_audit_event
+       WHERE action='vault.rewrap.open.idle')<>1 THEN
+    RAISE EXCEPTION 'idle open replay duplicated primary audit';
+  END IF;
+END $$;
 ROLLBACK;
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM public.kb_audit_event
+             WHERE action IN ('vault.rewrap.open.idle','unrelated.audit')) THEN
+    RAISE EXCEPTION 'idle open audit escaped rollback';
+  END IF;
+END $$;
 
 DO $$
 DECLARE bad BIGINT; public_usage BOOLEAN;
