@@ -295,6 +295,61 @@ shape: teach the reader BOTH schemas — flat key first (preserves the bundled s
 downloaded api.json — and capture `reasoning`/`tool_call` while there. This avoids rewriting
 downloaded bytes, keeps the atomic-rename download, and leaves the override format untouched.
 
+### 2.11 Catalog context window is NOT the routing ceiling (operator correction)
+
+Operator correction, 2026-07-23. Earlier drafts implied the per-agent
+`middleware.context_window` values in the live config were stale under-reports to be
+"corrected" against the catalog. **They are deliberate policy and must not be overridden:**
+
+| agent | catalog max | configured ceiling | why the ceiling is intentional |
+|---|---|---|---|
+| `claude` / claude-opus-4-8 | 1,000,000 | **200,000** | premium charges apply above 200k |
+| `codex` / gpt-5.6-sol | 1,050,000 | **272,000** | the product expects requests to stay within 272k |
+
+So two distinct quantities were being conflated:
+
+- **Capability context window** — what the model *can* accept. Catalog data. Used to reject a
+  packet the model physically cannot hold.
+- **Routing/serving ceiling** — what the operator *permits*, which may be lower for cost or
+  product reasons. Operator config.
+
+Treating the catalog value as authoritative would push requests across a provider price cliff.
+The existing precedence is therefore correct and must be preserved: an explicit
+`middleware.context_window` always wins over the catalog
+(`agent_config.c` `agent_satisfies_required_caps`, and `agent_meets_filter` in
+`delegate_routing.c`). Slice 0 preserves it.
+
+This also matters to §7: crossing 200k on Claude changes the price band, which is a genuine
+cost cliff a routing decision can trigger. A future competence/price model must treat price as
+varying WITHIN a model by context band, not as one number per model.
+
+### 2.11.1 Regression this creates in prompt budgeting — OPEN
+
+`agent_exec_context_budget_chars()` (`src/server/agent_context_budget.c`) reserves the model's
+output ceiling from the window:
+
+```c
+int output_tokens = agent->max_tokens > 0 ? agent->max_tokens
+                                          : model_max_output(agent_catalog_provider(agent), agent->model);
+int prompt_tokens = agent->middleware.context_window - output_tokens;
+```
+
+No live agent pins `max_tokens`, so the fallback applies. Correcting the catalog identity raised
+`model_max_output` for `claude` from **8192 to 128000**, so with the deliberate 200k ceiling the
+prompt budget falls from ~191,800 to ~72,000 tokens — a ~62% reduction. `codex` is affected the
+same way (272k ceiling, 128k reserved).
+
+Reserving a model's *theoretical maximum* output from a *policy-capped* window is too
+conservative: these models will not emit 128k tokens on a typical delegate turn. Options, none
+yet chosen:
+
+1. Reserve `min(model_max_output, ceiling / 4)` — bounded, no config change.
+2. Reserve the agent's configured `max_tokens` and default it explicitly per agent.
+3. Add a separate `reserved_output_tokens` knob distinct from the model ceiling.
+
+This is a behavioural consequence of an already-committed change and must be resolved before
+these commits are relied on in production.
+
 ## 3. Design
 
 ### 3.1 Capability becomes a total predicate

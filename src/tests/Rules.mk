@@ -385,7 +385,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
-               $(TESTPREFIX)/unit-test-models-dev \
+               $(TESTPREFIX)/unit-test-models-dev $(TESTPREFIX)/unit-test-agent-tier-lint \
                $(TESTPREFIX)/unit-test-p3b-spend \
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
@@ -4171,6 +4171,13 @@ $(TESTPREFIX)/unit-test-cmd-session: $(OBJDIR)/tests/test_cmd_session.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-model-registry: $(OBJDIR)/tests/test_model_registry.o \
+                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                                $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
+                                $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-agent-tier-lint: $(OBJDIR)/tests/test_agent_tier_lint.o \
+                                $(OBJDIR)/agent_tier_lint.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                                 $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
                                 $(OBJDIR)/cJSON.o

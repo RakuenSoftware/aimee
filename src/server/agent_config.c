@@ -221,6 +221,19 @@ static const struct
     {NULL, NULL},
 };
 
+/* Wire/CLI provider names that are NOT catalog vendor keys. aimee names some
+ * providers after the CLI or product ("claude" for the Claude CLI/OAuth seat,
+ * "chatgpt"/"codex" for the Codex seat) while models.dev keys the vendor
+ * ("anthropic", "openai"). Without this map the primary agent resolves NO
+ * capability flags at all and an 8192 output ceiling. */
+static const struct
+{
+   const char *wire;
+   const char *vendor;
+} g_catalog_provider_aliases[] = {
+    {"claude", "anthropic"}, {"chatgpt", "openai"}, {"codex", "openai"}, {NULL, NULL},
+};
+
 /* Vendor namespaces as they appear in gateway/OpenRouter model ids
  * ("moonshotai/kimi-k2.7-code"). */
 static const struct
@@ -322,9 +335,26 @@ static void agent_derive_catalog_provider(agent_t *ag)
 
    /* Bare vendor-family model id. */
    if (strncasecmp(ag->model, "minimax", 7) == 0)
+   {
       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
-   else if (strncasecmp(ag->model, "kimi", 4) == 0)
+      return;
+   }
+   if (strncasecmp(ag->model, "kimi", 4) == 0)
+   {
       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
+      return;
+   }
+
+   /* Last: the agent's own provider may be a wire/CLI name rather than a vendor. */
+   for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
+   {
+      if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
+      {
+         snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
+                  g_catalog_provider_aliases[i].vendor);
+         return;
+      }
+   }
 }
 
 const char *agent_catalog_provider(const agent_t *ag)
@@ -827,6 +857,10 @@ int agent_load_config(agent_config_t *cfg)
          if (v && cJSON_IsNumber(v))
             ag->cost_tier = v->valueint;
 
+         v = cJSON_GetObjectItem(a, "tier_price_exempt");
+         if (v && cJSON_IsString(v))
+            snprintf(ag->tier_price_exempt, sizeof(ag->tier_price_exempt), "%s", v->valuestring);
+
          v = cJSON_GetObjectItem(a, "max_tokens");
          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
 
@@ -1268,6 +1302,8 @@ int agent_save_config(const agent_config_t *cfg)
        * is recomputed at load so the derivation rules stay authoritative. */
       if (ag->catalog_provider_explicit && ag->catalog_provider[0])
          JSON_ADD_STR(a, "catalog_provider", ag->catalog_provider);
+      if (ag->tier_price_exempt[0])
+         JSON_ADD_STR(a, "tier_price_exempt", ag->tier_price_exempt);
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)

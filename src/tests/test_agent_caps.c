@@ -288,6 +288,55 @@ void test_catalog_provider_namespaced_model_ids(void)
    unlink(agent_config_path());
 }
 
+/* aimee names some providers after the CLI or product rather than the vendor:
+ * the Claude OAuth/CLI seat is provider "claude", the Codex seat is "chatgpt".
+ * models.dev keys those vendors "anthropic" and "openai". Unmapped, the PRIMARY
+ * agent resolved no capability flags at all, a 200k context against a real 1M,
+ * and an 8192 output ceiling against a real 128k. */
+void test_catalog_provider_maps_cli_provider_names(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[\n"
+         "{\"name\":\"claude\",\"provider\":\"claude\",\"endpoint\":\"\","
+         "\"model\":\"claude-opus-4-8\",\"auth_type\":\"none\",\"roles\":[\"review\"]},\n"
+         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+         "\"model\":\"gpt-5.6-sol\",\"auth_type\":\"codex-oauth\","
+         "\"roles\":[\"review\"]}\n"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   const agent_t *cl = agent_find(&c, "claude");
+   const agent_t *cx = agent_find(&c, "codex");
+   assert(cl && cx);
+
+   /* Wire provider untouched — it still selects auth and CLI behaviour. */
+   assert(strcmp(cl->provider, "claude") == 0);
+   assert(strcmp(cx->provider, "chatgpt") == 0);
+   /* Catalog identity is the vendor. */
+   assert(strcmp(agent_catalog_provider(cl), "anthropic") == 0);
+   assert(strcmp(agent_catalog_provider(cx), "openai") == 0);
+
+   /* Capability now resolves. The output ceiling is the sharpest symptom: an
+    * unmapped provider fell back to the non-reasoning 8192 default. */
+   model_capability_t cap;
+   assert(model_capability_get(agent_catalog_provider(cl), cl->model, &cap) != 0);
+   assert(cap.flags & MODEL_CAP_REASONING);
+   assert(cap.context_window == 200000 || cap.context_window >= 1000000);
+   assert(model_max_output(agent_catalog_provider(cl), cl->model) > 8192);
+
+   assert(model_capability_get(agent_catalog_provider(cx), cx->model, &cap) != 0);
+   assert(cap.flags & MODEL_CAP_REASONING);
+   assert(model_max_output(agent_catalog_provider(cx), cx->model) > 8192);
+
+   printf("  PASS: test_catalog_provider_maps_cli_provider_names\n");
+   unlink(agent_config_path());
+}
+
 /* The moonshotai heuristic must not hand REASONING to every unknown Moonshot
  * model: that would select the long per-call timeout and satisfy a REASONING
  * requirement for a model nobody has verified. Only the k2/k3 families it is

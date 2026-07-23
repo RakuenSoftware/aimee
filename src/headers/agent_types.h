@@ -250,6 +250,13 @@ typedef struct
     * an explicit value is re-serialized, so a save never freezes a derived guess
     * into config where it would outlive the derivation rules. */
    int catalog_provider_explicit;
+   /* Operator reason this agent's cost_tier is exempt from the catalog-price
+    * consistency check (agent_tier_lint). A subscription or flat-rate plan can
+    * make per-token price the wrong basis for its tier — e.g. a ChatGPT/codex
+    * OAuth seat whose marginal cost is not the published API price. Empty means
+    * the check applies. A REASON is required rather than a bare boolean so an
+    * exemption cannot silently hide a genuinely mis-tiered agent. */
+   char tier_price_exempt[128];
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,
