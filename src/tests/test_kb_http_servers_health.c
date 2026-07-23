@@ -1,5 +1,6 @@
 #include "kb/http/kb_http_servers.h"
 #include "kb_reqctx.h"
+#include "db2/db2_tenant.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -20,6 +21,25 @@ static int callback_entered;
 static int callback_release;
 static unsigned action_calls;
 static char action_body[128];
+static int scope_begins, scope_commits;
+static int64_t scope_team;
+static int next_scope_result;
+
+int db2_tenant_scope_begin(const kb_principal_t *actor, int64_t team)
+{
+   assert(actor && actor->authenticated);
+   scope_begins++;
+   scope_team = team;
+   return next_scope_result;
+}
+int db2_tenant_scope_commit(void)
+{
+   scope_commits++;
+   return 0;
+}
+void db2_tenant_scope_rollback(void)
+{
+}
 
 static kb_management_action_result_t action_handler_fn(void *ctx, const kb_principal_t *actor,
                                                        int64_t team, const char *server,
@@ -175,13 +195,23 @@ static void test_rejections_and_list_isolation(void)
    assert(route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 503);
    assert(route("GET", "/v1/servers", "team=1", out, sizeof(out)) == 200);
    assert(strstr(out, "stale-row"));
+   assert(scope_begins == 1 && scope_commits == 1 && scope_team == 1);
    assert(calls == before);
-   assert(route("GET", "/v1/servers", "team=+01&team=2", out, sizeof(out)) == 200);
-   assert(got_list_team == 1);
+   assert(route("GET", "/v1/servers", "team=+01&team=2", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers", "team=01", out, sizeof(out)) == 400);
+   assert(got_list_team == 1 && scope_begins == 1);
    assert(calls == before);
+
+   next_scope_result = DB2_ERR_TENANT_DENIED;
+   assert(route("GET", "/v1/servers", "team=2", out, sizeof(out)) == 403);
+   next_scope_result = DB2_ERR_TENANT_NO_CONN;
+   assert(route("GET", "/v1/servers", "team=2", out, sizeof(out)) == 503);
+   next_scope_result = 0;
+   assert(scope_begins == 3 && scope_commits == 1 && got_list_team == 1);
 
    kb_reqctx_clear();
    assert(route("GET", "/v1/servers/server-a/health", "team=1", out, sizeof(out)) == 401);
+   assert(route("GET", "/v1/servers", "team=1", out, sizeof(out)) == 401);
 }
 
 static void test_action_route(void)
