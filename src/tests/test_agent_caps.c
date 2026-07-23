@@ -1746,6 +1746,10 @@ void test_prefer_healthy_over_degraded(void)
    memset(&sys_cfg, 0, sizeof(sys_cfg));
    sys_cfg.model_meta_capability_routing = 1;
    cfg.agent_count = 2;
+   /* Assert the precondition rather than relying on the NULL default: a prior
+    * test that left a degraded filter registered would otherwise corrupt this. */
+   agent_set_route_degraded_filter(NULL);
+   g_degraded_name = NULL;
 
    /* The CHEAPER seat is the degraded one - exactly codex's position: tier 0 and
     * flapping. Only the health preference can lose it to the dearer healthy seat. */
@@ -1778,12 +1782,22 @@ void test_prefer_healthy_over_degraded(void)
    for (int i = 0; i < 6; i++)
       assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[1]);
 
-   /* Fallback, not exclusion: when the ONLY capable seat is degraded, it is still
-    * chosen - a degraded seat beats no seat. */
-   cfg.agents[1].enabled = 0;
+   /* Fallback, not exclusion: when the degraded seat is the ONLY one that can
+    * serve the role, it is still chosen - a degraded seat beats no seat, and the
+    * preference must not turn a routable role into NULL. Make the healthy seat
+    * INELIGIBLE by role rather than merely disabling it, so this proves routing
+    * falls THROUGH to the degraded seat, not just that a disabled agent is
+    * skipped. */
+   strcpy(cfg.agents[1].roles[0], "code"); /* no longer serves "review" */
+   /* Also pin explicit exec_roles: with none set, EVERY agent is exec-eligible
+    * for the default exec roles (which include "review"), so a bare role change
+    * would leave agents[1] still serving "review". */
+   strcpy(cfg.agents[1].exec_roles[0], "code");
+   cfg.agents[1].exec_role_count = 1;
    for (int i = 0; i < 6; i++)
       assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
-   cfg.agents[1].enabled = 1;
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].exec_role_count = 0;
 
    /* When EVERY seat is degraded, none can be preferred, so price decides again -
     * the preference narrows the field only when a healthy alternative exists. */

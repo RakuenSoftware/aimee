@@ -689,23 +689,35 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       }
    }
 
-   /* Prefer HEALTHY over DEGRADED, same shape as prefer_local: decide up front
-    * whether any eligible seat is healthy, and if so drop degraded seats from
-    * contention for the whole selection. A degraded seat is still a valid
-    * fallback - it is only excluded WHEN a healthy peer can serve the role - so
-    * this narrows the cheapest-with-capability choice to reliable seats rather
-    * than letting a flapping one keep winning on price. This is the routing half
-    * of the fix for the six-day codex quota outage: the breaker backoff stops it
-    * re-entering the set every minute, and this stops a degraded seat beating a
-    * healthy one while it is in the set. */
+   /* Prefer HEALTHY over DEGRADED, same shape as prefer_local: if any eligible
+    * seat is healthy, drop degraded seats from contention. A degraded seat is
+    * still a valid fallback - excluded only WHEN a healthy peer can serve the
+    * role - so this narrows the cheapest-with-capability choice to reliable seats
+    * rather than letting a flapping one keep winning on price. Routing half of
+    * the codex quota-outage fix: the breaker backoff keeps a hopeless seat out of
+    * the set longer, this keeps a degraded-but-routable seat from winning while a
+    * healthy peer exists.
+    *
+    * The degraded verdict is SNAPSHOT once per agent here and reused below,
+    * rather than re-queried in each loop. The predicate reads (and mutates, via
+    * the breaker half-open) live catalog health, so re-querying could let a seat
+    * cross the healthy/degraded line mid-selection - decide "a healthy seat
+    * exists", then drop every seat as degraded by candidate-collection time, and
+    * return NULL though a seat existed at decision time. That is the exact
+    * decide-against-stale, act-against-live bug this whole change is fixing.
+    * Freezing the snapshot makes "a healthy seat exists" imply the candidate loop
+    * finds it. A seat that flips to degraded after the snapshot is still routed
+    * to, which is harmless - it is a preference, and the seat may well serve. */
+   int degraded_snapshot[MAX_AGENTS];
    int healthy_only = 0;
    if (g_route_degraded_filter)
    {
-      for (int i = 0; i < cfg->agent_count; i++)
+      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         if (!ag->enabled || !agent_supports_role(ag, role) ||
-             !agent_is_available_for_routing(ag) || agent_is_degraded(ag))
+         degraded_snapshot[i] = agent_is_degraded(ag);
+         if (degraded_snapshot[i] || !ag->enabled || !agent_supports_role(ag, role) ||
+             !agent_is_available_for_routing(ag))
             continue;
          if (locals_only && !agent_is_local(ag))
             continue;
@@ -715,7 +727,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
              !agent_satisfies_required_caps(ag, required_caps, min_context, scope))
             continue;
          healthy_only = 1;
-         break;
       }
    }
 
@@ -728,7 +739,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
          continue;
       if (locals_only && !agent_is_local(ag))
          continue;
-      if (healthy_only && agent_is_degraded(ag))
+      if (healthy_only && i < MAX_AGENTS && degraded_snapshot[i])
          continue;
 
       /* The scope ceiling binds even when NOTHING else is required: it is a
@@ -769,7 +780,7 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
 
       if (locals_only && !agent_is_local(ag))
          continue;
-      if (healthy_only && agent_is_degraded(ag))
+      if (healthy_only && i < MAX_AGENTS && degraded_snapshot[i])
          continue;
       if (!agent_scope_admits(ag, scope))
          continue;

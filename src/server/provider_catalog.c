@@ -235,14 +235,26 @@ void provider_catalog_record_failure(const char *agent_name, const char *failure
    provider_catalog_entry_t *e = find_entry_locked(agent_name);
    if (e)
    {
-      /* A failure arriving while the breaker had HALF-OPENED (DEGRADED after its
-       * cooldown) is a genuine probe re-failure - the provider is still broken -
-       * so it counts as a breaker trip and lengthens the next cooldown. The
-       * burst of concurrent failures that first opens the breaker does NOT: those
-       * arrive while HEALTHY or already DOWN, and counting them would let
-       * parallelism, not elapsed time, drive the backoff. recompute on read can
-       * leave health DEGRADED without a fresh failure, so also require the streak
-       * to already be past the open threshold. */
+      /* Count a breaker TRIP only for a genuine half-open probe re-failure - a
+       * failure arriving while the breaker had already opened (streak >= 3) and
+       * then HALF-OPENED to DEGRADED after its cooldown. That is real evidence
+       * the provider is still broken, and it lengthens the next cooldown.
+       *
+       * Both clauses are needed, because DEGRADED has TWO sources in
+       * recompute_health: the half-open transition from DOWN (streak >= 3), and
+       * an ordinary early streak of 1-2 failures. The streak >= 3 clause excludes
+       * the latter - a second failure while merely warming up must not be counted
+       * as a breaker trip and start backing off before the breaker has even
+       * opened. The burst of concurrent failures that first opens the breaker is
+       * also excluded: those arrive while HEALTHY or already DOWN, so counting
+       * them would let parallelism, not elapsed time, drive the backoff.
+       *
+       * Under concurrency this can under-count - two probes half-open, both fail,
+       * the first flips DEGRADED->DOWN so the second sees DOWN and is not counted.
+       * That is acceptable: it is one trip per half-open CYCLE, and real cycles
+       * are serialised by the wall-clock cooldown, so the backoff still grows
+       * monotonically across them. Over-counting, which would over-penalise, is
+       * what the gates prevent. */
       if (e->health == CATALOG_HEALTH_DEGRADED && e->failure_streak >= 3)
          e->breaker_trips++;
       e->failure_streak++;
