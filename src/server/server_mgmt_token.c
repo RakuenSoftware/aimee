@@ -523,7 +523,7 @@ static int parse_payload(cJSON *payload, const unsigned char *raw, size_t raw_n,
         strcmp(v[5]->valuestring, "remote_reads") != 0) ||
        !ascii_token(v[6]->valuestring, 16, 128) || !ascii_token(v[7]->valuestring, 1, 128) ||
        !lower_hex(v[8]->valuestring, 64, 64) ||
-       !exact_secret(v[8]->valuestring, request_sha256, 64) ||
+       (request_sha256 && !exact_secret(v[8]->valuestring, request_sha256, 64)) ||
        !control_free(v[9]->valuestring, 1, 511) || strcmp(v[9]->valuestring, peer_issuer) != 0 ||
        !lower_hex(v[10]->valuestring, 0, 79) || strcmp(v[10]->valuestring, peer_serial) != 0 ||
        !lower_hex(v[11]->valuestring, 64, 64) ||
@@ -545,19 +545,18 @@ static int parse_payload(cJSON *payload, const unsigned char *raw, size_t raw_n,
           copy_string(v[11], out->peer_fingerprint, sizeof(out->peer_fingerprint));
 }
 
-server_mgmt_token_result_t
-server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_json,
-                            const char *expected_issuer, const char *expected_audience,
-                            const char *peer_issuer, const char *peer_serial,
-                            const char *peer_fingerprint, const char *request_sha256, int64_t now,
-                            server_mgmt_token_claims_t *out)
+static server_mgmt_token_result_t
+verify_core(const char *jwt, size_t jwt_len, const char *jwks_json, const char *expected_issuer,
+            const char *expected_audience, const char *peer_issuer, const char *peer_serial,
+            const char *peer_fingerprint, const char *request_sha256,
+            const char *required_capability, int64_t now, server_mgmt_token_claims_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
    if (!jwt || !jwks_json || !out || !control_free(expected_issuer, 1, 255) ||
        !ascii_token(expected_audience, 1, 127) || !control_free(peer_issuer, 1, 511) ||
        !lower_hex(peer_serial, 0, 79) || !lower_hex(peer_fingerprint, 64, 64) ||
-       !lower_hex(request_sha256, 64, 64) || now < 0)
+       (request_sha256 && !lower_hex(request_sha256, 64, 64)) || now < 0)
       return SERVER_MGMT_TOKEN_INVALID;
    size_t wire_n = jwt_len;
    size_t jwks_n = strnlen(jwks_json, JWKS_MAX + 1);
@@ -603,7 +602,8 @@ server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_js
    if (selected != KEY_SELECT_OK || !key ||
        !verify_signature(key, jwt, (size_t)(dot2 - jwt), signature, signature_n) ||
        !parse_payload(payload, payload_raw, payload_n, expected_issuer, expected_audience,
-                      peer_issuer, peer_serial, peer_fingerprint, request_sha256, now, &candidate))
+                      peer_issuer, peer_serial, peer_fingerprint, request_sha256, now, &candidate) ||
+       (required_capability && strcmp(candidate.capability, required_capability)))
       goto done;
    *out = candidate;
    ok = 1;
@@ -619,6 +619,32 @@ done:
    OPENSSL_cleanse(payload_raw, sizeof(payload_raw));
    OPENSSL_cleanse(signature, sizeof(signature));
    return result;
+}
+
+server_mgmt_token_result_t
+server_mgmt_token_verify_ex(const char *jwt, size_t jwt_len, const char *jwks_json,
+                            const char *expected_issuer, const char *expected_audience,
+                            const char *peer_issuer, const char *peer_serial,
+                            const char *peer_fingerprint, const char *request_sha256, int64_t now,
+                            server_mgmt_token_claims_t *out)
+{
+   if (!request_sha256)
+   {
+      if (out)
+         memset(out, 0, sizeof(*out));
+      return SERVER_MGMT_TOKEN_INVALID;
+   }
+   return verify_core(jwt, jwt_len, jwks_json, expected_issuer, expected_audience, peer_issuer,
+                      peer_serial, peer_fingerprint, request_sha256, NULL, now, out);
+}
+
+server_mgmt_token_result_t server_mgmt_token_verify_read_claims_ex(
+    const char *jwt, size_t jwt_len, const char *jwks_json, const char *expected_issuer,
+    const char *expected_audience, const char *peer_issuer, const char *peer_serial,
+    const char *peer_fingerprint, int64_t now, server_mgmt_token_claims_t *out)
+{
+   return verify_core(jwt, jwt_len, jwks_json, expected_issuer, expected_audience, peer_issuer,
+                      peer_serial, peer_fingerprint, NULL, "remote_reads", now, out);
 }
 
 int server_mgmt_token_verify(const char *jwt, size_t jwt_len, const char *jwks_json,

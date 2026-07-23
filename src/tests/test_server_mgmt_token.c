@@ -510,6 +510,17 @@ int main(void)
                          read_raw);
    assert(verify(read_jwt, strlen(read_jwt), jwks, NOW, &claims));
    assert(strcmp(claims.capability, "remote_reads") == 0);
+   assert(server_mgmt_token_verify_read_claims_ex(
+              read_jwt, strlen(read_jwt), jwks, issuer, audience, peer_issuer, peer_serial,
+              fingerprint, NOW, &claims) == SERVER_MGMT_TOKEN_OK);
+   assert(!strcmp(claims.capability, "remote_reads") &&
+          !strcmp(claims.request_sha256, request_hash));
+   memset(&claims, 0xa5, sizeof(claims));
+   assert(server_mgmt_token_verify_read_claims_ex(jwt, strlen(jwt), jwks, issuer, audience,
+                                                  peer_issuer, peer_serial, fingerprint, NOW,
+                                                  &claims) == SERVER_MGMT_TOKEN_INVALID);
+   for (size_t i = 0; i < sizeof(claims); ++i)
+      assert(((const unsigned char *)&claims)[i] == 0);
    free(read_jwt);
    free(read_raw);
 

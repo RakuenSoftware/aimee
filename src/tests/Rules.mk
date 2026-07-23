@@ -554,6 +554,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-server-mgmt-token \
                $(TESTPREFIX)/unit-test-server-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-server-mgmt-read \
+               $(TESTPREFIX)/unit-test-server-mgmt-read-source \
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-server-management-jti \
@@ -1829,6 +1830,11 @@ $(TESTPREFIX)/unit-test-server-mgmt-read: $(OBJDIR)/tests/test_server_mgmt_read.
                                           $(OBJDIR)/server/server_mgmt_read.o \
                                           $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-mgmt-read-source: \
+    $(OBJDIR)/tests/test_server_mgmt_read_source.o \
+    $(OBJDIR)/server/server_mgmt_read_source.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
     $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
