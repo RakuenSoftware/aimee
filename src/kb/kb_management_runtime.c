@@ -502,9 +502,8 @@ static int read_projection_token(const char *s, size_t max, int model)
    for (size_t i = 0; i < n; ++i)
    {
       unsigned char c = (unsigned char)s[i];
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' ||
-            (model && (c == ':' || c == '/' || c == '+'))))
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-' || (model && (c == ':' || c == '/' || c == '+'))))
          return 0;
    }
    return 1;
@@ -545,10 +544,9 @@ static int read_projection_valid(const char *wire, size_t len, const char *serve
       for (cJSON *field = cJSON_IsObject(agent) ? agent->child : NULL; field; field = field->next)
          fields++;
       if (!valid || fields != 7 || !read_projection_token(name_s, 63, 0) ||
-          !read_projection_token(provider_s, 15, 0) ||
-          !read_projection_token(model_s, 127, 1) || !cJSON_IsBool(enabled) ||
-          !cJSON_IsBool(delegate) || !cJSON_IsBool(primary) || !cJSON_IsNumber(parallel) ||
-          parallel->valuedouble < 0 || parallel->valuedouble > 1024 ||
+          !read_projection_token(provider_s, 15, 0) || !read_projection_token(model_s, 127, 1) ||
+          !cJSON_IsBool(enabled) || !cJSON_IsBool(delegate) || !cJSON_IsBool(primary) ||
+          !cJSON_IsNumber(parallel) || parallel->valuedouble < 0 || parallel->valuedouble > 1024 ||
           parallel->valuedouble != (double)parallel->valueint ||
           (previous && strcmp(previous, name_s) >= 0))
       {
@@ -613,8 +611,8 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    kb_management_read_result_t result = KB_MANAGEMENT_READ_UNAVAILABLE;
    uint64_t mono = monotonic_millis(NULL);
    uint64_t deadline = mono > UINT64_MAX - 15000 ? UINT64_MAX : mono + 15000;
-   kb_management_health_result_t hr = kb_management_health_snapshot_primary(
-       NULL, actor, team_id, server_id, &snapshot);
+   kb_management_health_result_t hr =
+       kb_management_health_snapshot_primary(NULL, actor, team_id, server_id, &snapshot);
    if (hr != KB_MANAGEMENT_HEALTH_OK)
    {
       result = hr == KB_MANAGEMENT_HEALTH_NOT_FOUND ? KB_MANAGEMENT_READ_NOT_FOUND
@@ -623,8 +621,7 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
       goto done;
    }
    loaded = 1;
-   if (kb_management_health_bundle_active(lifecycle, &bundle, &active) !=
-       KB_MANAGEMENT_HEALTH_OK)
+   if (kb_management_health_bundle_active(lifecycle, &bundle, &active) != KB_MANAGEMENT_HEALTH_OK)
       goto done;
    if (kb_management_health_server_open_production(&server_cfg, &snapshot, &bundle, deadline,
                                                    &session) != KB_MANAGEMENT_HEALTH_OK)
@@ -648,58 +645,84 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    char external_path[256];
    if (snprintf(external_path, sizeof(external_path), "/v1/servers/%s/agents", server_id) < 0)
       goto done;
+   int64_t publication_generation = 0;
+   db2_management_read_result_t generation_result =
+       db2_management_read_publication_generation(&publication_generation);
+   if (generation_result != DB2_MANAGEMENT_READ_OK)
+   {
+      result = generation_result == DB2_MANAGEMENT_READ_DENIED ? KB_MANAGEMENT_READ_DENIED
+               : generation_result == DB2_MANAGEMENT_READ_INTEGRITY
+                   ? KB_MANAGEMENT_READ_INTEGRITY
+                   : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
    server_mgmt_read_digest_input_t digest_input = {
-       .server_id = server_id, .team_id = team_id, .nonce = nonce,
-       .kb_issuer = active.issuer, .kb_serial = active.serial_norm,
+       .server_id = server_id,
+       .team_id = team_id,
+       .nonce = nonce,
+       .kb_issuer = active.issuer,
+       .kb_serial = active.serial_norm,
        .server_issuer = snapshot.management_issuer,
        .server_serial = snapshot.management_serial_norm,
-       .revocation_generation = snapshot.revocation_generation, .publication_generation = 1};
+       .revocation_generation = snapshot.revocation_generation,
+       .publication_generation = publication_generation};
    char digest[65];
    if (server_mgmt_read_digest(&digest_input, digest))
       goto done;
-   db2_management_read_result_t jr = db2_management_read_intent_start(
-       actor, team_id, server_id, external_path, nonce, digest, token_issuer, installation, ttl,
-       &intent);
+   db2_management_read_result_t jr =
+       db2_management_read_intent_start(actor, team_id, server_id, external_path, nonce, digest,
+                                        token_issuer, installation, ttl, &intent);
    if (jr != DB2_MANAGEMENT_READ_OK)
    {
-      result = jr == DB2_MANAGEMENT_READ_DENIED ? KB_MANAGEMENT_READ_DENIED
-               : jr == DB2_MANAGEMENT_READ_CONFLICT ? KB_MANAGEMENT_READ_CONFLICT
+      result = jr == DB2_MANAGEMENT_READ_DENIED      ? KB_MANAGEMENT_READ_DENIED
+               : jr == DB2_MANAGEMENT_READ_CONFLICT  ? KB_MANAGEMENT_READ_CONFLICT
                : jr == DB2_MANAGEMENT_READ_INTEGRITY ? KB_MANAGEMENT_READ_INTEGRITY
                                                      : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
    }
    char active_fp[65];
    hex32_runtime(active.fingerprint, active_fp);
-   if (!read_snapshot_matches(&snapshot, &intent) ||
-       strcmp(active.installation_id, installation) ||
+   if (!read_snapshot_matches(&snapshot, &intent) || strcmp(active.installation_id, installation) ||
        strcmp(active.issuer, intent.local_cert_issuer) ||
        strcmp(active.serial_norm, intent.local_cert_serial_norm) ||
-       strcmp(active_fp, intent.local_cert_fingerprint) || strcmp(digest, intent.request_sha256))
+       strcmp(active_fp, intent.local_cert_fingerprint) || strcmp(digest, intent.request_sha256) ||
+       intent.publication_generation != publication_generation)
    {
       result = KB_MANAGEMENT_READ_INTEGRITY;
       goto done;
    }
    if (monotonic_millis(NULL) >= deadline)
       goto done;
-   if (kb_mgmt_token_authority_client_issue(&token, intent.correlation_id, intent.jti, &bearer) !=
-       KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+   kb_mgmt_token_authority_ipc_result_t token_result =
+       kb_mgmt_token_authority_client_issue(&token, intent.correlation_id, intent.jti, &bearer);
+   if (token_result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+   {
+      result = token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_DENIED ? KB_MANAGEMENT_READ_DENIED
+               : token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_CONFLICT ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED
+                   ? KB_MANAGEMENT_READ_CONFLICT
+               : token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY
+                   ? KB_MANAGEMENT_READ_INTEGRITY
+                   : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
+   }
    char encoded[44];
    nonce64_runtime(nonce, encoded);
    int n = snprintf(status_request, sizeof(status_request),
                     "{\"nonce\":\"%s\",\"target\":\"%s\",\"target_mgmt_fp\":\"%s\","
-                    "\"purpose\":\"management.read.v1\"}", encoded, server_id,
-                    intent.target_mgmt_fingerprint);
+                    "\"purpose\":\"management.read.v1\"}",
+                    encoded, server_id, intent.target_mgmt_fingerprint);
    if (n < 0 || (size_t)n >= sizeof(status_request))
       goto done;
-   kb_management_health_result_t status_result = kb_mgmt_status_client_adapter(
-       &authority, &bundle, status_request, (size_t)n, deadline, staple, sizeof(staple),
-       &http_status);
+   kb_management_health_result_t status_result =
+       kb_mgmt_status_client_adapter(&authority, &bundle, status_request, (size_t)n, deadline,
+                                     staple, sizeof(staple), &http_status);
    if (status_result != KB_MANAGEMENT_HEALTH_OK)
       goto done;
-   if (http_status != 200 ||
-       !read_status_matches(staple, nonce, &active, &intent, status_key_id, status_public_key,
-                            wall_seconds(NULL)))
+   if (http_status != 200 || !read_status_matches(staple, nonce, &active, &intent, status_key_id,
+                                                  status_public_key, wall_seconds(NULL)))
    {
       result = KB_MANAGEMENT_READ_INTEGRITY;
       goto done;
@@ -728,10 +751,10 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    if (http_status != 200 || response_len == cap ||
        !read_projection_valid(out, response_len, server_id, team_id))
    {
-      result = http_status == 403 ? KB_MANAGEMENT_READ_DENIED
-               : http_status == 409 ? KB_MANAGEMENT_READ_CONFLICT
+      result = http_status == 403                         ? KB_MANAGEMENT_READ_DENIED
+               : http_status == 409                       ? KB_MANAGEMENT_READ_CONFLICT
                : http_status == 502 || http_status == 200 ? KB_MANAGEMENT_READ_INTEGRITY
-                                    : KB_MANAGEMENT_READ_UNAVAILABLE;
+                                                          : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
    }
    result = KB_MANAGEMENT_READ_OK;

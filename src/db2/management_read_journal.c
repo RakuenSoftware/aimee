@@ -60,14 +60,42 @@ static int decode(aimee_pg_stmt_t *st, db2_management_read_intent_t *o)
           text(st, 12, o->local_cert_fingerprint, 65) ||
           text(st, 13, o->target_mgmt_issuer, sizeof(o->target_mgmt_issuer)) ||
           text(st, 14, o->target_mgmt_serial_norm, sizeof(o->target_mgmt_serial_norm)) ||
-          text(st, 15, o->target_mgmt_fingerprint, 65) ||
-          i64(st, 16, &o->revocation_generation) || i64(st, 17, &o->publication_generation);
+          text(st, 15, o->target_mgmt_fingerprint, 65) || i64(st, 16, &o->revocation_generation) ||
+          i64(st, 17, &o->publication_generation);
 }
 
-db2_management_read_result_t db2_management_read_intent_start(
-    const kb_principal_t *principal, int64_t team, const char *server, const char *external_path,
-    const uint8_t nonce[32], const char *digest, const char *issuer, const char *installation,
-    int ttl, db2_management_read_intent_t *out)
+db2_management_read_result_t db2_management_read_publication_generation(int64_t *out)
+{
+   if (!out)
+      return DB2_MANAGEMENT_READ_INVALID;
+   *out = 0;
+   char error[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(), "SELECT public.kb_management_read_publication_generation()",
+                        error, sizeof(error));
+   aimee_pg_step_t step = st ? aimee_pg_step(st, error, sizeof(error)) : AIMEE_PG_ERR;
+   db2_management_read_result_t rc = DB2_MANAGEMENT_READ_UNAVAILABLE;
+   int64_t generation = 0;
+   if (st && step == AIMEE_PG_ROW && aimee_pg_column_count(st) == 1 && !i64(st, 0, &generation) &&
+       generation > 0 && generation <= INT16_MAX &&
+       aimee_pg_step(st, error, sizeof(error)) == AIMEE_PG_DONE)
+      rc = DB2_MANAGEMENT_READ_OK;
+   else if (st && step == AIMEE_PG_ERR)
+      rc = classify(aimee_pg_sqlstate(st));
+   else if (st)
+      rc = DB2_MANAGEMENT_READ_INTEGRITY;
+   if (st)
+      aimee_pg_finalize(st);
+   if (rc == DB2_MANAGEMENT_READ_OK)
+      *out = generation;
+   return rc;
+}
+
+db2_management_read_result_t
+db2_management_read_intent_start(const kb_principal_t *principal, int64_t team, const char *server,
+                                 const char *external_path, const uint8_t nonce[32],
+                                 const char *digest, const char *issuer, const char *installation,
+                                 int ttl, db2_management_read_intent_t *out)
 {
    if (out)
       memset(out, 0, sizeof(*out));
@@ -83,9 +111,11 @@ db2_management_read_result_t db2_management_read_intent_start(
                  ? DB2_MANAGEMENT_READ_DENIED
                  : DB2_MANAGEMENT_READ_UNAVAILABLE;
    char error[256] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       db2_conn(), "SELECT * FROM public.kb_management_read_intent_start(?1,?2,?3,?4,"
-                   "'agents','GET',?5,?6,?7,?8,?9,?10)", error, sizeof(error));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT * FROM public.kb_management_read_intent_start(?1,?2,?3,?4,"
+                        "'agents','GET',?5,?6,?7,?8,?9,?10)",
+                        error, sizeof(error));
    int bound = !st || aimee_pg_bind_text(st, "?1", corr) || aimee_pg_bind_text(st, "?2", jti) ||
                aimee_pg_bind_int64(st, "?3", team) || aimee_pg_bind_text(st, "?4", server) ||
                aimee_pg_bind_text(st, "?5", external_path) ||

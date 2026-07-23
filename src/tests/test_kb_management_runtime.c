@@ -34,7 +34,17 @@ static int block_reconcile;
 static int reconcile_entered;
 static int read_fixture_enabled;
 static int read_sequence;
+static kb_mgmt_token_authority_ipc_result_t token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
 static kb_http_servers_read_handler_fn captured_read_handler;
+
+db2_management_read_result_t db2_management_read_publication_generation(int64_t *out)
+{
+   if (!read_fixture_enabled)
+      return DB2_MANAGEMENT_READ_UNAVAILABLE;
+   assert(out);
+   *out = 9;
+   return DB2_MANAGEMENT_READ_OK;
+}
 
 int kb_http_servers_health_register(kb_http_servers_health_handler_fn handler, void *ctx)
 {
@@ -83,10 +93,11 @@ int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn handler, voi
    return 0;
 }
 
-db2_management_read_result_t db2_management_read_intent_start(
-    const kb_principal_t *actor, int64_t team, const char *server, const char *path,
-    const uint8_t nonce[32], const char *digest, const char *issuer, const char *installation,
-    int ttl, db2_management_read_intent_t *out)
+db2_management_read_result_t
+db2_management_read_intent_start(const kb_principal_t *actor, int64_t team, const char *server,
+                                 const char *path, const uint8_t nonce[32], const char *digest,
+                                 const char *issuer, const char *installation, int ttl,
+                                 db2_management_read_intent_t *out)
 {
    if (read_fixture_enabled)
    {
@@ -108,7 +119,7 @@ db2_management_read_result_t db2_management_read_intent_start(
       snprintf(out->target_mgmt_serial_norm, sizeof(out->target_mgmt_serial_norm), "10be");
       memset(out->target_mgmt_fingerprint, 'b', 64);
       out->revocation_generation = 7;
-      out->publication_generation = 1;
+      out->publication_generation = 9;
       return DB2_MANAGEMENT_READ_OK;
    }
    return DB2_MANAGEMENT_READ_UNAVAILABLE;
@@ -118,7 +129,8 @@ int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *input, char o
 {
    if (read_fixture_enabled)
    {
-      assert(input && !strcmp(input->server_id, "srv-1") && input->team_id == 7);
+      assert(input && !strcmp(input->server_id, "srv-1") && input->team_id == 7 &&
+             input->publication_generation == 9);
       memset(out, 'd', 64);
       out[64] = 0;
       return 0;
@@ -141,9 +153,10 @@ int kb_management_read_challenge_decode(const char *raw, size_t len, unsigned ch
    return -1;
 }
 
-kb_mgmt_token_authority_ipc_result_t kb_mgmt_token_authority_client_issue(
-    const kb_mgmt_token_authority_client_config_t *config, const char *correlation,
-    const char *jti, kb_mgmt_token_authority_output_t *out)
+kb_mgmt_token_authority_ipc_result_t
+kb_mgmt_token_authority_client_issue(const kb_mgmt_token_authority_client_config_t *config,
+                                     const char *correlation, const char *jti,
+                                     kb_mgmt_token_authority_output_t *out)
 {
    (void)config;
    (void)correlation;
@@ -151,6 +164,8 @@ kb_mgmt_token_authority_ipc_result_t kb_mgmt_token_authority_client_issue(
    if (read_fixture_enabled)
    {
       assert(read_sequence == 0 && correlation[0] == 'c' && jti[0] == 'e');
+      if (token_issue_result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+         return token_issue_result;
       read_sequence = 1;
       snprintf(out->jwt, sizeof(out->jwt), "signed-read-token");
       return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
@@ -555,6 +570,29 @@ int main(void)
    kb_principal_t read_actor = {.authenticated = 1};
    char read_out[1024];
    read_fixture_enabled = 1;
+   const struct
+   {
+      kb_mgmt_token_authority_ipc_result_t authority;
+      kb_management_read_result_t read;
+   } token_failures[] = {
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_DENIED, KB_MANAGEMENT_READ_DENIED},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_CONFLICT, KB_MANAGEMENT_READ_CONFLICT},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED, KB_MANAGEMENT_READ_CONFLICT},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED, KB_MANAGEMENT_READ_CONFLICT},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID, KB_MANAGEMENT_READ_INTEGRITY},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY, KB_MANAGEMENT_READ_INTEGRITY},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_SEALED, KB_MANAGEMENT_READ_UNAVAILABLE},
+       {KB_MGMT_TOKEN_AUTHORITY_IPC_COMMIT_AMBIGUOUS, KB_MANAGEMENT_READ_UNAVAILABLE},
+   };
+   for (size_t i = 0; i < sizeof(token_failures) / sizeof(token_failures[0]); ++i)
+   {
+      token_issue_result = token_failures[i].authority;
+      read_sequence = 0;
+      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out)) ==
+             token_failures[i].read);
+      assert(read_sequence == 0);
+   }
+   token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
    read_sequence = 0;
    kb_management_read_result_t read_rc =
        captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out));

@@ -26,8 +26,11 @@ typedef struct
    int64_t revocation_generation, publication_generation;
 } db2_management_read_intent_t;
 
-db2_management_read_result_t db2_management_read_intent_start(
-    const kb_principal_t *, int64_t, const char *, const char *, const uint8_t[32],
-    const char *, const char *, const char *, int, db2_management_read_intent_t *);
+db2_management_read_result_t db2_management_read_publication_generation(int64_t *);
+db2_management_read_result_t db2_management_read_intent_start(const kb_principal_t *, int64_t,
+                                                              const char *, const char *,
+                                                              const uint8_t[32], const char *,
+                                                              const char *, const char *, int,
+                                                              db2_management_read_intent_t *);
 
 #endif

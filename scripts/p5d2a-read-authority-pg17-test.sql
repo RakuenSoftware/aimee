@@ -13,6 +13,9 @@ RESET ROLE;
 
 SET LOCAL ROLE aimee_kb_runtime;
 DO $$ DECLARE r RECORD; BEGIN
+  IF public.kb_management_read_publication_generation()<>1 THEN
+    RAISE EXCEPTION 'P5-D2a authoritative publication generation mismatch';
+  END IF;
   PERFORM set_config('aimee.principal','oidc:https%3A%25issuer:p5c2d-lead',true);
   PERFORM set_config('aimee.team','97522',true);
   SELECT * INTO STRICT r FROM public.kb_management_read_intent_start(
@@ -23,6 +26,15 @@ DO $$ DECLARE r RECORD; BEGIN
      r.local_cert_serial_norm<>'11' OR r.target_mgmt_serial_norm<>'22' THEN
     RAISE EXCEPTION 'P5-D2a frozen intent mismatch';
   END IF;
+END $$;
+RESET ROLE;
+
+SET LOCAL ROLE aimee_kb_status;
+DO $$ BEGIN
+  BEGIN
+    PERFORM public.kb_management_read_publication_generation();
+    RAISE EXCEPTION 'status role read publication generation';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
 END $$;
 RESET ROLE;
 

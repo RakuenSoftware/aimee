@@ -640,6 +640,7 @@ BEGIN
   EXECUTE 'ALTER FUNCTION public.kb_management_action_worm_guard() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
+  EXECUTE 'ALTER FUNCTION public.kb_management_read_publication_generation() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_read_token_readback(TEXT,TEXT) OWNER TO aimee_kb_owner';
 
@@ -650,7 +651,8 @@ BEGIN
     public.kb_team_lead,public.kb_team_membership,public.kb_audit_event TO aimee_kb_owner;
   GRANT SELECT,INSERT ON public.kb_management_read_intent TO aimee_kb_owner;
   GRANT SELECT ON public.kb_management_jwks_publication_registry,
-    public.kb_management_jwks_publication_generation,public.kb_management_token_root
+    public.kb_management_jwks_publication_generation,
+    public.kb_management_jwks_publication_candidate,public.kb_management_token_root
     TO aimee_kb_owner;
   GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
     TO aimee_kb_owner;
@@ -664,6 +666,7 @@ BEGIN
     public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_read_transition_guard(),
     public.kb_management_read_worm_guard(),
+    public.kb_management_read_publication_generation(),
     public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT),
     public.kb_management_read_token_readback(TEXT,TEXT) FROM PUBLIC;
 
@@ -680,6 +683,7 @@ BEGIN
       public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT)
       TO aimee_kb_runtime;
     GRANT EXECUTE ON FUNCTION
+      public.kb_management_read_publication_generation(),
       public.kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT),
       public.kb_management_read_token_readback(TEXT,TEXT) TO aimee_kb_runtime;
   END IF;

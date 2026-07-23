@@ -10107,6 +10107,47 @@ BEGIN
     extract(epoch FROM a.created_at)::BIGINT;
 END $$;
 
+CREATE OR REPLACE FUNCTION kb_management_read_publication_generation()
+RETURNS SMALLINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  pc public.kb_management_jwks_publication_candidate%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE;
+  v_now BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'management read primary required' USING ERRCODE='25006';
+  END IF;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO pc FROM public.kb_management_jwks_publication_candidate x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x
+    WHERE x.root_kind='token' FOR SHARE;
+  v_now:=pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::BIGINT;
+  IF pr.singleton IS NULL OR pr.current_generation IS NULL OR pr.current_generation<1 OR
+     pg.generation IS NULL OR pc.generation IS NULL OR
+     pg.generation<>pr.current_generation OR pc.generation<>pr.current_generation OR
+     pr.candidate_id<>pg.candidate_id OR pr.candidate_id<>pc.candidate_id OR pc.phase<>'final' OR
+     pr.manifest_sha256<>pg.manifest_sha256 OR pr.manifest_sha256<>pc.manifest_sha256 OR
+     pr.envelope_sha256<>pg.envelope_sha256 OR pr.envelope_sha256<>pc.envelope_sha256 OR
+     pr.hwm2_attestation_digest<>pg.hwm2_attestation_digest OR
+     pr.hwm2_attestation_digest<>pc.hwm2_attestation_digest OR
+     pg.valid_from>v_now OR v_now>=pg.valid_until OR pc.valid_from<>pg.valid_from OR
+     pc.valid_until<>pg.valid_until OR tr.root_kind IS NULL OR NOT tr.enabled OR
+     tr.current_version<>2 OR tr.wire_id<>pg.token_wire_id OR
+     tr.public_digest<>pg.token_public_digest OR tr.jwk_digest<>pg.token_jwk_digest OR
+     pc.token_wire_id<>pg.token_wire_id OR pc.token_public_digest<>pg.token_public_digest OR
+     pc.token_jwk_digest<>pg.token_jwk_digest THEN
+    RAISE EXCEPTION 'management read publication integrity failure' USING ERRCODE='55000';
+  END IF;
+  RETURN pr.current_generation;
+END $$;
+
 CREATE OR REPLACE FUNCTION kb_management_read_intent_start(
   p_correlation_id TEXT,p_jti TEXT,p_team_id BIGINT,p_target_server_id TEXT,
   p_selector TEXT,p_external_method TEXT,p_external_path TEXT,p_challenge_nonce BYTEA,
@@ -10621,6 +10662,7 @@ REVOKE ALL ON FUNCTION kb_management_action_intent_start(
 REVOKE ALL ON FUNCTION kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
 REVOKE ALL ON TABLE kb_management_read_intent FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_read_transition_guard(),kb_management_read_worm_guard(),
+  kb_management_read_publication_generation(),
   kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT),
   kb_management_read_token_readback(TEXT,TEXT),
   kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
