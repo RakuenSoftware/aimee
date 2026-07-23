@@ -150,6 +150,13 @@ END $$;
 DO $$
 DECLARE v BIGINT;
 BEGIN
+  -- A synthetic shard to advance within. The cursor is now bounded by the real
+  -- stream head, so a test shard must exist for the monotonicity values to be
+  -- legitimate positions rather than suppression attempts.
+  INSERT INTO public.kb_vault_witness_shard(tenant,provider,seq,head_hash)
+  VALUES('emit-t','emit-p',20,decode(repeat('cd',32),'hex'))
+  ON CONFLICT (tenant,provider) DO NOTHING;
+
   -- Advance, then attempt to rewind: the lower value must be ignored, not applied.
   v := public.org_vault_witness_emit_advance(0::smallint,'emit-t','emit-p',10);
   IF v <> 10 THEN RAISE EXCEPTION 'WITNESS FAIL: first advance returned %', v; END IF;
@@ -171,6 +178,30 @@ BEGIN
   EXCEPTION WHEN sqlstate '22023' THEN NULL;
   END;
   RAISE NOTICE 'WITNESS OK: emission cursor is monotonic and rejects invalid input';
+END $$;
+
+-- The cursor must not be usable to SUPPRESS emission. Monotonicity alone does not
+-- prevent that: advancing far past the head would make the emitter skip everything
+-- while the backlog gauge reported healthy. An advance past the real stream head is
+-- rejected outright.
+DO $$
+DECLARE v_head BIGINT;
+BEGIN
+  SELECT seq INTO v_head FROM public.kb_vault_witness_shard
+    WHERE tenant='!kb' AND provider='!audit';
+  IF v_head IS NULL OR v_head < 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: expected a non-empty !kb/!audit shard for the suppression test';
+  END IF;
+  BEGIN
+    PERFORM public.org_vault_witness_emit_advance(0::smallint,'!kb','!audit', v_head + 1000000);
+    RAISE EXCEPTION 'WITNESS FAIL: cursor advanced past the stream head (emission suppressible)';
+  EXCEPTION WHEN sqlstate 'P7W06' THEN NULL;
+  END;
+  -- An advance exactly to the head is legitimate and must still be accepted.
+  IF public.org_vault_witness_emit_advance(0::smallint,'!kb','!audit', v_head) <> v_head THEN
+    RAISE EXCEPTION 'WITNESS FAIL: advance to the exact head was rejected';
+  END IF;
+  RAISE NOTICE 'WITNESS OK: emission cursor cannot be advanced past the stream head';
 END $$;
 
 -- The batch readers must never hand back more than asked, and must start strictly

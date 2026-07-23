@@ -5901,11 +5901,27 @@ CREATE OR REPLACE FUNCTION org_vault_witness_emit_advance(
   p_kind SMALLINT, p_tenant TEXT, p_provider TEXT, p_seq BIGINT)
 RETURNS BIGINT
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
-DECLARE v BIGINT;
+DECLARE v BIGINT; v_head BIGINT;
 BEGIN
   IF p_kind IS NULL OR p_kind NOT IN (0,1) OR p_seq IS NULL OR p_seq < 0 OR
      (p_kind = 1 AND (COALESCE(p_tenant,'') <> '' OR COALESCE(p_provider,'') <> '')) THEN
     RAISE EXCEPTION 'witness_emit_advance: invalid input' USING ERRCODE='22023';
+  END IF;
+  -- The cursor may never point past the end of the stream it tracks. Monotonicity
+  -- alone does not prevent SUPPRESSION: an advance to a huge value would make
+  -- org_vault_witness_emit_pending() report head_seq <= last_emitted forever, and
+  -- the emitter would silently skip all existing and future evidence while every
+  -- gauge read as healthy. Bounding by the real head makes that impossible, so the
+  -- cursor cannot be used as an off-switch for emission.
+  IF p_kind = 0 THEN
+    SELECT COALESCE(sh.seq,0) INTO v_head FROM public.kb_vault_witness_shard sh
+      WHERE sh.tenant = COALESCE(p_tenant,'') AND sh.provider = COALESCE(p_provider,'');
+  ELSE
+    SELECT COALESCE(max(cp.seq),0) INTO v_head FROM public.kb_vault_witness_checkpoint cp;
+  END IF;
+  IF p_seq > COALESCE(v_head,0) THEN
+    RAISE EXCEPTION 'witness_emit_advance: seq % past stream head %', p_seq, COALESCE(v_head,0)
+      USING ERRCODE='P7W06';
   END IF;
   INSERT INTO public.kb_vault_witness_emit_cursor(kind,tenant,provider,last_emitted,updated_at)
   VALUES(p_kind,COALESCE(p_tenant,''),COALESCE(p_provider,''),p_seq,pg_now_text())

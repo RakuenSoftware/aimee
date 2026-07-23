@@ -356,6 +356,54 @@ static void test_snapshot_unmatched_is_not_tamper(void)
    assert(rep.snapshots_bad == 0 && rep.any_tamper == 0);
 }
 
+/* A retained stream that repeats a checkpoint byte-identically (emission re-sends
+ * one whose snapshot was rejected; a reset cursor re-sends the run) must verify
+ * clean. Before this was handled the duplicate read as CONTINUITY_BROKEN, which is
+ * a false tampering alarm on a healthy system. */
+static void test_duplicate_checkpoint_tolerated(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t snap[32];
+   memset(snap, 0x31, sizeof snap);
+   vault_witness_anchor_t anchor;
+   emit_checkpoint_with_snapshot(1, snap, sizeof snap, priv, pub, &anchor);
+   /* Re-emit the identical checkpoint frame by rebuilding the same stream twice. */
+   size_t one = g_len;
+   assert(g_len * 2 <= sizeof g_stream);
+   memcpy(g_stream + g_len, g_stream, one);
+   g_len += one;
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.checkpoints == 2 && rep.checkpoints_duplicate == 1);
+   assert(rep.checkpoints_conflict == 0);
+   assert(rep.continuity == VAULT_WITNESS_CONTINUITY_OK);
+   assert(rep.any_tamper == 0);
+}
+
+/* Two DIFFERENT checkpoints at one seq is a fork: the signer certified two
+ * histories. That must be hard tamper evidence, not collapsed away. */
+static void test_conflicting_checkpoint_is_fork(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t snapA[32], snapB[32];
+   memset(snapA, 0x41, sizeof snapA);
+   memset(snapB, 0x42, sizeof snapB); /* different leaf set at the same seq */
+   vault_witness_anchor_t anchor;
+   emit_checkpoint_with_snapshot(1, snapA, sizeof snapA, priv, pub, &anchor);
+   emit_checkpoint_with_snapshot(1, snapB, sizeof snapB, priv, pub, &anchor);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.checkpoints_conflict == 1);
+   assert(rep.checkpoints_duplicate == 0);
+   assert(rep.any_tamper == 1);
+}
+
 int main(void)
 {
    test_clean_stream();
@@ -367,6 +415,8 @@ int main(void)
    test_snapshot_verified();
    test_snapshot_substituted_detected();
    test_snapshot_unmatched_is_not_tamper();
+   test_duplicate_checkpoint_tolerated();
+   test_conflicting_checkpoint_is_fork();
    printf("test_vault_witness_offline: all passed\n");
    return 0;
 }

@@ -36,6 +36,8 @@ typedef struct
    size_t checkpoints_bad_sig;           /* signature does not verify */
    size_t checkpoints_unknown_key;       /* signer not in anchor set */
    size_t checkpoints_revoked;           /* signer key revoked */
+   size_t checkpoints_duplicate;         /* byte-identical repeats (benign re-emission) */
+   size_t checkpoints_conflict;          /* SAME seq, DIFFERENT checkpoint: a fork */
    vault_witness_continuity_t continuity;/* over the checkpoint run */
    size_t proofs_ok, proofs_unmatched, proofs_bad; /* matched-checkpoint / no-cp / bad */
    size_t snapshots;                     /* leaf-snapshot frames seen */

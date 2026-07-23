@@ -288,10 +288,38 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
       }
    }
 
-   /* Checkpoint signatures + continuity. */
+   /* Checkpoint signatures + continuity. As with records, a retained stream may
+    * legitimately repeat a checkpoint: emission re-sends one whose leaf snapshot
+    * was not accepted, and a reset cursor re-sends the whole run. Byte-identical
+    * repeats at the same seq are therefore collapsed. Two DIFFERENT checkpoints at
+    * one seq are a fork — the signer certified two histories — and are hard tamper
+    * evidence. Without this collapse a benign re-emission reads as CONTINUITY_BROKEN
+    * (the duplicate's has_predecessor is false mid-run), which is a false tampering
+    * alarm on a completely healthy system. */
    if (cps.n)
    {
       qsort(cps.v, cps.n, sizeof cps.v[0], cp_sort_cmp);
+      size_t cw = 0;
+      for (size_t i = 0; i < cps.n; i++)
+      {
+         if (cw > 0 && cps.v[cw - 1].seq == cps.v[i].seq)
+         {
+            uint8_t da[32], db[32];
+            int same = vault_witness_checkpoint_digest(&cps.v[cw - 1], da) == 0 &&
+                       vault_witness_checkpoint_digest(&cps.v[i], db) == 0 &&
+                       memcmp(da, db, 32) == 0;
+            if (same)
+               report->checkpoints_duplicate++;
+            else
+            {
+               report->checkpoints_conflict++;
+               report->any_tamper = 1;
+            }
+            continue; /* collapse either way; a conflict is already recorded */
+         }
+         cps.v[cw++] = cps.v[i];
+      }
+      cps.n = cw;
       for (size_t k = 0; k < cps.n; k++)
       {
          switch (vault_witness_checkpoint_verify(&cps.v[k], anchors, n_anchors))

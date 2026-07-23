@@ -39,6 +39,22 @@
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
 
+/* Every step of this test either performs the tampering or checks for it, so none
+ * of it may be compiled away. assert() would vanish under NDEBUG and leave a
+ * security test that passes having done nothing at all — so side effects and
+ * assertions go through MUST, which is always evaluated. */
+#define MUST(cond, ...)                                                                            \
+   do                                                                                              \
+   {                                                                                               \
+      if (!(cond))                                                                                 \
+      {                                                                                            \
+         fprintf(stderr, "FAILED (%s:%d): ", __FILE__, __LINE__);                                  \
+         fprintf(stderr, __VA_ARGS__);                                                             \
+         fprintf(stderr, "\n");                                                                    \
+         return 1;                                                                                 \
+      }                                                                                            \
+   } while (0)
+
 static uint8_t g_stream[1 << 20];
 static size_t g_len;
 
@@ -78,7 +94,9 @@ static int expect_sqlstate(void *conn, const char *sql, const char *want)
    return 0;
 }
 
-static void append_record(void *conn, const char *sid)
+/* Returns 0 on success, -1 on failure. Never asserts: appending the evidence IS
+ * the test fixture, so it must happen even in a build that strips assertions. */
+static int append_record(void *conn, const char *sid)
 {
    char err[256];
    aimee_pg_stmt_t *st = aimee_pg_prepare(
@@ -86,15 +104,29 @@ static void append_record(void *conn, const char *sid)
        "SELECT * FROM org_vault_witness_append(0::smallint,?1,'!kb','!audit','','p','','g',"
        "'2026-07-23T00:00:00Z',decode(repeat('a1',32),'hex'),true,decode(repeat('00',32),'hex'))",
        err, sizeof err);
-   assert(st && aimee_pg_bind_text(st, "?1", sid) == 0);
-   assert(aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW);
+   if (!st || aimee_pg_bind_text(st, "?1", sid) != 0)
+   {
+      if (st)
+         aimee_pg_finalize(st);
+      fprintf(stderr, "append_record(%s): prepare/bind failed: %s\n", sid, err);
+      return -1;
+   }
+   int ok = (aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW);
    aimee_pg_finalize(st);
+   if (!ok)
+      fprintf(stderr, "append_record(%s): step failed: %s\n", sid, err);
+   return ok ? 0 : -1;
 }
 
-static void disable_worm(void *conn)
+static int disable_worm(void *conn)
 {
-   assert(exec_sql(conn, "ALTER TABLE kb_vault_witness_log DISABLE TRIGGER USER") == 0);
-   assert(exec_sql(conn, "ALTER TABLE kb_vault_witness_shard DISABLE TRIGGER USER") == 0);
+   if (exec_sql(conn, "ALTER TABLE kb_vault_witness_log DISABLE TRIGGER USER") != 0 ||
+       exec_sql(conn, "ALTER TABLE kb_vault_witness_shard DISABLE TRIGGER USER") != 0)
+   {
+      fprintf(stderr, "could not disable WORM triggers; the tamper scenarios cannot run\n");
+      return -1;
+   }
+   return 0;
 }
 
 int main(void)
@@ -118,13 +150,13 @@ int main(void)
       return 1;
    }
    void *conn = db2_conn();
-   assert(conn);
+   MUST(conn != NULL, "no database connection");
 
    for (int i = 0; i < 5; i++)
    {
       char sid[16];
       snprintf(sid, sizeof sid, "t%d", i);
-      append_record(conn, sid);
+      MUST(append_record(conn, sid) == 0, "baseline append %s failed", sid);
    }
 
    /* Baseline: the honest store verifies locally, and this is what a consumer
@@ -151,14 +183,15 @@ int main(void)
    printf("witness_tamper_pg: baseline emitted %llu records, checkpoint seq=%lld\n",
           (unsigned long long)s.records_emitted, (long long)cp_seq);
 
-   disable_worm(conn);
+   MUST(disable_worm(conn) == 0, "WORM triggers still enabled");
 
    /* -----------------------------------------------------------------------
     * Scenario 1: LOCALLY INCONSISTENT tampering. Edit an evidence row's content
     * without touching its stored record_hash. The local cross-check must catch it
     * with no retained copy involved. */
-   assert(exec_sql(conn, "UPDATE kb_vault_witness_log SET source_id='tampered' "
-                         "WHERE tenant='!kb' AND provider='!audit' AND shard_seq=3") == 0);
+   MUST(exec_sql(conn, "UPDATE kb_vault_witness_log SET source_id='tampered' "
+                       "WHERE tenant='!kb' AND provider='!audit' AND shard_seq=3") == 0,
+        "scenario 1 tamper UPDATE did not run");
    if (expect_sqlstate(conn, "SELECT org_vault_witness_verify_shard('!kb','!audit')", "P7W01") != 0)
    {
       fprintf(stderr, "SCENARIO 1 FAILED: edited evidence row not caught locally\n");
@@ -171,8 +204,9 @@ int main(void)
       fprintf(stderr, "SCENARIO 1 FAILED: producer did not refuse on head_log_mismatch\n");
       return 1;
    }
-   assert(exec_sql(conn, "UPDATE kb_vault_witness_log SET source_id='t2' "
-                         "WHERE tenant='!kb' AND provider='!audit' AND shard_seq=3") == 0);
+   MUST(exec_sql(conn, "UPDATE kb_vault_witness_log SET source_id='t2' "
+                       "WHERE tenant='!kb' AND provider='!audit' AND shard_seq=3") == 0,
+        "scenario 1 restore UPDATE did not run");
    if (exec_sql(conn, "SELECT org_vault_witness_verify_shard('!kb','!audit')") != 0)
    {
       fprintf(stderr, "restoring the row did not restore local verification\n");
@@ -185,17 +219,18 @@ int main(void)
     * every dependent digest and the shard head, so the local store is entirely
     * self-consistent. Local verification must now PASS — and the rewrite must
     * still be exposed by comparing against the retained copy. */
-   assert(exec_sql(conn,
-                   "DELETE FROM kb_vault_witness_log "
-                   "WHERE tenant='!kb' AND provider='!audit' AND shard_seq >= 4") == 0);
+   MUST(exec_sql(conn, "DELETE FROM kb_vault_witness_log "
+                       "WHERE tenant='!kb' AND provider='!audit' AND shard_seq >= 4") == 0,
+        "scenario 2 rewrite DELETE did not run");
    /* Re-append the rewritten tail through the real append function so all digests
     * and the head are recomputed exactly as the production path would. */
-   assert(exec_sql(conn, "UPDATE kb_vault_witness_shard SET seq=3, head_hash="
-                         "(SELECT record_hash FROM kb_vault_witness_log WHERE tenant='!kb' "
-                         "AND provider='!audit' AND shard_seq=3) "
-                         "WHERE tenant='!kb' AND provider='!audit'") == 0);
-   append_record(conn, "REWRITTEN-4");
-   append_record(conn, "REWRITTEN-5");
+   MUST(exec_sql(conn, "UPDATE kb_vault_witness_shard SET seq=3, head_hash="
+                       "(SELECT record_hash FROM kb_vault_witness_log WHERE tenant='!kb' "
+                       "AND provider='!audit' AND shard_seq=3) "
+                       "WHERE tenant='!kb' AND provider='!audit'") == 0,
+        "scenario 2 head rollback did not run");
+   MUST(append_record(conn, "REWRITTEN-4") == 0, "rewritten record 4 not appended");
+   MUST(append_record(conn, "REWRITTEN-5") == 0, "rewritten record 5 not appended");
 
    if (exec_sql(conn, "SELECT org_vault_witness_verify_shard('!kb','!audit')") != 0)
    {
@@ -208,7 +243,8 @@ int main(void)
 
    /* Now emit again from a reset cursor, as a consumer would receive after the
     * attacker's rewrite, and compare the two copies together. */
-   assert(exec_sql(conn, "DELETE FROM kb_vault_witness_emit_cursor") == 0);
+   MUST(exec_sql(conn, "DELETE FROM kb_vault_witness_emit_cursor") == 0,
+        "emission cursor reset did not run");
    db2_witness_emit_stats_t s2;
    if (db2_witness_emit_run(capture_sink, NULL, 256, &s2) != DB2_WITNESS_EMIT_OK)
    {
@@ -217,7 +253,7 @@ int main(void)
    }
 
    uint8_t pub[32], key_id[16];
-   assert(vault_witness_signer_identity(pub, key_id) == 0);
+   MUST(vault_witness_signer_identity(pub, key_id) == 0, "could not derive the witness identity");
    vault_witness_anchor_t anchor;
    memset(&anchor, 0, sizeof anchor);
    memcpy(anchor.key_id, key_id, 16);
@@ -225,8 +261,9 @@ int main(void)
 
    /* The post-tamper stream ALONE looks clean — the attacker made it consistent. */
    vault_witness_offline_report_t after;
-   assert(vault_witness_offline_verify(g_stream + retained_len, g_len - retained_len, &anchor, 1,
-                                       &after) == 0);
+   MUST(vault_witness_offline_verify(g_stream + retained_len, g_len - retained_len, &anchor, 1,
+                                     &after) == 0,
+        "offline verification of the post-tamper stream did not run");
    if (after.records_conflict != 0)
    {
       fprintf(stderr, "post-tamper stream alone showed a conflict; the rewrite was not coherent "
@@ -238,9 +275,27 @@ int main(void)
     * disagree with the rewritten ones. This is the detection the umbrella claims,
     * and it required the retained copy — nothing else. */
    vault_witness_offline_report_t both;
-   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &both) == 0);
+   MUST(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &both) == 0,
+        "offline verification of the combined stream did not run");
    printf("witness_tamper_pg: combined copies -> records=%zu duplicate=%zu conflict=%zu tamper=%d\n",
           both.records, both.records_duplicate, both.records_conflict, both.any_tamper);
+   /* Lock down the checkpoint side too. Without this, a regression that made every
+    * checkpoint verify as BAD_SIG or UNKNOWN_KEY would still leave this test green,
+    * because the record conflict alone sets any_tamper. The duplicate arises because
+    * the cursor was reset and the same checkpoint re-emitted; it must be collapsed,
+    * not counted as a fork. */
+   if (both.checkpoints_ok < 1 || both.checkpoints_bad_sig != 0 ||
+       both.checkpoints_unknown_key != 0 || both.checkpoints_revoked != 0 ||
+       both.checkpoints_conflict != 0 || both.continuity == VAULT_WITNESS_CONTINUITY_BROKEN)
+   {
+      fprintf(stderr,
+              "combined-stream checkpoint verification wrong: ok=%zu bad=%zu unknown=%zu "
+              "revoked=%zu dup=%zu conflict=%zu continuity=%d\n",
+              both.checkpoints_ok, both.checkpoints_bad_sig, both.checkpoints_unknown_key,
+              both.checkpoints_revoked, both.checkpoints_duplicate, both.checkpoints_conflict,
+              (int)both.continuity);
+      return 1;
+   }
    if (both.records_conflict < 2 || !both.any_tamper)
    {
       fprintf(stderr, "SCENARIO 2 FAILED: comparing retained and post-tamper copies did NOT "
@@ -258,7 +313,7 @@ int main(void)
     * foreign key and not by the check being broken in general. */
    {
       uint8_t cur_pub[32], cur_id[16];
-      assert(vault_witness_signer_identity(cur_pub, cur_id) == 0);
+      MUST(vault_witness_signer_identity(cur_pub, cur_id) == 0, "identity derivation failed");
       int64_t unknown = -1;
       char sample[64] = "";
       int cov = db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
@@ -277,9 +332,11 @@ int main(void)
          return 1;
       }
       /* The checkpoint table is WORM too; the attacker has already defeated it. */
-      assert(exec_sql(conn, "ALTER TABLE kb_vault_witness_checkpoint DISABLE TRIGGER USER") == 0);
-      assert(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
-                            "SET signer_key_id = decode(repeat('be',16),'hex')") == 0);
+      MUST(exec_sql(conn, "ALTER TABLE kb_vault_witness_checkpoint DISABLE TRIGGER USER") == 0,
+           "could not disable checkpoint WORM triggers");
+      MUST(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
+                          "SET signer_key_id = decode(repeat('be',16),'hex')") == 0,
+           "signer_key_id substitution did not run");
       if (db2_witness_checkpoint_anchor_coverage(cur_id, sizeof cur_id, &unknown, sample,
                                                  sizeof sample) != 0 ||
           unknown < 1)
@@ -320,7 +377,7 @@ int main(void)
    {
       db2_witness_verify_report_t vr;
       uint8_t cur_pub[32], cur_id[16];
-      assert(vault_witness_signer_identity(cur_pub, cur_id) == 0);
+      MUST(vault_witness_signer_identity(cur_pub, cur_id) == 0, "identity derivation failed");
 
       /* Unknown key is detected. */
       if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
@@ -348,7 +405,7 @@ int main(void)
             snprintf(hex + i * 2, 3, "%02x", cur_id[i]);
          snprintf(sql, sizeof sql,
                   "UPDATE kb_vault_witness_checkpoint SET signer_key_id = decode('%s','hex')", hex);
-         assert(exec_sql(conn, sql) == 0);
+         MUST(exec_sql(conn, sql) == 0, "signer_key_id restore did not run");
          /* Sanity: with the body restored the run must be clean again, otherwise the
           * bad-signature result below would not be attributable to the corruption. */
          if (db2_witness_checkpoint_verify_run(256, &vr) != 0 || vr.bad_signature != 0 ||
@@ -359,8 +416,9 @@ int main(void)
                     (long long)vr.bad_signature, (long long)vr.unknown_key);
             return 1;
          }
-         assert(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
-                               "SET signature = decode(repeat('7f',64),'hex')") == 0);
+         MUST(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
+                             "SET signature = decode(repeat('7f',64),'hex')") == 0,
+              "signature corruption did not run");
       }
       if (db2_witness_checkpoint_verify_run(256, &vr) != 0)
       {

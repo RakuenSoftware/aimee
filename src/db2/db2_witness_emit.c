@@ -350,8 +350,10 @@ static db2_witness_emit_result_t emit_checkpoints(void *conn, int64_t after, int
       if (sunk != 0)
       {
          /* The checkpoint went out but its snapshot did not. Do NOT advance past
-          * this seq: the next run re-emits both, and the duplicate checkpoint is
-          * collapsed by the verifier. Losing the snapshot silently would leave the
+          * this seq: the next run re-emits both. The offline verifier collapses the
+          * byte-identical duplicate checkpoint (vault_witness_offline_verify dedupes
+          * same-seq checkpoints exactly as it dedupes records), so the retry is not
+          * mistaken for a fork. Losing the snapshot silently would leave the
           * cross-gap leaf comparison without its inputs. */
          stats->sink_failures++;
          rc = DB2_WITNESS_EMIT_SINK_FAILED;
