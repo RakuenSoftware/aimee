@@ -1264,7 +1264,8 @@ $(TESTPREFIX)/unit-test-config-snapshot: $(OBJDIR)/tests/test_config_snapshot.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-config-snapshot-race: $(OBJDIR)/tests/test_config_snapshot_race.o \
-                                             $(OBJDIR)/tests/config_snapshot_config.o
+                                             $(OBJDIR)/tests/config_snapshot_config.o \
+                                             $(OBJDIR)/platform_random.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-msg-session-disable: $(OBJDIR)/tests/test_msg_session_disable.o \
