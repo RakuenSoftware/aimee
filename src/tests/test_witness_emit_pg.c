@@ -212,10 +212,18 @@ int main(void)
    /* The emitted leaf snapshot must verify against the digest its own checkpoint
     * signature commits to — proving the emitted snapshot really is the leaf set
     * the producer signed, not just well-formed bytes. */
-   if (rep.snapshots_ok < 1 || rep.snapshots_bad != 0)
+   /* snapshots_ok now requires BOTH bindings: the bytes are the ones the signature
+    * committed to, AND their leaves rebuild the signed root. This is what proves the
+    * producer's stored snapshot format and the verifier's parser actually agree —
+    * a divergence there would make every emitted snapshot useless while still
+    * passing a digest-only check. */
+   if (rep.snapshots_ok < 1 || rep.snapshots_bad != 0 || rep.snapshots_root_mismatch != 0)
    {
-      fprintf(stderr, "emitted leaf snapshot did not verify: ok=%zu bad=%zu unmatched=%zu\n",
-              rep.snapshots_ok, rep.snapshots_bad, rep.snapshots_unmatched);
+      fprintf(stderr,
+              "emitted leaf snapshot did not verify: ok=%zu bad_digest=%zu root_mismatch=%zu "
+              "unmatched=%zu\n",
+              rep.snapshots_ok, rep.snapshots_bad, rep.snapshots_root_mismatch,
+              rep.snapshots_unmatched);
       return 1;
    }
 

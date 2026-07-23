@@ -259,12 +259,57 @@ static void test_fork_conflict_detected(void)
    assert(rep.any_tamper == 1);
 }
 
-/* Emit a checkpoint whose leaf_snapshot_digest genuinely covers `snap`, plus the
- * matching snapshot frame. Returns the anchor. */
-static void emit_checkpoint_with_snapshot(uint64_t cp_seq, const uint8_t *snap, size_t snap_len,
+/* Build the canonical leaf-snapshot wire form for a single shard head:
+ *   u32 count, then per leaf: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32]
+ * matching what the checkpoint producer stores. Returns the byte length. */
+static size_t build_snapshot(const char *tenant, const char *provider, uint64_t seq,
+                             const uint8_t head[32], uint8_t *out, size_t cap)
+{
+   size_t tl = strlen(tenant), pl = strlen(provider);
+   size_t need = 4 + 2 + tl + 2 + pl + 8 + 32;
+   assert(need <= cap);
+   size_t o = 0;
+   out[o++] = 0;
+   out[o++] = 0;
+   out[o++] = 0;
+   out[o++] = 1; /* count = 1 */
+   out[o++] = (uint8_t)(tl >> 8);
+   out[o++] = (uint8_t)tl;
+   memcpy(out + o, tenant, tl);
+   o += tl;
+   out[o++] = (uint8_t)(pl >> 8);
+   out[o++] = (uint8_t)pl;
+   memcpy(out + o, provider, pl);
+   o += pl;
+   for (unsigned i = 0; i < 8; i++)
+      out[o++] = (uint8_t)(seq >> (56U - 8U * i));
+   memcpy(out + o, head, 32);
+   o += 32;
+   return o;
+}
+
+/* Emit a checkpoint whose root is genuinely the SMT root over the snapshot's leaf
+ * set, and whose leaf_snapshot_digest genuinely covers the snapshot bytes, plus the
+ * matching snapshot frame. Both bindings must hold for the verifier to accept it:
+ * digest-to-bytes AND leaves-rebuild-root. `snap`/`snap_len` receive the bytes. */
+static void emit_checkpoint_with_snapshot(uint64_t cp_seq, const uint8_t *seed, size_t seed_len,
                                           const uint8_t priv[32], const uint8_t pub[32],
                                           vault_witness_anchor_t *anchor)
 {
+   /* Derive a shard head from the caller's seed so different seeds give different
+    * leaf sets (which is how the fork/substitution cases differ). */
+   uint8_t head[32];
+   SHA256(seed_len ? seed : (const uint8_t *)"", seed_len, head);
+   static uint8_t snapbuf[512];
+   size_t snap_len = build_snapshot("!kb", "!audit", cp_seq, head, snapbuf, sizeof snapbuf);
+   const uint8_t *snap = snapbuf;
+
+   vault_witness_leaf_t leaf;
+   assert(vault_witness_shard_key_hash("!kb", "!audit", leaf.key) == 0);
+   assert(vault_witness_leaf_hash("!kb", "!audit", cp_seq, head, leaf.hash) == 0);
+   uint8_t real_root[32];
+   assert(vault_witness_merkle_root(&leaf, 1, real_root) == 0);
+
    vault_witness_checkpoint_t cp;
    memset(&cp, 0, sizeof cp);
    cp.version = 1;
@@ -273,8 +318,8 @@ static void emit_checkpoint_with_snapshot(uint64_t cp_seq, const uint8_t *snap, 
    cp.shard_count = 1;
    cp.sig_alg = VAULT_WITNESS_SIG_ED25519;
    cp.sig_version = 1;
-   memset(cp.root, 0x77, 32);
-   SHA256(snap_len ? snap : (const uint8_t *)"", snap_len, cp.leaf_snapshot_digest);
+   memcpy(cp.root, real_root, 32);
+   SHA256(snap, snap_len, cp.leaf_snapshot_digest);
    uint8_t key_id[16];
    memset(key_id, 0xC1, 16);
    memcpy(cp.signer_key_id, key_id, 16);
@@ -404,6 +449,80 @@ static void test_conflicting_checkpoint_is_fork(void)
    assert(rep.any_tamper == 1);
 }
 
+/* A snapshot can be exactly the byte string the signature committed to and still be
+ * useless: if its leaves do not rebuild the checkpoint's root, the signed root does
+ * not describe the emitted leaf set, and the cross-gap comparison the snapshot
+ * exists for would be built on sand. The digest check alone cannot see this. */
+static void test_snapshot_digest_ok_but_root_mismatch(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+
+   uint8_t head[32];
+   memset(head, 0x63, 32);
+   uint8_t snap[512];
+   size_t snap_len = build_snapshot("!kb", "!audit", 1, head, snap, sizeof snap);
+
+   vault_witness_checkpoint_t cp;
+   memset(&cp, 0, sizeof cp);
+   cp.version = 1;
+   cp.seq = 1;
+   cp.has_predecessor = 0;
+   cp.shard_count = 1;
+   cp.sig_alg = VAULT_WITNESS_SIG_ED25519;
+   cp.sig_version = 1;
+   memset(cp.root, 0xAB, 32); /* NOT the root of the snapshot's leaf set */
+   SHA256(snap, snap_len, cp.leaf_snapshot_digest); /* but the digest IS correct */
+   uint8_t key_id[16];
+   memset(key_id, 0xC7, 16);
+   memcpy(cp.signer_key_id, key_id, 16);
+   snprintf(cp.created_at, sizeof cp.created_at, "2026-07-23T00:00:00Z");
+   assert(vault_witness_checkpoint_sign_ed25519(&cp, priv) == 0);
+
+   uint8_t cw[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   size_t cl = 0;
+   assert(vault_witness_checkpoint_encode(&cp, cw, sizeof cw, &cl) == 0);
+   frame_payload(VAULT_WITNESS_EXPORT_CHECKPOINT, cw, cl);
+
+   uint8_t payload[576];
+   for (unsigned i = 0; i < 8; i++)
+      payload[i] = (uint8_t)(cp.seq >> (56U - 8U * i));
+   memcpy(payload + 8, snap, snap_len);
+   frame_payload(VAULT_WITNESS_EXPORT_SNAPSHOT, payload, 8 + snap_len);
+
+   vault_witness_anchor_t anchor;
+   memset(&anchor, 0, sizeof anchor);
+   memcpy(anchor.key_id, key_id, 16);
+   memcpy(anchor.ed25519_pub, pub, 32);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.checkpoints_ok == 1);       /* the signature is perfectly valid */
+   assert(rep.snapshots_bad == 0);        /* and the digest matches its bytes */
+   assert(rep.snapshots_root_mismatch == 1); /* yet the leaves do not rebuild the root */
+   assert(rep.snapshots_ok == 0);
+   assert(rep.any_tamper == 1);
+}
+
+/* A truncated snapshot must not be accepted as a rebuildable leaf set. */
+static void test_snapshot_truncated_rejected(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t seed[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+   vault_witness_anchor_t anchor;
+   emit_checkpoint_with_snapshot(1, seed, sizeof seed, priv, pub, &anchor);
+   /* Chop the last byte off the stream: the snapshot frame's declared length no
+    * longer matches, so the frame parser flags it. */
+   g_len -= 1;
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.any_tamper == 1);
+}
+
 int main(void)
 {
    test_clean_stream();
@@ -417,6 +536,8 @@ int main(void)
    test_snapshot_unmatched_is_not_tamper();
    test_duplicate_checkpoint_tolerated();
    test_conflicting_checkpoint_is_fork();
+   test_snapshot_digest_ok_but_root_mismatch();
+   test_snapshot_truncated_rejected();
    printf("test_vault_witness_offline: all passed\n");
    return 0;
 }

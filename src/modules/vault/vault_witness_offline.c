@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "vault_witness_export.h"
+#include "vault_witness_merkle.h"
 #include "vault_witness_proof.h"
 #include "vault_witness_record.h"
 #include "vault_witness_verify.h"
@@ -126,6 +127,78 @@ static int cp_sort_cmp(const void *a, const void *b)
 {
    const vault_witness_checkpoint_t *x = a, *y = b;
    return (x->seq < y->seq) ? -1 : (x->seq > y->seq);
+}
+
+
+/* Parse a leaf snapshot and rebuild its sparse-Merkle root.
+ *
+ * Wire form (produced by the checkpoint producer):
+ *   u32 count, then per leaf: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32]
+ *
+ * Returns 1 if the rebuilt root equals `want_root`, 0 if it does not, and -1 if the
+ * snapshot is malformed (which the caller treats the same as a mismatch: a snapshot
+ * that cannot be parsed cannot support the comparison it exists for).
+ */
+static int snapshot_rebuilds_root(const uint8_t *p, size_t len, const uint8_t want_root[32])
+{
+   if (!p || len < 4 || !want_root)
+      return -1;
+   size_t off = 0;
+   uint32_t count = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) |
+                    (uint32_t)p[3];
+   off = 4;
+   /* The producer refuses to build past the ceiling, so a snapshot claiming more
+    * leaves than that is malformed rather than merely large. */
+   if (count == 0 || count > VAULT_WITNESS_SHARD_CEILING)
+      return -1;
+   vault_witness_leaf_t *leaves = calloc(count, sizeof *leaves);
+   if (!leaves)
+      return -1;
+   int rc = -1;
+   for (uint32_t i = 0; i < count; i++)
+   {
+      char tenant[VAULT_WITNESS_TENANT_MAX + 1], provider[VAULT_WITNESS_PROVIDER_MAX + 1];
+      if (off + 2 > len)
+         goto out;
+      size_t tl = ((size_t)p[off] << 8) | p[off + 1];
+      off += 2;
+      if (tl > VAULT_WITNESS_TENANT_MAX || off + tl > len)
+         goto out;
+      memcpy(tenant, p + off, tl);
+      tenant[tl] = '\0';
+      off += tl;
+      if (off + 2 > len)
+         goto out;
+      size_t pl = ((size_t)p[off] << 8) | p[off + 1];
+      off += 2;
+      if (pl > VAULT_WITNESS_PROVIDER_MAX || off + pl > len)
+         goto out;
+      memcpy(provider, p + off, pl);
+      provider[pl] = '\0';
+      off += pl;
+      if (off + 8 + 32 > len)
+         goto out;
+      uint64_t seq = 0;
+      for (unsigned b = 0; b < 8; b++)
+         seq = (seq << 8) | p[off + b];
+      off += 8;
+      const uint8_t *head = p + off;
+      off += 32;
+      if (vault_witness_shard_key_hash(tenant, provider, leaves[i].key) != 0 ||
+          vault_witness_leaf_hash(tenant, provider, seq, head, leaves[i].hash) != 0)
+         goto out;
+   }
+   /* Trailing bytes mean the snapshot is not what it declares itself to be. */
+   if (off != len)
+      goto out;
+   uint8_t root[32];
+   if (vault_witness_merkle_root(leaves, count, root) != 0)
+      goto out;
+   rc = (memcmp(root, want_root, 32) == 0) ? 1 : 0;
+
+out:
+   free(leaves);
+   return rc;
 }
 
 int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
@@ -398,11 +471,24 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
       }
       uint8_t d[32];
       SHA256(sns.v[k].len ? sns.v[k].bytes : (const uint8_t *)"", sns.v[k].len, d);
-      if (memcmp(d, match->leaf_snapshot_digest, 32) == 0)
+      if (memcmp(d, match->leaf_snapshot_digest, 32) != 0)
+      {
+         report->snapshots_bad++;
+         report->any_tamper = 1;
+         continue;
+      }
+      /* The digest match proves the snapshot is the byte string the signature
+       * committed to. It does NOT prove those bytes describe the leaf set the
+       * checkpoint's root covers — a checkpoint carrying a root and a snapshot
+       * digest that do not correspond would still pass. Rebuilding the tree from the
+       * snapshot and comparing to the signed root is what makes the snapshot usable
+       * for the cross-gap leaf comparison, so it is checked rather than assumed. */
+      int root_ok = snapshot_rebuilds_root(sns.v[k].bytes, sns.v[k].len, match->root);
+      if (root_ok == 1)
          report->snapshots_ok++;
       else
       {
-         report->snapshots_bad++;
+         report->snapshots_root_mismatch++;
          report->any_tamper = 1;
       }
    }

@@ -44,6 +44,7 @@ typedef struct
    size_t snapshots_ok;                  /* digest matches its checkpoint's leaf_snapshot_digest */
    size_t snapshots_unmatched;           /* no checkpoint with that seq in this stream */
    size_t snapshots_bad;                 /* digest disagrees with the signed checkpoint: tamper */
+   size_t snapshots_root_mismatch;       /* digest matches but the leaves do not rebuild the root */
    int malformed;                        /* a frame or payload failed to parse */
    int any_tamper;                       /* 1 if any hard tamper was detected */
 } vault_witness_offline_report_t;

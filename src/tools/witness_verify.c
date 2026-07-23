@@ -187,8 +187,8 @@ int main(int argc, char **argv)
           r.checkpoints_ok, r.checkpoints_bad_sig, r.checkpoints_unknown_key,
           r.checkpoints_revoked, r.checkpoints_duplicate, r.checkpoints_conflict);
    printf("proofs: ok=%zu unmatched=%zu bad=%zu\n", r.proofs_ok, r.proofs_unmatched, r.proofs_bad);
-   printf("leaf-snapshots: ok=%zu unmatched=%zu bad=%zu\n", r.snapshots_ok, r.snapshots_unmatched,
-          r.snapshots_bad);
+   printf("leaf-snapshots: ok=%zu unmatched=%zu bad_digest=%zu root_mismatch=%zu\n",
+          r.snapshots_ok, r.snapshots_unmatched, r.snapshots_bad, r.snapshots_root_mismatch);
    const char *cont = r.continuity == VAULT_WITNESS_CONTINUITY_OK        ? "ok"
                       : r.continuity == VAULT_WITNESS_CONTINUITY_UNPROVEN ? "UNPROVEN (work item: "
                                                                            "compare cross-gap leaves)"
