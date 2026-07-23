@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -103,6 +104,7 @@ CREATE TABLE IF NOT EXISTS wfe_convergence (
 CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
   execution_key TEXT PRIMARY KEY,
   job_id INTEGER NOT NULL,
+  work_item_id TEXT NOT NULL DEFAULT '',
   participant_token TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`
@@ -125,7 +127,22 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 			}
 		}
 	}
+	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_lifecycle_work_item_parent_state ON lifecycle_work_item(parent_id, state)`); err != nil {
+		return fmt.Errorf("index DB1 workflow parent state: %w", err)
+	}
 	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN participant_token TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.ExecContext(ctx, `ALTER TABLE lifecycle_delegate_job ADD COLUMN work_item_id TEXT NOT NULL DEFAULT ''`)
+	// Recover structural ownership for mappings written before work_item_id was
+	// stored explicitly. The longest prefix prevents one workflow ID from
+	// claiming a descendant's mapping.
+	_, _ = s.db.ExecContext(ctx, `UPDATE lifecycle_delegate_job
+		SET work_item_id = COALESCE((
+			SELECT work_item_id FROM lifecycle_work_item
+			WHERE substr(lifecycle_delegate_job.execution_key, 1, length(work_item_id) + 1) = work_item_id || ':'
+			ORDER BY length(work_item_id) DESC LIMIT 1
+		), '')
+		WHERE work_item_id = ''`)
+	_, _ = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_lifecycle_delegate_job_work_item ON lifecycle_delegate_job(work_item_id)`)
 	// Older lifecycle mappings predate opaque participant capabilities. The C
 	// resource plane backfills agent_jobs first; copy those capabilities into
 	// the Go-owned durable mapping when both tables are present.
@@ -143,11 +160,46 @@ func (s *Store) DelegateJob(ctx context.Context, key string) (int, string, error
 }
 
 func (s *Store) SaveDelegateJob(ctx context.Context, key string, id int, participant string) error {
+	return s.SaveWorkflowDelegateJob(ctx, key, "", id, participant)
+}
+
+func (s *Store) SaveWorkflowDelegateJob(ctx context.Context, key, workItemID string, id int, participant string) error {
 	if key == "" || id <= 0 {
 		return errors.New("delegate execution key and job id are required")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id,participant_token) VALUES(?,?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,participant_token=excluded.participant_token,updated_at=datetime('now')`, key, id, participant)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO lifecycle_delegate_job(execution_key,job_id,work_item_id,participant_token) VALUES(?,?,?,?) ON CONFLICT(execution_key) DO UPDATE SET job_id=excluded.job_id,work_item_id=excluded.work_item_id,participant_token=excluded.participant_token,updated_at=datetime('now')`, key, id, workItemID, participant)
 	return err
+}
+
+type DelegateJobMapping struct {
+	ExecutionKey string
+	JobID        int
+}
+
+// TerminalDelegateJobs returns durable resource-plane jobs owned by workflow
+// items that can no longer execute. Retaining the mapping until remote
+// cancellation is acknowledged makes a crash between lifecycle commit and
+// cancellation recoverable on the next scheduler fill.
+func (s *Store) TerminalDelegateJobs(ctx context.Context) ([]DelegateJobMapping, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT mapping.execution_key,mapping.job_id
+FROM lifecycle_delegate_job mapping
+JOIN lifecycle_work_item item ON item.work_item_id=mapping.work_item_id
+JOIN agent_jobs job ON job.id=mapping.job_id
+WHERE item.state<>'active' AND job.status IN ('pending','running')
+ORDER BY mapping.job_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var mappings []DelegateJobMapping
+	for rows.Next() {
+		var mapping DelegateJobMapping
+		if err := rows.Scan(&mapping.ExecutionKey, &mapping.JobID); err != nil {
+			return nil, err
+		}
+		mappings = append(mappings, mapping)
+	}
+	return mappings, rows.Err()
 }
 
 func (s *Store) ForgetDelegateJob(ctx context.Context, key string) error {
@@ -274,14 +326,33 @@ func (s *Store) createWorkItem(ctx context.Context, in CreateWorkItem, cap int) 
 			return fmt.Errorf("%w (%d/%d active root workflows)", ErrAdmissionFull, active, cap)
 		}
 	}
-	_, err = tx.ExecContext(ctx, `
+	var inserted sql.Result
+	if in.ParentID == "" {
+		inserted, err = tx.ExecContext(ctx, `
 INSERT INTO lifecycle_work_item
   (work_item_id, repo, proposal_path, workflow_name, workflow_version,
    current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, in.ID, in.Repo, in.ProposalPath, in.WorkflowName,
-		in.WorkflowVersion, in.StartStage, in.Mode, in.Submitter, in.ParentID, in.SourcePath, in.MaxCostUSD)
+			in.WorkflowVersion, in.StartStage, in.Mode, in.Submitter, in.ParentID, in.SourcePath, in.MaxCostUSD)
+	} else {
+		// Parent eligibility and insertion are one SQLite statement. A concurrent
+		// StopTree therefore either includes this child or wins first and makes the
+		// SELECT yield no row; there is no check-then-insert orphan window.
+		inserted, err = tx.ExecContext(ctx, `
+INSERT INTO lifecycle_work_item
+  (work_item_id, repo, proposal_path, workflow_name, workflow_version,
+   current_stage, mode, submitter, parent_id, source_path, work_item_max_cost_usd)
+SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+FROM lifecycle_work_item parent
+WHERE parent.work_item_id=? AND parent.state='active'`, in.ID, in.Repo, in.ProposalPath,
+			in.WorkflowName, in.WorkflowVersion, in.StartStage, in.Mode, in.Submitter, in.ParentID,
+			in.SourcePath, in.MaxCostUSD, in.ParentID)
+	}
 	if err != nil {
 		return fmt.Errorf("insert work item: %w", err)
+	}
+	if changed, err := inserted.RowsAffected(); err != nil || changed != 1 {
+		return errors.New("parent work item is not active")
 	}
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO lifecycle_event (work_item_id, stage, kind, actor, detail, content_hash)
@@ -798,11 +869,178 @@ func (s *Store) Pause(ctx context.Context, workItemID string) error {
 }
 
 func (s *Store) Stop(ctx context.Context, workItemID string) error {
-	item, err := s.WorkItem(ctx, workItemID)
+	_, err := s.StopTree(ctx, workItemID)
+	return err
+}
+
+// StopTree atomically terminalizes a work item and every active descendant and
+// returns the exact committed IDs so the scheduler can cancel the same set
+// without a fallible post-commit discovery query.
+func (s *Store) StopTree(ctx context.Context, workItemID string) ([]string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return s.Finish(ctx, workItemID, item.Stage, "stopped", "operator_stop", item.ContentHash, 0)
+	defer tx.Rollback()
+	// Acquire SQLite's write reservation before reading the tree. Child creation
+	// uses an INSERT...SELECT against the parent's active state, so either it
+	// commits first and is included below, or it waits and then observes stopped.
+	locked, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET state=state WHERE work_item_id=? AND state='active'`, workItemID)
+	if err != nil {
+		return nil, fmt.Errorf("lock workflow tree root: %w", err)
+	}
+	if changed, err := locked.RowsAffected(); err != nil || changed != 1 {
+		return nil, errors.New("work item is not active")
+	}
+	type terminalItem struct {
+		id, stage, contentHash string
+	}
+	rows, err := tx.QueryContext(ctx, `
+WITH RECURSIVE tree(id) AS (
+  SELECT ?
+  UNION ALL
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
+)
+SELECT item.work_item_id, item.current_stage, item.content_hash
+FROM lifecycle_work_item item JOIN tree ON tree.id=item.work_item_id
+WHERE item.state='active'`, workItemID)
+	if err != nil {
+		return nil, fmt.Errorf("list active workflow tree: %w", err)
+	}
+	var items []terminalItem
+	for rows.Next() {
+		var item terminalItem
+		if err := rows.Scan(&item.id, &item.stage, &item.contentHash); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan active workflow tree: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active workflow tree: %w", err)
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,content_hash)
+VALUES (?,?,'terminal','go-wfe','operator_stop',?)`, item.id, item.stage, item.contentHash); err != nil {
+			return nil, fmt.Errorf("record stopped workflow tree: %w", err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
+WITH RECURSIVE tree(id) AS (
+  SELECT ?
+  UNION ALL
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
+)
+UPDATE lifecycle_work_item
+SET state='stopped', pause_reason='', paused_state='', updated_at=datetime('now')
+WHERE state='active' AND work_item_id IN (SELECT id FROM tree)`, workItemID)
+	if err != nil {
+		return nil, fmt.Errorf("stop workflow tree: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != int64(len(items)) {
+		return nil, errors.New("workflow tree changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.id
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// ReconcileOrphanedDescendants terminalizes active descendants whose ancestor
+// is already terminal. Older servers could stop a parent without stopping its
+// children, allowing those children to consume scheduler slots indefinitely.
+func (s *Store) ReconcileOrphanedDescendants(ctx context.Context) ([]string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	type orphan struct {
+		id, stage, contentHash string
+	}
+	rows, err := tx.QueryContext(ctx, `
+WITH RECURSIVE orphan(id) AS (
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child
+  JOIN lifecycle_work_item parent ON parent.work_item_id=child.parent_id
+  WHERE child.state='active' AND parent.state<>'active'
+  UNION
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child JOIN orphan parent ON child.parent_id=parent.id
+  WHERE child.state='active'
+)
+SELECT item.work_item_id, item.current_stage, item.content_hash
+FROM lifecycle_work_item item JOIN orphan ON orphan.id=item.work_item_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list orphaned workflow descendants: %w", err)
+	}
+	var items []orphan
+	for rows.Next() {
+		var item orphan
+		if err := rows.Scan(&item.id, &item.stage, &item.contentHash); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan orphaned workflow descendant: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate orphaned workflow descendants: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, tx.Commit()
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,content_hash)
+VALUES (?,?,'terminal','go-wfe','ancestor_terminal',?)`, item.id, item.stage, item.contentHash); err != nil {
+			return nil, fmt.Errorf("record orphaned workflow descendant: %w", err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
+WITH RECURSIVE orphan(id) AS (
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child
+  JOIN lifecycle_work_item parent ON parent.work_item_id=child.parent_id
+  WHERE child.state='active' AND parent.state<>'active'
+  UNION
+  SELECT child.work_item_id
+  FROM lifecycle_work_item child JOIN orphan parent ON child.parent_id=parent.id
+  WHERE child.state='active'
+)
+UPDATE lifecycle_work_item
+SET state='stopped', pause_reason='', paused_state='', updated_at=datetime('now')
+WHERE state='active' AND work_item_id IN (SELECT id FROM orphan)`)
+	if err != nil {
+		return nil, fmt.Errorf("stop orphaned workflow descendants: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != int64(len(items)) {
+		return nil, errors.New("orphaned workflow descendants changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.id
+	}
+	sort.Strings(ids)
+	return ids, nil
 }
 
 func (s *Store) Delete(ctx context.Context, workItemID string) error {

@@ -155,6 +155,11 @@ type chairmanFailureAgents struct{}
 
 type chairmanDeadlineAgents struct{}
 
+func chairmanApprovalFor(request DelegateRequest) string {
+	return fmt.Sprintf(`{"run_id":%q,"artifact_hash":%q,"artifact_stage":%q,"original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`,
+		request.WorkItemID, request.ArtifactHash, request.ArtifactStage)
+}
+
 func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
 	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
 		return DelegateResult{Response: `{"positions":[]}`}, nil
@@ -171,7 +176,7 @@ func (slowHealthySeatAgents) Delegate(ctx context.Context, request DelegateReque
 		return DelegateResult{Response: `{"positions":[]}`}, nil
 	}
 	if request.Persona == "chairman" {
-		return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+		return DelegateResult{Response: chairmanApprovalFor(request)}, nil
 	}
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
 		select {
@@ -703,6 +708,33 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 	}
 	if !foundPin || !foundDynamicQA {
 		t.Fatalf("UI pin semantics not preserved: %+v", agents.requests)
+	}
+}
+
+func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.T) {
+	agents := &recordingAgents{}
+	runner := &NativeRunner{agents: agents}
+	artifact := strings.Repeat("diff --git a/a b/a\n", 4) + "DIRECT_ARTIFACT_MARKER"
+	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
+		Artifact: artifact, OriginalRequest: "Review only the supplied direct artifact.",
+		ArtifactStage: "frozen_diff", RunID: "review-pr-1828-attempt-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash := wfe.Hash([]byte(artifact))
+	if result.RunID != "review-pr-1828-attempt-2" || result.ArtifactHash != wantHash || result.Feedback == nil || result.Feedback.ArtifactHash != wantHash {
+		t.Fatalf("result identity=%+v want run and artifact %s", result, wantHash)
+	}
+	agents.mu.Lock()
+	defer agents.mu.Unlock()
+	if len(agents.requests) != 2 {
+		t.Fatalf("requests=%d want direct two-seat bound", len(agents.requests))
+	}
+	for _, request := range agents.requests {
+		if !strings.Contains(request.Prompt, "DIRECT_ARTIFACT_MARKER") {
+			t.Fatalf("review request received another run's artifact: %+v", request)
+		}
 	}
 }
 

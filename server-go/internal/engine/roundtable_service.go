@@ -53,6 +53,11 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 		}
 		return roundtablecfg.RunResult{}, errors.New(result.Detail)
 	}
+	result.Roundtable.RunID = id
+	result.Roundtable.ArtifactHash = artifact.Hash
+	if result.Roundtable.Feedback == nil || result.Roundtable.Feedback.ArtifactHash != artifact.Hash {
+		return *result.Roundtable, errors.New("roundtable result artifact identity mismatch")
+	}
 	if result.Status == StepPending {
 		return *result.Roundtable, errors.New(result.Detail)
 	}

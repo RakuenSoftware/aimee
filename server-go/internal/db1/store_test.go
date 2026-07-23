@@ -50,6 +50,47 @@ func TestOpenMigratesPreGoWorkflowSchema(t *testing.T) {
 	}
 }
 
+func TestOpenBackfillsLegacyDelegateMappingOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-mapping.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+CREATE TABLE lifecycle_work_item (
+ id INTEGER PRIMARY KEY, work_item_id TEXT UNIQUE, repo TEXT DEFAULT '', proposal_path TEXT DEFAULT '',
+ workflow_name TEXT DEFAULT 'build', workflow_version TEXT DEFAULT '', current_stage TEXT DEFAULT '',
+ state TEXT DEFAULT 'active', mode TEXT DEFAULT 'autonomous', pause_reason TEXT DEFAULT '', paused_state TEXT DEFAULT '',
+ content_hash TEXT DEFAULT '', pr_ref TEXT DEFAULT '', submitter TEXT DEFAULT '', cum_cost_usd REAL DEFAULT 0,
+ override_count INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE(repo, proposal_path));
+INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_legacy_owner','repo','legacy','impl','stopped');
+INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_%_wildcard','repo','wildcard','impl','stopped');
+CREATE TABLE lifecycle_delegate_job (
+ execution_key TEXT PRIMARY KEY, job_id INTEGER NOT NULL, participant_token TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_legacy_owner:impl:v1:hash',91);
+INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_X_wildcard:impl:v1:hash',92);
+CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL,participant_token TEXT NOT NULL DEFAULT '');
+INSERT INTO agent_jobs(id,status) VALUES(91,'running'),(92,'running');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	mappings, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != 1 || mappings[0].ExecutionKey != "wi_legacy_owner:impl:v1:hash" || mappings[0].JobID != 91 {
+		t.Fatalf("legacy mappings=%+v", mappings)
+	}
+}
+
 func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 	store := newTestStore(t)
 	const attempts = 12
@@ -218,6 +259,143 @@ func TestGenericResumeCannotBypassLifecycleOwnedPause(t *testing.T) {
 	item, _ := store.WorkItem(context.Background(), "wi_owned_pause")
 	if item.PauseReason != "human_gate" {
 		t.Fatalf("item=%+v", item)
+	}
+}
+
+func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, in := range []CreateWorkItem{
+		{ID: "wi_stop_tree", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_stop_tree.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree"},
+		{ID: "wi_stop_tree.grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree.child"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := store.StopTree(ctx, "wi_stop_tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(stopped, ","); got != "wi_stop_tree,wi_stop_tree.child,wi_stop_tree.grandchild" {
+		t.Fatalf("stopped IDs=%q", got)
+	}
+	for _, id := range []string{"wi_stop_tree", "wi_stop_tree.child", "wi_stop_tree.grandchild"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.State != "stopped" {
+			t.Fatalf("%s state=%q want stopped", id, item.State)
+		}
+		events, err := store.Events(ctx, id, 0, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := events[len(events)-1]
+		if last.Kind != "terminal" || last.Detail != "operator_stop" {
+			t.Fatalf("%s last event=%+v", id, last)
+		}
+	}
+}
+
+func TestCreateChildRejectsTerminalParent(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_terminal_parent", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Stop(ctx, "wi_terminal_parent"); err != nil {
+		t.Fatal(err)
+	}
+	err := store.CreateWorkItem(ctx, CreateWorkItem{ID: "wi_late_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_parent"})
+	if err == nil || !strings.Contains(err.Error(), "parent work item is not active") {
+		t.Fatalf("create child under terminal parent: %v", err)
+	}
+	if _, err := store.WorkItem(ctx, "wi_late_child"); err == nil {
+		t.Fatal("late child was persisted")
+	}
+}
+
+func TestCreateChildRacingStopTreeCannotLeaveActiveOrphan(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for iteration := 0; iteration < 50; iteration++ {
+		rootID := fmt.Sprintf("wi_stop_race_%d", iteration)
+		childID := rootID + ".child"
+		if err := store.CreateWorkItem(ctx, CreateWorkItem{ID: rootID, Repo: "repo", ProposalPath: rootID, WorkflowName: "build", StartStage: "slices"}); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		var stopErr, createErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, stopErr = store.StopTree(ctx, rootID)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			createErr = store.CreateWorkItem(ctx, CreateWorkItem{ID: childID, Repo: "repo", ProposalPath: childID, WorkflowName: "slice", StartStage: "impl", ParentID: rootID})
+		}()
+		close(start)
+		wg.Wait()
+		if stopErr != nil {
+			t.Fatalf("iteration %d stop: %v", iteration, stopErr)
+		}
+		child, err := store.WorkItem(ctx, childID)
+		switch {
+		case createErr == nil && err != nil:
+			t.Fatalf("iteration %d successful child creation missing: %v", iteration, err)
+		case createErr == nil && child.State != "stopped":
+			t.Fatalf("iteration %d child state=%q want stopped", iteration, child.State)
+		case createErr != nil && err == nil:
+			t.Fatalf("iteration %d failed child creation persisted item=%+v: %v", iteration, child, createErr)
+		case createErr != nil && !strings.Contains(createErr.Error(), "parent work item is not active"):
+			t.Fatalf("iteration %d unexpected child error: %v", iteration, createErr)
+		}
+	}
+}
+
+func TestReconcileOrphanedDescendantsStopsCorruptActiveTree(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	for _, in := range []CreateWorkItem{
+		{ID: "wi_orphan_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_orphan_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_root"},
+		{ID: "wi_orphan_grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_child"},
+	} {
+		if err := store.CreateWorkItem(ctx, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Reproduce state written by the old non-cascading Stop implementation.
+	if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET state='stopped' WHERE work_item_id='wi_orphan_root'`); err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := store.ReconcileOrphanedDescendants(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(stopped, ","); got != "wi_orphan_child,wi_orphan_grandchild" {
+		t.Fatalf("stopped=%q", got)
+	}
+	for _, id := range []string{"wi_orphan_child", "wi_orphan_grandchild"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" {
+			t.Fatalf("%s item=%+v err=%v", id, item, err)
+		}
+		events, err := store.Events(ctx, id, 0, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := events[len(events)-1]
+		if last.Kind != "terminal" || last.Detail != "ancestor_terminal" {
+			t.Fatalf("%s last event=%+v", id, last)
+		}
 	}
 }
 

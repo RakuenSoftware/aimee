@@ -237,3 +237,35 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 		t.Fatalf("item=%+v", item)
 	}
 }
+
+func TestSchedulerReconciliationCancelsRunningOrphan(t *testing.T) {
+	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, item := range []db1.CreateWorkItem{
+		{ID: "wi_terminal_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_running_orphan", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_root"},
+	} {
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Reproduce the old single-row terminal transition while the child already
+	// has a scheduler execution context.
+	if err := store.Finish(t.Context(), "wi_terminal_root", "slices", "stopped", "operator_stop", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(store, nil, 1, nil)
+	cancelled := false
+	scheduler.cancels["wi_running_orphan"] = func() { cancelled = true }
+	scheduler.fill(t.Context())
+	if !cancelled {
+		t.Fatal("reconciled running descendant was not locally cancelled")
+	}
+	child, err := store.WorkItem(t.Context(), "wi_running_orphan")
+	if err != nil || child.State != "stopped" {
+		t.Fatalf("child=%+v err=%v", child, err)
+	}
+}
