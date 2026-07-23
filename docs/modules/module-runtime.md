@@ -63,7 +63,12 @@ configuration rather than silently applying a partial feature closure.
 Descriptor v1 also supports `private_headers` and the opt-in `ownership_complete` latch. For a
 complete descriptor, the validator compares the declared source and private-header sets with every
 matching owner-local file and requires the canonical module document. An undeclared new file or a
-stale declaration fails CI. Public headers remain confined to `include/aimee/<module>/`; tests are
+stale declaration fails CI. The latch is also refused outright when the module root holds no source
+and no private header: set equality would hold vacuously, so the assertion would mean nothing for a
+module whose implementation has never been moved under `src/modules/<id>/`. That rule is
+`ownership-empty-domain`, it is unconditional, and its message points at
+`docs/validation/core-modularization-class-a-migration.md`, which registers the eight descriptors
+currently in that state. Public headers remain confined to `include/aimee/<module>/`; tests are
 explicit declarations because integration tests can span more than one module. Modules that have not
 set `ownership_complete: true` remain migration debt and must not feed generated build profiles.
 Public headers and tests are validated when declared but are not part of completeness set equality in

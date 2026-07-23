@@ -344,6 +344,7 @@ def validate_complete_ownership(repo: Path, identifier: str,
         "sources": ROLE_EXTENSIONS["sources"],
         "private_headers": ROLE_EXTENSIONS["private_headers"],
     }
+    found: dict[str, set[str]] = {}
     for role, extensions in policies.items():
         actual: set[str] = set()
         for path in module_root.rglob("*"):
@@ -365,6 +366,7 @@ def validate_complete_ownership(repo: Path, identifier: str,
                     f"/{role}",
                 )
             actual.add(relative)
+        found[role] = actual
         declared = set(value.get(role, []))
         missing = sorted(actual - declared)
         extra = sorted(declared - actual)
@@ -375,6 +377,19 @@ def validate_complete_ownership(repo: Path, identifier: str,
                 f"missing={missing}, extra={extra}",
                 f"/{role}",
             )
+    if not any(found.values()):
+        # An empty module root satisfies set equality vacuously, so the latch would
+        # assert completeness for a module whose implementation has never been moved
+        # under src/modules/<id>. That is migration debt, not completion. Keep this
+        # ahead of the canonical-document check so an unmigrated module reports why it
+        # cannot be latched rather than which field to add next.
+        fail(
+            "ownership-empty-domain",
+            f"{identifier} has no module-local source or private header, so "
+            "ownership_complete would be vacuous; the module is not migrated rather "
+            "than broken. See docs/validation/core-modularization-class-a-migration.md",
+            "/ownership_complete",
+        )
     expected_doc = f"docs/modules/{identifier}.md"
     if value.get("docs") != [expected_doc]:
         fail("ownership-complete", f"{identifier} docs must equal [{expected_doc!r}]", "/docs")

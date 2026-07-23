@@ -322,6 +322,70 @@ class DescriptorTests(unittest.TestCase):
             with self.subTest(identifier=identifier):
                 self.assertIs(descriptor.get("ownership_complete"), True)
 
+    def test_empty_module_root_cannot_be_latched(self) -> None:
+        """An unmigrated module must not satisfy the latch vacuously."""
+        empty = (
+            "benchmarks", "control-web", "execution-policy", "kb-synthesis",
+            "response-composition", "routing", "runtime-web", "tools",
+        )
+        for identifier in empty:
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                document = f"docs/modules/{identifier}.md"
+                self.mutate_descriptor(
+                    repo, identifier,
+                    lambda value, document=document: value.update(
+                        {"ownership_complete": True, "docs": [document]}
+                    ),
+                )
+                (repo / document).parent.mkdir(parents=True, exist_ok=True)
+                (repo / document).write_text("placeholder\n", encoding="utf-8")
+                with self.subTest(identifier=identifier), self.assertRaisesRegex(
+                    validator.DescriptorError,
+                    r"rule=ownership-empty-domain pointer=/ownership_complete",
+                ):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
+
+    def test_a_single_module_local_file_is_enough_domain_to_latch(self) -> None:
+        """The guard rejects an empty domain, not a small one."""
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            source = repo / "src/modules/routing/routing_stub.c"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("/* planted */\n", encoding="utf-8")
+            document = "docs/modules/routing.md"
+            self.mutate_descriptor(
+                repo, "routing",
+                lambda value: value.update(
+                    {
+                        "ownership_complete": True,
+                        "docs": [document],
+                        "sources": ["src/modules/routing/routing_stub.c"],
+                    }
+                ),
+            )
+            (repo / document).parent.mkdir(parents=True, exist_ok=True)
+            (repo / document).write_text("placeholder\n", encoding="utf-8")
+            validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_latched_modules_all_have_a_non_empty_domain(self) -> None:
+        """Derived from the graph, so latching a tenth module needs no edit here."""
+        latched = 0
+        for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
+            descriptor = json.loads(path.read_text(encoding="utf-8"))
+            if descriptor.get("ownership_complete") is not True:
+                continue
+            latched += 1
+            with self.subTest(identifier=path.parent.name):
+                self.assertTrue(descriptor.get("sources") or descriptor.get("private_headers"))
+        self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
+
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway"):
