@@ -307,6 +307,14 @@ typedef struct
     * model can do bounded work but not whole-task work, and without this it would
     * win EVERY packet under cheapest-first routing. */
    agent_scope_t max_scope;
+   /* The provider-general registration that GENERATED this target, when it was
+    * generated. Empty for a legacy single-model agent, which is its own
+    * registration. Stored rather than inferred from the name: parsing "text
+    * before the first ':'" conflates a legacy agent coincidentally named
+    * "gw:backup" with targets of a registration "gw", and reduces a registration
+    * named "gw:east" to "gw" - grouping unrelated seats with different
+    * endpoints and credentials as fallback peers. */
+   char registration[MAX_AGENT_NAME];
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,

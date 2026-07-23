@@ -119,15 +119,19 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
     * is still valuable for availability, just a bigger semantic jump — so it is
     * the second choice, not the first. A legacy agent has no ':' and therefore no
     * siblings, which makes pass 0 empty and costs it nothing. */
-   char own_reg[MAX_AGENT_NAME];
-   agent_registration_prefix(ag->name, own_reg, sizeof(own_reg));
+   /* The STORED registration, not a name prefix. Inferring from "text before the
+    * first ':'" grouped a legacy agent coincidentally named "gw:backup" with the
+    * targets of a registration "gw", and flattened a registration named
+    * "gw:east" down to "gw" - both group seats with unrelated endpoints and
+    * credentials as same-registration peers, which is exactly what this
+    * preference exists to avoid. A legacy agent has no registration and is its
+    * own, so it simply has no siblings. */
+   const char *own_reg = ag->registration;
    for (int pass = 0; pass < 2 && rc != 0; pass++)
    for (int i = 0; i < cfg->agent_count && rc != 0; i++)
    {
       agent_t *peer = &cfg->agents[i];
-      char peer_reg[MAX_AGENT_NAME];
-      agent_registration_prefix(peer->name, peer_reg, sizeof(peer_reg));
-      int same_reg = own_reg[0] && strcmp(own_reg, peer_reg) == 0;
+      int same_reg = own_reg[0] && strcmp(own_reg, peer->registration) == 0;
       if ((pass == 0) != (same_reg != 0))
          continue;
       if (peer == ag || !peer->enabled || peer->cost_tier != tier ||

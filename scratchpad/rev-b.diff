@@ -1,0 +1,245 @@
+diff --git a/src/agent_tier_lint.c b/src/agent_tier_lint.c
+index 5a322774..f0eed094 100644
+--- a/src/agent_tier_lint.c
++++ b/src/agent_tier_lint.c
+@@ -224,9 +224,11 @@ static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
+     * public predicate with the roles actually in use rather than duplicating the
+     * table here — a copy would silently drift. */
+    static const char *const probe_roles[] = {
+-       "deploy", "validate",   "test",  "diagnose",   "execute", "review",
+-       "code",   "refactor",   "draft", "implement",  "explain", "summarize",
+-       "format", "search",     NULL,
++       /* Canonical roles only — `test`/`implement` are aliases and were removed
++        * from default_exec_roles, so probing them here would never match. */
++       "deploy", "validate", "diagnose",   "execute", "review",   "code",
++       "refactor", "draft",  "explain",    "summarize", "format", "search",
++       "continuity", "beat-check", NULL,
+    };
+    for (int i = 0; probe_roles[i]; i++)
+    {
+diff --git a/src/modules/delegates/delegate_role.c b/src/modules/delegates/delegate_role.c
+index cac8e9e2..491a3529 100644
+--- a/src/modules/delegates/delegate_role.c
++++ b/src/modules/delegates/delegate_role.c
+@@ -56,11 +56,7 @@ int delegate_role_is_write(const char *role)
+    if (!role || !role[0])
+       return 0;
+    const char *canonical = delegate_role_canonicalize(role);
+-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0 ||
+-          /* Novel-mode write roles: they draft/edit manuscript files. */
+-          strcmp(canonical, "prose") == 0 || strcmp(canonical, "line-edit") == 0 ||
+-          /* Songwriter-mode write roles: they draft/edit lyric files. */
+-          strcmp(canonical, "lyric") == 0 || strcmp(canonical, "hook") == 0;
++   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
+ }
+ 
+ int delegate_role_enable_tools_by_default(const char *role)
+@@ -72,10 +68,8 @@ int delegate_role_enable_tools_by_default(const char *role)
+    return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
+           strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
+           strcmp(role, "validate") == 0 ||
+-          /* Novel-mode read-only roles inspect the world bible by default. */
+-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0 ||
+-          /* Songwriter-mode read-only roles inspect the songbook by default. */
+-          strcmp(role, "prosody") == 0 || strcmp(role, "songform") == 0;
++          /* Novel-mode read-only checks inspect the world bible by default. */
++          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
+ }
+ 
+ int delegate_role_result_cache_enabled(const char *role)
+diff --git a/src/role_templates.c b/src/role_templates.c
+index 71420a51..fbcb9338 100644
+--- a/src/role_templates.c
++++ b/src/role_templates.c
+@@ -260,40 +260,6 @@ static const builtin_template_t g_defaults[] = {
+      "inconsistent issue remains unresolved, otherwise 'CONTINUITY: PASS'.\n\n"
+      "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+ 
+-    {"prose",
+-     "You are a prose-drafting delegate for a work of fiction. Your mission is to draft or "
+-     "revise a scene in the established voice, consistent with canon.\n\n"
+-     "## Constraints\n"
+-     "- Recall the relevant world state before writing; do not contradict established canon.\n"
+-     "- Match the established narrative voice, POV, and tense. If unspecified, infer from the "
+-     "surrounding scenes.\n"
+-     "- Write concrete, specific prose with subtext; avoid generic 'AI-tell' phrasing and "
+-     "filler.\n"
+-     "- Change only the scene in scope; preserve the author's existing prose elsewhere.\n"
+-     "- If a needed fact is unestablished, mark it rather than inventing canon.\n\n"
+-     "## Aimee Tools\n"
+-     "- `aimee:search_memory <query>` — established canon and character voices.\n"
+-     "- `aimee:search_graph <entity>` — who/where/relationships in scope.\n\n"
+-     "## Output\n"
+-     "Write the scene directly into the manuscript. Briefly note any new canon introduced and "
+-     "any fact you left unestablished.\n\n"
+-     "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+-    {"line-edit",
+-     "You are a line-editing delegate for a work of fiction. Your mission is sentence-level "
+-     "polish without changing events or canon.\n\n"
+-     "## Constraints\n"
+-     "- Do NOT change what happens, who is present, or any established fact — events and canon "
+-     "are fixed.\n"
+-     "- Improve rhythm, word choice, clarity, and voice consistency; cut filler and "
+-     "repetition.\n"
+-     "- Preserve the author's voice; do not impose a different style.\n"
+-     "- Keep edits minimal and local to the lines in scope.\n\n"
+-     "## Output\n"
+-     "Apply the edits directly. Summarise the kinds of changes made (e.g. tightened dialogue, "
+-     "removed repetition) and confirm no events or facts changed.\n\n"
+-     "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+     {"beat-check",
+      "You are a structure delegate for a work of fiction. Your mission is to check a scene or "
+      "chapter against the outline and beat sheet.\n\n"
+@@ -315,67 +281,6 @@ static const builtin_template_t g_defaults[] = {
+     /* --- Songwriter-mode roles. Like the novel roles, memory/graph is the
+      *     source of truth for the song's voice/hook/structure. --- */
+ 
+-    {"lyric",
+-     "You are a lyric-writing delegate for a song. Your mission is to draft or revise a "
+-     "section's lyrics in the established voice, fitting the song's meter and rhyme.\n\n"
+-     "## Constraints\n"
+-     "- Recall the song's concept, voice, hook, and structure before writing.\n"
+-     "- Match the established meter, syllable count, and rhyme scheme of the section.\n"
+-     "- Write concrete, singable lines with fresh imagery; avoid cliché and 'AI-tell'.\n"
+-     "- Change only the section in scope; preserve the author's other lyrics.\n"
+-     "- If a rhyme or meter choice is unsettled, mark it rather than forcing it.\n\n"
+-     "## Aimee Tools\n"
+-     "- `aimee:search_memory <query>` — the song's voice, hook, and prior sections.\n\n"
+-     "## Output\n"
+-     "Write the section directly. Note its rhyme scheme and any line you are unsure scans.\n\n"
+-     "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+-    {"hook", "You are a hook delegate for a song. Your mission is to craft or sharpen the chorus / "
+-             "central hook — the most memorable line of the song.\n\n"
+-             "## Constraints\n"
+-             "- The hook must capture the song's concept in a singable, repeatable line.\n"
+-             "- Keep it consistent with the established voice and mood.\n"
+-             "- Prefer a strong image or turn of phrase over abstraction; avoid cliché.\n"
+-             "- Offer 2-3 candidate hooks when the direction is open, then recommend one.\n\n"
+-             "## Aimee Tools\n"
+-             "- `aimee:search_memory <query>` — the song's concept, mood, and voice.\n\n"
+-             "## Output\n"
+-             "The hook (or candidates with a recommendation), with a line on why it lands.\n\n"
+-             "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+-    {"prosody",
+-     "You are a prosody editor for a song. Your mission is to check a draft section's meter, "
+-     "rhyme, and singability against the song's established pattern.\n\n"
+-     "## Constraints\n"
+-     "- You are READ-ONLY. Report issues for the writer to resolve; do not rewrite.\n"
+-     "- Check: syllable count per line vs the section pattern, rhyme scheme integrity, forced "
+-     "or near rhymes, and stress/scansion (read it aloud in your head).\n"
+-     "- Cite the specific line and the pattern it breaks.\n\n"
+-     "## Aimee Tools\n"
+-     "- `aimee:search_memory <query>` — the section's intended meter and rhyme scheme.\n\n"
+-     "## Output\n"
+-     "For each issue: **Line**, **Problem** (meter|rhyme|stress|singability), **Fix options** "
+-     "(one line). If the section scans cleanly, state \"No prosody issues found\".\n"
+-     "End with a single verdict line on its own: 'PROSODY: FAIL' if any line does not scan or "
+-     "breaks the rhyme scheme, otherwise 'PROSODY: PASS'.\n\n"
+-     "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+-    {"songform",
+-     "You are a structure delegate for a song. Your mission is to check a draft against the "
+-     "song's planned form and arc.\n\n"
+-     "## Constraints\n"
+-     "- You are READ-ONLY. Report structural gaps; do not rewrite.\n"
+-     "- Compare against the planned form (verse/pre-chorus/chorus/bridge): does each section "
+-     "do its job, does the song build, does the hook land where it should?\n"
+-     "- Flag missing sections, a weak or buried hook, and pacing/repetition problems.\n\n"
+-     "## Aimee Tools\n"
+-     "- `aimee:search_memory <query>` / `aimee:search_docs <query>` — the song's structure "
+-     "and concept.\n\n"
+-     "## Output\n"
+-     "Report: sections present vs planned, hook placement, arc/build notes, and pacing gaps. "
+-     "If the draft matches the plan, say so.\n\n"
+-     "## Task\n{{TASK}}\n\n## Context\n{{CONTEXT}}"},
+-
+     {NULL, NULL}};
+ 
+ /* --- Path resolution --- */
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index 5dce5dda..d9c6e676 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -2614,13 +2614,21 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
+ /* --- Exec role check --- */
+ 
+ static const char *default_exec_roles[] = {
+-    "deploy", "validate", "test", "diagnose", "execute", "review", "code", "refactor", "draft",
+-    "implement",
+-    /* Novel-mode roles: routable + tool-enabled on any default agent. */
+-    "continuity", "prose", "line-edit", "beat-check",
+-    /* Songwriter-mode roles. */
+-    "lyric", "hook", "prosody", "songform"};
+-#define DEFAULT_EXEC_ROLE_COUNT 18
++    /* The roles ANY agent may execute when it declares no explicit exec_roles.
++     * Canonical names only: `test` and `implement` were listed here but are
++     * ALIASES (delegate_role.c maps them to validate/code), so they could never
++     * match a canonicalised role and were dead entries.
++     *
++     * Novel/songwriter work is a PERSONA concern, not a role. prose, line-edit,
++     * lyric, hook, prosody and songform were removed outright: songwriter
++     * delegates nothing at all (policy "none") and novel is read-only and
++     * declares only continuity/beat-check/review/research, so no persona could
++     * ever reach them — yet every agent was exec-eligible for them by default. */
++    "deploy",     "validate", "diagnose", "execute", "review",
++    "code",       "refactor", "draft",
++    /* Novel-mode read-only checks the novel persona genuinely delegates. */
++    "continuity", "beat-check"};
++#define DEFAULT_EXEC_ROLE_COUNT 10
+ 
+ int agent_is_exec_role(const agent_t *agent, const char *role)
+ {
+diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
+index d0b13a77..1a6f213f 100644
+--- a/src/tests/test_agent.c
++++ b/src/tests/test_agent.c
+@@ -12,6 +12,7 @@
+ #include "db1.h"
+ #include "agent.h"
+ #include "agent_config.h"
++#include "delegate_role.h"
+ #include "agent_tools.h"
+ #include "anchor_snapshot.h"
+ #include <arpa/inet.h>
+@@ -1148,17 +1149,34 @@ static void test_agent_is_exec_role(void)
+    agent_t agent;
+    memset(&agent, 0, sizeof(agent));
+ 
+-   /* No explicit exec_roles: use defaults */
++   /* No explicit exec_roles: use defaults. CANONICAL names only — `test` and
++    * `implement` used to be listed here but are ALIASES (delegate_role.c maps
++    * them to validate/code), and every routing path canonicalises before this is
++    * reached (cmd_agent_delegate.c, server_compute.c), so they could never match
++    * and were dead entries. */
+    assert(agent_is_exec_role(&agent, "deploy") == 1);
+    assert(agent_is_exec_role(&agent, "validate") == 1);
+-   assert(agent_is_exec_role(&agent, "test") == 1);
+    assert(agent_is_exec_role(&agent, "diagnose") == 1);
+    assert(agent_is_exec_role(&agent, "execute") == 1);
+    assert(agent_is_exec_role(&agent, "code") == 1);
+    assert(agent_is_exec_role(&agent, "refactor") == 1);
+    assert(agent_is_exec_role(&agent, "draft") == 1);
+-   assert(agent_is_exec_role(&agent, "implement") == 1);
++   /* Aliases are NOT exec roles; they resolve to their canonical form first. */
++   assert(agent_is_exec_role(&agent, "test") == 0);
++   assert(agent_is_exec_role(&agent, "implement") == 0);
++   assert(strcmp(delegate_role_canonicalize("test"), "validate") == 0);
++   assert(strcmp(delegate_role_canonicalize("implement"), "code") == 0);
+    assert(agent_is_exec_role(&agent, "summarize") == 0);
++   /* Novel-mode checks the novel persona genuinely delegates stay. */
++   assert(agent_is_exec_role(&agent, "continuity") == 1);
++   assert(agent_is_exec_role(&agent, "beat-check") == 1);
++   /* Songwriter/novel WRITE work was culled: no persona could reach it. */
++   assert(agent_is_exec_role(&agent, "lyric") == 0);
++   assert(agent_is_exec_role(&agent, "prosody") == 0);
++   assert(agent_is_exec_role(&agent, "prose") == 0);
++   assert(agent_is_exec_role(&agent, "line-edit") == 0);
++   assert(agent_is_exec_role(&agent, "hook") == 0);
++   assert(agent_is_exec_role(&agent, "songform") == 0);
+ 
+    /* With explicit exec_roles */
+    strcpy(agent.exec_roles[0], "deploy");

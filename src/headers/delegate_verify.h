@@ -30,13 +30,16 @@ extern "C"
 
    /* Classify the return of safe_exec_capture() over `/bin/sh -c <verify_cmd>`.
     *
-    * -1        : could not spawn, or the child did not exit normally (signal).
-    * 126 / 127 : the shell ran but the command was not executable / not found.
-    * other != 0: the command ran and reported failure.
+    * This is a HEURISTIC. `/bin/sh -c` flattens everything into one integer, and
+    * 124, 126, 127 and 128+N are all values a verifier may also return on
+    * purpose - the distinction cannot be made reliably at this layer without a
+    * richer verifier protocol.
     *
-    * 126/127 are deliberately treated as infrastructure: they are the shell's own
-    * report that it never executed the verifier, and a verifier that is missing
-    * from a delegate's environment is a setup defect, not a failed build. */
+    * The tie is therefore broken toward INFRA_ERROR, because the two mistakes are
+    * not symmetric: treating a real test failure as infrastructure merely skips an
+    * escalation and defers to a human, whereas treating an OOM kill, a timeout or
+    * a missing binary as a work-product failure blames the model for its
+    * environment and burns a dearer seat for nothing. */
    verify_outcome_t verify_classify(int exec_rc);
 
    const char *verify_outcome_name(verify_outcome_t o);

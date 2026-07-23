@@ -324,6 +324,9 @@ static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, cons
    *ag = *base;
    snprintf(ag->model, sizeof(ag->model), "%s", model_id);
    snprintf(ag->name, sizeof(ag->name), "%s", name);
+   /* Record the generating registration so fallback grouping never has to infer
+    * it from the name. */
+   snprintf(ag->registration, sizeof(ag->registration), "%s", base->name);
    /* Re-derive per target, since the vendor can depend on the model id — but
     * ONLY when the registration's value was itself derived. An operator who
     * pinned catalog_provider on the registration (a gateway speaking one wire
@@ -2218,23 +2221,6 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
-/* routing.prefer_local: shift work to free local seats when any ELIGIBLE candidate
- * is local. Applied AFTER eligibility, so it can never smuggle a packet past a
- * scope ceiling or a capability requirement - it only reorders seats already
- * allowed to take the work. Local tokens are free, which removes the COST argument
- * for over-selecting, but not the wall-clock one: a local seat failing work beyond
- * its ceiling still burns a session, a review and an escalation. Returns the
- * narrowed count. */
-static int agent_prefer_local(agent_t **candidates, int count, const config_t *sys_cfg)
-{
-   if (!sys_cfg || !sys_cfg->prefer_local_agents || count <= 1)
-      return count;
-   int n = 0;
-   for (int i = 0; i < count; i++)
-      if (agent_is_local(candidates[i]))
-         candidates[n++] = candidates[i];
-   return n > 0 ? n : count; /* no local seat eligible: leave the field alone */
-}
 
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
@@ -2570,7 +2556,29 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
                                             int min_context, agent_scope_t scope)
 {
    if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
-      return agent_route(cfg, role);
+   {
+      /* A scope ceiling is CONFIGURATION eligibility, not model-metadata
+       * capability routing: it must bind whether or not capability routing is
+       * enabled. Returning agent_route() here unconditionally would let a
+       * whole_task packet reach a bounded-only seat the moment an operator set
+       * model_meta.capability_routing=false. */
+      agent_t *plain = agent_route(cfg, role);
+      if (!plain || agent_scope_admits(plain, scope))
+         return plain;
+      /* The cheapest seat is ceiling-barred: retry with the barred agents
+       * temporarily withheld so plain cost-tier routing still finds a seat. */
+      int saved[MAX_AGENTS];
+      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+      {
+         saved[i] = cfg->agents[i].enabled;
+         if (!agent_scope_admits(&cfg->agents[i], scope))
+            cfg->agents[i].enabled = 0;
+      }
+      agent_t *scoped = agent_route(cfg, role);
+      for (int i = 0; i < cfg->agent_count && i < MAX_AGENTS; i++)
+         cfg->agents[i].enabled = saved[i];
+      return scoped;
+   }
 
    /* Same primary-turn rule as agent_route(): the user-facing seat is chosen by
     * capability, not by price. It must still SATISFY the requirements — a
@@ -2582,12 +2590,39 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
         agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
       return primary_default;
 
+   /* prefer_local must be decided BEFORE min_tier, not after. Applying it to the
+    * cheapest-tier candidate list only ever preferred a local seat among peers
+    * that had already won on price - so an eligible local at tier 1 could never
+    * beat a paid remote at tier 0, which is the opposite of "try free local
+    * delegates first". Decide up front whether any ELIGIBLE seat is local, and if
+    * so treat non-local seats as out of contention for the whole selection. */
+   int locals_only = 0;
+   if (sys_cfg && sys_cfg->prefer_local_agents)
+   {
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         agent_t *ag = &cfg->agents[i];
+         if (!ag->enabled || !agent_supports_role(ag, role) ||
+             !agent_is_available_for_routing(ag) || !agent_is_local(ag))
+            continue;
+         if (!agent_scope_admits(ag, scope))
+            continue;
+         if ((required_caps || min_context > 0) &&
+             !agent_satisfies_required_caps(ag, required_caps, min_context, scope))
+            continue;
+         locals_only = 1;
+         break;
+      }
+   }
+
    int min_tier = -1;
    int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+         continue;
+      if (locals_only && !agent_is_local(ag))
          continue;
 
       /* The scope ceiling binds even when NOTHING else is required: it is a
@@ -2626,6 +2661,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
 
+      if (locals_only && !agent_is_local(ag))
+         continue;
       if (!agent_scope_admits(ag, scope))
          continue;
       if (required_caps || min_context > 0)
@@ -2637,7 +2674,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
-   count = agent_prefer_local(candidates, count, sys_cfg);
    return agent_pick_balanced(candidates, count);
 }
 

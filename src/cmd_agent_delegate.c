@@ -686,6 +686,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    prompt = prompt_plan.user_prompt;
 
    {
+      const char *removed = delegate_role_removed_reason(role);
+      if (removed)
+         fatal("role '%s' was %s", role, removed);
       const char *canonical = delegate_role_canonicalize(role);
       if (canonical != role)
          LOG_INFO("delegate", "delegate: role alias '%s' -> '%s'", role, canonical);
@@ -732,13 +735,19 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
        * whole_task: boundedness is opt-in, because under uncertainty we
        * over-select toward capability rather than risk a misplacement. */
       const char *scope_opt = opt_get(&opts, "scope");
-      agent_scope_t scope = AGENT_SCOPE_UNSET;
+      agent_scope_t scope = AGENT_SCOPE_WHOLE_TASK; /* the documented default */
       if (scope_opt && scope_opt[0])
       {
          scope = agent_scope_from_string(scope_opt);
          if (scope == AGENT_SCOPE_UNSET)
             fatal("--scope expects \"bounded\" or \"whole_task\", got '%s'", scope_opt);
       }
+      /* Resolved HERE, not left UNSET for a downstream router to interpret. This
+       * command routes through the mutably-filtered cfg and plain agent_route(),
+       * which carry no packet scope - so leaving it UNSET made
+       * delegate_filter_route_scope() a no-op and the advertised "default
+       * whole_task" silently unenforced, letting a bounded-only local seat win on
+       * price. */
       int drop_deprecated = !(via_agent_name && via_agent_name[0]) &&
                             !(provider_override && provider_override[0]) &&
                             !(model_override && model_override[0]);
@@ -1672,8 +1681,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       {
          agent_t *failed_seat = agent_find(&cfg, result.agent_name);
          int failed_tier = failed_seat ? failed_seat->cost_tier : -1;
-         agent_t *target =
-             agent_route_escalation_target(&cfg, role, failed_tier, 0, AGENT_SCOPE_UNSET);
+         /* The packet's OWN scope, not UNSET: scope is fixed at decomposition and
+          * survives re-routing. Passing UNSET reclassified a bounded packet as
+          * whole_task during target selection, which could exclude a perfectly
+          * valid bounded-capable seat and leave a bounded packet unable to
+          * escalate at all. */
+         agent_t *target = agent_route_escalation_target(&cfg, role, failed_tier, 0, scope);
          if (target)
          {
             LOG_WARN("delegate",
@@ -1745,8 +1758,11 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                else
                {
                   free(esc_result.response);
-                  LOG_WARN("delegate", "escalation dispatch to '%s' failed (rc=%d); keeping the "
-                                       "original result for review",
+                  LOG_WARN("delegate",
+                           "escalation dispatch to '%s' failed (rc=%d); keeping the original "
+                           "result for review. NOTE the worktree may now contain PARTIAL changes "
+                           "from the failed escalation attempt - inspect the diff before trusting "
+                           "the reported result",
                            target->name, esc_rc);
                }
             }
@@ -1759,7 +1775,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                      result.agent_name[0] ? result.agent_name : "?", role);
          }
       }
-      (void)escalated;
       free(verify_out);
       verify_out = NULL;
       if (verify_rc != 0)
@@ -1791,8 +1806,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             /* Machine-readable category, so a caller can tell an attributable
              * work-product failure from an unusable verifier. */
             cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
+            /* The REAL allowance state: after a re-dispatch the allowance is
+             * spent, so a second genuine failure must not advertise that another
+             * escalation is warranted. */
             cJSON_AddBoolToObject(obj, "escalation_warranted",
-                                  verify_escalation_warranted(rc, verify_outcome, 0));
+                                  verify_escalation_warranted(rc, verify_outcome, escalated));
+            cJSON_AddBoolToObject(obj, "escalated", escalated ? 1 : 0);
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
             char *json = cJSON_Print(obj);

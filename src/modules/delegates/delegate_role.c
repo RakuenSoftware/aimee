@@ -39,6 +39,30 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
    return 0;
 }
 
+/* Roles deleted in the persona-vs-role cull. They are named here so an operator
+ * or custom persona that still requests one gets a CLEAR error, rather than the
+ * hazardous half-supported state of the name still being accepted as an
+ * arbitrary role string while its semantics (write classification, tool
+ * defaults, built-in template) have all been removed - which would silently hand
+ * back a read-only delegate with a generic prompt. */
+static const char *const g_removed_roles[] = {"prose",   "line-edit", "lyric",
+                                              "hook",    "prosody",   "songform",
+                                              NULL};
+
+const char *delegate_role_removed_reason(const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   for (int i = 0; g_removed_roles[i]; i++)
+   {
+      if (strcmp(role, g_removed_roles[i]) == 0)
+         return "removed: novel/songwriter work is a PERSONA concern, not a delegate role. "
+                "Use a persona with a general role (draft/review/validate), or declare the "
+                "name in that agent's exec_roles and supply your own role template.";
+   }
+   return NULL;
+}
+
 const char *delegate_role_canonicalize(const char *role)
 {
    if (!role || !role[0])

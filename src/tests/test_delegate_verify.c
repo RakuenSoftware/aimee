@@ -23,10 +23,26 @@ static void test_classification(void)
     * for both. A timeout kill lands here and must NOT read as a failed build. */
    assert(verify_classify(-1) == VERIFY_OUTCOME_INFRA_ERROR);
 
-   /* The shell's own report that it never executed the verifier. A missing test
-    * runner in a delegate's environment is a setup defect, not a failing test. */
-   assert(verify_classify(126) == VERIFY_OUTCOME_INFRA_ERROR);
-   assert(verify_classify(127) == VERIFY_OUTCOME_INFRA_ERROR);
+   /* Ambiguous codes, resolved toward INFRA_ERROR on purpose. Through
+    * `/bin/sh -c` these can be the shell reporting it never ran the command, OR
+    * a verifier returning them itself - indistinguishable at this layer. The two
+    * mistakes are not symmetric: reading a real failure as infrastructure only
+    * skips an escalation and defers to a human, while reading an OOM kill or a
+    * missing binary as a work-product failure blames the model for its
+    * environment and burns a dearer seat for nothing. */
+   assert(verify_classify(126) == VERIFY_OUTCOME_INFRA_ERROR); /* not executable */
+   assert(verify_classify(127) == VERIFY_OUTCOME_INFRA_ERROR); /* not found */
+   assert(verify_classify(124) == VERIFY_OUTCOME_INFRA_ERROR); /* coreutils timeout */
+   assert(verify_classify(137) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+9  SIGKILL/OOM */
+   assert(verify_classify(143) == VERIFY_OUTCOME_INFRA_ERROR); /* 128+15 SIGTERM */
+
+   /* ...and the boundary: 128 itself is not a signal code. */
+   assert(verify_classify(128) == VERIFY_OUTCOME_FAILED);
+
+   /* An OOM-killed test suite must NOT warrant escalation - that would blame the
+    * model for the machine running out of memory. */
+   assert(verify_escalation_warranted(0, verify_classify(137), 0) == 0);
+   assert(verify_escalation_warranted(0, verify_classify(124), 0) == 0);
 
    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_PASS), "pass") == 0);
    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_FAILED), "failed") == 0);
