@@ -60,9 +60,18 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 			return
 		}
 	}
-	if fleetMutation && sess.fleetIndeterminate {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "prior fleet action result unresolved; sign in again only after operator resolution"})
-		return
+	if fleetMutation {
+		claimed, err := s.sessions.claimFleetMutation(sess.id)
+		if err != nil {
+			s.sessions.del(sess.id)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "fleet mutation latch unavailable; sign in again"})
+			return
+		}
+		if !claimed {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "prior fleet action result unresolved; sign in again only after operator resolution"})
+			return
+		}
+		sess.fleetIndeterminate = true
 	}
 
 	target := strings.TrimRight(s.cfg.kbBaseURL, "/") + kbPath
@@ -76,6 +85,9 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, body)
 	if err != nil {
+		if fleetMutation {
+			s.clearFleetMutationOrDelete(sess)
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "proxy build failed"})
 		return
 	}
@@ -86,31 +98,20 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 
 	resp, err := s.kbClient.Do(req)
 	if err != nil {
-		if fleetMutation {
-			s.markFleetIndeterminate(sess)
-		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "kb unreachable"})
 		return
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxProxyResponseBytes+1))
 	if err != nil {
-		if fleetMutation {
-			s.markFleetIndeterminate(sess)
-		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "kb response read failed"})
 		return
 	}
 	if len(payload) > maxProxyResponseBytes {
-		if fleetMutation {
-			s.markFleetIndeterminate(sess)
-		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "kb response too large"})
 		return
 	}
-	if fleetMutation && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusBadGateway) {
-		s.markFleetIndeterminate(sess)
-	}
+	keepFleetLatch := fleetMutation && (resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusBadGateway)
 	if resp.StatusCode == http.StatusUnauthorized && fleetRoute {
 		s.sessions.del(sess.id)
 	}
@@ -118,14 +119,16 @@ func (s *server) proxyAPI(w http.ResponseWriter, r *http.Request, sess *session)
 		w.Header().Set("Content-Type", ct)
 	}
 	w.WriteHeader(resp.StatusCode)
-	if _, err := w.Write(payload); err != nil && fleetMutation {
-		s.markFleetIndeterminate(sess)
+	_, writeErr := w.Write(payload)
+	if fleetMutation && writeErr == nil && !keepFleetLatch && resp.StatusCode != http.StatusUnauthorized {
+		s.clearFleetMutationOrDelete(sess)
 	}
 }
 
-func (s *server) markFleetIndeterminate(sess *session) {
-	sess.fleetIndeterminate = true
-	if err := s.sessions.markFleetIndeterminate(sess.id); err != nil {
+func (s *server) clearFleetMutationOrDelete(sess *session) {
+	if err := s.sessions.clearFleetMutation(sess.id); err != nil {
 		s.sessions.del(sess.id)
+		return
 	}
+	sess.fleetIndeterminate = false
 }

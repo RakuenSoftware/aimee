@@ -146,8 +146,20 @@ func (s *sessionStore) get(id string) (*session, error) {
 	return &sess, nil
 }
 
-func (s *sessionStore) markFleetIndeterminate(id string) error {
-	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=1 WHERE id=?`, id)
+func (s *sessionStore) claimFleetMutation(id string) (bool, error) {
+	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=1 WHERE id=? AND fleet_indeterminate=0`, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
+func (s *sessionStore) clearFleetMutation(id string) error {
+	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=0 WHERE id=?`, id)
 	if err != nil {
 		return err
 	}

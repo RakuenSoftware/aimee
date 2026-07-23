@@ -72,6 +72,38 @@ func TestConcurrentCredentialInsertionCompensatesLosingSessions(t *testing.T) {
 	}
 }
 
+func TestFleetMutationClaimIsAtomic(t *testing.T) {
+	srv := newTestServer(t, "http://127.0.0.1:1")
+	sess, err := srv.sessions.create(&principal{iss: "iss", sub: "sub"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const contenders = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var claims atomic.Int32
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			claimed, err := srv.sessions.claimFleetMutation(sess.id)
+			if err != nil {
+				t.Errorf("claim: %v", err)
+				return
+			}
+			if claimed {
+				claims.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := claims.Load(); got != 1 {
+		t.Fatalf("successful fleet mutation claims = %d, want 1", got)
+	}
+}
+
 func TestRetainOIDCCredentialCompensatesSessionOnCapacityFailure(t *testing.T) {
 	srv := newTestServer(t, "http://127.0.0.1:1")
 	srv.oidcTokens = newCredentialVault(1)

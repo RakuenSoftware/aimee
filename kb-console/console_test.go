@@ -183,6 +183,43 @@ func TestFleetAmbiguityLatchSurvivesSessionReloadAndBlocksRedispatch(t *testing.
 	}
 }
 
+func TestFleetMutationLatchClearsAfterDefiniteDenial(t *testing.T) {
+	upstreamCalls := 0
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "policy denied"})
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	exp := time.Now().Add(time.Hour)
+	sess, err := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/server-1/actions?team=9",
+			strings.NewReader(`{"action":"agent.enable","agent":"agent.one"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-CSRF-Token", sess.csrf)
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+		w := httptest.NewRecorder()
+		srv.handleAPI(w, r)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("definite denial %d status = %d", i, w.Code)
+		}
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("definite denials reached upstream %d times, want 2", upstreamCalls)
+	}
+	reloaded, err := srv.sessions.get(sess.id)
+	if err != nil || reloaded.fleetIndeterminate {
+		t.Fatalf("definite response left mutation latch set: %+v err=%v", reloaded, err)
+	}
+}
+
 // stubKB records the last request it saw and echoes a canned 200.
 func stubKB(t *testing.T, seen *http.Request) *httptest.Server {
 	t.Helper()
