@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "delegate_role.h"
 #include "agent_tools.h"
 #include "anchor_snapshot.h"
 #include <arpa/inet.h>
@@ -1148,17 +1149,34 @@ static void test_agent_is_exec_role(void)
    agent_t agent;
    memset(&agent, 0, sizeof(agent));
 
-   /* No explicit exec_roles: use defaults */
+   /* No explicit exec_roles: use defaults. CANONICAL names only — `test` and
+    * `implement` used to be listed here but are ALIASES (delegate_role.c maps
+    * them to validate/code), and every routing path canonicalises before this is
+    * reached (cmd_agent_delegate.c, server_compute.c), so they could never match
+    * and were dead entries. */
    assert(agent_is_exec_role(&agent, "deploy") == 1);
    assert(agent_is_exec_role(&agent, "validate") == 1);
-   assert(agent_is_exec_role(&agent, "test") == 1);
    assert(agent_is_exec_role(&agent, "diagnose") == 1);
    assert(agent_is_exec_role(&agent, "execute") == 1);
    assert(agent_is_exec_role(&agent, "code") == 1);
    assert(agent_is_exec_role(&agent, "refactor") == 1);
    assert(agent_is_exec_role(&agent, "draft") == 1);
-   assert(agent_is_exec_role(&agent, "implement") == 1);
+   /* Aliases are NOT exec roles; they resolve to their canonical form first. */
+   assert(agent_is_exec_role(&agent, "test") == 0);
+   assert(agent_is_exec_role(&agent, "implement") == 0);
+   assert(strcmp(delegate_role_canonicalize("test"), "validate") == 0);
+   assert(strcmp(delegate_role_canonicalize("implement"), "code") == 0);
    assert(agent_is_exec_role(&agent, "summarize") == 0);
+   /* Novel-mode checks the novel persona genuinely delegates stay. */
+   assert(agent_is_exec_role(&agent, "continuity") == 1);
+   assert(agent_is_exec_role(&agent, "beat-check") == 1);
+   /* Songwriter/novel WRITE work was culled: no persona could reach it. */
+   assert(agent_is_exec_role(&agent, "lyric") == 0);
+   assert(agent_is_exec_role(&agent, "prosody") == 0);
+   assert(agent_is_exec_role(&agent, "prose") == 0);
+   assert(agent_is_exec_role(&agent, "line-edit") == 0);
+   assert(agent_is_exec_role(&agent, "hook") == 0);
+   assert(agent_is_exec_role(&agent, "songform") == 0);
 
    /* With explicit exec_roles */
    strcpy(agent.exec_roles[0], "deploy");

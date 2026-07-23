@@ -56,11 +56,7 @@ int delegate_role_is_write(const char *role)
    if (!role || !role[0])
       return 0;
    const char *canonical = delegate_role_canonicalize(role);
-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0 ||
-          /* Novel-mode write roles: they draft/edit manuscript files. */
-          strcmp(canonical, "prose") == 0 || strcmp(canonical, "line-edit") == 0 ||
-          /* Songwriter-mode write roles: they draft/edit lyric files. */
-          strcmp(canonical, "lyric") == 0 || strcmp(canonical, "hook") == 0;
+   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
 }
 
 int delegate_role_enable_tools_by_default(const char *role)
@@ -72,10 +68,8 @@ int delegate_role_enable_tools_by_default(const char *role)
    return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
           strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
           strcmp(role, "validate") == 0 ||
-          /* Novel-mode read-only roles inspect the world bible by default. */
-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0 ||
-          /* Songwriter-mode read-only roles inspect the songbook by default. */
-          strcmp(role, "prosody") == 0 || strcmp(role, "songform") == 0;
+          /* Novel-mode read-only checks inspect the world bible by default. */
+          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
 }
 
 int delegate_role_result_cache_enabled(const char *role)

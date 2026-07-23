@@ -2614,13 +2614,21 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
 /* --- Exec role check --- */
 
 static const char *default_exec_roles[] = {
-    "deploy", "validate", "test", "diagnose", "execute", "review", "code", "refactor", "draft",
-    "implement",
-    /* Novel-mode roles: routable + tool-enabled on any default agent. */
-    "continuity", "prose", "line-edit", "beat-check",
-    /* Songwriter-mode roles. */
-    "lyric", "hook", "prosody", "songform"};
-#define DEFAULT_EXEC_ROLE_COUNT 18
+    /* The roles ANY agent may execute when it declares no explicit exec_roles.
+     * Canonical names only: `test` and `implement` were listed here but are
+     * ALIASES (delegate_role.c maps them to validate/code), so they could never
+     * match a canonicalised role and were dead entries.
+     *
+     * Novel/songwriter work is a PERSONA concern, not a role. prose, line-edit,
+     * lyric, hook, prosody and songform were removed outright: songwriter
+     * delegates nothing at all (policy "none") and novel is read-only and
+     * declares only continuity/beat-check/review/research, so no persona could
+     * ever reach them — yet every agent was exec-eligible for them by default. */
+    "deploy",     "validate", "diagnose", "execute", "review",
+    "code",       "refactor", "draft",
+    /* Novel-mode read-only checks the novel persona genuinely delegates. */
+    "continuity", "beat-check"};
+#define DEFAULT_EXEC_ROLE_COUNT 10
 
 int agent_is_exec_role(const agent_t *agent, const char *role)
 {

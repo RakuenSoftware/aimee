@@ -1,0 +1,508 @@
+diff --git a/src/headers/model_provider.h b/src/headers/model_provider.h
+index f50e617b..3267aa51 100644
+--- a/src/headers/model_provider.h
++++ b/src/headers/model_provider.h
+@@ -40,6 +40,17 @@ extern "C"
+       const char *default_aux_model; /* cheap model for auxiliary tasks */
+       const char **fallback_models;  /* NULL-terminated */
+ 
++      /* Curated set of models this provider EXPOSES as routable, NULL-terminated.
++       * Distinct from fallback_models, which describes retry ORDER and may omit
++       * the primary. This is exposure POLICY: a provider's catalog is discovery
++       * data, and a model appearing in it does not prove it is intended for this
++       * product, has complete capability metadata, or is enabled for the
++       * configured account. Lets an operator register a provider without naming
++       * models ("models": "auto"); they can still narrow it with an explicit
++       * list. NULL means the provider offers no curated set, so "auto" is
++       * rejected rather than guessed at. */
++      const char **routable_models;
++
+       int fixed_temperature; /* -1 = caller chooses; >= 0 = pinned */
+       int default_max_tokens;
+ 
+diff --git a/src/server/agent_config.c b/src/server/agent_config.c
+index 88b4b9a3..493286b6 100644
+--- a/src/server/agent_config.c
++++ b/src/server/agent_config.c
+@@ -6,6 +6,7 @@
+ #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
+ #include "vault_service.h"   /* vault_service_* : the permanent credential store (P4) */
+ #include "model_registry.h"
++#include "model_provider.h"
+ #include "platform_path.h"
+ #include "provider_cli_adapter.h"
+ #include "oauth_flow.h" /* oauth_token_store/get : vault-backed auto-refreshing codex token */
+@@ -238,38 +239,106 @@ static int model_price_to_cost_tier(double in_per_mtok)
+  * Returns the number of targets written, or -1 if they do not fit — the caller
+  * must then reject the whole config rather than register a partial fleet, since
+  * a silently truncated expansion would drop models an operator declared. */
++static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id);
++
++/* Curated allowlist for "models": "auto". The provider CATALOG is discovery
++ * data, not exposure policy: a model appearing in it does not prove it is
++ * intended for this product, has complete capability metadata, or is enabled for
++ * the account. Returns NULL when the profile publishes no curated set, so "auto"
++ * fails loudly rather than exposing whatever the provider happens to list. */
++static const char **agent_provider_routable_models(const agent_t *base)
++{
++   const char *vendor = agent_catalog_provider(base);
++   model_provider_t *p = vendor && vendor[0] ? model_provider_get(vendor) : NULL;
++   if (!p && base->provider[0])
++      p = model_provider_get(base->provider);
++   return p ? p->routable_models : NULL;
++}
++
+ static int agent_expand_provider_models(agent_config_t *cfg, const agent_t *base, cJSON *models)
+ {
+    int written = 0;
++
++   /* "models": "auto" -> the provider profile's curated allowlist, so an
++    * operator can register a provider without naming its models at all. */
++   if (cJSON_IsString(models))
++   {
++      if (strcmp(cJSON_GetStringValue(models), "auto") != 0)
++         return -1;
++      const char **curated = agent_provider_routable_models(base);
++      if (!curated || !curated[0])
++         return -1;
++      for (int i = 0; curated[i]; i++)
++      {
++         int rc = agent_expand_one_model(cfg, base, curated[i]);
++         if (rc < 0)
++            return -1;
++         written += rc;
++      }
++      return written;
++   }
++
+    cJSON *m;
+    cJSON_ArrayForEach(m, models)
+    {
+       const char *model_id = cJSON_GetStringValue(m);
++      /* A non-string or empty entry is a config error. Skipping it would hand
++       * back a partial fleet with no indication anything was dropped. */
+       if (!model_id || !model_id[0])
+-         continue;
+-      if (cfg->agent_count >= MAX_AGENTS)
+          return -1;
++      int rc = agent_expand_one_model(cfg, base, model_id);
++      if (rc < 0)
++         return -1;
++      written += rc;
++   }
++   return written;
++}
+ 
+-      agent_t *ag = &cfg->agents[cfg->agent_count];
+-      *ag = *base;
+-      snprintf(ag->model, sizeof(ag->model), "%s", model_id);
+-      snprintf(ag->name, sizeof(ag->name), "%s:%s", base->name, model_id);
+-      /* The registration's model list is the exposure policy; a target is only
+-       * routable if the catalog can actually describe it. */
+-      agent_derive_catalog_provider(ag);
++/* Materialise one runtime target. Returns 1 when written, 0 when skipped as a
++ * duplicate, -1 when it does not fit. */
++static int agent_expand_one_model(agent_config_t *cfg, const agent_t *base, const char *model_id)
++{
++   char name[MAX_AGENT_NAME];
++   int n = snprintf(name, sizeof(name), "%s:%s", base->name, model_id);
++   /* A truncated name would collide with a sibling target and, because health
++    * and --via both key on the name, silently conflate two models. Reject the
++    * registration instead. */
++   if (n < 0 || (size_t)n >= sizeof(name))
++      return -1;
+ 
+-      model_capability_t cap;
+-      if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
+-      {
+-         int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
+-         if (tier >= 0)
+-            ag->cost_tier = tier;
+-      }
++   /* A name collision - a repeated model id, or a legacy agent already using the
++    * generated name - must REJECT the config, not silently drop a target. Health
++    * and --via both key on the name, so two entries sharing one would conflate
++    * distinct models, and quietly registering fewer models than the operator
++    * declared routes work to a set they never approved. */
++   for (int i = 0; i < cfg->agent_count; i++)
++   {
++      if (strcmp(cfg->agents[i].name, name) == 0)
++         return -1;
++   }
+ 
+-      cfg->agent_count++;
+-      written++;
++   if (cfg->agent_count >= MAX_AGENTS)
++      return -1;
++
++   agent_t *ag = &cfg->agents[cfg->agent_count];
++   *ag = *base;
++   snprintf(ag->model, sizeof(ag->model), "%s", model_id);
++   snprintf(ag->name, sizeof(ag->name), "%s", name);
++   /* Re-derive per target: the vendor can depend on the model id. */
++   ag->catalog_provider[0] = '\0';
++   ag->catalog_provider_explicit = 0;
++   agent_derive_catalog_provider(ag);
++
++   model_capability_t cap;
++   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap))
++   {
++      int tier = model_price_to_cost_tier(cap.cost_in_per_mtok);
++      if (tier >= 0)
++         ag->cost_tier = tier;
+    }
+-   return written;
++
++   cfg->agent_count++;
++   return 1;
+ }
+ 
+ static void agent_normalize_builtin_cost_tier(agent_t *ag)
+@@ -440,8 +509,23 @@ static void agent_derive_catalog_provider(agent_t *ag)
+       }
+    }
+ 
++   /* Provider-alias fallback runs even with NO model: a provider-general
++    * registration carries only a provider until it is expanded, and its vendor
++    * identity is what selects the curated model list. Checked before the
++    * model-shaped rules below so an explicit model still wins where present. */
+    if (!ag->model[0])
++   {
++      for (int i = 0; g_catalog_provider_aliases[i].wire; i++)
++      {
++         if (strcasecmp(ag->provider, g_catalog_provider_aliases[i].wire) == 0)
++         {
++            snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s",
++                     g_catalog_provider_aliases[i].vendor);
++            return;
++         }
++      }
+       return;
++   }
+ 
+    /* Namespaced gateway id: "<vendor>/<model>". */
+    const char *slash = strchr(ag->model, '/');
+@@ -1238,7 +1322,37 @@ int agent_load_config(agent_config_t *cfg)
+           * its name for `--via`. Inferring provider-general mode from anything
+           * else would change cost, health and attribution on upgrade. */
+          cJSON *models_arr = cJSON_GetObjectItem(a, "models");
+-         if (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0)
++         if (models_arr)
++         {
++            /* Reject an ill-formed registration rather than degrading it into
++             * something the operator did not write. An empty or non-array/string
++             * `models` would otherwise fall through and register the bare
++             * registration as a routable agent with NO model - routing would
++             * then dispatch whatever the catalog happens to default to. */
++            int models_ok = (cJSON_IsArray(models_arr) && cJSON_GetArraySize(models_arr) > 0) ||
++                            cJSON_IsString(models_arr);
++            if (!models_ok)
++            {
++               LOG_ERROR("agent",
++                         "agents.json: registration '%s' has an empty or malformed \"models\"; "
++                         "use a non-empty array of model ids or \"auto\"",
++                         ag->name);
++               cJSON_Delete(root);
++               return -1;
++            }
++            /* `model` and `models` together are ambiguous: the single value would
++             * be silently discarded by expansion. Make the operator choose. */
++            if (ag->model[0])
++            {
++               LOG_ERROR("agent",
++                         "agents.json: registration '%s' sets both \"model\" and \"models\"; "
++                         "use one or the other",
++                         ag->name);
++               cJSON_Delete(root);
++               return -1;
++            }
++         }
++         if (models_arr)
+          {
+             agent_t base = *ag;
+             int n = agent_expand_provider_models(cfg, &base, models_arr);
+diff --git a/src/server/anthropic_profile.c b/src/server/anthropic_profile.c
+index 71918dca..b14bfafa 100644
+--- a/src/server/anthropic_profile.c
++++ b/src/server/anthropic_profile.c
+@@ -7,6 +7,8 @@
+ static const char *anthropic_env_vars[] = {"ANTHROPIC_API_KEY", NULL};
+ static const char *anthropic_default_headers[] = {"anthropic-version", "2023-06-01", NULL};
+ 
++static const char *anthropic_routable_models[] = {"claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5", NULL};
++
+ model_provider_t anthropic_provider = {
+     .name = "anthropic",
+     .display_name = "Anthropic",
+@@ -20,6 +22,7 @@ model_provider_t anthropic_provider = {
+     .default_model = "claude-sonnet-4-6",
+     .default_aux_model = "claude-haiku-4-5-20251001",
+     .fallback_models = NULL,
++    .routable_models = anthropic_routable_models,
+     .fixed_temperature = -1,
+     .default_max_tokens = 8192,
+     .default_headers = anthropic_default_headers,
+diff --git a/src/server/minimax_profile.c b/src/server/minimax_profile.c
+index e213bb24..c1cdb7c6 100644
+--- a/src/server/minimax_profile.c
++++ b/src/server/minimax_profile.c
+@@ -71,6 +71,8 @@ static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_
+    return 0;
+ }
+ 
++static const char *minimax_routable_models[] = {"MiniMax-M3", NULL};
++
+ model_provider_t minimax_provider = {
+     .name = "minimax",
+     .display_name = "MiniMax",
+@@ -84,6 +86,7 @@ model_provider_t minimax_provider = {
+     .default_model = "MiniMax-M3",
+     .default_aux_model = "MiniMax-M3",
+     .fallback_models = minimax_fallback_models,
++    .routable_models = minimax_routable_models,
+     .fixed_temperature = -1,
+     .default_max_tokens = 8192,
+     .default_headers = NULL,
+diff --git a/src/server/openai_profile.c b/src/server/openai_profile.c
+index 4d2d2c61..62878a90 100644
+--- a/src/server/openai_profile.c
++++ b/src/server/openai_profile.c
+@@ -69,6 +69,8 @@ static int openai_fetch_models(model_provider_t *p, char ***models_out, int *n_o
+    return 0;
+ }
+ 
++static const char *openai_routable_models[] = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", NULL};
++
+ model_provider_t openai_provider = {
+     .name = "openai",
+     .display_name = "OpenAI",
+@@ -82,6 +84,7 @@ model_provider_t openai_provider = {
+     .default_model = "gpt-4o",
+     .default_aux_model = "gpt-4o-mini",
+     .fallback_models = NULL,
++    .routable_models = openai_routable_models,
+     .fixed_temperature = -1,
+     .default_max_tokens = 8192,
+     .default_headers = NULL,
+diff --git a/src/tests/Rules.mk b/src/tests/Rules.mk
+index 9fa38d2d..ac3f7cb4 100644
+--- a/src/tests/Rules.mk
++++ b/src/tests/Rules.mk
+@@ -1040,6 +1040,10 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
+                       $(OBJDIR)/models_dev_cache.o $(OBJDIR)/payload_rewrite.o \
+                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
+                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
++                      $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
++                      $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
++                      $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
++                      $(OBJDIR)/server/ollama_profile.o $(OBJDIR)/server/llama_native_profile.o \
+                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+ 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+ 
+@@ -1545,6 +1549,10 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
+ $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
+                                $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
+                                $(OBJDIR)/agent_tier_lint.o \
++                               $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
++                               $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
++                               $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
++                               $(OBJDIR)/server/ollama_profile.o $(OBJDIR)/server/llama_native_profile.o \
+                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
+                                $(OBJDIR)/tests/support/vault_service_stub.o \
+                                $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
+diff --git a/src/tests/test_agent.c b/src/tests/test_agent.c
+index 3fc8345c..5f0b35ff 100644
+--- a/src/tests/test_agent.c
++++ b/src/tests/test_agent.c
+@@ -44,6 +44,9 @@ void test_catalog_provider_endpoint_parser_edges(void);
+ void test_request_max_tokens_clamped_to_context_window(void);
+ void test_provider_general_registration_expands(void);
+ void test_provider_general_overflow_rejects_config(void);
++void test_provider_general_auto_uses_curated_allowlist(void);
++void test_provider_general_auto_requires_curated_set(void);
++void test_provider_general_rejects_malformed_registrations(void);
+ void test_capability_routing_flag_behaviour_diff(void);
+ void test_capability_gate_escalates_instead_of_failing(void);
+ void test_no_escalation_when_capability_routing_disabled(void);
+@@ -3215,6 +3218,9 @@ int main(void)
+    test_request_max_tokens_clamped_to_context_window();
+    test_provider_general_registration_expands();
+    test_provider_general_overflow_rejects_config();
++   test_provider_general_auto_uses_curated_allowlist();
++   test_provider_general_auto_requires_curated_set();
++   test_provider_general_rejects_malformed_registrations();
+    test_capability_routing_flag_behaviour_diff();
+    test_capability_gate_escalates_instead_of_failing();
+    test_no_escalation_when_capability_routing_disabled();
+diff --git a/src/tests/test_agent_caps.c b/src/tests/test_agent_caps.c
+index fa9b583c..9a00ea68 100644
+--- a/src/tests/test_agent_caps.c
++++ b/src/tests/test_agent_caps.c
+@@ -1114,6 +1114,143 @@ void test_provider_general_registration_expands(void)
+    unlink(agent_config_path());
+ }
+ 
++/* "models": "auto" is the operator experience the requirement actually asks for:
++ * register the provider, name no models. It resolves the provider profile's
++ * CURATED allowlist rather than the raw catalog — a model appearing in a
++ * provider's listing does not prove it is intended for this product, has
++ * complete capability metadata, or is enabled for the account. */
++void test_provider_general_auto_uses_curated_allowlist(void)
++{
++   seed_codex_prices();
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":["
++         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":\"auto\"}"
++         "]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) == 0);
++   /* The openai profile curates exactly sol/terra/luna. */
++   assert(c.agent_count == 3);
++   assert(agent_find(&c, "codex:gpt-5.6-sol") != NULL);
++   assert(agent_find(&c, "codex:gpt-5.6-terra") != NULL);
++   assert(agent_find(&c, "codex:gpt-5.6-luna") != NULL);
++   /* Registration itself is not routable. */
++   assert(agent_find(&c, "codex") == NULL);
++   /* Tiers still derive per model. */
++   assert(agent_find(&c, "codex:gpt-5.6-sol")->cost_tier >
++          agent_find(&c, "codex:gpt-5.6-luna")->cost_tier);
++
++   printf("  PASS: test_provider_general_auto_uses_curated_allowlist\n");
++   unlink(agent_config_path());
++}
++
++/* "auto" against a provider with no curated set must FAIL rather than expose
++ * whatever the provider happens to list, and an unrecognised string is not a
++ * silent no-op. */
++void test_provider_general_auto_requires_curated_set(void)
++{
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"x\",\"provider\":\"ollama\","
++         "\"endpoint\":\"http://localhost:11434\",\"auth_type\":\"none\","
++         "\"roles\":[\"review\"],\"models\":\"auto\"}]}\n",
++         f);
++   fclose(f);
++   agent_config_t c;
++   assert(agent_load_config(&c) != 0);
++
++   f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"x\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":\"everything\"}]}\n",
++         f);
++   fclose(f);
++   assert(agent_load_config(&c) != 0);
++
++   printf("  PASS: test_provider_general_auto_requires_curated_set\n");
++   unlink(agent_config_path());
++}
++
++/* A duplicate model id must REJECT the config. Two targets would share a name,
++ * and both health and --via key on it; silently registering fewer models than
++ * the operator declared would route work to a set they never approved. Also
++ * covers the other ill-formed shapes: an empty models array, a non-string
++ * entry, a name colliding with a legacy agent, and `model` alongside `models`. */
++void test_provider_general_rejects_malformed_registrations(void)
++{
++   seed_codex_prices();
++   FILE *f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":[\"gpt-5.6-sol\",\"gpt-5.6-sol\",\"gpt-5.6-luna\"]}]}\n",
++         f);
++   fclose(f);
++
++   agent_config_t c;
++   assert(agent_load_config(&c) != 0); /* duplicate model id */
++
++   /* Empty models array. */
++   f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],\"models\":[]}]}\n",
++         f);
++   fclose(f);
++   assert(agent_load_config(&c) != 0);
++
++   /* Non-string entry. */
++   f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":[\"gpt-5.6-sol\",7]}]}\n",
++         f);
++   fclose(f);
++   assert(agent_load_config(&c) != 0);
++
++   /* `model` AND `models`: the single value would be silently discarded. */
++   f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":[{\"name\":\"c\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"model\":\"gpt-5.6-sol\",\"models\":[\"gpt-5.6-luna\"]}]}\n",
++         f);
++   fclose(f);
++   assert(agent_load_config(&c) != 0);
++
++   /* A LEGACY agent already holding the generated name must collide, not be
++    * shadowed by an unreachable duplicate. */
++   f = fopen(agent_config_path(), "w");
++   assert(f != NULL);
++   fputs("{\"agents\":["
++         "{\"name\":\"codex:gpt-5.6-sol\",\"provider\":\"openai\","
++         "\"endpoint\":\"https://api.openai.com/v1\",\"model\":\"gpt-5.6-sol\","
++         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},"
++         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
++         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
++         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
++         "\"models\":[\"gpt-5.6-sol\"]}]}\n",
++         f);
++   fclose(f);
++   assert(agent_load_config(&c) != 0);
++
++   printf("  PASS: test_provider_general_rejects_malformed_registrations\n");
++   unlink(agent_config_path());
++}
++
+ /* An expansion that does not fit must reject the WHOLE config rather than
+  * register a partial fleet: silently dropping models an operator declared would
+  * route work to a set they never approved. */
+diff --git a/src/tests/test_agent_list_handler.c b/src/tests/test_agent_list_handler.c
+index 470b0085..8cf20ede 100644
+--- a/src/tests/test_agent_list_handler.c
++++ b/src/tests/test_agent_list_handler.c
+@@ -158,6 +158,19 @@ static void test_primary_only_round_trips(void)
+  * it costs. `provider` alone is ambiguous for a third-party model served over
+  * another vendor's API, so catalog_provider and a canonical provider:model ref
+  * are both required. */
++/* Provider profiles are linked so agent_config can resolve a provider-general
++ * registration's curated model list; their fetch_models paths reach the network,
++ * which this test never exercises. Stubbed rather than linking the HTTP layer. */
++int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms)
++{
++   (void)url;
++   (void)extra_headers;
++   (void)timeout_ms;
++   if (response_buf)
++      *response_buf = NULL;
++   return -1;
++}
++
+ static void test_list_exposes_catalog_identity_and_pricing(void)
+ {
+    set_home_empty();
