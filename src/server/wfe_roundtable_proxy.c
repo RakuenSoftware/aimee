@@ -30,7 +30,7 @@ int wfe_roundtable_proxy(server_conn_t *conn, const cJSON *request)
 #include <sys/un.h>
 #include <unistd.h>
 
-#define GO_ROUNDTABLE_DEFAULT_DEADLINE_MS 360000
+#define GO_ROUNDTABLE_DEFAULT_DEADLINE_MS 600000
 #define GO_ROUNDTABLE_TRANSPORT_GRACE_MS  30000
 #define GO_ROUNDTABLE_SEND_TIMEOUT_SECS   30
 #define GO_ROUNDTABLE_MAX_RESPONSE        (16u * 1024u * 1024u)
