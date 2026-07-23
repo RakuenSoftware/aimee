@@ -42,9 +42,13 @@ int web_egress_private_endpoint_allowed(void)
    return (v && v[0] == '1' && v[1] == '\0') ? 1 : 0;
 }
 
-char *web_egress_fetch(const char *url, web_egress_policy_t policy, const char *extra_headers,
-                       int timeout_ms, size_t max_bytes, const char **err)
+char *web_egress_fetch_pinned(const char *url, web_egress_policy_t policy,
+                              const char *extra_headers, int timeout_ms, size_t max_bytes,
+                              char *pinned_out, size_t pinned_out_len, const char **err)
 {
+   /* No pinning on this platform, so no address is reported. */
+   if (pinned_out && pinned_out_len)
+      pinned_out[0] = '\0';
    const char *local_err = NULL;
    if (!err)
       err = &local_err;
@@ -80,4 +84,10 @@ char *web_egress_fetch(const char *url, web_egress_policy_t policy, const char *
    if (max_bytes && strlen(resp) > max_bytes)
       resp[max_bytes] = '\0';
    return resp;
+}
+
+char *web_egress_fetch(const char *url, web_egress_policy_t policy, const char *extra_headers,
+                       int timeout_ms, size_t max_bytes, const char **err)
+{
+   return web_egress_fetch_pinned(url, policy, extra_headers, timeout_ms, max_bytes, NULL, 0, err);
 }

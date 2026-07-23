@@ -62,6 +62,16 @@ typedef enum
 char *web_egress_fetch(const char *url, web_egress_policy_t policy, const char *extra_headers,
                        int timeout_ms, size_t max_bytes, const char **err);
 
+/* As web_egress_fetch, but reports the address the connection was pinned to.
+ *
+ * A cache needs this: storing the validated address alongside the body is what
+ * lets a later hit re-check it against current policy without resolving DNS
+ * again. `pinned_out` receives the address (at least 64 bytes) and is set to an
+ * empty string when the fetch fails. */
+char *web_egress_fetch_pinned(const char *url, web_egress_policy_t policy,
+                              const char *extra_headers, int timeout_ms, size_t max_bytes,
+                              char *pinned_out, size_t pinned_out_len, const char **err);
+
 /* True when a resolved address is private, reserved, loopback, or link-local.
  * Exposed for tests. */
 struct sockaddr;

@@ -4,6 +4,32 @@
 [surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md).
 Classification: **enhancement**.*
 
+> ## SUPERSEDED — the key argument was right for an extractor that no longer exists
+>
+> This record argued that a retrieval cache must key on `(document, query,
+> budget)` because "a key without the query is a page cache, not a result
+> cache." That reasoning is correct **for a chunk-and-rank extractor**, where the
+> selection policy is frozen at write time.
+>
+> Extraction is no longer that. It is a deterministic pure function over the
+> stripped text, re-run on every read, so `(query, budget)` are REAPPLIED at read
+> time rather than baked into the stored value. The cache supplies the document
+> and never stores a policy decision, which makes the query correctly absent from
+> the key.
+>
+> **Implemented** as `db1/web_page_cache.{c,h}`: stripped page text keyed by
+> canonical URL. Consequences, all in the same direction — any query against a
+> previously-fetched page hits rather than only a repeat of the same query;
+> changing the extractor invalidates nothing, so there is no policy version to
+> bump; and the key has no budget dimension.
+>
+> The record is kept rather than deleted because the reasoning was sound under
+> its own premise, and the premise changing is the interesting part.
+>
+> **Not foreclosed:** a span-level cache keyed by `(url, query, budget)` on top
+> of the page layer remains possible if repeated identical queries ever justify
+> it. The page layer makes that additive rather than a redesign.
+
 ## Problem
 
 There is no retrieval cache anywhere in the tree — `semcache`,

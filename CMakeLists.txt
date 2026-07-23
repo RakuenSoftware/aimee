@@ -341,6 +341,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/diagnose.c
     ${AIMEE_SRC_DIR}/db1/ensemble.c
     ${AIMEE_SRC_DIR}/db1/caches.c
+    ${AIMEE_SRC_DIR}/db1/web_page_cache.c
     ${AIMEE_SRC_DIR}/db1/primary_sessions.c
     ${AIMEE_SRC_DIR}/db1/webchat_claude_sessions.c
     ${AIMEE_SRC_DIR}/db1/env.c

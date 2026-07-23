@@ -44,6 +44,39 @@ char *web_egress_fetch(const char *url, web_egress_policy_t policy, const char *
                     "<a class=\"result__snippet\">snippet two text</a></div>");
    return strdup(FAKE_PAGE);
 }
+char *web_egress_fetch_pinned(const char *url, web_egress_policy_t policy,
+                              const char *extra_headers, int timeout_ms, size_t max_bytes,
+                              char *pinned_out, size_t pinned_out_len, const char **err)
+{
+   if (pinned_out && pinned_out_len)
+      snprintf(pinned_out, pinned_out_len, "93.184.216.34");
+   return web_egress_fetch(url, policy, extra_headers, timeout_ms, max_bytes, err);
+}
+
+/* Cache stubbed to always miss. This suite is about the FUSION contract; a real
+ * cache would make the second call in the process serve stored bytes and stop
+ * exercising the fetch path. Cache behaviour has its own suite. */
+char *db1_web_page_get(const char *url, long *age, char *pin, size_t pinlen)
+{
+   (void)url;
+   if (age)
+      *age = -1;
+   if (pin && pinlen)
+      pin[0] = 0;
+   return NULL;
+}
+int db1_web_page_put(const char *url, const char *body, const char *pin)
+{
+   (void)url;
+   (void)body;
+   (void)pin;
+   return 0;
+}
+void db1_web_page_drop(const char *url)
+{
+   (void)url;
+}
+
 int web_egress_addr_blocked(const struct sockaddr *sa)
 {
    (void)sa;

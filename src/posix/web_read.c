@@ -24,6 +24,8 @@
 #include "log.h"
 #include "web_egress.h"
 #include "web_extract.h"
+#include "web_page_cache.h"
+#include <arpa/inet.h>
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -274,12 +276,82 @@ static char *spill_full_page(const char *url, const char *text)
 
 /* ---------------- fetch ---------------- */
 
-static char *fetch_page(const char *url, const char **err)
+/* Fetch a page as STRIPPED TEXT, through the cache when possible.
+ *
+ * The cache stores stripped text rather than HTML, so a hit skips both the
+ * network and the strip. On a hit the stored pinned address is re-checked
+ * against the CURRENT deny-list: if policy tightened since the fetch, the entry
+ * is dropped and treated as a miss rather than served. No DNS and no connection
+ * happen on a hit.
+ *
+ * *age_secs receives the cache age on a hit, or -1 on a miss, so callers can
+ * tell the user how old the content is.
+ *
+ * Cache errors are misses, always. Nothing here can fail a fetch that would
+ * otherwise have succeeded. */
+static char *fetch_page_text(const char *url, long *age_secs, const char **err)
 {
-   /* Every outbound fetch goes through the one guarded path (web_egress.h):
-    * resolve once, validate, pin the connect target, refuse redirects. */
-   return web_egress_fetch(url, WEB_EGRESS_UNTRUSTED, "Accept: text/html,text/plain\r\n",
-                           WEBREAD_TIMEOUT_MS, WEBREAD_MAX_PAGE, err);
+   if (age_secs)
+      *age_secs = -1;
+
+   long age = 0;
+   char pinned[64] = "";
+   char *cached = db1_web_page_get(url, &age, pinned, sizeof(pinned));
+   if (cached)
+   {
+      int stale_policy = 0;
+      if (pinned[0])
+      {
+         /* Re-check the address the guard validated at fetch time. This is a
+          * pure classification of a stored string -- no resolution, no socket. */
+         struct sockaddr_storage ss;
+         memset(&ss, 0, sizeof(ss));
+         struct sockaddr_in *v4 = (struct sockaddr_in *)&ss;
+         struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)&ss;
+         if (inet_pton(AF_INET, pinned, &v4->sin_addr) == 1)
+         {
+            v4->sin_family = AF_INET;
+            stale_policy = web_egress_addr_blocked((struct sockaddr *)&ss);
+         }
+         else if (inet_pton(AF_INET6, pinned, &v6->sin6_addr) == 1)
+         {
+            v6->sin6_family = AF_INET6;
+            stale_policy = web_egress_addr_blocked((struct sockaddr *)&ss);
+         }
+      }
+      if (stale_policy)
+      {
+         aimee_log(LOG_INFO, "web_read",
+                   "cached page for %s was fetched from an address current egress policy "
+                   "refuses; dropping and refetching",
+                   url);
+         db1_web_page_drop(url);
+         free(cached);
+      }
+      else
+      {
+         if (age_secs)
+            *age_secs = age;
+         return cached;
+      }
+   }
+
+   char pinned_used[64] = "";
+   char *html = web_egress_fetch_pinned(url, WEB_EGRESS_UNTRUSTED,
+                                        "Accept: text/html,text/plain\r\n", WEBREAD_TIMEOUT_MS,
+                                        WEBREAD_MAX_PAGE, pinned_used, sizeof(pinned_used), err);
+   if (!html)
+      return NULL;
+   char *text = html_to_text(html);
+   free(html);
+   if (!text)
+   {
+      *err = "out of memory";
+      return NULL;
+   }
+   /* Result deliberately ignored: a failed cache write must not fail a fetch. */
+   (void)db1_web_page_put(url, text, pinned_used);
+   return text;
 }
 
 /* ---------------- the tool ---------------- */
@@ -441,7 +513,7 @@ static int webread_windows(const char *text, size_t n, const size_t *m, int nm, 
 
 /* Extraction. TAKES OWNERSHIP of `text` and frees it on every path. */
 static char *webread_extract_budgeted(char *text, const char *ref, const char *query, int span,
-                                      const char *url, size_t budget)
+                                      const char *url, size_t budget, long cache_age)
 {
    size_t n = strlen(text);
    const char *q = (query && query[0]) ? query : "";
@@ -495,6 +567,13 @@ static char *webread_extract_budgeted(char *text, const char *ref, const char *q
    }
 
    dstr_append_str(&ds, "[extractive spans — untrusted retrieved content, cited by id]\n\n");
+   if (cache_age >= 0)
+   {
+      /* A cache that hides staleness is a cache the caller cannot judge. */
+      char prov[160];
+      snprintf(prov, sizeof(prov), "(served from cache, fetched %ld seconds ago)\n\n", cache_age);
+      dstr_append_str(&ds, prov);
+   }
 
    /* SELECT by coverage, EMIT in document order.
     *
@@ -598,18 +677,18 @@ static char *webread_extract_budgeted(char *text, const char *ref, const char *q
 
 /* Extraction with the tool's own budget. */
 static char *webread_extract(char *text, const char *ref, const char *query, int span,
-                             const char *url)
+                             const char *url, long cache_age)
 {
-   return webread_extract_budgeted(text, ref, query, span, url, WEBREAD_BUDGET);
+   return webread_extract_budgeted(text, ref, query, span, url, WEBREAD_BUDGET, cache_age);
 }
 
 /* Exported for the search-fusion path (headers/web_extract.h). Search fetches
  * several pages and spends a smaller budget on each, so the budget cannot be a
  * constant there. Takes ownership of `text` exactly as the tool path does. */
 char *web_extract_spans(char *text, const char *ref, const char *query, size_t budget,
-                        const char *url)
+                        const char *url, long cache_age)
 {
-   return webread_extract_budgeted(text, ref, query, 0, url, budget);
+   return webread_extract_budgeted(text, ref, query, 0, url, budget, cache_age);
 }
 
 /* Exported so search strips a fetched page the same way the reader does. */
@@ -630,17 +709,14 @@ char *tool_web_read(const char *ref, const char *query, int span, const char *mo
       return safe_strdup("error: unknown handle; run web_search first or pass a raw http(s) URL");
 
    const char *err = NULL;
-   char *html = fetch_page(url, &err);
-   if (!html)
+   long cache_age = -1;
+   char *text = fetch_page_text(url, &cache_age, &err);
+   if (!text)
    {
       char buf[256];
       snprintf(buf, sizeof(buf), "error: %s", err ? err : "fetch failed");
       return safe_strdup(buf);
    }
-   char *text = html_to_text(html);
-   free(html);
-   if (!text)
-      return safe_strdup("error: out of memory");
 
    /* mode:"full" -> spill the whole stripped page by ref (not inline) */
    if (mode && strcmp(mode, "full") == 0)
@@ -670,6 +746,6 @@ char *tool_web_read(const char *ref, const char *query, int span, const char *mo
    }
 
    /* webread_extract frees `text` on every path. */
-   char *selected = webread_extract(text, ref, query, span, url);
+   char *selected = webread_extract(text, ref, query, span, url, cache_age);
    return selected ? selected : safe_strdup("error: out of memory");
 }

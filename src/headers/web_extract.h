@@ -18,8 +18,11 @@
  * TAKES OWNERSHIP of `text` and frees it on every path. `ref` is the citation
  * prefix (spans are emitted as `<ref>#<n>`). `url` is used only for a log line.
  * Returns a malloc'd, caller-freed block; never NULL on success. */
+/* `cache_age` is the age in seconds when the text came from the page cache, or
+ * -1 when it was fetched fresh. A cache that hides staleness is a cache the
+ * caller cannot judge, so it is reported in the output. */
 char *web_extract_spans(char *text, const char *ref, const char *query, size_t budget,
-                        const char *url);
+                        const char *url, long cache_age);
 
 /* Strip HTML to visible text. Returns a malloc'd string the caller frees. */
 char *web_extract_html_to_text(const char *html);

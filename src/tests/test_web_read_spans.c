@@ -22,7 +22,8 @@
 static char *extract(const char *text, const char *ref, const char *query, int span)
 {
    char *owned = safe_strdup(text);
-   char *out = webread_extract(owned, ref, query, span, "https://fixture.invalid/page");
+   char *out = webread_extract(owned, ref, query, span, "https://fixture.invalid/page",
+                               -1 /* fetched fresh, not from cache */);
    assert(out != NULL);
    return out;
 }

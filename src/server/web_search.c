@@ -12,6 +12,7 @@
 #include "http_retry.h"
 #include "web_egress.h"
 #include "web_extract.h"
+#include "web_page_cache.h"
 #include <time.h>
 #include "dstr.h"
 #include "cJSON.h"
@@ -586,31 +587,44 @@ static void fusion_append(dstr_t *ds, const web_search_result_t *results, int co
          continue;
       }
 
-      long long t0 = (long long)time(NULL) * 1000;
-      const char *err = NULL;
-      char *html =
-          web_egress_fetch(results[i].url, WEB_EGRESS_UNTRUSTED, "Accept: text/html,text/plain\r\n",
-                           FUSION_PAGE_TIMEOUT, 0, &err);
-      spent += ((long long)time(NULL) * 1000) - t0;
+      /* Cache first: fusion refetches the same popular URLs across repeated and
+       * refined searches, which is what the page cache exists for. A hit costs
+       * no network time and does not count against the total budget. */
+      long cache_age = -1;
+      char pinned[64] = "";
+      char *text = db1_web_page_get(results[i].url, &cache_age, pinned, sizeof(pinned));
 
-      if (!html)
-      {
-         char note[320];
-         snprintf(note, sizeof(note), "[%d] %s\n  (not fetched: %s)\n\n", i + 1, results[i].url,
-                  err ? err : "fetch failed");
-         dstr_append_str(ds, note);
-         continue;
-      }
-
-      char *text = web_extract_html_to_text(html);
-      free(html);
       if (!text)
-         continue;
+      {
+         cache_age = -1;
+         long long t0 = (long long)time(NULL) * 1000;
+         const char *err = NULL;
+         char used[64] = "";
+         char *html = web_egress_fetch_pinned(results[i].url, WEB_EGRESS_UNTRUSTED,
+                                              "Accept: text/html,text/plain\r\n",
+                                              FUSION_PAGE_TIMEOUT, 0, used, sizeof(used), &err);
+         spent += ((long long)time(NULL) * 1000) - t0;
+
+         if (!html)
+         {
+            char note[320];
+            snprintf(note, sizeof(note), "[%d] %s\n  (not fetched: %s)\n\n", i + 1,
+                     results[i].url, err ? err : "fetch failed");
+            dstr_append_str(ds, note);
+            continue;
+         }
+         text = web_extract_html_to_text(html);
+         free(html);
+         if (!text)
+            continue;
+         (void)db1_web_page_put(results[i].url, text, used); /* never fails a fetch */
+      }
 
       char ref[24];
       snprintf(ref, sizeof(ref), "s%d", i + 1);
       /* takes ownership of text */
-      char *spans = web_extract_spans(text, ref, query, FUSION_PAGE_BUDGET, results[i].url);
+      char *spans =
+          web_extract_spans(text, ref, query, FUSION_PAGE_BUDGET, results[i].url, cache_age);
       if (spans)
       {
          char lead[600];
