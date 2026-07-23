@@ -285,6 +285,7 @@ class DescriptorTests(unittest.TestCase):
             ("config", "private_headers", "src/modules/config/config_internal.h"),
             ("git", "sources", "src/modules/git/git_ops.c"),
             ("git", "private_headers", "src/modules/git/git_verify_internal.h"),
+            ("delegates", "sources", "src/modules/delegates/delegate_driver.c"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -305,7 +306,7 @@ class DescriptorTests(unittest.TestCase):
 
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git"):
+                           "workspace", "vault", "config", "git", "delegates"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -409,7 +410,7 @@ class DescriptorTests(unittest.TestCase):
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git"):
+                           "workspace", "vault", "config", "git", "delegates"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)

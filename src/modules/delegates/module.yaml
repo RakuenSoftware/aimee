@@ -38,6 +38,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/delegates/aimee_ir_rescue.c",
     "src/modules/delegates/delegate_backend.c",
