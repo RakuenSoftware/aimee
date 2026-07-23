@@ -65,7 +65,8 @@ static server_mgmt_read_result_t read_status(void *ctx, const server_mgmt_read_r
    const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
    unsigned char pub[32], digest[SHA256_DIGEST_LENGTH];
    kb_mgmt_status_t st;
-   if (!proof || !key_id || !rq->staple || rq->staple_len > KB_MGMT_STATUS_JSON_MAX ||
+   const char *purpose = rq ? server_mgmt_read_selector_purpose(rq->selector) : NULL;
+   if (!proof || !purpose || !key_id || !rq->staple || rq->staple_len > KB_MGMT_STATUS_JSON_MAX ||
        read_hex_key(key_hex, pub) != 0)
       return SERVER_MGMT_READ_UNAVAILABLE;
    memset(proof, 0, sizeof(*proof));
@@ -75,7 +76,7 @@ static server_mgmt_read_result_t read_status(void *ctx, const server_mgmt_read_r
       if (kb_mgmt_status_nonce_from_json(rq->staple, st.nonce) == 0)
       {
          server_mgmt_nonce_result_t consumed = server_mgmt_nonce_consume_purpose(
-             &st, rq->peer, rq->server_id, "management.read.v1", (uint64_t)rq->now, 0);
+             &st, rq->peer, rq->server_id, purpose, (uint64_t)rq->now, 0);
          if (consumed == SERVER_MGMT_NONCE_STORAGE)
             return SERVER_MGMT_READ_UNAVAILABLE;
       }
@@ -90,9 +91,9 @@ static server_mgmt_read_result_t read_status(void *ctx, const server_mgmt_read_r
                !strcmp(st.caller_fingerprint, rq->peer->fingerprint) &&
                !strcmp(st.target_server_id, rq->server_id) &&
                !strcmp(st.target_mgmt_fingerprint, rq->local_fingerprint) &&
-               !strcmp(st.purpose, "management.read.v1");
+               !strcmp(st.purpose, purpose);
    server_mgmt_nonce_result_t consumed = server_mgmt_nonce_consume_purpose(
-       &st, rq->peer, rq->server_id, "management.read.v1", (uint64_t)rq->now, valid);
+       &st, rq->peer, rq->server_id, purpose, (uint64_t)rq->now, valid);
    if (consumed != SERVER_MGMT_NONCE_OK)
       return consumed == SERVER_MGMT_NONCE_STORAGE ? SERVER_MGMT_READ_UNAVAILABLE
              : consumed == SERVER_MGMT_NONCE_NOT_FOUND || consumed == SERVER_MGMT_NONCE_EXPIRED ||
@@ -155,6 +156,12 @@ static int read_load(void *ctx, server_mgmt_read_agent_t *out, size_t cap, size_
 {
    (void)ctx;
    return server_mgmt_read_load_agents(out, cap, count);
+}
+
+static int read_load_config(void *ctx, server_mgmt_read_config_t *out)
+{
+   (void)ctx;
+   return server_mgmt_read_load_config(out);
 }
 
 static int64_t read_publication_generation(int64_t now)
@@ -220,7 +227,7 @@ int server_http_mgmt_read_error(server_mgmt_read_result_t result, char *resp, in
    return status;
 }
 
-int server_http_mgmt_read_agents(char *resp, int cap)
+static int server_http_mgmt_read(server_mgmt_read_selector_t selector, char *resp, int cap)
 {
    if (server_http_management_action_begin() != 0)
       return server_http_mgmt_read_error(SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
@@ -245,9 +252,15 @@ int server_http_mgmt_read_agents(char *resp, int cap)
        .local_fingerprint = local ? local->fingerprint : NULL,
        .publication_generation = generation > 0 ? (uint64_t)generation : 0,
        .now = now,
+       .selector = selector,
    };
    server_mgmt_read_deps_t deps = {
-       read_status, read_token, read_jti, read_load, read_checkpoint, NULL,
+       .verify_and_consume_status = read_status,
+       .verify_token = read_token,
+       .consume_jti = read_jti,
+       .load_agents = read_load,
+       .load_config = read_load_config,
+       .verify_checkpoint = read_checkpoint,
    };
    size_t response_len = 0;
    server_mgmt_read_result_t result =
@@ -257,4 +270,14 @@ int server_http_mgmt_read_agents(char *resp, int cap)
        result == SERVER_MGMT_READ_OK ? 200 : server_http_mgmt_read_error(result, resp, cap);
    server_http_management_action_end();
    return status;
+}
+
+int server_http_mgmt_read_agents(char *resp, int cap)
+{
+   return server_http_mgmt_read(SERVER_MGMT_READ_SELECTOR_AGENTS, resp, cap);
+}
+
+int server_http_mgmt_read_config(char *resp, int cap)
+{
+   return server_http_mgmt_read(SERVER_MGMT_READ_SELECTOR_CONFIG, resp, cap);
 }

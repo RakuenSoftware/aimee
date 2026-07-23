@@ -25,13 +25,13 @@ func TestConsoleAdminAllows_Allowed(t *testing.T) {
 }
 
 func TestFleetAllowsExactFamily(t *testing.T) {
-	allow := [][2]string{{"GET", "/v1/servers"}, {"GET", "/v1/servers/s1/health"}, {"GET", "/v1/servers/s1/agents"}, {"POST", "/v1/servers/s1/actions"}}
+	allow := [][2]string{{"GET", "/v1/servers"}, {"GET", "/v1/servers/s1/health"}, {"GET", "/v1/servers/s1/agents"}, {"GET", "/v1/servers/s1/config"}, {"POST", "/v1/servers/s1/actions"}}
 	for _, c := range allow {
 		if !fleetAllows(c[0], c[1]) {
 			t.Errorf("expected fleet allow: %s %s", c[0], c[1])
 		}
 	}
-	deny := [][2]string{{"POST", "/v1/servers"}, {"GET", "/v1/servers/"}, {"GET", "/v1/servers/s1/actions"}, {"POST", "/v1/servers/s1/agents"}, {"GET", "/v1/servers/s1/config"}, {"GET", "/v1/servers/s1/health/extra"}, {"GET", "/v1/%73ervers"}}
+	deny := [][2]string{{"POST", "/v1/servers"}, {"GET", "/v1/servers/"}, {"GET", "/v1/servers/s1/actions"}, {"POST", "/v1/servers/s1/agents"}, {"POST", "/v1/servers/s1/config"}, {"GET", "/v1/servers/s1/config/extra"}, {"GET", "/v1/servers/s1/health/extra"}, {"GET", "/v1/%73ervers"}}
 	for _, c := range deny {
 		if fleetAllows(c[0], c[1]) {
 			t.Errorf("expected fleet deny: %s %s", c[0], c[1])
@@ -54,6 +54,7 @@ func TestConsoleAdminAllows_Denied(t *testing.T) {
 		{"GET", "/v1/%65nrollments"},                 // encoded literal
 		{"GET", "/v1/enrollments?all=1"},             // stray query
 		{"GET", "/v1/servers/s1/agents"},             // OIDC fleet credential only
+		{"GET", "/v1/servers/s1/config"},             // OIDC fleet credential only
 		{"GET", "v1/enrollments"},                    // missing leading slash
 		{"GET", ""},
 		{"", "/v1/enrollments"},

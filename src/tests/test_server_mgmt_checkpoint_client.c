@@ -126,7 +126,8 @@ static int fake_transport(void *opaque, const server_mgmt_checkpoint_material_t 
    return 0;
 }
 
-static void make_staple(uint64_t generation, char out[KB_MGMT_STATUS_JSON_MAX + 1])
+static void make_staple(uint64_t generation, const char *purpose,
+                        char out[KB_MGMT_STATUS_JSON_MAX + 1])
 {
    unsigned char key[32] = {1};
    kb_mgmt_status_t s = {
@@ -140,7 +141,7 @@ static void make_staple(uint64_t generation, char out[KB_MGMT_STATUS_JSON_MAX + 
    snprintf(s.target_server_id, sizeof(s.target_server_id), "server-1");
    memset(s.target_mgmt_fingerprint, 'b', 64);
    s.target_mgmt_fingerprint[64] = 0;
-   snprintf(s.purpose, sizeof(s.purpose), "management.action.v1");
+   snprintf(s.purpose, sizeof(s.purpose), "%s", purpose);
    assert(kb_mgmt_status_sign(&s, key) == 0);
    assert(kb_mgmt_status_to_json(&s, out, KB_MGMT_STATUS_JSON_MAX + 1) == 0);
 }
@@ -181,7 +182,7 @@ int main(void)
    memset(peer.fingerprint, 'a', 64);
    peer.fingerprint[64] = 0;
    char staple[KB_MGMT_STATUS_JSON_MAX + 1];
-   make_staple(7, staple);
+   make_staple(7, "management.action.v1", staple);
    server_mgmt_endpoint_request_t rq = {.staple = staple,
                                         .staple_len = strlen(staple),
                                         .server_id = "server-1",
@@ -271,19 +272,26 @@ int main(void)
    fake.transport_rc = 0;
    fake.expected_purpose = "management.read.v1";
    snprintf(claims.capability, sizeof(claims.capability), "remote_reads");
-   make_staple(7, staple);
+   make_staple(7, "management.read.v1", staple);
    rq.staple_len = strlen(staple);
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     7, staple_digest) == SERVER_MGMT_CHECKPOINT_OK);
 
-   make_staple(6, staple);
+   fake.expected_purpose = "management.read.config.v1";
+   make_staple(7, "management.read.config.v1", staple);
+   rq.staple_len = strlen(staple);
+   assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
+                                                    7, staple_digest) == SERVER_MGMT_CHECKPOINT_OK);
+
+   fake.expected_purpose = "management.read.v1";
+   make_staple(6, "management.read.v1", staple);
    rq.staple_len = strlen(staple);
    fake.transport_rc = 0;
    fake.generation_delta = -1;
    assert(server_mgmt_checkpoint_client_verify_with(&material, fake_transport, &fake, &rq, &claims,
                                                     6, staple_digest) ==
           SERVER_MGMT_CHECKPOINT_INTEGRITY);
-   assert(fake.calls == 16);
+   assert(fake.calls == 17);
    assert(server_mgmt_status_hwm_advance(9) == 0);
    assert(server_mgmt_status_hwm_advance(8) == -1);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 9);

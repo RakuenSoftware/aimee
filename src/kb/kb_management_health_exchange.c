@@ -169,11 +169,11 @@ int kb_management_health_challenge_decode(const char *raw, size_t len, unsigned 
    return rc;
 }
 
-int kb_management_read_challenge_decode(const char *raw, size_t len, unsigned char nonce[32],
-                                        uint64_t *expires)
+int kb_management_read_challenge_decode(const char *raw, size_t len, const char *purpose,
+                                        unsigned char nonce[32], uint64_t *expires)
 {
    static const char *const names[] = {"nonce", "purpose", "expires_at"};
-   if (!nonce || !expires)
+   if (!purpose || !nonce || !expires)
       return -1;
    memset(nonce, 0, 32);
    *expires = 0;
@@ -183,7 +183,7 @@ int kb_management_read_challenge_decode(const char *raw, size_t len, unsigned ch
    const cJSON *e = j ? cJSON_GetObjectItemCaseSensitive(j, "expires_at") : NULL;
    const char *ns = cJSON_IsString(n) ? cJSON_GetStringValue(n) : NULL;
    int rc = exact_object(j, names, 3) && ns && cJSON_IsString(p) && cJSON_IsNumber(e) &&
-                    !strcmp(cJSON_GetStringValue(p), "management.read.v1") && e->valuedouble >= 0 &&
+                    !strcmp(cJSON_GetStringValue(p), purpose) && e->valuedouble >= 0 &&
                     e->valuedouble <= (double)UINT64_MAX &&
                     (double)(uint64_t)e->valuedouble == e->valuedouble &&
                     nonce_decode(ns, nonce) == 0

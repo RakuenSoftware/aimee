@@ -341,6 +341,12 @@ static int rh_management_read_agents(const route_req_t *rq, char *resp, int cap)
    return server_http_mgmt_read_agents(resp, cap);
 }
 
+static int rh_management_read_config(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return server_http_mgmt_read_config(resp, cap);
+}
+
 static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, int cap,
                                            const char *purpose)
 {
@@ -361,10 +367,9 @@ static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, in
    char enc[48];
    if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
       return err_json(resp, cap, 503, "management challenge unavailable");
-   if (!strcmp(purpose, "management.read.v1"))
-      snprintf(resp, (size_t)cap,
-               "{\"nonce\":\"%s\",\"purpose\":\"management.read.v1\",\"expires_at\":%llu}", enc,
-               (unsigned long long)expiry);
+   if (!strcmp(purpose, "management.read.v1") || !strcmp(purpose, "management.read.config.v1"))
+      snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"purpose\":\"%s\",\"expires_at\":%llu}", enc,
+               purpose, (unsigned long long)expiry);
    else
       snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
                (unsigned long long)expiry);
@@ -389,6 +394,17 @@ static int rh_management_action_challenge(const route_req_t *rq, char *resp, int
 static int rh_management_read_challenge(const route_req_t *rq, char *resp, int cap)
 {
    int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   else
+      status = server_http_mgmt_read_error(
+          status == 401 ? SERVER_MGMT_READ_FORBIDDEN : SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
+   return status;
+}
+
+static int rh_management_read_config_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.config.v1");
    if (status == 200)
       server_http_keepalive_set(1);
    else
@@ -1730,9 +1746,12 @@ static const http_route_t g_v1_routes[] = {
      rh_management_action_challenge},
     {"POST", "/v1/management/read/challenge", NULL, RM_EXACT, NULL, 0,
      rh_management_read_challenge},
+    {"POST", "/v1/management/read/config/challenge", NULL, RM_EXACT, NULL, 0,
+     rh_management_read_config_challenge},
     {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
     {"GET", "/v1/management/read/agents", NULL, RM_EXACT, NULL, 0, rh_management_read_agents},
+    {"GET", "/v1/management/read/config", NULL, RM_EXACT, NULL, 0, rh_management_read_config},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},

@@ -2,7 +2,9 @@
 
 #include "server.h"
 #include "agent_config.h"
+#include "config.h"
 
+#include <openssl/crypto.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -37,5 +39,27 @@ int server_mgmt_read_load_agents(server_mgmt_read_agent_t *out, size_t cap, size
       dst->max_parallel = src->max_parallel;
    }
    *count = (size_t)cfg.agent_count;
+   return 0;
+}
+
+int server_mgmt_read_load_config(server_mgmt_read_config_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!out)
+      return -1;
+   config_t active;
+   memset(&active, 0, sizeof(active));
+   if (config_load(&active) != 0)
+   {
+      OPENSSL_cleanse(&active, sizeof(active));
+      return -1;
+   }
+   out->mtls = active.server_api_mtls;
+   out->remote_writes = active.server_api_remote_writes;
+   memcpy(out->client_transport, active.server_api_client_transport, sizeof(out->client_transport));
+   out->cli_session_forwarding = active.server_api_cli_session_forwarding;
+   out->require_aimee_git = active.require_aimee_git;
+   OPENSSL_cleanse(&active, sizeof(active));
    return 0;
 }

@@ -875,6 +875,10 @@ int main(void)
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
       assert(server_http_management_auth("GET", "/v1/management/read/agents", 1, 1, 1,
                                          "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("POST", "/v1/management/read/config/challenge", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
+      assert(server_http_management_auth("GET", "/v1/management/read/config", 1, 1, 1,
+                                         "p5-kb-management") == SERVER_HTTP_MANAGEMENT_ALLOW);
       assert(server_http_management_auth("GET", "/v1/health", 0, 1, 0, "generic-client") ==
              SERVER_HTTP_MANAGEMENT_NOT_APPLICABLE);
       assert(server_http_management_auth("POST", "/v1/management/health", 1, 1, 1,
@@ -1015,6 +1019,17 @@ int main(void)
                                                        strlen(read_challenge)) == 1);
       assert(server_http_management_read_framing_valid("GET", "/v1/management/read/agents",
                                                        read_agents, strlen(read_agents)) == 1);
+      const char read_config_challenge[] =
+          "POST /v1/management/read/config/challenge HTTP/1.1\r\nHost: server.test\r\n"
+          "Content-Type: application/json\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+      const char read_config[] = "GET /v1/management/read/config HTTP/1.1\r\nHost: server.test\r\n"
+                                 "Authorization: Bearer token\r\nX-Aimee-Management-Status: {}\r\n"
+                                 "Content-Length: 0\r\nConnection: close\r\n\r\n";
+      assert(server_http_management_read_framing_valid(
+                 "POST", "/v1/management/read/config/challenge", read_config_challenge,
+                 strlen(read_config_challenge)) == 1);
+      assert(server_http_management_read_framing_valid("GET", "/v1/management/read/config",
+                                                       read_config, strlen(read_config)) == 1);
       char read_with_type[1024];
       snprintf(read_with_type, sizeof(read_with_type), "%.*sContent-Type: application/json\r\n\r\n",
                (int)(strlen(read_agents) - 2), read_agents);

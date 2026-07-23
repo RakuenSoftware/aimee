@@ -6507,7 +6507,8 @@ BEGIN
      OR p_fingerprint !~ '^[0-9a-f]{64}$'
      OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
      OR p_purpose NOT IN
-       ('management.health.v1','management.action.v1','management.read.v1') THEN
+       ('management.health.v1','management.action.v1','management.read.v1',
+        'management.read.config.v1') THEN
     RAISE EXCEPTION 'invalid management status input' USING ERRCODE='22023';
   END IF;
   RETURN QUERY SELECT g.generation,r.mgmt_fingerprint
@@ -9701,10 +9702,10 @@ CREATE TABLE IF NOT EXISTS kb_management_read_intent (
   kind TEXT NOT NULL CHECK (kind='read'),
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   actor_identity TEXT NOT NULL CHECK (char_length(actor_identity) BETWEEN 1 AND 576),
-  selector TEXT NOT NULL CHECK (selector='agents'),
+  selector TEXT NOT NULL CHECK (selector IN ('agents','config')),
   capability TEXT NOT NULL CHECK (capability='remote_reads'),
   external_method TEXT NOT NULL CHECK (external_method='GET'),
-  external_path TEXT NOT NULL CHECK (external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/agents$'),
+  external_path TEXT NOT NULL CHECK (external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$'),
   challenge_nonce BYTEA NOT NULL CHECK (octet_length(challenge_nonce)=32),
   target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
   request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[0-9a-f]{64}$'),
@@ -9740,7 +9741,7 @@ CREATE TABLE IF NOT EXISTS kb_management_read_intent (
   UNIQUE(correlation_id,jti,kind),
   FOREIGN KEY(correlation_id,jti,kind)
     REFERENCES kb_management_token_intent_namespace(correlation_id,jti,kind),
-  CHECK (external_path='/v1/servers/'||target_server_id||'/agents'),
+  CHECK (external_path='/v1/servers/'||target_server_id||'/'||selector),
   CHECK (issuance_deadline>to_timestamp(issued_at) AND
          issuance_deadline<=to_timestamp(issued_at+15)),
   CHECK ((state='pending' AND lease_owner IS NULL AND lease_until IS NULL AND
@@ -9759,7 +9760,7 @@ CREATE TABLE IF NOT EXISTS kb_management_read_key_use (
   team_id BIGINT NOT NULL,
   actor_identity TEXT NOT NULL,
   target_server_id TEXT NOT NULL,
-  selector TEXT NOT NULL CHECK (selector='agents'),
+  selector TEXT NOT NULL CHECK (selector IN ('agents','config')),
   request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[0-9a-f]{64}$'),
   kid TEXT NOT NULL,
   key_generation BIGINT NOT NULL CHECK (key_generation=2),
@@ -9769,6 +9770,58 @@ CREATE TABLE IF NOT EXISTS kb_management_read_key_use (
   created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   FOREIGN KEY(correlation_id,jti) REFERENCES kb_management_read_intent(correlation_id,jti)
 );
+
+-- P5-D2b: widen the frozen read authority from agents to the closed config
+-- selector without weakening method/path binding on already-provisioned DBs.
+-- Prior releases used anonymous CHECKs, whose generated names are not a migration
+-- contract. Discover every CHECK that depends on the two widened columns before
+-- installing the canonical named constraints.
+DO $$
+DECLARE constraint_name TEXT;
+BEGIN
+  FOR constraint_name IN
+    SELECT c.conname
+      FROM pg_catalog.pg_constraint c
+     WHERE c.conrelid='public.kb_management_read_intent'::pg_catalog.regclass
+       AND c.contype='c'
+       AND pg_catalog.pg_get_expr(c.conbin,c.conrelid)=ANY(ARRAY[
+         $expr$(selector = 'agents'::text)$expr$,
+         $expr$(selector = ANY (ARRAY['agents'::text, 'config'::text]))$expr$,
+         $expr$(external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/agents$'::text)$expr$,
+         $expr$(external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$'::text)$expr$,
+         $expr$(external_path = (('/v1/servers/'::text || target_server_id) || '/agents'::text))$expr$,
+         $expr$(external_path = ((('/v1/servers/'::text || target_server_id) || '/'::text) || selector))$expr$
+       ])
+  LOOP
+    EXECUTE pg_catalog.format('ALTER TABLE public.kb_management_read_intent DROP CONSTRAINT %I',
+                              constraint_name);
+  END LOOP;
+  FOR constraint_name IN
+    SELECT c.conname
+      FROM pg_catalog.pg_constraint c
+     WHERE c.conrelid='public.kb_management_read_key_use'::pg_catalog.regclass
+       AND c.contype='c'
+       AND pg_catalog.pg_get_expr(c.conbin,c.conrelid)=ANY(ARRAY[
+         $expr$(selector = 'agents'::text)$expr$,
+         $expr$(selector = ANY (ARRAY['agents'::text, 'config'::text]))$expr$
+       ])
+  LOOP
+    EXECUTE pg_catalog.format('ALTER TABLE public.kb_management_read_key_use DROP CONSTRAINT %I',
+                              constraint_name);
+  END LOOP;
+END $$;
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_selector_check
+  CHECK (selector IN ('agents','config'));
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_external_path_check
+  CHECK (external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$');
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_path_binding_check
+  CHECK (external_path='/v1/servers/'||target_server_id||'/'||selector);
+ALTER TABLE kb_management_read_key_use
+  ADD CONSTRAINT kb_management_read_key_use_selector_check
+  CHECK (selector IN ('agents','config'));
 
 ALTER TABLE kb_management_read_intent ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_read_intent FORCE ROW LEVEL SECURITY;
@@ -10180,8 +10233,9 @@ BEGIN
      p_external_path IS NULL OR p_challenge_nonce IS NULL OR p_request_sha256 IS NULL OR
      p_token_issuer IS NULL OR p_ttl_seconds IS NULL OR p_installation_id IS NULL OR
      p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR p_team_id<1 OR
-     p_target_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR p_selector<>'agents' OR
-     p_external_method<>'GET' OR p_external_path<>'/v1/servers/'||p_target_server_id||'/agents' OR
+     p_target_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR
+     p_selector NOT IN ('agents','config') OR p_external_method<>'GET' OR
+     p_external_path<>'/v1/servers/'||p_target_server_id||'/'||p_selector OR
      octet_length(p_challenge_nonce)<>32 OR p_request_sha256 !~ '^[0-9a-f]{64}$' OR
      char_length(p_token_issuer) NOT BETWEEN 1 AND 255 OR p_token_issuer ~ '[[:cntrl:]]' OR
      p_ttl_seconds NOT BETWEEN 1 AND 90 OR p_installation_id !~ '^[0-9a-f]{32}$' THEN
@@ -10253,7 +10307,7 @@ BEGIN
     installation_id,installation_generation,installation_enrollment_id,local_cert_issuer,
     local_cert_serial_norm,local_cert_fingerprint,target_enrollment_id,target_mgmt_issuer,
     target_mgmt_serial_norm,target_mgmt_fingerprint,revocation_generation,state)
-  VALUES(p_correlation_id,p_jti,'read',p_team_id,v_actor,'agents','remote_reads','GET',
+  VALUES(p_correlation_id,p_jti,'read',p_team_id,v_actor,p_selector,'remote_reads','GET',
     p_external_path,p_challenge_nonce,p_target_server_id,p_request_sha256,1,p_token_issuer,
     p_target_server_id,pg.token_wire_id,tr.current_version,pg.generation,v_iat,
     v_iat+p_ttl_seconds,pg_catalog.to_timestamp(v_iat+15),i.installation_id,i.current_generation,
@@ -10392,8 +10446,9 @@ BEGIN
                       (tl.id IS NULL OR tl.revoked_at<>'')) THEN
     RAISE EXCEPTION 'management read authority: actor denied' USING ERRCODE='42501';
   END IF;
-  IF a.selector<>'agents' OR a.capability<>'remote_reads' OR a.external_method<>'GET' OR
-     a.external_path<>'/v1/servers/'||a.target_server_id||'/agents' OR
+  IF a.selector NOT IN ('agents','config') OR a.capability<>'remote_reads' OR
+     a.external_method<>'GET' OR
+     a.external_path<>'/v1/servers/'||a.target_server_id||'/'||a.selector OR
      a.audience<>a.target_server_id OR a.issued_at>v_epoch OR v_epoch>=a.expires_at THEN
     RAISE EXCEPTION 'management read authority: frozen claims invalid' USING ERRCODE='40001';
   END IF;
