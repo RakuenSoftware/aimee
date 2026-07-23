@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "mcp_client.h"
+#include "aimee/protocols/mcp/mcp_client.h"
 
 #define PASS(name) printf("  PASS: %s\n", name)
 

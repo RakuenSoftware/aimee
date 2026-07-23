@@ -11,7 +11,7 @@
 #include "cli_code_audit.h"
 #include "cli_css.h"
 #include "cli_mcp_serve.h"
-#include "acp_server.h"
+#include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
 #include "client_integrations.h"

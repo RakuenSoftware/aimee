@@ -14,7 +14,7 @@
 #include "kb_client_cache.h"
 #include "kb_client_ws.h"
 #include "db1.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
 #include "cli_session_pty.h"

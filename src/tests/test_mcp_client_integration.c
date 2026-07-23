@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "mcp_client.h"
+#include "aimee/protocols/mcp/mcp_client.h"
 
 #ifdef AIMEE_POSIX
 typedef struct

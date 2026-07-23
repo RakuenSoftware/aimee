@@ -7,8 +7,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "mcp_osv_cache.h"
-#include "mcp_client_registry.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include "roundtable_activation.h"
 #include "../server/server_mcp_surface.h"
 

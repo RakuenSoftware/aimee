@@ -6,7 +6,7 @@
  * because the find_tools/describe_tool discovery meta-tools (also defined here)
  * surface the full catalog on demand. Set it to "full" to present everything. */
 #include "cJSON.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include "aimee_features.h"
 #include <stdlib.h>
 #include <string.h>

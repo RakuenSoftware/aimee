@@ -9,12 +9,31 @@ work, translate provider semantics, or make MCP/ACP optional extensions.
 
 ## Public contracts
 
-Canonical module source already includes `src/modules/protocols/mcp` client, registry, tool-table/profile,
-gateway bridge, and skill-tool code plus server-direction ACP in
-`src/modules/protocols/acp/acp_server.c`. Significant MCP server
+MCP and ACP are subnamespaces of this one required module. Consumers include public headers only
+through the module include root:
+
+| Canonical header | Purpose |
+| --- | --- |
+| `aimee/protocols/acp/acp_server.h` | Inbound ACP framing, handshake, prompt parsing, updates, and stdio server contract |
+| `aimee/protocols/mcp/mcp_client.h` | MCP transports, JSON-RPC framing, and client-session contract |
+| `aimee/protocols/mcp/mcp_client_registry.h` | Configured remote-client registry, discovery, and namespaced dispatch |
+| `aimee/protocols/mcp/mcp_tools.h` | Native MCP catalog, presentation profiles, discovery tools, and family demultiplexing |
+
+Headers used only to compose module-local tool families remain beside their implementation and are
+declared private. Production code outside `src/modules/protocols/` may not include those headers or
+use a bare/source-tree spelling for a public header. There is one canonical header for each public
+contract; the retired paths have no forwarding copies.
+
+Canonical module source includes the MCP client, registry, tool-table/profile, gateway bridge, and
+skill-tool code plus server-direction ACP in `src/modules/protocols/acp/acp_server.c`. Significant MCP server
 dispatch and ACP client/CLI integration remain under root and `src/server`, including `server_mcp_*`,
 `cli_mcp_serve`, and `cli_acp`; those are physical-ownership debt to inventory rather than evidence of a
 second protocol module.
+
+`src/modules/protocols/module.yaml` is the complete checked inventory for module-local sources and
+private headers. Its `ownership_complete` latch means an undeclared owner-local translation unit or
+private header, or a stale declaration, fails descriptor validation. Public headers, direct tests,
+and this document remain explicit declared contracts.
 
 ## Dependencies and consumers
 
@@ -79,6 +98,11 @@ the same core journeys rather than protocol-specific execution loops.
 cover framing and bridges. Malformed JSON, handshake mismatch, unavailable transport, unsafe package, or
 unknown tool fails with a protocol error and must not dispatch a partial or unauthorized action.
 
+Run `python3 -I -S scripts/validate_module_descriptors.py --check-schema src/modules` for descriptor
+set equality and `python3 -I -S scripts/check_module_header_layout.py` for canonical include/path
+enforcement. `python3 -I scripts/tests/test_check_module_header_layout.py -v` plants retired nested
+MCP/ACP include roots and spellings to prove the boundary check fails closed.
+
 ## Operational diagnostics
 
 Use per-adapter readiness, negotiated version/capabilities, registry/client state, `transport` lifecycle,
@@ -92,6 +116,8 @@ MCP/ACP method names, JSON-RPC IDs, capability negotiation, tool schemas/names, 
 ordering, and session semantics are compatibility contracts. Moving root/server MCP and ACP code into
 `src/modules/protocols` requires full caller/build inventories and wire fixtures. A simplified ACP dialect
 must not be presented as full ACP, and partial support must remain explicit in capability negotiation.
+This header-boundary change preserves the existing wire behavior, CLI names, routes, exported symbols,
+and Make/CMake object membership; it changes only header ownership and include spelling.
 
 ## Extension and removal
 

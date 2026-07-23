@@ -19,7 +19,7 @@
         },
         {
           "path": "src/server/server_main.c",
-          "sha256": "c0ca603f56cebdd3bc36ec890ba5c734d99ad8f8970c2cdc3b9ca8582d5074d0"
+          "sha256": "0eda8109ddeb8a6083b5fb888fd19c8a0e571cba8e9cf231d044635667036211"
         }
       ]
     },
@@ -1314,6 +1314,22 @@
           "sha256": "238f07213725f2456053afff18af6c741e52b86cbc04c0a10de47466f059a1eb"
         },
         {
+          "path": "src/modules/protocols/include/aimee/protocols/acp/acp_server.h",
+          "sha256": "ac6196c9264e2c6e3a2c2cb247f1e55996f0f906c60e814afe2429d0d53a4d54"
+        },
+        {
+          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h",
+          "sha256": "46bd495666eefe8fcb4f2d7a04a5285955906584e56a723adb9d12c3fe52556c"
+        },
+        {
+          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h",
+          "sha256": "9268f2b23353c04fe942281bb180ce6cf9c1484097cf086d60619e8cdcf67221"
+        },
+        {
+          "path": "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h",
+          "sha256": "e35bae8061155fd0b65e988189cbc00ad3370fb9707fa620556b8f5e4d3ce9f1"
+        },
+        {
           "path": "src/modules/skills/include/aimee/skills/skill.h",
           "sha256": "150a123e2dbb8af9bdb73891470f7ef3c995d727b27b4d5358d32bc7256abeeb"
         },
@@ -1336,7 +1352,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "255a9bee40df671182056227655416e54f62eceac68ecf70c7a6ba5f2e3ea440",
+      "sha256": "54566bc1962c97a57bc818a4518029ec11982663ebf349b0a246110064a683e8",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

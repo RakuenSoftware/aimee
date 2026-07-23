@@ -2,7 +2,7 @@
 #define DEC_MCP_CLIENT_REGISTRY_H 1
 
 #include "config.h"
-#include "mcp_client.h"
+#include "aimee/protocols/mcp/mcp_client.h"
 
 /* Boot the process-wide MCP client registry from config.
  * Returns the number of live sessions after startup. Never fails hard; entries

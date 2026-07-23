@@ -1,6 +1,6 @@
 /* mcp_tools_gateway.c: MCP tool registrations for the ambient-presence gateway. */
 #include "mcp_tools_gateway.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include <cJSON.h>
 #include <string.h>
 
