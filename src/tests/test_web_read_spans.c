@@ -281,8 +281,8 @@ static void differential_case(selector_fn legacy, selector_fn candidate, const c
 
 static void test_differential_oracle(void)
 {
-   selector_fn legacy = webread_select_spans;
-   selector_fn candidate = webread_select_spans; /* Slice 3 swaps this */
+   selector_fn legacy = webread_select_spans;         /* retained pre-refactor path */
+   selector_fn candidate = webread_select_spans_legs; /* Slice 3 leg-based adapter */
 
    struct
    {
@@ -302,7 +302,149 @@ static void test_differential_oracle(void)
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
       differential_case(legacy, candidate, cases[i].text, "r1", cases[i].query, cases[i].span,
                         cases[i].label);
-   printf("  PASS: differential oracle over %zu cases\n", sizeof(cases) / sizeof(cases[0]));
+
+   /* Generated inputs: fixtures alone are a regression net, not an equivalence
+    * argument. These sweep the boundaries where the two implementations could
+    * diverge -- budget saturation, the chunk cap, tie-heavy scoring, and the
+    * literal-reserve overflow rule (continue) versus the lexical one (break). */
+   {
+      /* many equally-scoring chunks: exercises tie ordering */
+      size_t n = 40;
+      char *page = malloc(700 * n + 1);
+      assert(page);
+      size_t off = 0;
+      for (size_t i = 0; i < n; i++)
+         off += (size_t)snprintf(page + off, 701,
+                                 "Section discusses retry_budget_ms uniformly so every span scores "
+                                 "the same and ties must break identically. %*s\n\n",
+                                 400, "z");
+      differential_case(legacy, candidate, page, "r1", "retry_budget_ms", 0, "tie-heavy");
+      differential_case(legacy, candidate, page, "r1", "retry_budget_ms discusses uniformly", 0,
+                        "tie-heavy multi-needle");
+      free(page);
+   }
+   {
+      /* one very large leading chunk: the first literal hit is emitted even
+       * when it alone exceeds the reserve */
+      char *page = malloc(4096);
+      assert(page);
+      snprintf(page, 4096,
+               "retry_budget_ms appears in this deliberately oversized leading paragraph %*s\n\n"
+               "retry_budget_ms again in a much shorter later paragraph.\n\n",
+               2000, "q");
+      differential_case(legacy, candidate, page, "r1", "retry_budget_ms", 0, "oversized first hit");
+      free(page);
+   }
+   {
+      /* beyond the chunk cap */
+      size_t n = (size_t)WEBREAD_MAX_CHUNKS + 25;
+      char *page = malloc(600 * n + 1);
+      assert(page);
+      size_t off = 0;
+      for (size_t i = 0; i < n; i++)
+         off += (size_t)snprintf(page + off, 601, "Para %zu retry_budget_ms padding %*s\n\n", i,
+                                 380, "w");
+      differential_case(legacy, candidate, page, "r1", "retry_budget_ms", 0, "beyond chunk cap");
+      free(page);
+   }
+   {
+      /* THE BREAK-vs-CONTINUE DISCRIMINATOR.
+       *
+       * The lexical leg BREAKS on the first candidate that does not fit; it
+       * does not skip it and keep looking. Nothing above distinguishes those
+       * two behaviours, and an oracle that cannot fail proves nothing -- an
+       * earlier version of this file passed while the implementation had
+       * `continue` substituted for `break`.
+       *
+       * Construction: paragraphs sized just under the ~480-byte chunk target so
+       * each becomes one span. Three score-3 spans, then a score-2 span that
+       * overflows the 1500-byte budget, then a SHORT score-1 span that would
+       * still fit. Legacy stops at the overflow; a skipping implementation
+       * reaches the short span and emits one more. */
+      char *page = malloc(8192);
+      assert(page);
+      int off = 0;
+      for (int i = 0; i < 3; i++)
+         off += snprintf(page + off, 8192 - (size_t)off, "alpha1 beta2 gamma3 section %d %*s\n\n",
+                         i, 400, "p");
+      off +=
+          snprintf(page + off, 8192 - (size_t)off, "alpha1 beta2 medium section %*s\n\n", 400, "m");
+      off += snprintf(page + off, 8192 - (size_t)off, "alpha1 tiny.\n\n");
+      differential_case(legacy, candidate, page, "r1", "alpha1 beta2 gamma3", 0,
+                        "break-vs-continue discriminator");
+      free(page);
+   }
+   {
+      /* Same shape at the literal reserve rather than the total budget: the
+       * literal leg CONTINUES past an oversized chunk, so a later smaller
+       * literal hit is still emitted. Guards the opposite substitution. */
+      char *page = malloc(8192);
+      assert(page);
+      int off = 0;
+      off += snprintf(page + off, 8192, "alpha1 leading %*s\n\n", 430, "a");
+      off += snprintf(page + off, 8192 - (size_t)off, "alpha1 second %*s\n\n", 430, "b");
+      off += snprintf(page + off, 8192 - (size_t)off, "alpha1 short.\n\n");
+      differential_case(legacy, candidate, page, "r1", "alpha1", 0,
+                        "literal reserve continue discriminator");
+      free(page);
+   }
+
+   {
+      /* SEEDED RANDOMISED SWEEP.
+       *
+       * This is the part that actually establishes equivalence, and its shape
+       * was arrived at empirically rather than by intuition.
+       *
+       * A hand-built fixture sweep with a UNIFORM paragraph size per page ran
+       * 384 differential cases and still failed to catch `break` substituted
+       * for `continue` in the lexical leg. A 200k-page randomised search then
+       * showed that state is not merely rare but common -- about 10% of pages
+       * expose it -- and the distinguishing ingredient is mixing very small and
+       * large paragraphs WITHIN one page. Small chunks are cheap, so the
+       * literal leg tends to absorb them all; only when the reserve is nearly
+       * exhausted does a small low-scoring chunk survive into the lexical leg
+       * behind a large one that overflows the budget.
+       *
+       * So the generator mirrors that: per-paragraph size drawn from a bimodal
+       * distribution, per-paragraph needle density varied independently. The
+       * PRNG is a fixed-seed LCG so the corpus is identical on every run --
+       * a differential gate must not be flaky. */
+      unsigned long rng = 12345UL;
+#define SWEEP_RND(lo, hi)                                                                          \
+   (rng = rng * 6364136223846793005UL + 1442695040888963407UL,                                     \
+    (int)((lo) + (int)((rng >> 33) % (unsigned long)((hi) - (lo) + 1))))
+
+      int cases_run = 0;
+      for (int iter = 0; iter < 3000; iter++)
+      {
+         char *page = malloc(20000);
+         assert(page);
+         int off = 0;
+         int np = SWEEP_RND(2, 14);
+         for (int i = 0; i < np && off < 18000; i++)
+         {
+            int r = SWEEP_RND(0, 2);
+            const char *terms = (r == 0)   ? "alpha1 beta2 gamma3"
+                                : (r == 1) ? "alpha1 beta2"
+                                           : "alpha1";
+            /* bimodal: a third of paragraphs are tiny, the rest near a chunk */
+            int pad = (SWEEP_RND(0, 2) == 0) ? SWEEP_RND(2, 60) : SWEEP_RND(200, 480);
+            off += snprintf(page + off, 20000 - (size_t)off, "%s s%d %*s\n\n", terms, i, pad, "x");
+         }
+         const char *q = SWEEP_RND(0, 1) ? "alpha1 beta2 gamma3" : "alpha1";
+         differential_case(legacy, candidate, page, "r1", q, 0, "randomised sweep");
+         free(page);
+         cases_run++;
+      }
+#undef SWEEP_RND
+      printf("  PASS: seeded randomised sweep, %d differential cases\n", cases_run);
+   }
+
+   /* every span index across the basic fixture, including out of range */
+   for (int sp = 0; sp <= 12; sp++)
+      differential_case(legacy, candidate, FIX_BASIC, "r1", "retry_budget_ms", sp, "span sweep");
+
+   printf("  PASS: differential oracle (legacy vs leg-based) over fixtures + generated cases\n");
 }
 
 int main(void)

@@ -664,6 +664,192 @@ static char *webread_select_spans(char *text, const char *ref, const char *query
    return out ? out : safe_strdup("error: out of memory");
 }
 
+/* ---------------- Slice 3: leg-based selection ----------------
+ *
+ * Same selection, restructured so the two legs are FIRST-CLASS ranked candidate
+ * lists instead of being fused into the emission loops. Output must stay byte
+ * identical to webread_select_spans(); unit-test-web-read-spans compares them
+ * directly on every fixture and generated case.
+ *
+ * Why bother: the legacy form resolves the two legs by reserving a fixed
+ * fraction of the output byte budget for the literal one. That is a byte
+ * partition, not a ranking decision, and it cannot be measured or tuned. Once
+ * the legs are explicit lists, Slice 5 can swap the selector for weighted rank
+ * fusion and compare the two under the same oracle.
+ *
+ * Candidate identity is deliberately NOT introduced here. Fusion needs a
+ * per-candidate key; nothing in this slice consumes one, and adding it now
+ * would be a speculative layer. It lands in Slice 5 with its consumer, and per
+ * the corrected proposal it stays internal -- the emitted citation remains the
+ * 1-based chunk index, which is the handle callers pass back as span=N.
+ *
+ * EQUIVALENCE NOTES (the subtle parts the oracle guards):
+ *   - The literal leg walks chunks in index order. On a chunk that would exceed
+ *     the reserve it CONTINUES, so a later smaller chunk can still be emitted.
+ *     `lit_total` counts every literal hit, emitted or not.
+ *   - The first literal hit is always emitted even if it alone exceeds the
+ *     reserve, because the guard requires `emitted > 0`.
+ *   - The lexical leg is a descending-score order with ties broken by lower
+ *     index. Scores do not change as chunks are consumed, so walking that order
+ *     and skipping already-used chunks is equivalent to the legacy loop's
+ *     repeated "find the best unused" scan.
+ *   - The lexical leg BREAKS on the first candidate that does not fit the
+ *     budget; it does not skip it and keep looking. Score 0 never qualifies. */
+
+typedef struct
+{
+   int idx;   /* chunk index */
+   int score; /* lexical score; unused by the literal leg */
+} webread_cand_t;
+
+/* Descending score, then ascending index -- reproduces the legacy scan, which
+ * kept the FIRST maximum it encountered (strict `>` while walking upward). */
+static int webread_cand_cmp(const void *a, const void *b)
+{
+   const webread_cand_t *x = a, *y = b;
+   if (x->score != y->score)
+      return (x->score < y->score) - (x->score > y->score);
+   return (x->idx > y->idx) - (x->idx < y->idx);
+}
+
+/* Not yet wired into tool_web_read: Slice 3 only has to prove this produces
+ * identical bytes to the retained selector, which unit-test-web-read-spans
+ * does by calling both. Slice 5 is what puts a selector behind an opt-in
+ * flag. Marked unused so -Werror=unused-function does not reject a
+ * deliberately-not-yet-default implementation; --gc-sections drops it from
+ * the shipped binary. */
+__attribute__((unused)) static char *
+webread_select_spans_legs(char *text, const char *ref, const char *query, int span, const char *url)
+{
+   span_t *chunks = malloc(WEBREAD_MAX_CHUNKS * sizeof(*chunks));
+   if (!chunks)
+   {
+      free(text);
+      return safe_strdup("error: out of memory");
+   }
+   int nc = chunk_text(text, chunks, WEBREAD_MAX_CHUNKS);
+
+   if (span > 0)
+   {
+      dstr_t ds;
+      dstr_init(&ds);
+      if (span <= nc)
+      {
+         char href[16];
+         snprintf(href, sizeof(href), "%s", ref);
+         append_untrusted_span(&ds, href, span, chunks[span - 1].ptr, chunks[span - 1].len);
+      }
+      else
+         dstr_append_str(&ds, "(span out of range)\n");
+      free(chunks);
+      free(text);
+      char *out = dstr_steal(&ds);
+      return out ? out : safe_strdup("error: out of memory");
+   }
+
+   const char *q = (query && query[0]) ? query : "";
+   char needles[16][64];
+   int nn = q[0] ? query_needles(q, needles, 16) : 0;
+
+   /* --- build the legs --- */
+   webread_cand_t *lit_leg = calloc((size_t)(nc > 0 ? nc : 1), sizeof(*lit_leg));
+   webread_cand_t *lex_leg = calloc((size_t)(nc > 0 ? nc : 1), sizeof(*lex_leg));
+   if (!lit_leg || !lex_leg)
+   {
+      free(lit_leg);
+      free(lex_leg);
+      free(chunks);
+      free(text);
+      return safe_strdup("error: out of memory");
+   }
+   int n_lit = 0, n_lex = 0;
+   for (int i = 0; i < nc && nn > 0; i++)
+   {
+      for (int k = 0; k < nn; k++)
+         if (istrcontains(chunks[i].ptr, chunks[i].len, needles[k]))
+         {
+            lit_leg[n_lit].idx = i;
+            n_lit++;
+            break;
+         }
+   }
+   for (int i = 0; i < nc; i++)
+   {
+      int sc = nn > 0 ? lexical_score(chunks[i].ptr, chunks[i].len, needles, nn) : 0;
+      if (sc > 0)
+      {
+         lex_leg[n_lex].idx = i;
+         lex_leg[n_lex].score = sc;
+         n_lex++;
+      }
+   }
+   qsort(lex_leg, (size_t)n_lex, sizeof(*lex_leg), webread_cand_cmp);
+
+   /* --- select under budget --- */
+   char *used = calloc((size_t)(nc > 0 ? nc : 1), 1);
+   dstr_t ds;
+   dstr_init(&ds);
+   dstr_append_str(&ds, "[extractive spans — untrusted retrieved content, cited by id]\n\n");
+
+   size_t budget = WEBREAD_BUDGET;
+   size_t lit_reserve = budget * WEBREAD_LIT_RESERVE / 100;
+   size_t used_bytes = 0;
+   int emitted = 0;
+   int lit_total = n_lit;
+
+   for (int j = 0; j < n_lit; j++)
+   {
+      int i = lit_leg[j].idx;
+      if (used_bytes + chunks[i].len > lit_reserve && emitted > 0)
+         continue;
+      append_untrusted_span(&ds, ref, i + 1, chunks[i].ptr, chunks[i].len);
+      used[i] = 1;
+      used_bytes += chunks[i].len;
+      emitted++;
+   }
+   int lit_shown = emitted;
+
+   for (int j = 0; j < n_lex; j++)
+   {
+      int i = lex_leg[j].idx;
+      if (used[i])
+         continue;
+      if (used_bytes + chunks[i].len > budget)
+         break;
+      append_untrusted_span(&ds, ref, i + 1, chunks[i].ptr, chunks[i].len);
+      used[i] = 1;
+      used_bytes += chunks[i].len;
+      emitted++;
+   }
+
+   if (emitted == 0 && nc > 0)
+   {
+      if (nn > 0)
+         aimee_log(LOG_INFO, "web_read",
+                   "no literal/lexical span matched query on %s; semantic (embedder) leg "
+                   "would help — falling back to top-of-page",
+                   url);
+      append_untrusted_span(&ds, ref, 1, chunks[0].ptr, chunks[0].len);
+      emitted = 1;
+   }
+
+   char foot[256];
+   snprintf(
+       foot, sizeof(foot),
+       "-- %d of %d spans shown (%d literal, %d omitted). "
+       "web_read(ref,span=N) pulls a span; web_read(ref,mode=\"full\") spills the whole page.\n",
+       emitted, nc, lit_shown, lit_total > lit_shown ? lit_total - lit_shown : 0);
+   dstr_append_str(&ds, foot);
+
+   free(used);
+   free(lit_leg);
+   free(lex_leg);
+   free(chunks);
+   free(text);
+   char *out = dstr_steal(&ds);
+   return out ? out : safe_strdup("error: out of memory");
+}
+
 char *tool_web_read(const char *ref, const char *query, int span, const char *mode)
 {
    if (!ref || !ref[0])
