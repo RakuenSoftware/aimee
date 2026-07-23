@@ -24,6 +24,56 @@ E1 provides one SECURITY DEFINER function that appends the evidence row and
 advances the shard head in the caller's transaction. E2 calls it from exactly
 three places, and nowhere else.
 
+### Shard model: one reserved shard per source ledger
+
+The three source ledgers are **not** per-`(tenant, provider)` — they are
+service-global or whole-vault chains. Verified against the code:
+`db2_kb_audit_append` / `kb_audit_worm_append` carry only actor/action/subject;
+`kb_vault_rewrap_worm` and `kb_vault_open_event` are whole-vault. So each ledger
+maps to its **own reserved witness shard**, and the per-`(tenant, provider)`
+sharding capacity is held for a future slice that witnesses per-key-use egress
+with real identities.
+
+| ledger | reserved `(tenant, provider)` | `source_kind` | `source_id` | `source_hash` | `has_source_pred` / `source_pred_hash` |
+|---|---|---|---|---|---|
+| audit | `("!kb", "!audit")` | 0 AUDIT | `seq::text` | the audit row's `row_hash` (a real content hash) | **true** / the audit row's `prev_hash` |
+| reseal | `("!kb", "!reseal")` | 1 REWRAP | `operation_id \|\| '/' \|\| event_kind` | **`sha256(content pack of the rewrap row)`** — not `event_id` | false / zero |
+| open | `("!kb", "!open")` | 2 OPEN | `event_id` | the open row's `row_hash` | false / zero |
+
+Each reserved shard is its own tamper-evident sub-chain with its own checkpoint
+leaf, so a rewrite of one ledger cannot be masked by another. The three chains are
+already serialized upstream (audit by `pg_advisory_xact_lock`, reseal/open by the
+vault maintenance barrier), so one-shard-per-ledger adds no hotspot.
+
+**`source_hash` must bind row content, not identity.** For the audit and open
+ledgers the existing `row_hash` is a true content hash, so the witness reuses it.
+For the reseal ledger, `event_id` is `sha256(label ‖ operation_id ‖ event_kind)` —
+a hash of *identity*, unchanged by a tamper of `state`, `seal_epoch`,
+`receipt_digest`, or `detail`. Using it as `source_hash` would leave those fields
+unwitnessed. The reseal witness therefore computes `source_hash` as a SHA-256 over
+a canonical pack of the rewrap row's immutable content columns
+(`event_id`, `state`, `seal_epoch`, `fencing_token`, the three digests, `actor`,
+`detail`), reusing the same pack discipline as the digest helpers. The E2 PG gate
+asserts that mutating any of those columns changes `source_hash`.
+
+**`source_pred_hash` is the source ledger's own predecessor, distinct from
+`witness_pred_hash`.** E1's record carries both: `witness_pred_hash` is the
+previous witness record in the shard (always present); `source_pred_hash` is the
+source chain's own predecessor and exists only for the audit ledger, which is
+hash-chained. Reseal and open have no source-chain predecessor, so
+`has_source_pred=false` and the field is zero. This separation is already built
+in E1; E2 must not conflate the two.
+
+**Collision safety with future real shards.** E2 writes only the three fixed
+reserved keys, and the append function is the sole writer (direct DML on the
+witness tables is revoked from every role). A real tenant/provider is never
+written by this umbrella, so there is no collision to guard against in E2. The
+obligation to keep real identities out of the `!`-reserved namespace transfers to
+the future per-key-use slice, which introduces real `(tenant, provider)` values;
+that slice must validate them against the reserved set. A blanket CHECK forbidding
+`!`-prefixed shard keys is **not** usable here because the reserved shards
+themselves use `!`.
+
 **Reseal — `kb_vault_rewrap_worm`.** Add the call inside the existing definer
 functions in `src/db2/schema.sql` that already `PERFORM
 org_vault_rewrap_worm_append`: the `intent`, `resealed`, `completed`, `abort`,
@@ -43,12 +93,20 @@ Wrapping a new transaction around the call would leave exactly the crash window
 the atomicity invariant exists to close.
 
 **The witness call must not inherit the audit chain's read-then-insert pattern.**
-That function establishes its sequence and predecessor with `SELECT … ORDER BY
-seq DESC LIMIT 1` followed by `INSERT`, which is not safe against concurrent
-appenders. The witness shard advance uses E1's atomic `UPDATE … SET seq = seq + 1
-… RETURNING` instead. Whether the pre-existing audit-chain pattern needs
-hardening is a real question but a separate one; this slice must not silently
-adopt it.
+The C `db2_kb_audit_append` establishes its sequence and predecessor with
+`SELECT … ORDER BY seq DESC LIMIT 1` followed by `INSERT`, with no advisory lock —
+not safe against concurrent appenders (the SQL `kb_audit_worm_append` *does* take
+`pg_advisory_xact_lock`, so the two writers to `kb_audit_event` differ in safety).
+The witness shard advance uses E1's ensure-sentinel + `FOR UPDATE` instead.
+
+A noted side effect, not a load-bearing fix: because the witness append takes
+`FOR UPDATE` on the `(!kb,!audit)` shard row inside the same transaction, two
+concurrent audit appends on the wired path serialize on that row and cannot both
+commit the same audit `seq`. E2 must not *rely* on this to fix the audit chain —
+the underlying C `MAX(seq)+INSERT` race is a pre-existing source-ledger defect,
+out of scope here, and should be surfaced as a follow-up (a sequence-backed
+`INSERT … RETURNING`, mirroring the witness store's own per-shard pattern) rather
+than papered over.
 
 On `witness_concurrency_exhausted` from E1's bounded retry, the caller aborts the
 source event. Evidence that cannot be appended means the source event does not
