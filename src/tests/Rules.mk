@@ -158,6 +158,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-manager-artifacts \
                $(TESTPREFIX)/unit-test-wfe-externalization \
                $(TESTPREFIX)/unit-test-tool-egress \
+               $(TESTPREFIX)/unit-test-cli-claude-allowlist \
                $(TESTPREFIX)/unit-test-web-read-spans \
                $(TESTPREFIX)/unit-test-kb-rrf-purity \
                $(TESTPREFIX)/unit-test-wfe-deliver \
@@ -1632,6 +1633,13 @@ $(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
 	$(CC) $(L_FLAGS) -o $@ $^
+
+$(TESTPREFIX)/unit-test-cli-claude-allowlist: $(OBJDIR)/tests/test_cli_claude_allowlist.o \
+                                    $(OBJDIR)/server/cli_claude.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o \
+                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o \
+                                    $(OBJDIR)/modules/workflows/tool_egress.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 $(TESTPREFIX)/unit-test-tool-egress: $(OBJDIR)/tests/test_tool_egress.o \
                                     $(OBJDIR)/modules/workflows/tool_egress.o \

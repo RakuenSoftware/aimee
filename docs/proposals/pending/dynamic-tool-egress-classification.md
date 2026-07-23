@@ -3,6 +3,34 @@
 *Filed as the known-gap record for the fail-closed egress capability gate.
 Classification: **security, high**.*
 
+> ## SEVERITY CORRECTED — there is no present bypass
+>
+> This record was filed as **security, high** on the reasoning that host-CLI
+> tools "still resolve to permitted". Measuring the actual allowlist showed that
+> claim was wrong. Every tool handed to the provider CLI is already accounted
+> for: `WebFetch` and `WebSearch` are recognised as externalization, `Bash` is
+> recognised as a shell tool and gated by command inspection, and the remaining
+> six (`Edit`, `Read`, `Write`, `Glob`, `Grep`, `NotebookEdit`) are genuinely
+> local and *should* be permitted — denying them would break gated runs outright.
+>
+> So the exposure was never "an egress tool is ungated today". It was temporal:
+> nothing forced a tool ADDED to that list later to be classified. That is a real
+> gap, but it is **medium** and it needed roughly thirty lines, not the
+> registration-time metadata subsystem proposed below.
+>
+> **Fixed** by making the allowlist enumerable data
+> (`cli_claude_allowed_tools()`) and adding `test_cli_claude_allowlist.c`, which
+> forces every entry into one of three buckets — gated as externalization, gated
+> by command inspection, or on a reviewed local-only list — and fails with an
+> explanatory message otherwise. Verified by adding an unclassified
+> egress-shaped tool to the list and confirming the suite fails.
+>
+> **Still open**, and genuinely unaddressed: third-party MCP servers are handled
+> by defaulting `mcp__*` to external, which keys on a NAME PREFIX rather than an
+> authenticated registration identity. The own-server exemption
+> (`mcp__aimee__*`) is likewise a naming convention. That is what the direction
+> below should address; the host-CLI half of the problem is closed.
+
 ## The gap, stated without softening
 
 The egress capability gate is fail-closed for two populations and **still
