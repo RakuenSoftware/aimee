@@ -1054,3 +1054,66 @@ It also recommended culling `deploy` as having "no template, no route". **That i
 
 Each step changes agent ELIGIBILITY, so none is a template-only edit, and none can be verified
 from this worktree against the live server.
+
+---
+
+## 11. Transport reality: where scope and verify actually run
+
+Found by trying to exercise escalation end to end against the live server, which is the only
+way this surfaced — every unit test passes with or without the defect.
+
+**The deployed topology is a thin client talking to a remote server over `/v1`.** The thin
+`aimee` binary links `CLI_SRCS`, which does NOT include `cmd_agent_delegate.c`; it carries no
+delegate engine, no provider transports and no credentials, by design. `marshal_delegate`
+forwards a fixed allowlist and silently drops everything else.
+
+Consequences, all verified rather than inferred:
+
+- `--verify` and `--scope` were **silently dropped** on every routed run. A caller got a normal,
+  successful-looking result while the verifier never executed and the scope ceiling never bound.
+- `agent_route_with_caps_scoped()` had **no production caller passing a real scope** —
+  `server_compute.c` read `required_caps`/`min_context` off the request and then called the
+  *unscoped* router. The one place a ceiling could apply was the one variant nobody called.
+- `verify_escalation_warranted()` / `agent_route_escalation_target()` are referenced **only** by
+  `cmd_agent_delegate.c`, which no supported deployment invokes.
+
+### Resolution (roundtable jobs 10864, 10885)
+
+The two flags are structurally different and were wrongly conflated onto one transport path.
+
+**`scope` is routing policy** — it names a ceiling, carries no caller-supplied code, and the
+server already chooses the seat. Forwarded and enforced server-side; the effective ceiling is
+logged with the placement so a ceiling that failed to bind is distinguishable from one that bound
+and admitted the seat. Constraints accepted from the panel: caller scope may only NARROW what
+operator policy permits, an unsatisfiable scope is an explicit error rather than silent widening,
+and scope is evaluated together with capability gating so a ceiling cannot force a non-capable
+placement.
+
+**`verify` is caller-supplied code whose exit status is the sole evidence used to decide a model
+was inadequate.** Honouring it server-side would both execute caller-supplied shell on a shared
+server and hand whoever passes the flag control of escalation, and therefore of spend. Running it
+client-side is not available: there is no delegate engine there. It is therefore **refused** on the
+routed path rather than accepted and ignored.
+
+### Open decision: retire generic auto-escalation
+
+The panel's stronger recommendation, not yet acted on because it removes a requested feature:
+
+> Drop generic verifier-driven auto-escalation from the public `--verify` contract. Route
+> correctly first; make retries explicit.
+
+The argument: a verifier failure has many causes a dearer model will not fix — invalid tests,
+environment problems, ambiguous requirements, an impossible task — so "the output failed a test"
+does not establish "the seat was badly chosen", and automatic spend escalation is a poor default
+response to that ambiguity. This is consistent with the operator's own rule that over-selecting
+beats laddering: the scope ceiling plus capability gating are what should choose a sufficient seat
+on the first attempt, and escalation is better treated as routing telemetry plus an explicit,
+audited retry.
+
+If retained, it should be an operator-owned recovery policy enabled narrowly for specific task and
+failure classes — never a consequence of a caller-supplied flag. The escalation TARGET SELECTION
+logic is worth keeping either way, as server routing intelligence or an advisory query.
+
+Until that is decided, `verify` + escalation remain implemented in `cmd_agent_delegate.c` and
+unreachable from the shipped client, which is the honest state: refused where it cannot work,
+not quietly ignored.

@@ -925,6 +925,13 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* Record the placement together with the ceiling it was made under. A scope
+    * that silently failed to bind is indistinguishable from one that bound and
+    * admitted the seat unless the effective value is observable, and this is the
+    * only place that knows both. */
+   if (scope != AGENT_SCOPE_UNSET)
+      aimee_log(LOG_INFO, "delegate", "routed role '%s' to '%s' under scope ceiling %s", role,
+                target_agent->name, agent_scope_name(scope));
    /* An agent flagged "Primary Agent Only" (agents.json `primary_only`) is never
     * a delegation target. A claude-oauth subscription is pre-flagged this way at
     * add time: driving a personal Claude plan as an automated delegate may breach
