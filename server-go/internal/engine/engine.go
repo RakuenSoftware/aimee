@@ -64,6 +64,10 @@ type Runner interface {
 	Run(context.Context, StepRequest) (StepResult, error)
 }
 
+// maxRunnerFailuresWithoutProgress bounds consecutive runner-failure parks at
+// one stage before the item is parked for a human instead of auto-resumed.
+const maxRunnerFailuresWithoutProgress = 8
+
 type Engine struct {
 	db            *db1.Store
 	artifacts     *wfe.ArtifactStore
@@ -236,6 +240,13 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, nil
 		}
 		reason := "runner_unavailable"
+		// A stage that keeps failing without ever advancing is not a transient
+		// outage: stop auto-resuming it and park for a human. Without this an
+		// endlessly-failing delegate retries on the transient backoff forever.
+		if failures, ferr := e.db.RunnerFailuresSinceProgress(context.WithoutCancel(ctx), item.ID, item.Stage); ferr == nil &&
+			failures >= maxRunnerFailuresWithoutProgress {
+			reason = "delegate_failed"
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			reason = "wall_cap"
 		}

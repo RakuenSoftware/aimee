@@ -937,6 +937,20 @@ WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason='' 
 	return tx.Commit()
 }
 
+// RunnerFailuresSinceProgress counts how many times this stage has parked on a
+// runner failure without any intervening forward progress. 'redispatch' is
+// deliberately NOT progress: a recovery that keeps re-dispatching work that
+// keeps failing is exactly the no-progress loop this bounds.
+func (s *Store) RunnerFailuresSinceProgress(ctx context.Context, workItemID, stage string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_event
+WHERE work_item_id=? AND stage=? AND kind='pause'
+  AND id > COALESCE((SELECT MAX(id) FROM lifecycle_event
+                     WHERE work_item_id=? AND kind IN ('advance','loop','create')), 0)`,
+		workItemID, stage, workItemID).Scan(&count)
+	return count, err
+}
+
 // RecoverLostReplay resolves a replay-only invocation whose durable delegate
 // result is gone (e.g. a restart killed the in-flight job). A reservation left
 // 'unresolved' was an ambiguous, interrupted dispatch whose estimate never
