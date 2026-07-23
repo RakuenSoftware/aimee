@@ -10,6 +10,32 @@
 
 #define MODELS_DEV_MAX_SIZE (8 * 1024 * 1024)
 
+/* The cache is DOWNLOADED and therefore untrusted. A JSON number outside int
+ * range converted straight to int is undefined behaviour, so every numeric field
+ * goes through this: non-finite, negative, and out-of-range values are rejected
+ * rather than truncated into a nonsense capability. */
+static int json_int_checked(cJSON *v, int *out)
+{
+   if (!cJSON_IsNumber(v))
+      return 0;
+   double d = v->valuedouble;
+   if (!(d >= 0.0) || d > 2147483647.0) /* also rejects NaN */
+      return 0;
+   *out = (int)d;
+   return 1;
+}
+
+static int json_double_checked(cJSON *v, double *out)
+{
+   if (!cJSON_IsNumber(v))
+      return 0;
+   double d = v->valuedouble;
+   if (!(d >= 0.0) || d > 1e12) /* also rejects NaN */
+      return 0;
+   *out = d;
+   return 1;
+}
+
 /* Defined below: resolves provider/model against the NESTED live api.json shape
  * after the flat key lookup misses. */
 static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
@@ -24,17 +50,13 @@ static void fill_cap_from_json(cJSON *entry, const char *provider, const char *m
 
    cJSON *tmp;
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "contextWindow");
-   if (cJSON_IsNumber(tmp))
-      out->context_window = (int)tmp->valuedouble;
+   (void)json_int_checked(tmp, &out->context_window);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "maxTokens");
-   if (cJSON_IsNumber(tmp))
-      out->max_output = (int)tmp->valuedouble;
+   (void)json_int_checked(tmp, &out->max_output);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "inputCost");
-   if (cJSON_IsNumber(tmp))
-      out->cost_in_per_mtok = tmp->valuedouble;
+   (void)json_double_checked(tmp, &out->cost_in_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "outputCost");
-   if (cJSON_IsNumber(tmp))
-      out->cost_out_per_mtok = tmp->valuedouble;
+   (void)json_double_checked(tmp, &out->cost_out_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "tools");
    if (cJSON_IsTrue(tmp))
       out->flags |= MODEL_CAP_TOOLS;
@@ -81,8 +103,11 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
 {
    char key[256];
    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
+   /* Flat form wins when it is a USABLE object. Mere presence must not suppress
+    * the nested lookup: a null, string, or otherwise malformed flat value would
+    * otherwise mask a perfectly good nested entry and yield empty capabilities. */
    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
-   if (!entry)
+   if (!cJSON_IsObject(entry))
       return lookup_in_nested_json(root, provider, model_id, out);
    fill_cap_from_json(entry, provider, model_id, out);
    return 1;
@@ -116,23 +141,18 @@ static void fill_cap_from_nested(cJSON *entry, const char *provider, const char 
    cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
    if (cJSON_IsObject(limit))
    {
-      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(limit, "context");
-      if (cJSON_IsNumber(tmp))
-         out->context_window = (int)tmp->valuedouble;
-      tmp = cJSON_GetObjectItemCaseSensitive(limit, "output");
-      if (cJSON_IsNumber(tmp))
-         out->max_output = (int)tmp->valuedouble;
+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "context"),
+                             &out->context_window);
+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "output"), &out->max_output);
    }
 
    cJSON *cost = cJSON_GetObjectItemCaseSensitive(entry, "cost");
    if (cJSON_IsObject(cost))
    {
-      cJSON *tmp = cJSON_GetObjectItemCaseSensitive(cost, "input");
-      if (cJSON_IsNumber(tmp))
-         out->cost_in_per_mtok = tmp->valuedouble;
-      tmp = cJSON_GetObjectItemCaseSensitive(cost, "output");
-      if (cJSON_IsNumber(tmp))
-         out->cost_out_per_mtok = tmp->valuedouble;
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "input"),
+                                &out->cost_in_per_mtok);
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "output"),
+                                &out->cost_out_per_mtok);
    }
 
    /* models.dev spells tool use "tool_call". REASONING has no flat-schema

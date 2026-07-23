@@ -246,15 +246,38 @@ static const struct
 };
 
 /* Lowercased host of an endpoint URL, without scheme, userinfo, port or path.
- * Returns 0 when no host could be parsed. */
+ * Returns 0 when no host could be parsed.
+ *
+ * The scheme must be ANCHORED: searching for "://" anywhere lets a scheme-less
+ * endpoint smuggle an authority through a path segment
+ * ("gateway.example/relay://api.minimax.io/v1" would otherwise parse as
+ * api.minimax.io), which for the legacy wire-provider rewrite would change auth
+ * and credential selection. Scheme-relative "//host/path" is accepted. */
 static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
 {
    if (!endpoint || !endpoint[0] || !out || out_len == 0)
       return 0;
    out[0] = '\0';
 
-   const char *p = strstr(endpoint, "://");
-   p = p ? p + 3 : endpoint;
+   const char *p = endpoint;
+   if (p[0] == '/' && p[1] == '/')
+   {
+      p += 2; /* scheme-relative */
+   }
+   else
+   {
+      /* scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":" "//" */
+      size_t i = 0;
+      if (isalpha((unsigned char)p[0]))
+      {
+         i = 1;
+         while (p[i] && (isalnum((unsigned char)p[i]) || p[i] == '+' || p[i] == '-' || p[i] == '.'))
+            i++;
+      }
+      if (i > 0 && p[i] == ':' && p[i + 1] == '/' && p[i + 2] == '/')
+         p += i + 3;
+      /* else: no scheme — treat the whole string as an authority + path. */
+   }
 
    /* Userinfo (user:pass@host) must not be mistaken for the host, but only when
     * the '@' precedes the authority's end. */
@@ -263,7 +286,19 @@ static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
    if (at)
       p = at + 1;
 
-   size_t n = strcspn(p, ":/?#");
+   size_t n;
+   if (p[0] == '[')
+   {
+      /* Bracketed IPv6 literal: the colons inside are not a port separator. */
+      const char *close = memchr(p, ']', (size_t)(authority_end - p));
+      if (!close)
+         return 0;
+      n = (size_t)(close - p) + 1;
+   }
+   else
+   {
+      n = strcspn(p, ":/?#");
+   }
    if (n == 0 || n >= out_len)
       return 0;
    for (size_t i = 0; i < n; i++)
@@ -274,6 +309,19 @@ static int agent_endpoint_host(const char *endpoint, char *out, size_t out_len)
    if (n > 1 && out[n - 1] == '.')
       out[n - 1] = '\0';
    return out[0] ? 1 : 0;
+}
+
+/* 1 when `model` names the given vendor FAMILY: the prefix must be followed by
+ * end-of-string or a separator, never more letters. Unanchored matching let
+ * "minimaximum-production" be treated as MiniMax — which, in the legacy wire
+ * rewrite, would change the agent's auth type and credential env vars. */
+static int model_family_is(const char *model, const char *family)
+{
+   size_t n = strlen(family);
+   if (!model || strncasecmp(model, family, n) != 0)
+      return 0;
+   char c = model[n];
+   return c == '\0' || c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == ' ';
 }
 
 /* 1 when host is `domain` itself or a subdomain of it. Label-anchored, so
@@ -334,12 +382,12 @@ static void agent_derive_catalog_provider(agent_t *ag)
    }
 
    /* Bare vendor-family model id. */
-   if (strncasecmp(ag->model, "minimax", 7) == 0)
+   if (model_family_is(ag->model, "minimax"))
    {
       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "minimax");
       return;
    }
-   if (strncasecmp(ag->model, "kimi", 4) == 0)
+   if (model_family_is(ag->model, "kimi"))
    {
       snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", "moonshotai");
       return;
@@ -837,7 +885,7 @@ int agent_load_config(agent_config_t *cfg)
                                (host_is_within_domain(lhost, "minimax.io") ||
                                 host_is_within_domain(lhost, "minimaxi.com") ||
                                 host_is_within_domain(lhost, "minimax.com"));
-            if (minimax_host || strncasecmp(ag->model, "minimax", 7) == 0)
+            if (minimax_host || model_family_is(ag->model, "minimax"))
                snprintf(ag->provider, sizeof(ag->provider), "%s", "minimax");
          }
 

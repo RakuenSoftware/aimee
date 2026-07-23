@@ -11,13 +11,42 @@
 #include "agent_tier_lint.h"
 #include "model_registry.h"
 
-/* Mirrors agent_config.c. Stubbed so this test links only the registry, not the
- * whole agent-config layer. */
+/* Mirror agent_config.c so this test links only the registry, not the whole
+ * agent-config layer. Kept behaviourally identical to the originals. */
 const char *agent_catalog_provider(const agent_t *agent)
 {
    if (!agent)
       return "";
    return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
+}
+
+int agent_has_role(const agent_t *agent, const char *role)
+{
+   for (int i = 0; i < agent->role_count; i++)
+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
+         return 1;
+   return 0;
+}
+
+int agent_is_exec_role(const agent_t *agent, const char *role)
+{
+   /* Same default set as agent_config.c: these 18 roles are granted to every
+    * agent regardless of its declared roles list. */
+   static const char *defaults[] = {"deploy",  "validate",   "test",  "diagnose",   "execute",
+                                    "review",  "code",       "refactor", "draft",   "implement",
+                                    "continuity", "prose",   "line-edit", "beat-check",
+                                    "lyric",   "hook",       "prosody", "songform"};
+   if (agent->exec_role_count > 0)
+   {
+      for (int i = 0; i < agent->exec_role_count; i++)
+         if (strcmp(agent->exec_roles[i], role) == 0)
+            return 1;
+      return 0;
+   }
+   for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); i++)
+      if (strcmp(defaults[i], role) == 0)
+         return 1;
+   return 0;
 }
 
 /* Seed a real priced catalog. Without this the static table prices nothing for
@@ -49,7 +78,15 @@ static void seed_priced_catalog(void)
                       "\"testvendor/ambig_a\":{\"contextWindow\":100000,\"inputCost\":9.0,"
                       "                      \"outputCost\":1.0,\"tools\":true},"
                       "\"testvendor/ambig_b\":{\"contextWindow\":100000,\"inputCost\":1.0,"
-                      "                      \"outputCost\":9.0,\"tools\":true}"
+                      "                      \"outputCost\":9.0,\"tools\":true},"
+                      /* Equal on input, dearer on output: Pareto-dominated. */
+                      "\"testvendor/eq_dear\":{\"contextWindow\":100000,\"inputCost\":10.0,"
+                      "                      \"outputCost\":50.0,\"tools\":true},"
+                      "\"testvendor/eq_cheap\":{\"contextWindow\":100000,\"inputCost\":10.0,"
+                      "                      \"outputCost\":5.0,\"tools\":true},"
+                      /* Output price ABSENT: partial data, not a known zero. */
+                      "\"testvendor/partial\":{\"contextWindow\":100000,\"inputCost\":1.0,"
+                      "                      \"tools\":true}"
                       "}";
    FILE *f = fopen(path, "w");
    assert(f);
@@ -217,6 +254,63 @@ static void test_ambiguous_price_axes_not_flagged(void)
    printf("  PASS: test_ambiguous_price_axes_not_flagged\n");
 }
 
+/* Equality on one axis with a strictly dearer other axis IS unambiguous Pareto
+ * dominance and needs no exchange rate: $10/$50 is never cheaper than $10/$5.
+ * A strict-on-both-axes test missed this. */
+static void test_equal_axis_dominance_is_flagged(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "eq_dear", 0);
+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "eq_cheap", 1);
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+   assert(strcmp(out[0].cheaper_tier_agent, "dear_at_tier0") == 0);
+
+   printf("  PASS: test_equal_axis_dominance_is_flagged\n");
+}
+
+/* A model with only one published price axis must not be compared as though the
+ * missing axis were known to be zero — that would manufacture a conflict from
+ * absent data, contradicting "absent is no evidence". */
+static void test_partial_price_data_is_not_compared(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);      /* 10 / 50 */
+   add_agent(&cfg, "partial_at_tier1", "testvendor", "partial", 1); /* 1 / absent */
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   printf("  PASS: test_partial_price_data_is_not_compared\n");
+}
+
+/* Agents that can never enter the same candidate set are not substitutes, so
+ * their relative tiers cannot mis-route anything. Reporting them would tell the
+ * operator routing prefers the dearer model when routing never chooses between
+ * them at all. */
+static void test_non_competing_roles_not_flagged(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
+   /* Disjoint, NON-exec roles: neither can serve the other's work. */
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   /* Sharing a role restores the finding. */
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "explain");
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+
+   printf("  PASS: test_non_competing_roles_not_flagged\n");
+}
+
 int main(void)
 {
    printf("agent_tier_lint:\n");
@@ -227,6 +321,9 @@ int main(void)
    test_disabled_agent_ignored();
    test_equal_tiers_never_conflict();
    test_ambiguous_price_axes_not_flagged();
+   test_equal_axis_dominance_is_flagged();
+   test_partial_price_data_is_not_compared();
+   test_non_competing_roles_not_flagged();
    test_guards();
    printf("agent_tier_lint: all tests passed\n");
    return 0;

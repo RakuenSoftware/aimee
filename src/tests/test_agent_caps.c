@@ -250,6 +250,59 @@ void test_catalog_provider_host_matching_is_label_anchored(void)
    unlink(agent_config_path());
 }
 
+/* Review-driven parser hardening. Each case previously misderived or was
+ * rejected; a misderivation is silent and, in the legacy wire rewrite, changes
+ * auth type and credential env-var selection. */
+void test_catalog_provider_endpoint_parser_edges(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[\n"
+         /* Scheme-less endpoint smuggling an authority through a PATH segment. */
+         "{\"name\":\"pathscheme\",\"provider\":\"openai\","
+         "\"endpoint\":\"gateway.example/relay://api.minimax.io/v1\","
+         "\"model\":\"house\",\"auth_type\":\"bearer\",\"api_key\":\"k\","
+         "\"roles\":[\"review\"]},\n"
+         /* Scheme-relative URL must still resolve its host. */
+         "{\"name\":\"schemerel\",\"provider\":\"anthropic\","
+         "\"endpoint\":\"//api.kimi.com/v1\",\"model\":\"house\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         /* Bracketed IPv6 literal must not parse as \"[\". */
+         "{\"name\":\"v6\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://[2001:db8::1]:8443/v1\",\"model\":\"house\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},\n"
+         /* Family prefix must be boundary-anchored: NOT MiniMax. */
+         "{\"name\":\"lookalikemodel\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://gw.example/v1\",\"model\":\"minimaximum-production\","
+         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}\n"
+         "]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+
+   /* Host is gateway.example, so no vendor: catalog falls back to the wire
+    * provider AND the legacy wire rewrite must not have fired. */
+   const agent_t *ps = agent_find(&c, "pathscheme");
+   assert(strcmp(agent_catalog_provider(ps), "openai") == 0);
+   assert(strcmp(ps->provider, "openai") == 0);
+
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "schemerel")), "moonshotai") == 0);
+
+   /* An IPv6 literal names no vendor domain; it must not derive one. */
+   assert(strcmp(agent_catalog_provider(agent_find(&c, "v6")), "openai") == 0);
+
+   /* "minimaximum-production" is not the minimax family: neither the catalog
+    * identity nor - critically - the wire provider may change. */
+   const agent_t *lk = agent_find(&c, "lookalikemodel");
+   assert(strcmp(agent_catalog_provider(lk), "openai") == 0);
+   assert(strcmp(lk->provider, "openai") == 0);
+
+   printf("  PASS: test_catalog_provider_endpoint_parser_edges\n");
+   unlink(agent_config_path());
+}
+
 /* Gateways (OpenRouter and friends) do not carry a vendor host, so the vendor
  * has to come from a namespaced model id. Review found "moonshotai/kimi-k2.7-code"
  * missed while "minimax/MiniMax-M3" worked by accident. */
@@ -326,12 +379,19 @@ void test_catalog_provider_maps_cli_provider_names(void)
    model_capability_t cap;
    assert(model_capability_get(agent_catalog_provider(cl), cl->model, &cap) != 0);
    assert(cap.flags & MODEL_CAP_REASONING);
-   assert(cap.context_window == 200000 || cap.context_window >= 1000000);
-   assert(model_max_output(agent_catalog_provider(cl), cl->model) > 8192);
+   assert(cap.flags & MODEL_CAP_TOOLS);
+   /* The catalog value, not the operator's policy ceiling: with a cold cache the
+    * static prefix table answers 200000 for claude-opus-4; with the real catalog
+    * it is 1000000. Both are legitimate SOURCES, so pin the property that
+    * actually regressed instead — an unmapped provider yielded NO flags and the
+    * non-reasoning 8192 output ceiling. */
+   assert(cap.context_window >= 200000);
+   assert(model_max_output(agent_catalog_provider(cl), cl->model) >= 32768);
 
    assert(model_capability_get(agent_catalog_provider(cx), cx->model, &cap) != 0);
    assert(cap.flags & MODEL_CAP_REASONING);
-   assert(model_max_output(agent_catalog_provider(cx), cx->model) > 8192);
+   assert(cap.flags & MODEL_CAP_TOOLS);
+   assert(model_max_output(agent_catalog_provider(cx), cx->model) >= 32768);
 
    printf("  PASS: test_catalog_provider_maps_cli_provider_names\n");
    unlink(agent_config_path());
