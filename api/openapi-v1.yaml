@@ -130,6 +130,24 @@ components:
               primary_only: { type: boolean }
               max_parallel: { type: integer, minimum: 0, maximum: 1024 }
 
+    ServerSafeConfigResponse:
+      type: object
+      additionalProperties: false
+      required: [server_id, team, config]
+      properties:
+        server_id: { type: string, minLength: 1, maxLength: 127, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$" }
+        team: { type: integer, format: int64, minimum: 1 }
+        config:
+          type: object
+          additionalProperties: false
+          required: [mtls, remote_writes, client_transport, cli_session_forwarding, require_aimee_git]
+          properties:
+            mtls: { type: string, enum: [off, optional, required] }
+            remote_writes: { type: string, enum: [off, data, full] }
+            client_transport: { type: string, enum: [socket, http, auto] }
+            cli_session_forwarding: { type: boolean }
+            require_aimee_git: { type: boolean }
+
     # ── Phase 3–4: Ingest API and corpus staging schemas ───────────────────
 
     DocIngestResponse:
@@ -1246,6 +1264,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServerAgentsResponse"
+        "400": { description: Invalid path or team query }
+        "401": { description: Authentication required }
+        "403": { description: Management read denied }
+        "404": { description: Server not found }
+        "409": { description: Read intent or target state conflict }
+        "502": { description: Authenticated management response failed integrity validation }
+        "503": { description: Management read runtime or dependency unavailable }
+
+  /servers/{server_id}/config:
+    get:
+      operationId: getServerSafeConfig
+      summary: Read the bounded safe configuration projection from one registered server
+      parameters:
+        - name: server_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 127, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$" }
+        - name: team
+          in: query
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "200":
+          description: Complete five-field safe configuration projection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerSafeConfigResponse" }
         "400": { description: Invalid path or team query }
         "401": { description: Authentication required }
         "403": { description: Management read denied }

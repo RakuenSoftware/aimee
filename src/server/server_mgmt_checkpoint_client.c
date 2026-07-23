@@ -164,9 +164,7 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
                                          size_t cap, char digest[65])
 {
    kb_mgmt_status_t staple;
-   const char *purpose = claims && !strcmp(claims->capability, "remote_reads")
-                             ? "management.read.v1"
-                             : "management.action.v1";
+   const char *purpose = NULL;
    char nonce[48], issuer[808];
    size_t serial_len =
        rq && rq->peer ? strnlen(rq->peer->serial_norm, sizeof(rq->peer->serial_norm)) : 0;
@@ -188,6 +186,15 @@ int server_mgmt_checkpoint_request_build(const server_mgmt_endpoint_request_t *r
        staple.revocation_generation != generation ||
        b64url(staple.nonce, sizeof(staple.nonce), nonce, sizeof(nonce)) ||
        b64url((const unsigned char *)rq->peer->issuer, issuer_len, issuer, sizeof(issuer)))
+      return -1;
+   if (!strcmp(claims->capability, "remote_reads") &&
+       (!strcmp(staple.purpose, "management.read.v1") ||
+        !strcmp(staple.purpose, "management.read.config.v1")))
+      purpose = staple.purpose;
+   else if (strcmp(claims->capability, "remote_reads") &&
+            !strcmp(staple.purpose, "management.action.v1"))
+      purpose = staple.purpose;
+   else
       return -1;
    int n = snprintf(out, cap,
                     "{\"version\":\"1\",\"purpose\":\"%s\",\"nonce\":\"%s\","

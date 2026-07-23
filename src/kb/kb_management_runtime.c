@@ -473,7 +473,8 @@ static int read_snapshot_matches(const db2_server_snapshot_t *s,
 static int read_status_matches(const char *wire, const unsigned char nonce[32],
                                const kb_management_cert_active_t *active,
                                const db2_management_read_intent_t *intent, const char *key_id,
-                               const unsigned char public_key[32], uint64_t now)
+                               const unsigned char public_key[32], uint64_t now,
+                               const char *purpose)
 {
    kb_mgmt_status_t status;
    char fingerprint[65];
@@ -485,8 +486,8 @@ static int read_status_matches(const char *wire, const unsigned char nonce[32],
              strcmp(status.caller_serial_norm, active->serial_norm) ||
              strcmp(status.caller_fingerprint, fingerprint) ||
              strcmp(status.target_server_id, intent->target_server_id) ||
-             strcmp(status.target_mgmt_fingerprint, intent->target_mgmt_fingerprint) ||
-             strcmp(status.purpose, "management.read.v1") ||
+             strcmp(status.target_mgmt_fingerprint, intent->target_mgmt_fingerprint) || !purpose ||
+             strcmp(status.purpose, purpose) ||
              status.revocation_generation != (uint64_t)intent->revocation_generation ||
              kb_mgmt_status_validate(&status, now, (uint64_t)intent->revocation_generation) ||
              kb_mgmt_status_verify_signature(&status, public_key);
@@ -528,7 +529,8 @@ static int read_object_exact(const cJSON *object, const char *const *names, size
    return fields == count && seen == (UINT32_C(1) << count) - 1;
 }
 
-static int read_projection_valid(const char *wire, size_t len, const char *server, int64_t team)
+static int read_agents_projection_valid(const char *wire, size_t len, const char *server,
+                                        int64_t team)
 {
    if (!wire || !len || len > 32768 || memchr(wire, 0, len))
       return 0;
@@ -581,12 +583,55 @@ static int read_projection_valid(const char *wire, size_t len, const char *serve
    return valid;
 }
 
+static int read_config_projection_valid(const char *wire, size_t len, const char *server,
+                                        int64_t team)
+{
+   if (!wire || !len || len > 32768 || memchr(wire, 0, len))
+      return 0;
+   const char *end = NULL;
+   cJSON *root = cJSON_ParseWithLengthOpts(wire, len, &end, 0);
+   cJSON *sid = root ? cJSON_GetObjectItemCaseSensitive(root, "server_id") : NULL;
+   cJSON *tid = root ? cJSON_GetObjectItemCaseSensitive(root, "team") : NULL;
+   cJSON *config = root ? cJSON_GetObjectItemCaseSensitive(root, "config") : NULL;
+   static const char *const root_fields[] = {"server_id", "team", "config"};
+   static const char *const config_fields[] = {"mtls", "remote_writes", "client_transport",
+                                               "cli_session_forwarding", "require_aimee_git"};
+   cJSON *mtls = config ? cJSON_GetObjectItemCaseSensitive(config, "mtls") : NULL;
+   cJSON *writes = config ? cJSON_GetObjectItemCaseSensitive(config, "remote_writes") : NULL;
+   cJSON *transport = config ? cJSON_GetObjectItemCaseSensitive(config, "client_transport") : NULL;
+   cJSON *forward =
+       config ? cJSON_GetObjectItemCaseSensitive(config, "cli_session_forwarding") : NULL;
+   cJSON *git = config ? cJSON_GetObjectItemCaseSensitive(config, "require_aimee_git") : NULL;
+   const char *m = cJSON_IsString(mtls) ? cJSON_GetStringValue(mtls) : NULL;
+   const char *w = cJSON_IsString(writes) ? cJSON_GetStringValue(writes) : NULL;
+   const char *t = cJSON_IsString(transport) ? cJSON_GetStringValue(transport) : NULL;
+   char team_token[48];
+   int team_n = snprintf(team_token, sizeof(team_token), "\"team\":%lld", (long long)team);
+   int valid =
+       root && end == wire + len &&
+       read_object_exact(root, root_fields, sizeof(root_fields) / sizeof(root_fields[0])) &&
+       read_object_exact(config, config_fields, sizeof(config_fields) / sizeof(config_fields[0])) &&
+       cJSON_IsString(sid) && !strcmp(cJSON_GetStringValue(sid), server) && cJSON_IsNumber(tid) &&
+       tid->valuedouble == (double)team && m &&
+       (!strcmp(m, "off") || !strcmp(m, "optional") || !strcmp(m, "required")) && w &&
+       (!strcmp(w, "off") || !strcmp(w, "data") || !strcmp(w, "full")) && t &&
+       (!strcmp(t, "socket") || !strcmp(t, "http") || !strcmp(t, "auto")) &&
+       cJSON_IsBool(forward) && cJSON_IsBool(git) && team_n > 0 &&
+       (size_t)team_n < sizeof(team_token) && strstr(wire, team_token);
+   cJSON_Delete(root);
+   return valid;
+}
+
 static kb_management_read_result_t runtime_read(void *unused, const kb_principal_t *actor,
-                                                int64_t team_id, const char *server_id, char *out,
+                                                int64_t team_id, const char *server_id,
+                                                server_mgmt_read_selector_t selector, char *out,
                                                 size_t cap)
 {
    (void)unused;
-   if (!actor || !actor->authenticated || team_id < 1 || !server_id || !out || cap < 2)
+   const char *selector_name = server_mgmt_read_selector_name(selector);
+   const char *purpose = server_mgmt_read_selector_purpose(selector);
+   if (!actor || !actor->authenticated || team_id < 1 || !server_id || !selector_name || !purpose ||
+       !out || cap < 2)
       return KB_MANAGEMENT_READ_INVALID;
    out[0] = 0;
    kb_management_cert_lifecycle_t *lifecycle = NULL;
@@ -652,13 +697,17 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    if (kb_management_health_server_open_production(&server_cfg, &snapshot, &bundle, deadline,
                                                    &session) != KB_MANAGEMENT_HEALTH_OK)
       goto done;
+   const char *challenge_path = selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+                                    ? "/v1/management/read/challenge"
+                                    : "/v1/management/read/config/challenge";
    if (kb_management_action_server_request_production(
-           NULL, session, "POST", "/v1/management/read/challenge", "", NULL, deadline, challenge,
-           sizeof(challenge), &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE ||
+           NULL, session, "POST", challenge_path, "", NULL, deadline, challenge, sizeof(challenge),
+           &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE ||
        http_status != 200)
       goto done;
    uint64_t expires = 0, now = wall_seconds(NULL);
-   if (kb_management_read_challenge_decode(challenge, strlen(challenge), nonce, &expires) ||
+   if (kb_management_read_challenge_decode(challenge, strlen(challenge), purpose, nonce,
+                                           &expires) ||
        expires <= now || expires - now > 15)
    {
       result = KB_MANAGEMENT_READ_INTEGRITY;
@@ -669,7 +718,8 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    if (challenge_deadline < deadline)
       deadline = challenge_deadline;
    char external_path[256];
-   if (snprintf(external_path, sizeof(external_path), "/v1/servers/%s/agents", server_id) < 0)
+   if (server_mgmt_read_selector_path(selector, server_id, external_path, sizeof(external_path)) <
+       0)
       goto done;
    int64_t publication_generation = 0;
    db2_management_read_result_t generation_result =
@@ -682,22 +732,23 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
                    : KB_MANAGEMENT_READ_UNAVAILABLE;
       goto done;
    }
-   server_mgmt_read_digest_input_t digest_input = {
-       .server_id = server_id,
-       .team_id = team_id,
-       .nonce = nonce,
-       .kb_issuer = active.issuer,
-       .kb_serial = active.serial_norm,
-       .server_issuer = snapshot.management_issuer,
-       .server_serial = snapshot.management_serial_norm,
-       .revocation_generation = snapshot.revocation_generation,
-       .publication_generation = publication_generation};
+   server_mgmt_read_digest_input_t digest_input = {.server_id = server_id,
+                                                   .team_id = team_id,
+                                                   .nonce = nonce,
+                                                   .kb_issuer = active.issuer,
+                                                   .kb_serial = active.serial_norm,
+                                                   .server_issuer = snapshot.management_issuer,
+                                                   .server_serial = snapshot.management_serial_norm,
+                                                   .revocation_generation =
+                                                       snapshot.revocation_generation,
+                                                   .publication_generation = publication_generation,
+                                                   .selector = selector};
    char digest[65];
    if (server_mgmt_read_digest(&digest_input, digest))
       goto done;
    db2_management_read_result_t jr =
-       db2_management_read_intent_start(actor, team_id, server_id, external_path, nonce, digest,
-                                        token_issuer, installation, ttl, &intent);
+       db2_management_read_intent_start(actor, team_id, server_id, selector, external_path, nonce,
+                                        digest, token_issuer, installation, ttl, &intent);
    if (jr != DB2_MANAGEMENT_READ_OK)
    {
       result = jr == DB2_MANAGEMENT_READ_DENIED      ? KB_MANAGEMENT_READ_DENIED
@@ -738,8 +789,8 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    nonce64_runtime(nonce, encoded);
    int n = snprintf(status_request, sizeof(status_request),
                     "{\"nonce\":\"%s\",\"target\":\"%s\",\"target_mgmt_fp\":\"%s\","
-                    "\"purpose\":\"management.read.v1\"}",
-                    encoded, server_id, intent.target_mgmt_fingerprint);
+                    "\"purpose\":\"%s\"}",
+                    encoded, server_id, intent.target_mgmt_fingerprint, purpose);
    if (n < 0 || (size_t)n >= sizeof(status_request))
       goto done;
    kb_management_health_result_t status_result =
@@ -748,7 +799,7 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    if (status_result != KB_MANAGEMENT_HEALTH_OK)
       goto done;
    if (http_status != 200 || !read_status_matches(staple, nonce, &active, &intent, status_key_id,
-                                                  status_public_key, wall_seconds(NULL)))
+                                                  status_public_key, wall_seconds(NULL), purpose))
    {
       result = KB_MANAGEMENT_READ_INTEGRITY;
       goto done;
@@ -772,13 +823,18 @@ static kb_management_read_result_t runtime_read(void *unused, const kb_principal
    server_response = calloc(32769, 1);
    if (!server_response)
       goto done;
+   const char *server_path = selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+                                 ? "/v1/management/read/agents"
+                                 : "/v1/management/read/config";
    if (kb_management_action_server_request_production(
-           NULL, session, "GET", "/v1/management/read/agents", "", headers, deadline,
-           server_response, 32769, &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE)
+           NULL, session, "GET", server_path, "", headers, deadline, server_response, 32769,
+           &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE)
       goto done;
    size_t response_len = strnlen(server_response, 32769);
    if (http_status != 200 || response_len == 32769 ||
-       !read_projection_valid(server_response, response_len, server_id, team_id))
+       !(selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+             ? read_agents_projection_valid(server_response, response_len, server_id, team_id)
+             : read_config_projection_valid(server_response, response_len, server_id, team_id)))
    {
       result = http_status == 403                         ? KB_MANAGEMENT_READ_DENIED
                : http_status == 409                       ? KB_MANAGEMENT_READ_CONFLICT

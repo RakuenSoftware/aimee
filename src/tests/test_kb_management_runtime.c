@@ -35,6 +35,7 @@ static int block_reconcile;
 static int reconcile_entered;
 static int read_fixture_enabled;
 static int read_sequence;
+static server_mgmt_read_selector_t read_selector;
 static int read_response_mode;
 static kb_mgmt_token_authority_ipc_result_t token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
 static kb_http_servers_read_handler_fn captured_read_handler;
@@ -98,14 +99,22 @@ int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn handler, voi
 
 db2_management_read_result_t
 db2_management_read_intent_start(const kb_principal_t *actor, int64_t team, const char *server,
-                                 const char *path, const uint8_t nonce[32], const char *digest,
-                                 const char *issuer, const char *installation, int ttl,
+                                 server_mgmt_read_selector_t selector, const char *path,
+                                 const uint8_t nonce[32], const char *digest, const char *issuer,
+                                 const char *installation, int ttl,
                                  db2_management_read_intent_t *out)
 {
    if (read_fixture_enabled)
    {
       assert(actor && actor->authenticated && team == 7 && !strcmp(server, "srv-1"));
-      assert(!strcmp(path, "/v1/servers/srv-1/agents") && nonce[0] == 0);
+      assert((selector == SERVER_MGMT_READ_SELECTOR_AGENTS ||
+              selector == SERVER_MGMT_READ_SELECTOR_CONFIG) &&
+             ((selector == SERVER_MGMT_READ_SELECTOR_AGENTS &&
+               !strcmp(path, "/v1/servers/srv-1/agents")) ||
+              (selector == SERVER_MGMT_READ_SELECTOR_CONFIG &&
+               !strcmp(path, "/v1/servers/srv-1/config"))) &&
+             nonce[0] == 0);
+      read_selector = selector;
       assert(!strcmp(digest, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"));
       assert(!strcmp(issuer, "https://issuer.example") &&
              !strcmp(installation, "00000000000000000000000000000000") && ttl == 90);
@@ -143,12 +152,34 @@ int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *input, char o
    return -1;
 }
 
-int kb_management_read_challenge_decode(const char *raw, size_t len, unsigned char nonce[32],
-                                        uint64_t *expires)
+const char *server_mgmt_read_selector_name(server_mgmt_read_selector_t selector)
+{
+   return selector == SERVER_MGMT_READ_SELECTOR_AGENTS   ? "agents"
+          : selector == SERVER_MGMT_READ_SELECTOR_CONFIG ? "config"
+                                                         : NULL;
+}
+
+const char *server_mgmt_read_selector_purpose(server_mgmt_read_selector_t selector)
+{
+   return selector == SERVER_MGMT_READ_SELECTOR_AGENTS   ? "management.read.v1"
+          : selector == SERVER_MGMT_READ_SELECTOR_CONFIG ? "management.read.config.v1"
+                                                         : NULL;
+}
+
+int server_mgmt_read_selector_path(server_mgmt_read_selector_t selector, const char *server,
+                                   char *out, size_t cap)
+{
+   const char *name = server_mgmt_read_selector_name(selector);
+   int n = name && server && out ? snprintf(out, cap, "/v1/servers/%s/%s", server, name) : -1;
+   return n > 0 && (size_t)n < cap ? n : -1;
+}
+
+int kb_management_read_challenge_decode(const char *raw, size_t len, const char *purpose,
+                                        unsigned char nonce[32], uint64_t *expires)
 {
    if (read_fixture_enabled)
    {
-      assert(raw && len && nonce && expires);
+      assert(raw && len && purpose && nonce && expires);
       memset(nonce, 0, 32);
       *expires = (uint64_t)time(NULL) + 10;
       return 0;
@@ -201,20 +232,26 @@ kb_management_action_transport_t kb_management_action_server_request_production(
     void *ctx, void *session, const char *method, const char *path, const char *body,
     const char *headers, uint64_t deadline, char *response, size_t cap, int *status)
 {
-   if (read_fixture_enabled && !strcmp(path, "/v1/management/read/challenge"))
+   if (read_fixture_enabled && (!strcmp(path, "/v1/management/read/challenge") ||
+                                !strcmp(path, "/v1/management/read/config/challenge")))
    {
       assert(!strcmp(method, "POST") && session == (void *)0x3456 && !headers);
       snprintf(response, cap, "challenge");
       *status = 200;
       return KB_MANAGEMENT_ACTION_SENT_RESPONSE;
    }
-   if (read_fixture_enabled && !strcmp(path, "/v1/management/read/agents"))
+   if (read_fixture_enabled &&
+       (!strcmp(path, "/v1/management/read/agents") || !strcmp(path, "/v1/management/read/config")))
    {
       assert(!strcmp(method, "GET") && session == (void *)0x3456 && headers &&
              strstr(headers, "Authorization: Bearer signed-read-token\r\n") &&
              strstr(headers, "X-Aimee-Management-Status: {") && read_sequence == 2);
       const char *projection =
-          read_response_mode == 1
+          read_selector == SERVER_MGMT_READ_SELECTOR_CONFIG
+              ? "{\"server_id\":\"srv-1\",\"team\":7,\"config\":{\"mtls\":\"required\","
+                "\"remote_writes\":\"data\",\"client_transport\":\"auto\","
+                "\"cli_session_forwarding\":true,\"require_aimee_git\":false}}"
+          : read_response_mode == 1
               ? "{\"server_id\":\"srv-1\",\"server_id\":\"srv-1\",\"agents\":[],\"team\":7}"
           : read_response_mode == 2
               ? "{\"server_id\":\"srv-1\",\"team\":7,\"agents\":[{\"name\":\"agent-a\","
@@ -426,7 +463,8 @@ kb_mgmt_status_client_adapter(void *ctx, const kb_management_cert_bundle_t *bund
       memset(proof.caller_fingerprint, 'a', 64);
       snprintf(proof.target_server_id, sizeof(proof.target_server_id), "srv-1");
       memset(proof.target_mgmt_fingerprint, 'b', 64);
-      snprintf(proof.purpose, sizeof(proof.purpose), "management.read.v1");
+      snprintf(proof.purpose, sizeof(proof.purpose), "%s",
+               server_mgmt_read_selector_purpose(read_selector));
       assert(!kb_mgmt_status_sign(&proof, read_status_private_key));
       assert(!kb_mgmt_status_to_json(&proof, response, cap));
       *status = 200;
@@ -638,23 +676,27 @@ int main(void)
    {
       token_issue_result = token_failures[i].authority;
       read_sequence = 0;
-      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out)) ==
-             token_failures[i].read);
+      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", SERVER_MGMT_READ_SELECTOR_AGENTS,
+                                   read_out, sizeof(read_out)) == token_failures[i].read);
       assert(read_sequence == 0);
    }
    token_issue_result = KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
    read_sequence = 0;
-   kb_management_read_result_t read_rc =
-       captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out));
+   kb_management_read_result_t read_rc = captured_read_handler(
+       NULL, &read_actor, 7, "srv-1", SERVER_MGMT_READ_SELECTOR_AGENTS, read_out, sizeof(read_out));
    assert(read_rc == KB_MANAGEMENT_READ_OK);
    assert(read_sequence == 3); /* token authority precedes status proof and dispatch */
    assert(strstr(read_out, "\"name\":\"agent-a\""));
+   read_sequence = 0;
+   assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", SERVER_MGMT_READ_SELECTOR_CONFIG,
+                                read_out, sizeof(read_out)) == KB_MANAGEMENT_READ_OK);
+   assert(read_sequence == 3 && strstr(read_out, "\"client_transport\":\"auto\""));
    for (read_response_mode = 1; read_response_mode <= 2; ++read_response_mode)
    {
       read_sequence = 0;
       memset(read_out, 'x', sizeof(read_out));
-      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out)) ==
-             KB_MANAGEMENT_READ_INTEGRITY);
+      assert(captured_read_handler(NULL, &read_actor, 7, "srv-1", SERVER_MGMT_READ_SELECTOR_AGENTS,
+                                   read_out, sizeof(read_out)) == KB_MANAGEMENT_READ_INTEGRITY);
       assert(read_sequence == 3 && read_out[0] == 0);
    }
    read_response_mode = 0;

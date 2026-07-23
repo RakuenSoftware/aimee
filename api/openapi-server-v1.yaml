@@ -405,7 +405,7 @@ paths:
                 required: [server_id, team, agents]
                 additionalProperties: false
                 properties:
-                  server_id: { type: string }
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
                   team: { type: integer, format: int64, minimum: 1 }
                   agents:
                     type: array
@@ -422,6 +422,53 @@ paths:
                         delegate_available: { type: boolean }
                         primary_only: { type: boolean }
                         max_parallel: { type: integer, minimum: 0, maximum: 1024 }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
+  /management/read/config/challenge:
+    post:
+      summary: Issue a purpose-separated nonce for a bounded configuration read
+      responses:
+        "200":
+          description: Configuration-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.config.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/config:
+    get:
+      summary: Return the bounded five-field safe configuration projection
+      responses:
+        "200":
+          description: Safe configuration projection
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [server_id, team, config]
+                properties:
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  config:
+                    type: object
+                    additionalProperties: false
+                    required: [mtls, remote_writes, client_transport, cli_session_forwarding, require_aimee_git]
+                    properties:
+                      mtls: { type: string, enum: [off, optional, required] }
+                      remote_writes: { type: string, enum: [off, data, full] }
+                      client_transport: { type: string, enum: [socket, http, auto] }
+                      cli_session_forwarding: { type: boolean }
+                      require_aimee_git: { type: boolean }
         "403": { description: Management read forbidden }
         "409": { description: Nonce or JTI already consumed }
         "502": { description: Integrity verification failed }

@@ -1,6 +1,7 @@
 # P5-D2b bounded safe configuration projection and P5 close-out
 
-- **State:** proposed; implementation not started.
+- **State:** completed and roundtable-converged; validated on real PostgreSQL 17, the CT260/CT262
+  required-mTLS topology, ASAN/UBSAN, and deterministic fuzz gates.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–4.
 - **Depends on:** completed P5-D2a management-read trust core and bounded agents projection, plus
   P5-D2b0's C-memory-model-safe active-config snapshot reader barrier.
@@ -180,7 +181,10 @@ The challenge route selects its purpose by code constant; the endpoint passes it
 selector into the shared verifier/projector. Neither accepts a selector or arbitrary loader from
 wire input.
 
-Add `/v1/servers/{id}/config` only to console `fleetAllows`, never `consoleAdminAllows`. The Fleet
+Expose the console proxy path `/api/v1/servers/{id}/config` only through the fleet credential,
+never the console-admin credential. As on existing Fleet routes, `proxyAPI` strips `/api` before
+`fleetAllows` matches `/v1/servers/{id}/config`; the upstream kb path remains that same `/v1`
+path. The Fleet
 drill-down adds a `Load config` action beside `Load agents`, uses only the verified OIDC fleet
 credential, deduplicates an in-flight request, and clears stale data on team/server change. It
 renders a fixed five-row read-only posture view, not recursive JSON. There is no edit control,

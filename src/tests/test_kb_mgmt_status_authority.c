@@ -14,7 +14,7 @@ static int lookup(const char *issuer, const char *serial, const char *fp, const 
    if (strcmp(issuer, "/CN=ca") || strcmp(serial, "01") || strlen(fp) != 64 ||
        strcmp(target, "server-1") ||
        (strcmp(purpose, "management.health.v1") && strcmp(purpose, "management.action.v1") &&
-        strcmp(purpose, "management.read.v1")))
+        strcmp(purpose, "management.read.v1") && strcmp(purpose, "management.read.config.v1")))
       return -1;
    *generation = 9;
    snprintf(target_fp, cap, "%064d", 2);

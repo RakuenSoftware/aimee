@@ -75,25 +75,33 @@ static kb_management_action_result_t blocking_action_handler(void *ctx, const kb
 
 static kb_management_read_result_t read_result;
 static kb_management_read_result_t read_handler_fn(void *ctx, const kb_principal_t *actor,
-                                                   int64_t team, const char *server, char *out,
+                                                   int64_t team, const char *server,
+                                                   server_mgmt_read_selector_t selector, char *out,
                                                    size_t cap)
 {
    assert(ctx == (void *)0x2468 && actor && actor->authenticated && team == 9);
    assert(!strcmp(server, "server-a"));
+   assert(selector == SERVER_MGMT_READ_SELECTOR_AGENTS ||
+          selector == SERVER_MGMT_READ_SELECTOR_CONFIG);
    read_calls++;
    if (read_result == KB_MANAGEMENT_READ_OK)
-      snprintf(out, cap, "{\"server_id\":\"server-a\",\"team\":9,\"agents\":[]}");
+      snprintf(out, cap,
+               selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+                   ? "{\"server_id\":\"server-a\",\"team\":9,\"agents\":[]}"
+                   : "{\"server_id\":\"server-a\",\"team\":9,\"config\":{}}");
    return read_result;
 }
 
 static kb_management_read_result_t blocking_read_handler(void *ctx, const kb_principal_t *actor,
                                                          int64_t team, const char *server,
+                                                         server_mgmt_read_selector_t selector,
                                                          char *out, size_t cap)
 {
    (void)ctx;
    (void)actor;
    (void)team;
    (void)server;
+   (void)selector;
    (void)out;
    (void)cap;
    pthread_mutex_lock(&block_mu);
@@ -291,6 +299,9 @@ static void test_read_route(void)
    read_result = KB_MANAGEMENT_READ_OK;
    assert(route("GET", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 200);
    assert(strstr(out, "\"agents\":[]") && read_calls == 1);
+   assert(route("GET", "/v1/servers/server-a/config", "team=9", out, sizeof(out)) == 200);
+   assert(strstr(out, "\"config\":{}") && read_calls == 2);
+   assert(route("POST", "/v1/servers/server-a/config", "team=9", out, sizeof(out)) == 405);
    assert(route("POST", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 405);
    assert(route("GET", "/v1/servers/server-a/agents", "x=1&team=9", out, sizeof(out)) == 400);
    assert(route("GET", "/v1/servers/server-a/agents", "team=%39", out, sizeof(out)) == 400);
