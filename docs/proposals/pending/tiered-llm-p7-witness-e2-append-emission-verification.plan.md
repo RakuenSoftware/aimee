@@ -299,9 +299,24 @@ result — that is precisely the shape an attacker would hide a fork behind.
   admission, reseal, and D3b open each either commit source-plus-witness together
   or neither.
 - `witness_concurrency_exhausted` aborts the source event.
-- Two instances racing to sign the same checkpoint sequence: the fence check is
-  the first statement, the loser aborts before signing, and no emitted checkpoint
-  is ever uncommitted.
+- Two instances racing to sign the same checkpoint sequence: exactly one commits,
+  the loser aborts, and no fork is ever persisted. **Verified empirically on
+  CT103** (two concurrent `REPEATABLE READ` sessions both computing `max(seq)+1`
+  from the same pre-race snapshot, both persisting that seq): the winner commits
+  seq 2; the loser fails with `23505` (checkpoint primary key), which the producer
+  maps to `DB2_WITNESS_CP_TRANSIENT` and retries on the next cadence tick.
+
+  The mechanism matters and is not what the guard's name suggests. Neither the
+  control-row `FOR UPDATE` nor the `P7W05` seq check is what serializes the race:
+  the `FOR UPDATE` lock is released at commit without having modified the row, and
+  under `REPEATABLE READ` the loser's snapshot still reports `max(seq)=1`, so its
+  `v_next` computes to 2 and the `P7W05` equality check **passes**. The unique
+  primary key on `seq` is the load-bearing constraint. `P7W05` remains valuable —
+  it rejects a producer that signed a stale seq it can see is stale, giving a
+  precise error instead of a PK collision — but it is the second line, not the
+  first. Both SQLSTATEs map to `TRANSIENT`, so the observable behaviour is correct
+  either way; the note exists so nobody later "simplifies away" the primary key on
+  the belief that `P7W05` covers the race.
 - The checkpoint transaction runs at REPEATABLE READ or stricter; a healthy
   append landing mid-walk does not trip `head_log_mismatch`.
 - Checkpoint cross-check catches injected shard-head tampering.
@@ -347,6 +362,47 @@ are not lost between slices:
   the bounded (5-attempt) SERIALIZABLE retry around the source-plus-witness
   transaction, raising `witness_concurrency_exhausted` on exhaustion and aborting
   the source event — never committing a source event whose witness row is missing.
+
+## 8b. E2 adversarial review outcome (job 11435)
+
+The review's two CRITICAL findings were both checked against the code and are
+**non-issues**. Recorded here with the evidence, because a future reader hitting
+the same suspicion should not have to re-derive the answer:
+
+- **Claimed use-after-free of the `hp` text pointer across later blob reads.**
+  `aimee_pg_column_text` returns `PQgetvalue(s->result, s->row_index, col)`
+  directly. It does *not* go through the one-blob-per-statement cache that
+  `aimee_pg_column_blob` uses, so text pointers stay valid for the lifetime of the
+  `PGresult` and are unaffected by subsequent blob reads. (The blob cache *is* a
+  real hazard — it caused a genuine bug earlier in E2, fixed by copying each
+  `bytea` immediately — but it does not extend to text columns.)
+- **Claimed the verifier may not recompute and compare predecessor digests, so a
+  swapped checkpoint body at the same seq would pass.** It does:
+  `vault_witness_verify_checkpoint_run` calls `vault_witness_checkpoint_digest`
+  on `checkpoints[i-1]` and feeds the result to
+  `vault_witness_checkpoint_continuity` for `checkpoints[i]`. A swapped body has a
+  different digest, so the successor's `predecessor_digest` no longer matches and
+  the run is flagged. The reviewer asked for explicit confirmation rather than
+  asserting the defect; confirmed sound.
+
+Findings that were real and are now fixed:
+
+- The offline parser's item cap allowed a worst-case allocation of roughly 2.4 GB
+  from a hostile stream. Lowered so the worst case stays well under a gigabyte;
+  the resident input size remains the primary bound.
+- The deliberate best-effort `mlock` of the derived signing seed was undocumented
+  and read as a swallowed error. It is now commented: `mlock` fails under a low
+  `RLIMIT_MEMLOCK` (common in containers), and failing the signature there would
+  halt checkpoint production entirely — a worse outcome than a pageable seed that
+  is cleansed immediately after use. The cleanse, not the pin, is the load-bearing
+  control.
+
+Findings assessed and deliberately not changed:
+
+- SQLSTATE `22023` (`checkpoint_persist: invalid input`) maps to
+  `DB2_WITNESS_CP_ERROR` rather than `TRANSIENT`. This is correct: the producer
+  constructs those arguments itself, so invalid input is a producer bug that must
+  surface, not a condition a retry could clear.
 
 ## 9. Deferred
 
