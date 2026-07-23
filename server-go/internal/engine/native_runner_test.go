@@ -1171,3 +1171,27 @@ func TestExtractJSONObjectFailsClosedAfterMismatchedCandidate(t *testing.T) {
 		}
 	}
 }
+
+// Suggestions and nits must not gate an artifact: the panel's severity taxonomy
+// exists to separate work that cannot ship from advisory polish. Gating on every
+// finding made any multi-seat gate unpassable.
+func TestBlockingFindingCountIgnoresAdvisorySeverities(t *testing.T) {
+	cases := []struct {
+		name     string
+		findings []wfe.Finding
+		want     int
+	}{
+		{"empty", nil, 0},
+		{"only advisory", []wfe.Finding{{Severity: "suggestion"}, {Severity: "nit"}, {Severity: "NIT"}, {Severity: " Suggestion "}}, 0},
+		{"blocking and foundational", []wfe.Finding{{Severity: "blocking"}, {Severity: "foundational"}}, 2},
+		{"mixed", []wfe.Finding{{Severity: "nit"}, {Severity: "blocking"}, {Severity: "suggestion"}}, 1},
+		{"unclassified is blocking", []wfe.Finding{{Severity: ""}, {Severity: "weird"}}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := blockingFindingCount(tc.findings); got != tc.want {
+				t.Fatalf("blockingFindingCount=%d want %d", got, tc.want)
+			}
+		})
+	}
+}

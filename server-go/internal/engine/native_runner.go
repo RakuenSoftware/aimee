@@ -636,7 +636,13 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 		}
 	}
 	quorum := panel.MinSuccessful
-	if approvals >= quorum && len(feedback.Findings) == 0 {
+	// Only foundational/blocking findings gate the artifact. Suggestions and nits
+	// are recorded on the feedback (and still reach the author) but must not hold
+	// the gate: the panel prompt defines the severity taxonomy precisely so that
+	// "ordinary defects, suggestions, and nits" are distinguishable from work that
+	// cannot ship. Gating on every finding made any multi-seat gate unpassable --
+	// one nit from one seat looped the stage until its iteration cap.
+	if approvals >= quorum && blockingFindingCount(feedback.Findings) == 0 {
 		rt := roundtableResult(&feedback, true, true, analysis, len(seats), totalCost)
 		rt.Degraded = rt.Degraded || discussionFailed > 0
 		rt.DeadlineHit = deadlineHit
@@ -802,6 +808,21 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		}
 	}
 	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, CostUnknown: costUnknown, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
+}
+
+// blockingFindingCount counts only the severities that must stop an artifact.
+// An unrecognised or empty severity is treated as blocking: a reviewer that
+// cannot classify its own finding gets the safe interpretation.
+func blockingFindingCount(findings []wfe.Finding) int {
+	blocking := 0
+	for _, finding := range findings {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "suggestion", "nit":
+		default:
+			blocking++
+		}
+	}
+	return blocking
 }
 
 func remainingCostLimit(limit, spent float64) float64 {
