@@ -4,6 +4,7 @@ import { loadSession, login, type SessionInfo } from './api';
 import ConsoleDashboard from './pages/ConsoleDashboard';
 import Accounts from './pages/Accounts';
 import Governance from './pages/Governance';
+import Fleet from './pages/Fleet';
 
 // ConsoleApp is the shell for the aimee-kb web console: a session gate wrapping a
 // nav + the Dashboard / Accounts / Governance surfaces. S0 ships the shell and
@@ -27,12 +28,14 @@ export default function ConsoleApp() {
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/accounts">Accounts</NavLink>
         <NavLink to="/governance">Governance</NavLink>
+        <NavLink to="/fleet">Fleet</NavLink>
       </nav>
       <main className="kbc-main">
         <Routes>
           <Route path="/dashboard" element={<ConsoleDashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/governance" element={<Governance />} />
+          <Route path="/fleet" element={<Fleet />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>
