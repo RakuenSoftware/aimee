@@ -118,7 +118,7 @@ promote_receipt_hex=41494d525345414c00010000000000c04444444444444444444444444444
 sql -c "SELECT org_vault_rewrap_record_prepared('$promote_op',$promote_fence,decode('$promote_receipt_hex','hex'),sha256(decode('$promote_receipt_hex','hex')))" >/dev/null
 sql <<SQL
 BEGIN ISOLATION LEVEL SERIALIZABLE;
-DO \$\$ DECLARE r RECORD; n BYTEA; BEGIN
+DO \$\$ DECLARE r RECORD; summary RECORD; n BYTEA; BEGIN
   FOR r IN SELECT * FROM org_vault_rewrap_secret_page('$promote_op',$promote_fence,0,128) LOOP
     n:=sha256(int8send(r.source_id)||decode('d1','hex'))||
        substring(sha256(int8send(r.source_id)||decode('d2','hex')) FROM 1 FOR 8);
@@ -132,7 +132,10 @@ DO \$\$ DECLARE r RECORD; n BYTEA; BEGIN
     PERFORM org_vault_rewrap_stage_check('$promote_op',$promote_fence,r.principal,
       r.source_digest,n);
   END LOOP;
-  PERFORM org_vault_rewrap_stage_finish('$promote_op',$promote_fence);
+  SELECT * INTO STRICT summary FROM
+    org_vault_rewrap_inventory_summary('$promote_op',$promote_fence);
+  PERFORM org_vault_rewrap_stage_finish('$promote_op',$promote_fence,
+    summary.secret_count,summary.check_count,summary.inventory_digest);
 END \$\$;
 COMMIT;
 SELECT org_vault_rewrap_mark_committing('$promote_op',$promote_fence);

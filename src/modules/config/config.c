@@ -413,6 +413,7 @@ static const config_schema_entry_t config_schema[] = {
     {"auxiliary", SCHEMA_OBJECT, 0},
     {"model_meta", SCHEMA_OBJECT, 0},
     {"db2", SCHEMA_OBJECT, 0},
+    {"vault", SCHEMA_OBJECT, 0},
     {"ensemble", SCHEMA_OBJECT, 0},
     {"roundtable", SCHEMA_OBJECT, 0},
     {"cron_jobs", SCHEMA_ARRAY, 0},
@@ -651,6 +652,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
+   /* -1 = operator did not say. web_search_ex resolves it to the built-in
+    * default; 0/1 are explicit off/on. memset-0 above would otherwise read as an
+    * explicit "off" and silently disable page fetching. */
+   cfg->search_fetch_pages = -1;
    /* structured-pdf Phase C blob reconciliation: default hourly sweep, alarm at 1 GiB of
     * reclaimable orphan bytes (config_t is memset-0 above, so these explicit values are the
     * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */

@@ -14,6 +14,7 @@
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"
+#include "tool_egress.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <pthread.h>
@@ -992,6 +993,9 @@ static cJSON *tp_web_search(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "query", "string", "The search query");
    tp_prop(props, "max_results", "integer", "Maximum results to return (default 5, max 10)");
+   tp_prop(props, "fetch_pages", "boolean",
+           "Fetch the top results and return relevant extracted page text as well as engine "
+           "snippets (default true). Set false for a faster, snippets-only search.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("query"));
@@ -1268,8 +1272,10 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "read by handle (r1..rN) without re-emitting a URL.",
      tp_web_search, TSURF_ALL},
     {"web_read",
-     "Read a web page token-lean: fetches once server-side and returns only the query-relevant "
-     "spans (exact API/error/version needles guaranteed in), cited by id and fenced as untrusted. "
+     "Read a web page token-lean: fetches once server-side and returns the parts of the page the "
+     "query occurs in, cited by id and fenced as untrusted. Extraction is deterministic: matches "
+     "are located, widened to readable windows, merged, and emitted in document order until the "
+     "span budget is spent. "
      "Accepts a web_search handle ('r2') or a raw http(s) URL. Prefer this over curl-ing a page "
      "into context; span=N / mode=\"full\" recover anything the ranker dropped.",
      tp_web_read, TSURF_ALL},
@@ -1453,6 +1459,107 @@ void agent_tools_set_shell_git_gate(agent_shell_git_gate_fn fn)
 agent_shell_git_gate_fn agent_tools_shell_git_gate(void)
 {
    return g_shell_git_gate;
+}
+
+/* See agent_tools.h. Exact-set coverage between the built-in tool table and the
+ * egress declaration registry. Count equality would not be enough: an omitted
+ * declaration plus a stale extra one yields equal counts, so both directions
+ * are checked by name. */
+int agent_tools_validate_egress_table(char *err, size_t err_len)
+{
+   size_t n = sizeof(g_builtin_tools) / sizeof(g_builtin_tools[0]);
+
+   /* 1. Every built-in is declared, and declared to something valid. */
+   for (size_t i = 0; i < n; i++)
+   {
+      const char *name = g_builtin_tools[i].name;
+      if (tool_egress_for(name) == TOOL_EGRESS_UNSET)
+      {
+         if (err && err_len)
+            snprintf(err, err_len,
+                     "tool \"%s\" has no egress declaration; add it to "
+                     "modules/workflows/tool_egress.c",
+                     name);
+         return -1;
+      }
+      /* 2. No duplicate names within the tool table itself, compared the same
+       *    case-insensitive way the registry resolves them. */
+      for (size_t j = i + 1; j < n; j++)
+         if (tool_egress_names_equal(name, g_builtin_tools[j].name))
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "tool \"%s\" is registered twice", name);
+            return -1;
+         }
+   }
+
+   /* 3. No duplicate declaration names, compared the SAME case-insensitive way
+    *    tool_egress_for() resolves them. A case-variant duplicate would other-
+    *    wise be accepted while lookup silently used only the first entry --
+    *    which is exactly how a conflicting classification could hide. */
+   int m = tool_egress_count();
+   for (int i = 0; i < m; i++)
+      for (int j = i + 1; j < m; j++)
+         if (tool_egress_names_equal(tool_egress_name_at(i), tool_egress_name_at(j)))
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "egress declaration for \"%s\" is duplicated",
+                        tool_egress_name_at(i));
+            return -1;
+         }
+
+   /* 4. Every declaration resolves to something real, in the right direction:
+    *      - a canonical entry must name a registered built-in;
+    *      - an alias must name a canonical entry that exists and agrees on class.
+    *    Aliases are validated rather than skipped, so an alias can never stand in
+    *    for the canonical declaration a built-in is required to have. */
+   for (int i = 0; i < m; i++)
+   {
+      const char *dname = tool_egress_name_at(i);
+      const char *canon = tool_egress_canonical_at(i);
+      if (canon)
+      {
+         int target = -1;
+         for (int j = 0; j < m; j++)
+            if (tool_egress_names_equal(canon, tool_egress_name_at(j)) &&
+                tool_egress_canonical_at(j) == NULL)
+            {
+               target = j;
+               break;
+            }
+         if (target < 0)
+         {
+            if (err && err_len)
+               snprintf(err, err_len, "egress alias \"%s\" names no canonical declaration \"%s\"",
+                        dname, canon);
+            return -1;
+         }
+         if (tool_egress_class_at(target) != tool_egress_class_at(i))
+         {
+            if (err && err_len)
+               snprintf(err, err_len,
+                        "egress alias \"%s\" (%s) disagrees with canonical \"%s\" (%s)", dname,
+                        tool_egress_class_name(tool_egress_class_at(i)), canon,
+                        tool_egress_class_name(tool_egress_class_at(target)));
+            return -1;
+         }
+         continue;
+      }
+      int found = 0;
+      for (size_t j = 0; j < n && !found; j++)
+         if (tool_egress_names_equal(dname, g_builtin_tools[j].name))
+            found = 1;
+      if (!found)
+      {
+         if (err && err_len)
+            snprintf(err, err_len,
+                     "egress declaration for \"%s\" names no registered tool "
+                     "(stale entry in modules/workflows/tool_egress.c)",
+                     dname);
+         return -1;
+      }
+   }
+   return 0;
 }
 
 static void emit_builtin_tools(cJSON *tools, unsigned surface)

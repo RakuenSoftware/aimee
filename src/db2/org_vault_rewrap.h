@@ -76,6 +76,12 @@ typedef struct
    uint8_t receipt_digest[32], inventory_digest[32], stage_digest[32];
 } db2_vault_rewrap_verify_summary_t;
 
+typedef struct
+{
+   int64_t secret_count, check_count;
+   uint8_t inventory_digest[32];
+} db2_vault_rewrap_inventory_summary_t;
+
 void db2_vault_rewrap_snapshot_clear(db2_vault_rewrap_snapshot_t *snapshot);
 void db2_vault_rewrap_secret_clear(db2_vault_rewrap_secret_t *rows, size_t count);
 void db2_vault_rewrap_check_clear(db2_vault_rewrap_check_t *rows, size_t count);
@@ -114,9 +120,12 @@ db2_vault_rewrap_result_t
 db2_vault_rewrap_stage_check(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
                              int64_t fence, const db2_vault_rewrap_check_t *source,
                              const uint8_t *new_check, size_t new_check_len);
-db2_vault_rewrap_result_t db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *tx,
-                                                        const uint8_t operation_id[16],
-                                                        int64_t fence);
+db2_vault_rewrap_result_t
+db2_vault_rewrap_inventory_summary(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
+                                   int64_t fence, db2_vault_rewrap_inventory_summary_t *out);
+db2_vault_rewrap_result_t
+db2_vault_rewrap_stage_finish(db2_vault_rewrap_tx_t *tx, const uint8_t operation_id[16],
+                              int64_t fence, const db2_vault_rewrap_inventory_summary_t *expected);
 db2_vault_rewrap_result_t db2_vault_rewrap_mark_committing(db2_vault_rewrap_tx_t *tx,
                                                            const uint8_t operation_id[16],
                                                            int64_t fence);
@@ -181,7 +190,10 @@ typedef struct
    db2_vault_rewrap_result_t (*stage_check)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
                                             const db2_vault_rewrap_check_t *, const uint8_t *,
                                             size_t);
-   db2_vault_rewrap_result_t (*stage_finish)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t);
+   db2_vault_rewrap_result_t (*inventory_summary)(db2_vault_rewrap_tx_t *, const uint8_t[16],
+                                                  int64_t, db2_vault_rewrap_inventory_summary_t *);
+   db2_vault_rewrap_result_t (*stage_finish)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,
+                                             const db2_vault_rewrap_inventory_summary_t *);
    db2_vault_rewrap_result_t (*mark_committing)(db2_vault_rewrap_tx_t *, const uint8_t[16],
                                                 int64_t);
    db2_vault_rewrap_result_t (*mark_resealed)(db2_vault_rewrap_tx_t *, const uint8_t[16], int64_t,

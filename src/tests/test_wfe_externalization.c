@@ -14,7 +14,12 @@ int main(void)
    assert(wfe_is_externalization_tool("pr.open"));
    assert(wfe_is_externalization_tool("merge"));
    assert(wfe_is_externalization_tool("git_push"));
-   assert(wfe_is_externalization_tool("WebFetch"));                         /* case-insensitive */
+   assert(wfe_is_externalization_tool("WebFetch")); /* case-insensitive */
+   /* web_read performs real server-side egress (posix/web_read.c) and is a
+    * registered tool (server/agent_tools.c). It must be gated like any other
+    * egress primitive; it was previously absent from the deny-list. */
+   assert(wfe_is_externalization_tool("web_read"));
+   assert(wfe_is_externalization_tool("WebRead"));
    assert(wfe_is_externalization_tool("mcp__github__create_pull_request")); /* substring */
    assert(wfe_is_externalization_tool("deploy_release"));
    assert(wfe_is_externalization_tool("notify_slack"));

@@ -3,6 +3,7 @@
 
 #include "org_vault_rewrap.h"
 #include "vault_custody_tpm2.h"
+#include "vault_mutation_budget.h"
 #include "vault_server_key.h"
 
 #include <stddef.h>
@@ -38,6 +39,7 @@ typedef struct
    const char *request_id;
    const uint8_t *provider_secret;
    size_t provider_secret_len;
+   vault_mutation_budget_t *budget;
 } vault_reseal_orchestrator_request_t;
 
 typedef struct
