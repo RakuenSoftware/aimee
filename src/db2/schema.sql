@@ -5694,7 +5694,56 @@ BEGIN
   RETURN QUERY SELECT v_new_seq, v_rhash;
 END; $$;
 
+-- The checkpoint head-vs-log cross-check (E2). Walks a shard's evidence log from
+-- genesis, recomputing each row's digest from its stored fields and verifying the
+-- witness-predecessor linkage and contiguous sequence, then requires the mutable
+-- shard head to equal the log tail. This is what keeps the shard-head table honest:
+-- because INSERT into the log is not blocked (only UPDATE/DELETE/TRUNCATE are), an
+-- attacker could append rows and advance the head to match, but they cannot forge a
+-- coherent chain back to the deterministic genesis sentinel without rewriting every
+-- record_hash, which the per-row digest recompute catches. Raises P7W01
+-- (head_log_mismatch) on any inconsistency; returns the verified head (NULL for an
+-- empty shard). Walks from genesis for provable correctness; a later optimization
+-- may resume from the previous checkpoint's leaf snapshot.
+CREATE OR REPLACE FUNCTION org_vault_witness_verify_shard(p_tenant TEXT, p_provider TEXT)
+RETURNS BYTEA LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE r RECORD; v_pred BYTEA; v_seq BIGINT := 1; v_recomputed BYTEA;
+  v_last BYTEA; v_head BYTEA;
+BEGIN
+  v_pred := public.org_vault_witness_genesis(p_tenant, p_provider);
+  FOR r IN SELECT * FROM public.kb_vault_witness_log
+           WHERE tenant=p_tenant AND provider=p_provider ORDER BY shard_seq ASC
+  LOOP
+    IF r.shard_seq <> v_seq THEN
+      RAISE EXCEPTION 'head_log_mismatch: seq gap at % (expected %)', r.shard_seq, v_seq
+        USING ERRCODE='P7W01';
+    END IF;
+    IF r.witness_pred_hash <> v_pred THEN
+      RAISE EXCEPTION 'head_log_mismatch: broken link at seq %', r.shard_seq USING ERRCODE='P7W01';
+    END IF;
+    v_recomputed := public.org_vault_witness_record_digest(
+      r.source_kind, r.source_id, r.tenant, r.provider, r.request_id, r.principal,
+      r.provider_cred, r.group_id, r.event_ts, r.source_hash, r.has_source_pred,
+      r.source_pred_hash, r.witness_pred_hash, r.seal_epoch, r.fencing_token, r.shard_seq);
+    IF v_recomputed <> r.record_hash THEN
+      RAISE EXCEPTION 'head_log_mismatch: record digest mismatch at seq %', r.shard_seq
+        USING ERRCODE='P7W01';
+    END IF;
+    v_pred := r.record_hash; v_last := r.record_hash; v_seq := v_seq + 1;
+  END LOOP;
+  IF v_last IS NULL THEN
+    RETURN NULL;
+  END IF;
+  SELECT head_hash INTO v_head FROM public.kb_vault_witness_shard
+    WHERE tenant=p_tenant AND provider=p_provider;
+  IF v_head IS DISTINCT FROM v_last THEN
+    RAISE EXCEPTION 'head_log_mismatch: shard head does not match log tail' USING ERRCODE='P7W01';
+  END IF;
+  RETURN v_last;
+END; $$;
+
 REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
@@ -5710,7 +5759,8 @@ BEGIN
     REVOKE ALL ON FUNCTION public.org_vault_witness_worm_block(),
       public.org_vault_witness_genesis(TEXT,TEXT),
       public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
-      public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA)
+      public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
+      public.org_vault_witness_verify_shard(TEXT,TEXT)
       FROM aimee_kb_runtime;
   END IF;
 END $$;

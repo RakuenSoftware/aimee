@@ -137,4 +137,40 @@ BEGIN
   END IF;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 6. Head-vs-log cross-check: org_vault_witness_verify_shard confirms an intact
+--    shard (from section 2) and catches a forged log row + advanced head — the
+--    exact attack the shard-head table (mutable, INSERT-allowed) exposes.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_head BYTEA; v_forged BYTEA;
+BEGIN
+  -- Intact shard verifies and returns its head.
+  v_head := public.org_vault_witness_verify_shard('acme','anthropic');
+  IF v_head IS NULL OR v_head <> (SELECT head_hash FROM public.kb_vault_witness_shard
+                                  WHERE tenant='acme' AND provider='anthropic') THEN
+    RAISE EXCEPTION 'WITNESS FAIL: verify_shard did not return the intact head';
+  END IF;
+
+  -- Attack: INSERT a forged log row at the next seq with a record_hash that does
+  -- NOT match its fields, and advance the shard head to it. verify_shard must catch
+  -- the digest mismatch (P7W01), because the forged row cannot chain to genesis.
+  v_forged := decode(repeat('ee',32),'hex');
+  INSERT INTO public.kb_vault_witness_log(tenant,provider,shard_seq,source_kind,source_id,
+    source_hash,has_source_pred,source_pred_hash,witness_pred_hash,record_hash,event_ts,
+    seal_epoch,fencing_token)
+  VALUES('acme','anthropic',3,0,'forged',decode(repeat('11',32),'hex'),false,
+    decode(repeat('00',32),'hex'),v_head,v_forged,'2026-07-23T00:00:00Z',1,1);
+  UPDATE public.kb_vault_witness_shard SET seq=3, head_hash=v_forged
+    WHERE tenant='acme' AND provider='anthropic';
+
+  BEGIN
+    PERFORM public.org_vault_witness_verify_shard('acme','anthropic');
+    RAISE EXCEPTION 'WITNESS FAIL: forged row was not caught by verify_shard';
+  EXCEPTION WHEN sqlstate 'P7W01' THEN
+    NULL; -- expected head_log_mismatch
+  END;
+  RAISE NOTICE 'WITNESS OK: head-vs-log cross-check catches a forged row';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_pg_test: all checks passed'; END $$;
