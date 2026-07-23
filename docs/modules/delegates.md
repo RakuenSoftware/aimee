@@ -11,7 +11,7 @@ not an optional extension and does not own roundtable policy, tools, vault, or w
 
 Current canonical source under `src/modules/delegates` includes `delegate_driver`, routing, launch/plan,
 run phases, local/Docker/SSH backends, credential acquisition/binding/retry classification, source authority,
-sandbox image, economics, and gateway
+sandbox image, economics, panel roster/provider seams, and gateway
 orchestration. The main durable worker and HTTP/RPC orchestration still live in `src/server/server_compute*`;
 root `cmd_agent_delegate.c` is an entry-point consumer. Remaining server/root implementations are relocation
 debt, not a second supported delegate engine.
@@ -37,9 +37,28 @@ Provider wire parsing remains owned by `translation`; final-answer assembly rema
 `response-composition`; server IR rollout, transport, and shadow controls remain outside this bounded
 delegate capability. The live bridge consumer is `src/posix/agent_ir_parse.c`.
 
+### Panel roster and provider boundary
+
+Panel membership is delegate-routing policy even when no deliberation module is active. The public
+`panel_roster.h` contract seeds configured agents, excludes the primary and unauthorized delegates,
+resolves random seats, and filters currently unavailable agents. Sweep and other core consumers call this
+required seam directly; roster selection is not hidden behind optional roundtable execution.
+
+Optional panel engines register at most one startup-lifetime `aimee_panel_provider_t` through
+`panel_provider.h`. Registering the same provider pointer again is idempotent; registering a different
+provider while one is installed is rejected. Core callers use `aimee_panel_aggregate` or
+`aimee_panel_run`. The facade reports explicit unavailable, invalid-input, and provider-error statuses and
+zeroes the output on every failure; if a failing callback supplied an artifact, the facade dispatches its
+release before zeroing the result. All request inputs and options are borrowed for the duration of the
+call. IR owns the `aimee_panel_result_t` layout. A provider allocates the artifact returned in a successful
+result, and the caller must release it exactly once through `aimee_panel_result_release` before the
+provider is unregistered. Unregistration is rejected while a result remains outstanding. Registration
+and unregistration are startup-only: the provider descriptor must remain valid until all calls have
+completed and all results have been released, and concurrent hot unload is unsupported.
+
 ### Public-header contract
 
-All 19 delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer
+All 21 delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer
 uses the `<aimee/delegates/...>` namespace. `src/modules/delegates/module.yaml` declares that complete
 surface in `public_headers`; `scripts/check_module_header_layout.py` rejects flat shadows, bare includes,
 missing canonical headers, or restored flat Make/CMake include roots.
@@ -115,7 +134,9 @@ and audit boundaries while reacquiring credentials through the authorized vault 
 ephemeral-workspace, liveness, budget, gateway-orchestration, CLI/API, and workflow suites cover the
 distributed implementation. An unavailable route, provider, or backend must fail concretely; partial runs retain audit
 evidence; policy, budget, or sandbox failure is fail-closed and cannot downgrade to raw local execution.
-`src/tests/test_aimee_ir_rescue.c` directly covers prose rescue. Consumer-level coverage runs through
+`src/tests/test_aimee_ir_rescue.c` directly covers prose rescue. `src/tests/test_panel_provider.c` covers
+unavailable, registration, success, inconsistent failure, ownership, and single-release behavior.
+Consumer-level rescue coverage runs through
 `src/tests/test_agent_ir_parse.c` and `src/tests/test_responses_parity.c`; all three must pass before changes
 to this behavior are considered verified.
 

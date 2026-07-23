@@ -515,7 +515,7 @@
         },
         {
           "path": "src/headers/evidence_replay.h",
-          "sha256": "b551db68f7fde74981508f19734dec7547e5bf273bf223be4b511e910ad7264d"
+          "sha256": "85f24a44304e9a91fb8bf4d2642c8b2fba88bf45cb4bfb7149a58962e0397064"
         },
         {
           "path": "src/headers/extractors_extra.h",
@@ -975,7 +975,7 @@
         },
         {
           "path": "src/headers/server_compute_internal.h",
-          "sha256": "64de4f8ff8e353a53f1bdfafac1e31cfddbd5154f13351cbe277d8a9bda18609"
+          "sha256": "16fb7e130497b563b0b0c077c53652215285939dfe02e06c32262a5fc1d48dce"
         },
         {
           "path": "src/headers/server_conn_io.h",
@@ -1266,6 +1266,14 @@
           "sha256": "b1156d0b5da1a881603b189929deb6289d78f9c0d3564be91d394cc4f4f6610b"
         },
         {
+          "path": "src/modules/delegates/include/aimee/delegates/panel_provider.h",
+          "sha256": "392ed8c8cec3eac48af4daf6a22d44db53f775dc862c9ed405ada0c0528358f6"
+        },
+        {
+          "path": "src/modules/delegates/include/aimee/delegates/panel_roster.h",
+          "sha256": "2a090fb1d066cc89d9c65388b69cf72765d2a39f6178c351eba010c436450df8"
+        },
+        {
           "path": "src/modules/gateway/include/aimee/gateway/gateway_delegate.h",
           "sha256": "81ffea4b320cf0df93e7e67fee923161089f247c67c4a3a5d6a10e2dbd733c6b"
         },
@@ -1284,6 +1292,10 @@
         {
           "path": "src/modules/ir/include/aimee/ir/aimee_ir_metrics.h",
           "sha256": "43229ea4c671e324f45b60504ef6967ffaa06bd8807502527f47b5a963bd78c9"
+        },
+        {
+          "path": "src/modules/ir/include/aimee/ir/panel_result.h",
+          "sha256": "de62a73f6e75c210c54db1e803ec0d0d37a17e4a597d4cbd746f68150bc651e2"
         },
         {
           "path": "src/modules/module-runtime/include/aimee/module-runtime/extension.h",
@@ -1324,7 +1336,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "895567884546d24412f80c562df80000c6dd983713b0d2273f1672703d73b918",
+      "sha256": "d98af787dcc635b12f03a2c0177560daf057367d3d5778b8307a4fad23725b6d",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

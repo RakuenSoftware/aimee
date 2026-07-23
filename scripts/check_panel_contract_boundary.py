@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ratchet direct optional-header debt while the panel provider seam is built."""
+"""Keep optional roundtable execution contracts out of required consumers."""
 
 from __future__ import annotations
 
@@ -11,14 +11,6 @@ from pathlib import Path
 
 ROUND_TABLE_TYPES = "roundtable_types.h"
 ENSEMBLE_HEADER = "delegate_ensemble.h"
-# Approved Slice 30 migration debt. Slice 31 replaces these execution calls with
-# the required provider ABI and removes this set; no new consumer may join it.
-TEMPORARY_PROVIDER_SEAM_CONSUMERS = {
-    "src/cmd_agent_delegate.c",
-    "src/modules/workflows/wfe_live_panel.c",
-    "src/server/server_compute.c",
-    "src/server/server_sweep.c",
-}
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 
 
@@ -35,7 +27,6 @@ def validate(root: Path) -> None:
     if not src.is_dir():
         raise CheckError("rule=source-root-missing path=src")
 
-    actual_ensemble_consumers: set[str] = set()
     for path in sorted((*src.rglob("*.c"), *src.rglob("*.h"))):
         relative = path.relative_to(root).as_posix()
         includes = _includes(path)
@@ -45,14 +36,7 @@ def validate(root: Path) -> None:
         if ROUND_TABLE_TYPES in includes and not (owner_private or test_code):
             raise CheckError(f"rule=optional-type-header-leak path={relative}")
         if ENSEMBLE_HEADER in includes and not (owner_private or test_code):
-            actual_ensemble_consumers.add(relative)
-
-    if actual_ensemble_consumers != TEMPORARY_PROVIDER_SEAM_CONSUMERS:
-        missing = sorted(TEMPORARY_PROVIDER_SEAM_CONSUMERS - actual_ensemble_consumers)
-        unexpected = sorted(actual_ensemble_consumers - TEMPORARY_PROVIDER_SEAM_CONSUMERS)
-        raise CheckError(
-            f"rule=temporary-provider-seam-debt missing={missing} unexpected={unexpected}"
-        )
+            raise CheckError(f"rule=optional-ensemble-header-leak path={relative}")
 
 
 def main() -> int:

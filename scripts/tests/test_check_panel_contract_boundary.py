@@ -22,7 +22,11 @@ SPEC.loader.exec_module(checker)
 
 class PanelContractBoundaryTests(unittest.TestCase):
     def fixture(self, root: Path) -> None:
-        paths = checker.TEMPORARY_PROVIDER_SEAM_CONSUMERS | {
+        paths = {
+            "src/cmd_agent_delegate.c",
+            "src/modules/workflows/wfe_live_panel.c",
+            "src/server/server_compute.c",
+            "src/server/server_sweep.c",
             "src/headers/evidence_replay.h",
             "src/server/server_pipeline.c",
         }
@@ -63,11 +67,11 @@ class PanelContractBoundaryTests(unittest.TestCase):
             "optional-type-header-leak",
         )
 
-    def test_new_ensemble_consumer_is_rejected(self) -> None:
+    def test_ensemble_consumer_is_rejected(self) -> None:
         self.mutate_rejected(
             "src/server/server_pipeline.c",
             "delegate_ensemble.h",
-            "temporary-provider-seam-debt",
+            "optional-ensemble-header-leak",
         )
 
     def test_owner_and_test_private_includes_are_allowed(self) -> None:

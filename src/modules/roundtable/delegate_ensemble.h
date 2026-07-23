@@ -5,11 +5,11 @@
 #ifndef DEC_DELEGATE_ENSEMBLE_H
 #define DEC_DELEGATE_ENSEMBLE_H 1
 
+#include <aimee/delegates/panel_provider.h>
 #include <aimee/ir/panel_result.h>
 #include "agent_config.h"
 #include "config.h"
-#include "roundtable_activation.h"
-#include "roundtable_types.h" /* roundtable_opts_t / roundtable_result_t (owned by the roundtable module) */
+#include "roundtable_types.h" /* private compatibility names */
 
 /* Max panelists in a roundtable/ensemble fan-out. This private compatibility
  * name aliases canonical AIMEE_PANEL_MAX_PARTICIPANTS (currently 32) and must match the
@@ -19,16 +19,7 @@
  * stack, which is 32 MB — so 32 panelists (~50KB frame) is well within budget. */
 #define ENSEMBLE_MAX_REFS AIMEE_PANEL_MAX_PARTICIPANTS
 
-typedef struct
-{
-   char response[8192];
-   int success;
-   double cost_usd;
-   int degraded;            /* 1 = returned best single candidate, not synthesized */
-   int cost_capped;         /* 1 = aborted before aggregation due to cost cap */
-   int participants_total;  /* reference models fanned out this run */
-   int participants_failed; /* participants that returned no usable response (partial failure) */
-} delegate_ensemble_result_t;
+typedef aimee_panel_aggregate_result_t delegate_ensemble_result_t;
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
                           delegate_ensemble_result_t *out);
@@ -42,18 +33,15 @@ double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
 double delegate_cost_estimate_usd(const char *provider, const char *model, int prompt_tokens,
                                   int completion_tokens);
 
-/* roundtable_opts_t, roundtable_result_t and their review-item / evidence /
- * answered-question types (plus ROUNDTABLE_MAX_*) now live in the roundtable
- * module's roundtable_types.h, included above. They were moved out of this
- * delegates header to break the header cycle with the roundtable module (whose
- * chair/verify headers need the result type). The delegate_roundtable_* entry
- * points below still produce and free those types. */
+/* The legacy entry points below use private aliases over the delegates-owned
+ * request and IR-owned result contracts. External callers use panel_provider.h. */
 
 int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,
                             const roundtable_opts_t *opts, roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
-/* Seed cfg->ensemble_reference_models from the enabled agents when no panel is
+/* Compatibility wrappers over delegates/panel_roster.h for optional internals
+ * and tests. Seed cfg->ensemble_reference_models from enabled agents when no panel is
  * configured (no-op if ensemble_reference_count > 0). Skips agents flagged
  * primary-only and claude-CLI agents that cannot run server-side. Defaults the
  * aggregator to the first seated model. */

@@ -31,16 +31,21 @@
     "src/modules/delegates/include/aimee/delegates/delegate_sandbox_image.h",
     "src/modules/delegates/include/aimee/delegates/delegate_source_authority.h",
     "src/modules/delegates/include/aimee/delegates/delegate_xml_fallback.h",
-    "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h"
+    "src/modules/delegates/include/aimee/delegates/gw_orch_delegates.h",
+    "src/modules/delegates/include/aimee/delegates/panel_provider.h",
+    "src/modules/delegates/include/aimee/delegates/panel_roster.h"
   ],
   "runtime_toggle": {
     "supported": false
   },
   "sources": [
-    "src/modules/delegates/aimee_ir_rescue.c"
+    "src/modules/delegates/aimee_ir_rescue.c",
+    "src/modules/delegates/panel_provider.c",
+    "src/modules/delegates/panel_roster.c"
   ],
   "tests": [
-    "src/tests/test_aimee_ir_rescue.c"
+    "src/tests/test_aimee_ir_rescue.c",
+    "src/tests/test_panel_provider.c"
   ],
   "docs": [
     "docs/modules/delegates.md"

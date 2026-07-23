@@ -1,10 +1,12 @@
 /* panel_result.h: provider-neutral panel output messages.
  *
- * IR owns only the data returned by a panel provider. Deliberation policy,
- * provider selection, execution, convergence, and result destruction belong to
- * the provider. The producing provider owns artifact and must expose the
- * matching release operation. A shallow struct copy is a non-owning view of
- * that same allocation and must never release artifact independently. */
+ * IR owns the aimee_panel_result_t data layout only. Delegates core owns
+ * provider registration, facade invocation, and release dispatch; deliberation
+ * policy and execution remain provider-specific. A provider allocates the
+ * artifact returned in a successful result and supplies its matching release
+ * callback. The caller must invoke aimee_panel_result_release exactly once
+ * before the provider is unregistered. A shallow struct copy is a non-owning
+ * view of the same allocation and must not be released independently. */
 #ifndef AIMEE_IR_PANEL_RESULT_H
 #define AIMEE_IR_PANEL_RESULT_H 1
 

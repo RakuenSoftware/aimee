@@ -23,6 +23,7 @@
     "src/modules/roundtable/roundtable_pipeline_capture.c",
     "src/modules/roundtable/roundtable_pipeline_chunk.c",
     "src/modules/roundtable/roundtable_pipeline_eval.c",
+    "src/modules/roundtable/roundtable_provider.c",
     "src/modules/roundtable/roundtable_preset.c",
     "src/modules/roundtable/roundtable_seat_resolve.c",
     "src/modules/roundtable/roundtable_verify.c"

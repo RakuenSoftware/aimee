@@ -19,7 +19,8 @@
 #include <aimee/delegates/delegate_plan.h>
 #include <aimee/delegates/delegate_launch.h>
 #include <aimee/delegates/delegate_economics.h>
-#include "delegate_ensemble.h"
+#include <aimee/delegates/panel_provider.h>
+#include "roundtable_activation.h"
 #include "memory_platform.h"
 #include "workspace.h"
 #include "guardrails.h"
@@ -525,14 +526,19 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fprintf(stderr, "error: %s\n", roundtable_module_disabled_message());
          return;
       }
+      if (roundtable_provider_configure(&cfg) < 0)
+      {
+         fprintf(stderr, "error: roundtable provider unavailable\n");
+         return;
+      }
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {
          fprintf(stderr, "error: could not load agent config\n");
          return;
       }
-      delegate_ensemble_result_t result;
-      if (delegate_ensemble_run(&acfg, &cfg, argv[1], &result) != 0)
+      aimee_panel_aggregate_result_t result;
+      if (aimee_panel_aggregate(&acfg, &cfg, argv[1], &result) != AIMEE_PANEL_PROVIDER_OK)
       {
          fprintf(stderr, "error: ensemble failed\n");
          return;

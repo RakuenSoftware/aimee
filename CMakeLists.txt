@@ -783,6 +783,8 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_run_phases.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
+    ${AIMEE_SRC_DIR}/modules/delegates/panel_provider.c
+    ${AIMEE_SRC_DIR}/modules/delegates/panel_roster.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_role.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_economics.c
     ${AIMEE_SRC_DIR}/cmd_wm.c
