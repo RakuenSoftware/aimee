@@ -80,13 +80,20 @@ The security property is simple and does not require any downstream cooperation:
   hosts the attacker does not control and cannot reach backwards in time to
   amend. Comparison exposes the rewrite.
 
-Either signal is sufficient. **Detection is the deliverable, not reconstruction.**
-This umbrella does not claim the exported evidence can rebuild the complete
-original event history; it claims that tampering cannot go unnoticed. Records
-carry the non-secret identifying fields an operator needs to act on a detection —
-request id, principal, `provider:cred` — because §6 requires that for the audit
-purpose anyway, but no slice may promise byte-exact historical reconstruction
-from hashes.
+Either signal is sufficient. **This umbrella's deliverable is detection and
+bounding: proving tampering occurred and establishing when.** Reconstructing what
+was actually done is a different mechanism and belongs to the event bus, which is
+designed to record and replay activity across services up to the point of a full
+takeover. The two compose: the witness chain establishes that the local history
+is false and from which point, and the replayable bus stream supplies the true
+activity over that window.
+
+No slice may claim the witness export alone rebuilds the original event history —
+hashes cannot be inverted, and only the fields actually exported are readable
+from it. Records do carry the non-secret identifying fields an operator needs to
+act on a detection (request id, principal, `provider:cred`), because §6 requires
+them for the audit purpose regardless. But the investigation claim rests on the
+bus, and slices must cite it rather than overstating what the chain provides.
 
 This reuses what P9a already built rather than inventing a transport. Signed
 checkpoints ride the metrics surface — `GET /v1/metrics`, behind org-admin auth
@@ -124,9 +131,10 @@ because those copies are already gone from the host's reach.
   itself; a locally clean chain that contradicts an exported copy proves it just
   as well. No slice may describe a durable local append or the primary hash chain
   as sufficient on its own.
-- **Detection is the deliverable, not reconstruction.** No slice may claim the
-  exported evidence rebuilds the complete original event history. It must claim
-  only that tampering is detectable.
+- **This umbrella delivers detection and bounding; the event bus delivers
+  reconstruction.** No slice may claim the witness export alone rebuilds the
+  original event history. Claims about determining what was done must cite the
+  event-bus record/replay mechanism, not the chain.
 - **Export everything, gate nothing on it.** All evidence is exported; export lag
   raises a typed integrity alert and never blocks admission. There is no delivery
   receipt, no watermark, no consumer registry, and no unwitnessed budget.
@@ -153,18 +161,22 @@ because those copies are already gone from the host's reach.
 To forge a consistent history, an attacker must rewrite aimee-kb's chain *and*
 every copy already exported to every downstream service, in a mutually consistent
 way, without access to those hosts. Exported copies cannot be reached backwards
-in time. With the forthcoming event-bus work — where activity is recorded and
-replayable across services — that burden grows further: the attacker would need
-to compromise the user's machine, aimee-server, and aimee-kb simultaneously, and
-keep all three consistent with each other *and* with the recorded, replayable
-stream. That is the assurance argument, and it does not depend on any single
-service being trustworthy.
+in time.
 
-The residual is bounded and stated plainly: an attacker who owns the kb host
-controls what is exported from that moment forward, so evidence generated after
-the compromise and before the next export has no external copy. Detection of the
-prior history is unaffected, because those copies are already beyond the host's
-reach. No slice may claim the residual is zero.
+The forthcoming event-bus work raises that bar substantially rather than
+marginally. Activity is recorded and replayable across services, so a forgery
+must additionally stay consistent with that stream. The attacker would need
+simultaneous control of the user's machine, aimee-server, and aimee-kb, including
+the bus itself, holding all of it mutually consistent — and consistent with what
+downstream collectors already hold. Short of that, the record remains replayable
+up to the moment of full takeover. This assurance argument does not depend on any
+single service being trustworthy, which is the point.
+
+The residual is bounded and stated plainly: an attacker with full simultaneous
+control of all three systems and the bus controls what is recorded and exported
+from that moment forward, so activity after that point has no independent copy.
+Everything before it remains detectable and replayable, because those copies are
+already beyond the attacker's reach. No slice may claim the residual is zero.
 
 ## Validation gates (umbrella level)
 
@@ -189,8 +201,8 @@ reach. No slice may claim the residual is zero.
 
 - Automated continuous cross-consumer comparison; it stays an operator-driven
   incident procedure.
-- Event-bus record/replay integration, which strengthens this argument but is
-  owned by its own proposal.
+- Event-bus record/replay integration, which supplies the reconstruction half of
+  the story and is owned by its own proposal.
 - Operator-facing witness console surfaces beyond the existing P5-D status
   plumbing.
 - KMS/PKCS#11 fleet root activation, which remains owned by the reseal umbrella.
