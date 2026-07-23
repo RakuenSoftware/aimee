@@ -47,12 +47,15 @@ VALUES(repeat('8',64),repeat('c',32),'initial',1,repeat('9',64),repeat('a',64),
   repeat('b',64),'issuer-local','11',repeat('1',64),repeat('a',64),now()-interval '1 minute',
   now()+interval '1 hour',97611,'active',now()-interval '2 minutes',
   now()-interval '1 minute',now()-interval '30 seconds');
-INSERT INTO public.kb_management_action_intent(correlation_id,jti,team_id,actor_identity,
+INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+VALUES(repeat('f',64),repeat('e',64),'action');
+INSERT INTO public.kb_management_action_intent(correlation_id,jti,kind,team_id,actor_identity,
   capability,target_server_id,request_sha256,token_issuer,audience,kid,issued_at,expires_at,
   installation_id,installation_generation,installation_enrollment_id,local_cert_issuer,
   local_cert_serial_norm,local_cert_fingerprint,target_enrollment_id,target_mgmt_issuer,
   target_mgmt_serial_norm,target_mgmt_fingerprint,revocation_generation)
-VALUES(repeat('f',64),repeat('e',64),9761,'oidc:https%3A%25issuer:concurrent','remote_writes',
+VALUES(repeat('f',64),repeat('e',64),'action',9761,
+  'oidc:https%3A%25issuer:concurrent','remote_writes',
   'srv-concurrent',repeat('d',64),'issuer','srv-concurrent','kid-1',1000,1090,repeat('c',32),
   1,97611,'issuer-local','11',repeat('1',64),97612,'issuer-target','22',repeat('2',64),1);
 SQL

@@ -9681,9 +9681,20 @@ REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
 -- either structured table or the audit detail.
 -- ============================================================================
 
+CREATE TABLE IF NOT EXISTS kb_management_token_intent_namespace (
+  correlation_id TEXT NOT NULL CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind IN ('action','read')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(correlation_id),
+  UNIQUE(jti),
+  UNIQUE(correlation_id,jti,kind)
+);
+
 CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
   jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind='action'),
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   actor_identity TEXT NOT NULL CHECK (char_length(actor_identity) BETWEEN 1 AND 576),
   capability TEXT NOT NULL CHECK (capability='remote_writes'),
@@ -9709,6 +9720,38 @@ CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(correlation_id,team_id)
 );
+
+ALTER TABLE kb_management_action_intent
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'action';
+ALTER TABLE kb_management_action_intent ALTER COLUMN kind DROP DEFAULT;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_kind_check') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_kind_check CHECK (kind='action');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_namespace_tuple_key') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_namespace_tuple_key
+      UNIQUE(correlation_id,jti,kind);
+  END IF;
+END $$;
+INSERT INTO kb_management_token_intent_namespace(correlation_id,jti,kind,created_at)
+  SELECT correlation_id,jti,'action',created_at FROM kb_management_action_intent
+  ON CONFLICT DO NOTHING;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_namespace_fk') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_namespace_fk
+      FOREIGN KEY(correlation_id,jti,kind)
+      REFERENCES public.kb_management_token_intent_namespace(correlation_id,jti,kind);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS kb_management_action_outcome (
   correlation_id TEXT PRIMARY KEY,
@@ -9741,11 +9784,19 @@ ALTER TABLE kb_management_action_outcome
 
 ALTER TABLE kb_management_action_intent ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_intent FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_token_intent_namespace ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_token_intent_namespace FORCE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_outcome ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_outcome FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS kb_management_action_intent_owner_only ON kb_management_action_intent;
 CREATE POLICY kb_management_action_intent_owner_only ON kb_management_action_intent
   USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+DROP POLICY IF EXISTS kb_management_token_intent_namespace_owner_only
+  ON kb_management_token_intent_namespace;
+CREATE POLICY kb_management_token_intent_namespace_owner_only
+  ON kb_management_token_intent_namespace
+  USING (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'))
+  WITH CHECK (current_user='aimee_kb_owner');
 DROP POLICY IF EXISTS kb_management_action_outcome_owner_only ON kb_management_action_outcome;
 CREATE POLICY kb_management_action_outcome_owner_only ON kb_management_action_outcome
   USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
@@ -9763,6 +9814,16 @@ CREATE TRIGGER kb_management_action_intent_delete_guard BEFORE DELETE ON kb_mana
   FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
 DROP TRIGGER IF EXISTS kb_management_action_intent_truncate_guard ON kb_management_action_intent;
 CREATE TRIGGER kb_management_action_intent_truncate_guard BEFORE TRUNCATE ON kb_management_action_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_token_intent_namespace_update_guard
+  ON kb_management_token_intent_namespace;
+CREATE TRIGGER kb_management_token_intent_namespace_update_guard
+  BEFORE UPDATE OR DELETE ON kb_management_token_intent_namespace
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_token_intent_namespace_truncate_guard
+  ON kb_management_token_intent_namespace;
+CREATE TRIGGER kb_management_token_intent_namespace_truncate_guard
+  BEFORE TRUNCATE ON kb_management_token_intent_namespace
   FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
 DROP TRIGGER IF EXISTS kb_management_action_outcome_update_guard ON kb_management_action_outcome;
 CREATE TRIGGER kb_management_action_outcome_update_guard BEFORE UPDATE ON kb_management_action_outcome
@@ -9797,7 +9858,7 @@ DECLARE
   i public.kb_management_instance%ROWTYPE;
   q public.kb_management_instance_issue%ROWTYPE;
   le public.kb_enrollments%ROWTYPE;
-  v_rev BIGINT; v_iat BIGINT; v_detail TEXT;
+  v_rev BIGINT; v_iat BIGINT; v_detail TEXT; v_reserved BIGINT;
 BEGIN
   IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
     RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
@@ -9888,13 +9949,19 @@ BEGIN
   END IF;
 
   v_iat:=pg_catalog.floor(extract(epoch FROM pg_catalog.statement_timestamp()))::BIGINT;
+  INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+    VALUES(p_correlation_id,p_jti,'action') ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS v_reserved=ROW_COUNT;
+  IF v_reserved<>1 THEN
+    RAISE EXCEPTION 'management action namespace conflict' USING ERRCODE='23505';
+  END IF;
   INSERT INTO public.kb_management_action_intent(
-    correlation_id,jti,team_id,actor_identity,capability,target_server_id,request_sha256,
+    correlation_id,jti,kind,team_id,actor_identity,capability,target_server_id,request_sha256,
     token_issuer,audience,kid,issued_at,expires_at,installation_id,installation_generation,
     installation_enrollment_id,local_cert_issuer,local_cert_serial_norm,local_cert_fingerprint,
     target_enrollment_id,target_mgmt_issuer,target_mgmt_serial_norm,target_mgmt_fingerprint,
     revocation_generation)
-  VALUES(p_correlation_id,p_jti,p_team_id,v_actor,p_capability,p_target_server_id,
+  VALUES(p_correlation_id,p_jti,'action',p_team_id,v_actor,p_capability,p_target_server_id,
     p_request_sha256,p_token_issuer,p_target_server_id,p_kid,v_iat,v_iat+p_ttl_seconds,
     i.installation_id,i.current_generation,le.id,le.cert_issuer,le.cert_serial_norm,le.fingerprint,
     te.id,r.mgmt_issuer,r.mgmt_serial_norm,r.mgmt_fingerprint,v_rev)
@@ -9981,7 +10048,8 @@ BEGIN
     o.status_code,o.response_sha256,extract(epoch FROM o.completed_at)::BIGINT;
 END $$;
 
-REVOKE ALL ON TABLE kb_management_action_intent,kb_management_action_outcome FROM PUBLIC;
+REVOKE ALL ON TABLE kb_management_token_intent_namespace,kb_management_action_intent,
+  kb_management_action_outcome FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_action_worm_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_action_intent_start(
   TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
@@ -10050,6 +10118,7 @@ RETURNS TABLE(correlation_id TEXT,jti TEXT,team_id BIGINT,actor_identity TEXT,
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
 DECLARE
+  ns public.kb_management_token_intent_namespace%ROWTYPE;
   a public.kb_management_action_intent%ROWTYPE;
   m public.kb_team_membership%ROWTYPE;
   ag public.kb_admin_grant%ROWTYPE;
@@ -10079,9 +10148,13 @@ BEGIN
     RAISE EXCEPTION 'management token authority: primary required' USING ERRCODE='25006';
   END IF;
 
+  SELECT x.* INTO ns FROM public.kb_management_token_intent_namespace x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti AND x.kind='action' FOR SHARE;
   SELECT x.* INTO a FROM public.kb_management_action_intent x
    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
-  IF a.correlation_id IS NULL THEN
+  IF ns.correlation_id IS NULL OR a.correlation_id IS NULL OR a.kind<>'action' OR
+     ROW(a.correlation_id,a.jti,a.kind) IS DISTINCT FROM
+       ROW(ns.correlation_id,ns.jti,ns.kind) THEN
     RAISE EXCEPTION 'management token authority: journal intent unavailable' USING ERRCODE='P0002';
   END IF;
   IF EXISTS (SELECT 1 FROM public.kb_management_action_outcome x

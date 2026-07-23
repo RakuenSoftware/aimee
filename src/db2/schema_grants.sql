@@ -354,7 +354,8 @@ BEGIN
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_token_authority_definer;
   GRANT EXECUTE ON FUNCTION public.kb_management_token_authority_snapshot(TEXT,TEXT)
     TO aimee_kb_token_authority_definer;
-  GRANT SELECT ON public.kb_management_action_intent,
+  GRANT SELECT ON public.kb_management_token_intent_namespace,
+    public.kb_management_action_intent,
     public.kb_management_action_outcome,public.kb_team_membership,
     public.kb_admin_grant,public.kb_team_lead,public.kb_server_registry,
     public.kb_enrollments,public.kb_management_instance,
@@ -369,7 +370,8 @@ BEGIN
   -- named by SELECT ... FOR SHARE.  Grant only an identity/key column; the
   -- authority has no generic SQL seam and every actual mutation remains outside
   -- its fixed functions (the key-use table is additionally WORM-triggered).
-  GRANT UPDATE(correlation_id) ON public.kb_management_action_intent,
+  GRANT UPDATE(correlation_id) ON public.kb_management_token_intent_namespace,
+    public.kb_management_action_intent,
     public.kb_management_action_outcome,public.kb_management_token_key_use_intent
     TO aimee_kb_token_authority_definer;
   GRANT UPDATE(id) ON public.kb_team_membership,public.kb_admin_grant,
@@ -417,7 +419,8 @@ BEGIN
     'aimee_kb_status_provision','aimee_kb_token_roots_provision','aimee_kb_jwks_publish',
     'aimee_kb_jwks_runtime_definer','aimee_kb_migrate'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=role_name) THEN
-      EXECUTE format('REVOKE ALL ON TABLE public.kb_management_token_key_use_intent FROM %I',role_name);
+      EXECUTE format('REVOKE ALL ON TABLE public.kb_management_token_intent_namespace,'
+        'public.kb_management_token_key_use_intent FROM %I',role_name);
       EXECUTE format('REVOKE ALL ON FUNCTION '
         'public.kb_management_token_key_use_worm_guard(),'
         'public.kb_management_token_authority_snapshot(TEXT,TEXT),'
@@ -599,6 +602,7 @@ BEGIN
 
   ALTER TABLE public.kb_management_action_intent OWNER TO aimee_kb_owner;
   ALTER TABLE public.kb_management_action_outcome OWNER TO aimee_kb_owner;
+  ALTER TABLE public.kb_management_token_intent_namespace OWNER TO aimee_kb_owner;
   EXECUTE 'ALTER FUNCTION public.kb_management_action_worm_guard() OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
   EXECUTE 'ALTER FUNCTION public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO aimee_kb_owner';
@@ -611,14 +615,16 @@ BEGIN
   GRANT EXECUTE ON FUNCTION public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
     TO aimee_kb_owner;
 
-  REVOKE ALL ON TABLE public.kb_management_action_intent,
+  REVOKE ALL ON TABLE public.kb_management_token_intent_namespace,
+    public.kb_management_action_intent,
     public.kb_management_action_outcome FROM PUBLIC;
   REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
     public.kb_management_action_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT),
     public.kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') THEN
-    REVOKE ALL ON TABLE public.kb_management_action_intent,
+    REVOKE ALL ON TABLE public.kb_management_token_intent_namespace,
+      public.kb_management_action_intent,
       public.kb_management_action_outcome FROM aimee_kb_runtime;
     REVOKE ALL ON FUNCTION public.kb_management_action_worm_guard(),
       public.kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
