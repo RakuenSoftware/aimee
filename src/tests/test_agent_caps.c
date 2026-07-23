@@ -1435,6 +1435,165 @@ void test_declared_roles_route_precisely(void)
    printf("  PASS: test_declared_roles_route_precisely\n");
 }
 
+/* A declared per-agent SCOPE CEILING is how "our local delegates can do some
+ * coding tasks, but not the complex ones" is expressed. Without it a local model
+ * at cost_tier 0 wins EVERY packet under cheapest-first routing. */
+void test_scope_ceiling_matches_work_to_capability(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 2;
+
+   /* Free local seat, cheapest tier, but only good for bounded work. */
+   strcpy(cfg.agents[0].name, "local");
+   strcpy(cfg.agents[0].provider, "llama_native");
+   strcpy(cfg.agents[0].model, "local-small");
+   strcpy(cfg.agents[0].endpoint, "http://localhost:8080/v1");
+   strcpy(cfg.agents[0].auth_type, "none");
+   strcpy(cfg.agents[0].roles[0], "code");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0;
+   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
+
+   /* Capable paid seat, dearest tier, no ceiling. */
+   strcpy(cfg.agents[1].name, "capable");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "code");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 3;
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* BOUNDED work goes to the cheap local seat — the whole point of registering it. */
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
+          &cfg.agents[0]);
+
+   /* WHOLE_TASK work must NOT: the local ceiling excludes it, so the dearer
+    * capable seat wins despite cheapest-first. */
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_WHOLE_TASK) ==
+          &cfg.agents[1]);
+
+   /* An UNDECLARED packet scope resolves to WHOLE_TASK: under uncertainty
+    * over-select toward capability rather than risk a misplacement. */
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_UNSET) ==
+          &cfg.agents[1]);
+   assert(agent_route_with_caps(&cfg, "code", &sys_cfg, 0, 0) == &cfg.agents[1]);
+
+   /* THE TRAP: scope binds like a capability, NOT like min_context. Escalation
+    * relaxes a context shortfall but must never relax a ceiling — otherwise a
+    * whole_task packet escalates INTO the seat declared unable to handle it.
+    * With the capable seat gone, the answer is "no route", not "use local". */
+   cfg.agents[1].enabled = 0;
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 5000000,
+                                       AGENT_SCOPE_WHOLE_TASK) == NULL);
+   /* ...while bounded work still routes, so this is a ceiling and not an outage. */
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
+          &cfg.agents[0]);
+
+   /* A fleet where EVERY agent declares a ceiling below whole_task cannot serve a
+    * default-scope packet. That must WARN at config load, not surface later as a
+    * confusing "no route" at dispatch — but it must not be fatal, since an
+    * operator may legitimately run only bounded work. */
+   {
+      FILE *cf = fopen(agent_config_path(), "w");
+      assert(cf != NULL);
+      fputs("{\"agents\":[{\"name\":\"only_local\",\"provider\":\"ollama\","
+            "\"endpoint\":\"http://localhost:11434\",\"model\":\"m\","
+            "\"auth_type\":\"none\",\"max_scope\":\"bounded\","
+            "\"roles\":[\"code\"]}]}\n",
+            cf);
+      fclose(cf);
+      agent_config_t only;
+      assert(agent_load_config(&only) == 0); /* warns, does NOT fail */
+      assert(only.agent_count == 1);
+      assert(only.agents[0].max_scope == AGENT_SCOPE_BOUNDED);
+      /* And the ceiling round-trips through save. */
+      assert(agent_save_config(&only) == 0);
+      agent_config_t back;
+      assert(agent_load_config(&back) == 0);
+      assert(back.agents[0].max_scope == AGENT_SCOPE_BOUNDED);
+      /* An unknown value is REJECTED rather than silently meaning "no ceiling",
+       * which would hand the hardest work to the seat being limited. */
+      cf = fopen(agent_config_path(), "w");
+      assert(cf != NULL);
+      fputs("{\"agents\":[{\"name\":\"x\",\"provider\":\"ollama\","
+            "\"endpoint\":\"http://localhost:11434\",\"model\":\"m\","
+            "\"auth_type\":\"none\",\"max_scope\":\"medium\","
+            "\"roles\":[\"code\"]}]}\n",
+            cf);
+      fclose(cf);
+      assert(agent_load_config(&back) != 0);
+      unlink(agent_config_path());
+   }
+
+   printf("  PASS: test_scope_ceiling_matches_work_to_capability\n");
+}
+
+/* routing.prefer_local shifts work to FREE local seats when one is eligible —
+ * but as an ORDERING preference only. It must never smuggle a packet past a
+ * ceiling: local tokens are free, which removes the cost argument for
+ * over-selecting, not the wall-clock one. */
+void test_prefer_local_orders_but_never_bypasses(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 2;
+
+   /* Local seat, but DEARER tier so only the preference can select it. */
+   strcpy(cfg.agents[0].name, "local");
+   strcpy(cfg.agents[0].provider, "ollama");
+   strcpy(cfg.agents[0].model, "local-small");
+   strcpy(cfg.agents[0].endpoint, "http://localhost:11434");
+   strcpy(cfg.agents[0].auth_type, "none");
+   strcpy(cfg.agents[0].roles[0], "code");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0;
+   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
+
+   strcpy(cfg.agents[1].name, "remote");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "code");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 0; /* SAME tier, so ordering decides */
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* Off: same tier, so the balanced picker may return either. */
+   sys_cfg.prefer_local_agents = 0;
+   assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) != NULL);
+
+   /* On: the local seat wins every time for work it can take. */
+   sys_cfg.prefer_local_agents = 1;
+   for (int i = 0; i < 6; i++)
+      assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_BOUNDED) ==
+             &cfg.agents[0]);
+
+   /* But it must NOT bypass the ceiling: whole_task still goes remote even with
+    * the preference on. This is the assertion that keeps "prefer free" from
+    * becoming "misplace work". */
+   for (int i = 0; i < 6; i++)
+      assert(agent_route_with_caps_scoped(&cfg, "code", &sys_cfg, 0, 0, AGENT_SCOPE_WHOLE_TASK) ==
+             &cfg.agents[1]);
+
+   printf("  PASS: test_prefer_local_orders_but_never_bypasses\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as

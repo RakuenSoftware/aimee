@@ -607,6 +607,30 @@ void agent_registration_prefix(const char *name, char *out, size_t out_len)
    out[n] = '\0';
 }
 
+const char *agent_scope_name(agent_scope_t s)
+{
+   switch (s)
+   {
+   case AGENT_SCOPE_BOUNDED:
+      return "bounded";
+   case AGENT_SCOPE_WHOLE_TASK:
+      return "whole_task";
+   default:
+      return "";
+   }
+}
+
+agent_scope_t agent_scope_from_string(const char *s)
+{
+   if (!s || !s[0])
+      return AGENT_SCOPE_UNSET;
+   if (strcmp(s, "bounded") == 0)
+      return AGENT_SCOPE_BOUNDED;
+   if (strcmp(s, "whole_task") == 0 || strcmp(s, "whole-task") == 0)
+      return AGENT_SCOPE_WHOLE_TASK;
+   return AGENT_SCOPE_UNSET;
+}
+
 const char *agent_catalog_provider(const agent_t *ag)
 {
    if (!ag)
@@ -1126,6 +1150,22 @@ int agent_load_config(agent_config_t *cfg)
          if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
             ag->price_cached_per_mtok = v->valuedouble;
 
+         /* An unrecognised value must not silently mean "no ceiling": that would
+          * hand the hardest work to the seat the operator was trying to limit. */
+         v = cJSON_GetObjectItem(a, "max_scope");
+         if (v && cJSON_IsString(v) && v->valuestring[0])
+         {
+            ag->max_scope = agent_scope_from_string(v->valuestring);
+            if (ag->max_scope == AGENT_SCOPE_UNSET)
+            {
+               LOG_ERROR("agent", "agents.json: agent '%s' has unknown max_scope '%s'; "
+                                  "use \"bounded\" or \"whole_task\"",
+                         ag->name, v->valuestring);
+               cJSON_Delete(root);
+               return -1;
+            }
+         }
+
          v = cJSON_GetObjectItem(a, "max_tokens");
          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
 
@@ -1412,6 +1452,29 @@ int agent_load_config(agent_config_t *cfg)
       }
    }
 
+   /* Q5 mitigation: a fleet where EVERY agent declares a ceiling below whole_task
+    * cannot serve a default-scope packet at all, and the failure would otherwise
+    * appear only at dispatch as a confusing "no route". Warn at load instead.
+    * Deliberately not fatal: an operator may legitimately run only bounded work. */
+   if (cfg->agent_count > 0)
+   {
+      int unbounded = 0;
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         if (cfg->agents[i].enabled && (cfg->agents[i].max_scope == AGENT_SCOPE_UNSET ||
+                                        cfg->agents[i].max_scope >= AGENT_SCOPE_WHOLE_TASK))
+         {
+            unbounded = 1;
+            break;
+         }
+      }
+      if (!unbounded)
+         LOG_WARN("agent",
+                  "no enabled agent can serve whole_task work (every agent declares a lower "
+                  "max_scope); packets without an explicit scope will fail to route. Remove a "
+                  "ceiling or add a more capable agent.");
+   }
+
    /* Whole-config name uniqueness. Checking only against agents committed SO FAR
     * is order-dependent: an expansion generating `codex:gpt-5.6-sol` is caught
     * when a legacy agent of that name was loaded first, but not when it is
@@ -1652,6 +1715,8 @@ int agent_save_config(const agent_config_t *cfg)
          cJSON_AddNumberToObject(a, "price_out_per_mtok", ag->price_out_per_mtok);
       if (ag->price_cached_per_mtok > 0.0)
          cJSON_AddNumberToObject(a, "price_cached_per_mtok", ag->price_cached_per_mtok);
+      if (ag->max_scope != AGENT_SCOPE_UNSET)
+         JSON_ADD_STR(a, "max_scope", agent_scope_name(ag->max_scope));
 
       cJSON *roles = cJSON_CreateArray();
       for (int j = 0; j < ag->role_count; j++)
@@ -2140,6 +2205,37 @@ agent_t *agent_default_primary(agent_config_t *cfg)
  * unpinned delegation starves every peer at the same tier.  A process-wide
  * atomic cursor gives those peers round-robin opportunities while explicit
  * --via pins continue to be handled before this function is reached. */
+/* A FREE, locally-hosted seat: llama.cpp / Ollama style, or an unauthenticated
+ * endpoint on this machine. Mirrors the local-provider notion already used by
+ * agent_default_inject_respond_tool. */
+static int agent_is_local(const agent_t *ag)
+{
+   if (!ag)
+      return 0;
+   if (strcmp(ag->provider, "ollama") == 0 || strcmp(ag->provider, "llama_native") == 0 ||
+       strcmp(ag->provider, "llama-eval") == 0)
+      return 1;
+   return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
+}
+
+/* routing.prefer_local: shift work to free local seats when any ELIGIBLE candidate
+ * is local. Applied AFTER eligibility, so it can never smuggle a packet past a
+ * scope ceiling or a capability requirement - it only reorders seats already
+ * allowed to take the work. Local tokens are free, which removes the COST argument
+ * for over-selecting, but not the wall-clock one: a local seat failing work beyond
+ * its ceiling still burns a session, a review and an escalation. Returns the
+ * narrowed count. */
+static int agent_prefer_local(agent_t **candidates, int count, const config_t *sys_cfg)
+{
+   if (!sys_cfg || !sys_cfg->prefer_local_agents || count <= 1)
+      return count;
+   int n = 0;
+   for (int i = 0; i < count; i++)
+      if (agent_is_local(candidates[i]))
+         candidates[n++] = candidates[i];
+   return n > 0 ? n : count; /* no local seat eligible: leave the field alone */
+}
+
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
 {
    static unsigned cursor;
@@ -2241,7 +2337,8 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
 }
 
 static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
-                                          unsigned required_caps, int min_context);
+                                          unsigned required_caps, int min_context,
+                                          agent_scope_t scope);
 
 /* A PRIMARY (user-facing) turn must reach the configured default agent whatever
  * its cost_tier. The default is the operator's "most capable seat" choice, and a
@@ -2281,7 +2378,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *peer = &cfg->agents[i];
-         if (!agent_route_candidate_eligible(peer, role, 0, 0))
+         if (!agent_route_candidate_eligible(peer, role, 0, 0, AGENT_SCOPE_UNSET))
             continue;
          if (min_tier < 0 || peer->cost_tier < min_tier)
             min_tier = peer->cost_tier;
@@ -2289,7 +2386,7 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *peer = &cfg->agents[i];
-         if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0))
+         if (peer == ag || !agent_route_candidate_eligible(peer, role, 0, 0, AGENT_SCOPE_UNSET))
             continue;
          if (peer->cost_tier == min_tier &&
              strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
@@ -2362,9 +2459,35 @@ agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
    return agent_pick_balanced(candidates, count);
 }
 
-static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_caps, int min_context)
+/* Does this agent's declared ceiling admit work of `scope`?
+ *
+ * BINDING, like a capability flag and unlike min_context: escalation may relax a
+ * context shortfall (a bigger seat is a genuine best effort) but must NEVER relax
+ * a scope ceiling. Relaxing it would escalate a whole_task packet INTO the very
+ * seat the operator declared unable to handle it - the exact inversion of the
+ * requirement. If nothing can serve the packet that is a config error worth
+ * surfacing, not something to paper over. */
+/* Scope is fixed at DECOMPOSITION time and is part of a packet's identity for its
+ * lifetime. A retry, a same-tier fallback or an escalation re-routes the SAME
+ * packet and must not alter its scope; widening bounded work into whole_task work
+ * is a re-decomposition, which only the orchestrator may do by emitting a new
+ * packet. */
+static int agent_scope_admits(const agent_t *ag, agent_scope_t scope)
+{
+   if (!ag || ag->max_scope == AGENT_SCOPE_UNSET)
+      return 1; /* no declared ceiling */
+   /* An undeclared packet scope resolves to WHOLE_TASK: under uncertainty prefer
+    * the capable seat, since over-selecting costs less than a misplacement. */
+   agent_scope_t want = scope == AGENT_SCOPE_UNSET ? AGENT_SCOPE_WHOLE_TASK : scope;
+   return want <= ag->max_scope;
+}
+
+static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_caps, int min_context,
+                                         agent_scope_t scope)
 {
    if (!ag)
+      return 0;
+   if (!agent_scope_admits(ag, scope))
       return 0;
 
    unsigned missing_caps = required_caps;
@@ -2372,7 +2495,7 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
       missing_caps &= ~MODEL_CAP_TOOLS;
 
    if (required_caps == 0 && min_context <= 0)
-      return 1;
+      return 1; /* scope already checked above */
 
    /* An explicit per-agent context_window override (agents.json
     * `middleware.context_window`, set via `aimee agent --ctx` or auto-detected
@@ -2396,7 +2519,16 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
       caps.flags &= ~MODEL_CAP_TOOLS;
    if (required_caps && (caps.flags & required_caps) != required_caps)
       return 0;
-   /* An UNKNOWN context window (0) must not satisfy a positive min_context. The
+   /* NOTE the deliberate ASYMMETRY with the max_scope ceiling above: min_context
+    * RELAXES during escalation, max_scope never does. The reason is monotonicity.
+    * "More context" is strictly more capable, so escalating to a bigger window is
+    * always a genuine best effort. "More scope" is NOT monotone: a whole_task
+    * packet is not a bigger version of a bounded one, it is a categorically
+    * different shape of work. Relaxing a ceiling would therefore hand the hardest
+    * packet to the seat declared least able to serve it. Do not "fix" one of these
+    * to match the other.
+    *
+    * An UNKNOWN context window (0) must not satisfy a positive min_context. The
     * previous `effective_ctx > 0` guard made zero pass the gate, so a model whose
     * window aimee could not establish was admitted for arbitrarily large prompts
     * — the failure looked like success.
@@ -2435,7 +2567,7 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
  * when capability routing is disabled. */
 static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *role,
                                             const config_t *sys_cfg, unsigned required_caps,
-                                            int min_context)
+                                            int min_context, agent_scope_t scope)
 {
    if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
       return agent_route(cfg, role);
@@ -2445,9 +2577,9 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
     * default that cannot hold the prompt or lacks a required modality is not a
     * usable seat — but its cost_tier is irrelevant to that decision. */
    agent_t *primary_default = agent_primary_turn_default(cfg, role);
-   if (primary_default && (!(required_caps || min_context > 0) ||
-                           agent_satisfies_required_caps(primary_default, required_caps,
-                                                         min_context)))
+   if (primary_default && agent_scope_admits(primary_default, scope) &&
+       (!(required_caps || min_context > 0) ||
+        agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
       return primary_default;
 
    int min_tier = -1;
@@ -2458,9 +2590,14 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
          continue;
 
+      /* The scope ceiling binds even when NOTHING else is required: it is a
+       * property of the agent, not of the request's capability demands, so it
+       * must not sit behind the required_caps/min_context guard. */
+      if (!agent_scope_admits(ag, scope))
+         goto next_agent;
       if (required_caps || min_context > 0)
       {
-         if (!agent_satisfies_required_caps(ag, required_caps, min_context))
+         if (!agent_satisfies_required_caps(ag, required_caps, min_context, scope))
             goto next_agent;
       }
 
@@ -2489,15 +2626,18 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
 
+      if (!agent_scope_admits(ag, scope))
+         continue;
       if (required_caps || min_context > 0)
       {
-         if (!agent_satisfies_required_caps(ag, required_caps, min_context))
+         if (!agent_satisfies_required_caps(ag, required_caps, min_context, scope))
             continue;
       }
 
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
+   count = agent_prefer_local(candidates, count, sys_cfg);
    return agent_pick_balanced(candidates, count);
 }
 
@@ -2543,17 +2683,19 @@ static int agent_effective_context(const agent_t *ag)
  * rule all live inside agent_is_available_for_routing(), so they are enforced
  * here for both paths. `min_context` is the only axis escalation relaxes. */
 static int agent_route_candidate_eligible(const agent_t *ag, const char *role,
-                                          unsigned required_caps, int min_context)
+                                          unsigned required_caps, int min_context,
+                                          agent_scope_t scope)
 {
    if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
        !agent_is_available_for_routing(ag))
       return 0;
    if (required_caps || min_context > 0)
-      return agent_satisfies_required_caps(ag, required_caps, min_context);
-   return 1;
+      return agent_satisfies_required_caps(ag, required_caps, min_context, scope);
+   return agent_scope_admits(ag, scope);
 }
 
-static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsigned required_caps)
+static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role,
+                                     unsigned required_caps, agent_scope_t scope)
 {
    agent_t *best = NULL;
    int best_ctx = -1;
@@ -2561,7 +2703,7 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
    if (cfg->default_agent[0])
    {
       agent_t *def = agent_find(cfg, cfg->default_agent);
-      if (def && agent_route_candidate_eligible(def, role, required_caps, 0))
+      if (def && agent_route_candidate_eligible(def, role, required_caps, 0, scope))
          return def;
    }
 
@@ -2573,7 +2715,7 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
        * KIND shortfall: if no agent has tools, none can be conjured, and
        * dispatching anyway trades a clear, actionable config error for a doomed
        * request. So required_caps still bind; only min_context is relaxed. */
-      if (!agent_route_candidate_eligible(ag, role, required_caps, 0))
+      if (!agent_route_candidate_eligible(ag, role, required_caps, 0, scope))
          continue;
       int ctx = agent_effective_context(ag);
       if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
@@ -2588,7 +2730,15 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsi
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context)
 {
-   agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context);
+   return agent_route_with_caps_scoped(cfg, role, sys_cfg, required_caps, min_context,
+                                       AGENT_SCOPE_UNSET);
+}
+
+agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
+                                      const config_t *sys_cfg, unsigned required_caps,
+                                      int min_context, agent_scope_t scope)
+{
+   agent_t *r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps, min_context, scope);
    /* Modality caps (vision/pdf/audio) are inferred from prompt text and are
     * best-effort: if no model satisfies them, relax them and route on the hard
     * caps (tools) + min_context rather than returning no route at all. Mirrors
@@ -2596,12 +2746,12 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
    if (!r && sys_cfg && sys_cfg->model_meta_capability_routing &&
        (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
-                                      min_context);
+                                      min_context, scope);
    /* Still nothing: escalate rather than report no route. Only reachable with
     * capability routing ON, so plain cost-tier routing is unaffected. */
    if (!r && sys_cfg && sys_cfg->model_meta_capability_routing)
    {
-      r = agent_route_escalate(cfg, role, required_caps & ~MODEL_CAP_MODALITY_SOFT);
+      r = agent_route_escalate(cfg, role, required_caps & ~MODEL_CAP_MODALITY_SOFT, scope);
       if (r)
          aimee_log(LOG_INFO, "agent",
                    "capability gate matched no agent for role '%s' (caps=0x%x min_context=%d); "

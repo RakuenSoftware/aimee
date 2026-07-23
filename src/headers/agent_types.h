@@ -220,6 +220,31 @@ typedef struct agent_ablation_flags
    int retry;             /* retry/repair paths */
 } agent_ablation_flags_t;
 
+/* How large a unit of work a packet is, and the hardest an agent may be given.
+ *
+ * Ordinal, so a ceiling comparison is a simple `>`. UNSET means "not declared":
+ * on an AGENT it means no ceiling; on a PACKET it resolves to WHOLE_TASK, because
+ * under uncertainty this design OVER-SELECTS toward capability.
+ *
+ * Why over-select rather than lean on escalation: one capable session plus a
+ * review is cheaper - and substantially faster - than a session, a review, an
+ * escalation, another session and another review. Escalation pays for the failed
+ * attempt AND everything after it, in tokens and in wall-clock. An escalation is
+ * therefore a MISPLACEMENT INCIDENT, not a routine safety net.
+ *
+ * Two values only, matching the distinction observed delegate prompts actually
+ * make: bounded SWE-bench style "fix this bug in this file" work versus
+ * "implement the complete approved task in this worktree and verify it". */
+typedef enum
+{
+   AGENT_SCOPE_UNSET = 0,
+   AGENT_SCOPE_BOUNDED = 1,    /* a specified, self-contained change */
+   AGENT_SCOPE_WHOLE_TASK = 2, /* the complete task, repo-wide verification */
+} agent_scope_t;
+
+const char *agent_scope_name(agent_scope_t s);
+agent_scope_t agent_scope_from_string(const char *s);
+
 typedef struct
 {
    char name[MAX_AGENT_NAME];
@@ -276,6 +301,12 @@ typedef struct
    double price_in_per_mtok;
    double price_out_per_mtok;
    double price_cached_per_mtok;
+   /* Hardest work this agent may be given. UNSET (the default, so every existing
+    * config is unchanged) means no ceiling. Declared by the operator, who knows
+    * their local model's limits better than any benchmark would: a small local
+    * model can do bounded work but not whole-task work, and without this it would
+    * win EVERY packet under cheapest-first routing. */
+   agent_scope_t max_scope;
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,

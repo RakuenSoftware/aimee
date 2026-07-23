@@ -1952,6 +1952,18 @@ typedef struct config
     *   required capabilities and minimum context window; when nothing does,
     *   routing escalates to the most capable seat rather than failing.
     */
+   /* routing.prefer_local: try FREE local delegates first whenever one is
+    * eligible, before falling back to paid remote seats. Off by default.
+    *
+    * This is an ORDERING preference among agents that already satisfy the packet
+    * - never a relaxation of eligibility. A local agent still cannot exceed its
+    * declared max_scope: local tokens are free, which removes the COST argument
+    * for over-selecting, but not the wall-clock one. A local model failing
+    * whole-task work still burns a session, a review and an escalation, and still
+    * produces a bad diff. So "free" changes which seat is preferred, not which
+    * seats are eligible. */
+   int prefer_local_agents;
+
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 

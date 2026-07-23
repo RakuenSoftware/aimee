@@ -903,6 +903,7 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
+   cfg->prefer_local_agents = 0;
    cfg->model_meta_refresh_minutes = 60;
    /* Capability routing ON by default. Routing previously consulted cost_tier
     * and role support only, so a packet could be handed to a model whose context

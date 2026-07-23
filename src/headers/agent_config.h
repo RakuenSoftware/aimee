@@ -19,6 +19,17 @@ agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context);
+
+/* Same, but for a packet of a declared SCOPE. An agent whose max_scope ceiling is
+ * below the packet's scope is excluded, and unlike min_context that exclusion is
+ * BINDING - escalation must never relax it, or a whole_task packet would escalate
+ * into the very seat the operator declared unable to handle it. An UNSET packet
+ * scope resolves to WHOLE_TASK: under uncertainty prefer the capable seat, because
+ * over-selecting costs less, in tokens and wall-clock, than a misplacement.
+ * agent_route_with_caps() is this with AGENT_SCOPE_UNSET. */
+agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
+                                      const config_t *sys_cfg, unsigned required_caps,
+                                      int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
