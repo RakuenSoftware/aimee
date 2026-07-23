@@ -77,7 +77,13 @@ class LocalUdsSentinel:
         self._sock.close()
 
 
-def run_client(binary: pathlib.Path, home: pathlib.Path, endpoint: str) -> subprocess.CompletedProcess[str]:
+def run_client(
+    binary: pathlib.Path,
+    home: pathlib.Path,
+    endpoint: str,
+    command: list[str],
+    integrations: bool = False,
+) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
         {
@@ -87,13 +93,22 @@ def run_client(binary: pathlib.Path, home: pathlib.Path, endpoint: str) -> subpr
             "AIMEE_API_BEARER": "test-only-token",
         }
     )
+    if integrations:
+        (home / ".claude").mkdir(exist_ok=True)
+    else:
+        env["AIMEE_NO_CLIENT_INTEGRATIONS"] = "1"
     for key in ("AIMEE_SERVER_URL", "AIMEE_SERVER_TOKEN", "AIMEE_TLS_INSECURE"):
         env.pop(key, None)
     return subprocess.run(
-        [str(binary), "--json", "agent", "list"],
+        [str(binary), "--json", *command],
         env=env,
         text=True,
         capture_output=True,
+        input='{"tool_name":"Read","tool_input":{},"cwd":"/tmp"}\n'
+        if command == ["hooks", "pre"]
+        else "{}\n"
+        if command == ["session-start"]
+        else None,
         timeout=20,
         check=False,
     )
@@ -123,14 +138,31 @@ def main() -> int:
         server_thread.start()
         try:
             port = int(server.server_address[1])
-            result = run_client(binary, home, f"tcp:127.0.0.1:{port}")
+            result = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["agent", "list"], True)
             assert result.returncode == 0, (result.stdout, result.stderr)
             assert RemoteHandler.requests >= 2, RemoteHandler.requests
             assert sentinel.contacts == 0, "configured remote also contacted local UDS"
 
-            failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}")
-            assert failed.returncode != 0, "unreachable remote unexpectedly succeeded"
-            assert sentinel.contacts == 0, "remote failure fell back to local UDS"
+            # Each independently special-cased path must obey the same exclusive
+            # selection rule as ordinary /v1 routing. Their semantic response
+            # rendering is not under test here; the remote request and local
+            # sentinel are the transport assertions.
+            for command in (["hooks", "pre"], ["session-start"], ["optimize", "points"]):
+                before = RemoteHandler.requests
+                special = run_client(binary, home, f"tcp:127.0.0.1:{port}", command)
+                assert RemoteHandler.requests > before, (command, special.stderr)
+                assert sentinel.contacts == 0, f"{command} contacted local UDS"
+
+            for command in (["hooks", "pre"], ["session-start"], ["optimize", "points"]):
+                failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)
+                # hooks intentionally fail open when the policy server is
+                # unavailable; that is not a local fallback and is therefore a
+                # valid result for this transport-only assertion.
+                if command == ["optimize", "points"]:
+                    assert failed.returncode != 0, (
+                        f"{command}: unreachable remote unexpectedly succeeded"
+                    )
+                assert sentinel.contacts == 0, f"{command}: remote failure fell back to local UDS"
         finally:
             server.shutdown()
             server.server_close()
