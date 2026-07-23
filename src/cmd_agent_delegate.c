@@ -1655,8 +1655,101 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       const char *verify_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
       char *verify_out = NULL;
       int verify_rc = safe_exec_capture(verify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
-      free(verify_out);
       verify_outcome_t verify_outcome = verify_classify(verify_rc);
+
+      /* MISPLACEMENT ESCALATION. The seat completed its run but its work product
+       * failed a verifier that genuinely executed - an attributable statement
+       * that this seat was not up to this packet. Re-dispatch ONCE to a dearer,
+       * still-eligible seat with the failing verifier output attached, then
+       * re-verify.
+       *
+       * Once, not a ladder: the allowance is spent here, so a second failure
+       * falls through to the normal failure path for human review. An escalation
+       * means the PLACEMENT was wrong, so it is logged as an incident - its rate
+       * is a health signal on the routing logic, not a routine cost. */
+      int escalated = 0;
+      if (verify_escalation_warranted(rc, verify_outcome, 0))
+      {
+         agent_t *failed_seat = agent_find(&cfg, result.agent_name);
+         int failed_tier = failed_seat ? failed_seat->cost_tier : -1;
+         agent_t *target =
+             agent_route_escalation_target(&cfg, role, failed_tier, 0, AGENT_SCOPE_UNSET);
+         if (target)
+         {
+            LOG_WARN("delegate",
+                     "MISPLACEMENT: '%s' (tier %d) completed but failed verification for role "
+                     "'%s'; escalating once to '%s' (tier %d). Investigate the PLACEMENT, not "
+                     "just the diff.",
+                     result.agent_name[0] ? result.agent_name : "?", failed_tier, role,
+                     target->name, target->cost_tier);
+            fprintf(stderr, "aimee: verify failed on '%s'; escalating once to '%s'\n",
+                    result.agent_name, target->name);
+
+            char *esc_prompt = NULL;
+            /* The failing verifier output is the whole point: the dearer seat
+             * must see WHY the previous attempt failed, not just retry blind. */
+            if (asprintf(&esc_prompt,
+                         "%s\n\n--- PREVIOUS ATTEMPT FAILED VERIFICATION ---\n"
+                         "A previous delegate produced changes that failed `%s` (exit %d).\n"
+                         "Verifier output:\n%s\n"
+                         "Correct the work so the verification passes.\n",
+                         prompt_to_use ? prompt_to_use : "", verify_cmd, verify_rc,
+                         verify_out && verify_out[0] ? verify_out : "(no output captured)") < 0)
+               esc_prompt = NULL;
+
+            if (esc_prompt)
+            {
+               /* Pin routing to the chosen seat so the re-dispatch cannot land
+                * back on the class of agent that just failed. */
+               for (int i = 0; i < cfg.agent_count; i++)
+                  cfg.agents[i].enabled = (&cfg.agents[i] == target);
+               cfg.route_pinned = 1;
+
+               agent_result_t esc_result;
+               memset(&esc_result, 0, sizeof(esc_result));
+               int esc_rc =
+                   agent_run_with_tools(&cfg, role, sys_prompt, esc_prompt, max_tokens, &esc_result);
+               free(esc_prompt);
+               if (esc_rc == 0)
+               {
+                  free(result.response);
+                  result = esc_result;
+                  rc = 0;
+                  escalated = 1;
+                  free(verify_out);
+                  verify_out = NULL;
+                  const char *reverify_argv[] = {"/bin/sh", "-c", verify_cmd, NULL};
+                  verify_rc = safe_exec_capture(reverify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
+                  verify_outcome = verify_classify(verify_rc);
+                  if (verify_rc == 0)
+                     fprintf(stderr, "aimee: escalation to '%s' passed verification\n",
+                             target->name);
+                  else
+                     fprintf(stderr,
+                             "aimee: escalation to '%s' ALSO failed verification (exit %d); "
+                             "failing for review\n",
+                             target->name, verify_rc);
+               }
+               else
+               {
+                  free(esc_result.response);
+                  LOG_WARN("delegate", "escalation dispatch to '%s' failed (rc=%d); keeping the "
+                                       "original result for review",
+                           target->name, esc_rc);
+               }
+            }
+         }
+         else
+         {
+            LOG_WARN("delegate",
+                     "MISPLACEMENT: '%s' failed verification for role '%s' but NO dearer eligible "
+                     "seat exists; failing for review rather than re-running the same class",
+                     result.agent_name[0] ? result.agent_name : "?", role);
+         }
+      }
+      (void)escalated;
+      free(verify_out);
+      verify_out = NULL;
       if (verify_rc != 0)
       {
          /* Distinguish "the verifier ran and reported failure" from "the verifier

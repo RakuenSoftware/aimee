@@ -1594,6 +1594,74 @@ void test_prefer_local_orders_but_never_bypasses(void)
    printf("  PASS: test_prefer_local_orders_but_never_bypasses\n");
 }
 
+/* Escalation target selection. An escalation is a placement CORRECTION, so it
+ * must land on a genuinely dearer seat, must still respect the scope ceiling, and
+ * must report "nothing" rather than re-running the class of seat that just failed. */
+void test_escalation_target_selection(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 3;
+
+   strcpy(cfg.agents[0].name, "cheap");
+   strcpy(cfg.agents[0].provider, "anthropic");
+   strcpy(cfg.agents[0].model, "claude-haiku-4-5");
+   strcpy(cfg.agents[0].roles[0], "code");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   strcpy(cfg.agents[1].name, "mid");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-sonnet-5");
+   strcpy(cfg.agents[1].roles[0], "code");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 2;
+   strcpy(cfg.agents[1].api_key, "k");
+
+   strcpy(cfg.agents[2].name, "dear");
+   strcpy(cfg.agents[2].provider, "anthropic");
+   strcpy(cfg.agents[2].model, "claude-opus-4-8");
+   strcpy(cfg.agents[2].roles[0], "code");
+   cfg.agents[2].role_count = 1;
+   cfg.agents[2].enabled = 1;
+   cfg.agents[2].tools_enabled = 1;
+   cfg.agents[2].cost_tier = 3;
+   cfg.agents[2].middleware.context_window = 400000; /* largest window */
+   strcpy(cfg.agents[2].api_key, "k");
+
+   /* Failing at tier 0 escalates to the MOST capable seat, not merely one step
+    * up: the allowance is spent once, so there is no second chance to correct an
+    * under-shoot, and over-selecting beats laddering. */
+   agent_t *tgt = agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_UNSET);
+   assert(tgt == &cfg.agents[2]);
+
+   /* Never the same class of seat: a target must be strictly dearer. */
+   assert(agent_route_escalation_target(&cfg, "code", 3, 0, AGENT_SCOPE_UNSET) == NULL);
+
+   /* The SCOPE CEILING still binds during escalation. A placement correction is
+    * not a licence to hand a packet to a seat declared unable to serve it. */
+   cfg.agents[2].max_scope = AGENT_SCOPE_BOUNDED;
+   tgt = agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_WHOLE_TASK);
+   assert(tgt == &cfg.agents[1]); /* dear is now ineligible; mid takes it */
+   /* ...and bounded work can still reach it. */
+   assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_BOUNDED) ==
+          &cfg.agents[2]);
+   cfg.agents[2].max_scope = AGENT_SCOPE_UNSET;
+
+   /* A disabled or role-mismatched seat is not a target. */
+   cfg.agents[2].enabled = 0;
+   assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_UNSET) == &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route_escalation_target(&cfg, "code", 0, 0, AGENT_SCOPE_UNSET) == NULL);
+
+   printf("  PASS: test_escalation_target_selection\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as

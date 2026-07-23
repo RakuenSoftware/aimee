@@ -2727,6 +2727,42 @@ static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role,
    return best;
 }
 
+/* Target for a MISPLACEMENT escalation: the most capable eligible seat strictly
+ * dearer than the one whose work failed verification.
+ *
+ * Most capable, not merely one step up. The escalation allowance is spent once,
+ * so there is no second chance to correct an under-shoot - and the operator's
+ * rule is that over-selecting beats laddering, since one capable session plus a
+ * review costs less in tokens AND wall-clock than another failed attempt.
+ *
+ * The scope ceiling still BINDS here. An escalation is a placement correction,
+ * not a licence to hand a packet to a seat declared unable to serve it.
+ * Returns NULL when nothing dearer is eligible - the caller must then fail for
+ * review rather than re-running the same class of seat. */
+agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, int failed_tier,
+                                       unsigned required_caps, agent_scope_t scope)
+{
+   if (!cfg)
+      return NULL;
+   agent_t *best = NULL;
+   int best_ctx = -1;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (ag->cost_tier <= failed_tier)
+         continue; /* same class of seat: re-running it proves nothing */
+      if (!agent_route_candidate_eligible(ag, role, required_caps, 0, scope))
+         continue;
+      int ctx = agent_effective_context(ag);
+      if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
+      {
+         best = ag;
+         best_ctx = ctx;
+      }
+   }
+   return best;
+}
+
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context)
 {

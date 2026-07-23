@@ -27,6 +27,14 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
  * scope resolves to WHOLE_TASK: under uncertainty prefer the capable seat, because
  * over-selecting costs less, in tokens and wall-clock, than a misplacement.
  * agent_route_with_caps() is this with AGENT_SCOPE_UNSET. */
+/* Target for a MISPLACEMENT escalation: the most capable eligible seat strictly
+ * dearer than `failed_tier`. Most capable rather than one step up, because the
+ * escalation allowance is spent once and over-selecting beats laddering. The
+ * scope ceiling still binds. NULL when nothing dearer is eligible, in which case
+ * the caller must fail for review rather than re-run the same class of seat. */
+agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, int failed_tier,
+                                       unsigned required_caps, agent_scope_t scope);
+
 agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const config_t *sys_cfg, unsigned required_caps,
                                       int min_context, agent_scope_t scope);
