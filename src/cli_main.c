@@ -231,6 +231,8 @@ static void client_delegate_usage(void)
                    "  --provider NAME    Route through a specific provider\n"
                    "  --model NAME       Override provider model\n"
                    "  --tier N           Route to the best agent at cost tier N\n"
+                   "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
+                   "                     lower max_scope are excluded (default whole_task)\n"
                    "\n"
                    "Subcommands:\n"
                    "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"

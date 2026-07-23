@@ -727,6 +727,17 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       char route_err[256];
       unsigned required_caps = 0;
       int min_context = 0;
+      /* Packet SCOPE, set by whoever decomposes the work. Absent means
+       * whole_task: boundedness is opt-in, because under uncertainty we
+       * over-select toward capability rather than risk a misplacement. */
+      const char *scope_opt = opt_get(&opts, "scope");
+      agent_scope_t scope = AGENT_SCOPE_UNSET;
+      if (scope_opt && scope_opt[0])
+      {
+         scope = agent_scope_from_string(scope_opt);
+         if (scope == AGENT_SCOPE_UNSET)
+            fatal("--scope expects \"bounded\" or \"whole_task\", got '%s'", scope_opt);
+      }
       int drop_deprecated = !(via_agent_name && via_agent_name[0]) &&
                             !(provider_override && provider_override[0]) &&
                             !(model_override && model_override[0]);
@@ -737,6 +748,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          fatal("%s", route_err);
       if (delegate_filter_route_capabilities(&cfg, role, required_caps, min_context,
                                              drop_deprecated, route_err, sizeof(route_err)) != 0)
+         fatal("%s", route_err);
+      if (delegate_filter_route_scope(&cfg, scope, route_err, sizeof(route_err)) != 0)
          fatal("%s", route_err);
       if (delegate_route_preflight(&cfg, role, route_err, sizeof(route_err)) != 0)
          fatal("%s", route_err);
