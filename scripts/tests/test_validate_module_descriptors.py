@@ -268,6 +268,8 @@ class DescriptorTests(unittest.TestCase):
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
             ("module-runtime", "sources", "src/modules/module-runtime/extension.c"),
             ("module-runtime", "sources", "src/modules/module-runtime/pre_llm_hook.c"),
+            ("plugin-loader", "sources", "src/modules/plugin-loader/plugin.c"),
+            ("plugin-loader", "sources", "src/modules/plugin-loader/plugin_loader.c"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -287,7 +289,7 @@ class DescriptorTests(unittest.TestCase):
                 tmp.cleanup()
 
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime"):
+                           "module-runtime", "plugin-loader"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -308,7 +310,7 @@ class DescriptorTests(unittest.TestCase):
     def test_latched_descriptors_declare_complete_ownership(self) -> None:
         """The latch itself is the control; mutation coverage below assumes it stays set."""
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime"):
+                           "module-runtime", "plugin-loader"):
             descriptor = json.loads(
                 (REPO_ROOT / "src/modules" / identifier / "module.yaml").read_text(
                     encoding="utf-8"
@@ -319,7 +321,7 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime"):
+                           "module-runtime", "plugin-loader"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)

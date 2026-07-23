@@ -20,6 +20,22 @@ install/enable/remove, hook/tool aggregation, conflict checks, `plugin_manifest_
 Loader types consume `aimee/module-runtime/extension.h` one way; module-runtime never includes this
 module.
 
+Five exports have no tracked production caller outside the module: `plugin_registry_path`,
+`plugin_registry_save`, and `plugin_load_and_register` are called only from `plugin.c` and
+`plugin_loader.c`; `plugin_tool_conflicts_with_builtin` is called from `plugin.c` plus the focused
+test, its only external caller; and `plugin_registry_get` has no module-local caller and only the
+focused test as a tracked caller. Two more have no caller in the tracked tree at all:
+`plugin_load_all_registered`, a second registration entry point superseded by
+`plugin_loader_discover_all`, and `plugin_loader_set_install_prefix`, whose documented `main()`
+call is absent — so in the tracked startup path bundled discovery takes the
+`$AIMEE_INSTALL_PREFIX`-then-`./plugins/` fallback. Both remain declared in public headers and
+shipped as external symbols, so a downstream host can link and call them — including calling the
+setter before discovery; their removal is an API and ABI compatibility decision, not a dead-code
+cleanup. The
+`plugin_load_all_registered` header comment still promises a call to
+`plugin_collect_delegate_backends`, which the ABI/loader split in #1722 removed; the comment was
+not updated with it.
+
 ## Dependencies and consumers
 
 - `audit`: records governed plugin-management actions through the core audit contract.
@@ -58,6 +74,16 @@ The exact absence proof is in `docs/validation/core-modularization-slice-11.md`.
 Slice 22 records the corresponding descriptor ownership and requires that established profile proof
 to remain green.
 
+The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C
+and private-header files — the module has no private headers — and requires this canonical
+document. Public-header and test entries are explicit audited claims, not auto-discovered
+completeness domains, so the latch does not police the public-header inventory. It is independent of
+`AIMEE_WITH_PLUGIN_LOADER`: the ownership domain is the module root on disk, not whichever profile a
+build selects. Completeness is a statement about file ownership only; it does not assert that every
+owned export has a caller, or that every declared test runs in every build system. The source
+liveness, build and test membership, adjacent-surface, and public-surface audit is recorded in
+`docs/validation/core-modularization-slice-36.md`.
+
 ## Data and migrations
 
 The module owns plugin manifests and `plugins/installed.json` under the configured Aimee directory.
@@ -92,6 +118,15 @@ Allocation failure reports an error while startup continues without discovered p
 The descriptor assigns both tests to `plugin-loader` by primary behavior. Module-runtime calls in
 `test_plugin.c` are dependency setup for plugin manifest, persistence, and lifecycle behavior;
 module-runtime's focused ownership remains `src/tests/test_plugin_c_hook.c`.
+`src/tests/test_dashboard.c` also calls `plugin_install`; it is a dashboard test and is not claimed
+here.
+
+Test registration is not uniform across build systems. Make registers `unit-test-plugin` and
+`unit-test-plugin-loader` in `src/tests/Rules.mk`; neither is registered with CTest, so Make's is
+the only tracked build registration that runs them, even though both build systems compile both
+sources under the feature flag. That is recorded follow-up debt with a concrete target — CTest must
+execute both plugin tests in an enabled profile — and is a build-membership change rather than an
+ownership one.
 
 ## Operational diagnostics
 
