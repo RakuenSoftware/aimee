@@ -244,6 +244,72 @@
     {
       "ctest": false,
       "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_capability.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_crypto.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_kek_cache.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_kms.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_master_rotate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_principal.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_seam.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_server_key.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_service.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_store.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_tpm2.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "workspace",
       "test": "src/tests/test_workspace.c"
     },
