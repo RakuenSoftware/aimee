@@ -21,7 +21,11 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
     *
     * So an UNPINNED reserve is capped at a quarter of the window. A caller that
     * genuinely needs a long reply pins max_tokens (or passes an explicit
-    * per-request budget, which never reaches this function). */
+    * per-request budget, which never reaches this function).
+    *
+    * NOTE this returns a PROMPT budget only. It does not itself constrain what
+    * the provider may emit, so an unpinned reply can still exceed the quarter
+    * reserved here; request construction owns the output cap. */
    int output_tokens = agent->max_tokens;
    if (output_tokens <= 0)
    {
@@ -30,6 +34,14 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
       output_tokens = (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling
                                                                         : reserve_cap;
    }
+   /* A pinned reserve at or above the whole window is a misconfiguration: there
+    * is no room left for a prompt. Clamp the RESERVE to half the window rather
+    * than inventing budget - the previous fallback silently advertised a 100k
+    * prompt alongside a 300k pinned reply against a 200k window, i.e. 400k of
+    * commitments against a 200k ceiling. Halving keeps a usable prompt while
+    * never claiming more total room than the window allows. */
+   if (output_tokens >= agent->middleware.context_window)
+      output_tokens = agent->middleware.context_window / 2;
    int prompt_tokens = agent->middleware.context_window - output_tokens;
    if (prompt_tokens <= 0)
       prompt_tokens = agent->middleware.context_window / 2;

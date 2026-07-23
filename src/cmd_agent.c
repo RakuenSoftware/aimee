@@ -5,6 +5,8 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tier_lint.h" /* agent_resolved_price */
+#include <math.h>
+#include <errno.h>
 #include "agent_tunnel.h"
 #include "commands.h"
 #include "hardware_probe.h"
@@ -239,6 +241,32 @@ static int ag_probe_models(const char *endpoint, const char *requested_model, ch
 
    cJSON_Delete(root);
    return status;
+}
+
+/* Strict $/Mtok parse: finite, non-negative, fully consumed. Rejects "nan",
+ * "inf", trailing junk, and the empty string. atof() would accept or silently
+ * zero all of these, and a NaN override defeats every `<=` comparison in the
+ * price resolver, making an unset price look set. */
+static int ag_parse_price(const char *s, double *out)
+{
+   if (!s || !s[0])
+      return 0;
+   errno = 0;
+   char *end = NULL;
+   double v = strtod(s, &end);
+   if (errno != 0 || end == s || (end && *end != '\0'))
+      return 0;
+   if (!isfinite(v) || v < 0.0)
+      return 0;
+   *out = v;
+   return 1;
+}
+
+static int ag_price_usage(const char *flag, const char *value)
+{
+   fprintf(stderr, "aimee: %s expects a finite non-negative number ($ per million tokens), got '%s'\n",
+           flag, value ? value : "");
+   return 1;
 }
 
 static int ag_probe_slots(const char *endpoint, int *slots_out, int *ctx_out, char *errbuf,
@@ -806,13 +834,24 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
          ag->cost_tier = atoi(argv[++i]);
       /* Price overrides ($/Mtok). Only meaningful when this deployment does not
-       * pay the published catalog rate. */
+       * pay the published catalog rate. Parsed strictly: atof() would turn
+       * "garbage" into 0 (silently meaning "unset") and would accept "nan" and
+       * "inf", which then defeat every ordered comparison downstream. */
       else if (strcmp(argv[i], "--price-in") == 0 && i + 1 < argc)
-         ag->price_in_per_mtok = atof(argv[++i]);
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_in_per_mtok))
+            return ag_price_usage("--price-in", argv[i]);
+      }
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
-         ag->price_out_per_mtok = atof(argv[++i]);
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_out_per_mtok))
+            return ag_price_usage("--price-out", argv[i]);
+      }
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
-         ag->price_cached_per_mtok = atof(argv[++i]);
+      {
+         if (!ag_parse_price(argv[++i], &ag->price_cached_per_mtok))
+            return ag_price_usage("--price-cached", argv[i]);
+      }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
       else if (strcmp(argv[i], "--max-turns") == 0 && i + 1 < argc)

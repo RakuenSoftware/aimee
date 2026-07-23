@@ -353,6 +353,29 @@ static void test_agent_context_budget_uses_context_window(void)
    assert(agent_exec_context_budget_chars(&ag) > AGENT_CONTEXT_BUDGET);
 }
 
+/* A pinned reserve at or above the whole window is a misconfiguration. The old
+ * fallback silently advertised context_window/2 of PROMPT while still honouring
+ * the oversized pinned reply, i.e. 400k of commitments against a 200k window.
+ * Clamp the reserve instead so total commitments never exceed the window. */
+static void test_agent_context_budget_clamps_oversized_pinned_output(void)
+{
+   agent_t ag;
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "anthropic");
+   strcpy(ag.model, "claude-opus-4-8");
+   ag.middleware.context_window = 200000;
+   ag.max_tokens = 300000; /* larger than the whole window */
+
+   /* Reserve clamps to window/2, so the prompt budget is the other half and
+    * prompt + reserve == the window rather than exceeding it. */
+   size_t budget = agent_exec_context_budget_chars(&ag);
+   assert(budget == (size_t)(200000 - 200000 / 2) * 4u);
+
+   /* Exactly equal to the window is the same misconfiguration. */
+   ag.max_tokens = 200000;
+   assert(agent_exec_context_budget_chars(&ag) == (size_t)(200000 - 200000 / 2) * 4u);
+}
+
 /* An UNPINNED output reserve must not eat the window.
  *
  * middleware.context_window is frequently a deliberate POLICY ceiling below the
@@ -414,6 +437,7 @@ int main(void)
    test_agent_exec_context_ex_can_skip_kb();
    test_agent_context_budget_uses_context_window();
    test_agent_context_budget_caps_unpinned_output_reserve();
+   test_agent_context_budget_clamps_oversized_pinned_output();
    printf("context_assembly: all tests passed\n");
    return 0;
 }

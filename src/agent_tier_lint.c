@@ -58,17 +58,38 @@ int agent_resolved_price(const agent_t *agent, double *in_per_mtok, double *out_
  * grants to every agent regardless of its declared list. */
 static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
 {
+   /* Declared roles, either direction, plus the "all" wildcard. */
    for (int i = 0; i < a->role_count; i++)
    {
       const char *role = a->roles[i];
-      if (!role[0])
-         continue;
-      if (strcmp(role, "all") == 0 || agent_has_role(b, role) || agent_is_exec_role(b, role))
+      if (role[0] && (strcmp(role, "all") == 0 || agent_has_role(b, role)))
          return 1;
    }
    for (int i = 0; i < b->role_count; i++)
    {
-      if (b->roles[i][0] && strcmp(b->roles[i], "all") == 0)
+      const char *role = b->roles[i];
+      if (role[0] && (strcmp(role, "all") == 0 || agent_has_role(a, role)))
+         return 1;
+   }
+
+   /* IMPLICIT overlap. agent_supports_role() also admits any agent for an exec
+    * role, so two agents with entirely disjoint declared roles still compete for
+    * every exec role both accept. Iterating only declared roles missed this and
+    * suppressed real conflicts: an agent declaring "explain" and one declaring
+    * "summarize" are both routable for review/code/test.
+    *
+    * The default exec set is internal to agent_config.c, so probe through the
+    * public predicate with the roles actually in use rather than duplicating the
+    * table here — a copy would silently drift. */
+   static const char *const probe_roles[] = {
+       "deploy", "validate",   "test",  "diagnose",   "execute", "review",
+       "code",   "refactor",   "draft", "implement",  "explain", "summarize",
+       "format", "search",     NULL,
+   };
+   for (int i = 0; probe_roles[i]; i++)
+   {
+      if ((agent_has_role(a, probe_roles[i]) || agent_is_exec_role(a, probe_roles[i])) &&
+          (agent_has_role(b, probe_roles[i]) || agent_is_exec_role(b, probe_roles[i])))
          return 1;
    }
    return 0;

@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -911,14 +912,17 @@ int agent_load_config(agent_config_t *cfg)
 
          /* Operator price override ($/Mtok); absent or negative leaves it unset
           * so the catalog answers. */
+         /* isfinite() matters: a parser can yield +inf from an overflowing
+          * literal, and a non-finite price defeats every ordered comparison in
+          * the resolver, making an unset axis look set. */
          v = cJSON_GetObjectItem(a, "price_in_per_mtok");
-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
             ag->price_in_per_mtok = v->valuedouble;
          v = cJSON_GetObjectItem(a, "price_out_per_mtok");
-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
             ag->price_out_per_mtok = v->valuedouble;
          v = cJSON_GetObjectItem(a, "price_cached_per_mtok");
-         if (v && cJSON_IsNumber(v) && v->valuedouble >= 0.0)
+         if (v && cJSON_IsNumber(v) && isfinite(v->valuedouble) && v->valuedouble >= 0.0)
             ag->price_cached_per_mtok = v->valuedouble;
 
          v = cJSON_GetObjectItem(a, "max_tokens");
@@ -1978,6 +1982,25 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
    if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
        !agent_is_available_for_routing(ag))
       return NULL;
+
+   /* Session affinity outranks the default. A tmux agent holds a STATEFUL
+    * session; switching a user mid-conversation to an HTTP peer abandons it.
+    * The tier-filtered pass below has always preferred tmux, so returning the
+    * default before that check would silently break session continuity for a
+    * user whose default happens to be an HTTP agent. Only bypass cost_tier
+    * here — that is the ordering this fix is about — not the tmux preference. */
+   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
+   {
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         agent_t *peer = &cfg->agents[i];
+         if (peer == ag || !peer->enabled || !agent_supports_role(peer, role) ||
+             !agent_is_available_for_routing(peer))
+            continue;
+         if (strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+            return NULL; /* let the normal pass pick the stateful session */
+      }
+   }
    return ag;
 }
 

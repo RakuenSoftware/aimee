@@ -263,7 +263,16 @@ typedef struct
     * marginal token cost differs from the published API rate, negotiated or
     * committed-use pricing, a self-hosted model whose real cost is compute, or a
     * gateway that resells at its own margin. Both axes are independent, so a
-    * deployment may override only one. */
+    * deployment may override only one.
+    *
+    * KNOWN LIMITS:
+    *  - 0 always means "unset, fall back to the catalog", so a genuinely FREE
+    *    model cannot be expressed as 0. Such an agent is simply skipped by the
+    *    price lint (no finding), which is the safe direction.
+    *  - These fields are NOT round-trip safe across binary versions: an older
+    *    binary loads agents.json, ignores these members, and drops them on its
+    *    next save. Mixed-version operation against one config will silently lose
+    *    pricing overrides. */
    double price_in_per_mtok;
    double price_out_per_mtok;
    double price_cached_per_mtok;

@@ -21,6 +21,10 @@ static int json_int_checked(cJSON *v, int *out)
    double d = v->valuedouble;
    if (!(d >= 0.0) || d > 2147483647.0) /* also rejects NaN */
       return 0;
+   /* Must be integral: a context window of 199999.9 is malformed data, and
+    * silently truncating it would contradict the reject-don't-truncate rule. */
+   if (d != (double)(long long)d)
+      return 0;
    *out = (int)d;
    return 1;
 }
@@ -105,14 +109,23 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
 {
    char key[256];
    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
-   /* Flat form wins when it is a USABLE object. Mere presence must not suppress
-    * the nested lookup: a null, string, or otherwise malformed flat value would
-    * otherwise mask a perfectly good nested entry and yield empty capabilities. */
+   /* Flat form wins only when it carries USABLE content. Mere presence must not
+    * suppress the nested lookup: a null, a string, or an EMPTY object would
+    * otherwise mask a perfectly good nested entry and return zeroed
+    * capabilities — which downstream reads as "no context window, no price". */
    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
-   if (!cJSON_IsObject(entry))
-      return lookup_in_nested_json(root, provider, model_id, out);
-   fill_cap_from_json(entry, provider, model_id, out);
-   return 1;
+   if (cJSON_IsObject(entry))
+   {
+      model_capability_t flat;
+      fill_cap_from_json(entry, provider, model_id, &flat);
+      if (flat.context_window > 0 || flat.max_output > 0 || flat.cost_in_per_mtok > 0.0 ||
+          flat.cost_out_per_mtok > 0.0 || flat.flags != 0)
+      {
+         *out = flat;
+         return 1;
+      }
+   }
+   return lookup_in_nested_json(root, provider, model_id, out);
 }
 
 /* ---- models.dev live api.json (NESTED) ----------------------------------

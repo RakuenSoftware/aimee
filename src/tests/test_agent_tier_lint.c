@@ -298,14 +298,21 @@ static void test_non_competing_roles_not_flagged(void)
    memset(&cfg, 0, sizeof(cfg));
    add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
    add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
-   /* Disjoint, NON-exec roles: neither can serve the other's work. */
+   /* Disjoint declared roles AND disjoint exec sets: only then do they truly
+    * never compete. Constraining exec_roles is essential — with the DEFAULT exec
+    * set both agents are routable for review/code/test and so DO compete, which
+    * an earlier version of this test wrongly encoded as "no competition". */
    snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
+   snprintf(cfg.agents[0].exec_roles[0], sizeof(cfg.agents[0].exec_roles[0]), "%s", "explain");
+   cfg.agents[0].exec_role_count = 1;
    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
+   snprintf(cfg.agents[1].exec_roles[0], sizeof(cfg.agents[1].exec_roles[0]), "%s", "summarize");
+   cfg.agents[1].exec_role_count = 1;
 
    agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
    assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
 
-   /* Sharing a role restores the finding. */
+   /* Sharing a declared role restores the finding. */
    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "explain");
    assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
 
@@ -414,6 +421,26 @@ static void test_cached_price_axis(void)
    printf("  PASS: test_cached_price_axis\n");
 }
 
+/* Two agents with entirely disjoint DECLARED roles still compete through the
+ * default exec-role set, which agent_supports_role() grants to every agent.
+ * Iterating declared roles alone missed that and suppressed real conflicts. */
+static void test_implicit_exec_role_competition_is_detected(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
+   /* Disjoint declared roles, but NO exec_roles override -> both inherit the
+    * default exec set and are routable for review/code/test alike. */
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+
+   printf("  PASS: test_implicit_exec_role_competition_is_detected\n");
+}
+
 int main(void)
 {
    printf("agent_tier_lint:\n");
@@ -427,6 +454,7 @@ int main(void)
    test_equal_axis_dominance_is_flagged();
    test_partial_price_data_is_not_compared();
    test_non_competing_roles_not_flagged();
+   test_implicit_exec_role_competition_is_detected();
    test_operator_price_override_wins();
    test_price_override_per_axis();
    test_cached_price_axis();
