@@ -384,6 +384,23 @@
       "blast_radius": "Production changes are physical public-header moves and include substitutions; symbols, wire framing, CLI names, routes, runtime defaults, persistence, source inputs, and target object membership remain unchanged.",
       "independent_review": "Aimee technical-writer job 10340 approved the module documentation; exact-final-diff roundtable approval remains required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-30.md", "docs/modules/protocols.md", "src/modules/protocols/module.yaml", "scripts/check_module_header_layout.py", "scripts/tests/test_check_module_header_layout.py", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 31,
+      "state": "present_and_verified",
+      "disposition": "Completed required-core IR module-local ownership after proving both production sources ship with non-test consumers and recording narrower test-support API cleanup candidates.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["translation remains independently incomplete", "aimee_ir_request_equal and aimee_ir_metrics_reset remain test-support exports", "aimee_ir_response_reasoning currently has only test callers"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Marking IR complete from filesystem enumeration alone would hide whether its sources ship or self-consume only; combining translation would weaken the independently green dependency boundary.",
+        "revisit": "Review the three symbol-level candidates in a focused public/test API cleanup, and complete translation as a separate graph-ordered slice."
+      },
+      "consumers": ["IR maintainers", "translation", "memory", "delegates", "server and POSIX runtimes", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains IR-specific missing-source, planted-source/header, and missing-document failures.",
+      "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-31.md", "docs/modules/ir.md", "src/modules/ir/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }
