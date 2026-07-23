@@ -49,7 +49,9 @@ typedef struct
 
 /* Private compatibility names for IR-owned message types and bounds. Required
  * code uses the AIMEE_* and aimee_* names. These aliases do not change artifact
- * ownership: the producing provider's release operation frees it exactly once. */
+ * ownership: the producing provider's release operation frees it exactly once.
+ * Keep this a leaf over the canonical IR header; another project include risks
+ * recreating the delegates/roundtable header cycle this boundary removed. */
 #define EV_NONE   AIMEE_REVIEW_EVIDENCE_NONE
 #define EV_SYMBOL AIMEE_REVIEW_EVIDENCE_SYMBOL
 #define EV_REFS   AIMEE_REVIEW_EVIDENCE_REFS

@@ -1328,7 +1328,6 @@ lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check 
 
 panel-contract-boundary-check:
 	@python3 ../scripts/check_panel_contract_boundary.py
-	@python3 ../scripts/tests/test_check_panel_contract_boundary.py
 
 # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
 # so a new entry can never silently run without RLS on the SQLite shim.

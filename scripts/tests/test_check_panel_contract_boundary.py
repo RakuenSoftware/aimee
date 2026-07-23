@@ -22,7 +22,10 @@ SPEC.loader.exec_module(checker)
 
 class PanelContractBoundaryTests(unittest.TestCase):
     def fixture(self, root: Path) -> None:
-        paths = checker.ENSEMBLE_CONSUMERS | checker.MIGRATED_CONSUMERS
+        paths = checker.TEMPORARY_PROVIDER_SEAM_CONSUMERS | {
+            "src/headers/evidence_replay.h",
+            "src/server/server_pipeline.c",
+        }
         paths |= {
             "src/modules/roundtable/roundtable_types.h",
             "src/tests/test_delegate_ensemble.c",
@@ -64,7 +67,7 @@ class PanelContractBoundaryTests(unittest.TestCase):
         self.mutate_rejected(
             "src/server/server_pipeline.c",
             "delegate_ensemble.h",
-            "ensemble-consumer-allowlist",
+            "temporary-provider-seam-debt",
         )
 
     def test_owner_and_test_private_includes_are_allowed(self) -> None:

@@ -10,6 +10,13 @@
 #include <string.h>
 #include <time.h>
 
+_Static_assert(sizeof(roundtable_result_t) == sizeof(aimee_panel_result_t),
+               "roundtable result must remain an IR compatibility alias");
+_Static_assert(sizeof(review_evidence_t) == sizeof(aimee_review_evidence_t),
+               "roundtable evidence must remain an IR compatibility alias");
+_Static_assert(EV_NONE == AIMEE_REVIEW_EVIDENCE_NONE,
+               "roundtable evidence values must remain IR-compatible");
+
 /* --- stubs for agent exec functions --- */
 
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */

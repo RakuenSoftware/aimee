@@ -16,7 +16,9 @@ handing the result to general response composition or a consuming workflow.
 
 Provider-neutral output shapes live in required IR's `aimee/ir/panel_result.h`. The private
 `roundtable_types.h` owns only roundtable mode, turn, and option policy plus temporary aliases used by the
-optional implementation; required consumers cannot include that compatibility header.
+optional implementation. Type-only required consumers include the IR contract directly. Four temporary
+execution callers still include `delegate_ensemble.h`; `scripts/check_panel_contract_boundary.py` freezes
+that provider-seam debt against growth until the next slice replaces it with a required provider ABI.
 Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
 `AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 
@@ -125,10 +127,12 @@ distinguish startup-config-disabled, provider-unready, non-converged, and workfl
 
 ## Compatibility
 
-Tool/API names, preset shapes, seat aliases, IR-owned panel result/finding schemas, quorum and verification
-semantics, chair contracts, pipeline state, attribution, and workflow provider results are compatibility
-contracts. Roundtable-specific result composition may depend on `response-composition` but cannot replace
-or redefine its general memory-grounded response contract.
+Tool/API names, preset shapes, seat aliases, IR-owned `aimee/ir/panel_result.h` result/finding schemas,
+quorum and verification semantics, chair contracts, pipeline state, attribution, and workflow provider
+results are compatibility contracts. `scripts/check_panel_contract_boundary.py` prevents new required-side
+private-header dependencies while the provider seam is completed. Roundtable-specific result composition
+may depend on `response-composition` but cannot replace or redefine its general memory-grounded response
+contract.
 
 ## Extension and removal
 

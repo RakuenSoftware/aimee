@@ -5,12 +5,14 @@
 #ifndef DEC_DELEGATE_ENSEMBLE_H
 #define DEC_DELEGATE_ENSEMBLE_H 1
 
+#include <aimee/ir/panel_result.h>
 #include "agent_config.h"
 #include "config.h"
 #include "roundtable_activation.h"
 #include "roundtable_types.h" /* roundtable_opts_t / roundtable_result_t (owned by the roundtable module) */
 
-/* Max panelists in a roundtable/ensemble fan-out. Must match the
+/* Max panelists in a roundtable/ensemble fan-out. This private compatibility
+ * name aliases canonical AIMEE_PANEL_MAX_PARTICIPANTS (currently 32) and must match the
  * ensemble_reference_models / ensemble_reference_personas array dims in config.h
  * (a _Static_assert in delegate_ensemble.c enforces this). The fan-out arrays
  * (agent_result_t results[N] ~1.4KB each, etc.) live on the compute-pool worker

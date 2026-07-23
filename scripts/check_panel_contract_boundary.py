@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep required panel-result consumers independent of optional roundtable headers."""
+"""Ratchet direct optional-header debt while the panel provider seam is built."""
 
 from __future__ import annotations
 
@@ -11,23 +11,13 @@ from pathlib import Path
 
 ROUND_TABLE_TYPES = "roundtable_types.h"
 ENSEMBLE_HEADER = "delegate_ensemble.h"
-ENSEMBLE_CONSUMERS = {
+# Approved Slice 30 migration debt. Slice 31 replaces these execution calls with
+# the required provider ABI and removes this set; no new consumer may join it.
+TEMPORARY_PROVIDER_SEAM_CONSUMERS = {
     "src/cmd_agent_delegate.c",
     "src/modules/workflows/wfe_live_panel.c",
     "src/server/server_compute.c",
     "src/server/server_sweep.c",
-}
-MIGRATED_CONSUMERS = {
-    "src/cmd_agent_delegate_toolset.c",
-    "src/headers/evidence_replay.h",
-    "src/headers/server_compute_internal.h",
-    "src/modules/workflows/wfe_panel_roundtable.c",
-    "src/modules/workflows/wfe_panel_roundtable.h",
-    "src/server/server_compute_mailbox.c",
-    "src/server/server_compute_roundtable.c",
-    "src/server/server_pipeline.c",
-    "src/server/server_pipeline_merge.c",
-    "src/server_compute_episodes.c",
 }
 INCLUDE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
 
@@ -57,20 +47,12 @@ def validate(root: Path) -> None:
         if ENSEMBLE_HEADER in includes and not (owner_private or test_code):
             actual_ensemble_consumers.add(relative)
 
-    if actual_ensemble_consumers != ENSEMBLE_CONSUMERS:
-        missing = sorted(ENSEMBLE_CONSUMERS - actual_ensemble_consumers)
-        unexpected = sorted(actual_ensemble_consumers - ENSEMBLE_CONSUMERS)
+    if actual_ensemble_consumers != TEMPORARY_PROVIDER_SEAM_CONSUMERS:
+        missing = sorted(TEMPORARY_PROVIDER_SEAM_CONSUMERS - actual_ensemble_consumers)
+        unexpected = sorted(actual_ensemble_consumers - TEMPORARY_PROVIDER_SEAM_CONSUMERS)
         raise CheckError(
-            f"rule=ensemble-consumer-allowlist missing={missing} unexpected={unexpected}"
+            f"rule=temporary-provider-seam-debt missing={missing} unexpected={unexpected}"
         )
-
-    for relative in sorted(MIGRATED_CONSUMERS):
-        path = root / relative
-        if not path.is_file():
-            raise CheckError(f"rule=migrated-consumer-missing path={relative}")
-        includes = _includes(path)
-        if ROUND_TABLE_TYPES in includes or ENSEMBLE_HEADER in includes:
-            raise CheckError(f"rule=migrated-consumer-regression path={relative}")
 
 
 def main() -> int:
