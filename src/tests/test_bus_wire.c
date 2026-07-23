@@ -423,6 +423,61 @@ static void test_pattern_matrix(void)
    printf("  pattern matrix: %d cases + payload bound both sides\n", cases);
 }
 
+/* The matrix above round-trips the combinations that are *valid*. This one
+ * decides, independently, what every combination should be — including the ones
+ * that must be refused — and checks the validator against that judgement rather
+ * than against whatever it happens to do. Enumerating only the valid half would
+ * leave the refusals resting on the hand-written rejection table alone. */
+static void test_combination_matrix(void)
+{
+   const uint16_t patterns[] = {0, BUS_F_NOTIFICATION, BUS_F_REQUEST, BUS_F_REPLY, BUS_F_CANCEL,
+                                BUS_F_REQUEST | BUS_F_REPLY};
+   const uint16_t placements[] = {0, BUS_F_INLINE, BUS_F_ARENA, BUS_F_INLINE | BUS_F_ARENA};
+   const uint32_t lens[] = {0, 64};
+   int accepted = 0, refused = 0;
+
+   for (size_t p = 0; p < sizeof patterns / sizeof patterns[0]; p++)
+      for (size_t q = 0; q < sizeof placements / sizeof placements[0]; q++)
+         for (size_t l = 0; l < sizeof lens / sizeof lens[0]; l++)
+            for (int control = 0; control <= 1; control++)
+            {
+               bus_frame_t f = base_frame();
+               f.hdr_flags = (uint16_t)(patterns[p] | placements[q] |
+                                        (control ? BUS_F_CONTROL : 0));
+               f.payload_len = lens[l];
+               if (lens[l] > 0)
+                  f.payload_ref = (placements[q] & BUS_F_ARENA) ? 0x40000 : BUS_WIRE_HDR_LEN;
+               if (patterns[p] != 0 && patterns[p] != BUS_F_NOTIFICATION)
+                  f.correlation_id = 0xdeadbeefcafef00dull;
+
+               /* Decided here from the contract, not read back from the code. */
+               int one_pattern = (patterns[p] == BUS_F_NOTIFICATION ||
+                                  patterns[p] == BUS_F_REQUEST || patterns[p] == BUS_F_REPLY ||
+                                  patterns[p] == BUS_F_CANCEL);
+               int one_placement = (placements[q] == BUS_F_INLINE || placements[q] == BUS_F_ARENA);
+               int placement_ok = lens[l] > 0 ? one_placement : (placements[q] == 0);
+               int want_ok = one_pattern && placement_ok;
+
+               bus_wire_result_t got = bus_wire_validate(&f);
+               if (want_ok && got != BUS_WIRE_OK)
+               {
+                  fprintf(stderr, "FAIL: flags=0x%04x plen=%u should be accepted, got %s\n",
+                          f.hdr_flags, f.payload_len, bus_wire_result_name(got));
+                  abort();
+               }
+               if (!want_ok && got == BUS_WIRE_OK)
+               {
+                  fprintf(stderr, "FAIL: flags=0x%04x plen=%u should be refused\n", f.hdr_flags,
+                          f.payload_len);
+                  abort();
+               }
+               want_ok ? accepted++ : refused++;
+            }
+
+   printf("  combination matrix: %d accepted, %d refused, judged independently\n", accepted,
+          refused);
+}
+
 /* ------------------------------------------------------------------ */
 /* 3. rejections                                                       */
 
@@ -494,7 +549,13 @@ static void test_rejections(void)
       uint32_t plen;
       bus_wire_result_t want;
    } cases[] = {
-      {"version", BUS_F_NOTIFICATION, BUS_WIRE_VERSION + 1, 0, 0, 0, BUS_WIRE_ERR_VERSION},
+      /* Both sides of the supported version, and zero. A one-sided test would
+       * still pass if the validator were loosened to `>= BUS_WIRE_VERSION`. */
+      {"version above", BUS_F_NOTIFICATION, BUS_WIRE_VERSION + 1, 0, 0, 0,
+       BUS_WIRE_ERR_VERSION},
+      {"version below", BUS_F_NOTIFICATION, BUS_WIRE_VERSION - 1, 0, 0, 0,
+       BUS_WIRE_ERR_VERSION},
+      {"version zero", BUS_F_NOTIFICATION, 0, 0, 0, 0, BUS_WIRE_ERR_VERSION},
       {"unknown flag bit", BUS_F_NOTIFICATION | 0x8000u, BUS_WIRE_VERSION, 0, 0, 0,
        BUS_WIRE_ERR_FLAGS},
       {"no pattern", 0, BUS_WIRE_VERSION, 0, 0, 0, BUS_WIRE_ERR_FLAGS},
@@ -599,6 +660,7 @@ int main(void)
    printf("test_bus_wire:\n");
    verify_vectors();
    test_pattern_matrix();
+   test_combination_matrix();
    test_rejections();
    test_placement_bounds();
    printf("test_bus_wire: OK\n");
