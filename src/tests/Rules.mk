@@ -3740,6 +3740,16 @@ $(TESTPREFIX)/unit-test-vault-witness-offline: $(OBJDIR)/tests/test_vault_witnes
                               $(OBJDIR)/modules/vault/vault_witness_proof.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-witness-tamper-scenarios: $(OBJDIR)/tests/test_witness_tamper_scenarios.o \
+                              $(OBJDIR)/modules/vault/vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 $(TESTPREFIX)/unit-test-vault-mutation-budget: \
                               $(OBJDIR)/tests/test_vault_mutation_budget.o \
                               $(OBJDIR)/modules/vault/vault_mutation_budget.o
