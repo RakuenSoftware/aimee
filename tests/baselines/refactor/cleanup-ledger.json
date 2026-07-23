@@ -775,6 +775,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains delegates-specific missing-source, planted-source, planted-header, missing-document, and cleared-latch failures, the planted-header case proving the absent private_headers field enforces emptiness.",
       "independent_review": "The slice-decision roundtable approved the declaration scope in slice 52 and flagged that the latcher's treatment of an absent field should be verified; that was verified before slice 52 was written and is re-proven here by the planted-header mutation. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-53.md", "docs/modules/delegates.md", "src/modules/delegates/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 54,
+      "state": "present_and_verified",
+      "disposition": "Declared the workflows descriptor's thirty sources, twenty-four module-root private headers, thirty-three direct tests, and document without setting ownership_complete, the declaration half of the pair for the eighth and second-largest Class B module, and recorded that the wfe_ name prefix is shared with DB1 so future tests must be classified by linked object rather than name.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["The wfe_ prefix is shared with src/db1/wfe_store.c and src/db1/wfe_binding.c, so a test_wfe_* filename is not an ownership signal; three of the four exclusions exist because of that collision and future test_wfe_* files must be classified by which object their target links", "Four candidates are excluded for linking no workflows object: test_wfe_binding (DB1 binding store), test_wfe_gate_apply and test_wfe_submitter (db1/wfe_store.o), and test_workflow_gate_caps (a route capability contract with no module object)", "test_wfe_webapi.c is the most cross-cutting declared test, linking db1, config, and server objects alongside three workflows engine objects; it is claimed because cross-cutting has never been an exclusion criterion and excluding it would orphan the engine's HTTP boundary", "CMake compiles twenty-four of the thirty sources and omits the six live, panel, forge, replay, and gateway-orchestration units that are server-side, the same intentional thin-client boundary recorded for the eight earlier modules", "Every one of the twenty-four headers pairs with a source; six sources carry no paired header and declare through the paired ones"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes descriptor metadata, the regenerated test-registration baseline, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Classifying the test_wfe_* files by name was rejected because the prefix is shared with DB1; the linked-object criterion is what separates the three DB1 store and binding tests from the thirty-three workflows tests.",
+        "revisit": "Slice 55 latches workflows; the DB1 wfe_store and wfe_binding sources remain outside this module and will be declared when db1 is given a descriptor."
+      },
+      "consumers": ["workflow intake, engine, and scheduler paths", "the gateway orchestration seam", "the workflows latch slice", "the remaining memory Class B declaration slice"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; the descriptor gains declared ownership fields validated for existence and containment, and the test-registration baseline gains thirty-three workflows rows, eleven of which are CTest-registered as well as Make-registered.",
+      "independent_review": "The slice-decision roundtable confirmed all three scoping decisions, agreed test_wfe_webapi.c should be included under the linked-object criterion, and specifically endorsed recording the wfe_ prefix collision in the validation record so future slices do not re-derive the trap. It also flagged loose phrasing in the unpaired-source list, which is corrected with the exact six names. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-54.md", "docs/modules/workflows.md", "src/modules/workflows/module.yaml", "tests/baselines/refactor/module-test-registration.json"]
     }
   ]
 }
