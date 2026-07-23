@@ -65,7 +65,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "notes.h"
 #include "kb.h"
 #include "td_search_render.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "lifecycle.h"
 #include "workspace.h"
 #include "diff.h"

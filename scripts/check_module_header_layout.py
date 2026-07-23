@@ -120,9 +120,9 @@ def violations(root: Path) -> list[str]:
     if not descriptors.is_dir():
         raise HeaderLayoutError(f"rule=config-root path={descriptors}: missing descriptor root")
 
-    # One bare basename fans out to every module that declares it.
+    # One retired include spelling may fan out to every module that declares it.
     claims: dict[str, set[str]] = {}
-    canonical_headers: list[tuple[str, str]] = []
+    canonical_headers: list[tuple[str, str, str]] = []
     for path in sorted(descriptors.rglob("module.yaml")):
         value = _read_descriptor(path)
         identifier = value.get("id")
@@ -132,11 +132,24 @@ def violations(root: Path) -> list[str]:
         for header in headers:
             if not isinstance(header, str):
                 raise HeaderLayoutError(f"rule=input path={path}: public header must be a string")
-            claims.setdefault(Path(header).name, set()).add(identifier)
-            canonical_headers.append((identifier, header))
+            prefix = f"src/modules/{identifier}/include/aimee/{identifier}/"
+            if not header.startswith(prefix) or header == prefix:
+                raise HeaderLayoutError(
+                    f"rule=input path={path}: public header is outside canonical include tree: "
+                    f"{header}"
+                )
+            suffix = header[len(prefix):]
+            for retired in {
+                Path(header).name,
+                suffix,
+                f"modules/{identifier}/{suffix}",
+                f"src/modules/{identifier}/{suffix}",
+            }:
+                claims.setdefault(retired, set()).add(identifier)
+            canonical_headers.append((identifier, header, suffix))
 
     found: set[str] = set()
-    for identifier, header in canonical_headers:
+    for identifier, header, _suffix in canonical_headers:
         if not (root / header).is_file():
             found.add(
                 f"module={identifier} rule=missing-canonical-header path={header}"
@@ -167,24 +180,29 @@ def violations(root: Path) -> list[str]:
     make_roots = _make_include_roots(makefile)
     cmake_roots = _cmake_include_roots(cmake)
 
-    for basename, identifiers in sorted(claims.items()):
-        for identifier in sorted(identifiers):
-            legacy = f"src/modules/{identifier}/{basename}"
-            if (root / legacy).is_symlink() or (root / legacy).exists():
-                found.add(f"module={identifier} rule=retired-header-path path={legacy}")
+    for identifier, _header, suffix in canonical_headers:
+        legacy = f"src/modules/{identifier}/{suffix}"
+        if (root / legacy).is_symlink() or (root / legacy).exists():
+            found.add(f"module={identifier} rule=retired-header-path path={legacy}")
 
-            make_root = f"modules/{identifier}"
-            if make_root in make_roots:
-                found.add(
-                    f"module={identifier} rule=retired-include-root path=src/Makefile "
-                    f"value=-I{make_root}"
-                )
-            cmake_root = f"${{AIMEE_SRC_DIR}}/modules/{identifier}"
-            if cmake_root in cmake_roots:
-                found.add(
-                    f"module={identifier} rule=retired-include-root path=CMakeLists.txt "
-                    f"value={cmake_root}"
-                )
+        legacy_parent = Path(suffix).parent.as_posix()
+        make_candidates = {f"modules/{identifier}"}
+        cmake_candidates = {f"${{AIMEE_SRC_DIR}}/modules/{identifier}"}
+        if legacy_parent != ".":
+            make_candidates.add(f"modules/{identifier}/{legacy_parent}")
+            cmake_candidates.add(
+                f"${{AIMEE_SRC_DIR}}/modules/{identifier}/{legacy_parent}"
+            )
+        for make_root in sorted(make_candidates & make_roots):
+            found.add(
+                f"module={identifier} rule=retired-include-root path=src/Makefile "
+                f"value=-I{make_root}"
+            )
+        for cmake_root in sorted(cmake_candidates & cmake_roots):
+            found.add(
+                f"module={identifier} rule=retired-include-root path=CMakeLists.txt "
+                f"value={cmake_root}"
+            )
     return sorted(found)
 
 

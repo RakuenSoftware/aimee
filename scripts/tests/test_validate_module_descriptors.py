@@ -247,21 +247,24 @@ class DescriptorTests(unittest.TestCase):
              "docs": 1},
         )
 
-    def test_roundtable_complete_ownership_mutations(self) -> None:
+    def test_production_complete_ownership_mutations(self) -> None:
         cases = (
-            ("sources", "src/modules/roundtable/roundtable_verify.c"),
-            ("private_headers", "src/modules/roundtable/roundtable_verify.h"),
+            ("roundtable", "sources", "src/modules/roundtable/roundtable_verify.c"),
+            ("roundtable", "private_headers", "src/modules/roundtable/roundtable_verify.h"),
+            ("protocols", "sources", "src/modules/protocols/acp/acp_server.c"),
+            ("protocols", "private_headers",
+             "src/modules/protocols/mcp/mcp_tools_gateway.h"),
         )
-        for field, relative in cases:
+        for identifier, field, relative in cases:
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
                 self.mutate_descriptor(
-                    repo, "roundtable",
+                    repo, identifier,
                     lambda value, field=field, relative=relative:
                         value[field].remove(relative),
                 )
-                with self.subTest(field=field), self.assertRaisesRegex(
+                with self.subTest(identifier=identifier, field=field), self.assertRaisesRegex(
                     validator.DescriptorError,
                     rf"rule=ownership-complete pointer=/{field}.*missing=.*{Path(relative).name}",
                 ):
@@ -269,20 +272,23 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for name in ("undeclared.c", "undeclared.h"):
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                (repo / "src/modules/roundtable" / name).write_text("/* planted */\n",
-                                                                    encoding="utf-8")
-                role = "sources" if name.endswith(".c") else "private_headers"
-                with self.subTest(name=name), self.assertRaisesRegex(
-                    validator.DescriptorError,
-                    rf"rule=ownership-complete pointer=/{role}.*missing=.*{name}",
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+        for identifier in ("roundtable", "protocols"):
+            for name in ("undeclared.c", "undeclared.h"):
+                tmp = self.production_repo()
+                try:
+                    repo = Path(tmp.name)
+                    (repo / "src/modules" / identifier / name).write_text(
+                        "/* planted */\n", encoding="utf-8"
+                    )
+                    role = "sources" if name.endswith(".c") else "private_headers"
+                    with self.subTest(identifier=identifier, name=name), \
+                            self.assertRaisesRegex(
+                                validator.DescriptorError,
+                                rf"rule=ownership-complete pointer=/{role}.*missing=.*{name}",
+                            ):
+                        validator.validate_roots(repo, [Path("src/modules")])
+                finally:
+                    tmp.cleanup()
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         tmp = self.production_repo()

@@ -10,7 +10,7 @@
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "log.h"
 #include "toolset.h"
 #include "tool_schema_sanitizer.h"

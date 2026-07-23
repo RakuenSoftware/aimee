@@ -17,7 +17,7 @@
 #include "notes.h"
 #include "kb.h"
 #include "kb_client.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "workspace.h"
 #include "sandbox_learned.h"
 #include "workspace_provider.h"

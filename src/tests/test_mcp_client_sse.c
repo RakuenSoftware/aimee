@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "mcp_client.h"
+#include "aimee/protocols/mcp/mcp_client.h"
 #include "support/mock_agent_http.h"
 
 typedef struct

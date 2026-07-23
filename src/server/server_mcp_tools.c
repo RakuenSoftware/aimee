@@ -3,7 +3,7 @@
 #include "server_mcp_surface.h"
 #include "config.h"
 #include "db1.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include "osv_check.h"
 #include "toolset.h"
 #include "cJSON.h"

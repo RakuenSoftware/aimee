@@ -1,6 +1,6 @@
 /* test_acp_server.c: unit tests for the inbound ACP server dispatch
  * (src/acp_server.c) — pure, no stdio. */
-#include "acp_server.h"
+#include "aimee/protocols/acp/acp_server.h"
 #include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>

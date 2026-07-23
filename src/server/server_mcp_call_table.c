@@ -17,7 +17,7 @@
 #include "kb_client.h"
 #include "config.h"
 #include "dashboard.h"
-#include "mcp_tools.h"
+#include "aimee/protocols/mcp/mcp_tools.h"
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"

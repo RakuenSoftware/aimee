@@ -136,6 +136,78 @@ class ModuleHeaderLayoutTests(unittest.TestCase):
             )
             self.assertEqual(checker.violations(root), [])
 
+    def test_nested_protocol_namespace_retires_nested_source_forms(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            descriptor = root / "src/modules/protocols/module.yaml"
+            descriptor.parent.mkdir(parents=True)
+            descriptor.write_text(json.dumps({
+                "id": "protocols",
+                "public_headers": [
+                    "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h"
+                ],
+            }), encoding="utf-8")
+            canonical = (
+                root
+                / "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h"
+            )
+            canonical.parent.mkdir(parents=True)
+            canonical.write_text("/* canonical */\n", encoding="utf-8")
+            (root / "src/consumer.c").write_text(
+                '#include "mcp/mcp_client.h"\n', encoding="utf-8"
+            )
+            (root / "src/Makefile").write_text(
+                "C_FLAGS = -Imodules/audit/include -Imodules/protocols/mcp\n",
+                encoding="utf-8",
+            )
+            (root / "CMakeLists.txt").write_text(
+                "target_include_directories(x PUBLIC\n"
+                "  ${AIMEE_SRC_DIR}/modules/protocols/mcp\n)\n",
+                encoding="utf-8",
+            )
+            problems = checker.violations(root)
+            self.assertTrue(any("header=mcp/mcp_client.h" in item for item in problems))
+            self.assertTrue(any("value=-Imodules/protocols/mcp" in item for item in problems))
+            self.assertTrue(any(
+                "value=${AIMEE_SRC_DIR}/modules/protocols/mcp" in item
+                for item in problems
+            ))
+
+    def test_nested_protocol_namespace_also_retires_broad_module_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            descriptor = root / "src/modules/protocols/module.yaml"
+            descriptor.parent.mkdir(parents=True)
+            descriptor.write_text(json.dumps({
+                "id": "protocols",
+                "public_headers": [
+                    "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h"
+                ],
+            }), encoding="utf-8")
+            canonical = (
+                root
+                / "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h"
+            )
+            canonical.parent.mkdir(parents=True)
+            canonical.write_text("/* canonical */\n", encoding="utf-8")
+            (root / "src/Makefile").write_text(
+                "C_FLAGS = -Imodules/audit/include -Imodules/protocols\n",
+                encoding="utf-8",
+            )
+            (root / "CMakeLists.txt").write_text(
+                "target_include_directories(x PUBLIC\n"
+                "  ${AIMEE_SRC_DIR}/modules/protocols\n)\n",
+                encoding="utf-8",
+            )
+            problems = checker.violations(root)
+            self.assertTrue(any("value=-Imodules/protocols" in item for item in problems))
+            self.assertTrue(any(
+                "value=${AIMEE_SRC_DIR}/modules/protocols" in item
+                for item in problems
+            ))
+
     def test_missing_mandatory_build_inputs_fail_closed(self) -> None:
         for relative in ("src/Makefile", "CMakeLists.txt"):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmp:
