@@ -21,8 +21,24 @@ namespace and remains as a compatibility name; renaming it requires the compatib
 `gw_pipeline_run_request`, `gateway_policy_apply_request`, and
 `gateway_delegate_run_request_pipeline` retain their existing contracts.
 
+The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C and
+private-header files — the module has no private headers — and requires this canonical document.
+Public-header and test entries are explicit audited claims, not auto-discovered completeness domains,
+so the latch does not police the public-header inventory. Completeness is a statement about file
+ownership only; it does not assert that every owned export has a caller, or that every declared test
+runs in every build system. The source liveness, build and test membership, adjacent-surface, and
+public-surface audit is recorded in `docs/validation/core-modularization-slice-38.md`.
+
+`gateway_policy_is_denied_tool` has no tracked-tree caller outside
+`src/tests/test_gateway_policy.c`; every other export has a tracked production consumer. `src/tests/test_anthropic_http.c` defines its own
+`gateway_policy_pin_model` as a link-time stub, so that one test binary shadows the module symbol
+rather than linking `gateway_policy.c`.
+
 Gateway main, context, pairing, session-key, and channel/session code remains under `src/gateway` and
-awaits a caller and lifecycle audit. The gateway-mutation family remains owned by economizer under
+awaits a caller and lifecycle audit. That directory is the `aimee-gateway` delivery binary — delivery
+routing, Telegram/ntfy/webhook platforms, pairing, STT and TTS — and is a distinct ownership surface
+from this module despite the shared gateway name; `GATEWAY_SRCS` in `src/Makefile` refers to it, not
+to `src/modules/gateway`. The gateway-mutation family remains owned by economizer under
 `src/modules/economizer/gateway_mutate*.c`. Optional delivery implementations (`platform_*`,
 `delivery_router`, STT, and TTS) require later provider-isolation slices and are not moved wholesale.
 
@@ -51,7 +67,11 @@ Readiness must report the exact missing stage rather than marking all of gateway
 
 Listener, pairing, policy, memory-stage, delivery, STT/TTS, and platform settings tune concrete providers.
 A future module profile must omit a platform's code and hide its GUI/config when excluded, while the core
-gateway remains. Multiple config keys must not select parallel ingress pipelines with divergent policy or
+gateway remains. Build membership is currently asymmetric by policy, not by drift: Make compiles all
+three sources into `DATA_SRCS`, while no CMake target compiles any of them. `CMakeLists.txt` states
+that CMake builds only the `aimee` thin client plus the unit-test suite, and that the `aimee-server`,
+`aimee-kb`, `aimee-gateway`, and `aimee-webchat` targets were removed because CMake's source lists had
+drifted far behind `src/Makefile` and no CI gate built them. Multiple config keys must not select parallel ingress pipelines with divergent policy or
 IR stage ordering.
 
 ## Surfaces
@@ -89,7 +109,14 @@ The gateway descriptor owns the direct `src/tests/test_gateway_pipeline.c`,
 `src/tests/test_gateway_policy.c`, and `src/tests/test_gateway_p4_delegate.c` contracts.
 `test_gateway.c`, platform tests, `test_gateway_mutate_wire.c`,
 mixed ingress/governance tests, and cross-protocol IR tests cover adjacent boundaries without becoming
-gateway-owned. Identity
+gateway-owned; the `test_gateway*` names that exercise delivery platforms belong to the `src/gateway`
+binary rather than to this module.
+
+Make registers all three declared tests in `src/tests/Rules.mk`; CTest registers none of them. That
+is an audited current condition, consistent with the module sitting outside CMake's thin-client
+profile; CMake does own a unit-test suite, so profile exclusion alone does not establish that these
+tests must be absent from it. `scripts/check_module_test_registration.py` pins that per-test registration to a reviewed
+baseline. Identity
 or policy failure is fail-closed; absent optional delivery returns a typed unsupported/unready result;
 stage failure must not fall through to a second, less-policed execution path.
 
