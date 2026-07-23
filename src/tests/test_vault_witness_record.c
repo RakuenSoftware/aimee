@@ -211,6 +211,32 @@ static void test_shard_key_hash_and_genesis_distinct(void)
    assert(memcmp(g1, g2, 32) != 0);
 }
 
+/* Deterministic decode fuzz: every truncation and every single-byte corruption of
+ * a valid record must return safely (0 or -1), never read out of bounds. Meant to
+ * be run under ASAN/UBSAN, where an OOB read aborts. */
+static void test_decode_fuzz(void)
+{
+   vault_witness_record_t r = fixture();
+   uint8_t wire[VAULT_WITNESS_RECORD_MAX];
+   size_t len = 0;
+   assert(vault_witness_record_encode(&r, wire, sizeof wire, &len) == 0);
+   vault_witness_record_t out;
+
+   for (size_t cut = 0; cut <= len; cut++)
+      (void)vault_witness_record_decode(wire, cut, &out);
+
+   for (size_t i = 0; i < len; i++)
+   {
+      uint8_t saved = wire[i];
+      for (unsigned bit = 0; bit < 8; bit++)
+      {
+         wire[i] = (uint8_t)(saved ^ (1u << bit));
+         (void)vault_witness_record_decode(wire, len, &out);
+      }
+      wire[i] = saved;
+   }
+}
+
 int main(void)
 {
    test_roundtrip();
@@ -221,6 +247,7 @@ int main(void)
    test_empty_and_overlong_shardkey();
    test_max_shardkey_roundtrips();
    test_shard_key_hash_and_genesis_distinct();
+   test_decode_fuzz();
    printf("test_vault_witness_record: all passed\n");
    return 0;
 }
