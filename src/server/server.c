@@ -1694,6 +1694,7 @@ static size_t method_size_limit(const char *method)
        {"memory.", LIMIT_MEMORY},
        {"tool.", LIMIT_TOOL},
        {"delegate", LIMIT_DELEGATE},
+       {"roundtable.review", LIMIT_ROUNDTABLE},
        {"mcp.call", LIMIT_DELEGATE},
        {"chat.", LIMIT_CHAT},
        {"index.ingest", LIMIT_INGEST},

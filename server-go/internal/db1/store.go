@@ -176,6 +176,8 @@ type DelegateJobMapping struct {
 	JobID        int
 }
 
+const terminalCancellationBatchSize = 8
+
 // TerminalDelegateJobs returns durable resource-plane jobs owned by workflow
 // items that can no longer execute. Retaining the mapping until remote
 // cancellation is acknowledged makes a crash between lifecycle commit and
@@ -186,7 +188,7 @@ FROM lifecycle_delegate_job mapping
 JOIN lifecycle_work_item item ON item.work_item_id=mapping.work_item_id
 JOIN agent_jobs job ON job.id=mapping.job_id
 WHERE item.state<>'active' AND job.status IN ('pending','running')
-ORDER BY mapping.job_id`)
+ORDER BY mapping.job_id LIMIT ?`, terminalCancellationBatchSize)
 	if err != nil {
 		return nil, err
 	}

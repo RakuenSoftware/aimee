@@ -58,7 +58,7 @@
  * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
  * conversation/tool-call history (175KB+ and growing), so the cap must be well
  * above the legacy 64KB or large requests are truncated and misparsed. */
-#define SHTTP_MAX_BODY (4 * 1024 * 1024)
+#define SHTTP_MAX_BODY (128 * 1024 * 1024)
 #define SHTTP_BACKLOG  16
 
 /* ── per-session persona store ──────────────────────────────────────────── */
@@ -1929,11 +1929,23 @@ void handle_conn(int fd, int is_tcp, int is_management)
    char clbuf[32] = "";
    if (http_header(buf, "Content-Length", clbuf, sizeof(clbuf)))
    {
-      body_len = atoi(clbuf);
-      if (body_len < 0)
-         body_len = 0;
-      if (body_len > SHTTP_MAX_BODY)
-         body_len = SHTTP_MAX_BODY;
+      errno = 0;
+      char *clend = NULL;
+      long declared = strtol(clbuf, &clend, 10);
+      if (errno == ERANGE || clend == clbuf || *clend != '\0' || declared < 0)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 400, "{\"error\":\"invalid content length\"}", request_id);
+         return;
+      }
+      if (declared > SHTTP_MAX_BODY)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, 413, "{\"error\":\"request body exceeds 128 MiB limit\"}",
+                       request_id);
+         return;
+      }
+      body_len = (int)declared;
       body = malloc((size_t)body_len + 1);
       if (body)
       {

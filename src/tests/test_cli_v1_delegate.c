@@ -219,6 +219,61 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    printf("  PASS: test_delegate_roundtable_context_file_folded_into_prompt\n");
 }
 
+static cJSON *marshal_roundtable_with_stdin(int argc, char **argv, const char *input)
+{
+   int old_stdin = dup(STDIN_FILENO);
+   assert(old_stdin >= 0);
+   int pipefd[2];
+   assert(pipe(pipefd) == 0);
+   assert(write(pipefd[1], input, strlen(input)) == (ssize_t)strlen(input));
+   close(pipefd[1]);
+   assert(dup2(pipefd[0], STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(pipefd[0]);
+   cJSON *req = marshal_roundtable_review(argc, argv);
+   assert(dup2(old_stdin, STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(old_stdin);
+   return req;
+}
+
+static void test_roundtable_stdin_is_authoritative_artifact(void)
+{
+   char *argv[] = {"-", "Review PR #1828 only", "--run-id", "review-pr-1828",
+                   "--artifact-stage", "frozen_diff"};
+   cJSON *req = marshal_roundtable_with_stdin(6, argv, "diff --git a/PR1828 b/PR1828\n+marker\n");
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring,
+                 "diff --git a/PR1828 b/PR1828\n+marker\n") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
+                 "Review PR #1828 only") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "run_id")->valuestring, "review-pr-1828") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact_stage")->valuestring, "frozen_diff") == 0);
+   assert(cJSON_GetObjectItem(req, "prompt") == NULL);
+   cJSON_Delete(req);
+   printf("  PASS: test_roundtable_stdin_is_authoritative_artifact\n");
+}
+
+static void test_roundtable_path_is_read_not_forwarded(void)
+{
+   char path[] = "/tmp/aimee_rt_artifact_test_XXXXXX";
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   const char *artifact = "diff --git a/ONLY1828 b/ONLY1828\n+exact bytes\n";
+   assert(write(fd, artifact, strlen(artifact)) == (ssize_t)strlen(artifact));
+   close(fd);
+   char *argv[] = {path, "Implement the original request"};
+   cJSON *req = marshal_roundtable_review(2, argv);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring, artifact) == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
+                 "Implement the original request") == 0);
+   assert(strstr(cJSON_GetObjectItem(req, "artifact")->valuestring, path) == NULL);
+   cJSON_Delete(req);
+   unlink(path);
+   printf("  PASS: test_roundtable_path_is_read_not_forwarded\n");
+}
+
 static cJSON *marshal_delegate_with_stdin(int argc, char **argv, const char *input)
 {
    int old_stdin = dup(STDIN_FILENO);
@@ -1277,6 +1332,8 @@ int main(void)
    test_delegate_roundtable_brief_marshaled();
    test_delegate_roundtable_invalid_brief_json_exits();
    test_delegate_roundtable_context_file_folded_into_prompt();
+   test_roundtable_stdin_is_authoritative_artifact();
+   test_roundtable_path_is_read_not_forwarded();
    test_delegate_prompt_stdin_marshaled();
    test_delegate_status_multiple_ids_marshaled();
    test_delegate_log_rejects_ignored_args();

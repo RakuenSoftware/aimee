@@ -91,6 +91,35 @@ INSERT INTO agent_jobs(id,status) VALUES(91,'running'),(92,'running');`)
 	}
 }
 
+func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
+	store := newTestStore(t)
+	if _, err := store.db.ExecContext(t.Context(), `CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= terminalCancellationBatchSize+2; i++ {
+		workItemID := fmt.Sprintf("wi_terminal_batch_%02d", i)
+		if err := store.CreateWorkItem(t.Context(), CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveWorkflowDelegateJob(t.Context(), workItemID+":impl:v1:hash", workItemID, i, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.db.ExecContext(t.Context(), `INSERT INTO agent_jobs(id,status) VALUES(?,'running')`, i); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.StopTree(t.Context(), workItemID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mappings, err := store.TerminalDelegateJobs(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mappings) != terminalCancellationBatchSize {
+		t.Fatalf("mappings=%d want bounded batch %d", len(mappings), terminalCancellationBatchSize)
+	}
+}
+
 func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 	store := newTestStore(t)
 	const attempts = 12
