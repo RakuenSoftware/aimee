@@ -334,7 +334,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 # as KB_VAULT_OBJS below, kb/-prefixed objects). db2/vault_pg.c (the kb Postgres store)
 # rides DB2_SRCS -> KB_DB2_OBJS and never enters aimee-server (the server links no
 # DB2_OBJS). The dual-compile is intentional: one crypto core, two persistence backends.
-VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
+VAULT_CORE_SRCS = modules/vault/vault_witness_record.c modules/vault/vault_witness_merkle.c modules/vault/vault_witness_checkpoint.c modules/vault/vault_witness_export.c modules/vault/vault_witness_verify.c modules/vault/vault_witness_proof.c modules/vault/vault_witness_signer.c modules/vault/vault_witness_signer_kek.c \
   modules/vault/vault_crypto.c modules/vault/vault_kek_check.c modules/vault/vault_reseal_receipt.c modules/vault/vault_hwm.c modules/vault/vault_principal.c \
                   modules/vault/vault_kek_cache.c modules/vault/vault_store.c \
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
