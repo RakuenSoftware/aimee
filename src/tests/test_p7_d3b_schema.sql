@@ -8,6 +8,52 @@ BEGIN
   IF n<>1 THEN RAISE EXCEPTION 'missing D3b open event'; END IF;
 END $$;
 
+-- START reserves every mandatory remaining increment before any durable write.
+-- Exhausted epoch and fence cases must leave control, operations, and WORM empty.
+BEGIN;
+UPDATE public.kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',
+  seal_epoch=9223372036854775806,fencing_token=1 WHERE singleton=1;
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$ BEGIN
+  PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_reserve(
+    'uid:0','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',0,1);
+  RAISE EXCEPTION 'epoch-exhausted reservation accepted';
+EXCEPTION WHEN numeric_value_out_of_range THEN NULL; END $$;
+RESET ROLE;
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation
+             WHERE request_id='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_worm
+             WHERE operation_id='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') OR
+     (SELECT sealed OR seal_epoch<>9223372036854775806 OR fencing_token<>1
+        FROM public.kb_vault_control WHERE singleton=1) THEN
+    RAISE EXCEPTION 'epoch exhaustion had durable effects';
+  END IF;
+END $$;
+ROLLBACK;
+
+BEGIN;
+UPDATE public.kb_vault_control SET sealed=false,maintenance_kind='',maintenance_id='',
+  seal_epoch=1,fencing_token=9223372036854775805 WHERE singleton=1;
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$ BEGIN
+  PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_reserve(
+    'uid:0','cccccccccccccccccccccccccccccccc','dddddddddddddddddddddddddddddddd',0,1);
+  RAISE EXCEPTION 'fence-exhausted reservation accepted';
+EXCEPTION WHEN numeric_value_out_of_range THEN NULL; END $$;
+RESET ROLE;
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation
+             WHERE request_id='cccccccccccccccccccccccccccccccc') OR
+     EXISTS(SELECT 1 FROM public.kb_vault_rewrap_worm
+             WHERE operation_id='dddddddddddddddddddddddddddddddd') OR
+     (SELECT sealed OR seal_epoch<>1 OR fencing_token<>9223372036854775805
+        FROM public.kb_vault_control WHERE singleton=1) THEN
+    RAISE EXCEPTION 'fence exhaustion had durable effects';
+  END IF;
+END $$;
+ROLLBACK;
+
 SET ROLE aimee_kb_vault_orchestrator_login;
 DO $$ BEGIN
   PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status();

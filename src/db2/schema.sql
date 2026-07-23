@@ -4901,8 +4901,6 @@ BEGIN
       WHERE x.singleton OPERATOR(pg_catalog.=) 1 FOR UPDATE;
     IF c.sealed OR c.maintenance_kind OPERATOR(pg_catalog.<>) '' OR
        c.maintenance_id OPERATOR(pg_catalog.<>) '' OR
-       c.seal_epoch OPERATOR(pg_catalog.=) 9223372036854775807 OR
-       c.fencing_token OPERATOR(pg_catalog.=) 9223372036854775807 OR
        EXISTS(SELECT 1 FROM public.org_vault_rotation AS r
                WHERE r.state OPERATOR(pg_catalog.<>) 'retired') OR
        EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation AS x
@@ -4910,6 +4908,13 @@ BEGIN
                      (x.state OPERATOR(pg_catalog.=) 'completed' AND
                       x.fencing_token OPERATOR(pg_catalog.>) c.last_opened_rewrap_fence)) THEN
       RAISE EXCEPTION 'P7_D3B_RESERVE_BUSY' USING ERRCODE='55000';
+    END IF;
+    -- A successful lifecycle needs two epoch increments (reserve + open) and
+    -- three control-fence increments (reserve + complete + open). Refuse before
+    -- writing the operation, intent, or sealed control if that headroom is gone.
+    IF c.seal_epoch OPERATOR(pg_catalog.>) 9223372036854775805 OR
+       c.fencing_token OPERATOR(pg_catalog.>) 9223372036854775804 THEN
+      RAISE EXCEPTION 'P7_D3B_RESERVE_EXHAUSTED' USING ERRCODE='22003';
     END IF;
     INSERT INTO public.kb_vault_rewrap_operation(operation_id,request_id,actor,state,
       seal_epoch,fencing_token,old_generation,new_generation)
