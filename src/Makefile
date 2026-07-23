@@ -325,7 +325,7 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
            db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c \
            db2/cross_repo_route.c db2/cross_repo_build.c \
            db2/vault_pg.c db2/org_vault_rewrap.c db2/org_vault_rotation.c db2/org_vault_key_use.c db2/org_model_catalog.c db2/org_spend.c db2/org_budget.c db2/org_rate.c db2/org_egress.c db2/org_telemetry.c db2/org_telemetry_fmt.c
-DB2_SRCS += db2/server_registry.c db2/management_client_instance.c db2/management_action_journal.c db2/management_jwks_runtime.c
+DB2_SRCS += db2/server_registry.c db2/management_client_instance.c db2/management_action_journal.c db2/management_read_journal.c db2/management_jwks_runtime.c
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 
 # Vault core (P10): the credential-vault crypto/store/service, shared by aimee-server
@@ -469,7 +469,7 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_cert_binding.c \
            kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
-           kb/kb_management_action.c kb/kb_management_runtime.c
+           kb/kb_management_action.c kb/kb_management_runtime.c server/server_mgmt_read.c
 KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 

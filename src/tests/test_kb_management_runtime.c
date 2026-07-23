@@ -4,6 +4,8 @@
 #include "kb/kb_mgmt_status_client.h"
 #include "kb/kb_workload_helper_posix.h"
 #include "kb_workload_provider.h"
+#include "db2/management_read_journal.h"
+#include "server/server_mgmt_read.h"
 
 #include <assert.h>
 #include <fcntl.h>
@@ -15,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static kb_workload_result_t provider_result = KB_WORKLOAD_UNAVAILABLE;
@@ -22,11 +25,16 @@ static kb_management_cert_result_t lifecycle_result = KB_MANAGEMENT_CERT_OK;
 static kb_management_cert_result_t reconcile_result = KB_MANAGEMENT_CERT_UNAVAILABLE;
 static int register_calls;
 static int unregister_calls;
+static int read_register_calls;
+static int read_unregister_calls;
 static int provider_close_calls;
 static pthread_mutex_t reconcile_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t reconcile_cond = PTHREAD_COND_INITIALIZER;
 static int block_reconcile;
 static int reconcile_entered;
+static int read_fixture_enabled;
+static int read_sequence;
+static kb_http_servers_read_handler_fn captured_read_handler;
 
 int kb_http_servers_health_register(kb_http_servers_health_handler_fn handler, void *ctx)
 {
@@ -58,6 +66,98 @@ int kb_http_servers_action_unregister(kb_http_servers_action_handler_fn handler,
    return 0;
 }
 
+int kb_http_servers_read_register(kb_http_servers_read_handler_fn handler, void *ctx)
+{
+   (void)ctx;
+   captured_read_handler = handler;
+   read_register_calls++;
+   return 0;
+}
+
+int kb_http_servers_read_unregister(kb_http_servers_read_handler_fn handler, void *ctx)
+{
+   (void)handler;
+   (void)ctx;
+   read_unregister_calls++;
+   captured_read_handler = NULL;
+   return 0;
+}
+
+db2_management_read_result_t db2_management_read_intent_start(
+    const kb_principal_t *actor, int64_t team, const char *server, const char *path,
+    const uint8_t nonce[32], const char *digest, const char *issuer, const char *installation,
+    int ttl, db2_management_read_intent_t *out)
+{
+   if (read_fixture_enabled)
+   {
+      assert(actor && actor->authenticated && team == 7 && !strcmp(server, "srv-1"));
+      assert(!strcmp(path, "/v1/servers/srv-1/agents") && nonce[0] == 0);
+      assert(!strcmp(digest, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"));
+      assert(!strcmp(issuer, "https://issuer.example") &&
+             !strcmp(installation, "00000000000000000000000000000000") && ttl == 90);
+      memset(out, 0, sizeof(*out));
+      memset(out->correlation_id, 'c', 64);
+      memset(out->jti, 'e', 64);
+      out->team_id = team;
+      snprintf(out->target_server_id, sizeof(out->target_server_id), "%s", server);
+      snprintf(out->request_sha256, sizeof(out->request_sha256), "%s", digest);
+      snprintf(out->local_cert_issuer, sizeof(out->local_cert_issuer), "/CN=kb-ca");
+      snprintf(out->local_cert_serial_norm, sizeof(out->local_cert_serial_norm), "01af");
+      memset(out->local_cert_fingerprint, 'a', 64);
+      snprintf(out->target_mgmt_issuer, sizeof(out->target_mgmt_issuer), "/CN=server-ca");
+      snprintf(out->target_mgmt_serial_norm, sizeof(out->target_mgmt_serial_norm), "10be");
+      memset(out->target_mgmt_fingerprint, 'b', 64);
+      out->revocation_generation = 7;
+      out->publication_generation = 1;
+      return DB2_MANAGEMENT_READ_OK;
+   }
+   return DB2_MANAGEMENT_READ_UNAVAILABLE;
+}
+
+int server_mgmt_read_digest(const server_mgmt_read_digest_input_t *input, char out[65])
+{
+   if (read_fixture_enabled)
+   {
+      assert(input && !strcmp(input->server_id, "srv-1") && input->team_id == 7);
+      memset(out, 'd', 64);
+      out[64] = 0;
+      return 0;
+   }
+   if (out)
+      out[0] = 0;
+   return -1;
+}
+
+int kb_management_read_challenge_decode(const char *raw, size_t len, unsigned char nonce[32],
+                                        uint64_t *expires)
+{
+   if (read_fixture_enabled)
+   {
+      assert(raw && len && nonce && expires);
+      memset(nonce, 0, 32);
+      *expires = (uint64_t)time(NULL) + 10;
+      return 0;
+   }
+   return -1;
+}
+
+kb_mgmt_token_authority_ipc_result_t kb_mgmt_token_authority_client_issue(
+    const kb_mgmt_token_authority_client_config_t *config, const char *correlation,
+    const char *jti, kb_mgmt_token_authority_output_t *out)
+{
+   (void)config;
+   (void)correlation;
+   (void)jti;
+   if (read_fixture_enabled)
+   {
+      assert(read_sequence == 0 && correlation[0] == 'c' && jti[0] == 'e');
+      read_sequence = 1;
+      snprintf(out->jwt, sizeof(out->jwt), "signed-read-token");
+      return KB_MGMT_TOKEN_AUTHORITY_IPC_OK;
+   }
+   return KB_MGMT_TOKEN_AUTHORITY_IPC_UNAVAILABLE;
+}
+
 db2_management_action_result_t db2_management_action_operation_init(
     int64_t team, const char *server, db2_management_action_capability_t cap,
     const uint8_t digest[32], const char *issuer, const char *kid, int ttl,
@@ -83,6 +183,13 @@ kb_management_action_transport_t kb_management_action_server_request_production(
     void *ctx, void *session, const char *method, const char *path, const char *body,
     const char *headers, uint64_t deadline, char *response, size_t cap, int *status)
 {
+   if (read_fixture_enabled && !strcmp(path, "/v1/management/read/challenge"))
+   {
+      assert(!strcmp(method, "POST") && session == (void *)0x3456 && !headers);
+      snprintf(response, cap, "challenge");
+      *status = 200;
+      return KB_MANAGEMENT_ACTION_SENT_RESPONSE;
+   }
    return KB_MANAGEMENT_ACTION_NOT_SENT;
 }
 kb_mgmt_token_authority_ipc_result_t
@@ -176,7 +283,20 @@ kb_management_health_snapshot_primary(void *ctx, const kb_principal_t *actor, in
    (void)actor;
    (void)team;
    (void)server;
-   (void)snapshot;
+   if (read_fixture_enabled)
+   {
+      memset(snapshot, 0, sizeof(*snapshot));
+      snprintf(snapshot->server_id, sizeof(snapshot->server_id), "%s", server);
+      snprintf(snapshot->endpoint, sizeof(snapshot->endpoint), "https://authority.example:443");
+      snprintf(snapshot->status, sizeof(snapshot->status), "active");
+      snprintf(snapshot->enrollment_state, sizeof(snapshot->enrollment_state), "active");
+      snprintf(snapshot->management_issuer, sizeof(snapshot->management_issuer), "/CN=server-ca");
+      snprintf(snapshot->management_serial_norm, sizeof(snapshot->management_serial_norm), "10be");
+      memset(snapshot->management_fingerprint, 'b', 64);
+      snapshot->management_fingerprint[64] = 0;
+      snapshot->revocation_generation = 7;
+      return KB_MANAGEMENT_HEALTH_OK;
+   }
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -186,7 +306,17 @@ kb_management_health_bundle_active(void *ctx, kb_management_cert_bundle_t *bundl
 {
    (void)ctx;
    (void)bundle;
-   (void)active;
+   if (read_fixture_enabled)
+   {
+      memset(bundle, 0, sizeof(*bundle));
+      memset(active, 0, sizeof(*active));
+      snprintf(active->installation_id, sizeof(active->installation_id),
+               "00000000000000000000000000000000");
+      snprintf(active->issuer, sizeof(active->issuer), "/CN=kb-ca");
+      snprintf(active->serial_norm, sizeof(active->serial_norm), "01af");
+      memset(active->fingerprint, 0xaa, sizeof(active->fingerprint));
+      return KB_MANAGEMENT_HEALTH_OK;
+   }
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -205,7 +335,11 @@ kb_management_health_server_open_production(void *ctx, const db2_server_snapshot
    (void)snapshot;
    (void)bundle;
    (void)deadline;
-   (void)out;
+   if (read_fixture_enabled)
+   {
+      *out = (void *)0x3456;
+      return KB_MANAGEMENT_HEALTH_OK;
+   }
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -222,7 +356,6 @@ kb_management_health_result_t kb_management_health_server_request_production(
    (void)deadline;
    (void)response;
    (void)cap;
-   (void)status;
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -245,6 +378,11 @@ kb_mgmt_status_client_adapter(void *ctx, const kb_management_cert_bundle_t *bund
    (void)response;
    (void)cap;
    (void)status;
+   if (read_fixture_enabled)
+   {
+      assert(read_sequence == 1);
+      read_sequence = 2;
+   }
    return KB_MANAGEMENT_HEALTH_UNAVAILABLE;
 }
 
@@ -376,11 +514,13 @@ int main(void)
    int registrations = register_calls;
    assert(kb_management_runtime_start() == 0);
    assert(register_calls == registrations + 1);
+   assert(read_register_calls > 0);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_RETRY_WAIT);
    assert(kb_management_runtime_start() == -1);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_RETRY_WAIT);
    kb_management_runtime_stop();
    assert(unregister_calls >= 1);
+   assert(read_unregister_calls >= 1);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_DISABLED);
 
    provider_result = KB_WORKLOAD_OK;
@@ -411,6 +551,16 @@ int main(void)
    reconcile_result = KB_MANAGEMENT_CERT_OK;
    assert(kb_management_runtime_start() == 0);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_READY);
+   assert(captured_read_handler);
+   kb_principal_t read_actor = {.authenticated = 1};
+   char read_out[1024];
+   read_fixture_enabled = 1;
+   read_sequence = 0;
+   kb_management_read_result_t read_rc =
+       captured_read_handler(NULL, &read_actor, 7, "srv-1", read_out, sizeof(read_out));
+   assert(read_rc == KB_MANAGEMENT_READ_UNAVAILABLE);
+   assert(read_sequence == 2); /* token authority precedes the fresh status proof */
+   read_fixture_enabled = 0;
    reconcile_result = KB_MANAGEMENT_CERT_UNAVAILABLE;
    kb_management_runtime_tick(INT64_MAX - 30);
    assert(kb_management_runtime_state() == KB_MANAGEMENT_RUNTIME_READY_DEGRADED);

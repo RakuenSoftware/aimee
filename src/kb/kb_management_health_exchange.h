@@ -77,6 +77,8 @@ kb_management_health_exchange(const kb_management_health_request_t *,
 /* Length-aware private wire codecs exposed for focused tests/fuzzing. */
 int kb_management_health_challenge_decode(const char *, size_t,
                                           unsigned char[KB_MGMT_STATUS_NONCE_LEN], uint64_t *);
+int kb_management_read_challenge_decode(const char *, size_t,
+                                        unsigned char[KB_MGMT_STATUS_NONCE_LEN], uint64_t *);
 int kb_management_health_response_decode(const char *, size_t, const char *);
 
 /* Production primary-snapshot and lifecycle adapters. */

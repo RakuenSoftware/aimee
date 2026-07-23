@@ -105,7 +105,10 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
       const result = await apiGet<{ server_id: string; team: number; agents: FleetAgent[] }>(
         `/v1/servers/${encodeURIComponent(selected)}/agents?team=${teamID}`,
       );
-      if (result.server_id !== selected || String(result.team) !== teamID || !Array.isArray(result.agents)) {
+      // JSON numbers cannot preserve every positive int64 team id. The KB has already
+      // authenticated and bound the exact canonical query value; keep the UI check to
+      // fields it can compare without precision loss.
+      if (result.server_id !== selected || !Array.isArray(result.agents)) {
         throw new Error('invalid fleet agent response');
       }
       setAgents(result.agents);

@@ -20,6 +20,7 @@ static pthread_cond_t block_cv = PTHREAD_COND_INITIALIZER;
 static int callback_entered;
 static int callback_release;
 static unsigned action_calls;
+static unsigned read_calls;
 static char action_body[128];
 static int scope_begins, scope_commits;
 static int64_t scope_team;
@@ -70,6 +71,19 @@ static kb_management_action_result_t blocking_action_handler(void *ctx, const kb
       pthread_cond_wait(&block_cv, &block_mu);
    pthread_mutex_unlock(&block_mu);
    return KB_MANAGEMENT_ACTION_OK;
+}
+
+static kb_management_read_result_t read_result;
+static kb_management_read_result_t read_handler_fn(void *ctx, const kb_principal_t *actor,
+                                                   int64_t team, const char *server, char *out,
+                                                   size_t cap)
+{
+   assert(ctx == (void *)0x2468 && actor && actor->authenticated && team == 9);
+   assert(!strcmp(server, "server-a"));
+   read_calls++;
+   if (read_result == KB_MANAGEMENT_READ_OK)
+      snprintf(out, cap, "{\"server_id\":\"server-a\",\"team\":9,\"agents\":[]}");
+   return read_result;
 }
 
 int db2_server_registry_list(int64_t team, db2_server_row_t *rows, int max)
@@ -245,6 +259,48 @@ static void test_action_route(void)
    kb_reqctx_clear();
 }
 
+static void test_read_route(void)
+{
+   char out[512];
+   set_actor();
+   assert(route("GET", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 503);
+   assert(strstr(out, "\"code\":\"unavailable\""));
+   const char *correlation = strstr(out, "\"correlation_id\":\"");
+   assert(correlation && strlen(correlation + strlen("\"correlation_id\":\"")) >= 45);
+   assert(kb_http_servers_read_register(read_handler_fn, (void *)0x2468) == 0);
+   assert(kb_http_servers_read_register(read_handler_fn, (void *)0x2468) == -1);
+   read_result = KB_MANAGEMENT_READ_OK;
+   assert(route("GET", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 200);
+   assert(strstr(out, "\"agents\":[]") && read_calls == 1);
+   assert(route("POST", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) == 405);
+   assert(route("GET", "/v1/servers/server-a/agents", "x=1&team=9", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/agents", "team=%39", out, sizeof(out)) == 400);
+   assert(route("GET", "/v1/servers/server-a/agents", "team=9&team=9", out, sizeof(out)) ==
+          400);
+   assert(route_body("GET", "/v1/servers/server-a/agents", "team=9", "{}", out,
+                     sizeof(out)) == 400);
+   static const struct
+   {
+      kb_management_read_result_t result;
+      int status;
+      const char *code;
+   } cases[] = {{KB_MANAGEMENT_READ_INVALID, 400, "invalid_request"},
+                {KB_MANAGEMENT_READ_DENIED, 403, "forbidden"},
+                {KB_MANAGEMENT_READ_NOT_FOUND, 404, "not_found"},
+                {KB_MANAGEMENT_READ_CONFLICT, 409, "conflict"},
+                {KB_MANAGEMENT_READ_INTEGRITY, 502, "integrity"},
+                {KB_MANAGEMENT_READ_UNAVAILABLE, 503, "unavailable"}};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+   {
+      read_result = cases[i].result;
+      assert(route("GET", "/v1/servers/server-a/agents", "team=9", out, sizeof(out)) ==
+             cases[i].status);
+      assert(strstr(out, cases[i].code) && strstr(out, "\"message\":"));
+   }
+   assert(kb_http_servers_read_unregister(read_handler_fn, (void *)0x2468) == 0);
+   kb_reqctx_clear();
+}
+
 typedef struct
 {
    int status;
@@ -354,6 +410,7 @@ int main(void)
    test_route_mapping();
    test_rejections_and_list_isolation();
    test_action_route();
+   test_read_route();
    test_unregister_waits_for_borrow();
    test_action_unregister_waits_for_borrow();
    kb_reqctx_clear();
