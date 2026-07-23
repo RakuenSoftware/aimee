@@ -16,8 +16,7 @@ func (r *NativeRunner) Review(ctx context.Context, request roundtablecfg.ReviewR
 	if r == nil || r.agents == nil {
 		return roundtablecfg.RunResult{}, errors.New("roundtable agent resource plane is unavailable")
 	}
-	request.Artifact = strings.TrimSpace(request.Artifact)
-	if len(request.Artifact) < 20 {
+	if len(strings.TrimSpace(request.Artifact)) < 20 {
 		return roundtablecfg.RunResult{}, roundtablecfg.ValidationError{Message: "roundtable artifact must be at least 20 characters"}
 	}
 	if len(request.Artifact) > 16<<20 {

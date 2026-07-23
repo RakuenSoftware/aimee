@@ -732,7 +732,7 @@ func TestNativeRunnerUsesCompleteArtifactsAndOnlyPositiveUIPins(t *testing.T) {
 func TestDirectRoundtableReviewReturnsAndVerifiesRunArtifactIdentity(t *testing.T) {
 	agents := &recordingAgents{}
 	runner := &NativeRunner{agents: agents}
-	artifact := strings.Repeat("diff --git a/a b/a\n", 4) + "DIRECT_ARTIFACT_MARKER"
+	artifact := "\n" + strings.Repeat("diff --git a/a b/a\n", 4) + "DIRECT_ARTIFACT_MARKER\n\n"
 	result, err := runner.Review(context.Background(), roundtablecfg.ReviewRequest{
 		Artifact: artifact, OriginalRequest: "Review only the supplied direct artifact.",
 		ArtifactStage: "frozen_diff", RunID: "review-pr-1828-attempt-2",

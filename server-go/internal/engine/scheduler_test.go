@@ -301,6 +301,11 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Keep the parent schedulable in lifecycle terms but parked so the child is
+	// deterministically the execution that enters the blocking runner.
+	if err := store.Park(t.Context(), "wi_live_root", "work", "manual", 0); err != nil {
+		t.Fatal(err)
+	}
 	runner := &blockingRunner{started: make(chan string, 2), release: make(chan struct{})}
 	eng, err := New(store, artifacts, workflowDir, runner)
 	if err != nil {
