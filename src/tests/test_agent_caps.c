@@ -55,8 +55,12 @@ void test_agent_route_with_caps_honors_context_override(void)
    memset(&sys_cfg, 0, sizeof(sys_cfg));
    sys_cfg.model_meta_capability_routing = 1;
 
-   cfg.agent_count = 1;
-   strcpy(cfg.default_agent, "small-ctx");
+   /* Two agents so the GATE has a real choice to make. Asserting NULL is no
+    * longer the way to observe rejection: an unsatisfiable min_context now
+    * escalates to the largest seat rather than failing the request (a DEGREE
+    * shortfall, best-effort). Rejection is therefore observed as "the other
+    * agent was chosen". */
+   cfg.agent_count = 2;
    strcpy(cfg.agents[0].name, "small-ctx");
    strcpy(cfg.agents[0].provider, "openai");
    /* gpt-4's catalog context window is 8192 — below the 50000 requirement. */
@@ -64,21 +68,37 @@ void test_agent_route_with_caps_honors_context_override(void)
    strcpy(cfg.agents[0].roles[0], "review");
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
+   cfg.agents[0].cost_tier = 0; /* cheapest, so only the gate can exclude it */
    strcpy(cfg.agents[0].api_key, "test-key");
 
-   /* Catalog says 8192 < 50000 and no override -> dropped by the gate. */
-   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == NULL);
+   strcpy(cfg.agents[1].name, "big-ctx");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].cost_tier = 1;
+   cfg.agents[1].middleware.context_window = 200000;
+   strcpy(cfg.agents[1].api_key, "test-key");
 
-   /* An explicit per-agent override supersedes the catalog value and routes,
-    * with no change to the model registry table. */
-   cfg.agents[0].enabled = 1;
+   /* Catalog says 8192 < 50000, so the cheapest agent is dropped by the gate and
+    * the larger one wins despite its higher tier. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
+
+   /* An explicit per-agent override supersedes the catalog value, so the cheap
+    * agent qualifies and cost-tier ordering puts it back in front — with no
+    * change to the model registry table. */
    cfg.agents[0].middleware.context_window = 1000000;
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[0]);
 
-   /* An override below the requirement is still rejected. */
-   cfg.agents[0].enabled = 1;
+   /* An override BELOW the requirement is still rejected by the gate. */
    cfg.agents[0].middleware.context_window = 1000;
-   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == NULL);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
+
+   /* When NOTHING satisfies the requirement, routing escalates to the largest
+    * seat rather than returning no route. */
+   cfg.agents[1].middleware.context_window = 2000;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
 }
 
 /* tools_enabled defaults from the backing model's intrinsic capability when the
@@ -482,7 +502,11 @@ void test_unknown_context_window_does_not_pass_min_context(void)
    memset(&sys_cfg, 0, sizeof(sys_cfg));
    sys_cfg.model_meta_capability_routing = 1;
 
-   cfg.agent_count = 1;
+   /* A known-good peer makes exclusion observable. Asserting NULL would no
+    * longer work: an unknown window disqualifies the agent from CHEAP selection,
+    * but with nothing else available routing escalates to it rather than failing
+    * the request. Exclusion is therefore "the peer was chosen instead". */
+   cfg.agent_count = 2;
    strcpy(cfg.agents[0].name, "unknown-ctx");
    strcpy(cfg.agents[0].provider, "anthropic");
    /* A model id no catalog or prefix table knows: context window resolves 0. */
@@ -491,12 +515,25 @@ void test_unknown_context_window_does_not_pass_min_context(void)
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
    cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0; /* cheapest, so only the gate can exclude it */
    strcpy(cfg.agents[0].api_key, "test-key");
 
-   /* Unknown window + a real requirement -> excluded (previously admitted). */
-   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == NULL);
+   strcpy(cfg.agents[1].name, "known-ctx");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 1;
+   cfg.agents[1].middleware.context_window = 200000;
+   strcpy(cfg.agents[1].api_key, "test-key");
 
-   /* No context requirement at all -> still routable. */
+   /* Unknown window + a real requirement -> excluded, so the dearer known-good
+    * peer is chosen (previously the unknown agent was silently ADMITTED). */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
+
+   /* No context requirement at all -> the cheap agent is routable again. */
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
 
    /* An operator override supplies the missing window and restores routing. */
@@ -656,6 +693,112 @@ void test_primary_turn_default_must_still_satisfy_caps(void)
    agent_routing_set_primary_turn(0);
 
    printf("  PASS: test_primary_turn_default_must_still_satisfy_caps\n");
+}
+
+/* FAIL UPWARD: when capability filtering eliminates every candidate, routing
+ * escalates to the most capable seat instead of reporting "no route".
+ *
+ * Two operator invariants collide when nothing qualifies — never fail a request,
+ * and never send a packet to a model that cannot complete it. Resolving toward
+ * the BEST seat makes the cost of being wrong "we overspent" (visible,
+ * recoverable) rather than an outage or a garbage answer. Crucially it must NOT
+ * fall back to the cheapest agent, which is exactly the seat the gate rejected. */
+void test_capability_gate_escalates_instead_of_failing(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 2;
+
+   /* Cheapest, smallest window: the seat the gate rejects. */
+   strcpy(cfg.agents[0].name, "small_cheap");
+   strcpy(cfg.agents[0].provider, "openai");
+   strcpy(cfg.agents[0].model, "gpt-4"); /* 8192 catalog window */
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   /* Larger window, dearer tier — still short of the requirement below. */
+   strcpy(cfg.agents[1].name, "big_dear");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 3;
+   cfg.agents[1].middleware.context_window = 200000;
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* A requirement NO agent satisfies. Previously this returned NULL, i.e. the
+    * request failed outright. It must now escalate to the largest window. */
+   agent_t *routed = agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000);
+   assert(routed != NULL);
+   assert(routed == &cfg.agents[1]);
+   /* Emphatically NOT the cheapest seat the gate just rejected. */
+   assert(routed != &cfg.agents[0]);
+
+   /* The configured default is the operator's most-capable choice and wins the
+    * escalation even when a peer has a larger window. */
+   strcpy(cfg.default_agent, "small_cheap");
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
+   cfg.default_agent[0] = '\0';
+
+   /* A satisfiable requirement must NOT escalate — normal routing still wins,
+    * and still picks the cheapest qualifying seat. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 100000) == &cfg.agents[1]);
+
+   /* Genuinely nothing enabled is a real outage, not a filtering artifact: NULL. */
+   cfg.agents[0].enabled = 0;
+   cfg.agents[1].enabled = 0;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == NULL);
+   cfg.agents[0].enabled = 1;
+   cfg.agents[1].enabled = 1;
+
+   /* A KIND shortfall must NOT escalate. Escalation is a best effort at a DEGREE
+    * problem (prompt bigger than any window); it cannot conjure a capability
+    * nobody has, and dispatching anyway would trade a clear config error for a
+    * doomed request. Tools required, none offered -> still "no route". */
+   cfg.agents[0].tools_enabled = 0;
+   cfg.agents[1].tools_enabled = 0;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == NULL);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 5000000) == NULL);
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+
+   printf("  PASS: test_capability_gate_escalates_instead_of_failing\n");
+}
+
+/* Escalation is gated on capability routing: with the flag OFF, plain cost-tier
+ * routing must be byte-identical to before. */
+void test_no_escalation_when_capability_routing_disabled(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 0; /* default */
+
+   cfg.agent_count = 1;
+   strcpy(cfg.agents[0].name, "only");
+   strcpy(cfg.agents[0].provider, "openai");
+   strcpy(cfg.agents[0].model, "gpt-4");
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   /* Flag off -> agent_route(), which ignores caps entirely. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 5000000) == &cfg.agents[0]);
+
+   printf("  PASS: test_no_escalation_when_capability_routing_disabled\n");
 }
 
 /* agent_default_primary must never hand back a disabled seat: a disabled

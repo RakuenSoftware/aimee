@@ -2206,6 +2206,77 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    return agent_pick_balanced(candidates, count);
 }
 
+/* Effective context window: the operator's policy ceiling when set, else the
+ * model catalog, else a CLI adapter's declared window. Mirrors the resolution
+ * order in agent_satisfies_required_caps(). */
+static int agent_effective_context(const agent_t *ag)
+{
+   if (ag->middleware.context_window > 0)
+      return ag->middleware.context_window;
+   model_capability_t cap;
+   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
+      return cap.context_window;
+   if (ag->cli_kind[0])
+   {
+      const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);
+      if (adapter && adapter->caps.max_context_tokens > 0)
+         return adapter->caps.max_context_tokens;
+   }
+   return 0;
+}
+
+/* FAIL UPWARD (see the capability-routing design): when capability filtering
+ * eliminates every candidate, escalate to the most capable seat rather than
+ * returning "no route".
+ *
+ * Two operator invariants collide here: routing must never fail a request
+ * because nothing qualified, and a packet must never go to a model that cannot
+ * complete it. When nothing qualifies, both cannot hold — so resolve toward the
+ * BEST available agent rather than either failing outright or silently falling
+ * back to the cheapest. The cost of being wrong is then "we spent more than
+ * necessary", which is visible and recoverable, instead of an outage or a
+ * garbage result from an under-powered model.
+ *
+ * Deliberately NOT agent_route(): that returns the CHEAPEST candidate, which is
+ * precisely the seat the capability gate just rejected. Prefer the configured
+ * default (the operator's most-capable choice), then the largest effective
+ * context window, then the highest cost_tier as a capability proxy. */
+static agent_t *agent_route_escalate(agent_config_t *cfg, const char *role, unsigned required_caps)
+{
+   agent_t *best = NULL;
+   int best_ctx = -1;
+
+   if (cfg->default_agent[0])
+   {
+      agent_t *def = agent_find(cfg, cfg->default_agent);
+      if (def && def->enabled && agent_supports_role(def, role) &&
+          agent_is_available_for_routing(def) &&
+          agent_satisfies_required_caps(def, required_caps, 0))
+         return def;
+   }
+
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
+         continue;
+      /* Escalation only helps a DEGREE shortfall - the prompt exceeds every
+       * window - where a bigger seat is a genuine best effort. It cannot help a
+       * KIND shortfall: if no agent has tools, none can be conjured, and
+       * dispatching anyway trades a clear, actionable config error for a doomed
+       * request. So required_caps still bind; only min_context is relaxed. */
+      if (!agent_satisfies_required_caps(ag, required_caps, 0))
+         continue;
+      int ctx = agent_effective_context(ag);
+      if (!best || ctx > best_ctx || (ctx == best_ctx && ag->cost_tier > best->cost_tier))
+      {
+         best = ag;
+         best_ctx = ctx;
+      }
+   }
+   return best;
+}
+
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context)
 {
@@ -2218,6 +2289,17 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
        (required_caps & MODEL_CAP_MODALITY_SOFT))
       r = agent_route_with_caps_inner(cfg, role, sys_cfg, required_caps & ~MODEL_CAP_MODALITY_SOFT,
                                       min_context);
+   /* Still nothing: escalate rather than report no route. Only reachable with
+    * capability routing ON, so plain cost-tier routing is unaffected. */
+   if (!r && sys_cfg && sys_cfg->model_meta_capability_routing)
+   {
+      r = agent_route_escalate(cfg, role, required_caps & ~MODEL_CAP_MODALITY_SOFT);
+      if (r)
+         aimee_log(LOG_INFO, "agent",
+                   "capability gate matched no agent for role '%s' (caps=0x%x min_context=%d); "
+                   "escalating to '%s'",
+                   role ? role : "", required_caps, min_context, r->name);
+   }
    return r;
 }
 

@@ -41,6 +41,8 @@ void test_catalog_provider_maps_cli_provider_names(void);
 void test_primary_turn_reaches_default_above_min_tier(void);
 void test_primary_turn_default_must_still_satisfy_caps(void);
 void test_catalog_provider_endpoint_parser_edges(void);
+void test_capability_gate_escalates_instead_of_failing(void);
+void test_no_escalation_when_capability_routing_disabled(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
@@ -3186,6 +3188,8 @@ int main(void)
    test_primary_turn_reaches_default_above_min_tier();
    test_primary_turn_default_must_still_satisfy_caps();
    test_catalog_provider_endpoint_parser_edges();
+   test_capability_gate_escalates_instead_of_failing();
+   test_no_escalation_when_capability_routing_disabled();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();
