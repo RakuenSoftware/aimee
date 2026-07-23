@@ -91,7 +91,7 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   feature implementations from global source buckets into documented, dependency-enforced
   modules; and uses the migration as a deletion-first, DRY refactor rather than a directory
   shuffle. **Recall / Rerank / Route / Translate / Constrain-Verify.**
-- [Advertise the effective capability set to the thin client and its consumer](proposals/pending/thin-client-capability-advertisement.md)
+- [The registration chain and the static thin client](proposals/pending/thin-client-capability-advertisement.md)
   — consuming child of the core-substrate suite. Replaces the static `/v1/capabilities` list with a
   truthful, generation-stamped projection of the module-runtime capability closure and state;
   delivers it to the thin client on connect and on server/Control-Plane change; and defines how the

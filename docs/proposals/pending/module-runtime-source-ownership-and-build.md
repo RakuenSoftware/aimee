@@ -64,6 +64,19 @@ This proposal owns the descriptor fields that declare config ownership and produ
 those declarations become the rendered effective catalog, user-visible surfaces, activation
 filtering, and config compatibility behavior.
 
+**Surface declarations (2026-07-23 reconciliation).** The descriptor's routes/commands/protocols
+declaration must be complete enough that a client which has never heard of the module can present
+and dispatch its surfaces from the declaration alone: for a command, the verb and subcommand path,
+the argument and flag schema with types and defaults, one-line and long help, tier, hidden flag, and
+aliases; for a tool, the name, description, and JSON input schema; for a route, the method and path;
+for a web surface, its identifier. Declarations are **declarative only** — a descriptor may not
+declare executable content, a template language, a code reference, a client-side handler binding, or
+a surface requiring client-local execution, and the validator rejects each. This proposal owns the
+declarations; [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md)
+exclusively owns their projected wire form, the registration chain that carries them, and the
+client-side compatibility rules — and its projection must be derived from these declarations, never
+authored separately.
+
 Optional modules are physically absent from the selected object and capability closure when
 omitted. Runtime-toggle support is declared separately and requires registration, listeners,
 routes, assets, config projection, and background work to unload cleanly. Required modules expose

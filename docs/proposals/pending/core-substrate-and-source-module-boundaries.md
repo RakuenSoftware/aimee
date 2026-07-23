@@ -419,12 +419,19 @@ rules (shared invariant 14):
 
 Each of the Runtime and the Control Plane owns its own shared-memory event bus, and core is the bus
 owner in each (shared invariant 16). A module does not have its capabilities read out of it by a
-core poller; it **publishes its capabilities to core over the bus** when it registers, and publishes
-state transitions as they happen. Core aggregates those publications into the capability closure and
-the generation-stamped advertisement that
-[`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) projects to the
+core poller; it **publishes its capabilities and its invocable surface descriptors to core over the
+bus** when it registers, and publishes state transitions as they happen. Core aggregates those
+publications into the capability closure and the generation-stamped projection that
+[`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) returns to the
 thin client and to other modules. Publication and advertisement are the same bus mechanism observed
 from two ends.
+
+Module→core publication is the first edge of a three-edge **registration chain** owned by that
+child: module→host service (this bus edge), Runtime→Control Plane, and thin client→Runtime.
+Registration always flows upward to the authority and the projection flows back down the same edge;
+a registrant contacts only its own authority, so the thin client's whole view is what its Runtime
+knows exists and it never addresses a Control Plane. Because the projection carries surface
+descriptors and not only capability state, a client needs no release when a module ships.
 
 Installation is **dependency-complete** and transactional. Each module declares its module
 dependencies in its descriptor; a module may not be installed unless every module it depends on is
@@ -606,12 +613,16 @@ rather than making that safety property optional.
 7. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
    sequences the moves and defines compatibility, cleanup, recovery, and completion gates.
 8. [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) owns the
-   runtime capability-advertisement surface: how a Runtime and a Control Plane project their live
-   capability closure and state to a connecting thin client, refresh it on change, and how the thin
-   client merges both and re-advertises the effective set to its consumer. It consumes proposals
-   2–5's capability-state, config, product, and protocol contracts and adds no taxonomy. It was
-   drafted after the 2026-07-20 suite review and awaits its own roundtable review; it does not
-   inherit the suite approvals.
+   registration chain and the static thin client: a module registers with its host service over the
+   bus, a Runtime registers with its Control Plane, and a thin client registers with its Runtime;
+   each edge returns a generation-stamped projection of the capability closure *and the invocable
+   surface descriptors* (CLI verb/args/help, MCP tool schema, route, web surface) the registrant may
+   see. A registrant contacts only its own authority — the thin client never contacts a Control Plane
+   and does not know whether one exists; the Runtime holds the merged closure and evaluates the
+   cross-service dependency law once. The client therefore ships no module knowledge and needs no
+   release when a module ships. It consumes proposals 2–5's capability-state, config, product, and
+   protocol contracts and adds no taxonomy. It was drafted after the 2026-07-20 suite review and
+   awaits its own roundtable review; it does not inherit the suite approvals.
 9. [`event-bus-governance-and-capture.md`](event-bus-governance-and-capture.md) owns governance and
    audit over the module event bus: the single tap that captures every inter-module event, authorizes
    action-class events, and feeds the durable ledger and attestation bundle. It consumes the in-flight
