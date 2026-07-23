@@ -486,6 +486,23 @@
       "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; descriptor validation gains plugin-loader-specific missing-source, planted-source/header, missing-document, and cleared-latch failures, all independent of AIMEE_WITH_PLUGIN_LOADER.",
       "independent_review": "The decision roundtable approved the ownership-only structure on the first optional module and required two narrowings: absence of tracked-tree callers must not be stated as absence of callers or as proof the exports are not ABI, and the removed helper must be described as absent from the current tree rather than as never having existed. Both are applied, and the repository history establishing the #1722 removal was audited. Technical-writer review and exact-final-diff roundtable approval remain required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-36.md", "docs/modules/plugin-loader.md", "src/modules/plugin-loader/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 37,
+      "state": "present_and_verified",
+      "disposition": "Corrected a factual error merged by slices 35 and 36, which claimed CMake registered no test target for module-runtime or plugin-loader because the audit read only the top-level CMakeLists.txt and missed src/tests/CMakeLists.txt, and supplemented the corrected prose with a derived control that pins the per-test build-file registration of every descriptor-declared test to a reviewed baseline.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["This entry supersedes the slice 35 fallback claiming CMake registers no module-runtime test target: src/tests/CMakeLists.txt registers test_plugin_c_hook as a CTest case, so module-runtime has no test-registration debt", "This entry supersedes the slice 36 fallback claiming neither plugin test is registered with CTest: test_plugin_loader is registered and only test_plugin is not, so the remaining debt is one test rather than two", "The historical slice 35 and 36 entries are left intact so the record still shows what each slice asserted when it was reviewed and merged", "test_plugin remains the only descriptor-declared test of a latched module that CTest does not register", "test_audit_action and test_audit_ledger are registered with CTest but not with Make, the inverse asymmetry already recorded by slice 34"],
+      "net_growth": {
+        "status": "justified",
+        "rationale": "A prose correction alone cannot prevent the same audit error from recurring, so the slice adds one derived checker, its failure-mode tests, and a generated baseline.",
+        "rejected_simpler_alternative": "Editing the documents and leaving registration facts to future manual greps would repeat the exact mistake that produced the error, since the miss was reading one build file instead of two.",
+        "revisit": "Fold the baseline into descriptor-generated build profiles once those become authoritative, and delete it if registration is then derived rather than pinned."
+      },
+      "consumers": ["module-inventory CI", "future ownership slices asserting build and test membership", "maintainers reading the slice 35 and 36 records"],
+      "blast_radius": "No production source, public symbol, build membership, configuration, storage, or runtime behavior changes; module-inventory CI gains a registration-drift failure and its failure-mode tests.",
+      "independent_review": "The slice decision roundtable required that the correction ship separately from the gateway latch, that a regression control be derived from src/tests/CMakeLists.txt rather than the correction resting on prose, and that the merged slice 35 and 36 ledger entries be superseded rather than rewritten in place. All three are applied; technical-writer review and exact-final-diff roundtable approval remain required before merge.",
+      "evidence": ["scripts/check_module_test_registration.py", "scripts/tests/test_check_module_test_registration.py", "tests/baselines/refactor/module-test-registration.json", "docs/validation/core-modularization-slice-35.md", "docs/validation/core-modularization-slice-36.md"]
     }
   ]
 }

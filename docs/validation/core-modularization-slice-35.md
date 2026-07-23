@@ -110,11 +110,18 @@ integration, and a test is never claimed by two descriptors; it is complementary
 `extension.c` — context lifecycle, kind and permission conversion, and the tool, hook, and
 slash-command registries — and is currently the only coverage of those extension surfaces.
 
-Build systems do not register tests uniformly. Make registers `unit-test-plugin-c-hook` in
-`src/tests/Rules.mk`; CMake registers no module-runtime test target, so the declared test executes
-only in the Make suite. This is pre-existing test-execution debt with a concrete verification
-target — CTest must execute the pre-LLM hook test — and is deferred to a build-membership slice
-because it changes build inputs rather than file ownership.
+Both build systems register the declared test. Make builds `unit-test-plugin-c-hook` from
+`src/tests/Rules.mk`, and `src/tests/CMakeLists.txt` registers `test_plugin_c_hook` as a CTest case.
+
+> **Correction (slice 37).** As merged, this section and the verification note below claimed that
+> CMake registered no module-runtime test target and that the declared test executed only in the
+> Make suite. That was wrong. The audit read only the top-level `CMakeLists.txt` and missed
+> `src/tests/CMakeLists.txt`, which `add_subdirectory(src/tests)` pulls in and which registers
+> `test_plugin_c_hook`. Slice 37 corrected the text and added
+> `scripts/check_module_test_registration.py`, which derives per-test registration from the build
+> files and pins it to `tests/baselines/refactor/module-test-registration.json`, so a future change
+> in registration surfaces as a reviewed baseline diff instead of being rediscovered by hand. No other finding in this document depended on the mistaken claim, and the ownership latch
+> is unaffected.
 
 ## Regression controls
 
@@ -161,8 +168,13 @@ cmake -S . -B build/cmake-slice35 -DAIMEE_WITH_UI=OFF
 cmake --build build/cmake-slice35 --target aimee-core -j2
 ```
 
-CMake registers no module-runtime test target, so there is no CTest selector to run for this module
-until the deferred test-registration slice lands.
+The declared test is also a registered CTest case. Configuring registers it but does not build it,
+so build the test target before invoking CTest:
+
+```sh
+cmake --build build/cmake-slice35 --target test_plugin_c_hook -j2
+ctest --test-dir build/cmake-slice35 -R '^test_plugin_c_hook$' --output-on-failure
+```
 
 Technical-writer review, exact-final-diff roundtable approval, and every required pull-request
 check, including Windows CMake, are required before merge.

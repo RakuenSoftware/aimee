@@ -117,15 +117,24 @@ tool aggregation, conflict checks, discovery precedence, capacity, required-envi
 and project gating.
 
 Build systems do not register tests uniformly. Make registers `unit-test-plugin` and
-`unit-test-plugin-loader` in `src/tests/Rules.mk`; neither is registered with CTest. So the only
-tracked build registration that runs them is Make's, even though both build systems compile both
-sources under the feature flag. Nothing prevents another script or a direct invocation from
-building and running the binaries — the verification section below does exactly that — but no CMake
-target selects them. This is pre-existing test-registration debt with a concrete verification
-target —
-CTest must execute both plugin tests in an enabled profile — and is deferred to a build-membership
-slice because it changes build inputs rather than file ownership. It is the same gap recorded for
-module-runtime in `docs/validation/core-modularization-slice-35.md`.
+`unit-test-plugin-loader` in `src/tests/Rules.mk`; `src/tests/CMakeLists.txt` registers
+`test_plugin_loader` as a CTest case but not `test_plugin`, which therefore runs only under Make.
+
+> **Correction (slice 37).** As merged, this section and the verification note below claimed that
+> neither plugin test was registered with CTest. That was wrong for `test_plugin_loader`, which
+> `src/tests/CMakeLists.txt` registers with an explicit `add_executable` plus `add_test`. The audit
+> read only the top-level `CMakeLists.txt` and missed the test subdirectory. The remaining gap is
+> real but narrower than recorded: `test_plugin` alone lacks CTest registration. Slice 37 corrected
+> the text and added `scripts/check_module_test_registration.py`, which pins per-test build-file
+> registration to a reviewed baseline. No other finding in this document depended on the
+> mistaken claim, and the ownership latch is unaffected.
+
+This remaining single-test gap is pre-existing test-registration debt with a concrete verification
+target — CTest must also execute `test_plugin` in an enabled profile — and is deferred to a
+build-membership slice because it changes build inputs rather than file ownership.
+`scripts/check_module_test_registration.py` pins the build-file registration of every
+descriptor-declared test, bound to the declared source path rather than to a target name, so a
+change to this gap surfaces as a baseline diff.
 
 ## Regression controls
 
@@ -176,9 +185,16 @@ cmake -S . -B build/cmake-slice36 -DAIMEE_WITH_UI=OFF -DAIMEE_WITH_PLUGIN_LOADER
 cmake --build build/cmake-slice36 --target aimee-core -j2
 ```
 
-CMake registers no plugin test target, so there is no CTest selector to run for this module until
-the deferred test-registration slice lands. The omitted-profile proof remains the
-`plugin-loader-profiles` CI job.
+`test_plugin_loader` is a registered CTest case. Configuring registers it but does not build it, so
+build the test target before invoking CTest:
+
+```sh
+cmake --build build/cmake-slice36 --target test_plugin_loader -j2
+ctest --test-dir build/cmake-slice36 -R '^test_plugin_loader$' --output-on-failure
+```
+
+`test_plugin` has no CTest selector until the deferred test-registration slice lands. The
+omitted-profile proof remains the `plugin-loader-profiles` CI job.
 
 Technical-writer review, exact-final-diff roundtable approval, and every required pull-request
 check, including Windows CMake, are required before merge.
