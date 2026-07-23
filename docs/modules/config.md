@@ -16,7 +16,7 @@ orchestration, or a GUI's navigation and presentation.
 registering a re-applier when bound state can safely change live.
 
 The descriptor declares this module's fifteen sources, seven module-root headers, four direct tests,
-and this document; it does not yet set `ownership_complete`. All seven headers are declared as
+and this document; it sets `ownership_complete: true`. All seven headers are declared as
 `private_headers` because they live at the module root rather than under
 `src/modules/config/include/aimee/config/`, the layout the header-layout checker treats as private;
 `config_internal.h` is the internal seam header and has no paired source, and nine section-parser
@@ -27,9 +27,10 @@ and server layers, so it is a public-header candidate for a future header-layout
 ownership-declaration slice moves nothing. Make compiles all fifteen sources; CMake compiles the twelve
 the thin `aimee` client reaches and omits `config_fields.c`, `config_mode.c`, and `config_server_api.c`
 whose callers are cmd/server/TLS-side, the same intentional thin-client boundary recorded for gateway,
-learning, workspace, and vault. `docs/validation/core-modularization-slice-48.md` records the audit;
-latching follows in a separate slice so the completeness audit does not review declarations authored in
-the same change.
+learning, workspace, and vault. `docs/validation/core-modularization-slice-48.md` records the declaration audit and
+`docs/validation/core-modularization-slice-49.md` the completeness audit; the two were split so the
+latch reviews declarations merged on their own first. Adding a new module-local source or module-root
+header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 

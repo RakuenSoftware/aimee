@@ -7,6 +7,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/config/config.c",
     "src/modules/config/config_charter.c",
