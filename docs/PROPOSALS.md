@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 21 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 22 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — twenty-one proposals (all but one not yet implemented).
+The genuinely open work — twenty-two proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -104,6 +104,12 @@ The genuinely open work — twenty-one proposals (all but one not yet implemente
   action-class events are authorized before delivery, and the stream feeds the durable ledger and
   `aimee audit attest`. Consumes the in-flight `governance-attestable-enforcement` (mid-implementation)
   without modifying it. Drafted 2026-07-23; awaits its own review. **Enforce / Gate-Promote / Constrain-Verify.**
+- [`module-loader` — load and host external and user-authored modules](proposals/pending/module-loader.md)
+  — consuming child of the core-substrate suite; the optional module (renamed from `plugin-loader`)
+  that owns the module package format, fail-closed artifact verification, the OS-sandbox and
+  WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
+  optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
+  **Gate-Promote / Enforce.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.

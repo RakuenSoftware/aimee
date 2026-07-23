@@ -258,7 +258,7 @@ therefore not be mappable by any process (shared invariant 17).
 
 This contract sets the admission invariant and its reuse of existing identity machinery; the
 mechanics of segment creation, handle granting, and sandbox startup are owned by `module-runtime` and
-`plugin-loader` in their documents.
+`module-loader` in their documents.
 
 ### Execution model: separate programs, isolation by process or sandbox
 
@@ -282,7 +282,7 @@ Because the participants are separate programs, there is no cross-language in-pr
 (exact toolchain/dependency lockstep, no universal platform support, no isolation). Splitting a
 module out of core costs more than a monolithic in-process call did; the shared-memory bus keeps that
 cost small (zero-copy, no syscall on the fast path) and batching/streaming keep the `memory` path
-within the performance budget. `plugin-loader` owns artifact verification, the sandbox host(s), and
+within the performance budget. `module-loader` owns artifact verification, the sandbox host(s), and
 lifecycle for the untrusted tier.
 
 ### Subscription and routing (observer pattern)
@@ -402,9 +402,9 @@ client, subscribe to and publish its declared event kinds, and publish its capab
 recompiling, or relinking core — the language boundary that once meant "C or Go" is gone, because the
 boundary is a message contract, not a linkage. A user module is authored in any language for which a
 bus client exists (or can be written as a small shim), packaged as an OS-sandboxed process or a WASM
-module, and admitted like any other untrusted participant. The optional `plugin-loader` module
+module, and admitted like any other untrusted participant. The optional `module-loader` module
 realizes this (artifact verification, sandbox host(s), and lifecycle); this suite records the
-property, and `plugin-loader`'s own document owns the packaging and host mechanics.
+property, and `module-loader`'s own document owns the packaging and host mechanics.
 
 The trust boundary does not soften for a user module — the sandbox and the bus boundary are exactly
 why this is safe:
@@ -474,7 +474,7 @@ small base/value primitives, platform shims, and generated contracts.
 
 The initial optional set contains exactly eight concrete module IDs:
 
-1. `plugin-loader`
+1. `module-loader`
 2. `governance`
 3. `workflows`
 4. `roundtable`
@@ -485,6 +485,13 @@ The initial optional set contains exactly eight concrete module IDs:
 
 `workflows` owns the `triggers`, `cron`, and `event-activation` capabilities; those are not
 additional module IDs.
+
+**Rename (2026-07-23 amendment).** The optional module formerly listed as `plugin-loader` is renamed
+`module-loader`: under the separate-program model it loads and hosts *modules* (native or sandboxed,
+any language), not in-process C plugins, and it supersedes the legacy in-tree plugin loader. The
+count stays eight; the canonical inventory transcribes `module-loader`. Because `plugin-loader` was a
+proposed ID that never reached a build or runtime, the rename carries no runtime compatibility alias;
+`module-loader`'s own document owns any migration of the legacy plugin code.
 
 The two enumerations above define the inventory's bootstrap contents. Implementation creates
 `tests/baselines/modules/canonical-inventory.yaml` as the single normative build/runtime inventory
@@ -567,6 +574,11 @@ rather than making that safety property optional.
    [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) (mid-implementation)
    without modifying it, and lands after both the event bus and that work's A1–A5. Later-drafted
    consuming child; awaits its own review.
+10. [`module-loader.md`](module-loader.md) owns the optional `module-loader` module (renamed from
+    `plugin-loader`): the module package format, artifact verification, the OS-sandbox and WebAssembly
+    host runtimes, and the loaded-module lifecycle for external and user-authored modules. It consumes
+    core admission/bus/policy and optional `governance` artifact trust without owning them.
+    Later-drafted consuming child; awaits its own review.
 
 `git-core-contract.md` is a required forthcoming child of proposal 3 and must be accepted before
 the Git migration slice begins. It owns Git API, event-production, mutation, security,

@@ -158,7 +158,7 @@ only its authorized bus queues. An untrusted external or user module runs under 
 an OS-sandboxed process (seccomp/namespaces/container, any language) or a WebAssembly instance in a
 host — reachable only through its authorized bus queues and unable to read core, `vault`, or another
 module's memory. The sandbox mechanism is a deployment choice; the bus contract and admission are
-identical across them. Native Go plugin loading is not used. `plugin-loader` owns artifact
+identical across them. Native Go plugin loading is not used. `module-loader` owns artifact
 verification, the sandbox host(s), and lifecycle.
 
 **Bus admission (shared invariant 17).** `module-runtime` is the sole admission authority for its
