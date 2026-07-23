@@ -24,6 +24,12 @@ assertion is exactly the kind of claim that survives a partially-skipped run.
 
 ## 1. Kill matrix
 
+**Status: NOT STARTED — this is what blocks the release gate.** It needs a real
+aimee-kb process on a host with swtpm and a retaining consumer (the plan's CT260
+shape), driven through its normal interfaces and killed at each boundary. Nothing
+in E2 or §2 substitutes for it: they prove the logic is right, not that a kill
+between two durable writes leaves a recoverable state.
+
 Build exact head with PostgreSQL 17, libtss2, swtpm, and a log/OTLP consumer
 configured to durably retain both records and checkpoints. Drive a real aimee-kb
 process through its normal interfaces, with more than 257 retained DEKs and
@@ -67,8 +73,32 @@ directory. Required outcomes:
 
 ## 2. Tamper detection, proven end to end
 
-The matrix must prove detection actually works rather than that the plumbing
-runs. Four scenarios, each starting from a healthy witnessed deployment with a
+**Status: BUILT and validated on real PG17.** All four scenarios are implemented
+and passing:
+
+| scenario | where | result |
+|---|---|---|
+| locally inconsistent tampering | `src/tests/test_witness_tamper_pg.c` | caught locally: `verify_shard` raises `P7W01` and the producer refuses to sign (`HEAD_MISMATCH`) |
+| coherent local rewrite | `src/tests/test_witness_tamper_pg.c` | local verification passes **and** the post-tamper stream alone is conflict-free (both asserted); comparison against the retained copy exposes it — 3 duplicates at untouched positions, 2 conflicts at rewritten ones |
+| fork behind a suppressed checkpoint | `src/tests/test_witness_tamper_scenarios.c` | `continuity_unproven`, `any_tamper == 0` — a work item, neither a pass nor a tamper claim |
+| fork between two emitted checkpoints | `src/tests/test_witness_tamper_scenarios.c` | continuity `OK` and every signature valid — detection comes **only** from the retained record stream |
+
+Run via `scripts/run-p7-witness-integration.sh` (live-store half, isolated
+databases) and the `unit-test-witness-tamper-scenarios` unit target (offline half).
+
+Two properties of the suite are deliberate and load-bearing:
+
+- **The negative half is asserted, not just the positive half.** The coherent
+  rewrite test requires that local verification *passes* and that the post-tamper
+  stream alone shows *no* conflict. Without those assertions the scenario could
+  silently degrade into scenario 1 — reproducing easy detection while appearing to
+  prove the hard case.
+- **Every detection assertion was negative-controlled.** Removing the fork drops
+  `records_conflict` to 0; removing the suppression returns continuity to `OK`. A
+  detector that always fires detects nothing, so the suite is checked to fail when
+  the tampering is absent.
+
+Four scenarios, each starting from a healthy witnessed deployment with a
 retaining consumer:
 
 - **Locally inconsistent tampering** — break a witness predecessor link, regress
@@ -91,6 +121,13 @@ retaining consumer:
 
 Each runs through the offline tool with no database access, because that is the
 posture during a real incident.
+
+### What §2 does and does not discharge
+
+It proves the *detection logic* is correct against a real store and real emitted
+bytes. It does **not** discharge §1: these tests drive the library and SQL surface
+directly, not a real aimee-kb process being killed at a durable boundary. Crash
+atomicity remains unproven until §1 runs. The release gate in §4 stays closed.
 
 ## 3. Canary scan
 
