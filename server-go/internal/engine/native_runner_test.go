@@ -145,6 +145,51 @@ type firstPanelSeatUnavailableAgents struct {
 	response string
 }
 
+type deadlineSeatAgents struct{}
+
+type deadlineDiscussionAgents struct{}
+
+type chairmanFailureAgents struct{}
+
+type chairmanDeadlineAgents struct{}
+
+func (deadlineSeatAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+		return DelegateResult{Response: `{"positions":[]}`}, nil
+	}
+	if strings.HasSuffix(request.DurableSlot, "seat:0") {
+		<-ctx.Done()
+		return DelegateResult{}, ctx.Err()
+	}
+	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
+func (deadlineDiscussionAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	if strings.HasPrefix(request.Prompt, "ROUNDTABLE DISCUSSION CYCLE") {
+		if strings.HasSuffix(request.DurableSlot, "seat:0") {
+			<-ctx.Done()
+			return DelegateResult{}, ctx.Err()
+		}
+		return DelegateResult{Response: `{"positions":[]}`}, nil
+	}
+	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
+func (chairmanFailureAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		return DelegateResult{}, errors.New("chairman unavailable")
+	}
+	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
+func (chairmanDeadlineAgents) Delegate(ctx context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		<-ctx.Done()
+		return DelegateResult{}, ctx.Err()
+	}
+	return DelegateResult{Response: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`}, nil
+}
+
 func (a firstPanelSeatUnavailableAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
 	if strings.HasSuffix(request.DurableSlot, "seat:0") {
 		return DelegateResult{}, errors.New("admission unavailable")
@@ -191,6 +236,22 @@ func (a *scriptedReviewAgents) DelegateGroup(ctx context.Context, requests []Del
 }
 
 func (a firstPanelSeatUnavailableAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func (a deadlineSeatAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func (a deadlineDiscussionAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func (a chairmanFailureAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func (a chairmanDeadlineAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
 	return testDelegateGroup(ctx, requests, a.Delegate)
 }
 
@@ -328,6 +389,191 @@ func TestStageMismatchCannotBeOverriddenByAnotherApproval(t *testing.T) {
 	feedback, approvals, voters, _, unreachable := runner.runPanelRound(context.Background(), StepRequest{}, []panelSeat{{persona: "qa"}, {persona: "security"}}, "review", "hash", "plan", 1)
 	if unreachable != "" || approvals != 1 || voters != 2 || len(feedback.Findings) != 1 || !strings.HasSuffix(feedback.Findings[0].ID, "-artifact-stage") {
 		t.Fatalf("mixed-stage panel could approve: approvals=%d voters=%d unreachable=%q feedback=%+v", approvals, voters, unreachable, feedback)
+	}
+}
+
+func TestConfiguredRoundtableHonorsMinimumWhenASeatIsUnavailable(t *testing.T) {
+	tests := []struct {
+		name          string
+		minSuccessful int
+		response      string
+		wantStatus    StepStatus
+		wantPause     string
+		wantUsed      int
+		wantFailed    int
+	}{
+		{name: "degraded-quorum", minSuccessful: 1, wantStatus: StepAdvanced, wantUsed: 1, wantFailed: 1},
+		{name: "below-quorum", minSuccessful: 2, wantStatus: StepPending, wantPause: "panel_unreachable", wantUsed: 1, wantFailed: 1},
+		{name: "unavailable-and-wrong-stage", minSuccessful: 1, response: `{"artifact_stage":"intent","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, wantStatus: StepPending, wantPause: "panel_unreachable", wantUsed: 0, wantFailed: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			body := fmt.Sprintf(`{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":%d}`, tc.minSuccessful)
+			if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := &NativeRunner{agents: firstPanelSeatUnavailableAgents{response: tc.response}, roundtables: store}
+			reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
+			reviewed.Hash = wfe.Hash(reviewed.Content)
+			result, err := runner.roundtable(context.Background(), StepRequest{
+				WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+				Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+				Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != tc.wantStatus || result.PauseReason != tc.wantPause {
+				t.Fatalf("result=%+v", result)
+			}
+			if result.Roundtable == nil || !result.Roundtable.Degraded || result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != tc.wantUsed || result.Roundtable.ParticipantsFailed != tc.wantFailed {
+				t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
+			}
+		})
+	}
+}
+
+func TestConfiguredRoundtableReservesDownstreamPhasesAfterSeatDeadline(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":1,"discussion":true,"chairman":"codex","chairman_enabled":true,"deadline_ms":120}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{agents: deadlineSeatAgents{}, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	started := time.Now()
+	result, err := runner.roundtable(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("roundtable did not bound the slow seat: %s", elapsed)
+	}
+	if result.Status != StepAdvanced || result.Roundtable == nil || !result.Roundtable.Approved || !result.Roundtable.Degraded || !result.Roundtable.DeadlineHit {
+		t.Fatalf("result=%+v", result)
+	}
+	if result.Roundtable.ParticipantsTotal != 2 || result.Roundtable.ParticipantsUsed != 1 || result.Roundtable.ParticipantsFailed != 1 {
+		t.Fatalf("degraded participation was not preserved: %+v", result.Roundtable)
+	}
+}
+
+func TestConfiguredRoundtableHonorsDiscussionQuorumAtPhaseDeadline(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":1,"discussion":true,"deadline_ms":100}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{agents: deadlineDiscussionAgents{}, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepAdvanced || result.Roundtable == nil || !result.Roundtable.Approved || !result.Roundtable.Degraded || !result.Roundtable.DeadlineHit {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestConfiguredRoundtableReportsEveryPhaseDeadline(t *testing.T) {
+	tests := []struct {
+		name      string
+		preset    string
+		agents    AgentClient
+		wantPause string
+	}{
+		{
+			name:      "analysis",
+			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":2,"discussion":true,"deadline_ms":90}`,
+			agents:    deadlineSeatAgents{},
+			wantPause: "panel_unreachable",
+		},
+		{
+			name:      "discussion",
+			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"},{"model":"minimax","persona":"qa"}],"min_successful":2,"discussion":true,"deadline_ms":90}`,
+			agents:    deadlineDiscussionAgents{},
+			wantPause: "roundtable_discussion",
+		},
+		{
+			name:      "chairman",
+			preset:    `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"codex","chairman_enabled":true,"deadline_ms":80}`,
+			agents:    chairmanDeadlineAgents{},
+			wantPause: "roundtable_chairman",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(tc.preset), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner := &NativeRunner{agents: tc.agents, roundtables: store}
+			reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
+			reviewed.Hash = wfe.Hash(reviewed.Content)
+			result, err := runner.roundtable(context.Background(), StepRequest{
+				WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+				Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+				Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != StepPending || result.PauseReason != tc.wantPause || result.Roundtable == nil || !result.Roundtable.DeadlineHit {
+				t.Fatalf("phase deadline was not reported: %+v", result)
+			}
+		})
+	}
+}
+
+func TestConfiguredRoundtableChairmanFailureIsVisiblyDegraded(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"kimi","chairman_enabled":true,"deadline_ms":100}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &NativeRunner{agents: chairmanFailureAgents{}, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete implementation plan")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi", Repo: "/repo", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+		Proposal: "implement the requested change", Inputs: map[string]wfe.Artifact{"src": reviewed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StepPending || result.PauseReason != "roundtable_chairman" || result.Roundtable == nil || !result.Roundtable.Degraded {
+		t.Fatalf("result=%+v", result)
 	}
 }
 

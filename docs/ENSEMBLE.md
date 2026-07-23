@@ -71,6 +71,19 @@ valid ballot in that discussion cycle. Abstentions remain in that denominator
 but do not by themselves count as disagreement or extend discussion. The saved
 `deadline_ms` is the overall analysis-plus-discussion budget; an omitted or zero
 legacy value is normalized to 360 seconds.
+The runtime divides that overall budget evenly across the configured analysis,
+Discussion, and Chairman phases. This prevents one slow analysis seat from
+consuming time reserved for a required downstream phase while preserving the
+single overall deadline as the hard upper bound.
+The C compatibility proxy derives its finite receive timeout from that acquired
+preset deadline and adds only transport grace; it does not impose a shorter
+fixed deadline or wait without a bound.
+
+An unavailable or unusable independent-analysis seat is recorded as failed and
+makes the result degraded. It parks the roundtable only when the remaining
+complete reports are below the preset's `min_successful`; a satisfied configured
+minimum proceeds to discussion or deterministic synthesis without hiding the
+failed seat.
 
 After deterministic synthesis, a preset may optionally require a **chairman**.
 The chairman is one configured, enabled review agent selected visibly in the
