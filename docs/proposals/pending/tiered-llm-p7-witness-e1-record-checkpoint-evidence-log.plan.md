@@ -49,7 +49,11 @@ The record is the *evidence*, not the audited event's payload. It carries:
 - the non-secret identifying fields of the source event — request id, principal
   or team, and `provider:cred` — carried explicitly, not merely committed to by
   the source hash. A 32-byte hash cannot be inverted, so any field an operator
-  must be able to read during triage has to be emitted in the clear;
+  must be able to read during triage has to be emitted in the clear.
+  `provider:cred` here is the credential's **stable identifier** (which provider,
+  which named credential slot) — never a credential handle, wrapped-key
+  reference, or anything from which key material could be dereferenced. The
+  canary gate asserts this at field level, not merely over the whole record;
 - the source entry's own hash, plus its source-ledger predecessor hash **only
   where that ledger actually is a chain**. `kb_audit_event` is hash-chained and
   supplies one. `kb_vault_rewrap_worm` has deterministic event IDs and replay
@@ -68,12 +72,16 @@ The record is the *evidence*, not the audited event's payload. It carries:
   already has history; a shard-bound sentinel is not. The decoder rejects the
   genesis sentinel on any record whose shard sequence is not the first, and
   rejects any other value on the first;
-- the emitting seal epoch and fencing token, taken from the vault control row
-  (`kb_vault_control`) as read inside the same transaction that appends the
-  record. They are not new counters: they bind the evidence to the vault
-  lifecycle state in force at append time, so evidence appended under a superseded
-  epoch — by a stale instance that lost its fence — is identifiable as such
-  rather than blending into the shard's history;
+- the emitting seal epoch and fencing token. These are not new counters. The
+  witness SECURITY DEFINER function reads them itself —
+  `SELECT seal_epoch, fencing_token FROM kb_vault_control` — inside the appending
+  transaction, so the values cannot be supplied by the caller and cannot drift
+  from the lifecycle state in force at append time. Evidence appended by a stale
+  instance that lost its fence therefore carries the superseded epoch and fence.
+  The verifier reports that as a typed `stale_fence` result: a distinct triage
+  signal, **not** a tamper detection — a fenced instance writing its own honest
+  record is a liveness artifact, not an attack, and conflating the two would page
+  on-call for a benign race;
 - a monotonic per-shard witness sequence; and
 - the RFC 3339 timestamp of the source entry, not of the export.
 
@@ -122,14 +130,39 @@ So:
 The checkpoint therefore *does* scan `kb_vault_witness_shard` once. That is
 stated plainly rather than hidden behind "incrementally maintained": the scan is
 O(shards), bounded by a documented maximum shard count, runs once per cadence
-rather than once per key use, and never touches the evidence log. Exceeding the
-documented ceiling is a typed failure, not a silent slowdown. The invariant this
+rather than once per key use. Exceeding the documented ceiling is a typed
+failure, not a silent slowdown. Checkpoint construction carries its own monotonic
+deadline — 1s typical, 5s hard — and expiry raises a typed
+`checkpoint_deadline_exceeded` that aborts and alerts rather than signing late or
+partially; the next cadence retries from the same committed state. The invariant this
 design satisfies is "checkpoint cost is off the hot path and bounded by a stated
 ceiling" — not "no scan exists."
 
 Because different shards have unrelated key-hash prefixes, their leaves are
 disjoint and concurrent advances never contend on shared tree state; there is no
 tree state on the advance path at all.
+
+**The rebuild must cross-check the shard heads against the log, or the shard-head
+table stops being a paper trail.** Removing the durable node table has a cost
+that has to be paid back explicitly: the checkpoint becomes a pure function of
+`kb_vault_witness_shard` at scan time, and that table is a mutable current-value
+row per shard, not an append-only history. An attacker on the host could insert
+evidence rows (INSERT is not blocked by the append-only triggers — only UPDATE,
+DELETE, and TRUNCATE are), advance the shard heads to match, and let the next
+checkpoint be built from the modified heads. Every local artifact would agree
+with every other one.
+
+So before signing, the checkpoint **recomputes each shard's head by walking the
+evidence log forward from the previous checkpoint's recorded head** and compares
+it to `kb_vault_witness_shard.head_hash`. A mismatch is a typed
+`head_log_mismatch` failure that aborts the checkpoint and raises an integrity
+alert; it never signs. The walk is O(records appended in the cadence), which is
+work the system already did once, and it hard-fails only on actual divergence.
+
+This is what keeps the "locally inconsistent tampering is detected immediately"
+claim true for the checkpoint path rather than only for the log. Without it, the
+claim would have to be downgraded, because the only witness-side state feeding
+the signature would be a table with no history.
 
 **Durable schema.** `kb_vault_witness_checkpoint(seq, root, predecessor_digest,
 shard_count, leaf_snapshot, signer_key_id, sig_alg, sig_version, signature,
@@ -171,6 +204,27 @@ every gap it reports, it surfaces the leaf set immediately preceding and
 following, so the operator can compare heads directly across the gap. E1 defines
 that output; E2's tool surfaces it. No slice may describe `continuity_unproven`
 as a clean result.
+
+**Two different attack shapes, and this affordance only covers one.** They must
+not be conflated:
+
+- **Missing checkpoint.** The attacker suppresses emission of checkpoints
+  spanning the fork. The consumer's retained set has a hole. This is what the
+  cross-gap leaf comparison above catches, because the leaf sets on either side
+  of the hole disagree about the chain that ran between them.
+- **Chain rewritten between two checkpoints that were both emitted.** The
+  attacker cannot alter A or B — they are already off-host — but rewrites the
+  local chain in the interval between them. A and B are individually valid,
+  signed, and *mutually consistent with the rewrite*. The gap affordance never
+  fires, because there is no gap. What catches this is the **retained record
+  stream** between A and B: the emitted per-entry evidence the attacker also
+  could not reach.
+
+So the record stream is not redundant with the checkpoint stream — it is the only
+thing that covers the second shape. A deployment that retains checkpoints but
+drops records is protected against the first attack and blind to the second. This
+is why the CT260 gate requires a consumer retaining *records*, not merely
+checkpoints.
 
 **Inclusion proofs.** A per-shard inclusion proof is the 64-sibling path
 authenticating one shard's leaf against a signed root, generated from that
@@ -218,9 +272,14 @@ transport:
 - **Inclusion proofs**, so a consumer can authenticate a specific shard head
   against a signed root it holds.
 
-The rendered stream carries an explicit export format version tag, so consumers
-comparing copies produced by different aimee versions can tell "encoding changed"
-apart from "evidence disagrees."
+The rendered stream carries an explicit export format version tag —
+`aimee-vault-witness-export-v1`, distinct from the record's own version tag and
+bound into the rendered bytes — so consumers comparing copies produced by
+different aimee versions can tell "encoding changed" apart from "evidence
+disagrees." Policy: a major bump on any byte-layout change, a minor bump on
+purely additive fields. A verifier meeting an unknown or mismatched export
+version returns typed `export_version_mismatch` rather than reporting a byte
+comparison failure, which would otherwise read as tampering during a rollout.
 
 **Metrics carry numbers only** — current checkpoint sequence, evidence count,
 emission backlog depth, verification-failure counters. No bytes, no roots, no
@@ -247,7 +306,11 @@ local state is honest; alerting on inferred downstream health is not.
 
 The rendering is deterministic: the same evidence renders to identical bytes on
 any instance, so copies retained by different consumers can be compared directly.
-Rendering never consults mutable state outside the evidence itself.
+Rendering never consults mutable state outside the evidence itself — no
+`time()`/`gettimeofday()` call, no hostname, no instance id, no locale-dependent
+formatting, no map iteration order. Every timestamp in the output comes from the
+record. This is a reviewable discipline, not only a property test, because a
+property test can pass while a clock read sits on an untaken branch.
 
 Consumers are not enumerated, ranked, or tracked. Any authorized collector may
 take the emissions; more copies in more places is strictly better and requires no
@@ -369,7 +432,28 @@ carrying the monotonic per-shard sequence and the current head hash. Rows are
 created lazily by DML upsert — never by runtime DDL, and never by a PostgreSQL
 `SEQUENCE` object — so the no-DDL invariant holds. The sequence is assigned by
 `UPDATE … SET seq = seq + 1 … RETURNING` inside the caller's transaction, giving
-each shard its own total order without a fleet-wide hotspot on a single head.
+each shard its own total order without a fleet-wide hotspot on a single head. The
+row-level lock on the shard row is what serializes ordinals; concurrent appends
+to *different* shards never contend.
+
+Rows are created by the canonical upsert, not by runtime DDL:
+
+```
+INSERT INTO kb_vault_witness_shard(tenant,provider,seq,head_hash)
+VALUES (:tenant,:provider,1,:head)
+ON CONFLICT (tenant,provider)
+DO UPDATE SET seq = kb_vault_witness_shard.seq + 1, head_hash = EXCLUDED.head_hash
+RETURNING seq, head_hash;
+```
+
+**The concurrency contract is part of this slice, not left to the implementer.**
+The witness append function retries a SERIALIZABLE conflict a **bounded** number
+of times (5), because an unbounded retry loop on SSI conflicts is a
+deadlock-amplifier rather than a fix. Exhaustion raises a typed
+`witness_concurrency_exhausted`, and **the caller must treat that as a source
+event abort**: if the witness row cannot be appended, the source event does not
+commit. That is the atomicity invariant doing its job — failing closed rather
+than committing a source event whose evidence is missing.
 
 **Checkpoint state.** `kb_vault_witness_checkpoint` per §2, under the same
 revoke/definer/append-only discipline. There is no durable Merkle-node table: the
@@ -396,6 +480,11 @@ reserved slot — a budget here would only ever deadlock.
   symbol name and log string added here.
 - No offline verifier tool; that is E2, which also owns emission.
 
+E2 must enforce the **inverse** of E1's reachability gate by the same link-level
+or symbol-level check, not by review: the witness append symbol is reachable from
+exactly the three source-ledger call sites and nowhere else. A softer assertion
+at E2 would discard the precedent E1's gate exists to set.
+
 ## 8. Validation gates
 
 ### Unit / default build
@@ -406,8 +495,10 @@ reserved slot — a budget here would only ever deadlock.
 - Decoder rejection for every malformed shape: short buffer, long buffer, wrong
   version, unknown discriminator, empty shard key, over-long shard key, wrong
   hash length, declared lengths that do not sum, and trailing bytes.
-- Field-boundary forgery: two distinct logical events whose naive concatenation
-  would collide must produce different digests.
+- Field-boundary forgery, with a named vector the test must reject: event A with
+  `source_id="42"` and `shard_key="acme:anthropic"` versus event B with
+  `source_id="42acme"` and `shard_key=":anthropic"`. Their naive concatenation is
+  byte-identical; length-prefixed packing must give them different digests.
 - C-versus-SQL digest agreement for the same logical event.
 - Canonical shard ordering is stable and independent of insertion order.
 - Checkpoint verification accepts a valid checkpoint and rejects a tampered leaf,
@@ -417,9 +508,24 @@ reserved slot — a budget here would only ever deadlock.
   distinct typed result from `continuity_broken` — so normal emission gaps do not
   read as tampering; and the gap report carries the leaf sets immediately before
   and after each gap so an operator can compare heads across it.
-- A fork hidden behind a suppressed-checkpoint gap is caught when those cross-gap
-  leaf sets are compared, proving the affordance is sufficient for the attack it
-  exists to stop.
+- A fork hidden behind a **missing** checkpoint is caught when the cross-gap leaf
+  sets are compared.
+- A fork hidden by **rewriting the chain between two emitted checkpoints** is
+  *not* caught by the verifier's gap handling — it is caught only by the retained
+  record stream. The gate asserts this explicitly so nobody mistakes the first
+  result for coverage of the second.
+- Checkpoint rebuild cross-check: a shard head that disagrees with the head
+  recomputed by walking the evidence log aborts with typed `head_log_mismatch`
+  and never signs; injected head tampering is caught even when every local
+  artifact is mutually consistent.
+- A stale-fenced append is reported as typed `stale_fence` and is distinguishable
+  from both a clean result and a tamper detection.
+- Bounded SERIALIZABLE retry: exhaustion raises `witness_concurrency_exhausted`
+  and the source event does not commit.
+- `checkpoint_deadline_exceeded` fires on a stalled checkpoint rather than
+  signing late, and the next cadence resumes from committed state.
+- An unknown export format version returns `export_version_mismatch`, not a byte
+  comparison failure.
 - SMT correctness at depth 64: the root is independent of leaf insertion order;
   empty-subtree constants are correct at every level; two shard keys differing
   only beyond the 8-byte key prefix are detected as a collision and fail typed
@@ -477,6 +583,11 @@ reserved slot — a budget here would only ever deadlock.
 
 - Full lint and build with test-only controls excluded from the production build,
   asserted the same way D3b asserts its deterministic test controls.
+- Operator-facing documentation states the conditional-coverage property: that
+  external detection covers only evidence a collector retained before compromise,
+  and that comparison depends on the deployment's collector ecosystem rather than
+  travelling with the software. The umbrella's no-over-claim invariant is judged
+  by the words that ship, so a gate reads them back.
 - No new production symbol reachable from admission, HTTP routing, or the reseal
   orchestrator; asserted by a link-level or symbol-level check rather than by
   review.
