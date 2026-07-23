@@ -28,12 +28,29 @@ the shared logging primitive. Production consumers include `src/server/agent_run
 optional plugin-loader contract; focused consumers are `src/tests/test_plugin.c` and
 `src/tests/test_plugin_c_hook.c`.
 
+Consumption is asymmetric by design. The host tree consumes the pre-LLM registry only as a reader:
+`src/server/agent_runtime.c` calls `plugin_chook_apply_pre_llm` per turn, and no host-side source
+calls `plugin_chook_register_pre_llm`. The registration entry points are producer-facing ABI for
+in-process extensions, so an unfired hook path in a plain host build is the expected state, not a
+defect. The same holds for the typed registries: `plugin_ctx_t`'s `register_*` callbacks are
+reachable only from a loaded extension's `register()` entry point. Removing or privatizing those
+producer-facing exports is therefore an extension-compatibility decision, not a dead-code cleanup.
+
 As the ownership-descriptor pilot, `module.yaml` also declares this module's two implementation
 sources, two public headers, focused C-hook test, and canonical module document. The descriptor
 validator rejects symlinked paths before claiming them and rejects duplicate normalized lexical
 paths within or across descriptors, then emits a deterministic declared-ownership report. Build
 inputs are still maintained by Make and CMake in this slice; descriptor-driven build generation
 remains a later step, so these ownership fields are documentation and validation only.
+
+The descriptor sets `ownership_complete: true`. That latch exhaustively checks the module-local C
+and private-header files — the module has no private headers — and requires this canonical
+document. Public-header and test entries are explicit audited claims, not auto-discovered
+completeness domains, so the latch does not police the public-header inventory. Completeness is a
+statement about file ownership only: it does not assert that every owned public facility has a
+host-side caller, nor that every declared test runs in every build system. The source liveness,
+build and test membership, adjacent-boundary, and public-surface audit is recorded in
+`docs/validation/core-modularization-slice-35.md`.
 
 Until generation replaces those lists, optional-module build selection is an explicit composition
 contract: both build systems define the same `AIMEE_WITH_<MODULE>` feature macro, omit owner-private
@@ -97,6 +114,17 @@ and populates these required registries rather than creating a parallel registry
 empty state, ordering, error/empty results, bounded capacity, reset, count, and per-turn message
 application. Null or excess registrations fail; a failing callback is skipped and later callbacks
 still run. Output is bounded by the caller-provided buffer.
+
+The descriptor claims only `src/tests/test_plugin_c_hook.c`. `src/tests/test_plugin.c` stays owned by
+[plugin-loader](plugin-loader.md), because its primary subject is loader integration; it is
+complementary coverage of `extension.c` rather than a second owner, and a test is never claimed
+twice. It is nonetheless the only current coverage of the extension context and typed registries.
+
+Test registration is not uniform across build systems. Make registers `unit-test-plugin-c-hook`
+in `src/tests/Rules.mk`; CMake registers no module-runtime test target, so the declared test runs
+only under the Make suite even though both build systems compile both sources. That is recorded
+follow-up debt with a concrete target — CTest must execute the pre-LLM hook test — and is a
+build-membership change rather than an ownership one.
 
 ## Operational diagnostics
 
