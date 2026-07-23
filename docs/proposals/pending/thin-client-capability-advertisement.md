@@ -914,9 +914,19 @@ The non-obvious ones, made concrete:
 
 ## Review status
 
-Freshly drafted 2026-07-23. This proposal has **not** been through the suite roundtable and does not
-inherit the 2026-07-20 approvals; it must complete its own technical-writing, architecture,
-adversarial, and verification review before acceptance.
+**Review in progress; not yet converged.** Drafted 2026-07-23. This proposal has not been through the
+suite roundtable and does not inherit the 2026-07-20 approvals; it must complete its own
+technical-writing, architecture, adversarial, and verification review before acceptance.
+
+It has been through **six roundtable verdicts** (revisions 1→7), and every genuine finding from each
+is resolved — see the revision history below. It is **paused before a clean pass**, not because it
+converged: the review panel is running degraded (the `codex` seat is out of quota until 2026-07-29,
+which destabilizes seat resolution), and the two most recent rounds produced malformed-verdict seat
+failures and two demonstrably false findings (a "truncated paragraph" that is intact, and a cited
+line number the panel gave as 675/702 that is 642/669 in both this branch and `origin/testing`). A
+zero-blocking result on a degraded panel would be weak evidence, so final convergence is deferred to
+a full-strength panel rather than pursued through further rounds now. The outstanding items at pause
+are non-blocking suggestions and nits, recorded for the next pass.
 
 It does not modify the suite taxonomy or any shared invariant. It does, however, add normative
 content beyond a pure projection, and review must treat these as new rather than inherited:
