@@ -1,6 +1,6 @@
 # Event bus v0 — rendered decisions (D1–D10)
 
-- **State:** DECIDED — 2026-07-23, revision 6, after five rounds of roundtable review.
+- **State:** DECIDED — 2026-07-23, revision 7, after six rounds of roundtable review.
 - **Companion:** [`EVENT_BUS_FEATURE_TREE.md`](EVENT_BUS_FEATURE_TREE.md) — scope, the twelve slices,
   the dependency graph, and **acceptance ids 1–6**, each of which names the decisions it enforces.
   This document holds only the decisions; the tree references them by id and is reviewed alongside it.
@@ -174,7 +174,13 @@ so this independence is asserted rather than assumed.
 
 **`layout_version` rule (normative).** `layout_version` changes only when the *structure* of the
 regions changes — fields added, moved, or removed from the control region, the queue-pair region, or
-the ring header. It does **not** change when a control-region *parameter value* changes. Re-tuning
+the ring header. It does **not** change when a control-region *parameter value* changes.
+
+The wire-frame header is deliberately **not** in `layout_version`'s scope: it is versioned by
+`wire_version`, which is per-event and negotiated at attach. A change to the frame header therefore
+bumps `wire_version` and re-issues slice 1's vectors, while leaving `layout_version` alone unless the
+region structure also moved. The two versions answer different questions — "can I map this?" and "can
+I decode this?" — and conflating them would force a re-attach for a decode-only change. Re-tuning
 `slot_size` or `inline_budget` in slice 12 therefore does not bump `layout_version`, does not re-issue
 slice 1's vectors, and does not invalidate the conformance suite. A client reads these values at
 attach and adapts; it is never compiled against them. *(Stated normatively in revision 3; revision 2
@@ -217,8 +223,11 @@ destination only**:
   propagates backpressure to that producer naturally — its credits stop returning and its next
   `bus_publish` blocks or returns `would_block`.
 
-**The host drain loop never blocks.** It services outbound rings round-robin; a stalled producer stalls
-only itself. A slow consumer therefore stalls exactly those producers that publish block-declared kinds
+**The host drain loop never blocks, and never busy-polls.** It services outbound rings round-robin
+while there is work; when every ring is empty it waits on an `eventfd` that a publishing client signals,
+with a bounded idle timeout so heartbeat reaping still runs on a quiet bus. "Never blocks" means it
+never waits on a *destination*; waiting for work to exist is not the same thing. A stalled producer
+stalls only itself. A slow consumer therefore stalls exactly those producers that publish block-declared kinds
 to it, and no one else. That is head-of-line blocking scoped to the pair that caused it, and it is
 accepted: the alternative is either an unbounded host queue or silent loss.
 
@@ -276,17 +285,28 @@ recorded for governance and forensics and delivered to no one. *(Revision 5 wron
 Control-class events differ from ordinary traffic in exactly two ways, both of which exist to stop
 the pathological recursion of an overflow notice itself overflowing:
 
-- They draw on a **small reserved credit pool** in each queue-pair region that ordinary traffic cannot
-  consume, so a client saturated with data events still has room to be told it lost some.
+- They draw on a **reserved credit pool** in each queue-pair region that ordinary traffic cannot
+  consume, so a client saturated with data events still has room to be told it lost some. Provisional
+  size: **4 control-class events per client**, re-tuned by slice 12 alongside D4's parameters.
 - They are **never shed** — the per-destination shed/block policy does not apply to them, so there is
   no overflow-of-overflow to recurse into.
 
 If the reserved pool is nonetheless exhausted, the host sets a sticky `control_lost` flag and counter
-in that client's queue-pair region. A client can therefore always discover that it lost something,
-even in the degenerate case — which is the actual content of invariant 13's "never silently".
+in that client's queue-pair region. **That flag is observable only by a live client**: a reaped
+client's queue pair is gone, so the flag does not survive it. This is deliberate — the flag exists so
+a running client can discover it missed a notice, not as a durable record. The durable record of every
+shed is the tap stream, which outlives any client.
 
-A consumer can then enumerate exactly which `seq` values it lost from the `overflow` events it
-received; governance derives the same facts from the tap. Neither depends on the other.
+**An `overflow` whose destination is reaped between the routing decision and delivery becomes
+tap-only**, for the same reason `producer_reaped` is: there is no ring left to deliver into. The shed
+remains recorded; only the notification is dropped.
+
+**A consumer learns of loss from `overflow` events, never by inspecting `seq`.** A consumer receives
+only the kinds it is an authorized observer of, so the `seq` values in its inbound ring are inherently
+sparse — gaps there are the normal case and carry no information. Contiguity is a property of the tap
+stream alone. This is why `overflow` must be delivered rather than merely tapped, and it is also why
+`producer_reaped` being tap-only costs a consumer nothing: it could not have inferred the reap from
+`seq` either way. Governance derives both facts from the tap; neither path depends on the other.
 
 **The delivered stream is derivable:** delivered = intended, minus the sheds the stream itself records,
 minus the `producer_reaped` discards it records. A ledger built on this answers both "what was
@@ -304,6 +324,11 @@ Enforced by `scripts/check_bus_blast_radius.sh`, which runs **as a required chec
 not only at tree level. A tree-level-only gate would let a regression between slices 10 and 12 link the
 bus into a shipping binary and still pass every per-slice gate. *(Per-PR enforcement added in revision
 3.)*
+
+The check is auditable rather than magic: it asserts that no `bus_*.o` object appears in the link line
+of `aimee`, `aimee-server`, `aimee-kb`, `aimee-gateway`, or `aimee-webchat` — by inspecting the
+`SRCS`/`OBJS` variables those targets are built from in `src/Makefile` and their `CMakeLists.txt`
+target sources — and that `src/modules/bus/` is referenced only by the bus test targets.
 
 ---
 
@@ -421,6 +446,10 @@ extent.
   stamped event, so contiguity holds through it. It **must be the final record**; any record after it
   is corrupt. Handles and mappings do not survive a host restart, so a capture does not either — the
   next epoch is a new stream with a new `first_seq`.
+- **`seq` assignment is serialized, which is what the contiguity claim rests on.** `seq` is assigned
+  in the host's single tap thread, and the sequence {assign `seq` N, invoke the tap, make the record
+  durable} completes before `seq` N+1 is assigned. Contiguity is therefore a consequence of that
+  serialization, not an assumption layered on top of it.
 - **The recorder must not be the source of a gap.** The contiguity rule above is a property of the
   bus; a recorder sitting between the tap callback and the file could still lose an event and
   manufacture a gap that looks like corruption. The recorder's obligation is therefore explicit: an
@@ -434,26 +463,36 @@ extent.
 algorithm rather than a description. `REC_MIN` is `8 + BUS_WIRE_HDR_LEN + 4` and `REC_MAX` is
 `REC_MIN + max_payload`; both are constants of the format.
 
-Scan from `header_len`. At each record position `p`, with `remaining = filesize − p`:
+**These are byte-observable classifications, not claims about what happened.** A reader cannot know
+whether a given file was interrupted or damaged; it can only classify the bytes in front of it. The
+rules below are chosen so that the common interrupted-write case lands on `truncated` and structural
+impossibilities land on `corrupt`, but neither label asserts a cause. A torn final write whose CRC-32C
+coincidentally validates (~2⁻³²) and whose contents are structurally inconsistent will be reported
+`corrupt`; that is the correct and safe outcome, and it is not a contradiction in the rule.
+
+0. Validate the file header: `magic`, and `format_version == 1`. An unknown `format_version` is
+   refused outright — the reader must not scan records under framing it does not know. Skip to
+   `header_len`.
+
+Then, at each record position `p`, with `remaining = filesize − p`:
 
 1. `remaining == 0` → the stream ends cleanly. **complete** if the previous record was
    `epoch_change`, otherwise **open** — a valid capture of a still-running host, not an error.
 2. `remaining < 8` → **truncated** at `p`. There is not even a length prefix.
-3. Read `record_len`. If it is outside `[REC_MIN, REC_MAX]`: **truncated** when
-   `remaining ≤ REC_MAX`, because a torn final write is the only thing that could have left a short,
-   partially-written tail there; **corrupt** when `remaining > REC_MAX`, because a plausible tail
-   cannot be that long and the damage is therefore interior.
-4. `remaining < record_len` → **truncated** at `p`. The final write was cut.
+3. Read `record_len`.
+   - `record_len < REC_MIN` → **corrupt**, regardless of `remaining`. A short-but-present length
+     prefix is a malformed header, not a partial write: no prefix of a valid record can name a length
+     below the minimum.
+   - `record_len > REC_MAX` → **truncated** when `remaining ≤ REC_MAX`, **corrupt** otherwise.
+4. `remaining < record_len` → **truncated** at `p`.
 5. `record_len` bytes are present but the CRC fails → **truncated** if `remaining == record_len`
-   (this record ends exactly at EOF and may be a torn final write); **corrupt** otherwise, because
-   bytes were written *after* it, which proves it was once complete and has since been damaged.
-6. CRC passes but `record_len ≠ 8 + BUS_WIRE_HDR_LEN + payload_len + 4`, or `seq` is not exactly one
-   greater than the previous record's, or the previous record was `epoch_change` → **corrupt**.
-   These are structural contradictions that no interrupted write can produce.
+   (this record ends exactly at EOF); **corrupt** otherwise, since bytes follow it.
+6. CRC passes, but any of: `record_len ≠ 8 + BUS_WIRE_HDR_LEN + payload_len + 4`; a reserved bit set
+   in `record_flags`; `seq` not exactly one greater than the previous record's; the previous record
+   was `epoch_change` → **corrupt**.
 
-The rule is total: every byte sequence lands in exactly one of complete, open, truncated, or corrupt.
-Only the *last* record can ever be truncated, which is what makes the classification decidable —
-anything wrong before the end is corruption by construction.
+The procedure is total: every byte sequence lands in exactly one of complete, open, truncated, or
+corrupt, and only the final record can ever be classified truncated.
 
 **A corrupt or truncated result is reported, never returned as data.** The report carries the last
 good `seq`, the byte offset of the offending record, and the rule number above that fired, so slice
@@ -520,3 +559,15 @@ re-executed.
   since r5 required delivering it into a queue pair the reap had already discarded. Plus: D1 names
   `check_bus_d1_gate.sh` as the mechanical gate, D9 draws the tap-contract boundary explicitly, and
   D5 pins what "in-flight" means.
+- **r7** (2026-07-23) — closes the r6 findings. D10's algorithm gains step 0 (`format_version`
+  validated before any record is scanned), splits step 3 so `record_len < REC_MIN` is corrupt
+  regardless of `remaining`, validates reserved `record_flags` bits in step 6, and drops the
+  overreaching claim that interrupted writes cannot produce rule-6 conditions — the states are now
+  presented as byte-observable classifications, which is all a reader can determine. D6 decides the
+  post-routing reap race (`overflow` to a dead destination is tap-only), scopes `control_lost` to a
+  live client, sizes the reserved control pool provisionally at 4, and explains why a consumer never
+  infers loss from `seq` — its inbound `seq` values are inherently sparse, which is exactly why
+  `overflow` must be delivered and why `producer_reaped` being tap-only costs a consumer nothing.
+  D5 gives the drain loop an `eventfd` wait so "never blocks" does not mean "busy-polls". D4 places
+  the wire-frame header under `wire_version` rather than `layout_version`. D10 states the `seq`
+  serialization the contiguity claim rests on, and D7 describes what its check actually inspects.
