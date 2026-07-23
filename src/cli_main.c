@@ -713,7 +713,11 @@ static int cli_delegate_probe(void)
    if (!req)
       return -1;
    cJSON_AddStringToObject(req, "method", "agent.list");
-   cJSON *resp = cli_v1_dispatch_local(req, 3000);
+   /* Transport selection is exclusive: a configured remote must receive the
+    * probe instead of probing the co-located UDS before the real command is
+    * forwarded remotely.  Otherwise every ordinary thin-client invocation
+    * executes agent.list locally and then executes its command remotely. */
+   cJSON *resp = cli_v1_dispatch(req, 3000);
    cJSON_Delete(req);
    if (!resp)
       return -1; /* server unreachable / no route -> unknown */
@@ -832,45 +836,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
       return wt_deny;
    }
 
-   const char *sock = cli_ensure_server_for_method(method);
-   if (!sock)
+   const int use_remote = cli_v1_has_remote_endpoint();
+   const char *sock = use_remote ? NULL : cli_ensure_server_for_method(method);
+   if (!use_remote && !sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
-      /* No co-located server, but a remote store is configured: the full
-       * pre_tool_check needs local session state, yet the memory-file guard can
-       * still run against the remote (memory_redirect captures there). Enforce
-       * it so an agent can't own its own memory bytes even on a remote-only host
-       * (session-start has the analogous handle_session_start_remote path). */
-      if (deny < 0 && strcmp(phase, "pre") == 0 && cli_v1_has_remote_endpoint() && json)
-      {
-         /* memory_redirect_check captures to the configured remote endpoint and
-          * denies the raw write (fail-open spill if the store is unreachable).
-          * pre_tool_check is skipped — it needs local session state. */
-         int rc = 0;
-         cJSON *tn = cJSON_GetObjectItemCaseSensitive(json, "tool_name");
-         cJSON *tin = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-         if (cJSON_IsString(tn) && tn->valuestring[0] && cJSON_IsObject(tin))
-         {
-            cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
-            const char *hp = (cJSON_IsString(hpj) && hpj->valuestring[0]) ? hpj->valuestring : NULL;
-            char mr_msg[1024] = "";
-            if (memory_redirect_check(tn->valuestring, tin, hook_cwd, hp, mr_msg, sizeof(mr_msg)) ==
-                2)
-            {
-               if (cli_hook_client_uses_pretool_json())
-                  emit_pretool_deny_json(mr_msg);
-               else
-               {
-                  fprintf(stderr, "aimee: %s\n", mr_msg);
-                  rc = 2;
-               }
-            }
-         }
-         free(stdin_data);
-         cJSON_Delete(json);
-         free(tool_input_heap);
-         return rc;
-      }
       if (deny < 0)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
       free(stdin_data);
@@ -932,7 +902,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
          hmem_audit("project-unresolved", NULL, NULL, "hooks pre");
    }
 
-   cJSON *resp = cli_v1_dispatch_local(req, 5000);
+   cJSON *resp = cli_v1_dispatch(req, 5000);
    cJSON_Delete(req);
    free(stdin_data);
 

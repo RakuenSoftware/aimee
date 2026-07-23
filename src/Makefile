@@ -950,6 +950,7 @@ endif
 
 integration-tests: $(BINARY) $(SERVER)
 	./tests/test_integration.sh
+	python3 ../scripts/test-thin-client-remote-exclusive.py $(BINARY)
 
 init-migrate-service-test: $(BINARY) $(SERVER)
 	./tests/test_init_migrate_service.sh

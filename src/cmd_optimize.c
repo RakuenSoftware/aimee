@@ -4,9 +4,10 @@
  * Thin-client command (special-cased in cli_main.c like `persona`/`manuscript`).
  * points/baseline/replay dispatch `optimize.export` (GET /v1/optimize/export);
  * replay-record dispatches `optimize.replay_record`; run/compare dispatch the
- * `memory.benchmark` suite (the offline-suite adapter). All via
- * cli_v1_dispatch_local to first-class /v1 routes — no kb_client in the thin
- * client. See docs/proposals/done/optimization-surface.md. */
+ * `memory.benchmark` suite (the offline-suite adapter). All via first-class /v1
+ * routes — no kb_client in the thin client. Dispatch uses the configured remote
+ * exclusively when present and the local UDS otherwise. See
+ * docs/proposals/done/optimization-surface.md. */
 #include "cJSON.h"
 #include "cli_client.h"
 #include <math.h>
@@ -22,7 +23,7 @@ static cJSON *optimize_fetch(void)
    if (!req)
       return NULL;
    cJSON_AddStringToObject(req, "method", "optimize.export");
-   cJSON *resp = cli_v1_dispatch_local(req, 30000);
+   cJSON *resp = cli_v1_dispatch(req, 30000);
    cJSON_Delete(req);
    if (!resp)
    {
@@ -273,7 +274,7 @@ static int optimize_cmd_replay_record(int argc, char **argv, int json_output)
    cJSON_AddStringToObject(req, "method", "optimize.replay_record");
    cJSON_AddStringToObject(req, "decision_point", point);
    cJSON_AddItemToObject(req, "result", result);
-   cJSON *resp = cli_v1_dispatch_local(req, 30000);
+   cJSON *resp = cli_v1_dispatch(req, 30000);
    cJSON_Delete(req);
    if (!resp)
    {
@@ -337,7 +338,7 @@ static cJSON *optimize_run_arm(const char *suite, const char *arm, const char *c
       cJSON_AddStringToObject(req, "corpus", corpus);
    if (matrix)
       cJSON_AddStringToObject(req, "matrix", matrix);
-   cJSON *resp = cli_v1_dispatch_local(req, 600000);
+   cJSON *resp = cli_v1_dispatch(req, 600000);
    cJSON_Delete(req);
    if (!resp)
    {
@@ -546,7 +547,7 @@ static int optimize_apply_promotion(const char *point, const char *arm, char *ro
    cJSON_AddStringToObject(req, "method", "optimize.promote");
    cJSON_AddStringToObject(req, "decision_point", point);
    cJSON_AddStringToObject(req, "arm", arm);
-   cJSON *resp = cli_v1_dispatch_local(req, 15000);
+   cJSON *resp = cli_v1_dispatch(req, 15000);
    cJSON_Delete(req);
    if (!resp)
       return -1;
