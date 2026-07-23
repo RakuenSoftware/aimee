@@ -12,5 +12,72 @@
   ],
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "sources": [
+    "src/modules/git/forge_credentials.c",
+    "src/modules/git/git_cred_inject.c",
+    "src/modules/git/git_forge_vault.c",
+    "src/modules/git/git_host_cred.c",
+    "src/modules/git/git_host_resolve.c",
+    "src/modules/git/git_oauth_device.c",
+    "src/modules/git/git_oauth_gh.c",
+    "src/modules/git/git_oauth_github.c",
+    "src/modules/git/git_ops.c",
+    "src/modules/git/git_org_repos.c",
+    "src/modules/git/git_pr_api.c",
+    "src/modules/git/git_pr_ci_grade.c",
+    "src/modules/git/git_project.c",
+    "src/modules/git/git_ssh_agent.c",
+    "src/modules/git/git_verify.c",
+    "src/modules/git/git_verify_config.c",
+    "src/modules/git/git_verify_hook.c",
+    "src/modules/git/git_verify_jobs.c",
+    "src/modules/git/git_verify_ops.c",
+    "src/modules/git/git_verify_select.c",
+    "src/modules/git/git_verify_state.c",
+    "src/modules/git/git_verify_step.c",
+    "src/modules/git/mcp_git_branch.c",
+    "src/modules/git/mcp_git_pr.c",
+    "src/modules/git/mcp_git_query.c",
+    "src/modules/git/mcp_git_write.c"
+  ],
+  "private_headers": [
+    "src/modules/git/forge_credentials.h",
+    "src/modules/git/git_cred_inject.h",
+    "src/modules/git/git_forge_vault.h",
+    "src/modules/git/git_host_cred.h",
+    "src/modules/git/git_host_resolve.h",
+    "src/modules/git/git_oauth_device.h",
+    "src/modules/git/git_oauth_gh.h",
+    "src/modules/git/git_oauth_github.h",
+    "src/modules/git/git_ops.h",
+    "src/modules/git/git_org_repos.h",
+    "src/modules/git/git_pr_api.h",
+    "src/modules/git/git_project.h",
+    "src/modules/git/git_ssh_agent.h",
+    "src/modules/git/git_verify.h",
+    "src/modules/git/git_verify_internal.h",
+    "src/modules/git/git_verify_jobs.h",
+    "src/modules/git/git_verify_select.h",
+    "src/modules/git/mcp_git.h"
+  ],
+  "tests": [
+    "src/tests/test_forge_credentials.c",
+    "src/tests/test_git_cred_inject.c",
+    "src/tests/test_git_forge_vault.c",
+    "src/tests/test_git_host_resolve.c",
+    "src/tests/test_git_oauth_device.c",
+    "src/tests/test_git_oauth_gh.c",
+    "src/tests/test_git_ops.c",
+    "src/tests/test_git_org_repos.c",
+    "src/tests/test_git_pr_ci_grade.c",
+    "src/tests/test_git_project.c",
+    "src/tests/test_git_ssh_agent.c",
+    "src/tests/test_git_verify_contract.c",
+    "src/tests/test_git_verify_select.c",
+    "src/tests/test_mcp_git.c"
+  ],
+  "docs": [
+    "docs/modules/git.md"
+  ]
 }
