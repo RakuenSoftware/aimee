@@ -145,15 +145,22 @@ module (shared invariant 14). Undeclared publish/subscribe, an event kind with t
 with no server, a cycle in the event edge graph, and any core→optional or module→`memory`-return
 edge fail validation with descriptor/kind ownership evidence.
 
+**Execution model (shared invariant 19).** Every module runs in-process; there is no out-of-process
+module and no local IPC endpoint. Trusted first-party Go modules are linked into the service binary
+with the C core via cgo (native tier). External or user-authored modules run in an in-process
+WebAssembly runtime (sandboxed tier): each is a WASM instance with its own linear memory, isolated
+from core and every other module, whose host imports are exactly its declared, authorized bus verbs.
+Native Go plugin loading is not used. `plugin-loader` owns the WASM host, artifact verification,
+instantiation, and lifecycle.
+
 **Bus admission (shared invariant 17).** `module-runtime` is the sole admission authority for its
-service's bus. A participant attaches only with an attested identity — reusing the vault principal
-and `cert:CN`/bearer classes, not a second scheme — and only when installed, registered, and
-authorized by `execution-policy`; the bus exposes no promiscuous endpoint, so an unauthenticated or
-unknown process cannot connect, enumerate, publish, or subscribe. In-process built-in modules are
-admitted under the service principal at load; out-of-process or externally authored modules
-(`plugin-loader`) attach over an access-restricted local endpoint with a per-module handshake.
-Admission is least-privilege — an admitted participant still reaches only its declared, authorized
-event kinds — and a refused attach is denied and audited.
+service's bus. Because the bus never leaves the process, admission is load-time, not a network
+attach: a module participates only when core loads (native) or instantiates (sandboxed) it, it is
+installed and registered, its identity/artifact is attested — reusing the vault principal and
+`cert:CN`/bearer classes and, for external modules, `governance` artifact trust, not a second scheme
+— and `execution-policy` authorizes it. A refused module is not instantiated and the refusal is
+audited; admission is least-privilege, so an admitted module still reaches only its declared,
+authorized event kinds.
 
 **Subscription routing (shared invariant 18).** Delivery is observer-pattern, not broadcast.
 `module-runtime` maintains, per event kind, the set of registered authorized observers and routes
@@ -247,7 +254,8 @@ logic or a second provider implementation.
 - {id: 14, tier: mechanical, check: "scripts/check_install_dependencies.sh --descriptor-declared-module-deps --transactional --refuse-install-with-unmet-dep --refuse-remove-with-installed-dependent --name-missing-module --dependency-closure --memory-orders-first --distinct-from-runtime-readiness"}
 - {id: 15, tier: integration, check: "scripts/test_capability_publication.sh --modules-publish-to-core-over-bus --no-core-poll --aggregate-into-closure-and-advertisement --fail-register-without-capability-contract --fail-serve-unadvertised-event-kind"}
 - {id: 16, tier: integration, check: "scripts/test_event_replay.sh --capture-per-service-stream --deterministic-same-events-same-order --capture-or-stub-nondeterminism --replay-reproduces-run --capture-obeys-audit-redaction-and-principal-scope"}
-- {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --untrusted-principal --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
-- {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --require-attested-identity --reuse-vault-principal-and-cert-cn-classes --no-anonymous-or-ambient-attach --refuse-unauthenticated-process-connect-enumerate-publish-subscribe --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --restricted-local-endpoint-for-out-of-process --fail-closed-and-audited"}
+- {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --untrusted-principal --wasm-sandbox --host-imports-only-authorized-bus-verbs --memory-and-fault-isolated --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
+- {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --in-process-only --no-out-of-process-module --no-local-ipc-endpoint --load-time-admission --require-attested-identity --reuse-vault-principal-cert-cn-and-governance-artifact-trust --verify-external-artifact-before-instantiate --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --refused-module-not-instantiated --fail-closed-and-audited"}
+- {id: 20, tier: integration, check: "scripts/test_execution_tiers.sh --native-tier-c-plus-go-cgo-in-binary --sandboxed-tier-wasm-per-instance-linear-memory --sandbox-cannot-read-core-vault-or-other-module-memory --sandbox-trap-does-not-crash-host --forbid-go-native-plugin --native-memory-path-no-wasm-boundary-copy"}
 - {id: 19, tier: integration, check: "scripts/test_bus_routing.sh --observer-pattern --per-event-kind-observer-set --deliver-only-to-authorized-observers --no-all-events-subscription --request-reply-point-to-point --subscribe-requires-descriptor-edge-and-execution-policy --refuse-undeclared-or-unauthorized-subscription-fail-closed-audited --module-cannot-observe-or-enumerate-others-traffic --only-governance-audit-tap-sees-full-stream"}
 ```

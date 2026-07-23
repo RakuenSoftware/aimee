@@ -42,10 +42,11 @@ is now the suite index and shared contract; it does not duplicate the child prop
    feature cluster.
 10. Less is more: remove duplicate implementations, registries, fallbacks, wrappers, stale config,
     and self-contained feature islands instead of relocating them.
-11. **The communication core is written in C; every feature module is written in Go.** Language and
-    selection are independent axes: a module may be required (always selected) yet still be a Go
-    module. The C core carries authenticated, audited, typed messages between participants and hosts
-    the event bus; it performs no feature work.
+11. **The communication core is written in C; first-party feature modules are written in Go.**
+    Language and selection are independent axes: a module may be required (always selected) yet still
+    be a Go module. The C core carries authenticated, audited, typed messages between participants and
+    hosts the event bus; it performs no feature work. External or user-authored modules may be
+    written in any language that compiles to the in-process sandbox (invariant 19).
 12. **Modules do not link or call each other directly.** A module reaches another module — and core
     reaches a module — only by publishing or requesting a typed event on the core-owned in-memory
     event bus, gated by the descriptor dependency graph and execution policy. There is no shared
@@ -71,18 +72,27 @@ is now the suite index and shared contract; it does not duplicate the child prop
     dependency on is already installed. Installation and selection are transactional and fail closed
     on a missing dependency; a module cannot be removed while an installed module still depends on
     it.
-17. **Bus admission is restricted, authenticated, and core-controlled.** The bus is not a promiscuous
-    endpoint any process can dial. Core is the sole admission authority; a participant attaches only
-    with an attested identity and only when installed, registered, and authorized. There is no
-    anonymous or ambient attach — an arbitrary local process cannot connect, enumerate, publish, or
-    subscribe. Admission is least-privilege (an admitted participant is still confined to its declared,
-    authorized event kinds) and fail-closed (a refused attach is denied and audited).
+17. **Bus admission is core-controlled and load-time, not a network attach.** The bus never leaves
+    the service process, so there is no endpoint any process can dial and no anonymous or ambient
+    attach. Core is the sole admission authority: a module participates only when core loads or
+    instantiates it (invariant 19), it is installed and registered, its identity/artifact is attested,
+    and `execution-policy` authorizes it. Admission is least-privilege (an admitted module is still
+    confined to its declared, authorized event kinds) and fail-closed (a refused module is not
+    instantiated and the refusal is audited).
 18. **Delivery is per-subscription observer routing, not broadcast.** Core routes each event only to
     the modules registered as authorized observers of that event kind (observer pattern); a module
     never receives, and cannot enumerate, traffic for event kinds it did not subscribe to and is not
     authorized for. A subscription is honored only when the descriptor declares it and execution
     policy authorizes it. The single full-stream observer is core's own governance/audit tap, which
     is trust-kernel infrastructure, not a feature module.
+19. **Every module runs in-process; untrusted modules run sandboxed.** No module runs as a separate
+    OS process. Trusted first-party modules are native — Go modules linked into the service binary
+    with the C core via cgo — for native speed on hot paths. External or user-authored modules run in
+    an in-process WebAssembly sandbox whose only host imports are their declared, authorized bus
+    verbs; they are memory- and fault-isolated from core and from every other module and can reach
+    nothing else. Native Go plugin loading is not used. The sandbox's capability set is exactly the
+    observer-routed authorized surface (invariants 17–18), so isolation is enforced by the runtime,
+    not by module good behavior.
 
 ## Shared terms
 
@@ -203,30 +213,57 @@ distinct from, and prior to, the per-event authorization above. A process that c
 could observe every module's messages or inject its own; the bus must therefore not be a
 promiscuous endpoint any process can dial (shared invariant 17).
 
-- **Core is the sole admission authority.** As bus owner in each service, core admits or refuses
-  every participant. There is no side channel to join and no anonymous or ambient attach.
-- **Every participant is identity-attested.** Admission reuses the existing principal and transport
-  classes — the vault principal model and the `cert:CN` / bearer attestation the thin-client↔server
-  link already uses ([`tiered-llm-p8-thinclient-mtls.md`](tiered-llm-p8-thinclient-mtls.md)) — rather
-  than inventing a second identity scheme. In-process built-in modules are admitted under the
-  service's own principal at load; an out-of-process or externally authored module (via
-  `plugin-loader`) attaches only through an access-restricted local endpoint and a per-module
-  authenticated handshake. An arbitrary local process holds no such identity and is refused.
-- **Admission is gated by installation and authorization.** A participant is admitted only when it
-  is installed, registered, and authorized by `execution-policy`; a module that is not installed, or
-  whose identity or dependencies do not check out, cannot attach. This is the connection-layer gate;
+- **Core is the sole admission authority.** As bus owner in each service, core loads or instantiates
+  every module. The bus never leaves the process (invariant 19), so there is no endpoint to dial, no
+  side channel to join, and no anonymous or ambient attach.
+- **Every module is identity-attested.** Admission reuses the existing principal and trust machinery
+  — the vault principal model, the `cert:CN` / bearer classes the thin-client↔server link uses
+  ([`tiered-llm-p8-thinclient-mtls.md`](tiered-llm-p8-thinclient-mtls.md)), and, for externally
+  authored modules, `governance`'s artifact signing/trust
+  ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md))
+  — rather than inventing a second scheme. A native first-party module is trusted at build/link time;
+  an external module's artifact is verified before core instantiates its sandbox.
+- **Admission is gated by installation and authorization.** A module participates only when it is
+  installed, registered, and authorized by `execution-policy`; a module that is not installed, or
+  whose identity or dependencies do not check out, is not instantiated. This is the load-time gate;
   the per-event contract check (declared, authorized event kinds only) still applies afterward, so
   admission never implies full access.
-- **Isolation and least privilege.** An admitted participant sees only the event kinds it is
-  authorized to subscribe to — the bus is not a broadcast every attached participant can read in
-  full. A compromised or malicious local process cannot attach, enumerate participants, snoop
-  traffic, or publish.
-- **Fail-closed and audited.** A refused or failed attach is denied and recorded through the same
-  tap as any other governed event, so an unexpected connection attempt is visible, not silent.
+- **Isolation and least privilege.** An admitted module sees only the event kinds it is authorized to
+  subscribe to — the bus is not a broadcast every module can read in full (invariant 18). An
+  untrusted module additionally cannot read core, vault, or another module's memory: its WebAssembly
+  sandbox exposes nothing but its authorized bus verbs (invariant 19).
+- **Fail-closed and audited.** A refused module is not instantiated and the refusal is recorded
+  through the same tap as any other governed event, so an unexpected load attempt is visible, not
+  silent.
 
 This contract sets the admission invariant and its reuse of existing identity machinery; the
-mechanics of the local endpoint, the handshake, and out-of-process module attachment are owned by
-`module-runtime` and `plugin-loader` in their documents.
+mechanics of native linkage and of sandbox instantiation are owned by `module-runtime` and
+`plugin-loader` in their documents.
+
+### Execution model: in-process native and sandboxed tiers
+
+Every module runs inside the service process — there is no out-of-process module and no local IPC to
+defend (invariant 19). Trust decides *how* a module runs, not *whether* it is in-process:
+
+- **Native tier (trusted, first-party).** The C communication core and the built-in Go modules are
+  one binary; the C core and Go are linked in-process via cgo. These modules run at native speed, so
+  the near-universal `memory` path stays close to a direct call and the performance budget below is
+  met without a boundary copy. First-party modules are compartmentalized by contract and observer
+  routing, not by a hardware boundary between them — acceptable because they are trusted, reviewed
+  code shipped with the service.
+- **Sandboxed tier (untrusted, external/user).** An external or user-authored module runs in an
+  in-process WebAssembly runtime. Each module is a WASM instance with its own linear memory, isolated
+  from core and from every other module and unable to crash the host on a trap. Its host imports are
+  exactly the bus verbs for its declared, authorized event kinds — publishing, subscribing, and
+  requesting — and nothing else; the sandbox capability set *is* the observer-routed authorized
+  surface, so the runtime enforces isolation rather than trusting the module. Data crossing the WASM
+  boundary is copied into and out of linear memory, which keeps untrusted modules off the native fast
+  path; this cost is acceptable for user features and never applies to the native `memory` path.
+
+Native Go plugin loading is deliberately excluded: it demands exact toolchain and dependency lockstep,
+does not run on every target platform, and provides no memory isolation, so it fails both portability
+and the untrusted-module security model. `plugin-loader` owns the WASM host, artifact verification,
+instantiation, and lifecycle for the sandboxed tier.
 
 ### Subscription and routing (observer pattern)
 
@@ -337,17 +374,19 @@ remain.
 
 Because the bus, the event contract, and capability publication are the *only* integration surface,
 a module needs nothing from core but to speak that surface: subscribe to and publish its declared
-event kinds, and publish its capabilities. This theoretically lets **end users author their own
-modules** and plug them in without modifying, recompiling, or relinking core — the same boundary
-that isolates the built-in Go modules admits a third-party one. The optional `plugin-loader` module
-is where this is realized (loading and lifecycle of externally authored modules); this suite records
-the property, and `plugin-loader`'s own document owns the packaging, loading, and sandbox mechanics.
+event kinds, and publish its capabilities. This lets **end users author their own modules** and plug
+them in without modifying, recompiling, or relinking core. A user module compiles to WebAssembly
+against the host ABI — the bus verbs — and runs in-process in the sandboxed tier (invariant 19), so
+it can be authored in any WASM-targeting language rather than only native Go. The optional
+`plugin-loader` module realizes this (artifact verification, WASM instantiation, and lifecycle); this
+suite records the property, and `plugin-loader`'s own document owns the packaging and host mechanics.
 
-The trust boundary does not soften for a user module — it is exactly why the bus boundary makes this
-safe to contemplate:
+The trust boundary does not soften for a user module — the WASM sandbox and the bus boundary are
+exactly why this is safe:
 
-- A user module is an **untrusted principal**. Every event it publishes or requests is authorized by
-  `execution-policy` and recorded by `audit` through the same tap as any other event; it gets no
+- A user module is an **untrusted principal** running in a memory-isolated sandbox. Every event it
+  publishes or requests is authorized by `execution-policy` and recorded by `audit` through the same
+  tap as any other event; its host imports are only its declared, authorized bus verbs, so it gets no
   ambient access and can reach another module (for example `memory`) only through that module's
   public event contract, only for event kinds it declared, and only if the dependency is installed.
 - **Dependency-complete installation** applies unchanged: a user module that depends on `memory`
@@ -355,11 +394,11 @@ safe to contemplate:
 - Executable-artifact trust — signing and hash-pinning of externally authored modules — is owned by
   optional `governance`
   ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md));
-  a deployment that requires signed modules enforces it there, over the same install and bus
-  contracts.
+  a deployment that requires signed modules enforces it there before core instantiates the sandbox.
 
 Nothing about user-authored modules is a new core capability or a new privilege path; it is the
-existing bus boundary observed from outside the project.
+existing in-process bus boundary, enforced by the sandbox runtime, offered to code from outside the
+project.
 
 ### What this changes downstream
 
