@@ -1,6 +1,6 @@
 # Proposal: Capability-thresholded delegate routing
 
-- **State:** PARTIALLY DELIVERED — see §9. Slices 0, 0b, 0c and 1 merged to `testing` in PR #1861 (squash `3332d3c4`), including the §11 transport work, server-side `--scope` enforcement, the health-breaker quota fix, and the retirement of automatic escalation. Slice 2 (competence) and Slice 4 (bandit) are not built.
+- **State:** PARTIALLY DELIVERED, in progress — see §9. Slices 0, 0b, 0c and 1 are implemented (PR #1861 / `3332d3c4`), including the §11 transport work, server-side `--scope` enforcement, the health-breaker quota fix, and the retirement of automatic escalation. Slice 2 (competence) and Slice 4 (bandit) are not built.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Supersedes:** nothing. Extends the existing `agent_route_with_caps()` path.
