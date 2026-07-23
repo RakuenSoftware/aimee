@@ -31,7 +31,7 @@
 #include "modules/vault/vault_witness_signer.h"
 
 /* Captured emission stream. */
-static uint8_t g_stream[1 << 20];
+static uint8_t g_stream[1 << 22];
 static size_t g_len;
 static size_t g_frames;
 
@@ -136,6 +136,53 @@ int main(void)
       fprintf(stderr, "incremental emit sent %llu records, expected 1\n",
               (unsigned long long)s3.records_emitted);
       return 1;
+   }
+
+   /* Drain across batch boundaries. The reader works in bounded batches, so a
+    * backlog larger than one batch must still clear in a single run — otherwise a
+    * burst would trickle out one batch per tick and the off-host copy would lag by
+    * however long the burst was. 600 crosses the 256-row batch size twice. */
+   {
+      char sid[24];
+      for (int i = 0; i < 600; i++)
+      {
+         snprintf(sid, sizeof sid, "burst%d", i);
+         append_record(conn, sid);
+      }
+      db2_witness_emit_stats_t sb;
+      assert(db2_witness_emit_run(capture_sink, NULL, 8192, &sb) == DB2_WITNESS_EMIT_OK);
+      if (sb.records_emitted != 600)
+      {
+         fprintf(stderr, "burst drain emitted %llu records, expected 600 in one run\n",
+                 (unsigned long long)sb.records_emitted);
+         return 1;
+      }
+      if (sb.backlog_records != 0)
+      {
+         fprintf(stderr, "burst drain left backlog %llu, expected 0\n",
+                 (unsigned long long)sb.backlog_records);
+         return 1;
+      }
+      /* And the budget is a real bound, not decoration: a small budget must stop
+       * short and leave the rest for the next run rather than draining anyway. */
+      for (int i = 0; i < 600; i++)
+      {
+         snprintf(sid, sizeof sid, "burst2-%d", i);
+         append_record(conn, sid);
+      }
+      db2_witness_emit_stats_t sc;
+      assert(db2_witness_emit_run(capture_sink, NULL, 300, &sc) == DB2_WITNESS_EMIT_OK);
+      if (sc.records_emitted >= 600 || sc.records_emitted == 0)
+      {
+         fprintf(stderr, "budget of 300 emitted %llu records; expected a partial drain\n",
+                 (unsigned long long)sc.records_emitted);
+         return 1;
+      }
+      printf("witness_emit_pg: burst drained 600 in one run; budget 300 stopped at %llu\n",
+             (unsigned long long)sc.records_emitted);
+      /* Finish the drain so the offline verification below sees a complete chain. */
+      db2_witness_emit_stats_t sd;
+      assert(db2_witness_emit_run(capture_sink, NULL, 8192, &sd) == DB2_WITNESS_EMIT_OK);
    }
 
    /* Verify the captured bytes offline: anchor only, no database. */

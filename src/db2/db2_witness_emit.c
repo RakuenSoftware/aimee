@@ -12,6 +12,10 @@
 
 #define EMIT_ERR 256
 #define EMIT_MAX_SHARDS 4096
+/* Rows per read. Bounded so each statement, each frame loop and each cursor
+ * advance stays small; the caller's budget governs how many batches a run drains.
+ * The SQL reader caps any limit at 1000, so this must not exceed it. */
+#define EMIT_BATCH_ROWS 256
 
 /* One pending stream position from org_vault_witness_emit_pending(). */
 typedef struct
@@ -62,13 +66,18 @@ static void advance_cursor(void *conn, int kind, const char *tenant, const char 
    aimee_pg_finalize(st);
 }
 
-/* Emit one shard's pending records. Returns a result; on OK *emitted counts frames
- * sent and the cursor has been advanced to the last one actually accepted. */
-static db2_witness_emit_result_t emit_shard(void *conn, const pending_t *p, int limit,
-                                            db2_witness_emit_sink_fn sink, void *ctx,
-                                            db2_witness_emit_stats_t *stats)
+/* Emit one batch of a shard's pending records, starting strictly after `after`.
+ * Sets *out_last to the highest shard_seq actually accepted by the sink (or leaves
+ * it at `after` if none) and *out_rows to the number of rows the reader returned,
+ * which the caller uses to tell "drained" from "hit the batch limit". */
+static db2_witness_emit_result_t emit_shard_batch(void *conn, const pending_t *p, int64_t after,
+                                                  int limit, db2_witness_emit_sink_fn sink,
+                                                  void *ctx, db2_witness_emit_stats_t *stats,
+                                                  int64_t *out_last, size_t *out_rows)
 {
    char err[EMIT_ERR];
+   *out_last = after;
+   *out_rows = 0;
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT shard_seq,source_kind,source_id,source_hash,has_source_pred,source_pred_hash,"
@@ -78,8 +87,7 @@ static db2_witness_emit_result_t emit_shard(void *conn, const pending_t *p, int 
    if (!st)
       return DB2_WITNESS_EMIT_ERROR;
    if (aimee_pg_bind_text(st, "?1", p->tenant) != 0 ||
-       aimee_pg_bind_text(st, "?2", p->provider) != 0 ||
-       aimee_pg_bind_int64(st, "?3", p->last_emitted) != 0 ||
+       aimee_pg_bind_text(st, "?2", p->provider) != 0 || aimee_pg_bind_int64(st, "?3", after) != 0 ||
        aimee_pg_bind_int64(st, "?4", limit) != 0)
    {
       aimee_pg_finalize(st);
@@ -87,10 +95,11 @@ static db2_witness_emit_result_t emit_shard(void *conn, const pending_t *p, int 
    }
 
    db2_witness_emit_result_t rc = DB2_WITNESS_EMIT_OK;
-   int64_t last_ok = p->last_emitted;
+   int64_t last_ok = after;
    aimee_pg_step_t sr;
    while ((sr = aimee_pg_step(st, err, sizeof err)) == AIMEE_PG_ROW)
    {
+      (*out_rows)++;
       vault_witness_record_t r;
       memset(&r, 0, sizeof r);
       int64_t shard_seq = aimee_pg_column_int64(st, 0);
@@ -169,9 +178,42 @@ static db2_witness_emit_result_t emit_shard(void *conn, const pending_t *p, int 
       rc = DB2_WITNESS_EMIT_TRANSIENT;
    aimee_pg_finalize(st);
 
-   if (last_ok > p->last_emitted)
+   *out_last = last_ok;
+   if (last_ok > after)
       advance_cursor(conn, 0, p->tenant, p->provider, last_ok);
    return rc;
+}
+
+/* Drain one shard, batch by batch, until it is empty or the per-run budget is
+ * spent. Draining in batches rather than one huge query keeps each statement and
+ * each cursor advance bounded, so a kill mid-drain loses at most one batch of
+ * progress (and loses no evidence — the cursor simply lags and the next tick
+ * re-reads). The budget is what stops a large backlog from monopolising the
+ * periodic loop; when it bites, the shard stays behind and the backlog gauge shows
+ * it rather than the drain silently appearing complete. */
+static db2_witness_emit_result_t emit_shard(void *conn, const pending_t *p, int batch,
+                                            uint64_t budget, db2_witness_emit_sink_fn sink,
+                                            void *ctx, db2_witness_emit_stats_t *stats)
+{
+   int64_t cursor = p->last_emitted;
+   uint64_t spent = 0;
+   for (;;)
+   {
+      int64_t last = cursor;
+      size_t rows = 0;
+      db2_witness_emit_result_t rc =
+          emit_shard_batch(conn, p, cursor, batch, sink, ctx, stats, &last, &rows);
+      if (rc != DB2_WITNESS_EMIT_OK)
+         return rc;
+      if (last <= cursor)
+         return DB2_WITNESS_EMIT_OK; /* nothing accepted: drained, or sink took none */
+      cursor = last;
+      spent += rows;
+      /* A short batch means the shard is drained; a full one means there may be
+       * more, so keep going until the budget is spent. */
+      if (rows < (size_t)batch || spent >= budget)
+         return DB2_WITNESS_EMIT_OK;
+   }
 }
 
 /* Emit pending checkpoints, each immediately followed by its leaf snapshot. */
@@ -411,10 +453,17 @@ db2_witness_emit_result_t db2_witness_emit_run(db2_witness_emit_sink_fn sink, vo
    {
       if (pend[i].head_seq <= pend[i].last_emitted)
          continue;
-      rc = emit_shard(conn, &pend[i], max_per_stream, sink, ctx, &stats);
+      rc = emit_shard(conn, &pend[i], EMIT_BATCH_ROWS, (uint64_t)max_per_stream, sink, ctx,
+                      &stats);
    }
+   /* Checkpoints arrive at cadence (roughly one per tick), so a single batch keeps
+    * up in steady state. After a long outage the stream drains over several ticks
+    * instead of one; the checkpoint backlog gauge shows that rather than it being
+    * invisible. */
    if (rc == DB2_WITNESS_EMIT_OK && have_cp && cp_head > cp_after)
-      rc = emit_checkpoints(conn, cp_after, max_per_stream, sink, ctx, &stats);
+      rc = emit_checkpoints(conn, cp_after,
+                            max_per_stream < EMIT_BATCH_ROWS ? max_per_stream : EMIT_BATCH_ROWS,
+                            sink, ctx, &stats);
 
    /* Backlog is reported from the pre-run positions minus what this run emitted, so
     * it reflects what is still outstanding without a second round trip. */

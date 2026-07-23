@@ -57,8 +57,16 @@ typedef struct
 typedef int (*db2_witness_emit_sink_fn)(void *ctx, vault_witness_export_kind_t kind,
                                         const uint8_t *frame, size_t frame_len);
 
-/* Emit at most `max_per_stream` items per shard and per stream in one run, so a
- * large backlog drains over several cadence ticks instead of monopolising one.
+/* Drain each shard, and the checkpoint stream, in one run.
+ *
+ * `max_per_stream` is a per-stream budget, not a hard cap: records are read in
+ * fixed-size batches and the budget is checked between batches, so a run can
+ * overshoot it by up to one batch. It exists to bound the tail — a normal burst
+ * clears in a single run while a pathological backlog cannot monopolise the
+ * caller's tick — and is not a precise quota. When it bites, the shard stays
+ * behind and the backlog gauge reports what is outstanding; a partial drain is
+ * never reported as a complete one.
+ *
  * `out` may be NULL. */
 db2_witness_emit_result_t db2_witness_emit_run(db2_witness_emit_sink_fn sink, void *ctx,
                                                int max_per_stream,

@@ -73,10 +73,13 @@ static int log_sink(void *ctx, vault_witness_export_kind_t kind, const uint8_t *
    return 0;
 }
 
-/* Drain bound per tick. Large enough that a normal backlog clears in one tick,
- * small enough that a huge one drains over several rather than monopolising the
- * periodic loop — emission must never starve the rest of the tick. */
-#define KB_WITNESS_EMIT_MAX_PER_STREAM 256
+/* Per-stream drain budget for one tick. Emission reads committed state and frames
+ * bytes, so the per-item cost is small; the budget exists to bound the tail, not
+ * the common case. Sized so a burst of several thousand events reaches an off-host
+ * consumer on the next tick rather than trickling out over an hour, while a
+ * pathological backlog still cannot monopolise the periodic loop. When it bites,
+ * the backlog gauge reports what is still outstanding. */
+#define KB_WITNESS_EMIT_MAX_PER_STREAM 8192
 
 static void emit_once(void)
 {
