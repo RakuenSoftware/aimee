@@ -25,11 +25,35 @@ Classification: **security, high**.*
 > explanatory message otherwise. Verified by adding an unclassified
 > egress-shaped tool to the list and confirming the suite fails.
 >
-> **Still open**, and genuinely unaddressed: third-party MCP servers are handled
-> by defaulting `mcp__*` to external, which keys on a NAME PREFIX rather than an
-> authenticated registration identity. The own-server exemption
-> (`mcp__aimee__*`) is likewise a naming convention. That is what the direction
-> below should address; the host-CLI half of the problem is closed.
+> **Still open**: the own-server exemption (`mcp__aimee` / `mcp__aimee__*`) keys
+> on a NAME PREFIX, not an authenticated registration identity. Scoped by
+> measurement:
+>
+> - **Not reachable for delegates.** Their MCP config is a hardcoded literal in
+>   `cli_claude.c` naming exactly one server (`aimee`), and `--allowedTools`
+>   permits only `mcp__aimee`. No other server can be introduced.
+> - **Reachable for primary sessions**, whose gate runs via `cmd_hooks.c` and
+>   whose MCP servers the operator configures.
+> - **Threat model matters.** The gate stops the *agent* externalizing before
+>   delivery. The adversary that motivates it — untrusted page content steering
+>   the agent — cannot register an MCP server. An operator who names their own
+>   server `aimee` is bypassing their own guardrail, which is self-inflicted.
+>   The genuine vector is narrower: a malicious or careless third-party MCP
+>   package that names itself `aimee` and is thereby treated as in-boundary.
+>   That is real but supply-chain shaped, and **low**, not high.
+>
+> **Why no partial fix was written.** The obvious cheap hardening — accept
+> `mcp__aimee__<tool>` only when `<tool>` is one aimee's MCP server actually
+> exposes — needs a statically enumerable catalog. `MCP_CORE_TOOLS[]` in
+> `mcp_tool_profile.c` is explicitly only the core profile floor ("the rest of
+> the catalog is reachable via these"), so validating against it would reject
+> legitimate aimee tools. A half-fix here breaks working setups while still not
+> authenticating anything.
+>
+> The correct fix is the registration-identity work described below. It is not
+> urgent at low severity, and it should not be approximated with a name check.
+>
+> The host-CLI half of the problem is closed.
 
 ## The gap, stated without softening
 
