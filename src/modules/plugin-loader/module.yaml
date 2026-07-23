@@ -13,6 +13,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/plugin-loader/plugin.c",
     "src/modules/plugin-loader/plugin_loader.c"
