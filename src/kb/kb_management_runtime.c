@@ -2,6 +2,7 @@
 #include "kb_management_runtime.h"
 #include "kb_management_action.h"
 #include "db2/management_action_journal.h"
+#include "db2/management_read_journal.h"
 
 #include "kb/http/kb_http_servers.h"
 #include "kb_mgmt_endpoint.h"
@@ -9,6 +10,8 @@
 #include "kb_tls.h"
 #include "kb_workload_helper_posix.h"
 #include "kb_workload_provider.h"
+#include "management_read.h"
+#include "cJSON.h"
 
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
@@ -37,6 +40,7 @@ typedef struct
    int configured;
    int registered;
    int action_registered;
+   int read_registered;
    int reconciling;
    int construction_complete;
    int had_success;
@@ -424,6 +428,441 @@ static kb_management_action_result_t runtime_action(void *unused, const kb_princ
    return result;
 }
 
+static void hex32_runtime(const uint8_t in[32], char out[65])
+{
+   static const char digits[] = "0123456789abcdef";
+   for (size_t i = 0; i < 32; ++i)
+      out[i * 2] = digits[in[i] >> 4], out[i * 2 + 1] = digits[in[i] & 15];
+   out[64] = 0;
+}
+
+static void nonce64_runtime(const unsigned char in[32], char out[44])
+{
+   static const char abc[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+   uint32_t acc = 0;
+   unsigned bits = 0;
+   size_t n = 0;
+   for (size_t i = 0; i < 32; ++i)
+   {
+      acc = (acc << 8) | in[i];
+      bits += 8;
+      while (bits >= 6)
+      {
+         bits -= 6;
+         out[n++] = abc[(acc >> bits) & 63];
+         acc &= bits ? (1U << bits) - 1U : 0U;
+      }
+   }
+   if (bits)
+      out[n++] = abc[(acc << (6 - bits)) & 63];
+   out[n] = 0;
+}
+
+static int read_snapshot_matches(const db2_server_snapshot_t *s,
+                                 const db2_management_read_intent_t *i)
+{
+   return s && i && !strcmp(s->server_id, i->target_server_id) &&
+          !kb_mgmt_endpoint_validate(s->endpoint) && !strcmp(s->status, "active") &&
+          !strcmp(s->enrollment_state, "active") && !s->revoked_at[0] &&
+          !strcmp(s->management_issuer, i->target_mgmt_issuer) &&
+          !strcmp(s->management_serial_norm, i->target_mgmt_serial_norm) &&
+          !strcmp(s->management_fingerprint, i->target_mgmt_fingerprint) &&
+          s->revocation_generation == i->revocation_generation;
+}
+
+static int read_status_matches(const char *wire, const unsigned char nonce[32],
+                               const kb_management_cert_active_t *active,
+                               const db2_management_read_intent_t *intent, const char *key_id,
+                               const unsigned char public_key[32], uint64_t now,
+                               const char *purpose)
+{
+   kb_mgmt_status_t status;
+   char fingerprint[65];
+   memset(&status, 0, sizeof(status));
+   hex32_runtime(active->fingerprint, fingerprint);
+   int bad = kb_mgmt_status_from_json(wire, &status) || strcmp(status.key_id, key_id) ||
+             CRYPTO_memcmp(status.nonce, nonce, 32) ||
+             strcmp(status.caller_issuer, active->issuer) ||
+             strcmp(status.caller_serial_norm, active->serial_norm) ||
+             strcmp(status.caller_fingerprint, fingerprint) ||
+             strcmp(status.target_server_id, intent->target_server_id) ||
+             strcmp(status.target_mgmt_fingerprint, intent->target_mgmt_fingerprint) || !purpose ||
+             strcmp(status.purpose, purpose) ||
+             status.revocation_generation != (uint64_t)intent->revocation_generation ||
+             kb_mgmt_status_validate(&status, now, (uint64_t)intent->revocation_generation) ||
+             kb_mgmt_status_verify_signature(&status, public_key);
+   OPENSSL_cleanse(&status, sizeof(status));
+   return !bad;
+}
+
+static int read_projection_token(const char *s, size_t max, int model)
+{
+   size_t n = s ? strnlen(s, max + 1) : 0;
+   if (!n || n > max)
+      return 0;
+   for (size_t i = 0; i < n; ++i)
+   {
+      unsigned char c = (unsigned char)s[i];
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '.' || c == '_' || c == '-' || (model && (c == ':' || c == '/' || c == '+'))))
+         return 0;
+   }
+   return 1;
+}
+
+static int read_object_exact(const cJSON *object, const char *const *names, size_t count)
+{
+   if (!cJSON_IsObject(object) || !names || !count || count > 32)
+      return 0;
+   uint32_t seen = 0;
+   size_t fields = 0;
+   for (const cJSON *field = object->child; field; field = field->next)
+   {
+      size_t i = 0;
+      while (i < count && (!field->string || strcmp(field->string, names[i])))
+         ++i;
+      if (i == count || (seen & (UINT32_C(1) << i)))
+         return 0;
+      seen |= UINT32_C(1) << i;
+      ++fields;
+   }
+   return fields == count && seen == (UINT32_C(1) << count) - 1;
+}
+
+static int read_agents_projection_valid(const char *wire, size_t len, const char *server,
+                                        int64_t team)
+{
+   if (!wire || !len || len > 32768 || memchr(wire, 0, len))
+      return 0;
+   const char *end = NULL;
+   cJSON *root = cJSON_ParseWithLengthOpts(wire, len, &end, 0);
+   cJSON *sid = root ? cJSON_GetObjectItemCaseSensitive(root, "server_id") : NULL;
+   cJSON *tid = root ? cJSON_GetObjectItemCaseSensitive(root, "team") : NULL;
+   cJSON *agents = root ? cJSON_GetObjectItemCaseSensitive(root, "agents") : NULL;
+   static const char *const root_fields[] = {"server_id", "team", "agents"};
+   char team_token[48];
+   int team_n = snprintf(team_token, sizeof(team_token), "\"team\":%lld", (long long)team);
+   int valid = root && end == wire + len &&
+               read_object_exact(root, root_fields, sizeof(root_fields) / sizeof(root_fields[0])) &&
+               cJSON_IsString(sid) && !strcmp(cJSON_GetStringValue(sid), server) &&
+               cJSON_IsNumber(tid) && tid->valuedouble == (double)team && cJSON_IsArray(agents) &&
+               cJSON_GetArraySize(agents) <= SERVER_MGMT_READ_AGENT_MAX && team_n > 0 &&
+               (size_t)team_n < sizeof(team_token) && strstr(wire, team_token);
+   const char *previous = NULL;
+   cJSON *agent = NULL;
+   cJSON_ArrayForEach(agent, agents)
+   {
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(agent, "name");
+      cJSON *provider = cJSON_GetObjectItemCaseSensitive(agent, "provider");
+      cJSON *model = cJSON_GetObjectItemCaseSensitive(agent, "model");
+      cJSON *enabled = cJSON_GetObjectItemCaseSensitive(agent, "enabled");
+      cJSON *delegate = cJSON_GetObjectItemCaseSensitive(agent, "delegate_available");
+      cJSON *primary = cJSON_GetObjectItemCaseSensitive(agent, "primary_only");
+      cJSON *parallel = cJSON_GetObjectItemCaseSensitive(agent, "max_parallel");
+      static const char *const agent_fields[] = {
+          "name",         "provider",    "model", "enabled", "delegate_available",
+          "primary_only", "max_parallel"};
+      const char *name_s = cJSON_IsString(name) ? cJSON_GetStringValue(name) : NULL;
+      const char *provider_s = cJSON_IsString(provider) ? cJSON_GetStringValue(provider) : NULL;
+      const char *model_s = cJSON_IsString(model) ? cJSON_GetStringValue(model) : NULL;
+      if (!valid ||
+          !read_object_exact(agent, agent_fields, sizeof(agent_fields) / sizeof(agent_fields[0])) ||
+          !read_projection_token(name_s, 63, 0) || !read_projection_token(provider_s, 15, 0) ||
+          !read_projection_token(model_s, 127, 1) || !cJSON_IsBool(enabled) ||
+          !cJSON_IsBool(delegate) || !cJSON_IsBool(primary) || !cJSON_IsNumber(parallel) ||
+          parallel->valuedouble < 0 || parallel->valuedouble > 1024 ||
+          parallel->valuedouble != (double)parallel->valueint ||
+          (previous && strcmp(previous, name_s) >= 0))
+      {
+         valid = 0;
+         break;
+      }
+      previous = name_s;
+   }
+   cJSON_Delete(root);
+   return valid;
+}
+
+static int read_config_projection_valid(const char *wire, size_t len, const char *server,
+                                        int64_t team)
+{
+   if (!wire || !len || len > 32768 || memchr(wire, 0, len))
+      return 0;
+   const char *end = NULL;
+   cJSON *root = cJSON_ParseWithLengthOpts(wire, len, &end, 0);
+   cJSON *sid = root ? cJSON_GetObjectItemCaseSensitive(root, "server_id") : NULL;
+   cJSON *tid = root ? cJSON_GetObjectItemCaseSensitive(root, "team") : NULL;
+   cJSON *config = root ? cJSON_GetObjectItemCaseSensitive(root, "config") : NULL;
+   static const char *const root_fields[] = {"server_id", "team", "config"};
+   static const char *const config_fields[] = {"mtls", "remote_writes", "client_transport",
+                                               "cli_session_forwarding", "require_aimee_git"};
+   cJSON *mtls = config ? cJSON_GetObjectItemCaseSensitive(config, "mtls") : NULL;
+   cJSON *writes = config ? cJSON_GetObjectItemCaseSensitive(config, "remote_writes") : NULL;
+   cJSON *transport = config ? cJSON_GetObjectItemCaseSensitive(config, "client_transport") : NULL;
+   cJSON *forward =
+       config ? cJSON_GetObjectItemCaseSensitive(config, "cli_session_forwarding") : NULL;
+   cJSON *git = config ? cJSON_GetObjectItemCaseSensitive(config, "require_aimee_git") : NULL;
+   const char *m = cJSON_IsString(mtls) ? cJSON_GetStringValue(mtls) : NULL;
+   const char *w = cJSON_IsString(writes) ? cJSON_GetStringValue(writes) : NULL;
+   const char *t = cJSON_IsString(transport) ? cJSON_GetStringValue(transport) : NULL;
+   char team_token[48];
+   int team_n = snprintf(team_token, sizeof(team_token), "\"team\":%lld", (long long)team);
+   int valid =
+       root && end == wire + len &&
+       read_object_exact(root, root_fields, sizeof(root_fields) / sizeof(root_fields[0])) &&
+       read_object_exact(config, config_fields, sizeof(config_fields) / sizeof(config_fields[0])) &&
+       cJSON_IsString(sid) && !strcmp(cJSON_GetStringValue(sid), server) && cJSON_IsNumber(tid) &&
+       tid->valuedouble == (double)team && m &&
+       (!strcmp(m, "off") || !strcmp(m, "optional") || !strcmp(m, "required")) && w &&
+       (!strcmp(w, "off") || !strcmp(w, "data") || !strcmp(w, "full")) && t &&
+       (!strcmp(t, "socket") || !strcmp(t, "http") || !strcmp(t, "auto")) &&
+       cJSON_IsBool(forward) && cJSON_IsBool(git) && team_n > 0 &&
+       (size_t)team_n < sizeof(team_token) && strstr(wire, team_token);
+   cJSON_Delete(root);
+   return valid;
+}
+
+static kb_management_read_result_t runtime_read(void *unused, const kb_principal_t *actor,
+                                                int64_t team_id, const char *server_id,
+                                                server_mgmt_read_selector_t selector, char *out,
+                                                size_t cap)
+{
+   (void)unused;
+   const char *selector_name = server_mgmt_read_selector_name(selector);
+   const char *purpose = server_mgmt_read_selector_purpose(selector);
+   if (!actor || !actor->authenticated || team_id < 1 || !server_id || !selector_name || !purpose ||
+       !out || cap < 2)
+      return KB_MANAGEMENT_READ_INVALID;
+   out[0] = 0;
+   kb_management_cert_lifecycle_t *lifecycle = NULL;
+   kb_management_health_server_config_t server_cfg = {0};
+   kb_mgmt_status_client_config_t authority = {0};
+   kb_mgmt_token_authority_client_config_t token = {0};
+   char status_key_id[65], token_issuer[256], installation[33];
+   unsigned char status_public_key[32];
+   int ttl = 0;
+   pthread_mutex_lock(&runtime.mutex);
+   if ((runtime.state != KB_MANAGEMENT_RUNTIME_READY &&
+        runtime.state != KB_MANAGEMENT_RUNTIME_READY_DEGRADED) ||
+       !runtime.lifecycle)
+   {
+      pthread_mutex_unlock(&runtime.mutex);
+      return KB_MANAGEMENT_READ_UNAVAILABLE;
+   }
+   lifecycle = runtime.lifecycle;
+   server_cfg.server_ca_pem = runtime.server_ca;
+   authority.endpoint = runtime.status_endpoint;
+   authority.ca_pem = runtime.status_ca;
+   authority.leaf_pin = runtime.status_leaf_pin;
+   authority.secondary_leaf_pin =
+       runtime.status_secondary_leaf_pin[0] ? runtime.status_secondary_leaf_pin : NULL;
+   token.socket_path = runtime.token_socket;
+   token.socket_gid = runtime.token_socket_gid;
+   token.socket_mode = 0660;
+   token.timeout_ms = KB_MGMT_TOKEN_AUTHORITY_IO_TIMEOUT_MS;
+   memcpy(status_key_id, runtime.status_key_id, sizeof(status_key_id));
+   memcpy(status_public_key, runtime.status_public_key, sizeof(status_public_key));
+   memcpy(token_issuer, runtime.token_issuer, sizeof(token_issuer));
+   memcpy(installation, runtime.installation_id, sizeof(installation));
+   ttl = runtime.token_ttl_seconds;
+   pthread_mutex_unlock(&runtime.mutex);
+
+   db2_server_snapshot_t snapshot = {0};
+   kb_management_cert_bundle_t bundle = {0};
+   kb_management_cert_active_t active = {0};
+   db2_management_read_intent_t intent = {0};
+   kb_mgmt_token_authority_output_t bearer = {0};
+   unsigned char nonce[32] = {0};
+   char challenge[512] = {0}, staple[KB_MGMT_STATUS_JSON_MAX + 1] = {0};
+   char status_request[1024] = {0};
+   char headers[KB_MGMT_TOKEN_WIRE_MAX + KB_MGMT_STATUS_JSON_MAX + 96] = {0};
+   char *server_response = NULL;
+   void *session = NULL;
+   int loaded = 0, http_status = 0;
+   kb_management_read_result_t result = KB_MANAGEMENT_READ_UNAVAILABLE;
+   uint64_t mono = monotonic_millis(NULL);
+   uint64_t deadline = mono > UINT64_MAX - 15000 ? UINT64_MAX : mono + 15000;
+   kb_management_health_result_t hr =
+       kb_management_health_snapshot_primary(NULL, actor, team_id, server_id, &snapshot);
+   if (hr != KB_MANAGEMENT_HEALTH_OK)
+   {
+      result = hr == KB_MANAGEMENT_HEALTH_NOT_FOUND ? KB_MANAGEMENT_READ_NOT_FOUND
+               : hr == KB_MANAGEMENT_HEALTH_DENIED  ? KB_MANAGEMENT_READ_DENIED
+                                                    : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   loaded = 1;
+   if (kb_management_health_bundle_active(lifecycle, &bundle, &active) != KB_MANAGEMENT_HEALTH_OK)
+      goto done;
+   if (kb_management_health_server_open_production(&server_cfg, &snapshot, &bundle, deadline,
+                                                   &session) != KB_MANAGEMENT_HEALTH_OK)
+      goto done;
+   const char *challenge_path = selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+                                    ? "/v1/management/read/challenge"
+                                    : "/v1/management/read/config/challenge";
+   if (kb_management_action_server_request_production(
+           NULL, session, "POST", challenge_path, "", NULL, deadline, challenge, sizeof(challenge),
+           &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE ||
+       http_status != 200)
+      goto done;
+   uint64_t expires = 0, now = wall_seconds(NULL);
+   if (kb_management_read_challenge_decode(challenge, strlen(challenge), purpose, nonce,
+                                           &expires) ||
+       expires <= now || expires - now > 15)
+   {
+      result = KB_MANAGEMENT_READ_INTEGRITY;
+      goto done;
+   }
+   uint64_t challenge_now = monotonic_millis(NULL);
+   uint64_t challenge_deadline = challenge_now + (expires - now) * 1000;
+   if (challenge_deadline < deadline)
+      deadline = challenge_deadline;
+   char external_path[256];
+   if (server_mgmt_read_selector_path(selector, server_id, external_path, sizeof(external_path)) <
+       0)
+      goto done;
+   int64_t publication_generation = 0;
+   db2_management_read_result_t generation_result =
+       db2_management_read_publication_generation(&publication_generation);
+   if (generation_result != DB2_MANAGEMENT_READ_OK)
+   {
+      result = generation_result == DB2_MANAGEMENT_READ_DENIED ? KB_MANAGEMENT_READ_DENIED
+               : generation_result == DB2_MANAGEMENT_READ_INTEGRITY
+                   ? KB_MANAGEMENT_READ_INTEGRITY
+                   : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   server_mgmt_read_digest_input_t digest_input = {.server_id = server_id,
+                                                   .team_id = team_id,
+                                                   .nonce = nonce,
+                                                   .kb_issuer = active.issuer,
+                                                   .kb_serial = active.serial_norm,
+                                                   .server_issuer = snapshot.management_issuer,
+                                                   .server_serial = snapshot.management_serial_norm,
+                                                   .revocation_generation =
+                                                       snapshot.revocation_generation,
+                                                   .publication_generation = publication_generation,
+                                                   .selector = selector};
+   char digest[65];
+   if (server_mgmt_read_digest(&digest_input, digest))
+      goto done;
+   db2_management_read_result_t jr =
+       db2_management_read_intent_start(actor, team_id, server_id, selector, external_path, nonce,
+                                        digest, token_issuer, installation, ttl, &intent);
+   if (jr != DB2_MANAGEMENT_READ_OK)
+   {
+      result = jr == DB2_MANAGEMENT_READ_DENIED      ? KB_MANAGEMENT_READ_DENIED
+               : jr == DB2_MANAGEMENT_READ_CONFLICT  ? KB_MANAGEMENT_READ_CONFLICT
+               : jr == DB2_MANAGEMENT_READ_INTEGRITY ? KB_MANAGEMENT_READ_INTEGRITY
+                                                     : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   char active_fp[65];
+   hex32_runtime(active.fingerprint, active_fp);
+   if (!read_snapshot_matches(&snapshot, &intent) || strcmp(active.installation_id, installation) ||
+       strcmp(active.issuer, intent.local_cert_issuer) ||
+       strcmp(active.serial_norm, intent.local_cert_serial_norm) ||
+       strcmp(active_fp, intent.local_cert_fingerprint) || strcmp(digest, intent.request_sha256) ||
+       intent.publication_generation != publication_generation)
+   {
+      result = KB_MANAGEMENT_READ_INTEGRITY;
+      goto done;
+   }
+   if (monotonic_millis(NULL) >= deadline)
+      goto done;
+   kb_mgmt_token_authority_ipc_result_t token_result =
+       kb_mgmt_token_authority_client_issue(&token, intent.correlation_id, intent.jti, &bearer);
+   if (token_result != KB_MGMT_TOKEN_AUTHORITY_IPC_OK)
+   {
+      result = token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_DENIED ? KB_MANAGEMENT_READ_DENIED
+               : token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_CONFLICT ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_EXPIRED ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_ALREADY_USED
+                   ? KB_MANAGEMENT_READ_CONFLICT
+               : token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_INVALID ||
+                       token_result == KB_MGMT_TOKEN_AUTHORITY_IPC_INTEGRITY
+                   ? KB_MANAGEMENT_READ_INTEGRITY
+                   : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   char encoded[44];
+   nonce64_runtime(nonce, encoded);
+   int n = snprintf(status_request, sizeof(status_request),
+                    "{\"nonce\":\"%s\",\"target\":\"%s\",\"target_mgmt_fp\":\"%s\","
+                    "\"purpose\":\"%s\"}",
+                    encoded, server_id, intent.target_mgmt_fingerprint, purpose);
+   if (n < 0 || (size_t)n >= sizeof(status_request))
+      goto done;
+   kb_management_health_result_t status_result =
+       kb_mgmt_status_client_adapter(&authority, &bundle, status_request, (size_t)n, deadline,
+                                     staple, sizeof(staple), &http_status);
+   if (status_result != KB_MANAGEMENT_HEALTH_OK)
+      goto done;
+   if (http_status != 200 || !read_status_matches(staple, nonce, &active, &intent, status_key_id,
+                                                  status_public_key, wall_seconds(NULL), purpose))
+   {
+      result = KB_MANAGEMENT_READ_INTEGRITY;
+      goto done;
+   }
+   db2_server_snapshot_t current = {0};
+   hr = kb_management_health_snapshot_primary(NULL, actor, team_id, server_id, &current);
+   if (hr != KB_MANAGEMENT_HEALTH_OK || !read_snapshot_matches(&current, &intent) ||
+       strcmp(current.endpoint, snapshot.endpoint))
+   {
+      result = hr == KB_MANAGEMENT_HEALTH_OK ? KB_MANAGEMENT_READ_INTEGRITY
+                                             : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   if (monotonic_millis(NULL) >= deadline)
+      goto done;
+   n = snprintf(headers, sizeof(headers),
+                "Authorization: Bearer %s\r\nX-Aimee-Management-Status: %s\r\n", bearer.jwt,
+                staple);
+   if (n < 0 || (size_t)n >= sizeof(headers))
+      goto done;
+   server_response = calloc(32769, 1);
+   if (!server_response)
+      goto done;
+   const char *server_path = selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+                                 ? "/v1/management/read/agents"
+                                 : "/v1/management/read/config";
+   if (kb_management_action_server_request_production(
+           NULL, session, "GET", server_path, "", headers, deadline, server_response, 32769,
+           &http_status) != KB_MANAGEMENT_ACTION_SENT_RESPONSE)
+      goto done;
+   size_t response_len = strnlen(server_response, 32769);
+   if (http_status != 200 || response_len == 32769 ||
+       !(selector == SERVER_MGMT_READ_SELECTOR_AGENTS
+             ? read_agents_projection_valid(server_response, response_len, server_id, team_id)
+             : read_config_projection_valid(server_response, response_len, server_id, team_id)))
+   {
+      result = http_status == 403                         ? KB_MANAGEMENT_READ_DENIED
+               : http_status == 409                       ? KB_MANAGEMENT_READ_CONFLICT
+               : http_status == 502 || http_status == 200 ? KB_MANAGEMENT_READ_INTEGRITY
+                                                          : KB_MANAGEMENT_READ_UNAVAILABLE;
+      goto done;
+   }
+   if (response_len >= cap)
+      goto done;
+   memcpy(out, server_response, response_len + 1);
+   result = KB_MANAGEMENT_READ_OK;
+done:
+   if (session)
+      kb_management_health_server_close_production(NULL, session);
+   if (loaded)
+      kb_management_health_bundle_cleanse(NULL, &bundle);
+   OPENSSL_cleanse(&bundle, sizeof(bundle));
+   OPENSSL_cleanse(&active, sizeof(active));
+   OPENSSL_cleanse(&bearer, sizeof(bearer));
+   OPENSSL_cleanse(status_public_key, sizeof(status_public_key));
+   if (server_response)
+   {
+      OPENSSL_cleanse(server_response, 32769);
+      free(server_response);
+   }
+   return result;
+}
+
 unsigned kb_management_runtime_retry_seconds(unsigned retry_index)
 {
    static const unsigned delays[] = {5, 10, 20, 40, 80, 160, 300};
@@ -572,8 +1011,8 @@ int kb_management_runtime_start(void)
 {
    pthread_mutex_lock(&runtime.mutex);
    int inactive = runtime.state == KB_MANAGEMENT_RUNTIME_DISABLED && !runtime.configured &&
-                  !runtime.registered && !runtime.action_registered && !runtime.provider &&
-                  !runtime.lifecycle;
+                  !runtime.registered && !runtime.action_registered && !runtime.read_registered &&
+                  !runtime.provider && !runtime.lifecycle;
    pthread_mutex_unlock(&runtime.mutex);
    if (!inactive)
       return -1;
@@ -656,6 +1095,11 @@ int kb_management_runtime_start(void)
    pthread_mutex_lock(&runtime.mutex);
    runtime.action_registered = 1;
    pthread_mutex_unlock(&runtime.mutex);
+   if (kb_http_servers_read_register(runtime_read, NULL))
+      goto invalid_action_registered;
+   pthread_mutex_lock(&runtime.mutex);
+   runtime.read_registered = 1;
+   pthread_mutex_unlock(&runtime.mutex);
    kb_management_runtime_tick((int64_t)wall_seconds(NULL));
    pthread_mutex_lock(&runtime.mutex);
    int static_failure =
@@ -669,6 +1113,12 @@ int kb_management_runtime_start(void)
    }
    OPENSSL_cleanse(public_hex, sizeof(public_hex));
    return 0;
+
+invalid_action_registered:
+   (void)kb_http_servers_action_unregister(runtime_action, NULL);
+   pthread_mutex_lock(&runtime.mutex);
+   runtime.action_registered = 0;
+   pthread_mutex_unlock(&runtime.mutex);
 
 invalid_registered:
    (void)kb_http_servers_health_unregister(runtime_health, NULL);
@@ -693,9 +1143,13 @@ void kb_management_runtime_stop(void)
    runtime.state = KB_MANAGEMENT_RUNTIME_STOPPING;
    int registered = runtime.registered;
    int action_registered = runtime.action_registered;
+   int read_registered = runtime.read_registered;
    runtime.registered = 0;
    runtime.action_registered = 0;
+   runtime.read_registered = 0;
    pthread_mutex_unlock(&runtime.mutex);
+   if (read_registered)
+      (void)kb_http_servers_read_unregister(runtime_read, NULL);
    if (action_registered)
       (void)kb_http_servers_action_unregister(runtime_action, NULL);
    if (registered)

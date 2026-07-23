@@ -10,7 +10,7 @@ import (
 )
 
 const DirectMaxSeats = 2
-const DefaultDeadlineMS = 360000
+const DefaultDeadlineMS = 600000
 
 type Seat struct {
 	Persona  string
@@ -149,7 +149,7 @@ func directPanel(lenses []string, pins map[string]string) (Panel, error) {
 		name := strings.TrimSpace(pins[persona])
 		seats = append(seats, Seat{Persona: persona, Selector: name})
 	}
-	return Panel{Seats: seats, MinSuccessful: len(seats)}, nil
+	return Panel{Seats: seats, MinSuccessful: len(seats), DeadlineMS: DefaultDeadlineMS}, nil
 }
 
 // ResolveDirect is the explicit no-roundtable path used by compatibility

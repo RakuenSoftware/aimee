@@ -289,8 +289,18 @@ static int rotate(void *v, const char *a, int *b, int *c, char *d, size_t e, cha
    (void)g;
    return -1;
 }
-static const vault_custody_provider_t p = {"kms", &g,       get_kek, rotate,     sealed, unseal,
-                                           seal,  hwm_read, hwm_cas, hwm_verify, NULL};
+static const vault_custody_provider_t p = {
+    .name = "kms",
+    .ctx = &g,
+    .get_kek = get_kek,
+    .rotate = rotate,
+    .is_sealed = sealed,
+    .unseal = unseal,
+    .seal = seal,
+    .hwm_read = hwm_read,
+    .hwm_cas = hwm_cas,
+    .hwm_verify = hwm_verify,
+};
 const vault_custody_provider_t *vault_custody_kms_provider(void)
 {
    return &p;

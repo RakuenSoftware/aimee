@@ -27,11 +27,11 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer = -1;               /* unspecified -> tier decides */
       assert(tool_condense_enabled(&cfg) == 0); /* tier OFF (memset) -> off */
-      cfg.economizer_mode = ECON_MODE_PROOF_GATED;
-      assert(tool_condense_enabled(&cfg) == 0); /* legacy reducer is disconnected */
+      cfg.economizer_mode = ECON_MODE_SAFE;
+      assert(tool_condense_enabled(&cfg) == 0); /* SAFE is lossless only */
       cfg.economizer_mode = ECON_MODE_OFF;      /* off tier kills the lever */
       assert(tool_condense_enabled(&cfg) == 0);
-      cfg.economizer_mode = ECON_MODE_PROOF_GATED;
+      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
       cfg.module_economizer = 0; /* modules.economizer:false hard-kills it */
       assert(tool_condense_enabled(&cfg) == 0);
       assert(tool_condense_enabled(NULL) == 0);
@@ -253,13 +253,17 @@ int main(void)
       free(r4);
    }
 
-   /* ---- legacy live application is permanently disconnected ---- */
+   /* ---- live application is aggressive-only ---- */
    {
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
       cfg.module_economizer = -1;
-      cfg.economizer_mode = ECON_MODE_PROOF_GATED;
+      cfg.economizer_mode = ECON_MODE_SAFE;
       assert(tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL) == NULL);
+      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
+      char *condensed =
+          tool_condense_apply(&cfg, "pytest -q", 0, "one test passed\n", "/tmp", NULL);
+      free(condensed);
    }
 
    /* ---- tc_family_diagnostics (S5) ---- */

@@ -383,7 +383,7 @@ const config_field_t config_fields[] = {
     /* Trigger admission policy. The scheduler reads this from the live config snapshot on
      * every sweep, so GUI changes take effect without a restart. */
     {"trigger.max_concurrent", offsetof(config_t, trigger_max_concurrent), sizeof(int), 0, CFG_INT},
-    /* The only economizer control. Legacy scalar/tier fields are not settable. */
+    /* The only economizer control: off, safe, or aggressive. */
     {"economizer.mode", offsetof(config_t, economizer_mode), sizeof(int), 0, CFG_ECON_MODE,
      RELOAD_HOT},
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the

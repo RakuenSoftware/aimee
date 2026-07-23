@@ -260,12 +260,14 @@ INSERT INTO public.kb_management_jwks_publication_registry
 SELECT 1,1,candidate_id,manifest_sha256,sha256(envelope_bytes),hwm_digest,now() FROM p5c2d_pub;
 DELETE FROM public.kb_management_jwks_publication_permit;
 
-INSERT INTO public.kb_management_action_intent(correlation_id,jti,team_id,actor_identity,
+INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+VALUES(repeat('6',64),repeat('7',64),'action');
+INSERT INTO public.kb_management_action_intent(correlation_id,jti,kind,team_id,actor_identity,
  capability,target_server_id,request_sha256,token_issuer,audience,kid,issued_at,expires_at,
  installation_id,installation_generation,installation_enrollment_id,local_cert_issuer,
  local_cert_serial_norm,local_cert_fingerprint,target_enrollment_id,target_mgmt_issuer,
  target_mgmt_serial_norm,target_mgmt_fingerprint,revocation_generation)
-SELECT repeat('6',64),repeat('7',64),97522,'oidc:https%3A%25issuer:p5c2d-lead',
+SELECT repeat('6',64),repeat('7',64),'action',97522,'oidc:https%3A%25issuer:p5c2d-lead',
  'remote_writes','srv-p5c2d',repeat('8',64),'https://kb.p5c2d.test','srv-p5c2d',wire,
  floor(extract(epoch FROM clock_timestamp()))::BIGINT,
  floor(extract(epoch FROM clock_timestamp()))::BIGINT+60,repeat('3',32),1,97521,

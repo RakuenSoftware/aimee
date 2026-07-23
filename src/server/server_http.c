@@ -54,13 +54,9 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-/* Max request body. The OpenAI/Codex Responses surface sends large bodies — a
- * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
- * conversation/tool-call history (175KB+ and growing), so the cap must be well
- * above the legacy 64KB or large requests are truncated and misparsed. */
-#define SHTTP_MAX_BODY (4 * 1024 * 1024)
-#define SHTTP_BACKLOG  16
-
+#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
+#define SHTTP_BACKLOG             16
 /* ── per-session persona store ──────────────────────────────────────────── */
 
 #define SHTTP_MAX_SESSIONS 256
@@ -1581,7 +1577,9 @@ void handle_conn(int fd, int is_tcp, int is_management)
         (server_http_management_health_route(method, path) &&
          !server_http_management_framing_valid(method, path, buf, management_header_len)) ||
         (server_http_management_action_route(method, path) &&
-         !server_http_management_action_framing_valid(method, path, buf, management_header_len))))
+         !server_http_management_action_framing_valid(method, path, buf, management_header_len)) ||
+        (server_http_management_read_route(method, path) &&
+         !server_http_management_read_framing_valid(method, path, buf, management_header_len))))
    {
       send_response(fd, 400, "{\"error\":\"invalid management request framing\"}", request_id);
       return;
@@ -1916,22 +1914,27 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
    }
-
-   /* Body via Content-Length (read remainder after the header block). Header
-    * names are case-insensitive (RFC 7230 §3.2): clients such as the Codex CLI
-    * (reqwest/hyper) send a lowercase `content-length`, so match it via the
-    * case-insensitive header lookup rather than a literal strstr — otherwise the
-    * body is never read and large POSTs misparse as empty. */
    char *body = NULL;
    int body_len = 0;
    char clbuf[32] = "";
    if (http_header(buf, "Content-Length", clbuf, sizeof(clbuf)))
    {
-      body_len = atoi(clbuf);
-      if (body_len < 0)
-         body_len = 0;
-      if (body_len > SHTTP_MAX_BODY)
-         body_len = SHTTP_MAX_BODY;
+      errno = 0;
+      char *clend = NULL;
+      long declared = strtol(clbuf, &clend, 10);
+      int route_limit =
+          !strcmp(path, "/v1/roundtable/review") ? SHTTP_MAX_ROUNDTABLE_BODY : SHTTP_MAX_BODY;
+      int invalid = errno == ERANGE || clend == clbuf || *clend != '\0' || declared < 0;
+      if (invalid || declared > route_limit)
+      {
+         server_http_keepalive_set(0);
+         send_response(fd, invalid ? 400 : 413,
+                       invalid ? "{\"error\":\"invalid content length\"}"
+                               : "{\"error\":\"request body exceeds route limit\"}",
+                       request_id);
+         return;
+      }
+      body_len = (int)declared;
       body = malloc((size_t)body_len + 1);
       if (body)
       {

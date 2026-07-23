@@ -208,7 +208,8 @@ static void test_db2_sqlite_rewrap_failure_provenance_migration(void)
    db1_apply_pragmas(db, DB_MODE_CLI);
    assert(sqlite3_exec(db,
                        "CREATE TABLE kb_vault_rewrap_operation ("
-                       " operation_id TEXT PRIMARY KEY, state TEXT NOT NULL)",
+                       " operation_id TEXT PRIMARY KEY, state TEXT NOT NULL,"
+                       " fencing_token INTEGER NOT NULL)",
                        NULL, NULL, NULL) == SQLITE_OK);
    assert(!sqlite_column_exists(db, "kb_vault_rewrap_operation", "failure_from_state"));
    char err[512] = {0};

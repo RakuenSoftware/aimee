@@ -2475,7 +2475,8 @@ CREATE TABLE IF NOT EXISTS kb_vault_control (
   seal_epoch       BIGINT NOT NULL DEFAULT 1 CHECK (seal_epoch > 0),
   maintenance_kind TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_kind) <= 64),
   maintenance_id   TEXT NOT NULL DEFAULT '' CHECK (char_length(maintenance_id) <= 200),
-  fencing_token    BIGINT NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  fencing_token    BIGINT NOT NULL DEFAULT 1 CHECK (fencing_token > 0),
+  last_opened_rewrap_fence BIGINT NOT NULL DEFAULT 0,
   updated_at       TEXT NOT NULL DEFAULT (pg_now_text()),
   CHECK ((maintenance_kind = '') = (maintenance_id = '')),
   CHECK (sealed OR (maintenance_kind = '' AND maintenance_id = ''))
@@ -3551,6 +3552,245 @@ DROP INDEX IF EXISTS idx_kb_vault_rewrap_one_active;
 CREATE UNIQUE INDEX idx_kb_vault_rewrap_one_active
   ON kb_vault_rewrap_operation((true))
   WHERE state NOT IN ('aborted','recovery_required','completed');
+
+-- P7-reseal-d3a: reserve a durable acknowledgement marker before an operator
+-- mutation exists.  The migration deliberately refuses to guess whether open
+-- control means that older terminal work was safely finalized.
+DO $p7_d3a_marker_migration$
+DECLARE
+  c RECORD;
+  v_duplicate BIGINT;
+  v_obligations BIGINT;
+  v_active BIGINT;
+  v_max_fence BIGINT;
+  v_marker BIGINT;
+  v_marker_type OID;
+  v_marker_notnull BOOLEAN;
+  v_marker_nulls BIGINT;
+  v_index_ok BOOLEAN;
+  v_relevant public.kb_vault_rewrap_operation%ROWTYPE;
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(-7046029254386353131::BIGINT);
+  SELECT a.atttypid,a.attnotnull INTO v_marker_type,v_marker_notnull
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid='public.kb_vault_control'::pg_catalog.regclass
+     AND a.attname='last_opened_rewrap_fence' AND NOT a.attisdropped;
+  IF FOUND THEN
+    IF v_marker_type<>'pg_catalog.int8'::pg_catalog.regtype THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    SELECT count(*) INTO v_marker_nulls FROM public.kb_vault_control
+     WHERE last_opened_rewrap_fence IS NULL;
+    IF v_marker_nulls<>0 THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    -- A type-correct partial install with no NULL data is safe to normalize.
+    ALTER TABLE public.kb_vault_control
+      ALTER COLUMN last_opened_rewrap_fence SET DEFAULT 0;
+    ALTER TABLE public.kb_vault_control
+      ALTER COLUMN last_opened_rewrap_fence SET NOT NULL;
+  ELSE
+    ALTER TABLE public.kb_vault_control
+      ADD COLUMN last_opened_rewrap_fence BIGINT NOT NULL DEFAULT 0;
+  END IF;
+  -- The post-D3a control fence begins at one.  Normalize a valid legacy or
+  -- partial install transactionally so future singleton restoration cannot
+  -- recreate the retired zero-fence shape.
+  ALTER TABLE public.kb_vault_control
+    ALTER COLUMN fencing_token SET DEFAULT 1;
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1 FOR UPDATE;
+
+  SELECT count(*) INTO v_duplicate FROM (
+    SELECT o.fencing_token FROM public.kb_vault_rewrap_operation o
+     GROUP BY o.fencing_token HAVING count(*)<>1
+  ) duplicates;
+  SELECT count(*) INTO v_obligations FROM public.kb_vault_rewrap_operation o
+   WHERE o.state IN ('completed','recovery_required')
+     AND o.fencing_token>c.last_opened_rewrap_fence;
+  SELECT count(*) INTO v_active FROM public.kb_vault_rewrap_operation o
+   WHERE o.state NOT IN ('aborted','recovery_required','completed');
+  SELECT COALESCE(max(o.fencing_token),0) INTO v_max_fence
+    FROM public.kb_vault_rewrap_operation o;
+  SELECT count(*) INTO v_marker FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token=c.last_opened_rewrap_fence AND o.state='completed';
+
+  IF v_duplicate<>0 OR v_active>1 OR v_max_fence>c.fencing_token OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE octet_length(o.actor) NOT BETWEEN 1 AND 575 OR
+                    octet_length(o.request_id) NOT BETWEEN 1 AND 200 OR
+                    o.actor ~ '[[:cntrl:]]' OR o.request_id ~ '[[:cntrl:]]') OR
+     c.last_opened_rewrap_fence<0 OR c.last_opened_rewrap_fence>c.fencing_token OR
+     (c.last_opened_rewrap_fence=0 AND v_marker<>0) OR
+     (c.last_opened_rewrap_fence>0 AND v_marker<>1) OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE o.state='recovery_required'
+                AND o.fencing_token<=c.last_opened_rewrap_fence) OR
+     (NOT c.sealed AND c.last_opened_rewrap_fence=0 AND v_obligations<>0) OR
+     (v_obligations>1) OR
+     (v_obligations=1 AND EXISTS (
+       SELECT 1 FROM public.kb_vault_rewrap_operation obligation
+        JOIN public.kb_vault_rewrap_operation later
+          ON later.fencing_token>obligation.fencing_token
+       WHERE obligation.state IN ('completed','recovery_required'))) THEN
+    RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED'
+      USING ERRCODE='55000';
+  END IF;
+  IF v_obligations=1 THEN
+    SELECT * INTO STRICT v_relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>c.last_opened_rewrap_fence
+       AND o.state IN ('completed','recovery_required');
+    IF v_active<>0 OR v_relevant.fencing_token<>v_max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'' OR c.maintenance_id<>'' OR
+       c.fencing_token<>v_relevant.fencing_token+1 OR
+       c.seal_epoch<>v_relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  ELSIF v_active=1 THEN
+    SELECT * INTO STRICT v_relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.state NOT IN ('aborted','recovery_required','completed');
+    IF v_relevant.fencing_token<=c.last_opened_rewrap_fence OR
+       v_relevant.fencing_token<>v_max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'tpm2-reseal' OR c.maintenance_id<>v_relevant.operation_id OR
+       c.fencing_token<>v_relevant.fencing_token OR c.seal_epoch<>v_relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  ELSIF c.maintenance_kind<>'' OR c.maintenance_id<>'' THEN
+    RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+  END IF;
+  IF c.fencing_token=0 THEN
+    IF v_max_fence<>0 THEN
+      RAISE EXCEPTION 'P7_D3A_MARKER_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+    UPDATE public.kb_vault_control SET fencing_token=1 WHERE singleton=1;
+  END IF;
+
+  ALTER TABLE public.kb_vault_control
+    DROP CONSTRAINT IF EXISTS kb_vault_control_fencing_token_check;
+  ALTER TABLE public.kb_vault_control
+    ADD CONSTRAINT kb_vault_control_fencing_token_check CHECK (fencing_token > 0);
+  ALTER TABLE public.kb_vault_control
+    DROP CONSTRAINT IF EXISTS kb_vault_control_last_opened_rewrap_fence_check;
+  ALTER TABLE public.kb_vault_control
+    ADD CONSTRAINT kb_vault_control_last_opened_rewrap_fence_check CHECK
+      (last_opened_rewrap_fence >= 0 AND last_opened_rewrap_fence <= fencing_token);
+
+  IF pg_catalog.to_regclass('public.idx_kb_vault_rewrap_fencing_token') IS NULL THEN
+    CREATE UNIQUE INDEX idx_kb_vault_rewrap_fencing_token
+      ON public.kb_vault_rewrap_operation(fencing_token);
+  ELSE
+    SELECT i.indisunique AND i.indisvalid AND i.indisready AND i.indpred IS NULL AND
+           i.indexprs IS NULL AND i.indnkeyatts=1 AND i.indnatts=1 AND
+           i.indkey[0]=a.attnum AND am.amname='btree'
+      INTO v_index_ok
+      FROM pg_catalog.pg_class idx
+      JOIN pg_catalog.pg_namespace ni ON ni.oid=idx.relnamespace
+      JOIN pg_catalog.pg_index i ON i.indexrelid=idx.oid
+      JOIN pg_catalog.pg_class tbl ON tbl.oid=i.indrelid
+      JOIN pg_catalog.pg_namespace nt ON nt.oid=tbl.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid=tbl.oid AND a.attname='fencing_token'
+      JOIN pg_catalog.pg_am am ON am.oid=idx.relam
+     WHERE ni.nspname='public' AND idx.relname='idx_kb_vault_rewrap_fencing_token'
+       AND nt.nspname='public' AND tbl.relname='kb_vault_rewrap_operation';
+    IF v_index_ok IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'P7_D3A_FENCE_INDEX_MIGRATION_REQUIRED' USING ERRCODE='55000';
+    END IF;
+  END IF;
+END
+$p7_d3a_marker_migration$;
+
+-- The only D3a database facade.  It returns a closed, secret-free control and
+-- operation tuple and rejects history that could hide a recovery obligation.
+-- Keep it out of public so schema USAGE is itself part of the capability.  The
+-- hardened grant phase pins the schema/function owner and future-function
+-- defaults; this immediate revoke also closes the schema-only/dev install.
+CREATE SCHEMA IF NOT EXISTS aimee_kb_vault_orchestrator_api;
+REVOKE ALL ON SCHEMA aimee_kb_vault_orchestrator_api FROM PUBLIC;
+CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()
+RETURNS TABLE(seal_epoch BIGINT,sealed BOOLEAN,control_fence BIGINT,
+  last_opened_fence BIGINT,operation_id TEXT,operation_state TEXT,
+  operation_seal_epoch BIGINT,operation_fence BIGINT,old_generation BIGINT,
+  new_generation BIGINT,failure_class TEXT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE
+  c public.kb_vault_control%ROWTYPE;
+  relevant public.kb_vault_rewrap_operation%ROWTYPE;
+  marker_rows BIGINT; obligation_rows BIGINT; active_rows BIGINT;
+  max_fence BIGINT; greater_rows BIGINT;
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT * INTO STRICT c FROM public.kb_vault_control x WHERE x.singleton=1 FOR SHARE;
+
+  IF c.seal_epoch<1 OR c.fencing_token<1 OR c.last_opened_rewrap_fence<0 OR
+     c.last_opened_rewrap_fence>c.fencing_token OR
+     ((c.maintenance_kind='')<>(c.maintenance_id='')) OR
+     (NOT c.sealed AND (c.maintenance_kind<>'' OR c.maintenance_id<>'')) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE octet_length(o.actor) NOT BETWEEN 1 AND 575 OR
+                    octet_length(o.request_id) NOT BETWEEN 1 AND 200 OR
+                    o.actor ~ '[[:cntrl:]]' OR o.request_id ~ '[[:cntrl:]]') THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  SELECT count(*) INTO marker_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token=c.last_opened_rewrap_fence AND o.state='completed';
+  IF (c.last_opened_rewrap_fence=0 AND marker_rows<>0) OR
+     (c.last_opened_rewrap_fence>0 AND marker_rows<>1) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  SELECT count(*) INTO obligation_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.fencing_token>c.last_opened_rewrap_fence
+     AND o.state IN ('completed','recovery_required');
+  SELECT count(*) INTO active_rows FROM public.kb_vault_rewrap_operation o
+   WHERE o.state NOT IN ('aborted','recovery_required','completed');
+  SELECT COALESCE(max(o.fencing_token),0) INTO max_fence
+    FROM public.kb_vault_rewrap_operation o;
+  IF max_fence>c.fencing_token OR obligation_rows>1 OR active_rows>1 OR
+     EXISTS (SELECT 1 FROM public.kb_vault_rewrap_operation o
+              WHERE o.state='recovery_required'
+                AND o.fencing_token<=c.last_opened_rewrap_fence) THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  IF obligation_rows=1 THEN
+    SELECT * INTO STRICT relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>c.last_opened_rewrap_fence
+       AND o.state IN ('completed','recovery_required');
+    SELECT count(*) INTO greater_rows FROM public.kb_vault_rewrap_operation o
+     WHERE o.fencing_token>relevant.fencing_token;
+    IF greater_rows<>0 OR active_rows<>0 OR NOT c.sealed OR
+       c.maintenance_kind<>'' OR c.maintenance_id<>'' OR
+       c.fencing_token<>relevant.fencing_token+1 OR
+       c.seal_epoch<>relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+    END IF;
+  ELSIF active_rows=1 THEN
+    SELECT * INTO STRICT relevant FROM public.kb_vault_rewrap_operation o
+     WHERE o.state NOT IN ('aborted','recovery_required','completed');
+    IF relevant.fencing_token<=c.last_opened_rewrap_fence OR
+       relevant.fencing_token<>max_fence OR NOT c.sealed OR
+       c.maintenance_kind<>'tpm2-reseal' OR c.maintenance_id<>relevant.operation_id OR
+       c.fencing_token<>relevant.fencing_token OR c.seal_epoch<>relevant.seal_epoch THEN
+      RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+    END IF;
+  ELSIF c.maintenance_kind<>'' OR c.maintenance_id<>'' THEN
+    RAISE EXCEPTION 'P7_D3A_STATUS_INTEGRITY' USING ERRCODE='55000';
+  END IF;
+
+  RETURN QUERY SELECT c.seal_epoch,c.sealed,c.fencing_token,c.last_opened_rewrap_fence,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.operation_id END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.state END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.seal_epoch END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.fencing_token END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.old_generation END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.new_generation END,
+    CASE WHEN relevant.operation_id IS NULL THEN NULL ELSE relevant.failure_class END;
+END
+$$;
+REVOKE ALL ON FUNCTION
+  aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status() FROM PUBLIC;
 
 CREATE TABLE IF NOT EXISTS kb_vault_rewrap_dek_stage (
   operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,
@@ -6506,7 +6746,9 @@ BEGIN
      OR p_serial !~ '^[0-9a-f]{1,128}$'
      OR p_fingerprint !~ '^[0-9a-f]{64}$'
      OR p_target_server !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'
-     OR p_purpose NOT IN ('management.health.v1','management.action.v1') THEN
+     OR p_purpose NOT IN
+       ('management.health.v1','management.action.v1','management.read.v1',
+        'management.read.config.v1') THEN
     RAISE EXCEPTION 'invalid management status input' USING ERRCODE='22023';
   END IF;
   RETURN QUERY SELECT g.generation,r.mgmt_fingerprint
@@ -9681,9 +9923,194 @@ REVOKE ALL ON FUNCTION org_egress_recover(INT) FROM PUBLIC;
 -- either structured table or the audit detail.
 -- ============================================================================
 
+CREATE TABLE IF NOT EXISTS kb_management_token_intent_namespace (
+  correlation_id TEXT NOT NULL CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind IN ('action','read')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(correlation_id),
+  UNIQUE(jti),
+  UNIQUE(correlation_id,jti,kind)
+);
+
+-- P5-D2a: read tokens retain their exact authority state and signed bytes.
+-- The ordinary runtime can create/read through fixed functions only; every
+-- state transition is owned by the isolated token-authority definer.
+CREATE TABLE IF NOT EXISTS kb_management_read_intent (
+  correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
+  jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind='read'),
+  team_id BIGINT NOT NULL REFERENCES kb_team(id),
+  actor_identity TEXT NOT NULL CHECK (char_length(actor_identity) BETWEEN 1 AND 576),
+  selector TEXT NOT NULL CHECK (selector IN ('agents','config')),
+  capability TEXT NOT NULL CHECK (capability='remote_reads'),
+  external_method TEXT NOT NULL CHECK (external_method='GET'),
+  external_path TEXT NOT NULL CHECK (external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$'),
+  challenge_nonce BYTEA NOT NULL CHECK (octet_length(challenge_nonce)=32),
+  target_server_id TEXT NOT NULL CHECK (target_server_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$'),
+  request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[0-9a-f]{64}$'),
+  token_version SMALLINT NOT NULL CHECK (token_version=1),
+  token_issuer TEXT NOT NULL CHECK (char_length(token_issuer) BETWEEN 1 AND 255),
+  audience TEXT NOT NULL CHECK (audience=target_server_id),
+  kid TEXT NOT NULL CHECK (kid ~ '^[A-Za-z0-9._-]{1,64}$'),
+  key_generation BIGINT NOT NULL CHECK (key_generation=2),
+  publication_generation SMALLINT NOT NULL CHECK (publication_generation=1),
+  issued_at BIGINT NOT NULL CHECK (issued_at BETWEEN 0 AND 9007199254740991),
+  expires_at BIGINT NOT NULL CHECK (expires_at>issued_at AND expires_at-issued_at BETWEEN 1 AND 90
+                                    AND expires_at<=9007199254740991),
+  issuance_deadline TIMESTAMPTZ NOT NULL,
+  installation_id TEXT NOT NULL CHECK (installation_id ~ '^[0-9a-f]{32}$'),
+  installation_generation BIGINT NOT NULL CHECK (installation_generation>=1),
+  installation_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  local_cert_issuer TEXT NOT NULL CHECK (char_length(local_cert_issuer) BETWEEN 1 AND 511),
+  local_cert_serial_norm TEXT NOT NULL CHECK (local_cert_serial_norm ~ '^[0-9a-f]{1,79}$'),
+  local_cert_fingerprint TEXT NOT NULL CHECK (local_cert_fingerprint ~ '^[0-9a-f]{64}$'),
+  target_enrollment_id BIGINT NOT NULL REFERENCES kb_enrollments(id),
+  target_mgmt_issuer TEXT NOT NULL CHECK (char_length(target_mgmt_issuer) BETWEEN 1 AND 511),
+  target_mgmt_serial_norm TEXT NOT NULL CHECK (target_mgmt_serial_norm ~ '^[0-9a-f]{1,79}$'),
+  target_mgmt_fingerprint TEXT NOT NULL CHECK (target_mgmt_fingerprint ~ '^[0-9a-f]{64}$'),
+  revocation_generation BIGINT NOT NULL CHECK (revocation_generation>=1),
+  state TEXT NOT NULL CHECK (state IN ('pending','signing','issued','expired')),
+  lease_owner TEXT CHECK (lease_owner IS NULL OR lease_owner ~ '^[0-9a-f]{64}$'),
+  lease_until TIMESTAMPTZ,
+  jwt TEXT CHECK (jwt IS NULL OR octet_length(jwt) BETWEEN 1 AND 8192),
+  jwt_sha256 BYTEA CHECK (jwt_sha256 IS NULL OR octet_length(jwt_sha256)=32),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE(correlation_id,jti),
+  UNIQUE(correlation_id,jti,kind),
+  FOREIGN KEY(correlation_id,jti,kind)
+    REFERENCES kb_management_token_intent_namespace(correlation_id,jti,kind),
+  CHECK (external_path='/v1/servers/'||target_server_id||'/'||selector),
+  CHECK (issuance_deadline>to_timestamp(issued_at) AND
+         issuance_deadline<=to_timestamp(issued_at+15)),
+  CHECK ((state='pending' AND lease_owner IS NULL AND lease_until IS NULL AND
+                         jwt IS NULL AND jwt_sha256 IS NULL) OR
+         (state='signing' AND lease_owner IS NOT NULL AND lease_until IS NOT NULL AND
+                         lease_until<=issuance_deadline AND jwt IS NULL AND jwt_sha256 IS NULL) OR
+         (state='issued' AND lease_owner IS NULL AND lease_until IS NULL AND
+                        jwt IS NOT NULL AND jwt_sha256=sha256(convert_to(jwt,'UTF8'))) OR
+         (state='expired' AND lease_owner IS NULL AND lease_until IS NULL AND
+                         jwt IS NULL AND jwt_sha256 IS NULL))
+);
+
+CREATE TABLE IF NOT EXISTS kb_management_read_key_use (
+  correlation_id TEXT PRIMARY KEY,
+  jti TEXT NOT NULL UNIQUE,
+  team_id BIGINT NOT NULL,
+  actor_identity TEXT NOT NULL,
+  target_server_id TEXT NOT NULL,
+  selector TEXT NOT NULL CHECK (selector IN ('agents','config')),
+  request_sha256 TEXT NOT NULL CHECK (request_sha256 ~ '^[0-9a-f]{64}$'),
+  kid TEXT NOT NULL,
+  key_generation BIGINT NOT NULL CHECK (key_generation=2),
+  publication_generation SMALLINT NOT NULL CHECK (publication_generation=1),
+  jwt_sha256 BYTEA NOT NULL CHECK (octet_length(jwt_sha256)=32),
+  result_status TEXT NOT NULL CHECK (result_status='issued'),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  FOREIGN KEY(correlation_id,jti) REFERENCES kb_management_read_intent(correlation_id,jti)
+);
+
+-- P5-D2b: widen the frozen read authority from agents to the closed config
+-- selector without weakening method/path binding on already-provisioned DBs.
+-- Prior releases used anonymous CHECKs, whose generated names are not a migration
+-- contract. Discover every CHECK that depends on the two widened columns before
+-- installing the canonical named constraints.
+DO $$
+DECLARE constraint_name TEXT;
+BEGIN
+  FOR constraint_name IN
+    SELECT c.conname
+      FROM pg_catalog.pg_constraint c
+     WHERE c.conrelid='public.kb_management_read_intent'::pg_catalog.regclass
+       AND c.contype='c'
+       AND pg_catalog.pg_get_expr(c.conbin,c.conrelid)=ANY(ARRAY[
+         $expr$(selector = 'agents'::text)$expr$,
+         $expr$(selector = ANY (ARRAY['agents'::text, 'config'::text]))$expr$,
+         $expr$(external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/agents$'::text)$expr$,
+         $expr$(external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$'::text)$expr$,
+         $expr$(external_path = (('/v1/servers/'::text || target_server_id) || '/agents'::text))$expr$,
+         $expr$(external_path = ((('/v1/servers/'::text || target_server_id) || '/'::text) || selector))$expr$
+       ])
+  LOOP
+    EXECUTE pg_catalog.format('ALTER TABLE public.kb_management_read_intent DROP CONSTRAINT %I',
+                              constraint_name);
+  END LOOP;
+  FOR constraint_name IN
+    SELECT c.conname
+      FROM pg_catalog.pg_constraint c
+     WHERE c.conrelid='public.kb_management_read_key_use'::pg_catalog.regclass
+       AND c.contype='c'
+       AND pg_catalog.pg_get_expr(c.conbin,c.conrelid)=ANY(ARRAY[
+         $expr$(selector = 'agents'::text)$expr$,
+         $expr$(selector = ANY (ARRAY['agents'::text, 'config'::text]))$expr$
+       ])
+  LOOP
+    EXECUTE pg_catalog.format('ALTER TABLE public.kb_management_read_key_use DROP CONSTRAINT %I',
+                              constraint_name);
+  END LOOP;
+END $$;
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_selector_check
+  CHECK (selector IN ('agents','config'));
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_external_path_check
+  CHECK (external_path ~ '^/v1/servers/[A-Za-z0-9][A-Za-z0-9._-]{0,126}/(agents|config)$');
+ALTER TABLE kb_management_read_intent
+  ADD CONSTRAINT kb_management_read_intent_path_binding_check
+  CHECK (external_path='/v1/servers/'||target_server_id||'/'||selector);
+ALTER TABLE kb_management_read_key_use
+  ADD CONSTRAINT kb_management_read_key_use_selector_check
+  CHECK (selector IN ('agents','config'));
+
+ALTER TABLE kb_management_read_intent ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_read_intent FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_read_key_use ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_read_key_use FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS kb_management_read_intent_authority_only ON kb_management_read_intent;
+CREATE POLICY kb_management_read_intent_authority_only ON kb_management_read_intent
+  USING (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'))
+  WITH CHECK (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'));
+DROP POLICY IF EXISTS kb_management_read_key_use_authority_only ON kb_management_read_key_use;
+CREATE POLICY kb_management_read_key_use_authority_only ON kb_management_read_key_use
+  USING (current_user='aimee_kb_token_authority_definer')
+  WITH CHECK (current_user='aimee_kb_token_authority_definer');
+
+CREATE OR REPLACE FUNCTION kb_management_read_transition_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+DECLARE immutable_old JSONB; immutable_new JSONB;
+BEGIN
+  IF current_user<>'aimee_kb_token_authority_definer' THEN
+    RAISE EXCEPTION 'management read state is authority-owned' USING ERRCODE='42501';
+  END IF;
+  immutable_old:=to_jsonb(OLD)-ARRAY['state','lease_owner','lease_until','jwt','jwt_sha256','updated_at'];
+  immutable_new:=to_jsonb(NEW)-ARRAY['state','lease_owner','lease_until','jwt','jwt_sha256','updated_at'];
+  IF immutable_old IS DISTINCT FROM immutable_new OR NEW.updated_at<=OLD.updated_at OR NOT (
+       (OLD.state='pending' AND NEW.state IN ('signing','expired')) OR
+       (OLD.state='signing' AND NEW.state IN ('signing','issued','expired'))) THEN
+    RAISE EXCEPTION 'invalid management read transition' USING ERRCODE='55000';
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS kb_management_read_transition ON kb_management_read_intent;
+CREATE TRIGGER kb_management_read_transition BEFORE UPDATE ON kb_management_read_intent
+  FOR EACH ROW EXECUTE FUNCTION kb_management_read_transition_guard();
+CREATE OR REPLACE FUNCTION kb_management_read_worm_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $$
+BEGIN
+  RAISE EXCEPTION 'management read intent cannot be removed' USING ERRCODE='55000';
+END $$;
+DROP TRIGGER IF EXISTS kb_management_read_delete_guard ON kb_management_read_intent;
+CREATE TRIGGER kb_management_read_delete_guard BEFORE DELETE OR TRUNCATE ON kb_management_read_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_read_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_read_key_use_worm ON kb_management_read_key_use;
+CREATE TRIGGER kb_management_read_key_use_worm BEFORE UPDATE OR DELETE OR TRUNCATE
+  ON kb_management_read_key_use FOR EACH STATEMENT EXECUTE FUNCTION kb_management_read_worm_guard();
+
 CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   correlation_id TEXT PRIMARY KEY CHECK (correlation_id ~ '^[0-9a-f]{64}$'),
   jti TEXT NOT NULL UNIQUE CHECK (jti ~ '^[0-9a-f]{64}$'),
+  kind TEXT NOT NULL CHECK (kind='action'),
   team_id BIGINT NOT NULL REFERENCES kb_team(id),
   actor_identity TEXT NOT NULL CHECK (char_length(actor_identity) BETWEEN 1 AND 576),
   capability TEXT NOT NULL CHECK (capability='remote_writes'),
@@ -9709,6 +10136,38 @@ CREATE TABLE IF NOT EXISTS kb_management_action_intent (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(correlation_id,team_id)
 );
+
+ALTER TABLE kb_management_action_intent
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'action';
+ALTER TABLE kb_management_action_intent ALTER COLUMN kind DROP DEFAULT;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_kind_check') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_kind_check CHECK (kind='action');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_namespace_tuple_key') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_namespace_tuple_key
+      UNIQUE(correlation_id,jti,kind);
+  END IF;
+END $$;
+INSERT INTO kb_management_token_intent_namespace(correlation_id,jti,kind,created_at)
+  SELECT correlation_id,jti,'action',created_at FROM kb_management_action_intent
+  ON CONFLICT DO NOTHING;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint
+      WHERE conrelid='public.kb_management_action_intent'::pg_catalog.regclass
+        AND conname='kb_management_action_intent_namespace_fk') THEN
+    ALTER TABLE public.kb_management_action_intent
+      ADD CONSTRAINT kb_management_action_intent_namespace_fk
+      FOREIGN KEY(correlation_id,jti,kind)
+      REFERENCES public.kb_management_token_intent_namespace(correlation_id,jti,kind);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS kb_management_action_outcome (
   correlation_id TEXT PRIMARY KEY,
@@ -9741,11 +10200,19 @@ ALTER TABLE kb_management_action_outcome
 
 ALTER TABLE kb_management_action_intent ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_intent FORCE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_token_intent_namespace ENABLE ROW LEVEL SECURITY;
+ALTER TABLE kb_management_token_intent_namespace FORCE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_outcome ENABLE ROW LEVEL SECURITY;
 ALTER TABLE kb_management_action_outcome FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS kb_management_action_intent_owner_only ON kb_management_action_intent;
 CREATE POLICY kb_management_action_intent_owner_only ON kb_management_action_intent
   USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
+DROP POLICY IF EXISTS kb_management_token_intent_namespace_owner_only
+  ON kb_management_token_intent_namespace;
+CREATE POLICY kb_management_token_intent_namespace_owner_only
+  ON kb_management_token_intent_namespace
+  USING (current_user IN ('aimee_kb_owner','aimee_kb_token_authority_definer'))
+  WITH CHECK (current_user='aimee_kb_owner');
 DROP POLICY IF EXISTS kb_management_action_outcome_owner_only ON kb_management_action_outcome;
 CREATE POLICY kb_management_action_outcome_owner_only ON kb_management_action_outcome
   USING (current_user='aimee_kb_owner') WITH CHECK (current_user='aimee_kb_owner');
@@ -9763,6 +10230,16 @@ CREATE TRIGGER kb_management_action_intent_delete_guard BEFORE DELETE ON kb_mana
   FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
 DROP TRIGGER IF EXISTS kb_management_action_intent_truncate_guard ON kb_management_action_intent;
 CREATE TRIGGER kb_management_action_intent_truncate_guard BEFORE TRUNCATE ON kb_management_action_intent
+  FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_token_intent_namespace_update_guard
+  ON kb_management_token_intent_namespace;
+CREATE TRIGGER kb_management_token_intent_namespace_update_guard
+  BEFORE UPDATE OR DELETE ON kb_management_token_intent_namespace
+  FOR EACH ROW EXECUTE FUNCTION kb_management_action_worm_guard();
+DROP TRIGGER IF EXISTS kb_management_token_intent_namespace_truncate_guard
+  ON kb_management_token_intent_namespace;
+CREATE TRIGGER kb_management_token_intent_namespace_truncate_guard
+  BEFORE TRUNCATE ON kb_management_token_intent_namespace
   FOR EACH STATEMENT EXECUTE FUNCTION kb_management_action_worm_guard();
 DROP TRIGGER IF EXISTS kb_management_action_outcome_update_guard ON kb_management_action_outcome;
 CREATE TRIGGER kb_management_action_outcome_update_guard BEFORE UPDATE ON kb_management_action_outcome
@@ -9797,7 +10274,7 @@ DECLARE
   i public.kb_management_instance%ROWTYPE;
   q public.kb_management_instance_issue%ROWTYPE;
   le public.kb_enrollments%ROWTYPE;
-  v_rev BIGINT; v_iat BIGINT; v_detail TEXT;
+  v_rev BIGINT; v_iat BIGINT; v_detail TEXT; v_reserved BIGINT;
 BEGIN
   IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
     RAISE EXCEPTION 'primary required' USING ERRCODE='25006';
@@ -9888,13 +10365,19 @@ BEGIN
   END IF;
 
   v_iat:=pg_catalog.floor(extract(epoch FROM pg_catalog.statement_timestamp()))::BIGINT;
+  INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+    VALUES(p_correlation_id,p_jti,'action') ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS v_reserved=ROW_COUNT;
+  IF v_reserved<>1 THEN
+    RAISE EXCEPTION 'management action namespace conflict' USING ERRCODE='23505';
+  END IF;
   INSERT INTO public.kb_management_action_intent(
-    correlation_id,jti,team_id,actor_identity,capability,target_server_id,request_sha256,
+    correlation_id,jti,kind,team_id,actor_identity,capability,target_server_id,request_sha256,
     token_issuer,audience,kid,issued_at,expires_at,installation_id,installation_generation,
     installation_enrollment_id,local_cert_issuer,local_cert_serial_norm,local_cert_fingerprint,
     target_enrollment_id,target_mgmt_issuer,target_mgmt_serial_norm,target_mgmt_fingerprint,
     revocation_generation)
-  VALUES(p_correlation_id,p_jti,p_team_id,v_actor,p_capability,p_target_server_id,
+  VALUES(p_correlation_id,p_jti,'action',p_team_id,v_actor,p_capability,p_target_server_id,
     p_request_sha256,p_token_issuer,p_target_server_id,p_kid,v_iat,v_iat+p_ttl_seconds,
     i.installation_id,i.current_generation,le.id,le.cert_issuer,le.cert_serial_norm,le.fingerprint,
     te.id,r.mgmt_issuer,r.mgmt_serial_norm,r.mgmt_fingerprint,v_rev)
@@ -9915,6 +10398,491 @@ BEGIN
     a.target_enrollment_id,a.target_mgmt_issuer,a.target_mgmt_serial_norm,
     a.target_mgmt_fingerprint,a.revocation_generation,
     extract(epoch FROM a.created_at)::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_publication_generation()
+RETURNS SMALLINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  pc public.kb_management_jwks_publication_candidate%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE;
+  v_now BIGINT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'management read primary required' USING ERRCODE='25006';
+  END IF;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO pc FROM public.kb_management_jwks_publication_candidate x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x
+    WHERE x.root_kind='token' FOR SHARE;
+  v_now:=pg_catalog.floor(extract(epoch FROM pg_catalog.clock_timestamp()))::BIGINT;
+  IF pr.singleton IS NULL OR pr.current_generation IS NULL OR pr.current_generation<1 OR
+     pg.generation IS NULL OR pc.generation IS NULL OR
+     pg.generation<>pr.current_generation OR pc.generation<>pr.current_generation OR
+     pr.candidate_id<>pg.candidate_id OR pr.candidate_id<>pc.candidate_id OR pc.phase<>'final' OR
+     pr.manifest_sha256<>pg.manifest_sha256 OR pr.manifest_sha256<>pc.manifest_sha256 OR
+     pr.envelope_sha256<>pg.envelope_sha256 OR pr.envelope_sha256<>pc.envelope_sha256 OR
+     pr.hwm2_attestation_digest<>pg.hwm2_attestation_digest OR
+     pr.hwm2_attestation_digest<>pc.hwm2_attestation_digest OR
+     pg.valid_from>v_now OR v_now>=pg.valid_until OR pc.valid_from<>pg.valid_from OR
+     pc.valid_until<>pg.valid_until OR tr.root_kind IS NULL OR NOT tr.enabled OR
+     tr.current_version<>2 OR tr.wire_id<>pg.token_wire_id OR
+     tr.public_digest<>pg.token_public_digest OR tr.jwk_digest<>pg.token_jwk_digest OR
+     pc.token_wire_id<>pg.token_wire_id OR pc.token_public_digest<>pg.token_public_digest OR
+     pc.token_jwk_digest<>pg.token_jwk_digest THEN
+    RAISE EXCEPTION 'management read publication integrity failure' USING ERRCODE='55000';
+  END IF;
+  RETURN pr.current_generation;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_intent_start(
+  p_correlation_id TEXT,p_jti TEXT,p_team_id BIGINT,p_target_server_id TEXT,
+  p_selector TEXT,p_external_method TEXT,p_external_path TEXT,p_challenge_nonce BYTEA,
+  p_request_sha256 TEXT,p_token_issuer TEXT,p_ttl_seconds INTEGER,p_installation_id TEXT
+) RETURNS TABLE(correlation_id TEXT,jti TEXT,team_id BIGINT,actor_identity TEXT,
+  target_server_id TEXT,request_sha256 TEXT,kid TEXT,issued_at BIGINT,expires_at BIGINT,
+  issuance_deadline_epoch BIGINT,local_cert_issuer TEXT,local_cert_serial_norm TEXT,
+  local_cert_fingerprint TEXT,target_mgmt_issuer TEXT,target_mgmt_serial_norm TEXT,
+  target_mgmt_fingerprint TEXT,revocation_generation BIGINT,publication_generation SMALLINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  v_actor TEXT:=pg_catalog.current_setting('aimee.principal',true);
+  v_team TEXT:=pg_catalog.current_setting('aimee.team',true);
+  r public.kb_server_registry%ROWTYPE;
+  te public.kb_enrollments%ROWTYPE;
+  i public.kb_management_instance%ROWTYPE;
+  q public.kb_management_instance_issue%ROWTYPE;
+  le public.kb_enrollments%ROWTYPE;
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE;
+  a public.kb_management_read_intent%ROWTYPE;
+  v_rev BIGINT; v_iat BIGINT; v_reserved BIGINT; v_now TIMESTAMPTZ; v_detail TEXT;
+BEGIN
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'management read primary required' USING ERRCODE='25006';
+  END IF;
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR p_team_id IS NULL OR
+     p_target_server_id IS NULL OR p_selector IS NULL OR p_external_method IS NULL OR
+     p_external_path IS NULL OR p_challenge_nonce IS NULL OR p_request_sha256 IS NULL OR
+     p_token_issuer IS NULL OR p_ttl_seconds IS NULL OR p_installation_id IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR p_team_id<1 OR
+     p_target_server_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' OR
+     p_selector NOT IN ('agents','config') OR p_external_method<>'GET' OR
+     p_external_path<>'/v1/servers/'||p_target_server_id||'/'||p_selector OR
+     octet_length(p_challenge_nonce)<>32 OR p_request_sha256 !~ '^[0-9a-f]{64}$' OR
+     char_length(p_token_issuer) NOT BETWEEN 1 AND 255 OR p_token_issuer ~ '[[:cntrl:]]' OR
+     p_ttl_seconds NOT BETWEEN 1 AND 90 OR p_installation_id !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'invalid management read intent' USING ERRCODE='22023';
+  END IF;
+  IF v_actor IS NULL OR char_length(v_actor) NOT BETWEEN 1 AND 576 OR
+     v_actor ~ '[[:cntrl:]]' OR v_team IS NULL OR v_team !~ '^[1-9][0-9]{0,18}$' OR
+     v_team::NUMERIC<>p_team_id::NUMERIC THEN
+    RAISE EXCEPTION 'management read scope denied' USING ERRCODE='42501';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM public.kb_team_membership m
+       WHERE m.identity_key=v_actor AND m.team=p_team_id) OR
+     NOT (EXISTS(SELECT 1 FROM public.kb_admin_grant g
+       WHERE g.identity_key=v_actor AND g.revoked_at='') OR
+          EXISTS(SELECT 1 FROM public.kb_team_lead l
+       WHERE l.identity_key=v_actor AND l.team=p_team_id AND l.revoked_at='')) THEN
+    RAISE EXCEPTION 'management read not authorized' USING ERRCODE='42501';
+  END IF;
+
+  -- Global acquisition order matches the action/token authority.
+  SELECT x.* INTO r FROM public.kb_server_registry x
+    WHERE x.server_id=p_target_server_id FOR SHARE;
+  SELECT x.* INTO i FROM public.kb_management_instance x
+    WHERE x.installation_id=p_installation_id FOR SHARE;
+  IF r.server_id IS NULL OR r.team_id<>p_team_id OR r.status<>'active' OR
+     i.installation_id IS NULL OR i.team_id<>p_team_id OR i.state<>'active' OR
+     i.current_generation<1 OR i.current_enrollment_id IS NULL THEN
+    RAISE EXCEPTION 'management read authority denied' USING ERRCODE='28000';
+  END IF;
+  SELECT x.* INTO te FROM public.kb_enrollments x
+    WHERE x.scope='p5-server-management' AND x.cert_issuer=r.mgmt_issuer AND
+      x.cert_serial_norm=r.mgmt_serial_norm AND x.fingerprint=r.mgmt_fingerprint FOR SHARE;
+  SELECT x.* INTO q FROM public.kb_management_instance_issue x
+    WHERE x.installation_id=i.installation_id AND x.generation=i.current_generation FOR SHARE;
+  SELECT x.* INTO le FROM public.kb_enrollments x WHERE x.id=i.current_enrollment_id FOR SHARE;
+  SELECT x.generation INTO v_rev FROM public.kb_cert_revocation_generation x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x WHERE x.root_kind='token' FOR SHARE;
+  v_now:=pg_catalog.clock_timestamp();
+  IF te.id IS NULL OR te.state<>'active' OR te.revoked_at<>'' OR te.expires_at='' OR
+     te.expires_at::TIMESTAMPTZ<=v_now OR q.operation_id IS NULL OR q.state<>'active' OR
+     q.enrollment_id<>i.current_enrollment_id OR q.cert_not_before>v_now OR q.cert_not_after<=v_now OR
+     q.cert_issuer IS DISTINCT FROM le.cert_issuer OR
+     q.cert_serial_norm IS DISTINCT FROM le.cert_serial_norm OR
+     q.cert_fingerprint IS DISTINCT FROM le.fingerprint OR le.id IS NULL OR
+     le.scope<>'p5-kb-management' OR le.authority_id<>i.authority_id OR le.state<>'active' OR
+     le.revoked_at<>'' OR le.expires_at='' OR le.expires_at::TIMESTAMPTZ<=v_now OR v_rev IS NULL OR
+     pr.singleton IS NULL OR pg.generation IS NULL OR pr.current_generation<>1 OR
+     pg.generation<>1 OR pg.valid_from>extract(epoch FROM v_now)::BIGINT OR
+     extract(epoch FROM v_now)::BIGINT>=pg.valid_until OR tr.root_kind IS NULL OR
+     NOT tr.enabled OR tr.current_version<>2 OR tr.wire_id<>pg.token_wire_id THEN
+    RAISE EXCEPTION 'management read certificate or publication denied' USING ERRCODE='28000';
+  END IF;
+  v_iat:=pg_catalog.floor(extract(epoch FROM v_now))::BIGINT;
+  INSERT INTO public.kb_management_token_intent_namespace(correlation_id,jti,kind)
+    VALUES(p_correlation_id,p_jti,'read') ON CONFLICT DO NOTHING;
+  GET DIAGNOSTICS v_reserved=ROW_COUNT;
+  IF v_reserved<>1 THEN
+    RAISE EXCEPTION 'management read namespace conflict' USING ERRCODE='23505';
+  END IF;
+  INSERT INTO public.kb_management_read_intent(
+    correlation_id,jti,kind,team_id,actor_identity,selector,capability,external_method,
+    external_path,challenge_nonce,target_server_id,request_sha256,token_version,token_issuer,
+    audience,kid,key_generation,publication_generation,issued_at,expires_at,issuance_deadline,
+    installation_id,installation_generation,installation_enrollment_id,local_cert_issuer,
+    local_cert_serial_norm,local_cert_fingerprint,target_enrollment_id,target_mgmt_issuer,
+    target_mgmt_serial_norm,target_mgmt_fingerprint,revocation_generation,state)
+  VALUES(p_correlation_id,p_jti,'read',p_team_id,v_actor,p_selector,'remote_reads','GET',
+    p_external_path,p_challenge_nonce,p_target_server_id,p_request_sha256,1,p_token_issuer,
+    p_target_server_id,pg.token_wire_id,tr.current_version,pg.generation,v_iat,
+    v_iat+p_ttl_seconds,pg_catalog.to_timestamp(v_iat+15),i.installation_id,i.current_generation,
+    le.id,le.cert_issuer,le.cert_serial_norm,le.fingerprint,te.id,r.mgmt_issuer,
+    r.mgmt_serial_norm,r.mgmt_fingerprint,v_rev,'pending') RETURNING * INTO a;
+  v_detail:=pg_catalog.json_build_object('selector',a.selector,'correlation_id',a.correlation_id,
+    'jti',a.jti,'team_id',a.team_id,'target_server_id',a.target_server_id,
+    'request_sha256',a.request_sha256,'kid',a.kid,
+    'publication_generation',a.publication_generation,'result_status','pending')::TEXT;
+  PERFORM public.kb_audit_worm_append('kb',v_actor,'management.read.intent',a.correlation_id,
+    'allow',v_detail);
+  RETURN QUERY SELECT a.correlation_id,a.jti,a.team_id,a.actor_identity,a.target_server_id,
+    a.request_sha256,a.kid,a.issued_at,a.expires_at,
+    extract(epoch FROM a.issuance_deadline)::BIGINT,a.local_cert_issuer,a.local_cert_serial_norm,
+    a.local_cert_fingerprint,a.target_mgmt_issuer,a.target_mgmt_serial_norm,
+    a.target_mgmt_fingerprint,a.revocation_generation,a.publication_generation;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_token_readback(p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(jwt TEXT,jwt_sha256 BYTEA,expires_at BIGINT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE a public.kb_management_read_intent%ROWTYPE;
+BEGIN
+  IF p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'invalid management read token readback' USING ERRCODE='22023';
+  END IF;
+  SELECT x.* INTO a FROM public.kb_management_read_intent x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti;
+  IF a.correlation_id IS NULL THEN RETURN; END IF;
+  IF a.state<>'issued' OR a.jwt IS NULL OR a.jwt_sha256 IS NULL OR
+     a.jwt_sha256<>pg_catalog.sha256(pg_catalog.convert_to(a.jwt,'UTF8')) THEN
+    RAISE EXCEPTION 'management read token readback conflict' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT a.jwt,a.jwt_sha256,a.expires_at;
+END $$;
+
+DROP FUNCTION IF EXISTS kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER);
+CREATE FUNCTION kb_management_read_authority_claim(
+  p_correlation_id TEXT,p_jti TEXT,p_lease_owner TEXT,p_lease_seconds INTEGER)
+RETURNS TABLE(newly_admitted BOOLEAN,correlation_id TEXT,jti TEXT,team_id BIGINT,
+  actor_identity TEXT,capability TEXT,
+  target_server_id TEXT,request_sha256 TEXT,token_issuer TEXT,audience TEXT,kid TEXT,
+  issued_at BIGINT,expires_at BIGINT,installation_id TEXT,installation_generation BIGINT,
+  installation_enrollment_id BIGINT,local_cert_issuer TEXT,local_cert_serial_norm TEXT,
+  local_cert_fingerprint TEXT,target_enrollment_id BIGINT,target_mgmt_issuer TEXT,
+  target_mgmt_serial_norm TEXT,target_mgmt_fingerprint TEXT,revocation_generation BIGINT,
+  publication_generation SMALLINT,publication_candidate_id TEXT,
+  publication_manifest_sha256 BYTEA,publication_envelope_sha256 BYTEA,
+  token_custody_key_id TEXT,token_version BIGINT,token_public_key BYTEA,
+  token_public_exponent BYTEA,token_public_digest BYTEA,token_jwk_digest BYTEA,
+  vault_seal_epoch BIGINT,hwm_attestation BYTEA,hwm_attestation_digest BYTEA,
+  wrapped_dek BYTEA,nonce BYTEA,ciphertext BYTEA,tag BYTEA,key_use_created_at_epoch BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  ns public.kb_management_token_intent_namespace%ROWTYPE;
+  a public.kb_management_read_intent%ROWTYPE;
+  m public.kb_team_membership%ROWTYPE; ag public.kb_admin_grant%ROWTYPE;
+  tl public.kb_team_lead%ROWTYPE; r public.kb_server_registry%ROWTYPE;
+  te public.kb_enrollments%ROWTYPE; mi public.kb_management_instance%ROWTYPE;
+  iq public.kb_management_instance_issue%ROWTYPE; le public.kb_enrollments%ROWTYPE;
+  vr BIGINT; pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  pc public.kb_management_jwks_publication_candidate%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE; vc public.org_vault_current%ROWTYPE;
+  vs public.org_vault_secret%ROWTYPE; rot public.org_vault_rotation%ROWTYPE;
+  ctl public.kb_vault_control%ROWTYPE; v_now TIMESTAMPTZ; v_epoch BIGINT;
+BEGIN
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR p_lease_owner IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR
+     p_lease_owner !~ '^[0-9a-f]{64}$' OR p_lease_seconds NOT BETWEEN 1 AND 10 THEN
+    RAISE EXCEPTION 'management read authority: invalid input' USING ERRCODE='22023';
+  END IF;
+  IF pg_catalog.pg_is_in_recovery() OR pg_catalog.current_setting('transaction_read_only')<>'off' THEN
+    RAISE EXCEPTION 'management read authority: primary required' USING ERRCODE='25006';
+  END IF;
+  SELECT x.* INTO ns FROM public.kb_management_token_intent_namespace x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti AND x.kind='read' FOR SHARE;
+  SELECT x.* INTO a FROM public.kb_management_read_intent x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR UPDATE;
+  v_now:=pg_catalog.clock_timestamp();
+  IF ns.correlation_id IS NULL OR a.correlation_id IS NULL OR a.kind<>'read' OR
+     ROW(a.correlation_id,a.jti,a.kind) IS DISTINCT FROM ROW(ns.correlation_id,ns.jti,ns.kind) THEN
+    RAISE EXCEPTION 'management read authority: intent unavailable' USING ERRCODE='P0002';
+  END IF;
+  IF a.state IN ('issued','expired') THEN
+    RETURN;
+  END IF;
+  IF v_now>=a.issuance_deadline OR extract(epoch FROM v_now)::BIGINT>=a.expires_at THEN
+    UPDATE public.kb_management_read_intent AS target SET state='expired',lease_owner=NULL,
+      lease_until=NULL,updated_at=v_now WHERE target.correlation_id=a.correlation_id
+      RETURNING target.* INTO a;
+    RETURN;
+  END IF;
+  IF a.state='signing' AND a.lease_until>v_now THEN
+    RAISE EXCEPTION 'management read authority: signing conflict' USING ERRCODE='23505';
+  END IF;
+  UPDATE public.kb_management_read_intent AS target SET state='signing',lease_owner=p_lease_owner,
+    lease_until=least(v_now+(p_lease_seconds::TEXT||' seconds')::INTERVAL,
+      target.issuance_deadline),updated_at=v_now
+    WHERE target.correlation_id=a.correlation_id RETURNING target.* INTO a;
+
+  SELECT x.* INTO m FROM public.kb_team_membership x
+    WHERE x.identity_key=a.actor_identity AND x.team=a.team_id FOR SHARE;
+  SELECT x.* INTO ag FROM public.kb_admin_grant x WHERE x.identity_key=a.actor_identity FOR SHARE;
+  SELECT x.* INTO tl FROM public.kb_team_lead x
+    WHERE x.identity_key=a.actor_identity AND x.team=a.team_id FOR SHARE;
+  SELECT x.* INTO r FROM public.kb_server_registry x WHERE x.server_id=a.target_server_id FOR SHARE;
+  SELECT x.* INTO te FROM public.kb_enrollments x WHERE x.id=a.target_enrollment_id FOR SHARE;
+  SELECT x.* INTO mi FROM public.kb_management_instance x
+    WHERE x.installation_id=a.installation_id FOR SHARE;
+  SELECT x.* INTO iq FROM public.kb_management_instance_issue x
+    WHERE x.installation_id=a.installation_id AND x.generation=a.installation_generation FOR SHARE;
+  SELECT x.* INTO le FROM public.kb_enrollments x WHERE x.id=a.installation_enrollment_id FOR SHARE;
+  SELECT x.generation INTO vr FROM public.kb_cert_revocation_generation x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO pc FROM public.kb_management_jwks_publication_candidate x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x WHERE x.root_kind='token' FOR SHARE;
+  SELECT x.* INTO vc FROM public.org_vault_current x
+    WHERE x.principal='org:p5-token' AND x.agent='management' AND x.cred='rs256' FOR SHARE;
+  SELECT x.* INTO vs FROM public.org_vault_secret x
+    WHERE x.principal='org:p5-token' AND x.team_id IS NULL AND x.agent='management' AND
+      x.cred='rs256' AND x.version=vc.version FOR SHARE;
+  SELECT x.* INTO rot FROM public.org_vault_rotation x
+    WHERE x.key_id=tr.custody_key_id AND x.principal='org:p5-token' AND x.team_id IS NULL AND
+      x.agent='management' AND x.cred='rs256' AND x.to_version=a.key_generation FOR SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT x.* INTO ctl FROM public.kb_vault_control x WHERE x.singleton=1 FOR SHARE;
+  v_epoch:=extract(epoch FROM v_now)::BIGINT;
+  IF m.id IS NULL OR ((ag.id IS NULL OR ag.revoked_at<>'') AND
+                      (tl.id IS NULL OR tl.revoked_at<>'')) THEN
+    RAISE EXCEPTION 'management read authority: actor denied' USING ERRCODE='42501';
+  END IF;
+  IF a.selector NOT IN ('agents','config') OR a.capability<>'remote_reads' OR
+     a.external_method<>'GET' OR
+     a.external_path<>'/v1/servers/'||a.target_server_id||'/'||a.selector OR
+     a.audience<>a.target_server_id OR a.issued_at>v_epoch OR v_epoch>=a.expires_at THEN
+    RAISE EXCEPTION 'management read authority: frozen claims invalid' USING ERRCODE='40001';
+  END IF;
+  IF r.server_id IS NULL OR r.team_id<>a.team_id OR r.status<>'active' OR
+     r.mgmt_issuer<>a.target_mgmt_issuer OR r.mgmt_serial_norm<>a.target_mgmt_serial_norm OR
+     r.mgmt_fingerprint<>a.target_mgmt_fingerprint OR te.id IS NULL OR
+     te.scope<>'p5-server-management' OR te.cert_issuer<>a.target_mgmt_issuer OR
+     te.cert_serial_norm<>a.target_mgmt_serial_norm OR te.fingerprint<>a.target_mgmt_fingerprint OR
+     te.state<>'active' OR te.revoked_at<>'' OR te.expires_at='' OR
+     te.expires_at::TIMESTAMPTZ<=v_now THEN
+    RAISE EXCEPTION 'management read authority: target changed' USING ERRCODE='28000';
+  END IF;
+  IF mi.installation_id IS NULL OR mi.team_id<>a.team_id OR mi.state<>'active' OR
+     mi.current_generation<>a.installation_generation OR
+     mi.current_enrollment_id<>a.installation_enrollment_id OR mi.revoked_at IS NOT NULL OR
+     iq.operation_id IS NULL OR iq.state<>'active' OR
+     iq.enrollment_id<>a.installation_enrollment_id OR
+     iq.cert_issuer IS DISTINCT FROM a.local_cert_issuer OR
+     iq.cert_serial_norm IS DISTINCT FROM a.local_cert_serial_norm OR
+     iq.cert_fingerprint IS DISTINCT FROM a.local_cert_fingerprint OR
+     iq.cert_not_before>v_now OR iq.cert_not_after<=v_now OR le.id IS NULL OR
+     le.scope<>'p5-kb-management' OR le.authority_id<>mi.authority_id OR
+     le.cert_issuer<>a.local_cert_issuer OR le.cert_serial_norm<>a.local_cert_serial_norm OR
+     le.fingerprint<>a.local_cert_fingerprint OR le.state<>'active' OR le.revoked_at<>'' OR
+     le.expires_at='' OR le.expires_at::TIMESTAMPTZ<=v_now THEN
+    RAISE EXCEPTION 'management read authority: local identity changed' USING ERRCODE='28000';
+  END IF;
+  IF vr IS NULL OR vr<>a.revocation_generation OR pr.singleton IS NULL OR
+     pg.generation IS NULL OR pc.generation IS NULL OR pr.current_generation<>a.publication_generation OR
+     pg.generation<>a.publication_generation OR pc.generation<>a.publication_generation OR
+     pc.phase<>'final' OR pr.candidate_id<>pg.candidate_id OR pg.candidate_id<>pc.candidate_id OR
+     pr.manifest_sha256<>pg.manifest_sha256 OR pg.manifest_sha256<>pc.manifest_sha256 OR
+     pr.envelope_sha256<>pg.envelope_sha256 OR pg.envelope_sha256<>pc.envelope_sha256 OR
+     pg.token_wire_id<>a.kid OR pc.token_wire_id<>a.kid OR pg.valid_from>v_epoch OR
+     v_epoch>=pg.valid_until OR tr.root_kind IS NULL OR NOT tr.enabled OR
+     tr.current_version<>a.key_generation OR tr.wire_id<>a.kid OR
+     tr.public_digest<>pg.token_public_digest OR tr.jwk_digest<>pg.token_jwk_digest OR
+     vc.principal IS NULL OR vc.version<>a.key_generation OR vs.id IS NULL OR
+     vs.team_id IS NOT NULL OR vs.version<>a.key_generation OR rot.id IS NULL OR
+     rot.state<>'activated' OR rot.hwm_attestation IS DISTINCT FROM vs.hwm_attestation OR
+     tr.hwm2_attestation_digest<>pg_catalog.sha256(vs.hwm_attestation) THEN
+    RAISE EXCEPTION 'management read authority: key binding changed' USING ERRCODE='40001';
+  END IF;
+  IF ctl.singleton IS NULL OR ctl.sealed OR ctl.maintenance_kind<>'' OR ctl.maintenance_id<>'' OR
+     ctl.seal_epoch<>pg.seal_epoch OR pc.seal_epoch<>pg.seal_epoch THEN
+    RAISE EXCEPTION 'management read authority: vault sealed' USING ERRCODE='55000';
+  END IF;
+  RETURN QUERY SELECT true,a.correlation_id,a.jti,a.team_id,
+    a.actor_identity,a.capability,a.target_server_id,a.request_sha256,a.token_issuer,a.audience,
+    a.kid,a.issued_at,a.expires_at,a.installation_id,a.installation_generation,
+    a.installation_enrollment_id,a.local_cert_issuer,a.local_cert_serial_norm,
+    a.local_cert_fingerprint,a.target_enrollment_id,a.target_mgmt_issuer,
+    a.target_mgmt_serial_norm,a.target_mgmt_fingerprint,a.revocation_generation,
+    a.publication_generation,pg.candidate_id,pg.manifest_sha256,pg.envelope_sha256,
+    tr.custody_key_id,tr.current_version,tr.public_key,tr.public_exponent,tr.public_digest,
+    tr.jwk_digest,ctl.seal_epoch,vs.hwm_attestation,pg_catalog.sha256(vs.hwm_attestation),
+    vs.wrapped_dek,vs.nonce,vs.ciphertext,vs.tag,0::BIGINT;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_b64url_decode(p_value TEXT) RETURNS BYTEA
+LANGUAGE plpgsql IMMUTABLE STRICT SET search_path=pg_catalog,pg_temp AS $$
+DECLARE n INTEGER:=octet_length(p_value); padded TEXT;
+BEGIN
+  IF n<1 OR p_value !~ '^[A-Za-z0-9_-]+$' OR n%4=1 THEN
+    RAISE EXCEPTION 'invalid base64url' USING ERRCODE='22023';
+  END IF;
+  padded:=translate(p_value,'-_','+/')||repeat('=',(4-n%4)%4);
+  RETURN decode(padded,'base64');
+EXCEPTION WHEN others THEN
+  RAISE EXCEPTION 'invalid base64url' USING ERRCODE='22023';
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_authority_finalize(
+  p_correlation_id TEXT,p_jti TEXT,p_lease_owner TEXT,p_jwt TEXT) RETURNS BOOLEAN
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
+DECLARE
+  a public.kb_management_read_intent%ROWTYPE;
+  pr public.kb_management_jwks_publication_registry%ROWTYPE;
+  pg public.kb_management_jwks_publication_generation%ROWTYPE;
+  pc public.kb_management_jwks_publication_candidate%ROWTYPE;
+  tr public.kb_management_token_root%ROWTYPE; ctl public.kb_vault_control%ROWTYPE;
+  v_now TIMESTAMPTZ; v_epoch BIGINT; parts TEXT[]; header JSONB; payload JSONB;
+  expected JSONB; signature BYTEA; token_hash BYTEA; detail TEXT;
+BEGIN
+  IF p_correlation_id IS NULL OR p_jti IS NULL OR p_lease_owner IS NULL OR p_jwt IS NULL OR
+     p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' OR
+     p_lease_owner !~ '^[0-9a-f]{64}$' OR octet_length(p_jwt) NOT BETWEEN 1 AND 8192 OR
+     p_jwt ~ '[[:space:][:cntrl:]]' THEN
+    RAISE EXCEPTION 'management read finalize: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT x.* INTO a FROM public.kb_management_read_intent x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR UPDATE;
+  v_now:=pg_catalog.clock_timestamp();
+  v_epoch:=extract(epoch FROM v_now)::BIGINT;
+  IF a.correlation_id IS NULL THEN
+    RAISE EXCEPTION 'management read finalize: intent unavailable' USING ERRCODE='P0002';
+  END IF;
+  IF a.state<>'signing' OR a.lease_owner<>p_lease_owner OR a.lease_until<=v_now OR
+     v_now>=a.issuance_deadline OR v_epoch>=a.expires_at THEN
+    RAISE EXCEPTION 'management read finalize: lease conflict' USING ERRCODE='23505';
+  END IF;
+  SELECT x.* INTO pr FROM public.kb_management_jwks_publication_registry x
+    WHERE x.singleton=1 FOR SHARE;
+  SELECT x.* INTO pg FROM public.kb_management_jwks_publication_generation x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO pc FROM public.kb_management_jwks_publication_candidate x
+    WHERE x.generation=pr.current_generation FOR SHARE;
+  SELECT x.* INTO tr FROM public.kb_management_token_root x WHERE x.root_kind='token' FOR SHARE;
+  PERFORM pg_catalog.pg_advisory_xact_lock_shared(-7046029254386353131::BIGINT);
+  SELECT x.* INTO ctl FROM public.kb_vault_control x WHERE x.singleton=1 FOR SHARE;
+  IF pr.singleton IS NULL OR pg.generation IS NULL OR pc.generation IS NULL OR
+     pr.current_generation<>a.publication_generation OR pg.generation<>a.publication_generation OR
+     pc.generation<>a.publication_generation OR pc.phase<>'final' OR
+     pr.candidate_id<>pg.candidate_id OR pg.candidate_id<>pc.candidate_id OR
+     pr.manifest_sha256<>pg.manifest_sha256 OR pg.manifest_sha256<>pc.manifest_sha256 OR
+     pr.envelope_sha256<>pg.envelope_sha256 OR pg.envelope_sha256<>pc.envelope_sha256 OR
+     pg.token_wire_id<>a.kid OR pc.token_wire_id<>a.kid OR pg.valid_from>v_epoch OR
+     v_epoch>=pg.valid_until OR tr.root_kind IS NULL OR NOT tr.enabled OR
+     tr.current_version<>a.key_generation OR tr.wire_id<>a.kid OR
+     tr.public_digest<>pg.token_public_digest OR tr.jwk_digest<>pg.token_jwk_digest OR
+     ctl.singleton IS NULL OR ctl.sealed OR ctl.maintenance_kind<>'' OR ctl.maintenance_id<>'' OR
+     ctl.seal_epoch<>pg.seal_epoch OR pc.seal_epoch<>pg.seal_epoch THEN
+    RAISE EXCEPTION 'management read finalize: key binding changed' USING ERRCODE='40001';
+  END IF;
+  parts:=pg_catalog.string_to_array(p_jwt,'.');
+  IF cardinality(parts)<>3 THEN
+    RAISE EXCEPTION 'management read finalize: invalid token' USING ERRCODE='22023';
+  END IF;
+  BEGIN
+    header:=pg_catalog.convert_from(public.kb_management_read_b64url_decode(parts[1]),'UTF8')::JSONB;
+    payload:=pg_catalog.convert_from(public.kb_management_read_b64url_decode(parts[2]),'UTF8')::JSONB;
+    signature:=public.kb_management_read_b64url_decode(parts[3]);
+  EXCEPTION WHEN others THEN
+    RAISE EXCEPTION 'management read finalize: invalid token' USING ERRCODE='22023';
+  END;
+  expected:=pg_catalog.jsonb_build_object('v',a.token_version,'iss',a.token_issuer,
+    'aud',a.audience,'sub',a.actor_identity,'team_id',a.team_id,'cap',a.capability,
+    'jti',a.jti,'correlation_id',a.correlation_id,'request_sha256',a.request_sha256,
+    'peer_issuer',a.local_cert_issuer,'peer_serial',a.local_cert_serial_norm,
+    'peer_fingerprint',a.local_cert_fingerprint,'iat',a.issued_at,'exp',a.expires_at);
+  IF header IS DISTINCT FROM pg_catalog.jsonb_build_object('alg','RS256','typ','JWT','kid',a.kid) OR
+     payload IS DISTINCT FROM expected OR octet_length(signature)<>384 THEN
+    RAISE EXCEPTION 'management read finalize: token claims mismatch' USING ERRCODE='40001';
+  END IF;
+  token_hash:=pg_catalog.sha256(pg_catalog.convert_to(p_jwt,'UTF8'));
+  INSERT INTO public.kb_management_read_key_use(correlation_id,jti,team_id,actor_identity,
+    target_server_id,selector,request_sha256,kid,key_generation,publication_generation,
+    jwt_sha256,result_status) VALUES(a.correlation_id,a.jti,a.team_id,a.actor_identity,
+    a.target_server_id,a.selector,a.request_sha256,a.kid,a.key_generation,
+    a.publication_generation,token_hash,'issued');
+  detail:=pg_catalog.json_build_object('authorization','org-admin-or-active-team-lead',
+    'actor',a.actor_identity,'team_id',a.team_id,'target_server_id',a.target_server_id,
+    'selector',a.selector,'correlation_id',a.correlation_id,'jti',a.jti,
+    'request_sha256',a.request_sha256,'kid',a.kid,'key_generation',a.key_generation,
+    'publication_generation',a.publication_generation,'result_status','issued')::TEXT;
+  PERFORM public.kb_audit_worm_append('kb','management-token-authority','vault.key_use',
+    a.kid,'allow',detail);
+  UPDATE public.kb_management_read_intent SET state='issued',lease_owner=NULL,lease_until=NULL,
+    jwt=p_jwt,jwt_sha256=token_hash,updated_at=v_now WHERE correlation_id=a.correlation_id;
+  RETURN true;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_token_intent_kind(
+  p_correlation_id TEXT,p_jti TEXT) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE v_kind TEXT;
+BEGIN
+  IF p_correlation_id !~ '^[0-9a-f]{64}$' OR p_jti !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'management token kind: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT x.kind INTO v_kind FROM public.kb_management_token_intent_namespace x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF v_kind IS NULL THEN
+    RAISE EXCEPTION 'management token kind: absent' USING ERRCODE='P0002';
+  END IF;
+  RETURN v_kind;
+END $$;
+
+CREATE OR REPLACE FUNCTION kb_management_read_authority_readback(
+  p_correlation_id TEXT,p_jti TEXT)
+RETURNS TABLE(jwt TEXT,jwt_sha256 BYTEA,expires_at BIGINT)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
+DECLARE a public.kb_management_read_intent%ROWTYPE;
+BEGIN
+  SELECT x.* INTO a FROM public.kb_management_read_intent x
+    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
+  IF a.correlation_id IS NULL THEN RETURN; END IF;
+  IF a.state IN ('pending','signing','expired') THEN RETURN; END IF;
+  IF a.state<>'issued' OR a.jwt IS NULL OR a.jwt_sha256 IS NULL OR
+     a.jwt_sha256<>pg_catalog.sha256(pg_catalog.convert_to(a.jwt,'UTF8')) THEN
+    RAISE EXCEPTION 'management read authority readback conflict' USING ERRCODE='40001';
+  END IF;
+  RETURN QUERY SELECT a.jwt,a.jwt_sha256,a.expires_at;
 END $$;
 
 DROP FUNCTION IF EXISTS kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT);
@@ -9981,11 +10949,22 @@ BEGIN
     o.status_code,o.response_sha256,extract(epoch FROM o.completed_at)::BIGINT;
 END $$;
 
-REVOKE ALL ON TABLE kb_management_action_intent,kb_management_action_outcome FROM PUBLIC;
+REVOKE ALL ON TABLE kb_management_token_intent_namespace,kb_management_action_intent,
+  kb_management_action_outcome FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_action_worm_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_action_intent_start(
   TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION kb_management_action_outcome_append(TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
+REVOKE ALL ON TABLE kb_management_read_intent FROM PUBLIC;
+REVOKE ALL ON FUNCTION kb_management_read_transition_guard(),kb_management_read_worm_guard(),
+  kb_management_read_publication_generation(),
+  kb_management_read_intent_start(TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,BYTEA,TEXT,TEXT,INTEGER,TEXT),
+  kb_management_read_token_readback(TEXT,TEXT),
+  kb_management_read_authority_claim(TEXT,TEXT,TEXT,INTEGER),
+  kb_management_read_b64url_decode(TEXT),
+  kb_management_read_authority_finalize(TEXT,TEXT,TEXT,TEXT),
+  kb_management_token_intent_kind(TEXT,TEXT),
+  kb_management_read_authority_readback(TEXT,TEXT) FROM PUBLIC;
 
 -- ============================================================================
 -- P5-C2d ONLINE MANAGEMENT-TOKEN AUTHORITY.  The immutable row below is a
@@ -10050,6 +11029,7 @@ RETURNS TABLE(correlation_id TEXT,jti TEXT,team_id BIGINT,actor_identity TEXT,
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,pg_temp SET TimeZone='UTC' AS $$
 DECLARE
+  ns public.kb_management_token_intent_namespace%ROWTYPE;
   a public.kb_management_action_intent%ROWTYPE;
   m public.kb_team_membership%ROWTYPE;
   ag public.kb_admin_grant%ROWTYPE;
@@ -10079,9 +11059,13 @@ BEGIN
     RAISE EXCEPTION 'management token authority: primary required' USING ERRCODE='25006';
   END IF;
 
+  SELECT x.* INTO ns FROM public.kb_management_token_intent_namespace x
+   WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti AND x.kind='action' FOR SHARE;
   SELECT x.* INTO a FROM public.kb_management_action_intent x
    WHERE x.correlation_id=p_correlation_id AND x.jti=p_jti FOR SHARE;
-  IF a.correlation_id IS NULL THEN
+  IF ns.correlation_id IS NULL OR a.correlation_id IS NULL OR a.kind<>'action' OR
+     ROW(a.correlation_id,a.jti,a.kind) IS DISTINCT FROM
+       ROW(ns.correlation_id,ns.jti,ns.kind) THEN
     RAISE EXCEPTION 'management token authority: journal intent unavailable' USING ERRCODE='P0002';
   END IF;
   IF EXISTS (SELECT 1 FROM public.kb_management_action_outcome x

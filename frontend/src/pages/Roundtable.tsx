@@ -92,7 +92,7 @@ function emptyPreset(name: string): Preset {
     chairman_enabled: false,
     min_successful: 2,
     max_cost_usd: 0,
-    deadline_ms: 360000,
+    deadline_ms: 600000,
     discussion: false,
     pipeline: { ...DEFAULT_PIPELINE },
   };

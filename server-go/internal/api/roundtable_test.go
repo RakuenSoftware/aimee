@@ -35,10 +35,10 @@ func TestRoundtableReviewEndpointRoutesToGoEngine(t *testing.T) {
 	server, _, _ := newTestServer(t)
 	reviewer := &fakeRoundtableReviewer{}
 	server.SetRoundtableReviewer(reviewer)
-	req := httptest.NewRequest(http.MethodPost, "/v1/roundtable/review", strings.NewReader(`{"artifact":"a complete artifact that needs review","original_request":"the original request","roundtable":"default"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/roundtable/review", strings.NewReader(`{"artifact":"a complete artifact that needs review","original_request":"the original request","roundtable":"default","artifact_stage":"frozen_diff","run_id":"review-pr-1828"}`))
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || reviewer.request.Roundtable != "default" || reviewer.request.Artifact == "" {
+	if rec.Code != http.StatusOK || reviewer.request.Roundtable != "default" || reviewer.request.Artifact == "" || reviewer.request.RunID != "review-pr-1828" || reviewer.request.ArtifactStage != "frozen_diff" {
 		t.Fatalf("status=%d request=%+v body=%s", rec.Code, reviewer.request, rec.Body.String())
 	}
 }

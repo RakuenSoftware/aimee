@@ -92,6 +92,21 @@ int vault_is_sealed(void);
 int vault_unseal(const void *params, size_t len);
 int vault_seal(void);
 
+/* Secret-free status of the selected custody provider's process-local state.
+ * The query performs no provider/backend I/O and spends at most 50ms acquiring
+ * provider-local locks.  UNAVAILABLE means the selected provider has no status
+ * seam, its context cannot be read in time, or the process is fork-invalid.
+ * MALFORMED is reserved for internally contradictory local state. */
+typedef enum
+{
+   VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED = 0,
+   VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED = 1,
+   VAULT_CUSTODY_LOCAL_UNAVAILABLE = 2,
+   VAULT_CUSTODY_LOCAL_MALFORMED = 3,
+} vault_custody_local_status_t;
+
+vault_custody_local_status_t vault_custody_selected_local_status(void);
+
 /* Anchor-authoritative per-key high-water operations (P7 §8). Providers that
  * do not supply the complete signed-HWM seam fail closed; there is deliberately
  * no database or process-local fallback. Returned attestations have already

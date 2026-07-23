@@ -91,10 +91,20 @@ int server_http_management_action_route(const char *method, const char *path)
            !strcmp(path, "/v1/management/action"));
 }
 
+int server_http_management_read_route(const char *method, const char *path)
+{
+   return method && path &&
+          ((!strcmp(method, "POST") && !strcmp(path, "/v1/management/read/challenge")) ||
+           (!strcmp(method, "POST") && !strcmp(path, "/v1/management/read/config/challenge")) ||
+           (!strcmp(method, "GET") && (!strcmp(path, "/v1/management/read/agents") ||
+                                       !strcmp(path, "/v1/management/read/config"))));
+}
+
 int server_http_management_route(const char *method, const char *path)
 {
    return server_http_management_health_route(method, path) ||
-          server_http_management_action_route(method, path);
+          server_http_management_action_route(method, path) ||
+          server_http_management_read_route(method, path);
 }
 
 server_http_management_auth_t server_http_management_auth(const char *method, const char *path,
@@ -440,7 +450,13 @@ int server_http_management_action_framing_valid(const char *method, const char *
          cl++;
          body_len = 0;
          for (size_t i = 0; i < vn; i++)
+         {
+            if (v[i] < '0' || v[i] > '9' || body_len > (SIZE_MAX - (size_t)(v[i] - '0')) / 10)
+               return 0;
             body_len = body_len * 10 + (size_t)(v[i] - '0');
+         }
+         if (!vn)
+            return 0;
       }
       else if (n == 10 && !strncasecmp(line, "Connection", n))
       {
@@ -469,6 +485,78 @@ int server_http_management_action_framing_valid(const char *method, const char *
           (challenge ? body_len == 0 && auth == 0 && staple == 0
                      : body_len > 0 && body_len <= SERVER_MGMT_ACTION_BODY_MAX && auth == 1 &&
                            staple == 1);
+}
+
+int server_http_management_read_framing_valid(const char *method, const char *path,
+                                              const char *request, size_t request_len)
+{
+   if (!server_http_management_read_route(method, path) || !request || !request_len ||
+       !server_http_management_request_syntax_valid(method, path, request, request_len))
+      return 0;
+   const char *end = management_find_bytes(request, request + request_len, "\r\n\r\n", 4);
+   const char *line = management_find_bytes(request, request + request_len, "\r\n", 2);
+   if (!end || !line)
+      return 0;
+   line += 2;
+   int host = 0, ct = 0, cl = 0, conn = 0, auth = 0, staple = 0;
+   size_t body_len = 0;
+   while (line < end)
+   {
+      const char *eol = management_find_bytes(line, end + 2, "\r\n", 2);
+      const char *colon = eol ? memchr(line, ':', (size_t)(eol - line)) : NULL;
+      if (!eol || !colon || colon == line)
+         return 0;
+      const char *v = colon + 1;
+      while (v < eol && (*v == ' ' || *v == '\t'))
+         v++;
+      const char *ve = eol;
+      while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+         ve--;
+      size_t n = (size_t)(colon - line), vn = (size_t)(ve - v);
+      if (n == 4 && !strncasecmp(line, "Host", n))
+         host = ++host == 1 && vn > 0 ? host : 99;
+      else if (n == 12 && !strncasecmp(line, "Content-Type", n))
+         ct = ++ct == 1 && vn == 16 && !strncasecmp(v, "application/json", 16) ? ct : 99;
+      else if (n == 14 && !strncasecmp(line, "Content-Length", n))
+      {
+         cl++;
+         body_len = 0;
+         for (size_t i = 0; i < vn; ++i)
+         {
+            if (v[i] < '0' || v[i] > '9' || body_len > (SIZE_MAX - (size_t)(v[i] - '0')) / 10)
+               return 0;
+            body_len = body_len * 10 + (size_t)(v[i] - '0');
+         }
+         if (!vn)
+            return 0;
+      }
+      else if (n == 10 && !strncasecmp(line, "Connection", n))
+      {
+         int challenge = !strcmp(path, "/v1/management/read/challenge") ||
+                         !strcmp(path, "/v1/management/read/config/challenge");
+         int exact = challenge ? vn == 10 && !strncasecmp(v, "keep-alive", 10)
+                               : vn == 5 && !strncasecmp(v, "close", 5);
+         conn = ++conn == 1 && exact ? conn : 99;
+      }
+      else if (n == 13 && !strncasecmp(line, "Authorization", n))
+         auth = ++auth == 1 && vn > 7 && vn <= 4096 && !strncasecmp(v, "Bearer ", 7) ? auth : 99;
+      else if (n == 25 && !strncasecmp(line, "X-Aimee-Management-Status", n))
+         staple = ++staple == 1 && vn > 0 && vn <= KB_MGMT_STATUS_JSON_MAX ? staple : 99;
+      else if ((n == 17 && !strncasecmp(line, "Transfer-Encoding", n)) ||
+               (n == 6 && !strncasecmp(line, "Expect", n)) ||
+               (n == 7 && !strncasecmp(line, "Upgrade", n)) ||
+               (n >= 6 && !strncasecmp(line, "Proxy-", 6)) ||
+               (n == 9 && !strncasecmp(line, "Forwarded", n)) ||
+               (n >= 12 && !strncasecmp(line, "X-Forwarded-", 12)) ||
+               (n == 16 && !strncasecmp(line, "Content-Encoding", n)) ||
+               (n == 7 && !strncasecmp(line, "Trailer", n)))
+         return 0;
+      line = eol + 2;
+   }
+   int challenge = !strcmp(path, "/v1/management/read/challenge") ||
+                   !strcmp(path, "/v1/management/read/config/challenge");
+   return host == 1 && cl == 1 && body_len == 0 && conn == 1 &&
+          (challenge ? ct == 1 && auth == 0 && staple == 0 : ct == 0 && auth == 1 && staple == 1);
 }
 
 int server_http_management_framing_valid(const char *method, const char *path, const char *request,
