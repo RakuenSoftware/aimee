@@ -34,156 +34,163 @@ ends by flipping a production release gate. Reviewing that as one change repeats
 the mistake the reseal split was created to avoid. Delivery is fail-closed and
 ordered:
 
-1. **E1 — witness record, export form, shared outbox, and atomic budget.**
-   Canonical witness record encoding and per-entry evidence digest, the
-   signed-head checkpoint format, the deterministic exported rendering and
-   per-consumer confirmed watermark, the durable shared outbox table,
-   per-`(tenant, provider)` shard counter rows created by DML upsert (no runtime
-   DDL), and the reservation of unwitnessed slots *inside* the admission
-   transaction with release against the minimum confirmed watermark. No admission
-   caller, no drain worker, no emission, no production invocation.
-2. **E2 — drain worker, fail-closed admission gate, and release-gate flip.**
-   Any-instance batched drain under CAS/lease ownership, the periodic global
-   checkpoint that signs and links sub-chain heads, continuous chain
-   verification, boot fail-closed for any key-holding kb whose witness is
-   unconfigured or whose chain verification is off, and only then a real
+1. **E1 — witness record, signed checkpoint, export form, and evidence log.**
+   Canonical witness record encoding and per-entry evidence digest, the signed
+   Merkle checkpoint format with per-shard inclusion proofs, the deterministic
+   exported rendering, evidence grouping by admission dispatch key, and the
+   durable evidence log plus per-`(tenant, provider)` shard counter rows created
+   by DML upsert (no runtime DDL). No admission caller, no emission, no
+   production invocation.
+2. **E2 — emission, continuous verification, and release-gate flip.** Checkpoint
+   cadence ("every N entries or T seconds, whichever first"), metrics emission of
+   signed checkpoints, log/OTLP emission of per-entry evidence, continuous chain
+   verification with typed integrity alerts, boot fail-closed for any key-holding
+   kb whose chain verification is off, and only then a real
    `kb_egress_release_allowed()`.
 3. **E3 — full kill matrix.** The exhaustive CT103/CT260 restart and signal-level
    kill matrix across every P7 durable boundary — the reseal boundaries D3b
-   enumerated plus the new witness reservation, drain, acknowledgement, and
-   checkpoint boundaries — with raw-key canary scans over database, files, logs,
+   enumerated plus the new evidence-append, shard-advance, checkpoint, and
+   emission boundaries — with raw-key canary scans over database, files, logs,
    and crash artifacts.
 
 Each slice gets its own reviewed plan, adversarial branch review, target
 validation, and merge. E1's plan is
-`tiered-llm-p7-witness-e1-record-outbox-budget.plan.md`.
+`tiered-llm-p7-witness-e1-record-checkpoint-evidence-log.plan.md`.
 
-E1 and E2 were originally split so that the encoding/acknowledgement rules could
-be proven before any budget depended on them. They are folded because the budget
-is meaningless without the outbox it counts and the outbox is dead weight without
-the budget that bounds it; the separation moved review cost without moving risk.
-The compensating control is that E1 still ships **no caller** — nothing drains,
-nothing gates, and the release gate stays closed until E2.
+E1 and E2 were originally split so that the acknowledgement rules could be proven
+before any budget depended on them. There is no acknowledgement and no budget
+(see below), so that split had nothing left to protect. The compensating control
+is that E1 still ships **no caller** — nothing emits, nothing gates, and the
+release gate stays closed until E2.
 
-## Witness architecture: stored on aimee-kb, exported to many consumers
+## Witness architecture: tamper-evident chain on aimee, exported everywhere
 
-**Decision:** the witness store is held on aimee-kb. aimee-kb exports the evidence
-outward as metrics and logs over the existing telemetry surfaces, and the
-independent verification points are the **multiple downstream services that
-receive those exports**. There is no third-party append-only sink and no new
-external service dependency.
+**Decision:** aimee-kb holds a tamper-evident, hash-chained evidence store and is
+the system of record for it. Everything in that store is exported outward
+continuously as logs and metrics. There is no third-party append-only sink, no
+delivery receipt, no per-consumer watermark, and no confirmation protocol.
 
-Tamper independence therefore comes from **fan-out and divergence detection**, not
-from a single privileged remote store. Evidence leaves aimee-kb continuously, to
-more than one consumer, in a form each consumer can verify on its own. An attacker
-who rewrites the in-database chain must also make every downstream copy agree —
-across services with different retention, different operators, and different
-storage — and any single disagreeing copy is the tamper signal.
+The security property is simple and does not require any downstream cooperation:
 
-This reuses what P9a already built rather than inventing a transport: kb serves
-Prometheus text at `GET /v1/metrics` behind either org-admin auth or the
-constant-time scrape token (`src/kb/http/kb_http_telemetry.c`,
-`src/headers/kb_http_telemetry.h`), and P9's forwarder/OTLP work extends the same
-seam. Witness export rides those surfaces.
+- A break in aimee's own chain — a bad link, a regressing sequence, a checkpoint
+  that fails signature verification — proves tampering, locally, immediately.
+- A privileged actor who instead rewrites *consistently*, or rolls the database
+  back to an earlier valid state, produces a locally clean chain that
+  **contradicts copies already exported to other machines**. Those copies are on
+  hosts the attacker does not control and cannot reach backwards in time to
+  amend. Comparison exposes the rewrite.
 
-Three consequences E1 must resolve, because they are where this architecture is
-genuinely harder than a cooperative sink:
+Either signal is sufficient. **Detection is the deliverable, not reconstruction.**
+This umbrella does not claim the exported evidence can rebuild the complete
+original event history; it claims that tampering cannot go unnoticed. Records
+carry the non-secret identifying fields an operator needs to act on a detection —
+request id, principal, `provider:cred` — because §6 requires that for the audit
+purpose anyway, but no slice may promise byte-exact historical reconstruction
+from hashes.
 
-- **Exported evidence must be self-verifying.** A consumer that only sees counters
-  can detect nothing. What is exported must include the signed checkpoint and the
-  per-shard head hashes, so any consumer — with no access to aimee-kb's database —
-  can verify linkage and signature offline, and so two consumers can be compared
-  byte-for-byte.
-- **Pull-based export gives no acknowledgement.** A Prometheus scrape does not tell
-  kb that evidence was durably retained. The unwitnessed budget cannot be released
-  by "we rendered it into a metrics page." E1 must define what counts as a
-  confirmed export watermark per consumer, and the budget releases only against
-  that — never against a render, a scrape hit, or an elapsed timer.
-- **Detection is local; reconstruction is the external job.** Continuous
-  cross-consumer comparison is not required and is not proposed. Chain
-  verification on aimee-kb detects the break; the exported copies exist so that,
-  once a break is detected, an operator can reconstruct the true history from
-  sources the attacker did not control. E1 must therefore make the exported form
-  sufficient for that reconstruction — enough linkage and signed anchors to
-  re-derive what the chain should have contained — not merely enough for a
-  dashboard.
+This reuses what P9a already built rather than inventing a transport. Signed
+checkpoints ride the metrics surface — `GET /v1/metrics`, behind org-admin auth
+or the constant-time scrape token (`src/kb/http/kb_http_telemetry.c`,
+`src/headers/kb_http_telemetry.h`) — because they are small, bounded, and
+constant-shape, which is what a Prometheus sample carries honestly. Per-entry
+evidence rides the log/OTLP path, because Prometheus exposition is a sampled
+snapshot: entries appearing between scrapes can be missed, and record bytes as
+labels are unbounded cardinality.
 
-The residual is stated plainly: an attacker who owns the kb host at the moment of
-export controls what is exported from then on. Fan-out bounds retroactive rewriting
-of already-exported evidence — it does not protect evidence not yet exported. The
-unwitnessed budget is exactly what bounds that window.
+**Why there is no unwitnessed budget.** The hardened-vault §6 backlog bound
+existed because evidence sat in a local outbox *waiting* to reach an off-host
+sink that was authoritative; the bound capped how many key uses could occur while
+their only durable copy was still local. That is not this architecture. Evidence
+is durably committed on aimee-kb before the key is used — the existing P7
+admission rule — and export is redundancy on top of a copy that already exists.
+There is no in-flight-sole-copy window for a budget to bound, and with no
+confirmation protocol there is no event that could release a reserved slot, so a
+budget would only ever deadlock.
+
+Export lag is therefore an **alerting signal, not an admission gate**. A
+collector that is down or slow reduces redundancy; it does not mean a key use
+went unaudited, and halting all org egress because a metrics scraper died trades
+a real outage for no assurance gain.
+
+**Residual.** An attacker who owns the kb host controls what is exported from
+that moment on, and evidence generated after the compromise but before the next
+export has no external copy. Detection of the *prior* history still holds,
+because those copies are already gone from the host's reach.
 
 ## Non-negotiable invariants
 
-- **No single source of authority: local detection, external adjudication.** The
-  tamper-evident chain on aimee-kb is what *proves tampering occurred* — a broken
-  link, a regressing sequence, or a checkpoint that fails signature verification
-  is detectable on aimee alone, without consulting anyone. What aimee cannot do
-  by itself is establish what the history *should have been*, because an attacker
-  who rewrites the chain can rewrite it consistently. That is what the exported
-  copies are for: once a break is detected, the external sources are consulted to
-  reconstruct the true history and bound the damage.
-- **Detection must not depend on export; reconstruction must not depend on
-  aimee.** Chain verification runs continuously on aimee and raises a typed
-  integrity alert with no external round-trip. The exported evidence must be
-  independently verifiable — signed checkpoints and head hashes — so a consumer
-  can validate it without access to aimee's database.
-- **Witnessing is never silently skipped on a key-holding kb.** The only operator
-  tunable is the backlog bound. Whether to witness is a build-time property, and
-  a key-holding kb fails closed at boot with witnessing or chain verification
-  disabled.
-- **The unwitnessed ceiling is global and shared, reserved atomically inside the
-  admission transaction** — `UPDATE … SET unwitnessed = unwitnessed + 1 WHERE
-  unwitnessed < :ceiling RETURNING` — never check-then-act, and never
-  per-instance, because instance count is unbounded. A per-shard allowance sits
-  under the global cap so one saturated shard cannot starve another tenant and
-  one tenant cannot consume the whole global budget.
-- **Budget exhaustion refuses new key use.** It never degrades to unwitnessed
-  egress, and it never degrades to read-only-and-continue.
-- **Export accounting is idempotent and cannot manufacture success.** Re-exporting
-  an entry, or replaying a retention confirmation, must not turn an uncommitted
-  transition into a reported success, must not release a slot twice, and must not
-  advance a watermark past evidence a consumer has not retained.
-- **No secret, key, or fingerprint of a key ever reaches the witness.** The
-  witness carries identity, timestamp, `provider:cred`, request id, and hashes.
-  Every slice's validation includes canary scans of what actually left the host.
-- **No runtime DDL.** Shard counter rows and budget rows are created by DML
-  upsert, consistent with the existing no-DDL invariant.
-- **Shared state only.** Outbox, budget, counters, and drain ownership are
-  PostgreSQL state. Nothing load-bearing may live in instance-local memory or on
-  an instance's disk, because autoscale teardown destroys it.
-- **Bounded work.** Every drain batch, export call, and checkpoint has a monotonic
-  deadline; deadline exhaustion leaves the reservation intact and the entry
-  unexported rather than counted as retained.
+- **No single source of authority.** Neither aimee's chain nor any single
+  exported copy is authoritative alone. A local chain break proves tampering by
+  itself; a locally clean chain that contradicts an exported copy proves it just
+  as well. No slice may describe a durable local append or the primary hash chain
+  as sufficient on its own.
+- **Detection is the deliverable, not reconstruction.** No slice may claim the
+  exported evidence rebuilds the complete original event history. It must claim
+  only that tampering is detectable.
+- **Export everything, gate nothing on it.** All evidence is exported; export lag
+  raises a typed integrity alert and never blocks admission. There is no delivery
+  receipt, no watermark, no consumer registry, and no unwitnessed budget.
+- **Evidence is durably committed before key use.** This is the existing P7
+  admission rule and the actual fail-closed property. No slice may weaken it, and
+  no slice may add a second, weaker gate that appears to replace it.
+- **Chain verification is default-on and non-disableable on a key-holding kb.**
+  It fails closed at boot if verification is off. This is a build-time property,
+  not an operator knob.
+- **No secret, key, or fingerprint of a key is ever exported.** Records carry
+  identity, timestamp, `provider:cred`, request id, and hashes. Every slice's
+  validation includes canary scans of the bytes actually exported.
+- **No runtime DDL.** Shard counter rows are created by DML upsert, consistent
+  with the existing no-DDL invariant.
+- **Shared state only.** The evidence log and shard counters are PostgreSQL
+  state. Nothing load-bearing lives in instance-local memory or on an instance's
+  disk, because autoscale teardown destroys it.
+- **Bounded work.** Checkpoint generation is bounded by construction — an
+  incrementally maintained Merkle root, never a full scan of every shard head —
+  and every export call carries a monotonic deadline.
 
-## Honest residual, restated
+## Threat model and honest residual
 
-A database compromise that erases an admission row and its not-yet-drained outbox
-entry before the drain runs leaves that one use unwitnessed. The fail-closed
-backlog bound caps how many uses can sit undrained; the highest-assurance posture
-drains synchronously. The window is bounded, not zero, and no slice may claim
-otherwise in code comments, docs, or operator-facing status.
+To forge a consistent history, an attacker must rewrite aimee-kb's chain *and*
+every copy already exported to every downstream service, in a mutually consistent
+way, without access to those hosts. Exported copies cannot be reached backwards
+in time. With the forthcoming event-bus work — where activity is recorded and
+replayable across services — that burden grows further: the attacker would need
+to compromise the user's machine, aimee-server, and aimee-kb simultaneously, and
+keep all three consistent with each other *and* with the recorded, replayable
+stream. That is the assurance argument, and it does not depend on any single
+service being trustworthy.
+
+The residual is bounded and stated plainly: an attacker who owns the kb host
+controls what is exported from that moment forward, so evidence generated after
+the compromise and before the next export has no external copy. Detection of the
+prior history is unaffected, because those copies are already beyond the host's
+reach. No slice may claim the residual is zero.
 
 ## Validation gates (umbrella level)
 
-- **Unit/default build:** unconfigured export fails closed; record encoding, digest,
-  and checkpoint vectors are exact and stable; every idempotent transition
-  replays identically; typed errors are distinguishable.
-- **ASAN/UBSAN:** record encode/decode and every drain success/failure path; no
-  leak, no use-after-cleanse, no callback after a fail-closed transition.
+- **Unit/default build:** record, checkpoint, and inclusion-proof vectors are
+  exact and stable; rendering is deterministic; tampered leaves, reordered leaf
+  sets, and forged proofs are rejected with distinct typed reasons.
+- **ASAN/UBSAN:** record encode/decode fuzz and every rendering success/failure
+  path; no leak, no use-after-cleanse, no callback after a fail-closed
+  transition.
 - **Real PG17 on CT103:** in-place schema upgrade plus the full P1 RLS gate;
-  concurrent admissions racing the budget ceiling; shard starvation; drain
-  ownership collision; forced disconnect at each transaction boundary;
-  append-only rules reject update/delete/truncate on every new table.
+  concurrent shard appends produce gap-free sequences with correct linkage;
+  forced disconnect at each transaction boundary never advances a shard head
+  without its evidence row; append-only rules reject update/delete/truncate on
+  every new table.
 - **CT260 real daemon:** the E3 kill matrix against a real aimee-kb process, real
-  PG17, swtpm, and a real kb-hosted witness store.
+  PG17, swtpm, and real metrics/log consumers, proving that a rewritten local
+  chain is caught by comparison against previously exported copies.
 - **Canary scan:** database, files, logs, crash artifacts, and the bytes actually
   exported to every consumer.
 
 ## Deferred beyond this umbrella
 
-- Automated continuous cross-consumer comparison; reconstruction stays an
-  operator-driven incident procedure.
+- Automated continuous cross-consumer comparison; it stays an operator-driven
+  incident procedure.
+- Event-bus record/replay integration, which strengthens this argument but is
+  owned by its own proposal.
 - Operator-facing witness console surfaces beyond the existing P5-D status
   plumbing.
 - KMS/PKCS#11 fleet root activation, which remains owned by the reseal umbrella.
