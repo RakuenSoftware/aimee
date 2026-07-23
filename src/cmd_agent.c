@@ -441,6 +441,14 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
                 * an absent cache rate for a free one. */
                if (pcached > 0.0)
                   cJSON_AddNumberToObject(obj, "price_base_cached_per_mtok", pcached);
+               /* DEPRECATED aliases, retained so the rename is not a silent
+                * machine-interface break for existing `agent list --json`
+                * consumers. They carry the BASE-band rate; read price_bands to
+                * price a large request. */
+               cJSON_AddNumberToObject(obj, "price_in_per_mtok", pin);
+               cJSON_AddNumberToObject(obj, "price_out_per_mtok", pout);
+               if (pcached > 0.0)
+                  cJSON_AddNumberToObject(obj, "price_cached_per_mtok", pcached);
 
                model_capability_t cap;
                if (ag->model[0] &&

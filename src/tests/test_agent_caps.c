@@ -695,6 +695,44 @@ void test_primary_turn_default_must_still_satisfy_caps(void)
    printf("  PASS: test_primary_turn_default_must_still_satisfy_caps\n");
 }
 
+/* The REQUEST's output limit must be clamped to the context window, not merely
+ * the prompt-budget arithmetic. agent_exec_context_budget_chars() clamps its own
+ * local maths, but that cannot constrain what the provider is asked to emit — a
+ * 200k-window agent pinned at 300k still asked for 300k of output until this
+ * clamp existed. */
+void test_request_max_tokens_clamped_to_context_window(void)
+{
+   agent_t ag;
+   memset(&ag, 0, sizeof(ag));
+   strcpy(ag.provider, "anthropic");
+   strcpy(ag.model, "claude-opus-4-8");
+   ag.middleware.context_window = 200000;
+
+   /* A pinned agent cap larger than the window is a misconfiguration. */
+   ag.max_tokens = 300000;
+   assert(agent_request_max_tokens(&ag, 0) == 100000);
+
+   /* Equal to the window leaves no prompt room either. */
+   ag.max_tokens = 200000;
+   assert(agent_request_max_tokens(&ag, 0) == 100000);
+
+   /* A sane pinned cap passes through untouched. */
+   ag.max_tokens = 8192;
+   assert(agent_request_max_tokens(&ag, 0) == 8192);
+
+   /* A caller-supplied budget is clamped on the same rule. */
+   ag.max_tokens = 0;
+   assert(agent_request_max_tokens(&ag, 500000) == 100000);
+   assert(agent_request_max_tokens(&ag, 4096) == 4096);
+
+   /* With no configured window there is nothing to clamp against. */
+   ag.middleware.context_window = 0;
+   ag.max_tokens = 300000;
+   assert(agent_request_max_tokens(&ag, 0) == 300000);
+
+   printf("  PASS: test_request_max_tokens_clamped_to_context_window\n");
+}
+
 /* FAIL UPWARD: when capability filtering eliminates every candidate, routing
  * escalates to the most capable seat instead of reporting "no route".
  *

@@ -5,6 +5,7 @@
 #include "models_dev.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -164,8 +165,6 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
    cJSON *t;
    cJSON_ArrayForEach(t, tiers)
    {
-      if (out->price_band_count >= MODEL_PRICE_BANDS_MAX)
-         break;
       if (!cJSON_IsObject(t))
          continue;
       cJSON *spec = cJSON_GetObjectItemCaseSensitive(t, "tier");
@@ -176,6 +175,12 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
          continue;
       int above = 0;
       if (!json_int_checked(cJSON_GetObjectItemCaseSensitive(spec, "size"), &above) || above <= 0)
+         continue;
+      /* A threshold of INT_MAX breaks both consumers: `above + 1` overflows
+       * (undefined behaviour) when emitting the schedule, and a band applies
+       * strictly ABOVE its threshold so INT_MAX could never be selected anyway.
+       * Reject rather than store an unusable entry. */
+      if (above == INT_MAX)
          continue;
 
       model_price_band_t band;
@@ -188,12 +193,30 @@ static void fill_price_bands(cJSON *cost, model_capability_t *out)
       (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
                                 &band.cache_read_per_mtok);
 
-      /* Insertion sort: the array is at most MODEL_PRICE_BANDS_MAX long. */
+      /* Insertion sort, ascending. When full, keep the LOWEST thresholds and
+       * flag the schedule as truncated rather than dropping whichever entries
+       * happened to arrive last: taking the first N in input order silently
+       * corrupts pricing (a descending registry would lose the lowest band, so
+       * mid-size requests keep the base rate). The flag makes consumers treat
+       * an incomplete schedule conservatively instead of trusting it. */
+      if (out->price_band_count >= MODEL_PRICE_BANDS_MAX)
+      {
+         out->price_bands_truncated = 1;
+         if (band.above_tokens >= out->price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens)
+            continue; /* higher than everything kept: drop it */
+         out->price_band_count = MODEL_PRICE_BANDS_MAX - 1; /* evict the largest */
+      }
       int i = out->price_band_count;
       while (i > 0 && out->price_bands[i - 1].above_tokens > band.above_tokens)
       {
          out->price_bands[i] = out->price_bands[i - 1];
          i--;
+      }
+      /* Duplicate threshold: last definition wins, no new slot consumed. */
+      if (i > 0 && out->price_bands[i - 1].above_tokens == band.above_tokens)
+      {
+         out->price_bands[i - 1] = band;
+         continue;
       }
       out->price_bands[i] = band;
       out->price_band_count++;

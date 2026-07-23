@@ -35,11 +35,11 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
                                                                         : reserve_cap;
    }
    /* A pinned reserve at or above the whole window is a misconfiguration: there
-    * is no room left for a prompt. Clamp the RESERVE to half the window rather
-    * than inventing budget - the previous fallback silently advertised a 100k
-    * prompt alongside a 300k pinned reply against a 200k window, i.e. 400k of
-    * commitments against a 200k ceiling. Halving keeps a usable prompt while
-    * never claiming more total room than the window allows. */
+    * is no room left for a prompt. Clamp the RESERVE to half the window so the
+    * PROMPT budget this function returns stays sane. The matching clamp on what
+    * the provider is actually asked to emit lives in agent_request_max_tokens()
+    * (agent_bridge.c) - this function only budgets the prompt and cannot
+    * constrain the request on its own. */
    if (output_tokens >= agent->middleware.context_window)
       output_tokens = agent->middleware.context_window / 2;
    int prompt_tokens = agent->middleware.context_window - output_tokens;

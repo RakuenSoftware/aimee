@@ -127,6 +127,71 @@ int agent_has_reachable_price_band(const agent_t *agent)
    return 0;
 }
 
+/* Does `a` cost at least as much as `b` at EVERY context size both can serve?
+ *
+ * Checking only the base rate and a notional "top" rate is not sufficient: with
+ * two or more bands an ordering can flip and flip back (dearer at base, cheaper
+ * mid-range, dearer again at the top), and a base+top test would wrongly report
+ * a conflict that does not hold across the whole range. Nor can the top be
+ * probed with INT_MAX — that evaluates bands the agents' context ceilings cannot
+ * reach, which suppresses conflicts that DO hold everywhere usable.
+ *
+ * So evaluate at the base plus every band boundary either agent publishes, and
+ * only up to the smaller of the two ceilings — beyond that the agents are not
+ * substitutable and the comparison is moot. A truncated schedule is treated as
+ * unknown: the dropped bands could reverse the ordering. */
+static int price_dominates_across_reachable_bands(const agent_t *a, const agent_t *b)
+{
+   model_capability_t cap_a, cap_b;
+   int have_a = a->model[0] && model_capability_get(agent_catalog_provider(a), a->model, &cap_a);
+   int have_b = b->model[0] && model_capability_get(agent_catalog_provider(b), b->model, &cap_b);
+   if ((have_a && cap_a.price_bands_truncated) || (have_b && cap_b.price_bands_truncated))
+      return 0;
+
+   int ceil_a = agent_effective_context_ceiling(a, have_a ? &cap_a : NULL);
+   int ceil_b = agent_effective_context_ceiling(b, have_b ? &cap_b : NULL);
+   /* 0 means unknown, i.e. unbounded for this purpose. */
+   int limit = 0;
+   if (ceil_a > 0 && ceil_b > 0)
+      limit = ceil_a < ceil_b ? ceil_a : ceil_b;
+   else if (ceil_a > 0)
+      limit = ceil_a;
+   else if (ceil_b > 0)
+      limit = ceil_b;
+
+   /* Probe points: the base band, then just past each published boundary. */
+   int points[2 * MODEL_PRICE_BANDS_MAX + 1];
+   int n = 0;
+   points[n++] = 1;
+   for (int pass = 0; pass < 2; pass++)
+   {
+      const model_capability_t *cap = pass == 0 ? &cap_a : &cap_b;
+      if (!(pass == 0 ? have_a : have_b))
+         continue;
+      for (int i = 0; i < cap->price_band_count; i++)
+      {
+         int at = cap->price_bands[i].above_tokens;
+         if (at <= 0 || at == INT_MAX)
+            continue;
+         if (limit > 0 && at >= limit)
+            continue; /* neither agent can reach past this boundary */
+         if (n < (int)(sizeof(points) / sizeof(points[0])))
+            points[n++] = at + 1;
+      }
+   }
+
+   for (int i = 0; i < n; i++)
+   {
+      double a_in = 0.0, a_out = 0.0, b_in = 0.0, b_out = 0.0;
+      if (!agent_resolved_price_at_context(a, points[i], &a_in, &a_out, NULL) ||
+          !agent_resolved_price_at_context(b, points[i], &b_in, &b_out, NULL))
+         return 0;
+      if (!(a_in >= b_in && a_out >= b_out && (a_in > b_in || a_out > b_out)))
+         return 0;
+   }
+   return 1;
+}
+
 /* Could these two agents ever be candidates for the SAME route? Comparing tiers
  * across agents that never compete is a false positive: routing never chooses
  * between them, so "routing prefers the more expensive model" would be untrue
@@ -167,6 +232,23 @@ static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
    {
       if ((agent_has_role(a, probe_roles[i]) || agent_is_exec_role(a, probe_roles[i])) &&
           (agent_has_role(b, probe_roles[i]) || agent_is_exec_role(b, probe_roles[i])))
+         return 1;
+   }
+
+   /* CUSTOM exec roles. The probe list above covers the built-in universe, but
+    * exec_roles[] is operator-configurable, so a shared "custom-migration" would
+    * otherwise be missed entirely — both agents are routable for it while this
+    * returned false. Compare the configured lists directly, in both directions. */
+   for (int i = 0; i < a->exec_role_count; i++)
+   {
+      if (a->exec_roles[i][0] &&
+          (agent_has_role(b, a->exec_roles[i]) || agent_is_exec_role(b, a->exec_roles[i])))
+         return 1;
+   }
+   for (int i = 0; i < b->exec_role_count; i++)
+   {
+      if (b->exec_roles[i][0] &&
+          (agent_has_role(a, b->exec_roles[i]) || agent_is_exec_role(a, b->exec_roles[i])))
          return 1;
    }
    return 0;
@@ -225,21 +307,10 @@ int agent_tier_price_conflicts(const agent_config_t *cfg, agent_tier_conflict_t 
 
          /* ... and the ordering does not depend on request size. When either
           * agent can reach a context band its applicable rate changes with the
-          * request, so a single comparison cannot support the definitive advice
-          * "routing prefers the more expensive model". Require the dominance to
-          * hold at the TOP band too; if it does not, stay silent rather than
-          * issue advice that is wrong for part of the operating range. */
-         if (agent_has_reachable_price_band(a) || agent_has_reachable_price_band(b))
-         {
-            double a_in_top = 0.0, a_out_top = 0.0, b_in_top = 0.0, b_out_top = 0.0;
-            /* INT_MAX selects the highest band each model publishes. */
-            if (!agent_resolved_price_at_context(a, INT_MAX, &a_in_top, &a_out_top, NULL) ||
-                !agent_resolved_price_at_context(b, INT_MAX, &b_in_top, &b_out_top, NULL))
-               continue;
-            if (!(a_in_top >= b_in_top && a_out_top >= b_out_top &&
-                  (a_in_top > b_in_top || a_out_top > b_out_top)))
-               continue;
-         }
+          * request, so one comparison cannot support the definitive advice
+          * "routing prefers the more expensive model". */
+         if (!price_dominates_across_reachable_bands(a, b))
+            continue;
 
          if (out && found < max)
          {

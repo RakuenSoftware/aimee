@@ -105,6 +105,18 @@ static void seed_priced_catalog(void)
                       "  \"flat_dear\": {\"limit\":{\"context\":1050000},"
                       "     \"cost\":{\"input\":20.0,\"output\":90.0},\"tool_call\":true},"
                       /* Two bands, to prove ascending selection. */
+                      /* Flips dear -> cheap -> dear across two boundaries: a
+                       * base+top comparison alone would wrongly report a
+                       * conflict that does not hold in the middle. */
+                      "  \"flipflop\": {\"limit\":{\"context\":1000000},"
+                      "     \"cost\":{\"input\":10.0,\"output\":10.0,"
+                      "       \"tiers\":[{\"input\":1.0,\"output\":1.0,"
+                      "         \"tier\":{\"type\":\"context\",\"size\":100000}},"
+                      "        {\"input\":20.0,\"output\":20.0,"
+                      "         \"tier\":{\"type\":\"context\",\"size\":200000}}]},"
+                      "     \"tool_call\":true},"
+                      "  \"flat_five\": {\"limit\":{\"context\":1000000},"
+                      "     \"cost\":{\"input\":5.0,\"output\":5.0},\"tool_call\":true},"
                       "  \"two_band\": {\"limit\":{\"context\":1000000},"
                       "     \"cost\":{\"input\":1.0,\"output\":2.0,"
                       "       \"tiers\":[{\"input\":4.0,\"output\":8.0,"
@@ -588,6 +600,73 @@ static void test_unreachable_band_is_ignored(void)
    printf("  PASS: test_unreachable_band_is_ignored\n");
 }
 
+/* An ordering that flips and flips BACK must not be reported. flipflop is
+ * $10 at base, $1 above 100k, $20 above 200k; flat_five is $5 everywhere. A
+ * comparison of base and top alone sees "dearer at both ends" and would report
+ * a conflict, but flipflop is CHEAPER between 100k and 200k, so the advice
+ * would be wrong across part of the operating range. */
+static void test_ordering_that_flips_back_is_not_flagged(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "flipflop_t0", "banded", "flipflop", 0);
+   add_agent(&cfg, "flat_five_t1", "banded", "flat_five", 1);
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 0);
+
+   printf("  PASS: test_ordering_that_flips_back_is_not_flagged\n");
+}
+
+/* An UNREACHABLE band must not suppress a conflict that holds everywhere the
+ * agents can actually operate. Capping flipflop below its second boundary makes
+ * the range 1..200000, where it is dearer at base and cheaper above 100k — still
+ * not a clean dominance. Capping below the FIRST boundary makes it flat $10 vs
+ * $5, which is a real conflict and must be reported. */
+static void test_unreachable_band_does_not_suppress_valid_conflict(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "flipflop_t0", "banded", "flipflop", 0);
+   add_agent(&cfg, "flat_five_t1", "banded", "flat_five", 1);
+   /* Ceiling below the first boundary: only the base rate is reachable. */
+   cfg.agents[0].middleware.context_window = 100000;
+   cfg.agents[1].middleware.context_window = 100000;
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+   assert(strcmp(out[0].cheaper_tier_agent, "flipflop_t0") == 0);
+
+   printf("  PASS: test_unreachable_band_does_not_suppress_valid_conflict\n");
+}
+
+/* Custom exec roles are operator-configurable and outside the built-in probe
+ * list, so two agents sharing only such a role would otherwise be judged
+ * non-competing and their conflict suppressed. */
+static void test_custom_exec_role_competition_is_detected(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   add_agent(&cfg, "dear_at_tier0", "testvendor", "dear", 0);
+   add_agent(&cfg, "cheap_at_tier1", "testvendor", "cheap", 1);
+
+   /* Disjoint declared roles, disjoint built-in exec roles, but a SHARED
+    * custom exec role that both are routable for. */
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "%s", "explain");
+   snprintf(cfg.agents[0].exec_roles[0], sizeof(cfg.agents[0].exec_roles[0]), "%s",
+            "custom-migration");
+   cfg.agents[0].exec_role_count = 1;
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "%s", "summarize");
+   snprintf(cfg.agents[1].exec_roles[0], sizeof(cfg.agents[1].exec_roles[0]), "%s",
+            "custom-migration");
+   cfg.agents[1].exec_role_count = 1;
+
+   agent_tier_conflict_t out[AGENT_TIER_LINT_MAX];
+   assert(agent_tier_price_conflicts(&cfg, out, AGENT_TIER_LINT_MAX) == 1);
+
+   printf("  PASS: test_custom_exec_role_competition_is_detected\n");
+}
+
 int main(void)
 {
    printf("agent_tier_lint:\n");
@@ -610,6 +689,9 @@ int main(void)
    test_band_dependent_ordering_is_not_flagged();
    test_band_stable_ordering_is_still_flagged();
    test_unreachable_band_is_ignored();
+   test_ordering_that_flips_back_is_not_flagged();
+   test_unreachable_band_does_not_suppress_valid_conflict();
+   test_custom_exec_role_competition_is_detected();
    test_guards();
    printf("agent_tier_lint: all tests passed\n");
    return 0;

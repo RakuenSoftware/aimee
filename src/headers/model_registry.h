@@ -49,7 +49,7 @@ enum
  * Only the structured `tiers[].tier.size` is authoritative; the legacy alias is
  * ignored. Of 5728 catalogued models, 252 publish bands: 245 with one and 7 with
  * two, all of type "context". */
-#define MODEL_PRICE_BANDS_MAX 4
+#define MODEL_PRICE_BANDS_MAX 8
 
 typedef struct
 {
@@ -76,6 +76,10 @@ typedef struct
     * means a single flat price at every context size. */
    model_price_band_t price_bands[MODEL_PRICE_BANDS_MAX];
    int price_band_count;
+   /* 1 when the source published more bands than fit, so the schedule is
+    * INCOMPLETE. Consumers must not assert a definitive price ordering from a
+    * truncated schedule — the dropped bands could reverse it. */
+   int price_bands_truncated;
    unsigned flags;
    char modalities[64];
    char knowledge_cutoff[16];

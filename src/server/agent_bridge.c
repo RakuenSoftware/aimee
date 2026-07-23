@@ -117,18 +117,35 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    }
    cJSON_AddItemToObject(req, "models", models);
 }
+/* Never promise the provider more output than the agent's context window can
+ * hold. A pinned max_tokens at or above the window is a misconfiguration: the
+ * reply alone would consume the whole context, leaving nothing for the prompt.
+ * agent_exec_context_budget_chars() clamps its own PROMPT arithmetic, but that
+ * is a local calculation - without this the request still carried the oversized
+ * limit, so a 200k-window agent pinned at 300k asked for 300k of output. */
+static int agent_clamp_to_context(const agent_t *agent, int tokens)
+{
+   if (!agent || tokens <= 0)
+      return tokens;
+   int window = agent->middleware.context_window;
+   if (window > 0 && tokens >= window)
+      return window / 2;
+   return tokens;
+}
+
 int agent_request_max_tokens(const agent_t *agent, int requested)
 {
    if (requested > 0)
-      return requested; /* caller pinned an explicit budget (e.g. a short ping) */
+      return agent_clamp_to_context(agent, requested); /* caller pinned a budget */
    if (agent && agent->max_tokens > 0)
-      return agent->max_tokens; /* agents.json / --max-tokens pinned a cap */
+      return agent_clamp_to_context(agent, agent->max_tokens); /* agents.json cap */
    /* No explicit cap: use the model's own output ceiling, never a hardcoded one. */
    /* Catalog identity, not the wire provider: a third-party vendor on another
     * vendor's API otherwise resolves the wrong capability row and gets the
     * non-reasoning 8192 output ceiling instead of its real one. */
-   return model_max_output(agent ? agent_catalog_provider(agent) : NULL,
-                           agent ? agent->model : NULL);
+   return agent_clamp_to_context(agent, model_max_output(agent ? agent_catalog_provider(agent)
+                                                              : NULL,
+                                                        agent ? agent->model : NULL));
 }
 
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,

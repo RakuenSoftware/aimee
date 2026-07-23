@@ -1991,14 +1991,30 @@ static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role
     * here — that is the ordering this fix is about — not the tmux preference. */
    if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
    {
+      /* Decline ONLY for a tmux peer the normal pass would actually select.
+       * That pass is tier-filtered and prefers tmux WITHIN min_tier, so a tmux
+       * agent at a higher tier never wins there. Declining for any tmux peer at
+       * all would abandon the default and then hand the turn to some unrelated
+       * cheap agent — losing the default without preserving the session. */
+      int min_tier = -1;
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         agent_t *peer = &cfg->agents[i];
+         if (!peer->enabled || !agent_supports_role(peer, role) ||
+             !agent_is_available_for_routing(peer))
+            continue;
+         if (min_tier < 0 || peer->cost_tier < min_tier)
+            min_tier = peer->cost_tier;
+      }
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *peer = &cfg->agents[i];
          if (peer == ag || !peer->enabled || !agent_supports_role(peer, role) ||
              !agent_is_available_for_routing(peer))
             continue;
-         if (strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
-            return NULL; /* let the normal pass pick the stateful session */
+         if (peer->cost_tier == min_tier &&
+             strcmp(peer->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+            return NULL; /* the normal pass will pick this stateful session */
       }
    }
    return ag;
