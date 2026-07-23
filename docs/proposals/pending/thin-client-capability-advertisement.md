@@ -40,11 +40,12 @@ config catalog, transport authentication, or governance policy distribution; it 
 
 **One discovery mechanism (2026-07-23).** The suite amendment
 ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
-makes every module a Go participant on a core-owned in-memory event bus, where nearly every module
-depends on `memory`. The same generation-stamped capability projection defined here is what a module
-consults to learn whether `memory` (or any dependency) is `ready` before it publishes a request on
-the bus. Discovery is one mechanism for a client and for a module; this proposal's projection serves
-both, so a module never reaches an unready dependency and a client never advertises one.
+makes every module a separate program — in any conforming language — on a core-owned shared-memory
+event bus, where nearly every module depends on `memory`. The same generation-stamped capability
+projection defined here is what a module consults to learn whether `memory` (or any dependency) is
+`ready` before it publishes a request on the bus. Discovery is one mechanism for a client and for a
+module; this proposal's projection serves both, so a module never reaches an unready dependency and a
+client never advertises one.
 
 ## Decision
 

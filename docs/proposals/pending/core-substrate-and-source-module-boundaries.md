@@ -1,10 +1,10 @@
 # Proposal suite: Aimee core, modular source ownership, and product boundaries
 
 - **State:** PENDING — roundtable-approved 2026-07-20; **amended 2026-07-23 (post-approval)**.
-  The 2026-07-23 amendment introduces the C-core / Go-module language boundary and the core-owned
-  in-memory event bus as the single inter-module messaging construct. It reopens the taxonomy and
-  shared invariants and must be re-reviewed before acceptance; it does not inherit the 2026-07-20
-  approval.
+  The 2026-07-23 amendment makes core a C communication substrate and every module a separate program
+  in any conforming language, communicating over a core-owned shared-memory event bus (no
+  cross-language linking, no cgo). It reopens the taxonomy and shared invariants and must be
+  re-reviewed before acceptance; it does not inherit the 2026-07-20 approval.
 - **Author:** Aimee project
 - **Date:** 2026-07-20 (amended 2026-07-23)
 
@@ -42,17 +42,20 @@ is now the suite index and shared contract; it does not duplicate the child prop
    feature cluster.
 10. Less is more: remove duplicate implementations, registries, fallbacks, wrappers, stale config,
     and self-contained feature islands instead of relocating them.
-11. **The communication core is written in C; first-party feature modules are written in Go.**
-    Language and selection are independent axes: a module may be required (always selected) yet still
-    be a Go module. The C core carries authenticated, audited, typed messages between participants and
-    hosts the event bus; it performs no feature work. External or user-authored modules may be
-    written in any language that compiles to the in-process sandbox (invariant 19).
-12. **Modules do not link or call each other directly.** A module reaches another module — and core
-    reaches a module — only by publishing or requesting a typed event on the core-owned in-memory
-    event bus, gated by the descriptor dependency graph and execution policy. There is no shared
-    header, symbol, link edge, or side channel between modules. The C↔Go boundary makes this
-    structural: the C core cannot link a Go module, and one Go module cannot link another across the
-    descriptor boundary.
+11. **The communication core is written in C; a module may be written in any language that conforms
+    to the bus contract.** The boundary between core and a module — and between two modules — is a
+    language-neutral message contract, not a header or a link edge, so language is a free choice.
+    First-party modules standardize on Go as the reference implementation language; that is a
+    convention, not a requirement. Language and selection are independent axes: a module may be
+    required (always selected) and written in any conforming language. The C core carries
+    authenticated, audited, typed messages between participants and owns the event bus; it performs no
+    feature work.
+12. **Modules do not link or call each other; they only exchange messages over the bus.** A module
+    reaches another module — and core reaches a module — only by publishing or requesting a typed
+    event on the core-owned shared-memory event bus, gated by the descriptor dependency graph and
+    execution policy. There is no shared header, symbol, link edge, cgo boundary, or side channel
+    between core and a module or between two modules. Because the boundary is a message contract and
+    the participants are separate programs, no cross-language linking exists and cgo is never required.
 13. **The event bus is the single loggable, governable, recordable messaging construct.** Every
     inter-module message is a bus event, so one tap observes, records, authorizes (for action-class
     events), and can **replay** the entire cross-module message stream. No module-to-module
@@ -61,38 +64,43 @@ is now the suite index and shared contract; it does not duplicate the child prop
 14. **`memory` is a hub, not a peer.** Nearly every module depends on `memory`; `memory` depends on
     no other feature module. It is a sink in the dependency graph, keeping the graph acyclic under
     broad fan-in, and its public event contract stays narrow despite that fan-in.
-15. **The bus stays within a performance budget.** In-memory, in-process dispatch with no network or
-    serialization on the intra-service hot path; a benchmark gate bounds per-event dispatch overhead
-    and holds the `memory` round trip at parity with the former in-process call. Governance capture
-    and record must not push the hot path outside budget (record is asynchronous; only action-class
-    verdicts are synchronous and cheap).
+15. **The bus stays within a performance budget.** The bus is an in-memory shared-memory transport:
+    lock-free ring buffers in a shared segment, zero-copy payloads, and no per-message syscall on the
+    fast path — near-in-process latency without a shared address space. A benchmark gate bounds
+    per-event dispatch overhead and keeps the `memory` round trip small; splitting `memory` into its
+    own program costs more than the former monolithic in-process call, so batching and streaming keep
+    that cost bounded rather than pretending it is zero. Governance capture and record must not push
+    the hot path outside budget (record is asynchronous; only action-class verdicts are synchronous
+    and cheap).
 16. **Installation is dependency-complete.** Each of the Runtime and the Control Plane owns its own
-    event bus; core is the bus owner in each. A module registers by publishing its capabilities to
-    core over that bus, and a module may not be installed unless every module it declares a
-    dependency on is already installed. Installation and selection are transactional and fail closed
-    on a missing dependency; a module cannot be removed while an installed module still depends on
-    it.
-17. **Bus admission is core-controlled and load-time, not a network attach.** The bus never leaves
-    the service process, so there is no endpoint any process can dial and no anonymous or ambient
-    attach. Core is the sole admission authority: a module participates only when core loads or
-    instantiates it (invariant 19), it is installed and registered, its identity/artifact is attested,
-    and `execution-policy` authorizes it. Admission is least-privilege (an admitted module is still
-    confined to its declared, authorized event kinds) and fail-closed (a refused module is not
-    instantiated and the refusal is audited).
+    shared-memory event bus; core is the bus owner in each. A module registers by publishing its
+    capabilities to core over that bus, and a module may not be installed unless every module it
+    declares a dependency on is already installed. Installation and selection are transactional and
+    fail closed on a missing dependency; a module cannot be removed while an installed module still
+    depends on it.
+17. **Bus admission is core-controlled; the shared segment is not open.** The shared-memory bus is
+    not a segment any process may map. Core is the sole admission authority: a module is granted the
+    bus handle and its own queue mappings only when it is installed and registered, its
+    identity/artifact is attested, and `execution-policy` authorizes it. There is no anonymous or
+    ambient access — an unadmitted process holds no handle and cannot map the segment, enumerate, or
+    inject. Admission is least-privilege (an admitted module still reaches only its declared,
+    authorized event kinds) and fail-closed (a refused module is not started and the refusal is
+    audited).
 18. **Delivery is per-subscription observer routing, not broadcast.** Core routes each event only to
     the modules registered as authorized observers of that event kind (observer pattern); a module
     never receives, and cannot enumerate, traffic for event kinds it did not subscribe to and is not
     authorized for. A subscription is honored only when the descriptor declares it and execution
     policy authorizes it. The single full-stream observer is core's own governance/audit tap, which
     is trust-kernel infrastructure, not a feature module.
-19. **Every module runs in-process; untrusted modules run sandboxed.** No module runs as a separate
-    OS process. Trusted first-party modules are native — Go modules linked into the service binary
-    with the C core via cgo — for native speed on hot paths. External or user-authored modules run in
-    an in-process WebAssembly sandbox whose only host imports are their declared, authorized bus
-    verbs; they are memory- and fault-isolated from core and from every other module and can reach
-    nothing else. Native Go plugin loading is not used. The sandbox's capability set is exactly the
-    observer-routed authorized surface (invariants 17–18), so isolation is enforced by the runtime,
-    not by module good behavior.
+19. **Modules are separate programs; isolation is by process or sandbox, not by language.** Core and
+    each module are distinct programs that never link; they meet only on the shared-memory bus. A
+    trusted first-party module runs as its own process mapped to only its authorized bus queues. An
+    untrusted external or user module runs under an enforced sandbox — an OS-sandboxed process
+    (seccomp/namespaces/container) or a WebAssembly instance in a host — reachable only through its
+    authorized bus queues and unable to read core, `vault`, or another module's memory. The isolation
+    mechanism is a deployment choice; the bus contract, admission, and routing are identical across
+    them, and separate programs give independent fault domains and scaling. Cross-language in-process
+    linking (including cgo and native Go plugins) is not used.
 
 ## Shared terms
 
@@ -123,20 +131,25 @@ is now the suite index and shared contract; it does not duplicate the child prop
 - The **communication core** is the C substrate that carries authenticated, audited, typed messages
   between participants (client, Runtime, Control Plane, and modules), hosts the event bus, and holds
   capability state. It contains no feature capability.
-- The **event bus** is the core-owned, in-memory, in-process message path over which participants
-  exchange typed events. It supports one-way notifications and correlated request/reply, resolves a
-  target by capability, authorizes and records the hop, and returns typed `capability_absent` when a
-  target is unselected or not `ready`. It is per-service (one in each of Runtime and Control Plane);
-  cross-service events travel the existing network transport, not the in-memory bus.
+- The **event bus** is the core-owned, in-memory **shared-memory** message path over which
+  participants exchange typed events. It supports one-way notifications and correlated request/reply,
+  resolves a target by capability, authorizes and records the hop, and returns typed
+  `capability_absent` when a target is unselected or not `ready`. It is per-service (one in each of
+  Runtime and Control Plane); cross-service events travel the existing network transport, not the
+  shared-memory bus.
 - An **event contract** is the language-neutral schema for the event kinds a module publishes,
-  subscribes to, and may request. It is the only surface another participant may invoke, and it
-  replaces the C public header as the enforced dependency edge for Go modules.
+  subscribes to, and may request, plus the bus wire format that carries them. It is the only surface
+  another participant may invoke, and it replaces the C public header as the enforced dependency edge
+  between separate-program participants.
+- The **bus client** is the per-language library that lets a module attach the shared-memory bus,
+  encode/decode events in the wire format, and publish/subscribe/request. A reference client SDK and
+  the wire spec are what make any language a module host.
 - A **hub module** is a module (canonically `memory`) that is an allowed dependency of many other
   modules and itself depends on no feature module — a sink in the dependency graph.
 - The **object closure** term extends per axis: the **C object closure** is the selected `.o` set
-  for the communication core; the **module closure** is the selected set of Go module build units
-  and their registered event contracts. Omission removes a module from the module closure and the
-  capability closure alike.
+  for the communication core; the **module closure** is the selected set of module programs and their
+  registered event contracts. Omission removes a module from the module closure and the capability
+  closure alike.
 
 Runtime-disabled and omitted are not synonyms. A selected module may remain in the build while its
 declared runtime lifecycle is disabled; an omitted module must be absent from every build/link/load
@@ -147,8 +160,10 @@ and runtime surface named by the suite's absence manifest.
 The suite's original decision placed feature capabilities *inside* core. This amendment narrows core
 to exactly what the first message of this work asked for: **the pieces needed to communicate between
 the client, the Runtime, and the Control Plane.** That substrate is written in C. Every capability
-that does work in response to a message — including `memory` — is a **Go module** that communicates
-over a **core-owned in-memory event bus**, not a C-linked part of core.
+that does work in response to a message — including `memory` — is a **separate module program** that
+communicates over a **core-owned shared-memory event bus**. Because the boundary is a language-neutral
+message contract and the participants are separate programs, core and modules never link, cgo is
+never required, and a module may be written in any language with a bus client.
 
 ### Two independent axes
 
@@ -156,20 +171,22 @@ Selection and language are orthogonal. Each module is classified on both:
 
 - **Selection:** *required* (present in every profile, no enable switch) or *optional* (selectable,
   absent from the module and capability closure when omitted). Unchanged from the approved suite.
-- **Runtime/language:** *communication core* (C, in the trusted message path) or *module* (Go,
-  behind an event contract on the bus). New with this amendment.
+- **Runtime/language:** *communication core* (C, in the trusted message path) or *module* (a separate
+  program in any conforming language, behind an event contract on the bus). New with this amendment.
 
-"Required" no longer implies "compiled into C core." A required Go module is always selected and
-always registered, but it is still a Go build unit that speaks only over the bus. The eighteen IDs
-the approved taxonomy called "required core modules" split across the new language axis; the final
-assignment is delegated to [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md),
-which must resolve it before its round-trip proof is built. This suite records the intended carving:
+"Required" no longer implies "compiled into C core." A required module is always selected and always
+registered, but it is a separate program that speaks only over the bus. The eighteen IDs the approved
+taxonomy called "required core modules" split across the new axis; the final assignment is delegated
+to [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md), which must resolve it
+before its round-trip proof is built. This suite records the intended carving:
 
 - **Communication core (C):** `module-runtime` (now also the event bus and capability-state
   authority), `ir`, `translation`, `protocols`, `gateway`, and `config`. These move a typed message
   and nothing else.
-- **Required Go modules:** `memory`, `learning`, `routing`, `delegates`, `tools`, `workspace`,
-  `git`, `skills`, and `response-composition`. Always selected; still Go; still on the bus.
+- **Required modules (Go reference):** `memory`, `learning`, `routing`, `delegates`, `tools`,
+  `workspace`, `git`, `skills`, and `response-composition`. Always selected; separate programs on the
+  bus; authored in Go as the first-party reference language, though any conforming language is
+  admissible.
 - **Trust kernel (pivotal):** `vault`, `execution-policy`, and `audit` gate and record every bus
   event. This suite's recommendation is to keep them in the C communication core, because the bus
   cannot authorize or record an inter-module event without them and the safety boundary must not
@@ -177,25 +194,27 @@ which must resolve it before its round-trip proof is built. This suite records t
   placement and must state it explicitly; wherever it lands, the safety contracts and their
   reference implementations remain required in every profile.
 
-All eight optional modules remain Go modules.
+All eight optional modules are separate programs on the bus, Go by first-party convention.
 
-### The in-memory event bus
+### The shared-memory event bus
 
-`module-runtime` owns an **in-memory, in-process event bus** per service. Every message between
-participants — a remote client, the Runtime, the Control Plane, or another module — is a typed IR
-event on this bus. A participant publishes a one-way notification or a correlated request and
-receives the reply; the bus resolves the target by capability, authorizes the event through the
-trust kernel, offers it to the governance/audit tap, and returns the typed result or
-`capability_absent`. The same IR envelopes, auth, and capability advertisement drive both the C↔Go
-boundary and the client↔server↔kb boundary, so a module invoking `memory` and a client invoking the
-Runtime traverse one construct, not two. Cross-service events (Runtime↔Control Plane) leave the
-in-memory bus and travel the existing network transport; the in-memory guarantee is intra-service.
+`module-runtime` owns a **shared-memory event bus** per service — lock-free ring buffers in a shared
+segment that admitted modules map, giving in-memory speed and zero-copy payloads without a shared
+address space, so no cross-language linking or cgo is involved. Every message between participants —
+a remote client, the Runtime, the Control Plane, or another module — is a typed IR event on this bus.
+A participant publishes a one-way notification or a correlated request and receives the reply; the
+bus resolves the target by capability, authorizes the event through the trust kernel, offers it to
+the governance/audit tap, and returns the typed result or `capability_absent`. The same IR envelopes,
+auth, and capability advertisement drive both the core↔module boundary and the client↔server↔kb
+boundary, so a module requesting `memory` and a client invoking the Runtime traverse one construct,
+not two. Cross-service events (Runtime↔Control Plane) leave the shared-memory bus and travel the
+existing network transport; the shared-memory guarantee is intra-service.
 
-Choosing a bus over point-to-point calls is deliberate: one construct carries every inter-module
-message, so it is the single place to **log, govern, and reason about** cross-module behavior
-(shared invariant 13). It also structurally enforces invariants 1 and 12 — the C core has no build
-or link edge to any Go module; it holds only the descriptor graph and the bus. "Core never depends
-on an optional module" becomes unbreakable rather than merely checked: core *cannot* link a module
+Choosing a bus over direct calls is deliberate: one construct carries every inter-module message, so
+it is the single place to **log, govern, and reason about** cross-module behavior (shared invariant
+13). It also structurally enforces invariants 1 and 12 — the C core has no build or link edge to any
+module; it holds only the descriptor graph and the bus. "Core never depends on an optional module"
+becomes unbreakable rather than merely checked: core is a separate program that cannot link a module
 at all. An unselected module simply has no registered event contract, and every attempt to reach it
 fails closed.
 
@@ -208,62 +227,63 @@ client, is one mechanism.
 ### Bus admission and isolation
 
 The bus carries every module's traffic, including the near-universal `memory` path and every
-governed action-class event, so **who may attach to it is a security boundary in its own right** —
-distinct from, and prior to, the per-event authorization above. A process that could connect freely
-could observe every module's messages or inject its own; the bus must therefore not be a
-promiscuous endpoint any process can dial (shared invariant 17).
+governed action-class event, so **who may map its shared segment is a security boundary in its own
+right** — distinct from, and prior to, the per-event authorization above. A process that could map
+the segment freely could observe every module's messages or inject its own; the shared segment must
+therefore not be mappable by any process (shared invariant 17).
 
-- **Core is the sole admission authority.** As bus owner in each service, core loads or instantiates
-  every module. The bus never leaves the process (invariant 19), so there is no endpoint to dial, no
-  side channel to join, and no anonymous or ambient attach.
+- **Core is the sole admission authority.** As bus owner in each service, core creates the shared
+  segment and hands a module its handle and its own queue mappings only on admission. There is no
+  side channel to join and no anonymous or ambient mapping; an unadmitted process holds no handle and
+  the segment's OS permissions deny it.
 - **Every module is identity-attested.** Admission reuses the existing principal and trust machinery
   — the vault principal model, the `cert:CN` / bearer classes the thin-client↔server link uses
   ([`tiered-llm-p8-thinclient-mtls.md`](tiered-llm-p8-thinclient-mtls.md)), and, for externally
   authored modules, `governance`'s artifact signing/trust
   ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md))
-  — rather than inventing a second scheme. A native first-party module is trusted at build/link time;
-  an external module's artifact is verified before core instantiates its sandbox.
+  — rather than inventing a second scheme. A first-party module is trusted at build time; an external
+  module's artifact is verified before core starts it.
 - **Admission is gated by installation and authorization.** A module participates only when it is
   installed, registered, and authorized by `execution-policy`; a module that is not installed, or
-  whose identity or dependencies do not check out, is not instantiated. This is the load-time gate;
-  the per-event contract check (declared, authorized event kinds only) still applies afterward, so
-  admission never implies full access.
-- **Isolation and least privilege.** An admitted module sees only the event kinds it is authorized to
-  subscribe to — the bus is not a broadcast every module can read in full (invariant 18). An
-  untrusted module additionally cannot read core, vault, or another module's memory: its WebAssembly
-  sandbox exposes nothing but its authorized bus verbs (invariant 19).
-- **Fail-closed and audited.** A refused module is not instantiated and the refusal is recorded
-  through the same tap as any other governed event, so an unexpected load attempt is visible, not
-  silent.
+  whose identity or dependencies do not check out, is not started and is granted no handle. This is
+  the start-time gate; the per-event contract check (declared, authorized event kinds only) still
+  applies afterward, so admission never implies full access.
+- **Isolation and least privilege.** An admitted module maps only its own queues, so it sees only the
+  event kinds it is authorized to subscribe to — the bus is not a shared channel every module can
+  read in full (invariant 18). An untrusted module additionally cannot read core, `vault`, or another
+  module's memory: its process/sandbox boundary and its restricted queue mappings expose nothing but
+  its authorized bus verbs (invariant 19).
+- **Fail-closed and audited.** A refused module is not started and the refusal is recorded through
+  the same tap as any other governed event, so an unexpected start attempt is visible, not silent.
 
 This contract sets the admission invariant and its reuse of existing identity machinery; the
-mechanics of native linkage and of sandbox instantiation are owned by `module-runtime` and
+mechanics of segment creation, handle granting, and sandbox startup are owned by `module-runtime` and
 `plugin-loader` in their documents.
 
-### Execution model: in-process native and sandboxed tiers
+### Execution model: separate programs, isolation by process or sandbox
 
-Every module runs inside the service process — there is no out-of-process module and no local IPC to
-defend (invariant 19). Trust decides *how* a module runs, not *whether* it is in-process:
+Every module is a separate program that meets core only on the shared-memory bus (invariant 19).
+Trust decides *how* a module is isolated, not whether it links into core — nothing links into core:
 
-- **Native tier (trusted, first-party).** The C communication core and the built-in Go modules are
-  one binary; the C core and Go are linked in-process via cgo. These modules run at native speed, so
-  the near-universal `memory` path stays close to a direct call and the performance budget below is
-  met without a boundary copy. First-party modules are compartmentalized by contract and observer
-  routing, not by a hardware boundary between them — acceptable because they are trusted, reviewed
-  code shipped with the service.
-- **Sandboxed tier (untrusted, external/user).** An external or user-authored module runs in an
-  in-process WebAssembly runtime. Each module is a WASM instance with its own linear memory, isolated
-  from core and from every other module and unable to crash the host on a trap. Its host imports are
-  exactly the bus verbs for its declared, authorized event kinds — publishing, subscribing, and
-  requesting — and nothing else; the sandbox capability set *is* the observer-routed authorized
-  surface, so the runtime enforces isolation rather than trusting the module. Data crossing the WASM
-  boundary is copied into and out of linear memory, which keeps untrusted modules off the native fast
-  path; this cost is acceptable for user features and never applies to the native `memory` path.
+- **Trusted (first-party).** A first-party module runs as its own process, mapped to only its
+  authorized bus queues. It is authored in Go by convention but may be any conforming language. It is
+  compartmentalized from other modules by the process boundary and observer routing; separate
+  processes also give it an independent fault domain and independent scaling.
+- **Untrusted (external/user).** An external or user-authored module runs under an enforced sandbox,
+  and the sandbox mechanism is a deployment choice over one identical contract: an **OS-sandboxed
+  process** (seccomp/namespaces/container) for a native binary in any language, or a **WebAssembly
+  instance** in a host for a WASM-targeting module. Either way it reaches nothing but its authorized
+  bus queues and cannot read core, `vault`, or another module's memory; the sandbox capability set
+  *is* the observer-routed authorized surface, so the runtime enforces isolation rather than trusting
+  the module.
 
-Native Go plugin loading is deliberately excluded: it demands exact toolchain and dependency lockstep,
-does not run on every target platform, and provides no memory isolation, so it fails both portability
-and the untrusted-module security model. `plugin-loader` owns the WASM host, artifact verification,
-instantiation, and lifecycle for the sandboxed tier.
+Because the participants are separate programs, there is no cross-language in-process linking anywhere
+— cgo and native Go plugins are both excluded, the former unnecessary and the latter unshippable
+(exact toolchain/dependency lockstep, no universal platform support, no isolation). Splitting a
+module out of core costs more than a monolithic in-process call did; the shared-memory bus keeps that
+cost small (zero-copy, no syscall on the fast path) and batching/streaming keep the `memory` path
+within the performance budget. `plugin-loader` owns artifact verification, the sandbox host(s), and
+lifecycle for the untrusted tier.
 
 ### Subscription and routing (observer pattern)
 
@@ -320,11 +340,13 @@ redaction and principal-scoping as the audit tap; a recorded stream is a governe
 
 The bus is superior only while its cost stays within acceptable limits, and the hottest path —
 module→`memory`, run on every request on both Runtime and Control Plane — is the one that must not
-regress (shared invariant 15). The in-memory, in-process design is what makes this viable: intra-
-service events cross no network and require no wire serialization, so the boundary crossing that used
-to be an in-process call stays close to one. A benchmark gate bounds per-event dispatch overhead and
-holds the `memory` round trip at parity with the former in-process call; the round-trip proof
-exercises the `memory` stages *across* the C↔Go boundary, not as an in-proc shortcut.
+regress (shared invariant 15). A **shared-memory** bus is what makes this viable: lock-free ring
+buffers in a shared segment give near-in-process latency and zero-copy payloads with no per-message
+syscall on the fast path, so a separate-program `memory` is reached far faster than any socket and
+without cgo. This is not free — splitting `memory` into its own program costs more than the former
+monolithic in-process call — so a benchmark gate bounds per-event dispatch overhead and batching and
+streaming keep the `memory` round trip small; the round-trip proof exercises the `memory` stages
+*across* the bus, not as an in-proc shortcut.
 
 Governance capture must live within this budget. The tap observes every event, but **recording** to
 the durable audit chain is asynchronous and batched (consistent with the WORM hot-path cost noted in
@@ -345,12 +367,13 @@ rules (shared invariant 14):
 2. **The `memory` event contract stays narrow.** Heavy fan-in does not license a wide surface: typed
    ingest, recall, index, embed, and rerank events only. Callers adapt to `memory`; `memory` does not
    grow an event kind per caller.
-3. **The bus gives `memory` a first-class local fast-path.** Recall and ingest support batching and
-   streaming so the in-memory crossing does not regress a hot path, per the performance budget above.
+3. **The bus gives `memory` a first-class fast-path.** Recall and ingest support batching and
+   streaming so the shared-memory crossing does not regress a hot path, per the performance budget
+   above.
 
 ### Capability publication and dependency-complete installation
 
-Each of the Runtime and the Control Plane owns its own in-memory event bus, and core is the bus
+Each of the Runtime and the Control Plane owns its own shared-memory event bus, and core is the bus
 owner in each (shared invariant 16). A module does not have its capabilities read out of it by a
 core poller; it **publishes its capabilities to core over the bus** when it registers, and publishes
 state transitions as they happen. Core aggregates those publications into the capability closure and
@@ -372,43 +395,47 @@ remain.
 
 ### User-authored modules
 
-Because the bus, the event contract, and capability publication are the *only* integration surface,
-a module needs nothing from core but to speak that surface: subscribe to and publish its declared
-event kinds, and publish its capabilities. This lets **end users author their own modules** and plug
-them in without modifying, recompiling, or relinking core. A user module compiles to WebAssembly
-against the host ABI — the bus verbs — and runs in-process in the sandboxed tier (invariant 19), so
-it can be authored in any WASM-targeting language rather than only native Go. The optional
-`plugin-loader` module realizes this (artifact verification, WASM instantiation, and lifecycle); this
-suite records the property, and `plugin-loader`'s own document owns the packaging and host mechanics.
+Because the bus contract, the event contract, and capability publication are the *only* integration
+surface, a module needs nothing from core but to speak that surface: attach the bus with a bus
+client, subscribe to and publish its declared event kinds, and publish its capabilities. This lets
+**end users author their own modules in any language** and plug them in without modifying,
+recompiling, or relinking core — the language boundary that once meant "C or Go" is gone, because the
+boundary is a message contract, not a linkage. A user module is authored in any language for which a
+bus client exists (or can be written as a small shim), packaged as an OS-sandboxed process or a WASM
+module, and admitted like any other untrusted participant. The optional `plugin-loader` module
+realizes this (artifact verification, sandbox host(s), and lifecycle); this suite records the
+property, and `plugin-loader`'s own document owns the packaging and host mechanics.
 
-The trust boundary does not soften for a user module — the WASM sandbox and the bus boundary are
-exactly why this is safe:
+The trust boundary does not soften for a user module — the sandbox and the bus boundary are exactly
+why this is safe:
 
-- A user module is an **untrusted principal** running in a memory-isolated sandbox. Every event it
-  publishes or requests is authorized by `execution-policy` and recorded by `audit` through the same
-  tap as any other event; its host imports are only its declared, authorized bus verbs, so it gets no
-  ambient access and can reach another module (for example `memory`) only through that module's
-  public event contract, only for event kinds it declared, and only if the dependency is installed.
+- A user module is an **untrusted principal** running in an enforced sandbox (OS-sandboxed process or
+  WASM instance). Every event it publishes or requests is authorized by `execution-policy` and
+  recorded by `audit` through the same tap as any other event; it maps only its authorized bus queues,
+  so it gets no ambient access and can reach another module (for example `memory`) only through that
+  module's public event contract, only for event kinds it declared, and only if the dependency is
+  installed.
 - **Dependency-complete installation** applies unchanged: a user module that depends on `memory`
   installs only when `memory` is present and reaches it solely over the bus.
 - Executable-artifact trust — signing and hash-pinning of externally authored modules — is owned by
   optional `governance`
   ([`governance-agent-identity-and-artifact-trust.md`](governance-agent-identity-and-artifact-trust.md));
-  a deployment that requires signed modules enforces it there before core instantiates the sandbox.
+  a deployment that requires signed modules enforces it there before core starts the module.
 
 Nothing about user-authored modules is a new core capability or a new privilege path; it is the
-existing in-process bus boundary, enforced by the sandbox runtime, offered to code from outside the
-project.
+existing bus boundary, enforced by the sandbox, offered to code from outside the project — in
+whatever language its author chose.
 
 ### What this changes downstream
 
 - [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)
-  owns the polyglot build (C core plus Go module builds from one descriptor graph), the event
-  contract schema, bus ownership, and dependency enforcement re-expressed as authorized event
-  publication/subscription rather than only a C link/symbol graph.
-- [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) owns the final C/Go
-  carving of the eighteen IDs, the trust-kernel placement, and a round-trip proof whose stages flow
-  as bus events across the boundary within the performance budget.
+  owns the polyglot build (C core plus separate module programs from one descriptor graph), the event
+  contract schema, the bus wire spec and reference client SDK, bus ownership, and dependency
+  enforcement re-expressed as authorized event publication/subscription rather than only a C
+  link/symbol graph.
+- [`aimee-core-capability-contract.md`](aimee-core-capability-contract.md) owns the final
+  core-vs-module carving of the eighteen IDs, the trust-kernel placement, and a round-trip proof whose
+  stages flow as bus events across the boundary within the performance budget.
 - [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md) gains the bus as a
   single, uniform capture and enforcement seam, replacing the seven scattered enforcer sinks its A2
   inventory routes into the chain one by one.

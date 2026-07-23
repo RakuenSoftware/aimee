@@ -179,10 +179,10 @@ A2 above routes seven enforcers into the chain one wiring at a time, and A5's `u
 list exists precisely because capture is a per-site effort that can silently miss a site. The
 modularization suite's amendment
 ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md),
-2026-07-23) removes that problem at the root: once the communication core is C and every module is
-Go, **every inter-module message is a typed event on a single core-owned in-memory event bus**, and
-no module-to-module path exists outside it. That makes the bus the one place to govern and log the
-entire cross-module message stream.
+2026-07-23) removes that problem at the root: once the communication core is C and every module is a
+separate program on a core-owned shared-memory event bus, **every inter-module message is a typed
+event on that single bus**, and no module-to-module path exists outside it. That makes the bus the
+one place to govern and log the entire cross-module message stream.
 
 - **Capture completeness becomes structural, not inventoried.** The bus tap offers every event to
   audit; the A2 sources (gateway policy, memory interception, integrity gate, native gate, vault,
