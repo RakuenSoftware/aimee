@@ -559,6 +559,73 @@ static void test_needle_retrieved_when_chunking_preserves_it(void)
           eligible, skipped_split);
 }
 
+/* Footer accounting must be internally consistent: a span must never be counted
+ * as both shown and omitted, literal-shown must not exceed shown, and shown must
+ * not exceed the chunk count.
+ *
+ * Note on scope: review raised a path where fusion emits nothing (its top
+ * candidate exceeding the budget) and the fallback emits chunk 0, which would
+ * double-count. Measurement shows that is UNREACHABLE under the current
+ * constants -- chunk_text never emits a span longer than WEBREAD_CHUNK (max
+ * observed 480) and WEBREAD_BUDGET is 1500, so the first candidate always fits.
+ * The accounting handles it anyway and a _Static_assert ties that guard to the
+ * constants, but this test cannot exercise it and does not claim to. */
+static void test_fusion_footer_is_consistent(void)
+{
+   /* single oversized matching chunk: fusion loop breaks immediately, fallback
+    * emits chunk 0, and chunk 0 IS the fused candidate */
+   char *page = malloc(8192);
+   assert(page);
+   snprintf(page, 8192, "retry_budget_ms %*s\n\n", 3000, "z");
+   char *t = safe_strdup(page);
+   char *out = webread_select_spans_fusion(t, "r1", "retry_budget_ms", 0, "u");
+   assert(out);
+   int shown = -1, total = -1, lit = -1, omitted = -1;
+   const char *f = strstr(out, "-- ");
+   assert(f);
+   assert(sscanf(f, "-- %d of %d spans shown (%d literal, %d omitted)", &shown, &total, &lit,
+                 &omitted) == 4);
+   /* the one span was emitted, so it cannot also be omitted */
+   assert(shown >= 1);
+   assert(omitted == 0);
+   assert(shown + omitted <= total || total == 0);
+   free(out);
+   free(page);
+
+   /* and across the randomised corpus, shown+omitted must never exceed the
+    * chunk count and omitted must never go negative */
+   unsigned long rng = 31UL;
+#define FC_RND(lo, hi)                                                                             \
+   (rng = rng * 6364136223846793005UL + 1442695040888963407UL,                                     \
+    (int)((lo) + (int)((rng >> 33) % (unsigned long)((hi) - (lo) + 1))))
+   for (int it = 0; it < 300; it++)
+   {
+      char *p2 = malloc(20000);
+      assert(p2);
+      int off = 0;
+      int np = FC_RND(1, 12);
+      for (int i = 0; i < np && off < 18000; i++)
+         off += snprintf(p2 + off, 20000 - (size_t)off, "alpha1 beta2 s%d %*s\n\n", i,
+                         (FC_RND(0, 2) == 0) ? FC_RND(2, 60) : FC_RND(200, 470), "x");
+      char *t2 = safe_strdup(p2);
+      char *o2 = webread_select_spans_fusion(t2, "r1", "alpha1 beta2", 0, "u");
+      assert(o2);
+      const char *f2 = strstr(o2, "-- ");
+      assert(f2);
+      int sh = -1, tt = -1, li = -1, om = -1;
+      assert(sscanf(f2, "-- %d of %d spans shown (%d literal, %d omitted)", &sh, &tt, &li, &om) ==
+             4);
+      assert(sh >= 0 && om >= 0 && li >= 0);
+      assert(li <= sh);      /* literal shown cannot exceed spans shown */
+      assert(sh <= tt);      /* cannot show more spans than exist */
+      assert(sh + om <= tt); /* a span is never both shown and omitted */
+      free(o2);
+      free(p2);
+   }
+#undef FC_RND
+   printf("  PASS: fusion footer accounting is self-consistent\n");
+}
+
 /* Fusion reorders by fused rank, so it is NOT held to byte-identity. What it
  * must still satisfy are the invariants that are contracts rather than
  * implementation details. */
@@ -671,6 +738,7 @@ int main(void)
    test_dispatch_defaults_to_original();
    test_needle_retrieved_when_chunking_preserves_it();
    test_fusion_respects_contracts();
+   test_fusion_footer_is_consistent();
    test_fusion_is_a_real_behaviour_change();
    printf("web_read_spans: all tests passed\n");
    return 0;

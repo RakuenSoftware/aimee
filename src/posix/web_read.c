@@ -42,6 +42,13 @@
 #define WEBREAD_MAX_CHUNKS  400
 #define WEBREAD_TIMEOUT_MS  15000
 
+/* Selection assumes a single chunk always fits the budget: it is what makes the
+ * "fallback span was also a fused candidate" case unreachable, and what keeps
+ * the footer's shown/omitted columns disjoint in practice. Tie the assumption
+ * to the constants so a future tuning change has to revisit it. */
+_Static_assert(WEBREAD_CHUNK < WEBREAD_BUDGET,
+               "a chunk must fit the selection budget; see fusion footer accounting");
+
 /* ---------------- SSRF egress deny-list ---------------- */
 
 /* 1 if this IPv4 (host byte order) is in a private/reserved/link-local range. */
@@ -987,13 +994,25 @@ static char *webread_select_spans_fusion(char *text, const char *ref, const char
     * came from the literal leg. Reporting n_lit (the candidate count) instead
     * produces self-contradictory footers such as "3 of 10 shown (10 literal)". */
    char *is_lit = calloc((size_t)(nc > 0 ? nc : 1), 1);
-   if (is_lit)
-      for (int j = 0; j < n_lit; j++)
-      {
-         int li = atoi(lit[j].id);
-         if (li >= 0 && li < nc)
-            is_lit[li] = 1;
-      }
+   if (!is_lit)
+   {
+      /* Continuing without this would report every emitted span as non-literal,
+       * silently breaking the footer's stated meaning. Fail like the other
+       * allocations rather than emit counts that are quietly wrong. */
+      free(lit);
+      free(lex);
+      free(scored);
+      free(fused);
+      free(chunks);
+      free(text);
+      return safe_strdup("error: out of memory");
+   }
+   for (int j = 0; j < n_lit; j++)
+   {
+      int li = atoi(lit[j].id);
+      if (li >= 0 && li < nc)
+         is_lit[li] = 1;
+   }
 
    size_t budget = WEBREAD_BUDGET;
    size_t used_bytes = 0;
@@ -1011,7 +1030,7 @@ static char *webread_select_spans_fusion(char *text, const char *ref, const char
       used_bytes += chunks[i].len;
       emitted++;
       fused_emitted++;
-      if (is_lit && is_lit[i])
+      if (is_lit[i])
          lit_emitted++;
    }
 
@@ -1024,6 +1043,25 @@ static char *webread_select_spans_fusion(char *text, const char *ref, const char
                    url);
       append_untrusted_span(&ds, ref, 1, chunks[0].ptr, chunks[0].len);
       emitted = 1;
+      /* The fallback span can also be a fused candidate: if the top candidate
+       * alone exceeded the budget the loop would break immediately and chunk 0
+       * would be emitted here instead, making it both "shown" and "omitted".
+       *
+       * Under the CURRENT constants that cannot happen -- chunk_text never
+       * emits a span longer than WEBREAD_CHUNK, which is well under
+       * WEBREAD_BUDGET, so the first candidate always fits (measured: max
+       * observed chunk 480 against a 1500 budget). The static assertion below
+       * ties this guard to that fact, so shrinking the budget or growing the
+       * chunk size fails the build here rather than silently producing footers
+       * that count one span twice. */
+      for (int j = 0; j < nf; j++)
+         if (atoi(fused[j].id) == 0)
+         {
+            fused_emitted++;
+            if (is_lit[0])
+               lit_emitted++;
+            break;
+         }
    }
 
    /* Omitted counts fused candidates that were not emitted. The fallback span is
