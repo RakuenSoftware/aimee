@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "delegate_ensemble.h"
 #include "delegate_ensemble_internal.h" /* parse_model_json_lenient */
+#include "roundtable_activation.h"
 #include "cJSON.h"
 #include "model_registry.h"
 #include <assert.h>
@@ -9,6 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+_Static_assert(sizeof(roundtable_result_t) == sizeof(aimee_panel_result_t),
+               "roundtable result must remain an IR compatibility alias");
+_Static_assert(sizeof(review_evidence_t) == sizeof(aimee_review_evidence_t),
+               "roundtable evidence must remain an IR compatibility alias");
+_Static_assert(EV_NONE == AIMEE_REVIEW_EVIDENCE_NONE,
+               "roundtable evidence values must remain IR-compatible");
 
 /* --- stubs for agent exec functions --- */
 
@@ -298,10 +306,7 @@ agent_route_block_t agent_routing_block_reason(const agent_t *agent, char *detai
       return AGENT_ROUTE_NO_CREDENTIALS;
    return AGENT_ROUTE_OK;
 }
-/* Stubs for the seat resolver pulled in via ensemble_resolve_random_seats. These
- * test seats are all specific model names (never "$random"), so rt_seat_is_random
- * returns 0 and the resolver passes them through unchanged; delegate_pick_for_role
- * is only reached for a "$random" seat and is never called here. */
+/* Stubs for the roster's random-seat resolver. */
 int rt_seat_is_random(const char *model)
 {
    return (!model || !model[0]) ? 1 : (strcmp(model, "$random") == 0);
@@ -309,10 +314,16 @@ int rt_seat_is_random(const char *model)
 int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *const exclude[],
                            int nexclude)
 {
-   (void)cfg;
    (void)role;
-   (void)exclude;
-   (void)nexclude;
+   for (int i = 0; cfg && i < cfg->agent_count; i++)
+   {
+      int excluded = 0;
+      for (int j = 0; j < nexclude; j++)
+         if (exclude[j] && strcmp(cfg->agents[i].name, exclude[j]) == 0)
+            excluded = 1;
+      if (cfg->agents[i].enabled && !excluded)
+         return i;
+   }
    return -1;
 }
 static int g_cost_fold_calls = 0;
@@ -1093,6 +1104,57 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
+static void test_panel_authorization_resolves_random_first(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 1;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "primary");
+
+   const char *random_seats[] = {"$random", ""};
+   for (size_t i = 0; i < sizeof(random_seats) / sizeof(random_seats[0]); i++)
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.provider, sizeof(cfg.provider), "primary");
+      cfg.ensemble_reference_count = 1;
+      snprintf(cfg.ensemble_reference_models[0], 128, "%s", random_seats[i]);
+
+      ensemble_filter_panel_authorization(&cfg, &acfg);
+      assert(cfg.ensemble_reference_count == 0);
+      assert(cfg.ensemble_aggregator[0] == '\0');
+   }
+   printf("  test_panel_authorization_resolves_random_first: ok\n");
+}
+
+static void test_panel_aggregator_random_compatibility(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 2;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "panelist");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "outside");
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 1;
+   snprintf(cfg.ensemble_reference_models[0], 128, "panelist");
+   ensemble_filter_panel_authorization(&cfg, &acfg);
+   assert(strcmp(cfg.ensemble_aggregator, "panelist") == 0);
+
+   config_t random_cfg;
+   memset(&random_cfg, 0, sizeof(random_cfg));
+   random_cfg.ensemble_reference_count = 1;
+   snprintf(random_cfg.ensemble_reference_models[0], 128, "panelist");
+   snprintf(random_cfg.ensemble_aggregator, sizeof(random_cfg.ensemble_aggregator), "$random");
+   ensemble_filter_panel_authorization(&random_cfg, &acfg);
+   assert(strcmp(random_cfg.ensemble_aggregator, "outside") == 0);
+   printf("  test_panel_aggregator_random_compatibility: ok\n");
+}
+
 static void test_panel_excludes_primary(void)
 {
    /* The PRIMARY agent (config.provider) is never seated on — nor allowed to
@@ -1608,6 +1670,8 @@ int main(void)
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
    test_panel_filter_drops_unauthorized_claude();
+   test_panel_authorization_resolves_random_first();
+   test_panel_aggregator_random_compatibility();
    test_panel_excludes_primary();
    test_panel_filter_drops_unavailable();
    test_panel_persona_name_assignment();

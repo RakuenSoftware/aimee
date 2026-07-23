@@ -3,7 +3,8 @@
 ## Purpose and non-goals
 
 IR is required core and defines Aimee's provider-neutral request, response, block, tool-call, delta,
-usage, and stop-reason shapes. `aimee_request_t` and `aimee_response_t` let core stages operate once
+usage, stop-reason, and panel-result shapes. `aimee_request_t`, `aimee_response_t`, and
+`aimee_panel_result_t` let core stages operate once
 instead of repeating logic for every wire protocol. IR does not choose a provider, authorize tools,
 route work, or define a provider's external JSON contract.
 
@@ -12,7 +13,8 @@ route work, or define a provider's external JSON contract.
 The canonical implementations are `src/modules/ir/aimee_ir.c` and
 `src/modules/ir/aimee_ir_metrics.c`. Their matching public contracts are
 `src/modules/ir/include/aimee/ir/aimee_ir.h`,
-and `src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`. Consumers use the canonical include namespace
+`src/modules/ir/include/aimee/ir/aimee_ir_metrics.h`, and
+`src/modules/ir/include/aimee/ir/panel_result.h`. Consumers use the canonical include namespace
 `aimee/ir`; the former flat `src/headers` and `src/server` paths are retired.
 
 The deferred flat `src/headers/aimee_ir_{rescue,serve,shadow,stream}.h` contracts include the canonical
@@ -20,7 +22,12 @@ IR headers for compatibility. New code should include `aimee/ir/aimee_ir.h` or
 `aimee/ir/aimee_ir_metrics.h` directly when it uses those contracts rather than relying on that transitive
 re-export.
 
-These contracts own the provider-neutral message model, its allocation and accessors, and IR-local metrics.
+These contracts own the provider-neutral message model, its allocation and accessors, IR-local metrics,
+and bounded panel findings, evidence, answered questions, coverage gaps, and result status. IR does not
+own panel seats, turns, convergence, deadlines, cancellation callbacks, provider selection, activation,
+or result destruction; those are provider behavior rather than messages.
+The optional `roundtable` provider produces this panel result today, while core serializers, evidence
+replay, and workflows consume it without depending on roundtable's private execution headers.
 The legacy-named rescue, serve, shadow, and stream files remain outside this ownership set because
 they mix canonical operations with translation or comparison behavior. A later behavior-separation slice
 must split those responsibilities before assigning them to IR or translation. IR does not own provider
@@ -61,6 +68,9 @@ boundary into or out of `aimee_request_t` and `aimee_response_t`.
 ## Data and migrations
 
 Most IR values are per-turn heap state released by `aimee_request_free` or `aimee_response_free`.
+The producing provider owns `aimee_panel_result_t.artifact` and exposes the matching result-release
+operation. A shallow struct copy is a non-owning view of that allocation: it neither transfers nor
+duplicates ownership and must never release `artifact` independently.
 Persisted transcripts, shadow comparisons, metrics, and run events are owned by their storage modules but
 must retain block type/order, tool identifiers, stop reason, usage, and model semantics. Structure changes
 therefore require explicit schema and wire compatibility review.
@@ -83,8 +93,9 @@ through `aimee_ir_response_from_text` rather than a parallel answer type.
 
 ## Tests and failure behavior
 
-The descriptor owns `src/tests/test_aimee_ir.c` and `src/tests/test_aimee_ir_metrics.c` as its direct
-contracts.
+The descriptor owns `src/tests/test_aimee_ir.c`, `src/tests/test_aimee_ir_metrics.c`, and
+`src/tests/test_panel_ir_contract.c` as its direct contracts. The panel contract test pins bounds, enum
+values, zero initialization, fixed-array copying, and artifact-pointer semantics.
 Cross-protocol, ingress, backend, and parity tests exercise adjacent translation and gateway boundaries
 without becoming IR-owned. Allocation or malformed-structure failure must be
 explicit and leave outputs freed/zeroed; unsupported block loss must never be silent.
@@ -98,8 +109,9 @@ requests or treating every provider failure as an IR parse failure.
 
 ## Compatibility
 
-The layout and semantics of exported `aimee_*` structures, block ordering, tool-call identity, stop
-reasons, usage, free functions, and stream event ordering are compatibility contracts. Future moves at the
+The layout and semantics of exported `aimee_*` structures, panel result bounds and evidence enum values,
+block ordering, tool-call identity, stop reasons, usage, free functions, and stream event ordering are
+compatibility contracts. Future moves at the
 translation or response-composition boundaries must preserve these installed headers, symbols, fixtures,
 and parity baselines.
 

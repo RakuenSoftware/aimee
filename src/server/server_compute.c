@@ -33,7 +33,8 @@
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
 #include <aimee/delegates/delegate_role.h>
-#include "delegate_ensemble.h"
+#include <aimee/delegates/panel_provider.h>
+#include <aimee/delegates/panel_roster.h>
 #include "evidence_replay.h"
 #include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "guardrails.h"
@@ -47,6 +48,7 @@
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
+#include "roundtable_activation.h"
 #include "workspace.h"
 #include "workspace_provider.h"
 #include "workspace_turn.h"
@@ -1932,17 +1934,17 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
-   ensemble_default_panel_from_agents(&cfg, &acfg);
+   aimee_panel_roster_default(&cfg, &acfg);
    /* Also gate an EXPLICIT reference_models list: never run an unauthorized
     * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
+   aimee_panel_roster_filter_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
+   aimee_panel_roster_filter_availability(&cfg, &acfg);
    bind_request_session_creds(req);
 
-   delegate_ensemble_result_t result;
-   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   aimee_panel_aggregate_result_t result;
+   int rc = aimee_panel_aggregate(&acfg, &cfg, prompt, &result);
    if (rc != 0)
       return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
                                NULL);
@@ -2081,11 +2083,11 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
     * Activation is checked first so a disabled module performs no setup work. */
    if (!evidence_replay_active_backend())
       evidence_replay_set_backend(&rt_replay_kb_backend);
-   roundtable_opts_t opts;
+   aimee_panel_options_t opts;
    memset(&opts, 0, sizeof(opts));
-   opts.mode = ROUNDTABLE_DRAFT;
-   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                : ROUNDTABLE_PARALLEL;
+   opts.mode = AIMEE_PANEL_DRAFT;
+   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? AIMEE_PANEL_SEQUENTIAL
+                                                                : AIMEE_PANEL_PARALLEL;
    opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 1;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
@@ -2107,12 +2109,12 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.question_count = brief.question_count;
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
-      opts.mode = ROUNDTABLE_REVIEW;
+      opts.mode = AIMEE_PANEL_REVIEW;
    cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
    if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
-      opts.turns = ROUNDTABLE_SEQUENTIAL;
+      opts.turns = AIMEE_PANEL_SEQUENTIAL;
    else if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "parallel") == 0)
-      opts.turns = ROUNDTABLE_PARALLEL;
+      opts.turns = AIMEE_PANEL_PARALLEL;
    cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
    if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
    {
@@ -2131,13 +2133,13 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
-   ensemble_default_panel_from_agents(&cfg, &acfg);
+   aimee_panel_roster_default(&cfg, &acfg);
    /* Also gate an EXPLICIT reference_models list: never run an unauthorized
     * claude as a panelist, however it got into the panel. */
-   ensemble_filter_panel_authorization(&cfg, &acfg);
+   aimee_panel_roster_filter_authorization(&cfg, &acfg);
    /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
     * degraded by a model that is in the list/roster but can't actually run. */
-   ensemble_filter_panel_availability(&cfg, &acfg);
+   aimee_panel_roster_filter_availability(&cfg, &acfg);
    bind_request_session_creds(req);
 
    /* Give the tool-less panelists read-only access to aimee memory + the code
@@ -2145,8 +2147,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    char *rt_context = roundtable_build_aimee_context(prompt);
    opts.context = rt_context;
 
-   roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
+   aimee_panel_result_t result;
+   int rc = aimee_panel_run(&acfg, &cfg, prompt, &opts, &result);
    if (rc != 0)
    {
       free(rt_context);
@@ -2171,7 +2173,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    add_roundtable_arrays(resp, &result);
-   delegate_roundtable_result_free(&result);
+   aimee_panel_result_release(&result);
    free(rt_context);
    free(brief.rendered);
    return server_send_ok(conn, resp);

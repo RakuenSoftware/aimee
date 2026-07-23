@@ -2,17 +2,27 @@
 
 ## Purpose and non-goals
 
-`roundtable` is an optional multi-agent deliberation module that owns panel/seat formation, chair
+`roundtable` is an optional multi-agent deliberation module that owns deliberation-specific seat policy, chair
 behavior, roundtable-specific review/verification, iterative authoring pipelines, and composition of
 panel findings. It is not a workflow engine, generic router, delegate runtime, benchmark authority, or
 replacement for core `response-composition`.
 
 ## Public contracts
 
-Current contracts include delegate ensemble execution/results, panel eligibility and seat resolution,
+Current contracts include delegate ensemble execution, preset seat resolution,
 `roundtable_chair_apply`, preset load/save/apply, pipeline capture/chunk/evaluation, and verification.
 Roundtable-specific composition must preserve attributed panel evidence and verdict semantics before
 handing the result to general response composition or a consuming workflow.
+
+Provider-neutral output layouts live in the required IR module's `aimee/ir/panel_result.h`.
+Provider-neutral request/options and aggregate-result types, registration and invocation facades, and
+release dispatch live in the required delegates module's `panel_provider.h`. Required consumers use those
+facades and never include optional roundtable execution headers. The private `roundtable_types.h` provides
+compatibility aliases, while the private `delegate_ensemble.h` declares optional implementation entry
+points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects either private header
+outside the roundtable owner and its tests, with no allowlist.
+Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
+`AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 
 ## Dependencies and consumers
 
@@ -37,8 +47,12 @@ physically absent from a build profile.
 
 ## Providers and readiness
 
-Panel providers are resolved from configured agents, `roundtable_preset` eligibility/authorization/availability filters,
-seat presets, and random-seat rules; chair and verifier calls use delegate providers. Readiness must
+The required delegates roster applies common eligibility, authorization, random-seat, and availability
+policy. Roundtable adds named presets and deliberation-specific seat/persona policy; chair and verifier
+calls use delegate providers. `src/modules/roundtable/roundtable_provider.c` implements the
+`aimee_panel_provider_t` adapter and `roundtable_provider_configure` installs it only when startup
+activation succeeds. The adapter forwards to `delegate_ensemble_run` and `delegate_roundtable_run` while
+all required callers stay behind `aimee_panel_aggregate` and `aimee_panel_run`. Readiness must
 separate activation, usable seats, provider credentials/health, budget, preset validity, capture store,
 and pipeline state. A compiled route or saved preset is not proof of an executable panel.
 
@@ -60,8 +74,9 @@ The server resolves activation once at startup because administrative hot toggli
 Changing `modules.roundtable` or its environment fallback therefore requires a server restart. While
 disabled, roundtable-owned raw methods are absent from `server.info`, HTTP operation routes return 404,
 and MCP tools are absent from `tools/list`, `find_tools`, and `describe_tool`; direct raw method or MCP
-calls return unknown-method/tool semantics. Implementation objects remain compiled, so profile-driven
-object omission is still required follow-up work.
+calls return unknown-method/tool semantics. A provider registration conflict aborts server startup rather
+than advertising unusable routes. Implementation objects remain compiled, so profile-driven object
+omission is still required follow-up work.
 
 ## Surfaces
 
@@ -84,6 +99,12 @@ State includes named JSON presets, DB1 ensemble/session records, panel assignmen
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
+The roundtable provider allocates the `aimee_panel_result_t.artifact` returned by a successful call and
+supplies the matching release callback. The caller must release the result exactly once through the
+delegates-owned `aimee_panel_result_release` facade, which dispatches that callback, before the provider is
+unregistered; shallow result copies are non-owning views and must not be released independently. IR owns
+the message layout, while delegates core owns registration, facade invocation, and release dispatch.
+Registration and unregistration occur only during startup, with no concurrent hot unload.
 
 ## Security and privacy
 
@@ -116,10 +137,12 @@ distinguish startup-config-disabled, provider-unready, non-converged, and workfl
 
 ## Compatibility
 
-Tool/API names, preset shapes, seat aliases, panel result/finding schemas, quorum and verification
-semantics, chair contracts, pipeline state, attribution, and workflow provider results are compatibility
-contracts. Roundtable-specific result composition may depend on `response-composition` but cannot replace
-or redefine its general memory-grounded response contract.
+Tool/API names, preset shapes, seat aliases, IR-owned `aimee/ir/panel_result.h` result/finding schemas,
+quorum and verification semantics, chair contracts, pipeline state, attribution, and workflow provider
+results are compatibility contracts. `scripts/check_panel_contract_boundary.py` prevents required-side
+private-header dependencies. Roundtable-specific result composition
+may depend on `response-composition` but cannot replace or redefine its general memory-grounded response
+contract.
 
 ## Extension and removal
 

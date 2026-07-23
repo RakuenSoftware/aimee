@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include "cJSON.h"
 #include "server.h"
-#include "delegate_ensemble.h"
+#include <aimee/ir/panel_result.h>
 #include <pthread.h>
 #define DELEGATION_INPUT_TIMEOUT 60 /* seconds */
 #define MAX_ACTIVE_DELEGATIONS   32
@@ -36,13 +36,13 @@ typedef struct
 {
    char *rendered;
    int truncated;
-   char questions[ROUNDTABLE_MAX_QUESTIONS][512];
-   const char *question_ptrs[ROUNDTABLE_MAX_QUESTIONS];
+   char questions[AIMEE_PANEL_MAX_QUESTIONS][512];
+   const char *question_ptrs[AIMEE_PANEL_MAX_QUESTIONS];
    int question_count;
 } normalized_roundtable_brief_t;
 
 /* promoted cross-TU (former .inc statics) */
-void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result);
+void add_roundtable_arrays(cJSON *resp, const aimee_panel_result_t *result);
 int normalize_roundtable_brief(cJSON *req, normalized_roundtable_brief_t *out, char *err,
                                size_t err_n);
 

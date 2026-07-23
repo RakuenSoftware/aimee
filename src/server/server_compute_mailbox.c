@@ -34,7 +34,6 @@
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
 #include <aimee/delegates/delegate_role.h>
-#include "delegate_ensemble.h"
 #include "evidence_replay.h"
 #include "guardrails.h"
 #include "liveness.h"

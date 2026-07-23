@@ -13,11 +13,11 @@
 #include "agent_config.h"
 #include "config.h"
 #include <aimee/delegates/delegate_credentials.h>
+#include <aimee/delegates/panel_roster.h>
 #include "cost_fold.h"
 #include "log.h"
 #include "persona.h"
 #include "dstr.h"
-#include "roundtable_seat_resolve.h"
 #include "roundtable_chair.h"
 #include "roundtable_verify.h"
 #include "token_tracker.h"
@@ -1257,198 +1257,31 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    return 0;
 }
 
-/* Is `ag` allowed to sit on a roundtable/ensemble panel? Enabled + named, NOT
- * flagged primary-only (agents.json `primary_only` — the per-agent delegate
- * opt-out that replaced the global claude_cli_delegate_enabled; a claude-oauth
- * subscription is pre-flagged primary-only for the ToS reason), and — for
- * claude-CLI — able to run server-side (is_server_hosted, via `aimee agent add
- * claude-oauth`). A client-only claude has no server endpoint and would just
- * burn a slot on a "failed to build request URL" participant; server-hosting is
- * capability, primary_only is authorization, so both must pass. So a
- * primary-only or disabled claude is never seated, even after a server-side
- * OAuth setup. Other enabled agents are eligible.
- *
- * The PRIMARY agent is also never seated: a roundtable exists for an INDEPENDENT
- * second opinion, so the model the operator runs as primary (config.provider)
- * must not sit on — or aggregate — its own review panel and quietly grade its own
- * work. Any agent that resolves to the primary provider (by agent name — the
- * primary passthrough is named after the provider — or by its provider tag) is
- * excluded, structurally, regardless of what ensemble.reference_models lists. */
-int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
+/* Compatibility entry points for optional roundtable internals and tests. The
+ * required delegates module owns the policy and implementation. */
+int ensemble_panelist_eligible(const config_t *cfg, const agent_t *agent)
 {
-   if (!ag || !ag->enabled || !ag->name[0])
-      return 0;
-   if (cfg->provider[0] && (strcasecmp(ag->name, cfg->provider) == 0 ||
-                            (ag->provider[0] && strcasecmp(ag->provider, cfg->provider) == 0)))
-      return 0; /* the primary must never sit on its own panel */
-   if (ag->primary_only)
-      return 0;
-   if (agent_is_claude_cli(ag) && !ag->is_server_hosted)
-      return 0;
-   return 1;
+   return aimee_panelist_eligible(cfg, agent);
 }
 
-void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
+void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *agents)
 {
-   if (cfg->ensemble_reference_count > 0)
-      return;
-   int n = 0;
-   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
-   {
-      if (!ensemble_panelist_eligible(cfg, &acfg->agents[i]))
-         continue;
-      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
-               acfg->agents[i].name);
-      n++;
-   }
-   cfg->ensemble_reference_count = n;
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   aimee_panel_roster_default(cfg, agents);
 }
 
-void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *acfg)
+void ensemble_resolve_random_seats(config_t *cfg, const agent_config_t *agents)
 {
-   /* Replace each "$random" seat with a concretely-picked review-capable agent,
-    * excluding models already seated (pinned seats + prior random picks) for
-    * diversity. A $random seat that cannot be filled (roster exhausted) is DROPPED
-    * — an interactive roundtable degrades rather than fails; the fail-on-
-    * unfulfillable rule is the autonomous gate's, where a pinned model is a hard
-    * requirement. Pinned seats pass through untouched (the availability filter
-    * below drops an unavailable pinned model). Runs before the authorization /
-    * availability filters so a resolved seat is a real, filterable agent. */
-   char models[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_models[0]];
-   char personas[ENSEMBLE_MAX_REFS][sizeof cfg->ensemble_reference_personas[0]];
-   const char *used[ENSEMBLE_MAX_REFS];
-   int n = 0, nused = 0;
-
-   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
-      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
-         used[nused++] = cfg->ensemble_reference_models[i];
-
-   for (int i = 0; i < cfg->ensemble_reference_count && i < ENSEMBLE_MAX_REFS; i++)
-   {
-      const char *persona =
-          (i < cfg->ensemble_reference_persona_count) ? cfg->ensemble_reference_personas[i] : "";
-      if (!rt_seat_is_random(cfg->ensemble_reference_models[i]))
-      {
-         snprintf(models[n], sizeof models[n], "%s", cfg->ensemble_reference_models[i]);
-         snprintf(personas[n], sizeof personas[n], "%s", persona);
-         n++;
-         continue;
-      }
-      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
-      if (idx < 0)
-      {
-         aimee_log(LOG_WARN, "delegate.panel",
-                   "no review-capable agent left for a $random seat -> dropping it");
-         continue;
-      }
-      snprintf(models[n], sizeof models[n], "%s", acfg->agents[idx].name);
-      snprintf(personas[n], sizeof personas[n], "%s", persona);
-      if (nused < ENSEMBLE_MAX_REFS)
-         used[nused++] = acfg->agents[idx].name; /* stable pointer into acfg for this call */
-      n++;
-   }
-
-   for (int i = 0; i < n; i++)
-   {
-      snprintf(cfg->ensemble_reference_models[i], sizeof cfg->ensemble_reference_models[i], "%s",
-               models[i]);
-      snprintf(cfg->ensemble_reference_personas[i], sizeof cfg->ensemble_reference_personas[i],
-               "%s", personas[i]);
-   }
-   cfg->ensemble_reference_count = n;
-   cfg->ensemble_reference_persona_count = n;
-
-   /* An aggregator explicitly set to "$random" resolves the same way. */
-   if (cfg->ensemble_aggregator[0] && strcmp(cfg->ensemble_aggregator, RT_SEAT_RANDOM) == 0)
-   {
-      int idx = delegate_pick_for_role((agent_config_t *)acfg, "review", used, nused);
-      if (idx >= 0)
-         snprintf(cfg->ensemble_aggregator, sizeof cfg->ensemble_aggregator, "%s",
-                  acfg->agents[idx].name);
-      else
-         cfg->ensemble_aggregator[0] = '\0';
-   }
+   aimee_panel_roster_resolve_random(cfg, agents);
 }
 
-void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
+void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *agents)
 {
-   /* Resolve "$random" seats to concrete agents FIRST, so the eligibility check
-    * below (and the availability filter after it) see real, filterable agents. */
-   ensemble_resolve_random_seats(cfg, acfg);
-   /* Applies the same eligibility rule to an EXPLICITLY configured
-    * ensemble.reference_models list: drop any entry that names a configured agent
-    * which is not panel-eligible (an unauthorized / disabled / client-only
-    * claude). An entry that is not a configured agent (an ad-hoc model id) is
-    * left as-is. Keeps reference_models and the aggregator consistent. */
-   int n = 0;
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
-   {
-      const char *name = cfg->ensemble_reference_models[i];
-      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
-      if (ag && !ensemble_panelist_eligible(cfg, ag))
-      {
-         aimee_log(LOG_WARN, "delegate.panel",
-                   "dropping unauthorized panelist '%s' from the roundtable panel", name);
-         continue;
-      }
-      if (n != i)
-         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
-                  "%s", name);
-      n++;
-   }
-   cfg->ensemble_reference_count = n;
-   /* If the aggregator named a now-dropped agent, repoint it to the first seat. */
-   if (cfg->ensemble_aggregator[0])
-   {
-      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
-      if (agg && !ensemble_panelist_eligible(cfg, agg))
-         cfg->ensemble_aggregator[0] = '\0';
-   }
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   aimee_panel_roster_filter_authorization(cfg, agents);
 }
 
-void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg)
+void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *agents)
 {
-   /* Runtime gate (distinct from the authorization gate above): drop any
-    * configured panelist that is not currently USABLE — an HTTP agent with no
-    * resolvable key, a CLI agent whose command/tmux is absent, or one the health
-    * breaker marked DOWN. Otherwise it burns a panel seat on a guaranteed-to-fail
-    * participant and silently degrades the round (the bug that left a roundtable
-    * "2/3 participants failed" with unkeyed models in the list). An ad-hoc model
-    * id that is not a configured agent is left as-is (we cannot check it). Same
-    * predicate single-delegate routing uses: agent_is_available_for_routing. */
-   int n = 0;
-   for (int i = 0; i < cfg->ensemble_reference_count; i++)
-   {
-      const char *name = cfg->ensemble_reference_models[i];
-      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
-      if (ag && !agent_is_available_for_routing(ag))
-      {
-         aimee_log(LOG_WARN, "delegate.panel",
-                   "dropping unavailable panelist '%s' (no key / unhealthy / command missing)",
-                   name);
-         continue;
-      }
-      if (n != i)
-         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
-                  "%s", name);
-      n++;
-   }
-   cfg->ensemble_reference_count = n;
-   if (cfg->ensemble_aggregator[0])
-   {
-      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
-      if (agg && !agent_is_available_for_routing(agg))
-         cfg->ensemble_aggregator[0] = '\0';
-   }
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
+   aimee_panel_roster_filter_availability(cfg, agents);
 }
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,

@@ -2183,13 +2183,21 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
             platform_mkdir_p(cfg_dir, 0700);
       }
    }
+   /* Compose optional providers before publishing the pid. A registration
+    * conflict is a broken startup configuration, not a recoverable per-request
+    * outage: continuing would advertise routes that can never execute. */
+   config_t cfg;
+   int config_rc = config_load(&cfg);
+   if (roundtable_provider_configure(config_rc == 0 ? &cfg : NULL) < 0)
+   {
+      LOG_ERROR("server", "roundtable panel provider registration failed");
+      platform_evloop_destroy(&ctx->evloop);
+      return -1;
+   }
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
    /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
-   config_t cfg;
-   int config_rc = config_load(&cfg);
-   roundtable_runtime_configure(config_rc == 0 ? &cfg : NULL);
    if (db1_init(cfg.db1_path) != 0)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
                cfg.db1_path);

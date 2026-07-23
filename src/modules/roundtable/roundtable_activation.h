@@ -13,6 +13,10 @@ const char *roundtable_module_disabled_message(void);
  * module. Roundtable does not support administrative hot toggling. */
 void roundtable_runtime_configure(const config_t *cfg);
 
+/* Compose the optional roundtable implementation behind delegates core's panel
+ * provider ABI. Startup-only; returns 1 enabled, 0 disabled, -1 on error. */
+int roundtable_provider_configure(const config_t *cfg);
+
 /* Runtime composition predicates. Names not owned by roundtable pass through;
  * the exact/prefix ownership tables live only in roundtable_activation.c. */
 int roundtable_operation_available(const char *operation);

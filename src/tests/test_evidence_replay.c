@@ -92,8 +92,8 @@ static void test_idkey_order_independence(void)
 static void test_no_evidence(void)
 {
    replay_backend_t be = fake_backend();
-   review_evidence_t ev;
-   memset(&ev, 0, sizeof(ev)); /* EV_NONE */
+   aimee_review_evidence_t ev;
+   memset(&ev, 0, sizeof(ev)); /* AIMEE_REVIEW_EVIDENCE_NONE */
    reduced_record_t r;
    assert(evidence_replay_with(&be, &ev, &r) == REPLAY_NO_EVIDENCE);
 }
@@ -102,9 +102,9 @@ static void test_vacuous(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_REFS; /* non-NONE but empty target */
+   ev.kind = AIMEE_REVIEW_EVIDENCE_REFS; /* non-NONE but empty target */
    reduced_record_t r;
    assert(evidence_replay_with(&be, &ev, &r) == REPLAY_VACUOUS);
 
@@ -116,9 +116,9 @@ static void test_vacuous(void)
 static void test_index_unavailable_degrades(void)
 {
    replay_backend_t be = fake_backend();
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_REFS;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_REFS;
    snprintf(ev.target, sizeof(ev.target), "some_symbol");
    ev.count = 5;
    reduced_record_t r;
@@ -139,9 +139,9 @@ static void test_refs_match_correct_contradict(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_REFS;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_REFS;
    snprintf(ev.target, sizeof(ev.target), "sym");
    reduced_record_t r;
 
@@ -171,9 +171,9 @@ static void test_symbol_exists_or_not(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_SYMBOL;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_SYMBOL;
    snprintf(ev.target, sizeof(ev.target), "thing");
    reduced_record_t r;
 
@@ -191,9 +191,9 @@ static void test_search_positive_and_dberror(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_SEARCH;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_SEARCH;
    snprintf(ev.target, sizeof(ev.target), "needle");
    reduced_record_t r;
 
@@ -204,7 +204,7 @@ static void test_search_positive_and_dberror(void)
    assert(r.count == 4);
    assert(strlen(r.idkey) == 64); /* file-level hits still produce a stable key */
 
-   g_search_ret = -1; /* DB error -> degrade (parity with EV_REFS) */
+   g_search_ret = -1; /* DB error -> degrade (parity with AIMEE_REVIEW_EVIDENCE_REFS) */
    assert(evidence_replay_with(&be, &ev, &r) == REPLAY_INDEX_UNAVAILABLE);
 }
 
@@ -212,9 +212,9 @@ static void test_symbol_dberror(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_SYMBOL;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_SYMBOL;
    snprintf(ev.target, sizeof(ev.target), "thing");
    reduced_record_t r;
    g_symbol_ret = -1;
@@ -225,9 +225,9 @@ static void test_claimed_idkey_match_and_mismatch(void)
 {
    replay_backend_t be = fake_backend();
    g_pc = 1;
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_REFS;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_REFS;
    snprintf(ev.target, sizeof(ev.target), "sym");
    ev.count = 2;
    g_caller_ret = 2;
@@ -268,9 +268,9 @@ static void test_idkey_cap_and_dedup(void)
 static void test_no_backend_degrades(void)
 {
    /* no backend registered (default) -> evidence_replay degrades, never rejects */
-   review_evidence_t ev;
+   aimee_review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
-   ev.kind = EV_SYMBOL;
+   ev.kind = AIMEE_REVIEW_EVIDENCE_SYMBOL;
    snprintf(ev.target, sizeof(ev.target), "x");
    reduced_record_t r;
    assert(evidence_replay_active_backend() == NULL);

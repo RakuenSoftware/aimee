@@ -1,7 +1,7 @@
 /* wfe_live_panel.c -- the live roundtable panel provider.
  *
  * gate.roundtable calls this to convene a diverse panel THROUGH THE ROUNDTABLE
- * ENGINE (delegate_roundtable_run, REVIEW mode): one structured-review panelist
+ * ENGINE (the delegates-owned panel-provider seam, REVIEW mode): one structured-review panelist
  * per REQUIRED persona, whose findings are captured as review items with
  * replayable evidence, deduped across the panel, replay-VERIFIED against the
  * gate's worktree (wfe_replay_worktree — interpretation never blocks, a
@@ -34,8 +34,9 @@
 
 #include "agent_config.h"
 #include "config.h"
-#include "delegate_ensemble.h"
+#include <aimee/delegates/panel_provider.h>
 #include "log.h"
+#include "roundtable_activation.h"
 #include "roundtable_preset.h"
 #include "roundtable_seat_resolve.h"
 #include "roundtable_verify.h"
@@ -308,18 +309,18 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
       cfg.ensemble_min_successful = nlens;
       cfg.roundtable_replay_verify_enabled = 0;
 
-      roundtable_opts_t opts;
+      aimee_panel_options_t opts;
       memset(&opts, 0, sizeof opts);
-      opts.mode = ROUNDTABLE_REVIEW;
-      opts.turns = ROUNDTABLE_PARALLEL;
+      opts.mode = AIMEE_PANEL_REVIEW;
+      opts.turns = AIMEE_PANEL_PARALLEL;
       opts.max_rounds = 1;
       opts.deadline_ms = WFE_PANEL_DEADLINE_MS;
 
-      roundtable_result_t rt;
+      aimee_panel_result_t rt;
       memset(&rt, 0, sizeof rt);
-      if (delegate_roundtable_run(&acfg, &cfg, task, &opts, &rt) != 0)
+      if (aimee_panel_run(&acfg, &cfg, task, &opts, &rt) != AIMEE_PANEL_PROVIDER_OK)
       {
-         delegate_roundtable_result_free(&rt);
+         aimee_panel_result_release(&rt);
          rc_final = WFE_PANEL_UNREACHABLE;
          break;
       }
@@ -329,7 +330,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
          aimee_log(LOG_WARN, "wfe-panel", "panel attempt: %d/%d panelist(s) failed%s%s",
                    rt.participants_failed, rt.participants_total, rt.degraded ? " (degraded)" : "",
                    final ? " -> degrade" : " -> re-seat and retry");
-         delegate_roundtable_result_free(&rt);
+         aimee_panel_result_release(&rt);
          if (final)
          {
             rc_final = 0; /* missing lens coverage -> gate parks (fail closed) */
@@ -363,7 +364,7 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
                    out[i].persona,
                    out[i].kind == WFE_V_REQUEST_CHANGES ? "request_changes" : "approve",
                    out[i].model, out[i].high_sev_blockers);
-      delegate_roundtable_result_free(&rt);
+      aimee_panel_result_release(&rt);
       rc_final = filled > 0 ? filled : 0;
       break;
    }

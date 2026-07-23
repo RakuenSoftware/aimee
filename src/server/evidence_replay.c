@@ -174,7 +174,7 @@ static replay_status_t grade(int actual, int claimed, const char *claimed_idkey,
    return REPLAY_CORRECTED; /* reproduced, but count/set differs -> re-ground to actual */
 }
 
-replay_status_t evidence_replay_with(const replay_backend_t *be, const review_evidence_t *ev,
+replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_review_evidence_t *ev,
                                      reduced_record_t *out)
 {
    if (out)
@@ -183,7 +183,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
       return REPLAY_VACUOUS;
    if (!be)
       return REPLAY_INDEX_UNAVAILABLE; /* no backend installed => can't ground => degrade */
-   if (ev->kind == EV_NONE)
+   if (ev->kind == AIMEE_REVIEW_EVIDENCE_NONE)
       return REPLAY_NO_EVIDENCE;
 
    char target[sizeof(ev->target)];
@@ -207,7 +207,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
    char(*files)[MAX_PATH_LEN] = NULL;
    int *lines = NULL;
 
-   if (ev->kind == EV_SYMBOL)
+   if (ev->kind == AIMEE_REVIEW_EVIDENCE_SYMBOL)
    {
       term_hit_t *hits = calloc(REPLAY_MAX_HITS, sizeof(*hits));
       if (!hits)
@@ -226,7 +226,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
       }
       free(hits);
    }
-   else if (ev->kind == EV_REFS)
+   else if (ev->kind == AIMEE_REVIEW_EVIDENCE_REFS)
    {
       caller_hit_t *hits = calloc(REPLAY_MAX_HITS, sizeof(*hits));
       if (!hits)
@@ -245,7 +245,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
       }
       free(hits);
    }
-   else if (ev->kind == EV_SEARCH)
+   else if (ev->kind == AIMEE_REVIEW_EVIDENCE_SEARCH)
    {
       code_search_hit_t *hits = calloc(REPLAY_MAX_HITS, sizeof(*hits));
       if (!hits)
@@ -285,7 +285,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
    return grade(n, ev->count, ev->idkey, out->idkey);
 }
 
-replay_status_t evidence_replay(const review_evidence_t *ev, reduced_record_t *out)
+replay_status_t evidence_replay(const aimee_review_evidence_t *ev, reduced_record_t *out)
 {
    return evidence_replay_with(g_backend, ev, out);
 }
