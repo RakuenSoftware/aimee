@@ -1,0 +1,403 @@
+# Event bus v0 — rendered decisions (D1–D10)
+
+- **State:** DECIDED — 2026-07-23, revision 4, after three rounds of roundtable review.
+- **Companion:** [`EVENT_BUS_FEATURE_TREE.md`](EVENT_BUS_FEATURE_TREE.md) — scope, the twelve slices,
+  the dependency graph, and **acceptance ids 1–6**, each of which names the decisions it enforces.
+  This document holds only the decisions; the tree references them by id and is reviewed alongside it.
+- **Implements:** [`event-bus-wire-spec.md`](../proposals/pending/event-bus-wire-spec.md) v0 DRAFT,
+  under [`core-substrate-and-source-module-boundaries.md`](../proposals/pending/core-substrate-and-source-module-boundaries.md)
+  invariants 12, 13, 15, 17, 18, 19.
+
+Every decision below is rendered, not deferred. Where a decision changes the wire spec, it is marked
+and gated in [D1](#d1--segment-access-multiple-memfds-not-one-named-segment).
+
+---
+
+## D1 — Segment access: multiple `memfd`s, not one named segment
+
+**Decision: the bus is realized as several fd-backed regions. A client receives fds only for what it
+may map.**
+
+Two alternatives were considered and rejected:
+
+- `shm_open` with a filesystem path. Rejected: the segment has a name, so invariant 17's "an
+  unadmitted process cannot map the segment" rests entirely on permission bits and is one
+  misconfiguration away from failing.
+- One anonymous `memfd_create` segment, fd passed after admission. Rejected on review: it makes
+  invariant 17 structural (nothing to open), but an *admitted* client holding the whole-segment fd can
+  map and read every other client's rings and the whole queue directory. Invariant 18's "cannot
+  enumerate" would be an API-level courtesy presented as a memory-level guarantee.
+
+| Region | Backing | Client mapping | Contents |
+|---|---|---|---|
+| Control | one `memfd` | `PROT_READ` | magic, `spec_version`, `layout_version`, flags, `slot_size`, `inline_budget`, `arena_size`, `host_epoch`, `host_heartbeat` |
+| Queue pair | one `memfd` **per admitted slot** | `PROT_READ\|PROT_WRITE`, own slot only | that client's inbound and outbound rings, its credit counters, its `client_heartbeat` |
+| Arena | one `memfd` | `PROT_READ\|PROT_WRITE` | shared payload arena addressed by `(offset, len)` |
+
+The **queue directory is not shared at all** — it becomes ordinary host-private memory. A client
+learns its own slot geometry from the attach reply and has no fd, no mapping, and no address through
+which to observe that another slot exists. Enumeration is structurally impossible rather than merely
+unauthorized; cross-client ring access is an MMU fault rather than a policy violation.
+
+Transport: a `SOCK_SEQPACKET` attach socket; the three fds are passed by `SCM_RIGHTS` only after
+`bus_admit_fn` returns success. Cost is `N+2` fds and one `sendmsg` carrying three fds — trivial.
+`memfd_create` is Linux-only; accepted for v0, since both bus-hosting services are containerized
+Linux. A `shm_open` portability fallback is a later slice, not a v0 requirement, and reintroduces the
+named-segment weakness, so it must carry its own threat-model note when written.
+
+### Spec amendment and its gate
+
+D1 changes the wire spec's **Segment layout** from one shared segment to several fd-backed regions and
+moves the queue directory out of shared memory. That document is owned by `module-runtime`, so the
+change is **requested, not made unilaterally**.
+
+The change is argued to be *more* faithful to the spec's intent: the spec's Security section already
+requires that "a client cannot read another client's traffic, matching observer routing at the memory
+level, not only the API level", and a single shared segment cannot deliver that. The spec also states
+that exact offsets are frozen by the conformance vectors rather than by prose, and the **frame
+encoding — which is what the vectors cover — is unchanged by D1.**
+
+**Gate.** Slices 1 and 2 are layout-independent and may proceed now: slice 1 produces frame vectors
+only (see [D4](#d4--slot-size-and-inline-budget-control-region-parameters-not-wire-fields)) and slice
+2 produces a ring primitive that is agnostic to which fd backs it. **Slices 3 and later do not begin
+until `module-runtime` accepts or declines the D1 amendment.**
+
+If `module-runtime` declines, this is **not** a one-slice fallback. Reverting to a single segment
+invalidates the enforced half of [D2](#d2--threat-model)'s threat model, re-opens cross-client ring
+access and slot enumeration, and re-states slice 3, slice 5, and acceptance id 3. That path therefore
+requires **re-running the roundtable on D1 and D2** and re-issuing this document — it may not be taken
+by silently widening D2. Revision 2 of the tree understated this; it is corrected here.
+
+---
+
+## D2 — Threat model
+
+**Decision: state the limits of v0 isolation explicitly rather than implying uniform enforcement.**
+
+D1 closes cross-client ring access and slot enumeration. It does not close the arena: zero-copy
+fan-out requires every admitted client to map the arena read-write, so arena lease bounds are a
+**cooperative contract among admitted clients, not an enforced one**. An admitted client that ignores
+the client library can read or corrupt any arena byte. This is consistent with the wire spec, which
+already places "a hostile native client in the trusted tier" outside this boundary's threat model.
+
+| Class | Property | How it holds |
+|---|---|---|
+| **Enforced** (fd / MMU) | An unadmitted process can map nothing | it holds no fd |
+| **Enforced** | An admitted client cannot map or address another client's rings | it holds no fd for them |
+| **Enforced** | An admitted client cannot enumerate other slots | the queue directory is host-private |
+| **Enforced** | The control region is read-only to clients | `PROT_READ` mapping |
+| **Cooperative** | Arena access stays within active leases | client-library contract, validated by conformance, not by hardware |
+| **Out of scope for v0** | A malicious admitted *native* client | untrusted code does not run as a native admitted client |
+
+Untrusted code runs sandboxed under `module-loader`, whose tier will need either per-lease arena
+sub-regions or a copy-on-deliver mode. That is `module-loader`'s obligation; it is named here so it is
+not forgotten.
+
+Acceptance id 3 tests the two classes differently: enforced properties are tested as faults,
+cooperative properties as contracts.
+
+---
+
+## D3 — Arena leases: host-mediated, with generations and refcounts
+
+**Decision: the spec's v0 baseline stands — the producer requests a lease, fills it, publishes the
+ref; the consumer reads in place and releases; the host tracks the lease.** Payload bytes are never
+copied through the host; only lease bookkeeping is host-mediated. Direct producer→consumer allocation
+without host bookkeeping is **overruled** for v0: it has no ownership story that survives a client
+dying mid-write.
+
+Review found three lifetime gaps in earlier revisions. All three are closed here.
+
+**Generations and refcounts.** Every lease carries a generation and a consumer refcount. Publishing to
+`k` observers takes `k` references; each consumer's release drops one. A region returns to the free
+pool only at refcount zero. A consumer validates the lease generation before reading; a stale
+generation is a typed error, never a read of whatever now occupies those bytes.
+
+**Producer reap does not reclaim live regions.** Reaping a producer marks its leases
+orphaned-but-live; they drain as consumers release and are reclaimed at zero.
+
+**Consumer reap releases that consumer's references.** Each reference is attributed to the consumer
+slot that holds it. Reaping a consumer drops every reference attributed to it, which may take a region
+to zero and reclaim it. Without this rule a dead consumer's references would be permanently
+unreleasable and repeated consumer deaths would exhaust the arena. *(Added in revision 3; earlier
+revisions defined producer reap only.)*
+
+**The per-client live-lease cap is enforced synchronously at allocation, not at reap.** A client at
+its cap is refused a new lease immediately, by the host, at the allocation call. Reap is
+heartbeat-driven and therefore lagging; enforcing the cap only at reap would leave a heartbeat-long
+window in which a misbehaving client keeps allocating. The cap is the synchronous gate; reap is the
+eventual cleanup. *(Added in revision 3.)*
+
+---
+
+## D4 — Slot size and inline budget: control-region parameters, not wire fields
+
+**Decision: `slot_size`, `inline_budget`, and `arena_size` are control-region parameters read by a
+client at attach. They are not wire-frame fields and they do not participate in `layout_version`.**
+
+Provisional values set in slice 3 — **256-byte slots, 192-byte inline budget, 1024-slot default ring
+capacity** — re-set from the slice-12 measurement before the tree closes.
+
+The frame carries `payload_len`, a `payload_ref` (in-slot offset, or arena `(offset,len)`), and an
+inline-vs-arena flag. It does **not** carry the threshold at which a producer chooses between them.
+A frame produced under a 192-byte budget and one produced under a 1024-byte budget are byte-identical
+for the same payload placement, so slice 1's golden vectors are stable under any later re-tuning.
+Slice 1's vector set must include an inline-flagged and an arena-flagged frame at the budget boundary,
+so this independence is asserted rather than assumed.
+
+**`layout_version` rule (normative).** `layout_version` changes only when the *structure* of the
+regions changes — fields added, moved, or removed from the control region, the queue-pair region, or
+the ring header. It does **not** change when a control-region *parameter value* changes. Re-tuning
+`slot_size` or `inline_budget` in slice 12 therefore does not bump `layout_version`, does not re-issue
+slice 1's vectors, and does not invalidate the conformance suite. A client reads these values at
+attach and adapts; it is never compiled against them. *(Stated normatively in revision 3; revision 2
+left it as inference.)*
+
+---
+
+## D5 — Backpressure: block by default, per-client, never silently
+
+**Decision: block-with-bounded-wait is the default; shed-with-typed-`overflow` only where a kind's
+descriptor declares it.** Shedding by default loses events silently, which invariant 13 forbids. The
+spec leaves shed-vs-block per kind; the default must be the safe one.
+
+### What `bus_publish` means
+
+**`bus_publish` returning OK means the event was accepted into the calling client's outbound ring. It
+never means delivered.** Producer-side credits are space in that one ring and nothing else. A bounded
+wait blocks the calling client until credits free or the deadline expires; at expiry the call returns
+`would_block`. It never blocks the host, never blocks another client, and never silently degrades into
+a shed.
+
+### Fan-out is not atomic, and that is the contract
+
+*(This section answers the fan-out/credit-reservation gap found in revision 2, which left it
+undefined.)*
+
+An event is popped from the producer's outbound ring, `seq`-stamped, and tapped **once**. Delivery to
+each of its `k` destinations is then **independent** and may complete at different times. **Partial
+delivery is permitted and is exactly what the `overflow` events record.** There is no cross-destination
+credit reservation and no atomic fan-out — providing one would require the host to hold events for
+absent credit across all destinations, which is the unbounded host queue invariant 15 forbids.
+
+For a destination whose inbound ring is full, the host applies that kind's declared policy **to that
+destination only**:
+
+- **shed-declared:** emit a typed `overflow` immediately and move on.
+- **block-declared:** the event stays in that event's *residual destination set*. The host holds at
+  most **one** in-flight event per producer, so the structure is bounded by slot count, not by
+  traffic. The host stops popping that producer's outbound ring until the residual set drains, which
+  propagates backpressure to that producer naturally — its credits stop returning and its next
+  `bus_publish` blocks or returns `would_block`.
+
+**The host drain loop never blocks.** It services outbound rings round-robin; a stalled producer stalls
+only itself. A slow consumer therefore stalls exactly those producers that publish block-declared kinds
+to it, and no one else. That is head-of-line blocking scoped to the pair that caused it, and it is
+accepted: the alternative is either an unbounded host queue or silent loss.
+
+### Reap under in-flight publishes
+
+*(Added in revision 3; revision 2 left the fate of in-flight publishes on reap undefined.)*
+
+- **Producer reaped:** its outbound ring and its one residual in-flight event are discarded, and a
+  typed `producer_reaped` event is tapped naming the discarded `seq`. Nothing is lost silently.
+- **Destination reaped:** its entries in any residual destination set are dropped and tapped as
+  `overflow` with reason `destination_reaped`.
+- A client blocked in `bus_publish` when it is reaped observes the reap through `host_epoch` /
+  attach-state and must re-attach; its pending publish is not delivered and is accounted by the
+  `producer_reaped` event.
+
+---
+
+## D6 — The tap records the intended stream; sheds are events
+
+**Decision: the tap is invoked once per event immediately after `seq` stamping and before any routing
+decision, and every divergence between intended and delivered is itself an event in the stream.**
+
+After routing there are `k` per-destination outcomes rather than one event, so pre-routing is the only
+point at which a total, totally-ordered view exists.
+
+**"Every event" means every event the host has `seq`-stamped.** A producer-side `would_block` is an
+event the host never accepted; it is **not** a tap miss and acceptance id 4 must not be read as
+requiring it. Callers that need visibility into their own rejected publishes read a per-client
+producer-reject counter in their queue-pair region. *(This scoping was ambiguous in revision 2 and is
+made explicit here.)*
+
+**Sheds are recorded, and are actionable.** Every shed emits its own typed `overflow` event, itself
+`seq`-stamped and tapped, carrying **the shed event's `seq`, its kind, and the destination slot id**.
+A consumer can therefore enumerate exactly which `seq` values it lost from the `overflow` events
+alone — overflow is observable *and* actionable, which is what invariant 13 actually requires.
+
+**The delivered stream is derivable:** delivered = intended, minus the sheds the stream itself records,
+minus the `producer_reaped` discards it records. A ledger built on this answers both "what was
+published" and "what arrived" from one capture point.
+
+---
+
+## D7 — The bus does not link into any shipping binary in this tree
+
+**Decision: build as a static library with its own test-harness binaries.** Linking an unproven IPC
+substrate into a shipping binary before slices 10 and 12 are green buys nothing and risks a live
+process.
+
+Enforced by `scripts/check_bus_blast_radius.sh`, which runs **as a required check on every slice PR**,
+not only at tree level. A tree-level-only gate would let a regression between slices 10 and 12 link the
+bus into a shipping binary and still pass every per-slice gate. *(Per-PR enforcement added in revision
+3.)*
+
+---
+
+## D8 — The Go reference client is pure Go
+
+**Decision: a new top-level `server-go/bus` package; `golang.org/x/sys/unix` for `mmap`, `recvmsg`,
+and `SCM_RIGHTS`; no cgo.**
+
+Suite invariant 12 excludes cgo ("no shared header, symbol, link edge, cgo boundary, or side channel"),
+and a Go client that linked the C implementation would defeat the conformance suite's purpose — it
+would test the C code twice and prove nothing about the spec.
+
+`scripts/check_bus_single_host.sh` enforces the corollary that there is exactly one host: `bus_host_create`
+is defined in exactly one translation unit; `memfd_create` is called from no file outside
+`src/modules/bus/bus_host.c`; no Go file in `server-go/bus` creates regions or accepts attaches; and
+**no test in `server-go/bus` regenerates or shadows the slice-1 vectors**. The last clause matters
+because the first three catch only a new violating *file* — they would not catch a future drift in the
+C host's frame bytes being papered over by a Go-local vector override. Slice 1's vectors are the single
+conformance authority.
+
+---
+
+## D9 — The tap in this tree is a callback plus a recording test double
+
+**Decision: the host invokes a registered `bus_tap_fn` per D6.** This tree owes the seam and the proof
+that the seam is total — every `seq`-stamped event, exactly once, in `seq` order. Durable chaining,
+`policy_rev`, and the attestation bundle belong to
+[`event-bus-governance-and-capture.md`](../proposals/pending/event-bus-governance-and-capture.md) and
+are not built here. The recording test double is the conformance vehicle, not a shipped feature.
+
+---
+
+## D10 — The v0 capture stream format
+
+**Decision: the capture format is specified normatively here and *validated* by slice 11's tests. It
+is the contract the later governance-and-capture tree must adopt.**
+
+Earlier revisions said only that slice 11 would "freeze the format", which deferred the decision while
+claiming to render it. The format is defined below.
+
+### Framing
+
+All integers little-endian. The stream is a fixed file header followed by records.
+
+**File header (64 bytes):**
+
+| Offset | Size | Field | Value / meaning |
+|---|---|---|---|
+| 0 | 8 | `magic` | ASCII `AIMEECAP` |
+| 8 | 2 | `format_version` | `1` for v0 |
+| 10 | 2 | `header_len` | `64`; a reader skips to `header_len` so a later version may extend the header |
+| 12 | 4 | `flags` | reserved, must be `0` |
+| 16 | 4 | `spec_version` | the bus `spec_version` this stream was captured under |
+| 20 | 4 | `layout_version` | the region `layout_version` at capture time |
+| 24 | 8 | `host_epoch` | the epoch this stream belongs to |
+| 32 | 8 | `first_seq` | `seq` of the first record; a stream may start mid-run |
+| 40 | 8 | `created_unix_nanos` | wall clock at stream open, informational only — ordering comes from `seq` |
+| 48 | 16 | `reserved` | must be zero on write; a reader **must ignore** nonzero reserved bytes and must not let them influence parsing |
+
+**Record:**
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | `record_len` — total record bytes including this field and the trailing CRC |
+| 4 | 2 | `record_type` |
+| 6 | 2 | `record_flags` — bit 0 `payload_materialized`; all other bits reserved, zero |
+| 8 | `BUS_WIRE_HDR_LEN` | the bus wire frame header, **verbatim** |
+| 8 + `BUS_WIRE_HDR_LEN` | `payload_len` | materialized payload bytes |
+| `record_len` − 4 | 4 | `crc32c` (Castagnoli, u32 LE) over every preceding byte of the record |
+
+`record_type`: `0` event, `1` overflow, `2` producer_reaped, `3` epoch_change.
+
+**Sizes are not free variables.** `BUS_WIRE_HDR_LEN` is the fixed frame-header size defined by slice 1
+and frozen by its vectors; the capture format does not re-declare it. The materialized payload length
+is **exactly the embedded frame's own `payload_len` field** — there is no second length in the record.
+A reader therefore validates
+
+```
+record_len == 8 + BUS_WIRE_HDR_LEN + payload_len + 4
+```
+
+and treats any mismatch as **corrupt**. Slice 11's vectors must exercise this boundary, including a
+record whose `record_len` disagrees with its `payload_len` and a record whose CRC covers the wrong
+extent.
+
+### Rules
+
+- **Payloads are materialized.** An arena region does not outlive the host, so a capture that stored
+  only a `payload_ref` would be unreadable the moment the run ended. The frame header is preserved
+  **byte-identical**, including its original `payload_ref`, and the *resolved* payload bytes follow
+  inline with `payload_materialized` set. A reader **must** use the materialized bytes and **must
+  never** dereference `payload_ref` at replay time — that offset names an arena that no longer
+  exists. The preserved ref is forensic detail only.
+- **`seq` is contiguous within a stream, and that is provable, not aspirational.** A `seq` is assigned
+  only at stamping, and D6 requires every stamped event to be tapped, so the tapped set *is* the
+  complete set of assigned `seq` values. Within one stream, `seq` therefore runs contiguously upward
+  from `first_seq`, and a gap is a defect the reader must report rather than interpolate. Two things
+  that might look like gaps are not: a producer-side `would_block` never received a `seq` at all (D6),
+  so it cannot create one; and records before `first_seq` belong to an earlier stream, not to a hole
+  in this one. This contiguity is what makes the delivered stream derivable per D6.
+- **`overflow` and `producer_reaped` records are ordinary `seq`-stamped records**, so the derivation
+  in D6 is a single pass over one ordered stream.
+- **`epoch_change` terminates the stream.** Its body is 16 bytes — `old_epoch` (u64 LE) then
+  `new_epoch` (u64 LE) — carried in the payload position, with a zero-payload frame header and
+  `payload_materialized` clear. It carries the `seq` immediately after the last stamped event, so
+  contiguity holds through it. It **must be the final record**; any record after it is corrupt.
+  Handles and mappings do not survive a host restart, so a capture does not either — the next epoch
+  is a new stream with a new `first_seq`.
+- **Three terminal states, all explicit.** A stream whose final record is complete and CRC-valid but
+  is *not* `epoch_change` is **open** — a valid capture of a still-running host, not an error. A
+  trailing record that is short or fails CRC means the stream was cut mid-write: the reader stops at
+  the last complete CRC-valid record and reports **truncated**, with the last good `seq`. A CRC
+  failure on a record that is *not* last, a `record_len`/`payload_len` mismatch, a `seq` gap, or a
+  record following `epoch_change` means **corrupt**: a hard error, never a partial read.
+- **`format_version` is independent** of `wire_version` and `layout_version`. A reader refuses an
+  unknown `format_version` outright rather than guessing at the framing.
+
+### What slice 11 owes
+
+Slice 11 *validates* this contract rather than defining it: round-trip of every record type,
+contiguous-`seq` enforcement, materialized-payload correctness for both inline and arena frames,
+`record_len`/`payload_len`/CRC boundary vectors, open-vs-truncated-vs-corrupt discrimination,
+`epoch_change` termination including rejection of a record after it, and rejection of an unknown
+`format_version`. Acceptance id 4 links this to the governance tree, which must adopt the format
+rather than redefine it.
+
+Module replay (re-driving a module against recorded inbound events) is **not** delivered by this tree.
+Slice 11 delivers observational replay only, which is exact by construction because nothing is
+re-executed.
+
+---
+
+## Revision history
+
+- **r1** (2026-07-23) — seven decisions presented as recommendations for the roundtable to converge.
+  Panel returned `drifted`: a decided plan was asked for, not an agenda. Four blocking technical
+  findings: intra-segment isolation overclaimed, arena reclaim raced in-flight readers, the tap/shed
+  contract silently pre-decided, inline-budget re-tune appeared to threaten the frozen vectors.
+- **r2** (2026-07-23) — nine decisions rendered; D1 multi-region layout and D2 threat model adopted;
+  lease generations and refcounts added; D6 added; D4 clarified. Panel found six further blocking
+  gaps: fan-out credit contract undefined, consumer reap did not release references, the spec-amendment
+  fallback understated its blast radius, the blast-radius check was tree-level only, in-flight
+  publishes on reap were undefined, and `layout_version` under re-tune was inferred rather than stated.
+- **r3** (2026-07-23) — all six closed: D5 gained the fan-out and reap contracts, D3 consumer-reap
+  release and synchronous cap enforcement, D1 a hard gate on the spec amendment, D7 per-PR
+  enforcement, D4 the normative `layout_version` rule, D6 the seq-stamped scoping and
+  actionable-overflow rule. D10 was added but **deferred the capture format to slice-11 tests** —
+  which the panel correctly called out as claiming to render a decision while still deferring it.
+  Split from the feature tree into this document so neither exceeds the review payload limit.
+- **r4** (2026-07-23) — this revision. D10 now renders the capture stream format normatively: file
+  header and record framing with exact offsets, `BUS_WIRE_HDR_LEN` and the single-`payload_len` rule
+  with the `record_len` identity a reader validates, CRC-32C extent, the proof that `seq` is
+  contiguous within a stream (and why `would_block` and `first_seq` do not break it), the
+  `epoch_change` body and termination state machine, and the three terminal states
+  open / truncated / corrupt. Slice 11 now validates the contract instead of defining it. Also:
+  reserved bytes given a reader rule, `payload_ref` explicitly non-dereferenceable at replay, and the
+  acceptance-id surface pointed at the companion tree.
