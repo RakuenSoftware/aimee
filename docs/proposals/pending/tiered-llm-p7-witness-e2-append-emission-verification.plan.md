@@ -85,12 +85,30 @@ append joins that transaction with no restructuring.
 idle-open functions already update `kb_vault_control`, insert the open event, and
 `PERFORM` an audit append together.
 
-**Admission — `kb_audit_event`.** This one requires modifying C, not SQL.
-`db2_kb_audit_append` (`src/db2/kb_audit_worm.c`) opens its own `BEGIN`, reads
-the current head, computes the row hash, inserts, and commits. The witness insert
-and shard advance go **inside that function, before its existing commit**.
-Wrapping a new transaction around the call would leave exactly the crash window
-the atomicity invariant exists to close.
+**Admission — `kb_audit_event`, wired in SQL, not C (finding during implementation).**
+The plan originally assumed the admission witness must modify the C
+`db2_kb_audit_append`. Investigation showed otherwise: `kb_audit_event` has two
+writers, and the security-critical one is SQL. Every `vault.key_use` (the append
+that gates key attachment), reseal, open, rotation, catalog, registry, and status
+event is written by the SQL `kb_audit_worm_append`, which already serializes
+appenders under `pg_advisory_xact_lock`. **The witness append is wired there**, in
+that transaction — so the key-attachment gate is fully witnessed, the witness
+shard `FOR UPDATE` is never contended (the advisory lock already serialized), and
+the high-blast-radius C admission-path change with its unsafe `MAX(seq)+INSERT`
+sequence assignment is avoided entirely.
+
+The C `db2_kb_audit_append` (`src/db2/kb_audit_worm.c`) is the *other* writer, used
+by only three call sites: two conspicuous integration-test overrides in
+`kb_main.c` and artifact promotion in `artifacts.c` — none of them vault or key
+security events. Witnessing that path (artifact-promotion audits) is a bounded
+follow-up that would need the SERIALIZABLE-retry contract, because unlike the SQL
+path it is not advisory-locked. It is **not** required for the umbrella's security
+property, which is about vault/key events, all of which take the SQL path.
+
+All three ledgers' wiring is validated on real PG17: `scripts/run-p7-witness-wiring.sh`
+(isolated DB) proves audit/reseal/open each witness in-transaction with
+content-binding source hashes and idempotent replay, and the full P1 RLS gate
+passes with the audit witnessing active across every subsystem (no regression).
 
 **The witness call must not inherit the audit chain's read-then-insert pattern.**
 The C `db2_kb_audit_append` establishes its sequence and predecessor with
