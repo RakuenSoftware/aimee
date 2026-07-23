@@ -4995,6 +4995,7 @@ RETURNS TABLE(operation_id TEXT,actor TEXT,request_id TEXT,seal_epoch BIGINT,
   secret_count BIGINT,check_count BIGINT)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c public.kb_vault_control%ROWTYPE; o public.kb_vault_rewrap_operation%ROWTYPE;
+  w public.kb_vault_rewrap_worm%ROWTYPE; obligations BIGINT;
 BEGIN
   IF p_actor OPERATOR(pg_catalog.<>) 'uid:0' OR
      coalesce(p_request,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
@@ -5009,7 +5010,15 @@ BEGIN
   IF o.actor OPERATOR(pg_catalog.<>) p_actor OR o.request_id OPERATOR(pg_catalog.<>) p_request THEN
     RAISE EXCEPTION 'P7_D3B_REPLAY_MISMATCH' USING ERRCODE='23505';
   END IF;
-  IF o.state OPERATOR(pg_catalog.<>) 'completed' OR o.receipt IS NULL OR
+  SELECT pg_catalog.count(*) INTO obligations
+    FROM public.kb_vault_rewrap_operation AS x
+   WHERE x.fencing_token OPERATOR(pg_catalog.>) c.last_opened_rewrap_fence AND
+         x.state IN ('completed','recovery_required');
+  SELECT * INTO w FROM public.kb_vault_rewrap_worm AS x
+   WHERE x.operation_id OPERATOR(pg_catalog.=) p_op AND
+         x.event_kind OPERATOR(pg_catalog.=) 'completed';
+  IF obligations OPERATOR(pg_catalog.<>) 1 OR
+     o.state OPERATOR(pg_catalog.<>) 'completed' OR o.receipt IS NULL OR
      pg_catalog.octet_length(o.receipt) OPERATOR(pg_catalog.<>) 208 OR
      pg_catalog.octet_length(o.receipt_digest) OPERATOR(pg_catalog.<>) 32 OR
      pg_catalog.sha256(o.receipt) OPERATOR(pg_catalog.<>) o.receipt_digest OR
@@ -5022,6 +5031,15 @@ BEGIN
      EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation AS x
              WHERE x.fencing_token OPERATOR(pg_catalog.>) o.fencing_token) THEN
     RAISE EXCEPTION 'P7_D3B_COMPLETED_INTEGRITY' USING ERRCODE='P7I01';
+  END IF;
+  IF w.operation_id IS NULL OR w.state OPERATOR(pg_catalog.<>) 'completed' OR
+     w.seal_epoch OPERATOR(pg_catalog.<>) o.seal_epoch OR
+     w.fencing_token OPERATOR(pg_catalog.<>) o.fencing_token OR
+     w.receipt_digest IS DISTINCT FROM o.receipt_digest OR
+     w.inventory_digest IS DISTINCT FROM o.inventory_digest OR
+     w.stage_digest IS DISTINCT FROM o.stage_digest OR
+     w.actor OPERATOR(pg_catalog.<>) o.actor OR w.detail OPERATOR(pg_catalog.<>) '' THEN
+    RAISE EXCEPTION 'P7_D3B_COMPLETED_CHECKPOINT_INTEGRITY' USING ERRCODE='P7I01';
   END IF;
   RETURN QUERY SELECT o.operation_id,o.actor,o.request_id,o.seal_epoch,o.fencing_token,
     o.old_generation,o.new_generation,o.receipt,o.receipt_digest,o.inventory_digest,

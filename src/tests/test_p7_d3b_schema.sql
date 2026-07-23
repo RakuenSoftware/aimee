@@ -95,6 +95,13 @@ UPDATE public.kb_vault_rewrap_operation SET state='completed',
   inventory_digest=decode(repeat('cd',32),'hex'),stage_digest=decode(repeat('ef',32),'hex');
 UPDATE public.kb_vault_control SET sealed=true,maintenance_kind='',maintenance_id='',
   fencing_token=3 WHERE singleton=1;
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$ BEGIN
+  PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(
+    'uid:0','00112233445566778899aabbccddeeff','11111111111111111111111111111111');
+  RAISE EXCEPTION 'completed material accepted missing checkpoint';
+EXCEPTION WHEN SQLSTATE 'P7I01' THEN NULL; END $$;
+RESET ROLE;
 SELECT public.org_vault_rewrap_worm_append(
   '11111111111111111111111111111111','completed','completed','');
 DO $$ BEGIN IF (SELECT count(*) FROM public.kb_vault_rewrap_worm
@@ -174,18 +181,11 @@ INSERT INTO public.kb_vault_rewrap_operation(operation_id,request_id,actor,state
 VALUES('44444444444444444444444444444444','44444444444444444444444444444444','uid:0',
  'recovery_required',1,1,9,10,'test_recovery','preparing');
 SET ROLE aimee_kb_vault_orchestrator;
-DO $$
-DECLARE o RECORD;
-BEGIN
-  SELECT * INTO STRICT o FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(
+DO $$ BEGIN
+  PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(
     'uid:0','00112233445566778899aabbccddeeff','11111111111111111111111111111111');
-  BEGIN
-    PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(
-      'uid:0',o.request_id,o.operation_id,o.seal_epoch,o.fencing_token,
-      o.receipt_digest,o.inventory_digest,o.stage_digest);
-    RAISE EXCEPTION 'open accepted multiple outstanding obligations';
-  EXCEPTION WHEN SQLSTATE 'P7I01' THEN NULL; END;
-END $$;
+  RAISE EXCEPTION 'completed material accepted multiple obligations';
+EXCEPTION WHEN SQLSTATE 'P7I01' THEN NULL; END $$;
 RESET ROLE;
 ROLLBACK;
 
