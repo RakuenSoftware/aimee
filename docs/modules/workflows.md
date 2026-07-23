@@ -14,6 +14,20 @@ The current contracts include `wfe_def_parse`, `wfe_def_validate`, `wfe_work_ite
 notification, and trigger dispatch through `gw_orch_workflows_run`. Definitions and state transitions
 must remain deterministic and versioned; provider seams perform effects without owning the lifecycle.
 
+The descriptor declares this module's thirty sources, twenty-four module-root headers, thirty-three
+direct tests, and this document; it does not yet set `ownership_complete`. All twenty-four headers are
+declared as `private_headers` because they live at the module root rather than under
+`src/modules/workflows/include/aimee/workflows/`, the layout the header-layout checker treats as
+private; every one pairs with a like-named source, and six sources carry no paired header
+(`wfe_canonical.c`, `wfe_custom.c`, `wfe_live_forge.c`, `wfe_router_catalog.c`, `wfe_scheduler.c`,
+`wfe_validate.c`), declaring instead through the paired headers. Make compiles all thirty sources;
+CMake compiles twenty-four, omitting `gw_orch_workflows.c`, `wfe_live_foreach.c`, `wfe_live_forge.c`,
+`wfe_live_panel.c`, `wfe_panel_roundtable.c`, and `wfe_replay_worktree.c` — the live, panel, forge,
+replay, and gateway-orchestration units that are server-side — the same intentional thin-client
+boundary recorded for the earlier modules. `docs/validation/core-modularization-slice-54.md` records
+the audit; latching follows in a separate slice so the completeness audit does not review declarations
+authored in the same change.
+
 ## Dependencies and consumers
 
 - `audit`: records workflow intake, decisions, effects, state transitions, and terminal outcomes.
@@ -79,9 +93,20 @@ roundtable block awaits a roundtable result while workflows retains run state an
 
 ## Tests and failure behavior
 
-WFE definition, validation, blocks, engine, safety, manager-flow, scheduler, trigger,
-`gw_orch_workflows`, approval, native-gate, replay-worktree, and live-provider suites exercise current
-behavior. Disabled intake returns capability absence instead of filing; invalid graphs fail before
+The descriptor's thirty-three direct tests each link at least one `modules/workflows` object as their
+subject, covering definition, validation, blocks, the engine, safety, manager flow, the scheduler,
+routing and the router catalog, approval and autonomy, the native gate, enforcement, externalization,
+delivery, the roundtable and panel seams, replay-worktree, the web API, and
+`test_gw_orch_workflows.c`. Eleven of them are additionally registered as CTest cases; the rest run
+under Make alone.
+
+The `wfe_` prefix is shared with DB1's `src/db1/wfe_store.c` and `src/db1/wfe_binding.c`, so a
+`test_wfe_*` filename is a poor ownership signal for this module and future files must be classified by
+which object their target links, not by name. Four such files are deliberately not claimed:
+`test_wfe_binding.c` links only DB1 objects and exercises the DB1 binding store; `test_wfe_gate_apply.c`
+and `test_wfe_submitter.c` link `db1/wfe_store.o`; and `test_workflow_gate_caps.c` links no module
+object at all, asserting a route capability contract. Together with those adjacent suites they exercise
+current behavior. Disabled intake returns capability absence instead of filing; invalid graphs fail before
 execution; lease/CAS conflict, missing provider, denied effect, budget exhaustion, or failed verification
 must preserve an inspectable non-success state rather than silently complete.
 

@@ -520,6 +520,204 @@
     {
       "ctest": false,
       "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_gw_orch_workflows.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_advance.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_advance_exec.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_approval.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_autonomous_route.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_autonomy.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_bind_ingress.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_block_resolve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_blocks.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_custom.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_delegate_seam.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_deliver.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_enforce.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_engine.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_externalization.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_failure_taxonomy.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_foreach.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_foreach_spawn.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_gate_reject.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_artifacts.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_blocks.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_flow.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_native_gate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_panel_roundtable.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_replay_worktree.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_roundtable.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_router.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_router_catalog.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_safety.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_scheduler.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_sliced_build.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_webapi.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_workflow.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "workspace",
       "test": "src/tests/test_workspace.c"
     },
