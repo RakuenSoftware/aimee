@@ -221,6 +221,7 @@ static const struct
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
+#if AIMEE_WITH_ROUNDTABLE
     {"pipeline", "start", "pipeline.start", NULL, NULL, 60000},
     {"pipeline", "status", "pipeline.status", NULL, NULL, 0},
     {"pipeline", "list", "pipeline.list", NULL, NULL, 0},
@@ -228,6 +229,7 @@ static const struct
     {"pipeline", "resume", "pipeline.resume", NULL, NULL, 0},
     {"pipeline", "advance", "pipeline.advance", NULL, NULL, 300000},
     {"pipeline", "gate", "pipeline.gate", NULL, NULL, 300000},
+#endif
     {"delegate", "launch", "delegate.launch", NULL, NULL, 300000},
     {"delegate", "status", "delegate.status", NULL, NULL, 0},
     {"delegate", "--list-roles", "agent.list", NULL, "agents", 0},
@@ -235,6 +237,7 @@ static const struct
     {"delegate", "history", "delegate.log", NULL, "episodes", 0},
     {"delegate", "sandbox list", "delegate.sandbox_list", NULL, "images", 0},
     {"delegate", "sandbox gc", "delegate.sandbox_gc", NULL, NULL, 60000},
+#if AIMEE_WITH_ROUNDTABLE
     /* MoA ensemble aggregate: positional[0] is the PROMPT (not a role). Async —
      * forwards to POST /v1/delegate/aggregate and polls GET /v1/runs/{id}. This
      * specific route is what makes `aimee delegate aggregate "<prompt>"` reach the
@@ -249,6 +252,7 @@ static const struct
      * tools). `delegate aggregate/roundtable` stay as back-compat aliases. */
     {"ensemble", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
     {"ensemble", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
+#endif
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1747,6 +1751,7 @@ static const char *marshal_delegate_toolset_arg(int argc, char **argv)
    return NULL;
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 /* MoA ensemble aggregate. positional[0] is the prompt (the catch-all delegate
  * marshaller mapped positional[0] -> role, which is the §0.2 routing bug). */
 cJSON *marshal_delegate_aggregate(int argc, char **argv)
@@ -1815,6 +1820,7 @@ cJSON *marshal_delegate_roundtable(int argc, char **argv)
       cJSON_AddBoolToObject(req, "apply", 1);
    return req;
 }
+#endif
 
 cJSON *marshal_delegate(int argc, char **argv)
 {

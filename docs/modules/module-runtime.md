@@ -35,6 +35,14 @@ paths within or across descriptors, then emits a deterministic declared-ownershi
 inputs are still maintained by Make and CMake in this slice; descriptor-driven build generation
 remains a later step, so these ownership fields are documentation and validation only.
 
+Until generation replaces those lists, optional-module build selection is an explicit composition
+contract: both build systems define the same `AIMEE_WITH_<MODULE>` feature macro, omit owner-private
+include roots and selected objects when false, and preserve required provider facades. CI builds an
+omitted profile and inspects both its object graph and user-facing binary strings. Runtime activation is
+orthogonal: a module may be selected into a binary yet remain inactive by default.
+Where a build system does not yet own a full application target, it must reject an unsupported omitted
+configuration rather than silently applying a partial feature closure.
+
 Descriptor v1 also supports `private_headers` and the opt-in `ownership_complete` latch. For a
 complete descriptor, the validator compares the declared source and private-header sets with every
 matching owner-local file and requires the canonical module document. An undeclared new file or a

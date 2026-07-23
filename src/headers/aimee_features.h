@@ -7,4 +7,9 @@
 #define AIMEE_WITH_PLUGIN_LOADER 0
 #endif
 
+/* Optional, but selected in normal builds for backward compatibility. */
+#ifndef AIMEE_WITH_ROUNDTABLE
+#define AIMEE_WITH_ROUNDTABLE 1
+#endif
+
 #endif /* AIMEE_FEATURES_H */

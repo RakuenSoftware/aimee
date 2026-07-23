@@ -10,6 +10,7 @@
  * are discoverable via find_tools/describe_tool and callable by name. */
 #include "cJSON.h"
 #include "mcp_tools.h"
+#include "aimee_features.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -252,6 +253,7 @@ struct fam_def
    struct fam_member members[14];
 };
 static const struct fam_def MCP_FAMILIES[] = {
+#if AIMEE_WITH_ROUNDTABLE
     {"pipeline",
      "command",
      "Roundtable authoring pipeline. Set 'command' to the operation; other params apply per "
@@ -264,6 +266,7 @@ static const struct fam_def MCP_FAMILIES[] = {
       {"resume", "pipeline_resume"},
       {"cancel", "pipeline_cancel"},
       {NULL, NULL}}},
+#endif
     {"diagnose",
      "command",
      "Structured diagnosis session (observe → hypothesize → weigh evidence). Set 'command'.",

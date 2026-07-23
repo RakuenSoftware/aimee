@@ -13,7 +13,9 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -39,7 +41,9 @@
 #include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
+#endif
 #include "commands.h"
 #include "agent.h"
 #include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
@@ -348,8 +352,12 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (methods)
    {
       for (int i = 0; server_dispatch_table[i].method; i++)
+#if AIMEE_WITH_ROUNDTABLE
          if (roundtable_operation_available(server_dispatch_table[i].method))
             cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
+#else
+         cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
+#endif
       cJSON_AddItemToObject(resp, "methods", methods);
    }
    return server_send_ok(conn, resp);
@@ -1564,11 +1572,13 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Compute (thread pool) */
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
+#if AIMEE_WITH_ROUNDTABLE
     /* Public /v1 delegate aggregate/roundtable routes enqueue through
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
     {"delegate.roundtable", handle_delegate_roundtable},
+#endif
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
@@ -1596,6 +1606,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"config.show", handle_config_show},
     {"config.get", handle_config_get},
     {"config.set", handle_config_set},
+#if AIMEE_WITH_ROUNDTABLE
     {"pipeline.start", handle_pipeline_start},
     {"pipeline.status", handle_pipeline_status},
     {"pipeline.list", handle_pipeline_list},
@@ -1603,6 +1614,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"pipeline.resume", handle_pipeline_resume},
     {"pipeline.advance", handle_pipeline_advance},
     {"pipeline.gate", handle_pipeline_gate},
+#endif
     {"aux.test", handle_aux_test},
     {"delegate.reply", handle_delegate_reply},
     {"delegate.log", handle_delegate_log},
@@ -1749,9 +1761,10 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    const char *m = method->valuestring;
    int rc;
 
-   /* Optional-module methods are absent from the live registry. Keep this
+   /* Runtime-disabled optional-module methods are absent from the live registry. Keep this
     * before capability lookup so disabled operations have unknown-method, not
     * authorization, semantics and can never reach a handler. */
+#if AIMEE_WITH_ROUNDTABLE
    if (!roundtable_operation_available(m))
    {
       cJSON *resp = cJSON_CreateObject();
@@ -1764,6 +1777,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       cJSON_Delete(req);
       return rc;
    }
+#endif
 
    /* Capability check */
    uint32_t required = server_capability_for_method(m);
@@ -2183,17 +2197,22 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
             platform_mkdir_p(cfg_dir, 0700);
       }
    }
-   /* Compose optional providers before publishing the pid. A registration
+   /* Compose selected optional providers before publishing the pid. A registration
     * conflict is a broken startup configuration, not a recoverable per-request
     * outage: continuing would advertise routes that can never execute. */
    config_t cfg;
    int config_rc = config_load(&cfg);
+#if AIMEE_WITH_ROUNDTABLE
    if (roundtable_provider_configure(config_rc == 0 ? &cfg : NULL) < 0)
    {
       LOG_ERROR("server", "roundtable panel provider registration failed");
       platform_evloop_destroy(&ctx->evloop);
       return -1;
    }
+#else
+   if (config_rc == 0 && cfg.module_roundtable == 1)
+      LOG_WARN("server", "roundtable is enabled in config but absent from this build");
+#endif
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);

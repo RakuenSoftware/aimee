@@ -56,6 +56,10 @@ provider is unregistered. Unregistration is rejected while a result remains outs
 and unregistration are startup-only: the provider descriptor must remain valid until all calls have
 completed and all results have been released, and concurrent hot unload is unsupported.
 
+When roundtable is omitted at build time, the provider and roster facades remain in core, no optional
+private include path or symbol is linked, and panel calls return the typed unavailable status. This keeps
+delegation and routing usable without substituting a stub implementation for the absent module.
+
 ### Public-header contract
 
 All 21 delegate headers live under `src/modules/delegates/include/aimee/delegates/`, and every consumer

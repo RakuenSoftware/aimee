@@ -48,7 +48,9 @@
 #include "server_http.h"
 #include "provider_catalog.h"
 #include "role_templates.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 #include "workspace.h"
 #include "workspace_provider.h"
 #include "workspace_turn.h"
@@ -1771,11 +1773,13 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    return cctx;
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 static int roundtable_run_cancel_requested(void *ctx)
 {
    const char *run_id = (const char *)ctx;
    return run_id && run_id[0] && openai_runs_store_cancel_requested(run_id);
 }
+#endif
 
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1901,6 +1905,7 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 /* Convene the ensemble panel from enabled registry agents when no explicit
  * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
@@ -2178,6 +2183,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    free(brief.rendered);
    return server_send_ok(conn, resp);
 }
+#endif
 
 int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

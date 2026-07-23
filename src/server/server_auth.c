@@ -91,8 +91,10 @@ const method_policy_t method_registry[] = {
     /* Compute */
     {"tool.execute", CAP_TOOL_EXECUTE, "execute tool"},
     {"delegate", CAP_DELEGATE, "delegate task"},
+#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
     {"delegate.roundtable", CAP_DELEGATE, "multi-round agent roundtable"},
+#endif
     {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses

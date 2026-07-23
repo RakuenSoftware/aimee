@@ -5,7 +5,9 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_activation.h"
+#endif
 #include "server_mgmt_endpoint.h"
 #include "server_http_identity.h"
 #include <openssl/sha.h>
@@ -30,7 +32,9 @@
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
+#endif
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
@@ -717,6 +721,7 @@ static int rh_role_template_delete(const route_req_t *rq, char *resp, int cap)
    return route_role_template_remove(rq->id, resp, cap);
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 static int rh_roundtables_list(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -742,6 +747,7 @@ static int rh_roundtable_delete(const route_req_t *rq, char *resp, int cap)
 {
    return route_roundtable_remove(rq->id, resp, cap);
 }
+#endif
 
 static int rh_sessions_list(const route_req_t *rq, char *resp, int cap)
 {
@@ -975,7 +981,9 @@ static void op_run_worker_run(void *arg)
    /* Pipeline-owned result capture (#18): persist the terminal attempt into the
     * durable DB1 ledger before the bounded /v1/runs record can be evicted. This
     * no-ops for ordinary (non-pipeline) op-runs. */
+#if AIMEE_WITH_ROUNDTABLE
    rtp_seam_finalize(j->run_id, ok, terminal_status == OPENAI_RUN_CANCELLED, buf);
+#endif
    free(snap);
    free(buf);
    free(j->line);
@@ -1021,6 +1029,7 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
     * is never honored. An unknown / non-owned pass id is rejected. */
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__pipeline_pass_id");
    cJSON *ppid = cJSON_GetObjectItemCaseSensitive(req, "pipeline_pass_id");
+#if AIMEE_WITH_ROUNDTABLE
    if (ppid && cJSON_IsNumber(ppid))
    {
       int pass_id = (int)ppid->valuedouble;
@@ -1032,6 +1041,13 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
       }
       cJSON_AddNumberToObject(req, "__pipeline_pass_id", pass_id);
    }
+#else
+   if (ppid)
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 404, "not found");
+   }
+#endif
 
    char *line = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
@@ -1096,6 +1112,7 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    return (n > 0 && n < cap) ? 200 : 200;
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                               char *resp, int cap)
 {
@@ -1105,6 +1122,7 @@ int server_http_submit_op_run(const char *op_method, const char *body_json, uint
       return err_json(resp, cap, 404, "not found");
    return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
 }
+#endif
 
 static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
 {
@@ -1707,10 +1725,12 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op_async},
     {"POST", "/v1/rules/generate", NULL, RM_EXACT, "rules.generate", 0, rh_dispatch_op_async},
     {"POST", "/v1/eval/run", NULL, RM_EXACT, "eval.run", 0, rh_dispatch_op_async},
+#if AIMEE_WITH_ROUNDTABLE
     {"POST", "/v1/delegate/aggregate", NULL, RM_EXACT, "delegate.aggregate", 0,
      rh_dispatch_op_async},
     {"POST", "/v1/delegate/roundtable", NULL, RM_EXACT, "delegate.roundtable", 0,
      rh_dispatch_op_async},
+#endif
     {"POST", "/v1/dev/sweep", NULL, RM_EXACT, "dev.sweep", 0, rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */
@@ -1781,6 +1801,7 @@ static const http_route_t g_v1_routes[] = {
     {"DELETE", "/v1/role_templates/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_role_template_delete},
 
+#if AIMEE_WITH_ROUNDTABLE
     /* Named roundtable presets: read like personas, mutate as admin. The exact
      * POST /v1/roundtables/active (set active preset) precedes the prefix routes
      * so it is not captured as a preset name. */
@@ -1791,6 +1812,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_roundtable_show},
     {"PUT", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_put},
     {"DELETE", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_delete},
+#endif
 
     /* Unified presence: list / attach / detach / persona / events are
      * session-scoped on the owner's own presence. */
@@ -1932,8 +1954,10 @@ static const http_route_t *route_match(const char *method, const char *path, cha
       {
          if (strcmp(path, e->path) == 0)
          {
+#if AIMEE_WITH_ROUNDTABLE
             if (e->op && !roundtable_operation_available(e->op))
                continue;
+#endif
             return e;
          }
          continue;
@@ -1964,8 +1988,10 @@ static const http_route_t *route_match(const char *method, const char *path, cha
          memcpy(id_out, rest, idlen);
          id_out[idlen] = '\0';
       }
+#if AIMEE_WITH_ROUNDTABLE
       if (e->op && !roundtable_operation_available(e->op))
          continue;
+#endif
       return e;
    }
    return NULL;

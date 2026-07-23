@@ -4,6 +4,7 @@
 #include "cli_client.h"
 #include "aimee_home.h" /* aimee_home() — cross-platform, used outside the _WIN32 guard */
 #include "cli_v1_routes.h"
+#include "aimee_features.h"
 #define V1_MAX_POS   16
 #define V1_MAX_FLAGS 32
 typedef struct
@@ -33,10 +34,14 @@ cJSON *marshal_coord_jobs_list(int argc, char **argv);
 cJSON *marshal_curator_contradictions(int argc, char **argv);
 cJSON *marshal_curator_topic(const char *method, int argc, char **argv);
 cJSON *marshal_delegate(int argc, char **argv);
+#if AIMEE_WITH_ROUNDTABLE
 cJSON *marshal_delegate_aggregate(int argc, char **argv);
+#endif
 cJSON *marshal_delegate_backend_exec(int argc, char **argv);
 cJSON *marshal_delegate_log(int argc, char **argv);
+#if AIMEE_WITH_ROUNDTABLE
 cJSON *marshal_delegate_roundtable(int argc, char **argv);
+#endif
 cJSON *marshal_delegate_status(int argc, char **argv);
 cJSON *marshal_index_blast_radius(int argc, char **argv);
 cJSON *marshal_index_deps(int argc, char **argv);
@@ -126,7 +131,9 @@ void pt_print_cron_show(const char *method, cJSON *resp);
 void pt_print_delegate(const char *method, cJSON *resp);
 void pt_print_delegate_launch(const char *method, cJSON *resp);
 void pt_print_delegate_log(const char *method, cJSON *resp);
+#if AIMEE_WITH_ROUNDTABLE
 void pt_print_delegate_roundtable(const char *method, cJSON *resp);
+#endif
 void pt_print_delegate_status(const char *method, cJSON *resp);
 void pt_print_dogfood_report(const char *method, cJSON *resp);
 void pt_print_dogfood_tag(const char *method, cJSON *resp);

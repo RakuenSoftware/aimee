@@ -35,7 +35,9 @@
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
 #include "server_http.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
+#endif
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -104,6 +106,7 @@ static int send_mcp_result_structured(server_conn_t *conn, cJSON *content, cJSON
    return server_send_ok(conn, resp);
 }
 
+#if AIMEE_WITH_ROUNDTABLE
 static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
 {
    cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
@@ -192,6 +195,7 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
    cJSON_Delete(snap);
    return server_send_ok(conn, resp);
 }
+#endif
 cJSON *tool_get_help(cJSON *args)
 {
    cJSON *jtopic = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive(args, "topic") : NULL;
@@ -1758,6 +1762,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return rc;
    }
 
+#if AIMEE_WITH_ROUNDTABLE
    if (strcmp(tool, "ensemble_review") == 0)
    {
       int rc = handle_mcp_ensemble_review(conn, jargs);
@@ -1765,6 +1770,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(jargs);
       return rc;
    }
+#endif
 
    /* Delegate reply: forward to existing handler */
    if (strcmp(tool, "delegate_reply") == 0)
@@ -1784,6 +1790,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return rc;
    }
 
+#if AIMEE_WITH_ROUNDTABLE
    /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
     * pipeline_* tool to its handler, which sends its own response on conn (like
     * ensemble_review/delegate). Capability is enforced against the matching
@@ -1822,6 +1829,7 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return rc;
       }
    }
+#endif
 
    /* Discovery meta-tools (P2): pure introspection of the full catalog; set
     * content and fall through to the normal send path. */

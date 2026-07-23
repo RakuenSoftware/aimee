@@ -166,6 +166,49 @@ jobs:
           strings ./aimee-server | grep -Eq '^[[:space:]]*/plugins:$'
           strings ./aimee-server | grep -q 'plugin.list'
 
+  roundtable-profiles:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc make cmake \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
+      - name: Build Make profile without roundtable
+        run: |
+          make -C src -j$(nproc) AIMEE_WITH_ROUNDTABLE=0 all \
+            build/obj/tests/unit-test-panel-provider \
+            build/obj/tests/unit-test-delegate-role \
+            build/obj/tests/unit-test-aimee-ir \
+            build/obj/tests/unit-test-acp-server \
+            build/obj/tests/unit-test-mcp-native-surface \
+            build/obj/tests/unit-test-gw-response-registry \
+            build/obj/tests/unit-test-server-dispatch \
+            build/obj/tests/unit-test-server-http
+      - name: Verify required core without roundtable
+        run: |
+          for test in panel-provider delegate-role aimee-ir acp-server \
+            mcp-native-surface gw-response-registry server-dispatch server-http; do
+            ./src/build/obj/tests/unit-test-$test
+          done
+          make -C src AIMEE_WITH_ROUNDTABLE=0 cli-v1-routes-check
+      - name: Verify disabled roundtable closure
+        run: ./scripts/check_roundtable_disabled.sh
+      - name: Configure CMake profile without roundtable
+        run: cmake -S . -B build-cmake-no-roundtable -DAIMEE_THIN_CLIENT=ON -DAIMEE_WITH_ROUNDTABLE=OFF -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+      - name: Build CMake profile without roundtable
+        run: cmake --build build-cmake-no-roundtable --parallel 2 --target aimee
+      - name: Reject unsupported full CMake omission
+        run: |
+          if cmake -S . -B build-cmake-invalid -DAIMEE_WITH_ROUNDTABLE=OFF; then
+            echo "::error::CMake accepted a partial full-stack roundtable omission"
+            exit 1
+          fi
+
   build-integrity:
     runs-on: ubuntu-latest
     steps:

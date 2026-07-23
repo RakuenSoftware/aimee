@@ -39,8 +39,10 @@
 #include "wfe_blocks.h"
 #include "wfe_live_forge.h"
 #include "wfe_live_foreach.h"
+#if AIMEE_WITH_ROUNDTABLE
 #include "wfe_live_panel.h"
 #include "wfe_roundtable.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -482,11 +484,13 @@ void wfe_autonomy_register(void)
 {
    /* Full engine executor set so a work item can run end-to-end server-side. */
    wfe_register_default_executors();
+#if AIMEE_WITH_ROUNDTABLE
    wfe_register_roundtable_gate();
    /* The live roundtable panel (per-persona review delegates -> verdicts). Replaces the
     * default fail-closed stub so gate.roundtable can actually convene; still fail-closed
     * (DEGRADED/park) when a required persona has no reachable agent. */
    wfe_live_panel_register();
+#endif
    wfe_register_human_gate();
    /* The live worker + the mechanical verify gate (implement only advances a unit
     * that passes verification). */

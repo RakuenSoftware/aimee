@@ -626,6 +626,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                           "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
+#if AIMEE_WITH_ROUNDTABLE
    /* ensemble_review */
    {
       cJSON_AddItemToArray(
@@ -762,6 +763,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                  "\"pipeline_id\":{\"type\":\"integer\",\"description\":\"Pipeline "
                                  "id.\"}},\"required\":[\"pipeline_id\"]}")));
    }
+
+#endif
 
    /* preview_blast_radius */
    {

@@ -37,11 +37,26 @@ option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
 # toolchain. Composes with AIMEE_LEAN for a size-optimized, stripped binary.
 option(AIMEE_THIN_CLIENT "Build only the aimee thin client (no server/kb/gateway/webchat)" OFF)
 option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)
+option(AIMEE_WITH_ROUNDTABLE "Build the optional roundtable module" ON)
+
+# CMake currently owns the portable thin-client target; full server composition
+# remains Make-owned. Do not silently accept a partial full-profile omission.
+if(NOT AIMEE_WITH_ROUNDTABLE AND NOT AIMEE_THIN_CLIENT)
+    message(FATAL_ERROR
+        "AIMEE_WITH_ROUNDTABLE=OFF is currently supported only with "
+        "AIMEE_THIN_CLIENT=ON; use the Make profile for full-stack omission")
+endif()
 
 if(AIMEE_WITH_PLUGIN_LOADER)
     add_compile_definitions(AIMEE_WITH_PLUGIN_LOADER=1)
 else()
     add_compile_definitions(AIMEE_WITH_PLUGIN_LOADER=0)
+endif()
+
+if(AIMEE_WITH_ROUNDTABLE)
+    add_compile_definitions(AIMEE_WITH_ROUNDTABLE=1)
+else()
+    add_compile_definitions(AIMEE_WITH_ROUNDTABLE=0)
 endif()
 
 include(CTest)
@@ -77,6 +92,11 @@ set(AIMEE_TRANSLATION_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/translation/include")
 set(AIMEE_DELEGATES_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/delegates/include")
+if(AIMEE_WITH_ROUNDTABLE)
+    set(AIMEE_ROUNDTABLE_INCLUDE_DIR "${AIMEE_SRC_DIR}/modules/roundtable")
+else()
+    set(AIMEE_ROUNDTABLE_INCLUDE_DIR "")
+endif()
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
@@ -785,7 +805,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
     ${AIMEE_SRC_DIR}/modules/delegates/panel_provider.c
     ${AIMEE_SRC_DIR}/modules/delegates/panel_roster.c
-    ${AIMEE_SRC_DIR}/modules/roundtable/roundtable_provider.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_role.c
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_economics.c
     ${AIMEE_SRC_DIR}/cmd_wm.c
@@ -809,6 +828,9 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/aimee_client.c
     ${PLATFORM_CMD_SRCS}
 )
+if(AIMEE_WITH_ROUNDTABLE)
+    list(APPEND CMD_SRCS ${AIMEE_SRC_DIR}/modules/roundtable/roundtable_provider.c)
+endif()
 if(AIMEE_WITH_PLUGIN_LOADER)
     list(APPEND CORE_SRCS
         ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c
@@ -879,7 +901,6 @@ set(CLI_SRCS
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/server/server.c
-    ${AIMEE_SRC_DIR}/modules/roundtable/roundtable_provider.c
     ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c
     ${AIMEE_SRC_DIR}/server_provider.c
     ${AIMEE_SRC_DIR}/server_insights.c
@@ -1001,6 +1022,9 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomy.c
     ${PLATFORM_SERVER_SRCS}
 )
+if(AIMEE_WITH_ROUNDTABLE)
+    list(APPEND SERVER_SRCS ${AIMEE_SRC_DIR}/modules/roundtable/roundtable_provider.c)
+endif()
 if(NOT AIMEE_WITH_PLUGIN_LOADER)
     list(REMOVE_ITEM SERVER_SRCS ${AIMEE_SRC_DIR}/server/server_plugin.c)
 endif()
@@ -1130,7 +1154,7 @@ add_library(aimee-core STATIC
 )
 target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}
-    ${AIMEE_SRC_DIR}/headers ${AIMEE_PLUGIN_LOADER_INCLUDE_DIR} ${AIMEE_MODULE_RUNTIME_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_DELEGATES_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline
+    ${AIMEE_SRC_DIR}/headers ${AIMEE_PLUGIN_LOADER_INCLUDE_DIR} ${AIMEE_MODULE_RUNTIME_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_DELEGATES_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
@@ -1140,12 +1164,12 @@ target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
 
 add_library(aimee-data STATIC ${DATA_SRCS})
-target_include_directories(aimee-data PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-data PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-data PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-data PUBLIC aimee-core ${ZSTD_LIBRARY})
 
 add_library(aimee-agent STATIC ${AGENT_SRCS})
-target_include_directories(aimee-agent PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-agent PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-agent PRIVATE ${AIMEE_COMMON_WARNINGS})
 if(OpenSSL_FOUND OR OPENSSL_FOUND)
     target_link_libraries(aimee-agent PUBLIC aimee-data aimee-core OpenSSL::SSL OpenSSL::Crypto)
@@ -1154,12 +1178,12 @@ else()
 endif()
 
 add_library(aimee-git STATIC ${GIT_SRCS})
-target_include_directories(aimee-git PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-git PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-git PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-git PUBLIC aimee-agent aimee-data aimee-core)
 
 add_library(aimee-cmd STATIC ${CMD_SRCS})
-target_include_directories(aimee-cmd PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
+target_include_directories(aimee-cmd PUBLIC ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers)
 target_compile_options(aimee-cmd PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-cmd PUBLIC aimee-git aimee-agent aimee-data aimee-core)
 if(WITH_UI)
@@ -1330,7 +1354,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_router_catalog.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_autonomous_route.c
 )
-target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_DELEGATES_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_SRC_DIR}/modules/roundtable ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
+target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/modules/config ${AIMEE_SRC_DIR}/modules/economizer ${AIMEE_SRC_DIR}/modules/memory ${AIMEE_SRC_DIR}/modules/governance ${AIMEE_DELEGATES_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/workflows ${AIMEE_SRC_DIR}/modules/protocols/mcp ${AIMEE_SRC_DIR}/modules/protocols/acp ${AIMEE_SRC_DIR}/modules/vault ${AIMEE_SRC_DIR}/modules/git ${AIMEE_SRC_DIR}/modules/workspace ${AIMEE_SRC_DIR}/modules/guardrails ${AIMEE_ROUNDTABLE_INCLUDE_DIR} ${AIMEE_AUDIT_INCLUDE_DIR} ${AIMEE_GATEWAY_INCLUDE_DIR} ${AIMEE_IR_INCLUDE_DIR} ${AIMEE_TRANSLATION_INCLUDE_DIR} ${AIMEE_SRC_DIR}/modules/kb_client ${AIMEE_SRC_DIR}/modules/agent_eval ${AIMEE_SRC_DIR}/modules/learning ${AIMEE_SRC_DIR}/modules/roadmap ${AIMEE_SRC_DIR}/modules/sandbox ${AIMEE_SRC_DIR}/modules/lsp ${AIMEE_SRC_DIR}/modules/skills/include ${AIMEE_SRC_DIR}/modules/css ${AIMEE_SRC_DIR}/modules/webuser ${AIMEE_SRC_DIR}/pipeline ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE Threads::Threads)
 if(NOT WIN32)
