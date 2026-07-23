@@ -27,6 +27,17 @@ func (s *Server) roundtableReview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("request must contain one JSON value"))
 		return
 	}
+	artifact, err := roundtable.MaterializeArtifact(r.Context(), request.Artifact, s.artifactHTTPClient)
+	if err != nil {
+		var validation roundtable.ValidationError
+		if errors.As(err, &validation) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		writeError(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	request.Artifact = artifact
 	result, err := s.roundtable.Review(r.Context(), request)
 	if err != nil {
 		var validation roundtable.ValidationError

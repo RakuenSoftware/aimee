@@ -43,6 +43,7 @@
 #include "openai_runs_store.h"
 #include "platform_process.h"
 #include "prompts.h"
+#include <limits.h>
 #include "persona.h"
 #include "roundtable_preset.h"
 #include "server_http.h"
@@ -143,6 +144,7 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
    cJSON *tool_calls = cJSON_GetObjectItemCaseSensitive(resp, "tool_calls");
    cJSON *response = cJSON_GetObjectItemCaseSensitive(resp, "response");
    cJSON *message = cJSON_GetObjectItemCaseSensitive(resp, "message");
+   cJSON *cost_usd = cJSON_GetObjectItemCaseSensitive(resp, "cost_usd");
    int has_response = cJSON_IsString(response) && response->valuestring[0];
    int has_message = cJSON_IsString(message) && message->valuestring[0];
 
@@ -201,7 +203,15 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
       db1_agent_job_free(&job); /* zero-init by get on miss; safe either way */
    }
 
-   db1_agent_job_update(cctx->background_job_id, job_status, cursor_turn, result);
+   cJSON *cost_known = cJSON_GetObjectItemCaseSensitive(resp, "cost_known");
+   /* An absent or false cost_known means the delegate produced no measurement.
+    * Leave the stored cost unknown rather than recording a false zero. */
+   int has_cost =
+       cJSON_IsTrue(cost_known) && cJSON_IsNumber(cost_usd) && cost_usd->valuedouble >= 0.0;
+   if (db1_agent_job_complete(cctx->background_job_id, job_status, cursor_turn, result, has_cost,
+                              has_cost ? cost_usd->valuedouble : 0.0) != 0)
+      aimee_log(LOG_ERROR, "delegate", "background job %d terminal status/cost write failed",
+                cctx->background_job_id);
 }
 
 static void compute_update_coord_task(compute_ctx_t *cctx, cJSON *resp)
@@ -536,6 +546,18 @@ void delegate_child_export_context_env(void)
  * with the response and apply_error attached when present. Economics and
  * handoff-validation fields are added the same way for both. Returns a new
  * cJSON object; the caller attaches checkout info and responds. */
+/* Publish the realized cost only when the audit actually recorded one. A
+ * missing audit row means the spend is unknown, not zero: the consumer must be
+ * able to tell those apart or unmeasured provider spend is committed as free. */
+static void delegate_add_measured_cost_json(cJSON *resp, const char *deleg_id)
+{
+   double cost = 0.0;
+   int known = db1_token_audit_cost_for_delegation_ex(deleg_id, &cost) == 0;
+   cJSON_AddBoolToObject(resp, "cost_known", known);
+   if (known)
+      cJSON_AddNumberToObject(resp, "cost_usd", cost);
+}
+
 static cJSON *delegate_build_result_response(
     const char *deleg_id, int rc, const agent_result_t *result, const agent_config_t *acfg,
     const char *role, const agent_t *target_agent, int applied_changes, int handoff_checked,
@@ -555,6 +577,7 @@ static cJSON *delegate_build_result_response(
       cJSON_AddNumberToObject(resp, "prompt_tokens", result->prompt_tokens);
       cJSON_AddNumberToObject(resp, "completion_tokens", result->completion_tokens);
       delegate_economics_add_agent_result_json(resp, acfg, role, result, target_agent);
+      delegate_add_measured_cost_json(resp, deleg_id);
       if (applied_changes >= 0)
          cJSON_AddNumberToObject(resp, "applied_changes", applied_changes);
       if (handoff_checked)
@@ -578,6 +601,7 @@ static cJSON *delegate_build_result_response(
       cJSON_AddNumberToObject(resp, "prompt_tokens", result->prompt_tokens);
       cJSON_AddNumberToObject(resp, "completion_tokens", result->completion_tokens);
       delegate_economics_add_agent_result_json(resp, acfg, role, result, target_agent);
+      delegate_add_measured_cost_json(resp, deleg_id);
       if (result->response)
          cJSON_AddStringToObject(resp, "response", result->response);
       if (apply_error[0])
@@ -605,6 +629,40 @@ static void delegate_append_owned_block(const char **system_prompt, char **templ
       *system_prompt = combined;
    }
    free(block);
+}
+
+/* Convert a USD ceiling into a conservative total-token ceiling after routing,
+ * when the actual model and authoritative DB1 pricing are known. Charging one
+ * synthetic token in every usage class deliberately overstates the per-token
+ * rate (notably for cached input), which makes the resulting token ceiling a
+ * safety bound rather than a spend prediction. */
+static int delegate_apply_cost_limit(agent_t *agent, double max_cost_usd, int input_tokens,
+                                     int *max_tokens, char *err, size_t err_cap)
+{
+   if (max_cost_usd <= 0.0)
+      return 0;
+   if (!agent || !agent->model[0])
+   {
+      snprintf(err, err_cap, "max_cost_usd requires a routed model");
+      return -1;
+   }
+   int token_cap = 0, total_cap = 0;
+   int ceiling = token_cost_ceiling(agent->model, max_cost_usd, input_tokens, *max_tokens,
+                                    &token_cap, &total_cap);
+   if (ceiling < 0)
+   {
+      snprintf(err, err_cap, "cannot enforce max_cost_usd %.6f for model '%s'", max_cost_usd,
+               agent->model);
+      return -1;
+   }
+   if (ceiling == 0) /* explicitly free model */
+      return 0;
+   *max_tokens = token_cap;
+   if (agent->max_tokens <= 0 || agent->max_tokens > token_cap)
+      agent->max_tokens = token_cap;
+   if (agent->middleware.cost_limit <= 0 || agent->middleware.cost_limit > total_cap)
+      agent->middleware.cost_limit = total_cap;
+   return 0;
 }
 
 void delegate_worker(void *arg)
@@ -647,6 +705,7 @@ void delegate_worker(void *arg)
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
+   cJSON *jmaxcost = cJSON_GetObjectItemCaseSensitive(req, "max_cost_usd");
    cJSON *jsystem = cJSON_GetObjectItemCaseSensitive(req, "system_prompt");
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "delegation_id");
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
@@ -670,6 +729,7 @@ void delegate_worker(void *arg)
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
+   double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
@@ -824,8 +884,26 @@ void delegate_worker(void *arg)
                                                                persona_override, cwd, &tmpl);
             agent_result_t result;
             memset(&result, 0, sizeof(result));
-            int rc = agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
-                                               AGENT_DEFAULT_MAX_TOKENS, 0.3, &result);
+            int cli_max_tokens = AGENT_DEFAULT_MAX_TOKENS;
+            int cli_cost_failed = 0;
+            if (max_cost_usd != 0.0)
+            {
+               size_t bytes = strlen(sysp ? sysp : "") + strlen(prompt);
+               int input_tokens = bytes > (size_t)(INT_MAX - 32768) ? INT_MAX : (int)bytes + 32768;
+               char cost_err[256] = "";
+               if (max_cost_usd < 0.0 ||
+                   delegate_apply_cost_limit(cag, max_cost_usd, input_tokens, &cli_max_tokens,
+                                             cost_err, sizeof(cost_err)) != 0)
+               {
+                  snprintf(result.error, sizeof(result.error), "%s",
+                           max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
+                  cli_cost_failed = 1;
+               }
+            }
+            int rc = cli_cost_failed
+                         ? -1
+                         : agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
+                                                     cli_max_tokens, 0.3, &result);
             run_cmd_set_cwd(NULL);
             workspace_turn_unbind_active();
             free(tmpl);
@@ -1275,6 +1353,31 @@ void delegate_worker(void *arg)
    if (learning_sys_prompt)
       system_prompt = learning_sys_prompt;
 
+   int rc = -1;
+   int cost_limit_failed = 0;
+   if (max_cost_usd != 0.0)
+   {
+      size_t input_bytes =
+          strlen(run_prompt ? run_prompt : "") + strlen(system_prompt ? system_prompt : "");
+      /* One byte per token is a conservative tokenizer-independent ceiling.
+       * Reserve additional input for tool schemas/provider framing that is not
+       * present in the two prompt strings. */
+      const size_t framing_tokens = 32768;
+      int input_tokens = input_bytes > (size_t)(INT_MAX - (int)framing_tokens)
+                             ? INT_MAX
+                             : (int)input_bytes + (int)framing_tokens;
+      char cost_err[256] = "";
+      if (max_cost_usd < 0.0 ||
+          delegate_apply_cost_limit(target_agent, max_cost_usd, input_tokens, &max_tokens, cost_err,
+                                    sizeof(cost_err)) != 0)
+      {
+         snprintf(result.error, sizeof(result.error), "%s",
+                  max_cost_usd < 0.0 ? "max_cost_usd cannot be negative" : cost_err);
+         rc = -1;
+         cost_limit_failed = 1;
+      }
+   }
+
    /* Provider-backed delegates can call back into aimee-server tools while
     * waiting on the model. Keep the server compute budget available for
     * those callbacks; delegate concurrency is already governed above by the
@@ -1293,7 +1396,6 @@ void delegate_worker(void *arg)
       parent_write_guard_active = 1;
    }
 
-   int rc;
    /* Thread-local, not the process env: delegate turns run on POOLED worker threads
     * and overlap by design (session_threads defaults above 1; panels fan out through
     * agent_run_parallel). The old save/restore around a process-wide setenv looked
@@ -1430,7 +1532,11 @@ void delegate_worker(void *arg)
            ? 0
            : workspace_turn_bind_container(deleg_id, sbx_image_arg, container_ws, container_ws_ro);
 
-   if (container_bound < 0)
+   if (cost_limit_failed)
+   {
+      /* Result error was populated before any provider dispatch. */
+   }
+   else if (container_bound < 0)
    {
       /* HARD isolation refusal (delegate_sandbox_require_isolation): the runtime would
        * not provide a network-isolated sandbox. Refuse the delegation rather than fall

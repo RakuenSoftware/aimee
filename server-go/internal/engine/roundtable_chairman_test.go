@@ -32,7 +32,7 @@ func TestChairmanSubmitsFinalApprovalAfterDeterministicSynthesis(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents}
 	analysis := discussionAnalysis("blocking")
-	feedback, approvals, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan")
+	feedback, approvals, _, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "plan")
 	if errText != "" || approvals != len(analysis.Reports) || len(feedback.Findings) != 0 || len(agents.requests) != 1 {
 		t.Fatalf("chairman approval failed: approvals=%d err=%q feedback=%+v calls=%d", approvals, errText, feedback, len(agents.requests))
 	}
@@ -44,7 +44,7 @@ func TestChairmanChangesReceiveStableFinalIDs(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents}
 	analysis := discussionAnalysis("blocking")
-	feedback, approvals, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan")
+	feedback, approvals, _, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "plan")
 	if errText != "" || approvals != 0 || len(feedback.Findings) != 1 || !strings.HasPrefix(feedback.Findings[0].ID, "issue-") || feedback.Findings[0].Persona != "chairman" {
 		t.Fatalf("chairman changes failed: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
 	}
@@ -56,7 +56,7 @@ func TestChairmanDriftedChangesBecomeActionableFeedback(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents}
 	analysis := discussionAnalysis("blocking")
-	feedback, approvals, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan")
+	feedback, approvals, _, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "plan")
 	if errText != "" || approvals != 0 || len(feedback.Findings) != 2 {
 		t.Fatalf("drifted changes did not reach refinement: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
 	}
@@ -74,7 +74,7 @@ func TestChairmanFailsClosedOnMalformedFinalVerdict(t *testing.T) {
 		agents := &discussionTestAgents{respond: func(DelegateRequest) (string, error) { return response, nil }}
 		runner := &NativeRunner{agents: agents}
 		analysis := discussionAnalysis("blocking")
-		if _, _, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan"); errText == "" {
+		if _, _, _, _, errText := runner.runPanelChairman(context.Background(), chairmanRequest(), roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "plan"); errText == "" {
 			t.Fatalf("malformed chairman verdict passed: %s", response)
 		}
 	}
@@ -87,7 +87,7 @@ func TestChairmanRejectsAnotherRunsArtifactIdentity(t *testing.T) {
 	}}
 	runner := &NativeRunner{agents: agents}
 	analysis := discussionAnalysis("blocking")
-	if _, _, _, errText := runner.runPanelChairman(context.Background(), req, roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, "plan"); !strings.Contains(errText, "mismatched run or artifact identity") {
+	if _, _, _, _, errText := runner.runPanelChairman(context.Background(), req, roundtablecfg.Panel{ChairmanEnabled: true, Chairman: "codex"}, analysis, analysis.Feedback, 0, false, "plan"); !strings.Contains(errText, "mismatched run or artifact identity") {
 		t.Fatalf("stale chairman response was not rejected: %q", errText)
 	}
 }

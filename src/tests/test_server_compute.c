@@ -185,7 +185,7 @@ int agent_load_config(agent_config_t *cfg)
    memset(cfg, 0, sizeof(*cfg));
    cfg->agent_count = 1;
    snprintf(cfg->agents[0].name, sizeof(cfg->agents[0].name), "test-agent");
-   snprintf(cfg->agents[0].model, sizeof(cfg->agents[0].model), "test-model");
+   snprintf(cfg->agents[0].model, sizeof(cfg->agents[0].model), "gpt-4o");
    snprintf(cfg->agents[0].provider, sizeof(cfg->agents[0].provider), "openai");
    cfg->agents[0].enabled = 1;
    cfg->agents[0].tools_enabled = g_config_tools_enabled;
@@ -2823,6 +2823,27 @@ static void test_delegate_worker_ok_response_shape(void)
    printf("  PASS: test_delegate_worker_ok_response_shape\n");
 }
 
+static void test_delegate_cost_cap_rejects_oversized_input_before_provider(void)
+{
+   reset_last_response();
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "role", "execute");
+   cJSON_AddStringToObject(req, "persona", "engineer");
+   cJSON_AddStringToObject(req, "prompt",
+                           "This prompt plus the conservative provider framing cannot fit the "
+                           "sub-token workflow cost allowance.");
+   cJSON_AddNumberToObject(req, "max_cost_usd", 0.000000001);
+   cJSON *resp = sci_drive_delegate(req);
+   cJSON_Delete(req);
+   assert(resp != NULL);
+   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "error") == 0);
+   assert(g_agent_run_calls == 0);
+   assert(g_agent_tool_run_calls == 0);
+   cJSON_Delete(resp);
+   reset_last_response();
+   printf("  PASS: test_delegate_cost_cap_rejects_oversized_input_before_provider\n");
+}
+
 /* The same context-restore invariants must hold when the run fails (rc != 0). */
 static void test_delegate_worker_restores_state_on_error(void)
 {
@@ -3150,6 +3171,7 @@ int main(void)
    test_inspection_roles_get_evidence_bundle();
    test_delegate_worker_restores_caller_context();
    test_delegate_worker_ok_response_shape();
+   test_delegate_cost_cap_rejects_oversized_input_before_provider();
    test_delegate_worker_restores_state_on_error();
    test_delegate_worker_sets_session_override_during_run();
    test_create_compute_ctx_threads_vault_identity();

@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -25,7 +27,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve DB1 path: %w", err)
 	}
-	dsn := (&url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"}).String()
+	dsn := (&url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"}).String()
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open DB1: %w", err)
@@ -66,6 +68,10 @@ CREATE TABLE IF NOT EXISTS lifecycle_work_item (
   worktree TEXT NOT NULL DEFAULT '',
   submitter TEXT NOT NULL DEFAULT '',
   cum_cost_usd REAL NOT NULL DEFAULT 0,
+  reserved_cost_usd REAL NOT NULL DEFAULT 0,
+  reservation_state TEXT NOT NULL DEFAULT '',
+  reservation_owner TEXT NOT NULL DEFAULT '',
+  reservation_lease_until TEXT NOT NULL DEFAULT '',
   work_item_max_cost_usd REAL NOT NULL DEFAULT 0,
   override_count INTEGER NOT NULL DEFAULT 0,
   parent_id TEXT NOT NULL DEFAULT '',
@@ -117,6 +123,10 @@ CREATE TABLE IF NOT EXISTS lifecycle_delegate_job (
 		{"worktree", `ALTER TABLE lifecycle_work_item ADD COLUMN worktree TEXT NOT NULL DEFAULT ''`},
 		{"source_path", `ALTER TABLE lifecycle_work_item ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`},
 		{"work_item_max_cost_usd", `ALTER TABLE lifecycle_work_item ADD COLUMN work_item_max_cost_usd REAL NOT NULL DEFAULT 0`},
+		{"reserved_cost_usd", `ALTER TABLE lifecycle_work_item ADD COLUMN reserved_cost_usd REAL NOT NULL DEFAULT 0`},
+		{"reservation_state", `ALTER TABLE lifecycle_work_item ADD COLUMN reservation_state TEXT NOT NULL DEFAULT ''`},
+		{"reservation_owner", `ALTER TABLE lifecycle_work_item ADD COLUMN reservation_owner TEXT NOT NULL DEFAULT ''`},
+		{"reservation_lease_until", `ALTER TABLE lifecycle_work_item ADD COLUMN reservation_lease_until TEXT NOT NULL DEFAULT ''`},
 	} {
 		has, err := s.hasWorkItemColumn(ctx, migration.column)
 		if err != nil {
@@ -404,6 +414,8 @@ type WorkItem struct {
 	PRRef             string  `json:"pr_ref"`
 	Submitter         string  `json:"submitter"`
 	CumulativeCostUSD float64 `json:"cum_cost_usd"`
+	ReservedCostUSD   float64 `json:"reserved_cost_usd"`
+	ReservationState  string  `json:"-"`
 	MaxCostUSD        float64 `json:"work_item_max_cost_usd"`
 	OverrideCount     int     `json:"override_count"`
 	ParentID          string  `json:"parent_id,omitempty"`
@@ -416,12 +428,12 @@ func (s *Store) WorkItem(ctx context.Context, id string) (WorkItem, error) {
 	var item WorkItem
 	err := s.db.QueryRowContext(ctx, `
 SELECT work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage,
-       state, mode, pause_reason, content_hash, pr_ref, submitter, cum_cost_usd,
+       state, mode, pause_reason, content_hash, pr_ref, submitter, cum_cost_usd, reserved_cost_usd, reservation_state,
        work_item_max_cost_usd, override_count, parent_id, worktree, source_path, updated_at
 FROM lifecycle_work_item WHERE work_item_id = ?`, id).Scan(
 		&item.ID, &item.Repo, &item.ProposalPath, &item.WorkflowName, &item.WorkflowVersion,
 		&item.Stage, &item.State, &item.Mode, &item.PauseReason, &item.ContentHash, &item.PRRef,
-		&item.Submitter, &item.CumulativeCostUSD, &item.MaxCostUSD, &item.OverrideCount, &item.ParentID, &item.Worktree, &item.SourcePath,
+		&item.Submitter, &item.CumulativeCostUSD, &item.ReservedCostUSD, &item.ReservationState, &item.MaxCostUSD, &item.OverrideCount, &item.ParentID, &item.Worktree, &item.SourcePath,
 		&item.UpdatedAt)
 	if err != nil {
 		return WorkItem{}, fmt.Errorf("get work item: %w", err)
@@ -465,7 +477,7 @@ ORDER BY id LIMIT 1`, repo, identity, legacySuffix, legacySuffix).Scan(&id); err
 func (s *Store) WorkItems(ctx context.Context) ([]WorkItem, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage,
-       state, mode, pause_reason, content_hash, pr_ref, submitter, cum_cost_usd,
+       state, mode, pause_reason, content_hash, pr_ref, submitter, cum_cost_usd, reserved_cost_usd,
        work_item_max_cost_usd, override_count, parent_id, worktree, source_path, updated_at
 FROM lifecycle_work_item ORDER BY id DESC`)
 	if err != nil {
@@ -477,7 +489,7 @@ FROM lifecycle_work_item ORDER BY id DESC`)
 		var item WorkItem
 		if err := rows.Scan(&item.ID, &item.Repo, &item.ProposalPath, &item.WorkflowName,
 			&item.WorkflowVersion, &item.Stage, &item.State, &item.Mode, &item.PauseReason,
-			&item.ContentHash, &item.PRRef, &item.Submitter, &item.CumulativeCostUSD,
+			&item.ContentHash, &item.PRRef, &item.Submitter, &item.CumulativeCostUSD, &item.ReservedCostUSD,
 			&item.MaxCostUSD, &item.OverrideCount, &item.ParentID, &item.Worktree, &item.SourcePath, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan work item: %w", err)
 		}
@@ -626,19 +638,323 @@ func (s *Store) WorkflowBudget(ctx context.Context, workItemID string) (rootID s
 	return
 }
 
-func (s *Store) ParkBudgetTree(ctx context.Context, rootID string, addedCost float64) error {
+type BudgetReservation struct {
+	RootID     string
+	Amount     float64
+	MaxUSD     float64
+	Allowed    bool
+	Busy       bool
+	ReplayOnly bool
+}
+
+func isSQLiteContention(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") || strings.Contains(message, "database is busy") || strings.Contains(message, "sqlite_busy")
+}
+
+func workflowBudgetRoot(ctx context.Context, tx *sql.Tx, workItemID string) (string, float64, error) {
+	var rootID string
+	var maxUSD float64
+	err := tx.QueryRowContext(ctx, `WITH RECURSIVE ancestors(id,parent_id,max_usd) AS (
+  SELECT work_item_id,parent_id,work_item_max_cost_usd FROM lifecycle_work_item WHERE work_item_id=?
+  UNION ALL
+  SELECT parent.work_item_id,parent.parent_id,parent.work_item_max_cost_usd
+  FROM lifecycle_work_item parent JOIN ancestors child ON child.parent_id=parent.work_item_id
+)
+SELECT id,max_usd FROM ancestors WHERE parent_id='' LIMIT 1`, workItemID).Scan(&rootID, &maxUSD)
+	return rootID, maxUSD, err
+}
+
+// ReserveWorkflowBudget atomically gives one runnable item a fair share of the
+// uncommitted root budget. Reservations are durable so process restart cannot
+// forget in-flight spend. An uncapped tree needs no reservation.
+func (s *Store) ReserveWorkflowBudget(ctx context.Context, workItemID, owner string) (BudgetReservation, error) {
+	if owner == "" {
+		return BudgetReservation{}, errors.New("workflow budget reservation owner is required")
+	}
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		out, retry, err := s.reserveWorkflowBudgetOnce(ctx, workItemID, owner)
+		if !retry {
+			return out, err
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return BudgetReservation{}, ctx.Err()
+		case <-time.After(time.Duration(1<<attempt) * time.Millisecond):
+		}
+	}
+	return BudgetReservation{}, fmt.Errorf("reserve workflow budget after contention: %w", lastErr)
+}
+
+func (s *Store) reserveWorkflowBudgetOnce(ctx context.Context, workItemID, owner string) (BudgetReservation, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return BudgetReservation{}, isSQLiteContention(err), err
+	}
+	defer tx.Rollback()
+	rootID, maxUSD, err := workflowBudgetRoot(ctx, tx, workItemID)
+	if err != nil {
+		return BudgetReservation{}, false, fmt.Errorf("resolve workflow budget root: %w", err)
+	}
+	out := BudgetReservation{RootID: rootID, MaxUSD: maxUSD, Allowed: true}
+	var current float64
+	var reservationState, reservationOwner string
+	if err := tx.QueryRowContext(ctx, `SELECT reserved_cost_usd,reservation_state,reservation_owner FROM lifecycle_work_item
+WHERE work_item_id=? AND state='active' AND pause_reason=''`, workItemID).Scan(&current, &reservationState, &reservationOwner); err != nil {
+		return BudgetReservation{}, false, fmt.Errorf("load workflow budget reservation: %w", err)
+	}
+	if reservationState != "" {
+		out.Amount = current
+		if reservationState == "actual" || reservationState == "unresolved" {
+			// Replay is still exactly-once work: take ownership only from an owner
+			// whose lease has lapsed, and hold a fresh lease while replaying so a
+			// concurrent process cannot steal the reservation mid-reconciliation.
+			out.ReplayOnly = true
+			if reservationOwner != owner {
+				var live int
+				if err := tx.QueryRowContext(ctx, `SELECT reservation_lease_until > datetime('now')
+FROM lifecycle_work_item WHERE work_item_id=?`, workItemID).Scan(&live); err != nil {
+					return BudgetReservation{}, false, err
+				}
+				if live != 0 {
+					out.Allowed, out.Busy, out.ReplayOnly = false, true, false
+					return out, false, tx.Commit()
+				}
+			}
+			result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET reservation_owner=?,reservation_lease_until=datetime('now','+2 minutes')
+WHERE work_item_id=? AND reservation_state=? AND reservation_owner=?
+  AND (reservation_owner=? OR reservation_lease_until='' OR reservation_lease_until<=datetime('now'))`,
+				owner, workItemID, reservationState, reservationOwner, owner)
+			if err != nil {
+				return BudgetReservation{}, isSQLiteContention(err), err
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				return BudgetReservation{}, true, errors.New("replay workflow budget ownership was acquired concurrently")
+			}
+			return out, false, tx.Commit()
+		}
+		if reservationState == "reserved" && reservationOwner != owner {
+			var live int
+			if err := tx.QueryRowContext(ctx, `SELECT reservation_lease_until > datetime('now')
+FROM lifecycle_work_item WHERE work_item_id=?`, workItemID).Scan(&live); err != nil {
+				return BudgetReservation{}, false, err
+			}
+			if live != 0 {
+				out.Allowed, out.Busy = false, true
+				return out, false, tx.Commit()
+			}
+			// An expired invocation may have crossed the provider boundary. Retain
+			// its authorization as unresolved spend and permit only a durable replay.
+			// The replay may replace this estimate with measured actual exactly once.
+			out.ReplayOnly = true
+			result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET reservation_state='unresolved',reservation_owner=?,reservation_lease_until=datetime('now','+2 minutes')
+WHERE work_item_id=? AND reservation_state='reserved' AND reservation_owner=? AND reservation_lease_until<=datetime('now')`, owner, workItemID, reservationOwner)
+			if err != nil {
+				return BudgetReservation{}, isSQLiteContention(err), err
+			}
+			if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+				return BudgetReservation{}, true, errors.New("expired workflow budget lease was acquired concurrently")
+			}
+			return out, false, tx.Commit()
+		}
+		if reservationState == "reserved" {
+			_, _ = tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','+2 minutes') WHERE work_item_id=? AND reservation_owner=?`, workItemID, owner)
+		}
+		return out, false, tx.Commit()
+	}
+	if maxUSD <= 0 {
+		result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET reserved_cost_usd=0,reservation_state='reserved',reservation_owner=?,reservation_lease_until=datetime('now','+2 minutes')
+WHERE work_item_id=? AND state='active' AND pause_reason='' AND reservation_state=''`, owner, workItemID)
+		if err != nil {
+			return BudgetReservation{}, isSQLiteContention(err), err
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			return BudgetReservation{}, true, errors.New("uncapped work item changed during invocation reservation")
+		}
+		return out, false, tx.Commit()
+	}
+	var spent, outstanding float64
+	var runnable int
+	if err := tx.QueryRowContext(ctx, `WITH RECURSIVE tree(id) AS (
+  SELECT ? UNION ALL SELECT child.work_item_id FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
+)
+SELECT COALESCE(SUM(cum_cost_usd),0),COALESCE(SUM(reserved_cost_usd),0),
+       SUM(CASE WHEN state='active' AND pause_reason='' AND reserved_cost_usd=0 THEN 1 ELSE 0 END)
+FROM lifecycle_work_item WHERE work_item_id IN tree`, rootID).Scan(&spent, &outstanding, &runnable); err != nil {
+		return BudgetReservation{}, isSQLiteContention(err), fmt.Errorf("load workflow budget availability: %w", err)
+	}
+	remaining := maxUSD - spent - outstanding
+	if remaining <= 0 {
+		out.Allowed = false
+		return out, false, tx.Commit()
+	}
+	if runnable < 1 {
+		runnable = 1
+	}
+	out.Amount = remaining / float64(runnable)
+	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET reserved_cost_usd=?,reservation_state='reserved',reservation_owner=?,reservation_lease_until=datetime('now','+2 minutes')
+WHERE work_item_id=? AND state='active' AND pause_reason='' AND reserved_cost_usd=0`, out.Amount, owner, workItemID)
+	if err != nil {
+		return BudgetReservation{}, isSQLiteContention(err), fmt.Errorf("reserve workflow budget: %w", err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return BudgetReservation{}, true, errors.New("work item changed during budget reservation")
+	}
+	if err := tx.Commit(); err != nil {
+		return BudgetReservation{}, isSQLiteContention(err), err
+	}
+	return out, false, nil
+}
+
+// ReconcileWorkflowBudget replaces one estimate with actual cost while the
+// engine's short per-root completion lock is held. Other runner calls remain
+// concurrent; only accounting and the lifecycle transition are serialized.
+func (s *Store) ReconcileWorkflowBudget(ctx context.Context, workItemID, owner string, actual float64) (bool, error) {
+	// Reject non-finite cost at the durable boundary: a NaN/Inf written into
+	// cum_cost_usd would make every later budget comparison fail and strand the
+	// whole tree in budget_cap. Symmetric with the C-side isfinite guard.
+	if actual < 0 || math.IsNaN(actual) || math.IsInf(actual, 0) {
+		return false, errors.New("workflow cost must be finite and non-negative")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	rootID, maxUSD, err := workflowBudgetRoot(ctx, tx, workItemID)
+	if err != nil {
+		return false, err
+	}
+	var state, currentOwner string
+	var currentAmount float64
+	if err := tx.QueryRowContext(ctx, `SELECT reserved_cost_usd,reservation_state,reservation_owner
+FROM lifecycle_work_item WHERE work_item_id=?`, workItemID).Scan(&currentAmount, &state, &currentOwner); err != nil {
+		return false, err
+	}
+	if currentOwner != owner {
+		return false, errors.New("workflow budget reservation is owned by another invocation")
+	}
+	if state != "actual" && state != "reserved" && state != "unresolved" {
+		return false, errors.New("workflow budget reservation is not active")
+	}
+	if state == "actual" && currentAmount != actual {
+		return false, fmt.Errorf("replayed workflow cost %.6f differs from retained actual %.6f", actual, currentAmount)
+	}
+	// Allowance is recomputed from durable state on every call, including an
+	// 'actual' replay. A crash between reconciliation and the tree park must not
+	// silently upgrade a denied over-budget decision into an approved one.
+	allowed := true
+	if maxUSD > 0 {
+		var spent, otherReserved float64
+		if err := tx.QueryRowContext(ctx, `WITH RECURSIVE tree(id) AS (
+  SELECT ? UNION ALL SELECT child.work_item_id FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
+)
+SELECT COALESCE(SUM(cum_cost_usd),0),
+       COALESCE(SUM(CASE WHEN work_item_id<>? THEN reserved_cost_usd ELSE 0 END),0)
+FROM lifecycle_work_item WHERE work_item_id IN tree`, rootID, workItemID).Scan(&spent, &otherReserved); err != nil {
+			return false, err
+		}
+		allowed = spent+otherReserved+actual <= maxUSD
+	}
+	if state == "actual" {
+		return allowed, tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET reserved_cost_usd=?,reservation_state='actual'
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state IN ('reserved','unresolved')`, actual, workItemID, owner); err != nil {
+		return false, err
+	}
+	return allowed, tx.Commit()
+}
+
+func (s *Store) ReleaseWorkflowBudget(ctx context.Context, workItemID, owner string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET reserved_cost_usd=0,reservation_state='',reservation_owner='',reservation_lease_until=''
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, workItemID, owner)
+	return err
+}
+
+func (s *Store) HeartbeatWorkflowBudget(ctx context.Context, workItemID, owner string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET reservation_lease_until=datetime('now','+2 minutes')
+WHERE work_item_id=? AND reservation_owner=? AND reservation_state='reserved'`, workItemID, owner)
+	return err
+}
+
+// ParkRunnerFailure records the failure and updates its reservation in the same
+// database transaction. Pre-dispatch failures release it, measured failures
+// commit actual spend, and ambiguous post-dispatch failures retain an unresolved
+// estimate for replay instead of pretending the estimate is actual cost.
+func (s *Store) ParkRunnerFailure(ctx context.Context, workItemID, stage, owner, reason, detail string, dispatched, costKnown bool, actual float64) error {
+	if workItemID == "" || stage == "" || owner == "" || reason == "" || actual < 0 ||
+		math.IsNaN(actual) || math.IsInf(actual, 0) {
+		return errors.New("complete runner failure coordinates and finite non-negative cost are required")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id) UPDATE lifecycle_work_item SET pause_reason='budget_cap',paused_state=current_stage,updated_at=datetime('now') WHERE state='active' AND pause_reason='' AND work_item_id IN tree`, rootID); err != nil {
+	state := ""
+	amount := 0.0
+	eventCost := 0.0
+	if dispatched && costKnown {
+		state, amount, eventCost = "", 0, actual
+	} else if dispatched {
+		state = "unresolved"
+		if err := tx.QueryRowContext(ctx, `SELECT reserved_cost_usd FROM lifecycle_work_item WHERE work_item_id=? AND reservation_owner=? AND reservation_state IN ('reserved','unresolved')`, workItemID, owner).Scan(&amount); err != nil {
+			return fmt.Errorf("retain unresolved workflow reservation: %w", err)
+		}
+		// CostUSD may contain measured spend from completed reroute attempts even
+		// when the final dispatched attempt is ambiguous. Commit that known prefix
+		// now and retain only the remaining authorization as unresolved.
+		eventCost = actual
+		if amount > actual {
+			amount -= actual
+		} else if amount > 0 {
+			amount = 0
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET pause_reason=?,paused_state=?,cum_cost_usd=cum_cost_usd+?,reserved_cost_usd=?,reservation_state=?,reservation_owner=CASE WHEN ?='' THEN '' ELSE ? END,reservation_lease_until='',updated_at=datetime('now')
+WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason='' AND reservation_owner=?`,
+		reason, stage, eventCost, amount, state, state, owner, workItemID, stage, owner)
+	if err != nil {
 		return err
 	}
-	if addedCost > 0 {
-		if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET cum_cost_usd=cum_cost_usd+? WHERE work_item_id=?`, addedCost, rootID); err != nil {
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		return errors.New("runner failure reservation changed concurrently")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) VALUES (?,?, 'pause','go-wfe',?,?)`, workItemID, stage, detail, eventCost); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ParkBudgetTree(ctx context.Context, rootID, completedItemID string, addedCost float64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if addedCost > 0 && completedItemID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item
+SET cum_cost_usd=cum_cost_usd+?,reserved_cost_usd=0,reservation_state='',reservation_owner='',reservation_lease_until=''
+WHERE work_item_id=?`, addedCost, completedItemID); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `WITH RECURSIVE tree(id) AS (SELECT ? UNION ALL SELECT w.work_item_id FROM lifecycle_work_item w JOIN tree t ON w.parent_id=t.id)
+UPDATE lifecycle_work_item SET pause_reason='budget_cap',paused_state=current_stage,updated_at=datetime('now')
+WHERE state='active' AND pause_reason='' AND work_item_id IN tree
+  AND (reservation_state='' OR work_item_id=?)`, rootID, completedItemID); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_event (work_item_id,stage,kind,actor,detail,cost_usd) SELECT work_item_id,current_stage,'pause','go-wfe','budget_cap',? FROM lifecycle_work_item WHERE work_item_id=?`, addedCost, rootID)
 	if err != nil {
@@ -687,7 +1003,8 @@ func (s *Store) Move(ctx context.Context, workItemID, fromStage, toStage, kind, 
 	result, err := tx.ExecContext(ctx, `
 UPDATE lifecycle_work_item
 SET current_stage=?, content_hash=?, pause_reason='', paused_state='',
-    cum_cost_usd=cum_cost_usd+?, updated_at=datetime('now')
+    cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0, reservation_state='',
+    reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''`,
 		toStage, contentHash, costUSD, workItemID, fromStage)
 	if err != nil {
@@ -747,7 +1064,7 @@ func (s *Store) RecordRetry(ctx context.Context, workItemID, stage, toStage, det
 		pausedState = stage
 		target = stage
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET current_stage=?,pause_reason=?,paused_state=?,cum_cost_usd=cum_cost_usd+?,updated_at=datetime('now') WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''`, target, reason, pausedState, costUSD, workItemID, stage)
+	result, err := tx.ExecContext(ctx, `UPDATE lifecycle_work_item SET current_stage=?,pause_reason=?,paused_state=?,cum_cost_usd=cum_cost_usd+?,reserved_cost_usd=0,reservation_state='',reservation_owner='',reservation_lease_until='',updated_at=datetime('now') WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''`, target, reason, pausedState, costUSD, workItemID, stage)
 	if err != nil {
 		return false, err
 	}
@@ -795,7 +1112,8 @@ func (s *Store) ParkWithDetail(ctx context.Context, workItemID, stage, reason, d
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
 UPDATE lifecycle_work_item
-SET pause_reason=?, paused_state=?, cum_cost_usd=cum_cost_usd+?, updated_at=datetime('now')
+SET pause_reason=?, paused_state=?, cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0,
+    reservation_state='', reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason=''`,
 		reason, stage, costUSD, workItemID, stage)
 	if err != nil {
@@ -961,7 +1279,8 @@ WITH RECURSIVE tree(id) AS (
   FROM lifecycle_work_item child JOIN tree parent ON child.parent_id=parent.id
 )
 UPDATE lifecycle_work_item
-SET state='stopped', pause_reason='', paused_state='', updated_at=datetime('now')
+SET state='stopped', pause_reason='', paused_state='', reserved_cost_usd=0,
+    reservation_state='', reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE state='active' AND work_item_id IN (SELECT id FROM tree)`, workItemID)
 	if err != nil {
 		return nil, fmt.Errorf("stop workflow tree: %w", err)
@@ -1046,7 +1365,8 @@ WITH RECURSIVE orphan(id) AS (
   WHERE child.state='active'
 )
 UPDATE lifecycle_work_item
-SET state='stopped', pause_reason='', paused_state='', updated_at=datetime('now')
+SET state='stopped', pause_reason='', paused_state='', reserved_cost_usd=0,
+    reservation_state='', reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE state='active' AND work_item_id IN (SELECT id FROM orphan)`)
 	if err != nil {
 		return nil, fmt.Errorf("stop orphaned workflow descendants: %w", err)
@@ -1155,7 +1475,8 @@ func (s *Store) Finish(ctx context.Context, workItemID, stage, state, detail,
 	result, err := tx.ExecContext(ctx, `
 UPDATE lifecycle_work_item
 SET state=?, pause_reason='', paused_state='', content_hash=?,
-    cum_cost_usd=cum_cost_usd+?, updated_at=datetime('now')
+    cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0, reservation_state='',
+    reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE work_item_id=? AND current_stage=? AND state='active'`,
 		state, contentHash, costUSD, workItemID, stage)
 	if err != nil {
@@ -1258,7 +1579,7 @@ ON CONFLICT(work_item_id, gate) DO UPDATE SET
 	if out.Parked {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE lifecycle_work_item
-SET current_stage=?, pause_reason=?, paused_state=?, content_hash=?, cum_cost_usd=cum_cost_usd+?, updated_at=datetime('now')
+SET current_stage=?, pause_reason=?, paused_state=?, content_hash=?, cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0, reservation_state='', reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE work_item_id=?`, planStage, out.PauseReason, gate, planHash, costUSD, workItemID); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("park non-converging work item: %w", err)
 		}
@@ -1270,7 +1591,7 @@ VALUES (?, ?, 'pause', 'go-wfe', ?, ?, ?)`, workItemID, gate, out.PauseReason, p
 	} else {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE lifecycle_work_item
-SET current_stage=?, pause_reason='', paused_state='', content_hash=?, cum_cost_usd=cum_cost_usd+?, updated_at=datetime('now')
+SET current_stage=?, pause_reason='', paused_state='', content_hash=?, cum_cost_usd=cum_cost_usd+?, reserved_cost_usd=0, reservation_state='', reservation_owner='', reservation_lease_until='', updated_at=datetime('now')
 WHERE work_item_id=?`, planStage, planHash, costUSD, workItemID); err != nil {
 			return ReviewOutcome{}, fmt.Errorf("route work item to plan refinement: %w", err)
 		}

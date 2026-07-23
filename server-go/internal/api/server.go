@@ -31,9 +31,10 @@ type Server struct {
 	roundtable      interface {
 		Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
 	}
-	triggerMu       sync.Mutex
-	triggerErrorsMu sync.Mutex
-	triggerErrors   map[string]string
+	artifactHTTPClient *http.Client
+	triggerMu          sync.Mutex
+	triggerErrorsMu    sync.Mutex
+	triggerErrors      map[string]string
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
@@ -89,6 +90,10 @@ func (s *Server) SetRoundtableReviewer(reviewer interface {
 	Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
 }) {
 	s.roundtable = reviewer
+}
+
+func (s *Server) SetRoundtableArtifactHTTPClient(client *http.Client) {
+	s.artifactHTTPClient = client
 }
 
 func (s *Server) workflowRegistry() (*wfe.Registry, error) {

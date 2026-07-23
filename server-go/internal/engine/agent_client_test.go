@@ -54,6 +54,90 @@ func TestHTTPAgentClientReusesDurableRemoteJob(t *testing.T) {
 	}
 }
 
+func TestHTTPAgentClientDistinguishesRejectedFromAmbiguousDispatch(t *testing.T) {
+	request := DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement"}
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		dispatched bool
+	}{
+		{name: "admission rejection", status: http.StatusBadRequest, body: `{"error":"cost limit cannot fit prompt"}`},
+		{name: "accepted response lost", status: http.StatusOK, body: `{`, dispatched: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, callErr := client.Delegate(t.Context(), request)
+			if callErr == nil {
+				t.Fatal("expected delegate failure")
+			}
+			var execution *DelegateExecutionError
+			if errors.As(callErr, &execution) != tc.dispatched {
+				t.Fatalf("error=%T %v dispatched=%v", callErr, callErr, execution)
+			}
+			if execution != nil && (execution.CostKnown || execution.CostUSD != 0) {
+				t.Fatalf("ambiguous response claimed measured cost: %+v", execution)
+			}
+		})
+	}
+}
+
+func TestHTTPAgentClientRetainsAmbiguityAfterMeasuredReroute(t *testing.T) {
+	var launches atomic.Int32
+	var secondLimit float64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/delegate/run":
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			job := launches.Add(1)
+			if job == 2 {
+				secondLimit, _ = payload["max_cost_usd"].(float64)
+				_, _ = w.Write([]byte(`{`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_id": job})
+		case "/v1/delegate/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"job_status": "failed", "error": "quota", "cost_usd": .1})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: server.URL, PollEvery: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, callErr := client.Delegate(t.Context(), DelegateRequest{Role: "review", Persona: "reviewer", Prompt: "review", MaxCostUSD: .5})
+	var execution *DelegateExecutionError
+	if !errors.As(callErr, &execution) || !execution.Dispatched || execution.CostKnown || execution.CostUSD != .1 {
+		t.Fatalf("error=%v execution=%+v", callErr, execution)
+	}
+	if launches.Load() != 2 || secondLimit != .4 {
+		t.Fatalf("launches=%d second_limit=%v", launches.Load(), secondLimit)
+	}
+}
+
+func TestHTTPAgentClientReplayMissRemainsUnresolved(t *testing.T) {
+	client, err := NewHTTPAgentClient(AgentHTTPConfig{BaseURL: "http://127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, callErr := client.Delegate(t.Context(), DelegateRequest{Role: "code", Persona: "engineer", Prompt: "implement", ReplayOnly: true})
+	var execution *DelegateExecutionError
+	if !errors.As(callErr, &execution) || !execution.Dispatched || execution.CostKnown {
+		t.Fatalf("error=%v execution=%+v", callErr, execution)
+	}
+}
+
 func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 	store, err := db1.Open(filepath.Join(t.TempDir(), "db.sqlite"))
 	if err != nil {
@@ -68,6 +152,9 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&payload)
 			if provided, ok := payload["provided_target"].(bool); !ok || !provided {
 				t.Errorf("provided review target missing from payload %v", payload)
+			}
+			if limit, ok := payload["max_cost_usd"].(float64); !ok || limit != .5 {
+				t.Errorf("workflow cost limit missing from payload %v", payload)
 			}
 			for _, localOnly := range []string{"durable_slot", "DurableSlot", "durableslot", "retry_tag", "RetryTag"} {
 				if _, leaked := payload[localOnly]; leaked {
@@ -88,7 +175,7 @@ func TestHTTPAgentClientDurableSlotsLaunchDistinctJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := DelegateRequest{Role: "review", Persona: "qa", Prompt: "review complete artifact",
-		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true}
+		WorkItemID: "wi_slots", Stage: "gate", ExecutionVersion: "v1", ProvidedTarget: true, MaxCostUSD: .5}
 	for _, slot := range []string{"panel:gate:round:1:seat:0", "panel:gate:round:1:seat:1"} {
 		request.DurableSlot = slot
 		if _, err := client.Delegate(t.Context(), request); err != nil {
