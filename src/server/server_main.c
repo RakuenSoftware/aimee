@@ -1,5 +1,6 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include "aimee.h"
+#include "agent_tools.h"
 #include "cli_client.h"
 #include "commands.h"
 #include "config.h"
@@ -175,6 +176,23 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * + editor) act on the SAME isolated worktree the session's agent edits, rather
     * than the shared project checkout (session_isolation_target, workspace.c). */
    git_ops_register_session_isolation(session_isolation_target);
+
+   /* Fail closed on an undeclared tool BEFORE serving anything. The
+    * externalization gate consults the egress declaration registry, so a
+    * built-in tool with no declaration would be an ungated egress path. Refusing
+    * to start is the whole point: the alternative is a silent bypass that looks
+    * healthy. Cheap (a few dozen string compares) and has no config dependency,
+    * so it runs first. */
+   {
+      char egress_err[256] = "";
+      if (agent_tools_validate_egress_table(egress_err, sizeof(egress_err)) != 0)
+      {
+         startup_notify(notify_fd, "error: tool egress declaration invariant violated\n");
+         aimee_log(LOG_ERROR, "tools", "server startup rejected: %s", egress_err);
+         audit_log_close();
+         return 1;
+      }
+   }
 
    config_t cfg;
    memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
