@@ -16,6 +16,7 @@
 #include "events.h"
 #include "agent_coord.h"
 #include "delegate_role.h"
+#include "delegate_verify.h"
 #include "delegate_plan.h"
 #include "delegate_launch.h"
 #include "delegate_economics.h"
@@ -1655,10 +1656,26 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       char *verify_out = NULL;
       int verify_rc = safe_exec_capture(verify_argv, &verify_out, AGENT_TOOL_OUTPUT_MAX);
       free(verify_out);
+      verify_outcome_t verify_outcome = verify_classify(verify_rc);
       if (verify_rc != 0)
       {
-         event_notify(AIMEE_EVENT_VERIFY_FAIL, "delegate verify failed");
-         fprintf(stderr, "aimee: verify command failed (exit %d): %s\n", verify_rc, verify_cmd);
+         /* Distinguish "the verifier ran and reported failure" from "the verifier
+          * could not be run". Only the former is evidence about the delegate's
+          * work product; the latter is a setup defect and must never be read as
+          * the model having been inadequate. */
+         if (verify_outcome == VERIFY_OUTCOME_INFRA_ERROR)
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "verify command could not be run");
+            fprintf(stderr,
+                    "aimee: verify command could not be RUN (exit %d): %s\n"
+                    "aimee: this is a verifier/environment problem, not a delegate result\n",
+                    verify_rc, verify_cmd);
+         }
+         else
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "delegate verify failed");
+            fprintf(stderr, "aimee: verify command failed (exit %d): %s\n", verify_rc, verify_cmd);
+         }
          if (json_output)
          {
             cJSON *obj = agent_result_to_json(&result);
@@ -1666,6 +1683,11 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                                                      agent_route(&cfg, role));
             cJSON_AddBoolToObject(obj, "verify_passed", 0);
             cJSON_AddNumberToObject(obj, "verify_exit_code", verify_rc);
+            /* Machine-readable category, so a caller can tell an attributable
+             * work-product failure from an unusable verifier. */
+            cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
+            cJSON_AddBoolToObject(obj, "escalation_warranted",
+                                  verify_escalation_warranted(rc, verify_outcome, 0));
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
             char *json = cJSON_Print(obj);
@@ -1713,10 +1735,25 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          char *cv_out = NULL;
          int cv_rc = safe_exec_capture(cv_argv, &cv_out, AGENT_TOOL_OUTPUT_MAX);
          free(cv_out);
-         if (cv_rc != 0)
+         verify_outcome_t cv_outcome = verify_classify(cv_rc);
+         if (cv_outcome == VERIFY_OUTCOME_INFRA_ERROR)
+         {
+            event_notify(AIMEE_EVENT_VERIFY_FAIL, "cross-verify could not be run");
+            fprintf(stderr,
+                    "aimee: cross-verify could not be RUN (exit %d) — verifier/environment "
+                    "problem, not a delegate result\n",
+                    cv_rc);
+         }
+         else if (cv_rc != 0)
          {
             event_notify(AIMEE_EVENT_VERIFY_FAIL, "cross-verify failed");
             fprintf(stderr, "aimee: cross-verify FAILED (exit %d)\n", cv_rc);
+            if (verify_escalation_warranted(rc, cv_outcome, 0))
+               LOG_WARN("delegate",
+                        "MISPLACEMENT: agent '%s' completed but its work failed verification for "
+                        "role '%s'. Escalation is warranted — placement, not the model, is the "
+                        "defect to investigate.",
+                        result.agent_name[0] ? result.agent_name : "?", role);
          }
          else
          {
