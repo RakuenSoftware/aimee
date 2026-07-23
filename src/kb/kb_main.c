@@ -1861,8 +1861,13 @@ int main(int argc, char **argv)
             if (wait_rc > 0)
                break;
          }
-         if (!g_ctx.running || kb_vault_operator_runtime_activation_validate(
-                                   &vault_operator_components.runtime, &activated) != 0)
+         if (!g_ctx.running ||
+             kb_vault_operator_mutation_activation_window_valid(
+                 &vault_operator_components.mutation) != 0 ||
+             kb_vault_operator_runtime_activation_validate(&vault_operator_components.runtime,
+                                                           &activated) != 0 ||
+             kb_vault_operator_mutation_activation_window_valid(
+                 &vault_operator_components.mutation) != 0)
          {
             (void)vault_seal();
             kb_vault_operator_service_stop(vault_operator_service);
@@ -1878,6 +1883,19 @@ int main(int argc, char **argv)
          }
       }
       if (kb_vault_operator_runtime_mark_general_serving(&vault_operator_components.runtime) != 0)
+      {
+         (void)vault_seal();
+         kb_vault_operator_service_stop(vault_operator_service);
+         vault_operator_service = NULL;
+         kb_vault_operator_components_destroy(&vault_operator_components);
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+         vault_operator_runtime_opened = 0;
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+      if (kb_vault_operator_mutation_mark_general_serving(&vault_operator_components.mutation) != 0)
       {
          (void)vault_seal();
          kb_vault_operator_service_stop(vault_operator_service);

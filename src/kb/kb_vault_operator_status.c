@@ -409,13 +409,10 @@ static int mutation_result_status_valid(kb_vault_operator_result_t result,
    {
    case KB_VAULT_OPERATOR_RESULT_OPERATIONAL:
       return status->state == KB_VAULT_OPERATOR_STATE_OPERATIONAL;
-   case KB_VAULT_OPERATOR_RESULT_BACKEND_UNAVAILABLE:
-      return status->state == KB_VAULT_OPERATOR_STATE_BACKEND_UNAVAILABLE;
-   case KB_VAULT_OPERATOR_RESULT_RECOVERY_REQUIRED:
-      return status->state == KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED;
-   case KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE:
-      return status->state == KB_VAULT_OPERATOR_STATE_INTEGRITY_FAILURE;
    default:
+      /* Closed operation results describe this attempt.  The independently
+       * sampled durable status may legitimately remain completed_sealed,
+       * sealed_idle, or operational (for example wrong-secret START). */
       return 1;
    }
 }

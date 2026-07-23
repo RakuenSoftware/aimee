@@ -9,6 +9,12 @@
 int db2_vault_operator_rewrap_bind(db2_vault_operator_runtime_t *runtime);
 void db2_vault_operator_rewrap_unbind(db2_vault_operator_runtime_t *runtime);
 
+/* Recover a connection whose last statement result was lost.  Returns one
+ * only after a new PostgreSQL session has re-established the fixed login and
+ * SET ROLE authority, zero when there is no uncertain result, and minus one
+ * when recovery itself is unavailable. */
+int db2_vault_operator_rewrap_recover_uncertain(void);
+
 extern const db2_vault_rewrap_ops_t db2_vault_operator_rewrap_ops;
 
 typedef struct

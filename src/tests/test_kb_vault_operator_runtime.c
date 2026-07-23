@@ -15,14 +15,25 @@ typedef struct
    int current_generation_reads;
    int open_calls;
    int event_reads;
+   int uncertain_recoveries;
    int guard_ends;
+   int open_result;
+   int uncertain_committed;
+   int corrupt_event_hash;
    int dispatch_found;
    db2_vault_operator_rewrap_binding_t dispatch_row;
+   db2_vault_operator_completed_t completed_row;
+   vault_tpm2_reseal_receipt_t receipt;
    db2_vault_operator_open_result_t opened;
    db2_vault_operator_open_event_t event;
 } fixture_t;
 
 static fixture_t fixture;
+
+static void idle_opened_event(const uint8_t[16], int64_t, int64_t,
+                              db2_vault_operator_open_event_t *);
+static void opened_event_id(const uint8_t[16], uint8_t[32]);
+static void completed_row_hash(const db2_vault_operator_open_event_t *, uint8_t[32]);
 
 /* Production defaults are not exercised by this injected binary. */
 const db2_vault_rewrap_ops_t db2_vault_operator_rewrap_ops = {0};
@@ -120,17 +131,19 @@ static int active(db2_vault_operator_rewrap_binding_t *out, int *found)
 
 static int completed(const uint8_t a[16], const uint8_t b[16], db2_vault_operator_completed_t *out)
 {
-   (void)a;
-   (void)b;
-   (void)out;
-   return DB2_VAULT_REWRAP_INVALID;
+   if (memcmp(a, fixture.completed_row.binding.request_id, 16) ||
+       memcmp(b, fixture.completed_row.binding.operation_id, 16))
+      return DB2_VAULT_REWRAP_NOT_FOUND;
+   *out = fixture.completed_row;
+   return DB2_VAULT_REWRAP_OK;
 }
 
 static int completed_active(const uint8_t operation_id[16], db2_vault_operator_completed_t *out)
 {
-   (void)operation_id;
-   (void)out;
-   return DB2_VAULT_REWRAP_INVALID;
+   if (memcmp(operation_id, fixture.completed_row.binding.operation_id, 16))
+      return DB2_VAULT_REWRAP_NOT_FOUND;
+   *out = fixture.completed_row;
+   return DB2_VAULT_REWRAP_OK;
 }
 
 static int check_page(const db2_vault_rewrap_cursor_t *after, int limit,
@@ -149,9 +162,22 @@ static int check_page(const db2_vault_rewrap_cursor_t *after, int limit,
 static int open_completed(const db2_vault_operator_completed_t *completed,
                           db2_vault_operator_open_result_t *out)
 {
-   (void)completed;
-   (void)out;
-   return DB2_VAULT_REWRAP_INVALID;
+   fixture.open_calls++;
+   memset(&fixture.event, 0, sizeof(fixture.event));
+   fixture.event.completed_open = 1;
+   fixture.event.operation_present = 1;
+   fixture.event.operation_fence = completed->binding.fencing_token;
+   fixture.event.opened.opened_epoch = completed->binding.seal_epoch + 1;
+   fixture.event.opened.opened_fence = completed->binding.fencing_token + 1;
+   memcpy(fixture.event.operation_id, completed->binding.operation_id, 16);
+   memcpy(fixture.event.request_id, completed->binding.request_id, 16);
+   opened_event_id(completed->binding.operation_id, fixture.event.opened.event_id);
+   completed_row_hash(&fixture.event, fixture.event.opened.row_hash);
+   if (fixture.corrupt_event_hash)
+      fixture.event.opened.row_hash[0] ^= 1;
+   fixture.opened = fixture.event.opened;
+   *out = fixture.opened;
+   return DB2_VAULT_REWRAP_OK;
 }
 
 static int open_idle(const uint8_t request[16], int64_t epoch, int64_t fence, int64_t marker,
@@ -159,13 +185,22 @@ static int open_idle(const uint8_t request[16], int64_t epoch, int64_t fence, in
 {
    assert(epoch == 5 && fence == 9 && marker == 0);
    fixture.open_calls++;
-   memset(&fixture.opened, 0, sizeof(fixture.opened));
-   fixture.opened.opened_epoch = 6;
-   fixture.opened.opened_fence = 10;
-   memset(fixture.opened.event_id, 0x51, 32);
-   memset(fixture.opened.row_hash, 0x61, 32);
-   fixture.event.opened = fixture.opened;
-   memcpy(fixture.event.request_id, request, 16);
+   if (fixture.open_result)
+   {
+      if (fixture.uncertain_committed)
+      {
+         idle_opened_event(request, epoch + 1, fence + 1, &fixture.event);
+         fixture.status.state = KB_VAULT_OPERATOR_STATE_LOCAL_UNSEAL_REQUIRED;
+         fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+         fixture.status.seal_epoch = (uint64_t)epoch + 1;
+         fixture.status.control_fence = (uint64_t)fence + 1;
+      }
+      return fixture.open_result;
+   }
+   idle_opened_event(request, 6, 10, &fixture.event);
+   if (fixture.corrupt_event_hash)
+      fixture.event.opened.row_hash[0] ^= 1;
+   fixture.opened = fixture.event.opened;
    *out = fixture.opened;
    fixture.status.state = KB_VAULT_OPERATOR_STATE_OPERATIONAL;
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_NONE;
@@ -182,6 +217,11 @@ static int open_event(const uint8_t id[32], db2_vault_operator_open_event_t *out
    return DB2_VAULT_REWRAP_OK;
 }
 
+static int recover_uncertain(void)
+{
+   return fixture.uncertain_recoveries ? 1 : 0;
+}
+
 static vault_reseal_orchestrator_result_t
 orchestrate(const vault_reseal_orchestrator_request_t *request,
             const vault_reseal_orchestrator_deps_t *deps, vault_reseal_orchestrator_output_t *out)
@@ -195,18 +235,20 @@ orchestrate(const vault_reseal_orchestrator_request_t *request,
 static int receipt_decode(const uint8_t *wire, size_t length, vault_tpm2_reseal_receipt_t *out)
 {
    (void)wire;
-   (void)length;
-   (void)out;
-   return -1;
+   if (length != VAULT_RESEAL_RECEIPT_V1_LEN)
+      return -1;
+   *out = fixture.receipt;
+   return 0;
 }
 
 static int receipt_status(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
                           vault_tpm2_reseal_status_t *status)
 {
    (void)receipt;
-   (void)secret;
-   (void)status;
-   return -1;
+   if (strcmp(secret, "ok"))
+      return -1;
+   *status = VAULT_TPM2_RESEAL_CLEANED;
+   return VAULT_TPM2_RESEAL_OK;
 }
 
 static int receipt_cleanup(const vault_tpm2_reseal_receipt_t *receipt, const char *secret,
@@ -305,6 +347,7 @@ static const kb_vault_operator_runtime_platform_t platform = {
     .open_completed = open_completed,
     .open_idle = open_idle,
     .open_event = open_event,
+    .recover_uncertain = recover_uncertain,
     .orchestrator_run = orchestrate,
     .receipt_decode = receipt_decode,
     .receipt_status = receipt_status,
@@ -371,6 +414,44 @@ static void completed_row_hash(const db2_vault_operator_open_event_t *event, uin
    assert(offset == sizeof(input) && SHA256(input, sizeof(input), out) != NULL);
 }
 
+static void idle_opened_event(const uint8_t request_id[16], int64_t epoch, int64_t fence,
+                              db2_vault_operator_open_event_t *event)
+{
+   static const char id_domain[] = "aimee-vault-open-idle-v1";
+   static const char row_domain[] = "aimee-vault-open-row-v1";
+   static const char kind[] = "idle_opened";
+   static const char actor[] = "uid:0";
+   static const char digits[] = "0123456789abcdef";
+   uint8_t id_input[sizeof(id_domain) - 1 + 32];
+   uint8_t row_input[(sizeof(row_domain) - 1) + (sizeof(kind) - 1) + 32 + (sizeof(actor) - 1) + 16];
+   size_t offset = 0;
+   memset(event, 0, sizeof(*event));
+   memcpy(event->request_id, request_id, 16);
+   event->opened.opened_epoch = epoch;
+   event->opened.opened_fence = fence;
+   memcpy(id_input, id_domain, sizeof(id_domain) - 1);
+   for (size_t i = 0; i < 16; ++i)
+   {
+      id_input[sizeof(id_domain) - 1 + i * 2] = digits[request_id[i] >> 4];
+      id_input[sizeof(id_domain) - 1 + i * 2 + 1] = digits[request_id[i] & 15];
+   }
+   assert(SHA256(id_input, sizeof(id_input), event->opened.event_id) != NULL);
+   memcpy(row_input + offset, row_domain, sizeof(row_domain) - 1);
+   offset += sizeof(row_domain) - 1;
+   memcpy(row_input + offset, kind, sizeof(kind) - 1);
+   offset += sizeof(kind) - 1;
+   memcpy(row_input + offset, id_input + sizeof(id_domain) - 1, 32);
+   offset += 32;
+   memcpy(row_input + offset, actor, sizeof(actor) - 1);
+   offset += sizeof(actor) - 1;
+   uint64_t values[] = {(uint64_t)epoch, (uint64_t)fence};
+   for (size_t value = 0; value < 2; ++value)
+      for (int i = 7; i >= 0; --i)
+         row_input[offset++] = (uint8_t)(values[value] >> (i * 8));
+   assert(offset == sizeof(row_input));
+   assert(SHA256(row_input, sizeof(row_input), event->opened.row_hash) != NULL);
+}
+
 static void test_opened_replay(void)
 {
    memset(&fixture, 0, sizeof(fixture));
@@ -413,12 +494,164 @@ static void test_opened_replay(void)
    assert(binding.state == KB_VAULT_MUTATION_BINDING_OPENED);
    assert(runtime.activation_proof_valid && runtime.activation_has_event);
    assert(fixture.event_reads == 1);
+   fixture.dispatch_row.state = DB2_VAULT_REWRAP_ABORTED;
+   assert(deps.start_lookup(fixture.dispatch_row.request_id, 0, &binding, &runtime) ==
+          KB_VAULT_MUTATION_DB_OK);
+   assert(binding.state == KB_VAULT_MUTATION_BINDING_ABORTED);
+   fixture.dispatch_row.state = DB2_VAULT_REWRAP_RECOVERY_REQUIRED;
+   assert(deps.start_lookup(fixture.dispatch_row.request_id, 0, &binding, &runtime) ==
+          KB_VAULT_MUTATION_DB_OK);
+   assert(binding.state == KB_VAULT_MUTATION_BINDING_RECOVERY_REQUIRED);
+   kb_vault_operator_runtime_destroy(&runtime);
+}
+
+static void test_uncertain_idle_open_is_safe_retry(void)
+{
+   memset(&fixture, 0, sizeof(fixture));
+   fixture.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
+   fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   fixture.status.seal_epoch = 5;
+   fixture.status.control_fence = 9;
+   fixture.open_result = DB2_VAULT_REWRAP_TRANSIENT;
+   fixture.uncertain_recoveries = 1;
+   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const vault_reseal_custody_ops_t fake_custody_ops = {0};
+   vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
+                                                         .custody = &fake_custody_ops};
+   kb_vault_operator_runtime_t runtime;
+   assert(kb_vault_operator_runtime_init_with_platform(&runtime, (void *)0x11, (void *)0x22,
+                                                       (void *)0x44, &platform,
+                                                       &orchestrator_deps) == 0);
+   kb_vault_operator_mutation_deps_t deps;
+   kb_vault_operator_runtime_fill_deps(&runtime, &deps);
+   kb_vault_operator_mutation_t mutation;
+   assert(kb_vault_operator_mutation_init(&mutation, &deps, &runtime) == 0);
+   kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+   assert(kb_vault_operator_mutation_execute(KB_VAULT_OPERATOR_OPCODE_UNSEAL, NULL,
+                                             (const uint8_t *)"ok", 2, &result, &mutation) == 0);
+   assert(result == KB_VAULT_OPERATOR_RESULT_SAFE_RETRY);
+   assert(fixture.open_calls == 1 && fixture.local_unsealed == 0);
+   assert(fixture.publishes == 0);
+   assert(kb_vault_operator_mutation_after_secret_wipe(&mutation) == 0);
+   kb_vault_operator_mutation_destroy(&mutation);
+   kb_vault_operator_runtime_destroy(&runtime);
+}
+
+static void test_uncertain_committed_idle_open_is_safe_retry(void)
+{
+   memset(&fixture, 0, sizeof(fixture));
+   fixture.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
+   fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   fixture.status.seal_epoch = 5;
+   fixture.status.control_fence = 9;
+   fixture.open_result = DB2_VAULT_REWRAP_TRANSIENT;
+   fixture.uncertain_recoveries = 1;
+   fixture.uncertain_committed = 1;
+   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const vault_reseal_custody_ops_t fake_custody_ops = {0};
+   vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
+                                                         .custody = &fake_custody_ops};
+   kb_vault_operator_runtime_t runtime;
+   assert(kb_vault_operator_runtime_init_with_platform(&runtime, (void *)0x11, (void *)0x22,
+                                                       (void *)0x44, &platform,
+                                                       &orchestrator_deps) == 0);
+   kb_vault_operator_mutation_deps_t deps;
+   kb_vault_operator_runtime_fill_deps(&runtime, &deps);
+   kb_vault_operator_mutation_t mutation;
+   assert(kb_vault_operator_mutation_init(&mutation, &deps, &runtime) == 0);
+   kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE;
+   assert(kb_vault_operator_mutation_execute(KB_VAULT_OPERATOR_OPCODE_UNSEAL, NULL,
+                                             (const uint8_t *)"ok", 2, &result, &mutation) == 0);
+   assert(result == KB_VAULT_OPERATOR_RESULT_SAFE_RETRY);
+   assert(fixture.event_reads == 1 && fixture.local_unsealed == 0 && fixture.publishes == 0);
+   kb_vault_operator_mutation_destroy(&mutation);
+   kb_vault_operator_runtime_destroy(&runtime);
+}
+
+static void test_corrupt_idle_open_event_fails_closed(void)
+{
+   memset(&fixture, 0, sizeof(fixture));
+   fixture.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
+   fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   fixture.status.seal_epoch = 5;
+   fixture.status.control_fence = 9;
+   fixture.corrupt_event_hash = 1;
+   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const vault_reseal_custody_ops_t fake_custody_ops = {0};
+   vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
+                                                         .custody = &fake_custody_ops};
+   kb_vault_operator_runtime_t runtime;
+   assert(kb_vault_operator_runtime_init_with_platform(&runtime, (void *)0x11, (void *)0x22,
+                                                       (void *)0x44, &platform,
+                                                       &orchestrator_deps) == 0);
+   kb_vault_operator_mutation_deps_t deps;
+   kb_vault_operator_runtime_fill_deps(&runtime, &deps);
+   kb_vault_operator_mutation_t mutation;
+   assert(kb_vault_operator_mutation_init(&mutation, &deps, &runtime) == 0);
+   kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_OPERATIONAL;
+   assert(kb_vault_operator_mutation_execute(KB_VAULT_OPERATOR_OPCODE_UNSEAL, NULL,
+                                             (const uint8_t *)"ok", 2, &result, &mutation) == 0);
+   assert(result == KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE);
+   assert(fixture.event_reads == 1 && fixture.guard_ends == 0 && fixture.local_unsealed == 0);
+   kb_vault_operator_mutation_destroy(&mutation);
+   kb_vault_operator_runtime_destroy(&runtime);
+}
+
+static void test_corrupt_completed_open_event_fails_closed(void)
+{
+   memset(&fixture, 0, sizeof(fixture));
+   fixture.status.state = KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED;
+   fixture.status.operation_state = KB_VAULT_OPERATOR_OPERATION_COMPLETED;
+   fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_FINALIZE;
+   fixture.status.flags = 1;
+   fixture.status.seal_epoch = 5;
+   fixture.status.control_fence = 7;
+   fixture.status.old_generation = 6;
+   fixture.status.new_generation = 7;
+   memset(fixture.status.operation_id, 0x31, 16);
+   fixture.completed_row.binding.state = DB2_VAULT_REWRAP_COMPLETED;
+   fixture.completed_row.binding.seal_epoch = 5;
+   fixture.completed_row.binding.fencing_token = 7;
+   fixture.completed_row.binding.old_generation = 6;
+   fixture.completed_row.binding.new_generation = 7;
+   memcpy(fixture.completed_row.binding.operation_id, fixture.status.operation_id, 16);
+   memset(fixture.completed_row.binding.request_id, 0x41, 16);
+   memcpy(fixture.receipt.operation_id, fixture.status.operation_id, 16);
+   fixture.receipt.old_generation = 6;
+   fixture.receipt.new_generation = 7;
+   uint8_t kek[VAULT_KEK_LEN];
+   memset(kek, 0x77, sizeof(kek));
+   assert(SHA256(kek, sizeof(kek), fixture.receipt.new_kek_digest) != NULL);
+   fixture.corrupt_event_hash = 1;
+   static const db2_vault_rewrap_ops_t fake_db_ops = {0};
+   static const vault_reseal_custody_ops_t fake_custody_ops = {0};
+   vault_reseal_orchestrator_deps_t orchestrator_deps = {.db = &fake_db_ops,
+                                                         .custody = &fake_custody_ops};
+   kb_vault_operator_runtime_t runtime;
+   assert(kb_vault_operator_runtime_init_with_platform(&runtime, (void *)0x11, (void *)0x22,
+                                                       (void *)0x44, &platform,
+                                                       &orchestrator_deps) == 0);
+   kb_vault_operator_mutation_deps_t deps;
+   kb_vault_operator_runtime_fill_deps(&runtime, &deps);
+   kb_vault_operator_mutation_t mutation;
+   assert(kb_vault_operator_mutation_init(&mutation, &deps, &runtime) == 0);
+   kb_vault_operator_result_t result = KB_VAULT_OPERATOR_RESULT_OPERATIONAL;
+   assert(kb_vault_operator_mutation_execute(KB_VAULT_OPERATOR_OPCODE_UNSEAL, NULL,
+                                             (const uint8_t *)"ok", 2, &result, &mutation) == 0);
+   assert(result == KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE);
+   assert(fixture.open_calls == 1 && fixture.event_reads == 1 && fixture.guard_ends == 0 &&
+          fixture.local_unsealed == 0);
+   kb_vault_operator_mutation_destroy(&mutation);
    kb_vault_operator_runtime_destroy(&runtime);
 }
 
 int main(void)
 {
    test_opened_replay();
+   test_uncertain_idle_open_is_safe_retry();
+   test_uncertain_committed_idle_open_is_safe_retry();
+   test_corrupt_idle_open_event_fails_closed();
+   test_corrupt_completed_open_event_fails_closed();
    memset(&fixture, 0, sizeof(fixture));
    fixture.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
    fixture.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;

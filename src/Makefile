@@ -338,7 +338,8 @@ VAULT_CORE_SRCS = modules/vault/vault_crypto.c modules/vault/vault_kek_check.c m
                   modules/vault/vault_service.c modules/vault/vault_server_key.c \
                   modules/vault/vault_custody_mock.c modules/vault/vault_custody_tpm2.c modules/vault/vault_custody_pkcs11.c modules/vault/vault_custody_kms.c \
                   modules/vault/vault_capability.c
-KB_VAULT_SRCS = $(VAULT_CORE_SRCS) modules/vault/vault_reseal_orchestrator.c
+KB_VAULT_SRCS = $(VAULT_CORE_SRCS) modules/vault/vault_mutation_budget.c \
+                modules/vault/vault_reseal_orchestrator.c
 KB_VAULT_OBJS = $(KB_VAULT_SRCS:%.c=$(OBJDIR)/kb/%.o)
 
 # P7-tpm2a: the real tpm2 custody provider is BUILD-GUARDED. The default build

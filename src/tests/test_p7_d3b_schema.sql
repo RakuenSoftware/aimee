@@ -88,6 +88,48 @@ EXCEPTION WHEN SQLSTATE 'P7I01' THEN NULL; END $$;
 RESET ROLE;
 ROLLBACK;
 
+-- The open transaction itself (not only the earlier material read) re-proves
+-- the exact sole obligation and immutable completed checkpoint.
+BEGIN;
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$
+DECLARE o RECORD; r RECORD; e RECORD;
+BEGIN
+  SELECT * INTO STRICT o FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed_active(
+    'uid:0','11111111111111111111111111111111');
+  SELECT * INTO STRICT r FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(
+    'uid:0',o.request_id,o.operation_id,o.seal_epoch,o.fencing_token,
+    o.receipt_digest,o.inventory_digest,o.stage_digest);
+  SELECT * INTO STRICT e FROM aimee_kb_vault_orchestrator_api.org_vault_open_event(r.event_id);
+  IF r.opened_epoch<>o.seal_epoch+1 OR e.row_hash<>r.row_hash OR
+     e.operation_id<>o.operation_id OR e.event_kind<>'completed_opened' THEN
+    RAISE EXCEPTION 'completed open result mismatch';
+  END IF;
+END $$;
+RESET ROLE;
+ROLLBACK;
+
+BEGIN;
+INSERT INTO public.kb_vault_rewrap_operation(operation_id,request_id,actor,state,seal_epoch,
+ fencing_token,old_generation,new_generation,failure_class,failure_from_state)
+VALUES('44444444444444444444444444444444','44444444444444444444444444444444','uid:0',
+ 'recovery_required',1,1,9,10,'test_recovery','preparing');
+SET ROLE aimee_kb_vault_orchestrator;
+DO $$
+DECLARE o RECORD;
+BEGIN
+  SELECT * INTO STRICT o FROM aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(
+    'uid:0','00112233445566778899aabbccddeeff','11111111111111111111111111111111');
+  BEGIN
+    PERFORM aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(
+      'uid:0',o.request_id,o.operation_id,o.seal_epoch,o.fencing_token,
+      o.receipt_digest,o.inventory_digest,o.stage_digest);
+    RAISE EXCEPTION 'open accepted multiple outstanding obligations';
+  EXCEPTION WHEN SQLSTATE 'P7I01' THEN NULL; END;
+END $$;
+RESET ROLE;
+ROLLBACK;
+
 -- Exercise idle-open atomicity and exact replay in an isolated rollback scope.
 BEGIN;
 UPDATE public.kb_vault_rewrap_operation SET state='aborted',failure_class='test_abort';

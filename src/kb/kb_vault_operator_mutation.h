@@ -2,9 +2,14 @@
 #define AIMEE_KB_VAULT_OPERATOR_MUTATION_H
 
 #include "kb_vault_operator_status.h"
+#include "modules/vault/vault_mutation_budget.h"
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
+
+#define KB_VAULT_ACTIVATION_PUBLISH_WINDOW_MS 5000u
 
 typedef enum
 {
@@ -22,6 +27,8 @@ typedef enum
    KB_VAULT_MUTATION_BINDING_ACTIVE = 1,
    KB_VAULT_MUTATION_BINDING_COMPLETED,
    KB_VAULT_MUTATION_BINDING_OPENED,
+   KB_VAULT_MUTATION_BINDING_ABORTED,
+   KB_VAULT_MUTATION_BINDING_RECOVERY_REQUIRED,
 } kb_vault_mutation_binding_state_t;
 
 typedef struct
@@ -113,8 +120,13 @@ typedef struct
 {
    kb_vault_operator_mutation_deps_t deps;
    void *opaque;
+   pthread_mutex_t activation_mutex;
    kb_vault_operator_status_t pending_activation;
+   struct timespec activation_deadline;
+   int activation_mutex_initialized;
    int pending_activation_valid;
+   int activation_transition;
+   int general_serving;
 } kb_vault_operator_mutation_t;
 
 int kb_vault_operator_mutation_init(kb_vault_operator_mutation_t *mutation,
@@ -133,5 +145,12 @@ int kb_vault_operator_mutation_execute(kb_vault_operator_opcode_t opcode,
  * status/singleton proof and publishes activation. A non-operational mutation is
  * a successful no-op. */
 int kb_vault_operator_mutation_after_secret_wipe(kb_vault_operator_mutation_t *mutation);
+
+/* The main thread brackets its fresh activation validation and serving mark
+ * with these calls. While the transition is pending, mutation admission is
+ * typed-busy, so no new durable barrier can appear in the validation-to-mark
+ * interval. Both calls fail after the monotonic publish window expires. */
+int kb_vault_operator_mutation_activation_window_valid(kb_vault_operator_mutation_t *mutation);
+int kb_vault_operator_mutation_mark_general_serving(kb_vault_operator_mutation_t *mutation);
 
 #endif

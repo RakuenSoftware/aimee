@@ -308,7 +308,8 @@ static void test_transaction_kind_gates(void)
    db2_vault_rewrap_tx_rollback(&tx);
 
    assert(db2_vault_rewrap_tx_begin(&tx) == DB2_VAULT_REWRAP_OK);
-   assert(db2_vault_rewrap_stage_finish(tx, op, 1) == DB2_VAULT_REWRAP_INVALID);
+   assert(db2_vault_rewrap_stage_finish(tx, op, 1, &(db2_vault_rewrap_inventory_summary_t){0}) ==
+          DB2_VAULT_REWRAP_INVALID);
    db2_vault_rewrap_tx_rollback(&tx);
 
    db2_vault_rewrap_secret_t secret;
@@ -323,7 +324,8 @@ static void test_transaction_kind_gates(void)
           DB2_VAULT_REWRAP_OK);
    g_empty_rows = 0;
    g_state_response = "wraps_staged";
-   assert(db2_vault_rewrap_stage_finish(tx, op, 1) == DB2_VAULT_REWRAP_OK);
+   assert(db2_vault_rewrap_stage_finish(tx, op, 1, &(db2_vault_rewrap_inventory_summary_t){0}) ==
+          DB2_VAULT_REWRAP_OK);
    assert(db2_vault_rewrap_tx_commit(&tx) == DB2_VAULT_REWRAP_OK && !tx);
    g_state_response = "promoted";
 }
@@ -606,7 +608,8 @@ static void test_edge_response_states(void)
    assert(db2_vault_rewrap_source_check_page(tx, op, 1, &stage_cursor, 1, &stage_check, 1,
                                              &stage_count, &stage_next) == DB2_VAULT_REWRAP_OK);
    g_empty_rows = 0;
-   assert(db2_vault_rewrap_stage_finish(tx, op, 1) == DB2_VAULT_REWRAP_INTEGRITY);
+   assert(db2_vault_rewrap_stage_finish(tx, op, 1, &(db2_vault_rewrap_inventory_summary_t){0}) ==
+          DB2_VAULT_REWRAP_INTEGRITY);
    db2_vault_rewrap_tx_rollback(&tx);
    EXPECT_BAD_STATE(db2_vault_rewrap_mark_committing(tx, op, 1), "wraps_staged");
    EXPECT_BAD_STATE(db2_vault_rewrap_mark_resealed(tx, op, 1, digest), "reseal_committing");

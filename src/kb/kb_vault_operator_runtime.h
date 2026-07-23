@@ -30,6 +30,7 @@ typedef struct kb_vault_operator_runtime_platform
    int (*open_idle)(const uint8_t[16], int64_t, int64_t, int64_t,
                     db2_vault_operator_open_result_t *);
    int (*open_event)(const uint8_t[32], db2_vault_operator_open_event_t *);
+   int (*recover_uncertain)(void);
 
    vault_reseal_orchestrator_result_t (*orchestrator_run)(
        const vault_reseal_orchestrator_request_t *, const vault_reseal_orchestrator_deps_t *,

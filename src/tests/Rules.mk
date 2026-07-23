@@ -338,6 +338,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-check \
                $(TESTPREFIX)/unit-test-vault-reseal-receipt \
+               $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
                $(TESTPREFIX)/unit-test-vault-kek-cache \
@@ -3687,9 +3688,15 @@ $(TESTPREFIX)/unit-test-vault-reseal-receipt: $(OBJDIR)/tests/test_vault_reseal_
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-vault-mutation-budget: \
+                              $(OBJDIR)/tests/test_vault_mutation_budget.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-vault-reseal-orchestrator: \
                               $(OBJDIR)/tests/test_vault_reseal_orchestrator.o \
                               $(OBJDIR)/modules/vault/vault_reseal_orchestrator.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o \
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
@@ -3770,13 +3777,15 @@ $(TESTPREFIX)/unit-test-kb-vault-operator-mutation: \
 
 $(TESTPREFIX)/unit-test-kb-vault-operator-choreography: \
                               $(OBJDIR)/tests/test_kb_vault_operator_choreography.o \
-                              $(OBJDIR)/kb/kb_vault_operator_mutation.o
+                              $(OBJDIR)/kb/kb_vault_operator_mutation.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-kb-vault-operator-runtime: \
                               $(OBJDIR)/tests/test_kb_vault_operator_runtime.o \
                               $(OBJDIR)/kb/kb_vault_operator_runtime.o \
                               $(OBJDIR)/kb/kb_vault_operator_mutation.o \
+                              $(OBJDIR)/modules/vault/vault_mutation_budget.o \
                               $(OBJDIR)/kb/kb_vault_protected_secret.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto -lpthread
 

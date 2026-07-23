@@ -165,6 +165,26 @@ static void test_codecs(void)
    response[18] = 1;
    assert(kb_vault_operator_mutation_response_decode(response, response_len, &result, &decoded) ==
           -1);
+
+   /* Attempt-local integrity must remain representable while the durable
+    * barrier correctly remains completed_sealed. */
+   status = (kb_vault_operator_status_t){.state = KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED,
+                                         .operation_state = KB_VAULT_OPERATOR_OPERATION_COMPLETED,
+                                         .remediation = KB_VAULT_OPERATOR_REMEDIATION_FINALIZE,
+                                         .flags = 1,
+                                         .seal_epoch = 3,
+                                         .control_fence = 4,
+                                         .old_generation = 7,
+                                         .new_generation = 8,
+                                         .last_opened_fence = 2};
+   memset(status.operation_id, 0x44, sizeof(status.operation_id));
+   assert(kb_vault_operator_mutation_response_encode(KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE,
+                                                     &status, response, sizeof(response),
+                                                     &response_len) == 0);
+   assert(kb_vault_operator_mutation_response_decode(response, response_len, &result, &decoded) ==
+              0 &&
+          result == KB_VAULT_OPERATOR_RESULT_INTEGRITY_FAILURE &&
+          decoded.state == KB_VAULT_OPERATOR_STATE_COMPLETED_SEALED);
 }
 
 static void test_start_and_resume(void)

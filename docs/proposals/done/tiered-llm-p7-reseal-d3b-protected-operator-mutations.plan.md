@@ -1,7 +1,6 @@
 # P7-reseal-d3b protected operator mutations and operational unseal
 
-- **State:** planned; not enabled until this slice passes branch review and the
-  real-daemon PostgreSQL 17/swtpm kill matrix.
+- **State:** implemented and validated; merged as the P7-D3b delivery slice.
 - **Depends on:** P7-reseal D1, D2a, D2b, and D3a.
 - **Enables:** authorized whole-vault START/RESUME, exact terminal artifact
   cleanup, completed-to-open finalization, and explicit operational unseal for

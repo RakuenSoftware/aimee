@@ -4266,11 +4266,37 @@ BEGIN
   RETURN NEXT;
 END; $$;
 
-CREATE OR REPLACE FUNCTION org_vault_rewrap_stage_finish(p_op TEXT,p_fence BIGINT) RETURNS TEXT
+CREATE OR REPLACE FUNCTION org_vault_rewrap_inventory_summary(p_op TEXT,p_fence BIGINT)
+RETURNS TABLE(secret_count BIGINT,check_count BIGINT,inventory_digest BYTEA)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
 DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; d RECORD;
 BEGIN
-  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 THEN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     current_setting('transaction_isolation')<>'serializable' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_inventory_summary: invalid input' USING ERRCODE='22023';
+  END IF;
+  PERFORM public.org_vault_control_lock_exclusive();
+  SELECT * INTO STRICT o FROM public.kb_vault_rewrap_operation WHERE operation_id=p_op FOR UPDATE;
+  IF o.fencing_token<>p_fence OR o.state<>'custody_prepared' THEN
+    RAISE EXCEPTION 'org_vault_rewrap_inventory_summary: state conflict' USING ERRCODE='P7C01';
+  END IF;
+  PERFORM public.org_vault_rewrap_assert_live(p_op,p_fence,true);
+  SELECT * INTO STRICT d FROM public.org_vault_rewrap_digests(p_op);
+  secret_count:=d.secret_count; check_count:=d.check_count;
+  inventory_digest:=d.inventory_digest;
+  RETURN NEXT;
+END; $$;
+
+CREATE OR REPLACE FUNCTION org_vault_rewrap_stage_finish(
+  p_op TEXT,p_fence BIGINT,p_expected_secrets BIGINT,p_expected_checks BIGINT,
+  p_expected_inventory BYTEA) RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE o public.kb_vault_rewrap_operation%ROWTYPE; d RECORD;
+BEGIN
+  IF COALESCE(p_op,'') !~ '^[0-9a-f]{32}$' OR p_fence IS NULL OR p_fence<1 OR
+     p_expected_secrets IS NULL OR p_expected_secrets<0 OR
+     p_expected_checks IS NULL OR p_expected_checks<0 OR
+     p_expected_inventory IS NULL OR octet_length(p_expected_inventory)<>32 THEN
     RAISE EXCEPTION 'org_vault_rewrap_stage_finish: invalid input' USING ERRCODE='22023';
   END IF;
   PERFORM public.org_vault_control_lock_exclusive();
@@ -4303,9 +4329,12 @@ BEGIN
     RAISE EXCEPTION 'org_vault_rewrap_stage_finish: inventory mismatch' USING ERRCODE='40001';
   END IF;
   SELECT * INTO STRICT d FROM public.org_vault_rewrap_digests(p_op);
-  IF d.secret_count<>(SELECT count(*) FROM public.kb_vault_rewrap_dek_stage WHERE operation_id=p_op)
+  IF d.secret_count<>p_expected_secrets OR d.check_count<>p_expected_checks OR
+     d.inventory_digest<>p_expected_inventory OR
+     d.secret_count<>(SELECT count(*) FROM public.kb_vault_rewrap_dek_stage WHERE operation_id=p_op)
      OR d.check_count<>(SELECT count(*) FROM public.kb_vault_rewrap_check_stage WHERE operation_id=p_op) THEN
-    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: count mismatch' USING ERRCODE='40001';
+    RAISE EXCEPTION 'org_vault_rewrap_stage_finish: budget inventory mismatch'
+      USING ERRCODE='P7B01';
   END IF;
   UPDATE public.kb_vault_rewrap_operation SET state='wraps_staged',secret_count=d.secret_count,
     check_count=d.check_count,inventory_digest=d.inventory_digest,stage_digest=d.stage_digest,
@@ -5090,7 +5119,8 @@ CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_open
 RETURNS TABLE(opened_epoch BIGINT,opened_fence BIGINT,event_id TEXT,row_hash BYTEA)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c public.kb_vault_control%ROWTYPE; o public.kb_vault_rewrap_operation%ROWTYPE;
-  e public.kb_vault_open_event%ROWTYPE; eid TEXT; rh BYTEA; ne BIGINT; nf BIGINT;
+  w public.kb_vault_rewrap_worm%ROWTYPE; e public.kb_vault_open_event%ROWTYPE;
+  obligations BIGINT; eid TEXT; rh BYTEA; ne BIGINT; nf BIGINT;
 BEGIN
   IF p_actor OPERATOR(pg_catalog.<>) 'uid:0' OR
      coalesce(p_request,'') OPERATOR(pg_catalog.!~) '^[0-9a-f]{32}$' OR
@@ -5117,13 +5147,26 @@ BEGIN
      o.stage_digest OPERATOR(pg_catalog.<>) p_stage_digest THEN
     RAISE EXCEPTION 'P7_D3B_OPEN_REPLAY_MISMATCH' USING ERRCODE='23505';
   END IF;
+  SELECT * INTO w FROM public.kb_vault_rewrap_worm AS x
+   WHERE x.operation_id OPERATOR(pg_catalog.=) p_op AND
+         x.event_kind OPERATOR(pg_catalog.=) 'completed';
+  IF w.operation_id IS NULL OR w.state OPERATOR(pg_catalog.<>) 'completed' OR
+     w.seal_epoch OPERATOR(pg_catalog.<>) o.seal_epoch OR
+     w.fencing_token OPERATOR(pg_catalog.<>) o.fencing_token OR
+     w.receipt_digest IS DISTINCT FROM o.receipt_digest OR
+     w.inventory_digest IS DISTINCT FROM o.inventory_digest OR
+     w.stage_digest IS DISTINCT FROM o.stage_digest OR
+     w.actor OPERATOR(pg_catalog.<>) o.actor OR w.detail OPERATOR(pg_catalog.<>) '' THEN
+    RAISE EXCEPTION 'P7_D3B_OPEN_CHECKPOINT_INTEGRITY' USING ERRCODE='P7I01';
+  END IF;
   eid:=pg_catalog.encode(pg_catalog.sha256(
     pg_catalog.convert_to('aimee-vault-open-completed-v1','UTF8') OPERATOR(pg_catalog.||)
     pg_catalog.convert_to(p_op,'UTF8')),'hex');
   SELECT * INTO e FROM public.kb_vault_open_event AS x
     WHERE x.event_id OPERATOR(pg_catalog.=) eid;
   IF FOUND THEN
-    IF e.event_kind OPERATOR(pg_catalog.<>) 'completed_opened' OR
+    IF o.state OPERATOR(pg_catalog.<>) 'completed' OR
+       e.event_kind OPERATOR(pg_catalog.<>) 'completed_opened' OR
        e.operation_id OPERATOR(pg_catalog.<>) p_op OR e.request_id OPERATOR(pg_catalog.<>) p_request OR
        e.actor OPERATOR(pg_catalog.<>) p_actor OR e.operation_fence OPERATOR(pg_catalog.<>) p_fence OR
        c.last_opened_rewrap_fence OPERATOR(pg_catalog.<>) p_fence OR c.sealed OR
@@ -5135,6 +5178,10 @@ BEGIN
     END IF;
     RETURN QUERY SELECT e.opened_epoch,e.opened_fence,e.event_id,e.row_hash; RETURN;
   END IF;
+  SELECT pg_catalog.count(*) INTO obligations
+    FROM public.kb_vault_rewrap_operation AS x
+   WHERE x.fencing_token OPERATOR(pg_catalog.>) c.last_opened_rewrap_fence AND
+         x.state IN ('completed','recovery_required');
   IF o.state OPERATOR(pg_catalog.<>) 'completed' OR o.seal_epoch OPERATOR(pg_catalog.<>) p_epoch OR
      o.fencing_token OPERATOR(pg_catalog.<>) p_fence OR
      o.receipt_digest OPERATOR(pg_catalog.<>) p_receipt_digest OR
@@ -5144,6 +5191,7 @@ BEGIN
      c.seal_epoch OPERATOR(pg_catalog.<>) p_epoch OR
      c.fencing_token OPERATOR(pg_catalog.<>) (p_fence OPERATOR(pg_catalog.+) 1) OR
      c.last_opened_rewrap_fence OPERATOR(pg_catalog.>=) p_fence OR
+     obligations OPERATOR(pg_catalog.<>) 1 OR
      EXISTS(SELECT 1 FROM public.kb_vault_rewrap_operation AS x
              WHERE x.fencing_token OPERATOR(pg_catalog.>) p_fence) THEN
     RAISE EXCEPTION 'P7_D3B_OPEN_INTEGRITY' USING ERRCODE='P7I01';
@@ -5287,9 +5335,16 @@ CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_stag
  p TEXT,f BIGINT,pr TEXT,d BYTEA,n BYTEA) RETURNS VOID
 LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS
 $$ SELECT public.org_vault_rewrap_stage_check(p,f,pr,d,n) $$;
+CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_inventory_summary(
+ p TEXT,f BIGINT) RETURNS TABLE(secret_count BIGINT,check_count BIGINT,inventory_digest BYTEA)
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS
+$$ SELECT * FROM public.org_vault_rewrap_inventory_summary(p,f) $$;
+DROP FUNCTION IF EXISTS aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(TEXT,BIGINT);
+DROP FUNCTION IF EXISTS public.org_vault_rewrap_stage_finish(TEXT,BIGINT);
 CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(
- p TEXT,f BIGINT) RETURNS TEXT LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS
-$$ SELECT public.org_vault_rewrap_stage_finish(p,f) $$;
+ p TEXT,f BIGINT,s BIGINT,c BIGINT,i BYTEA) RETURNS TEXT
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS
+$$ SELECT public.org_vault_rewrap_stage_finish(p,f,s,c,i) $$;
 CREATE OR REPLACE FUNCTION aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_committing(
  p TEXT,f BIGINT) RETURNS TEXT LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS
 $$ SELECT public.org_vault_rewrap_mark_committing(p,f) $$;
@@ -5352,7 +5407,8 @@ REVOKE ALL ON FUNCTION org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER) FR
 REVOKE ALL ON FUNCTION org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_digests(TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION org_vault_rewrap_stage_finish(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_inventory_summary(TEXT,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_rewrap_stage_finish(TEXT,BIGINT,BIGINT,BIGINT,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_mark_committing(TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_rewrap_promote(TEXT,BIGINT) FROM PUBLIC;
@@ -5380,7 +5436,9 @@ BEGIN
       public.org_vault_rewrap_check_page(TEXT,BIGINT,BYTEA,INTEGER),
       public.org_vault_rewrap_stage_dek(TEXT,BIGINT,BIGINT,TEXT,TEXT,TEXT,BIGINT,BYTEA,BYTEA),
       public.org_vault_rewrap_stage_check(TEXT,BIGINT,TEXT,BYTEA,BYTEA),
-      public.org_vault_rewrap_digests(TEXT),public.org_vault_rewrap_stage_finish(TEXT,BIGINT),
+      public.org_vault_rewrap_digests(TEXT),
+      public.org_vault_rewrap_inventory_summary(TEXT,BIGINT),
+      public.org_vault_rewrap_stage_finish(TEXT,BIGINT,BIGINT,BIGINT,BYTEA),
       public.org_vault_rewrap_mark_committing(TEXT,BIGINT),
       public.org_vault_rewrap_mark_resealed(TEXT,BIGINT,BYTEA),
       public.org_vault_rewrap_promote(TEXT,BIGINT),

@@ -3,6 +3,7 @@
 #endif
 #include "vault_operator_rewrap_runtime.h"
 
+#include "vault_mutation_budget.h"
 #include "vault_reseal_receipt.h"
 
 #include <libpq-fe.h>
@@ -49,6 +50,7 @@ struct db2_vault_rewrap_tx
 
 static pthread_mutex_t binding_mutex = PTHREAD_MUTEX_INITIALIZER;
 static db2_vault_operator_runtime_t *bound_runtime;
+static PGconn *uncertain_connection;
 
 static pthread_mutex_t *runtime_mutex(db2_vault_operator_runtime_t *r)
 {
@@ -65,7 +67,10 @@ static int64_t mono_ms(void)
 static int64_t deadline(void)
 {
    int64_t n = mono_ms();
-   return n < 0 || n > INT64_MAX - D3B_DB_MS ? -1 : n + D3B_DB_MS;
+   if (n < 0 || n > INT64_MAX - D3B_DB_MS)
+      return -1;
+   vault_mutation_budget_t *budget = vault_mutation_budget_current();
+   return budget ? vault_mutation_budget_deadline_ms(budget, D3B_DB_MS) : n + D3B_DB_MS;
 }
 
 static int lock_until(pthread_mutex_t *m, int64_t end)
@@ -105,16 +110,20 @@ static db2_vault_rewrap_result_t sql_error(PGresult *r)
    const char *s = r ? PQresultErrorField(r, PG_DIAG_SQLSTATE) : NULL;
    return db2_vault_rewrap_classify_sqlstate(s);
 }
-static void discard_connection(PGconn *c)
+static void mark_uncertain(PGconn *c)
 {
    pthread_mutex_lock(&binding_mutex);
    if (bound_runtime && bound_runtime->connection == c)
-   {
-      bound_runtime->database->close(bound_runtime->database_context, c);
-      bound_runtime->connection = NULL;
-      bound_runtime->transaction_active = 0;
-   }
+      uncertain_connection = c;
    pthread_mutex_unlock(&binding_mutex);
+}
+
+static int connection_uncertain(PGconn *c)
+{
+   pthread_mutex_lock(&binding_mutex);
+   int uncertain = uncertain_connection == c;
+   pthread_mutex_unlock(&binding_mutex);
+   return uncertain;
 }
 
 static db2_vault_rewrap_result_t query(PGconn *c, const char *sql, int n, const Oid *types,
@@ -123,36 +132,37 @@ static db2_vault_rewrap_result_t query(PGconn *c, const char *sql, int n, const 
 {
    *out = NULL;
    int64_t end = deadline();
-   if (end < 0 || !c || PQstatus(c) != CONNECTION_OK || PQtransactionStatus(c) == PQTRANS_UNKNOWN)
+   if (end < 0 || !c || connection_uncertain(c) || PQstatus(c) != CONNECTION_OK ||
+       PQtransactionStatus(c) == PQTRANS_UNKNOWN)
    {
       if (c)
-         discard_connection(c);
+         mark_uncertain(c);
       return DB2_VAULT_REWRAP_TRANSIENT;
    }
    if (!PQsendQueryParams(c, sql, n, types, values, lengths, formats, 1))
    {
-      discard_connection(c);
+      mark_uncertain(c);
       return DB2_VAULT_REWRAP_TRANSIENT;
    }
    while (PQflush(c) == 1)
       if (wait_socket(c, POLLOUT, end) != 0)
       {
-         discard_connection(c);
+         mark_uncertain(c);
          return DB2_VAULT_REWRAP_TRANSIENT;
       }
    while (PQisBusy(c))
    {
       if (wait_socket(c, POLLIN, end) != 0 || !PQconsumeInput(c))
       {
-         discard_connection(c);
+         mark_uncertain(c);
          return DB2_VAULT_REWRAP_TRANSIENT;
       }
    }
    PGresult *r = PQgetResult(c);
    if (!r)
    {
-      discard_connection(c);
-      return DB2_VAULT_REWRAP_INTEGRITY;
+      mark_uncertain(c);
+      return DB2_VAULT_REWRAP_TRANSIENT;
    }
    ExecStatusType st = PQresultStatus(r);
    if (st != PGRES_TUPLES_OK && st != PGRES_COMMAND_OK)
@@ -164,7 +174,10 @@ static db2_vault_rewrap_result_t query(PGconn *c, const char *sql, int n, const 
       while ((r = PQgetResult(c)) != NULL)
          PQclear(r);
       if (poison)
-         discard_connection(c);
+      {
+         mark_uncertain(c);
+         return DB2_VAULT_REWRAP_TRANSIENT;
+      }
       return rc;
    }
    PGresult *surplus = PQgetResult(c);
@@ -172,7 +185,7 @@ static db2_vault_rewrap_result_t query(PGconn *c, const char *sql, int n, const 
    {
       PQclear(surplus);
       PQclear(r);
-      discard_connection(c);
+      mark_uncertain(c);
       return DB2_VAULT_REWRAP_INTEGRITY;
    }
    *out = r;
@@ -306,7 +319,10 @@ int db2_vault_operator_rewrap_bind(db2_vault_operator_runtime_t *r)
    pthread_mutex_lock(&binding_mutex);
    int rc = bound_runtime && bound_runtime != r ? -1 : 0;
    if (!rc)
+   {
       bound_runtime = r;
+      uncertain_connection = NULL;
+   }
    pthread_mutex_unlock(&binding_mutex);
    return rc;
 }
@@ -314,7 +330,11 @@ void db2_vault_operator_rewrap_unbind(db2_vault_operator_runtime_t *r)
 {
    pthread_mutex_lock(&binding_mutex);
    if (bound_runtime == r)
+   {
+      if (r && uncertain_connection == r->connection)
+         uncertain_connection = NULL;
       bound_runtime = NULL;
+   }
    pthread_mutex_unlock(&binding_mutex);
 }
 static db2_vault_operator_runtime_t *binding(void)
@@ -323,6 +343,110 @@ static db2_vault_operator_runtime_t *binding(void)
    db2_vault_operator_runtime_t *r = bound_runtime;
    pthread_mutex_unlock(&binding_mutex);
    return r;
+}
+
+static int authority_boolean(PGconn *connection, const char *sql)
+{
+   PGresult *result = NULL;
+   int valid = 0;
+   db2_vault_rewrap_result_t rc = query(connection, sql, 0, NULL, NULL, NULL, NULL, &result);
+   if (rc == DB2_VAULT_REWRAP_OK && PQntuples(result) == 1 && PQnfields(result) == 1 &&
+       !PQgetisnull(result, 0, 0) && PQgetlength(result, 0, 0) == 1)
+      valid = *(const unsigned char *)PQgetvalue(result, 0, 0) == 1;
+   PQclear(result);
+   return valid ? 0 : -1;
+}
+
+static int recover_uncertain_locked(db2_vault_operator_runtime_t *runtime)
+{
+   static const char before[] =
+       "SELECT session_user='aimee_kb_vault_orchestrator_login' AND "
+       "current_user=session_user AND l.rolcanlogin AND NOT l.rolinherit AND NOT l.rolsuper AND "
+       "NOT l.rolbypassrls AND NOT l.rolcreatedb AND NOT l.rolcreaterole AND NOT "
+       "l.rolreplication AND pg_catalog.pg_has_role(session_user,"
+       "'aimee_kb_vault_orchestrator','MEMBER') AND (SELECT count(*) FROM "
+       "pg_catalog.pg_auth_members m WHERE m.member=l.oid)=1 AND NOT EXISTS (SELECT 1 FROM "
+       "pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles granted ON granted.oid=m.roleid "
+       "WHERE m.member=l.oid AND granted.rolname<>'aimee_kb_vault_orchestrator') FROM "
+       "pg_catalog.pg_roles l WHERE "
+       "l.rolname=session_user";
+   static const char after[] =
+       "SELECT session_user='aimee_kb_vault_orchestrator_login' AND "
+       "current_user='aimee_kb_vault_orchestrator' AND NOT o.rolcanlogin AND NOT o.rolinherit "
+       "AND NOT o.rolsuper AND NOT o.rolbypassrls AND NOT o.rolcreatedb AND NOT "
+       "o.rolcreaterole AND NOT o.rolreplication AND "
+       "pg_catalog.current_setting('search_path')='pg_catalog, pg_temp' AND "
+       "pg_catalog.current_setting('row_security')='on' AND "
+       "pg_catalog.current_setting('statement_timeout')='1900ms' AND "
+       "pg_catalog.current_setting('lock_timeout')='1900ms' AND NOT "
+       "pg_catalog.has_schema_privilege(current_user,'public','USAGE') AND "
+       "pg_catalog.has_schema_privilege(current_user,'aimee_kb_vault_orchestrator_api','USAGE') "
+       "AND NOT pg_catalog.has_schema_privilege(current_user,"
+       "'aimee_kb_vault_orchestrator_api','CREATE') AND NOT EXISTS (SELECT 1 FROM "
+       "pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE "
+       "n.nspname='aimee_kb_vault_orchestrator_api' AND NOT "
+       "pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')) AND NOT EXISTS (SELECT "
+       "1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE "
+       "pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname NOT IN "
+       "('information_schema','aimee_kb_vault_orchestrator_api') AND "
+       "pg_catalog.has_schema_privilege(current_user,n.oid,'USAGE') AND "
+       "pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE')) AND NOT EXISTS (SELECT "
+       "1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+       "WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema' AND "
+       "CASE WHEN c.relkind IN ('r','p','v','m','f') THEN "
+       "pg_catalog.has_table_privilege(current_user,c.oid,"
+       "'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') ELSE false END) FROM "
+       "pg_catalog.pg_roles o WHERE "
+       "o.rolname=current_user";
+   PGconn *connection = runtime ? (PGconn *)runtime->connection : NULL;
+   if (!connection || !connection_uncertain(connection))
+      return 0;
+   int64_t end = deadline();
+   if (end < 0 || !PQresetStart(connection))
+      goto fail;
+   for (;;)
+   {
+      PostgresPollingStatusType state = PQresetPoll(connection);
+      if (state == PGRES_POLLING_OK)
+         break;
+      if (state == PGRES_POLLING_ACTIVE)
+         continue;
+      if (state == PGRES_POLLING_FAILED ||
+          wait_socket(connection, state == PGRES_POLLING_READING ? POLLIN : POLLOUT, end) != 0)
+         goto fail;
+   }
+   pthread_mutex_lock(&binding_mutex);
+   if (bound_runtime != runtime || uncertain_connection != connection)
+   {
+      pthread_mutex_unlock(&binding_mutex);
+      goto fail;
+   }
+   uncertain_connection = NULL;
+   pthread_mutex_unlock(&binding_mutex);
+   if (command(connection, "SET search_path = pg_catalog, pg_temp") ||
+       command(connection, "SET row_security = on") ||
+       command(connection, "SET statement_timeout = '1900ms'") ||
+       command(connection, "SET lock_timeout = '1900ms'") ||
+       authority_boolean(connection, before) ||
+       command(connection, "SET ROLE aimee_kb_vault_orchestrator") ||
+       authority_boolean(connection, after))
+      goto fail;
+   runtime->transaction_active = 0;
+   return 1;
+fail:
+   mark_uncertain(connection);
+   return -1;
+}
+
+int db2_vault_operator_rewrap_recover_uncertain(void)
+{
+   db2_vault_operator_runtime_t *runtime = binding();
+   int64_t end = deadline();
+   if (!runtime || end < 0 || lock_until(runtime_mutex(runtime), end))
+      return -1;
+   int rc = recover_uncertain_locked(runtime);
+   pthread_mutex_unlock(runtime_mutex(runtime));
+   return rc;
 }
 
 static db2_vault_rewrap_result_t tx_begin(db2_vault_rewrap_tx_t **out)
@@ -378,6 +502,11 @@ static db2_vault_rewrap_result_t tx_end(db2_vault_rewrap_tx_t **tp, int commit)
       rc = DB2_VAULT_REWRAP_TRANSIENT;
    db2_vault_operator_runtime_t *r = t->runtime;
    r->transaction_active = 0;
+   /* COMMIT can have taken effect even when its result was lost.  Restore a
+    * separately authenticated session, but preserve TRANSIENT so D2 performs
+    * its normal fresh-snapshot replay classification. */
+   if (connection_uncertain((PGconn *)r->connection))
+      (void)recover_uncertain_locked(r);
    OPENSSL_cleanse(t, sizeof(*t));
    free(t);
    *tp = NULL;
@@ -842,13 +971,53 @@ static db2_vault_rewrap_result_t stage_check(db2_vault_rewrap_tx_t *t, const uin
       fail(t, rc);
    return rc;
 }
-static db2_vault_rewrap_result_t stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
-                                              int64_t f)
+static db2_vault_rewrap_result_t inventory_summary(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                                   int64_t f,
+                                                   db2_vault_rewrap_inventory_summary_t *out)
 {
-   if (!t || !t->secret_exhausted || !t->check_exhausted)
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!t || (t->phase != TX_GENERAL && t->phase != TX_STAGING) || !out)
       return fail(t, DB2_VAULT_REWRAP_INVALID);
+   char id[33], fb[32];
+   op_hex(o, id);
+   snprintf(fb, sizeof(fb), "%lld", (long long)f);
+   Oid ty[] = {25, 20};
+   const char *v[] = {id, fb};
+   PGresult *r = NULL;
+   db2_vault_rewrap_result_t rc = query(
+       t->runtime->connection, "SELECT * FROM " API "org_vault_rewrap_inventory_summary($1,$2)", 2,
+       ty, v, NULL, NULL, &r);
+   if (rc == DB2_VAULT_REWRAP_OK &&
+       (PQntuples(r) != 1 || PQnfields(r) != 3 || col_i64(r, 0, 0, &out->secret_count) ||
+        col_i64(r, 0, 1, &out->check_count) || out->secret_count < 0 || out->check_count < 0 ||
+        col_blob(r, 0, 2, out->inventory_digest, 32)))
+      rc = DB2_VAULT_REWRAP_INTEGRITY;
+   PQclear(r);
+   if (rc != DB2_VAULT_REWRAP_OK)
+   {
+      memset(out, 0, sizeof(*out));
+      return fail(t, rc);
+   }
+   t->phase = TX_STAGING;
+   return rc;
+}
+
+static db2_vault_rewrap_result_t stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                              int64_t f,
+                                              const db2_vault_rewrap_inventory_summary_t *expected)
+{
+   if (!t || !t->secret_exhausted || !t->check_exhausted || !expected ||
+       expected->secret_count < 0 || expected->check_count < 0)
+      return fail(t, DB2_VAULT_REWRAP_INVALID);
+   char sb[32], cb[32];
+   snprintf(sb, sizeof(sb), "%lld", (long long)expected->secret_count);
+   snprintf(cb, sizeof(cb), "%lld", (long long)expected->check_count);
+   Oid ty[] = {20, 20, 17};
+   const char *v[] = {sb, cb, (const char *)expected->inventory_digest};
+   int l[] = {0, 0, 32}, fmt[] = {0, 0, 1};
    db2_vault_rewrap_result_t rc =
-       single_state(t, "org_vault_rewrap_stage_finish", o, f, 0, NULL, NULL, NULL, NULL);
+       single_state(t, "org_vault_rewrap_stage_finish", o, f, 3, ty, v, l, fmt);
    if (!rc)
       t->phase = TX_STAGE_DONE;
    return rc;
@@ -1425,6 +1594,7 @@ const db2_vault_rewrap_ops_t db2_vault_operator_rewrap_ops = {
     .source_check_page = source_check_page,
     .stage_dek = stage_dek,
     .stage_check = stage_check,
+    .inventory_summary = inventory_summary,
     .stage_finish = stage_finish,
     .mark_committing = mark_committing,
     .mark_resealed = mark_resealed,

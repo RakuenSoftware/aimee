@@ -13,6 +13,7 @@ typedef struct
    kb_vault_mutation_auth_result_t auth;
    kb_vault_mutation_step_result_t step;
    kb_vault_operator_result_t effect_result;
+   int race_winner;
    int lookups, locked_lookups, reserves, reseals, finalizes, idle, local;
    int publishes, seals, singleton_calls, auth_calls;
 } fixture_t;
@@ -54,6 +55,14 @@ static void active(fixture_t *f)
    f->status.remediation = KB_VAULT_OPERATOR_REMEDIATION_RESUME;
 }
 
+static void recovery_required(fixture_t *f)
+{
+   completed(f);
+   f->status.state = KB_VAULT_OPERATOR_STATE_RECOVERY_REQUIRED;
+   f->status.operation_state = KB_VAULT_OPERATOR_OPERATION_RECOVERY_REQUIRED;
+   f->status.remediation = KB_VAULT_OPERATOR_REMEDIATION_RECOVER;
+}
+
 static int read_status(kb_vault_operator_status_t *s, void *p)
 {
    *s = ((fixture_t *)p)->status;
@@ -87,6 +96,14 @@ static kb_vault_mutation_db_result_t lookup(const uint8_t request[16], int locke
    assert(request);
    f->lookups++;
    f->locked_lookups += locked;
+   if (f->race_winner)
+   {
+      if (!locked)
+         return KB_VAULT_MUTATION_DB_NOT_FOUND;
+      active(f);
+      *binding = f->binding;
+      return KB_VAULT_MUTATION_DB_OK;
+   }
    if (f->lookup_result == KB_VAULT_MUTATION_DB_OK)
       *binding = f->binding;
    return f->lookup_result;
@@ -264,6 +281,19 @@ static void test_nonoperational_relookup(void)
    kb_vault_operator_mutation_destroy(&m);
 }
 
+static void test_nonoperational_relookup_refreshes_winner_status(void)
+{
+   fixture_t f;
+   kb_vault_operator_mutation_t m;
+   setup(&f, &m);
+   f.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
+   f.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   f.race_winner = 1;
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_OPERATIONAL);
+   assert(f.lookups == 2 && f.locked_lookups == 1 && f.reseals == 1 && f.finalizes == 1);
+   kb_vault_operator_mutation_destroy(&m);
+}
+
 static void test_resume_exact_active(void)
 {
    fixture_t f;
@@ -304,6 +334,61 @@ static void test_start_request_binding_mismatch(void)
    kb_vault_operator_mutation_destroy(&m);
 }
 
+static void test_start_terminal_replays_are_typed_and_stable(void)
+{
+   fixture_t f;
+   kb_vault_operator_mutation_t m;
+   setup(&f, &m);
+   f.lookup_result = KB_VAULT_MUTATION_DB_OK;
+   f.binding.state = KB_VAULT_MUTATION_BINDING_RECOVERY_REQUIRED;
+   recovery_required(&f);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) ==
+          KB_VAULT_OPERATOR_RESULT_RECOVERY_REQUIRED);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) ==
+          KB_VAULT_OPERATOR_RESULT_RECOVERY_REQUIRED);
+   assert(f.reseals == 0 && f.finalizes == 0 && f.reserves == 0);
+   kb_vault_operator_mutation_destroy(&m);
+
+   setup(&f, &m);
+   f.lookup_result = KB_VAULT_MUTATION_DB_OK;
+   f.binding.state = KB_VAULT_MUTATION_BINDING_ABORTED;
+   f.status.state = KB_VAULT_OPERATOR_STATE_SEALED_IDLE;
+   f.status.remediation = KB_VAULT_OPERATOR_REMEDIATION_UNSEAL;
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_INVALID_STATE);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_INVALID_STATE);
+   assert(f.reseals == 0 && f.finalizes == 0 && f.reserves == 0);
+   kb_vault_operator_mutation_destroy(&m);
+}
+
+static void test_activation_transition_closes_admission_window(void)
+{
+   fixture_t f;
+   kb_vault_operator_mutation_t m;
+   setup(&f, &m);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_OPERATIONAL);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_BUSY);
+   assert(kb_vault_operator_mutation_after_secret_wipe(&m) == 0);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_BUSY);
+   assert(kb_vault_operator_mutation_activation_window_valid(&m) == 0);
+   assert(kb_vault_operator_mutation_mark_general_serving(&m) == 0);
+   f.auth = KB_VAULT_MUTATION_AUTH_WRONG_SECRET;
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_WRONG_SECRET);
+   kb_vault_operator_mutation_destroy(&m);
+}
+
+static void test_activation_publish_deadline_expires_closed(void)
+{
+   fixture_t f;
+   kb_vault_operator_mutation_t m;
+   setup(&f, &m);
+   assert(execute(&m, KB_VAULT_OPERATOR_OPCODE_START) == KB_VAULT_OPERATOR_RESULT_OPERATIONAL);
+   m.activation_deadline.tv_sec = 0;
+   m.activation_deadline.tv_nsec = 0;
+   assert(kb_vault_operator_mutation_after_secret_wipe(&m) == -1);
+   assert(f.publishes == 0 && f.seals == 1);
+   kb_vault_operator_mutation_destroy(&m);
+}
+
 static void test_unseal_shapes(void)
 {
    fixture_t f;
@@ -330,9 +415,13 @@ int main(void)
    test_start_and_publish();
    test_wrong_secret_is_effectless();
    test_nonoperational_relookup();
+   test_nonoperational_relookup_refreshes_winner_status();
    test_resume_exact_active();
    test_resume_mismatch();
    test_start_request_binding_mismatch();
+   test_start_terminal_replays_are_typed_and_stable();
+   test_activation_transition_closes_admission_window();
+   test_activation_publish_deadline_expires_closed();
    test_unseal_shapes();
    puts("kb vault operator choreography tests: ok");
    return 0;
