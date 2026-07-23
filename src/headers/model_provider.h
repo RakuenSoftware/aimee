@@ -46,9 +46,13 @@ extern "C"
        * data, and a model appearing in it does not prove it is intended for this
        * product, has complete capability metadata, or is enabled for the
        * configured account. Lets an operator register a provider without naming
-       * models ("models": "auto"); they can still narrow it with an explicit
-       * list. NULL means the provider offers no curated set, so "auto" is
-       * rejected rather than guessed at. */
+       * models ("models": "auto"). NULL means the provider offers no curated
+       * set, so "auto" is rejected rather than guessed at.
+       *
+       * This list is the DEFAULT, not a ceiling: an explicit "models" array is an
+       * operator OVERRIDE and is expanded without membership checking. An
+       * operator who names a model deliberately is not second-guessed — the
+       * curated set exists so they do not have to name any. */
       const char **routable_models;
 
       int fixed_temperature; /* -1 = caller chooses; >= 0 = pinned */

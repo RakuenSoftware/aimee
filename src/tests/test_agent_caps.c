@@ -1232,22 +1232,72 @@ void test_provider_general_rejects_malformed_registrations(void)
    assert(agent_load_config(&c) != 0);
 
    /* A LEGACY agent already holding the generated name must collide, not be
-    * shadowed by an unreachable duplicate. */
-   f = fopen(agent_config_path(), "w");
-   assert(f != NULL);
-   fputs("{\"agents\":["
-         "{\"name\":\"codex:gpt-5.6-sol\",\"provider\":\"openai\","
-         "\"endpoint\":\"https://api.openai.com/v1\",\"model\":\"gpt-5.6-sol\","
-         "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},"
-         "{\"name\":\"codex\",\"provider\":\"chatgpt\","
-         "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
-         "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
-         "\"models\":[\"gpt-5.6-sol\"]}]}\n",
-         f);
-   fclose(f);
-   assert(agent_load_config(&c) != 0);
+    * shadowed by an unreachable duplicate — in EITHER declaration order. A scan
+    * of only the agents committed so far catches one ordering and misses the
+    * other, which is why the check is a whole-config pass. */
+   const char *legacy_first =
+       "{\"agents\":["
+       "{\"name\":\"codex:gpt-5.6-sol\",\"provider\":\"openai\","
+       "\"endpoint\":\"https://api.openai.com/v1\",\"model\":\"gpt-5.6-sol\","
+       "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]},"
+       "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+       "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+       "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+       "\"models\":[\"gpt-5.6-sol\"]}]}\n";
+   const char *expansion_first =
+       "{\"agents\":["
+       "{\"name\":\"codex\",\"provider\":\"chatgpt\","
+       "\"endpoint\":\"https://chatgpt.com/backend-api/codex\","
+       "\"auth_type\":\"codex-oauth\",\"roles\":[\"review\"],"
+       "\"models\":[\"gpt-5.6-sol\"]},"
+       "{\"name\":\"codex:gpt-5.6-sol\",\"provider\":\"openai\","
+       "\"endpoint\":\"https://api.openai.com/v1\",\"model\":\"gpt-5.6-sol\","
+       "\"auth_type\":\"bearer\",\"api_key\":\"k\",\"roles\":[\"review\"]}]}\n";
+   for (int order = 0; order < 2; order++)
+   {
+      f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      fputs(order == 0 ? legacy_first : expansion_first, f);
+      fclose(f);
+      assert(agent_load_config(&c) != 0);
+   }
 
    printf("  PASS: test_provider_general_rejects_malformed_registrations\n");
+   unlink(agent_config_path());
+}
+
+/* An operator who pins catalog_provider on a provider-general registration - a
+ * gateway speaking one wire format while serving another vendor's models - means
+ * it for every generated target. Discarding it would silently swap the vendor
+ * identity that drives capability lookup, price, tier derivation and the
+ * canonical model ref. */
+void test_provider_general_preserves_explicit_catalog_provider(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f != NULL);
+   fputs("{\"agents\":[{\"name\":\"gw\",\"provider\":\"openai\","
+         "\"endpoint\":\"https://gateway.example/v1\",\"auth_type\":\"bearer\","
+         "\"api_key\":\"k\",\"catalog_provider\":\"anthropic\","
+         "\"roles\":[\"review\"],"
+         "\"models\":[\"claude-opus-4-8\",\"claude-haiku-4-5\"]}]}\n",
+         f);
+   fclose(f);
+
+   agent_config_t c;
+   assert(agent_load_config(&c) == 0);
+   assert(c.agent_count == 2);
+
+   const agent_t *opus = agent_find(&c, "gw:claude-opus-4-8");
+   const agent_t *haiku = agent_find(&c, "gw:claude-haiku-4-5");
+   assert(opus && haiku);
+   /* The pin survives on EVERY target, and is still marked explicit. */
+   assert(strcmp(agent_catalog_provider(opus), "anthropic") == 0);
+   assert(strcmp(agent_catalog_provider(haiku), "anthropic") == 0);
+   assert(opus->catalog_provider_explicit == 1);
+   /* Wire provider untouched. */
+   assert(strcmp(opus->provider, "openai") == 0);
+
+   printf("  PASS: test_provider_general_preserves_explicit_catalog_provider\n");
    unlink(agent_config_path());
 }
 
