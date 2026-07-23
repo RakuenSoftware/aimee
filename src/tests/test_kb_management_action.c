@@ -1,4 +1,5 @@
 #include "kb/kb_management_action.h"
+#include "json_wire.h"
 #include "kb_mgmt_status_authority.h"
 
 #include <assert.h>
@@ -337,6 +338,9 @@ int main(void)
    assert(kb_management_action_body_parse(nul_action, strlen(nul_action), &a));
    assert(kb_management_action_body_parse(nul_agent, strlen(nul_agent), &a));
    const char *literal_escape = "{\"action\":\"agent.enable\",\"agent\":\"alpha\\\\u0000\"}";
+   assert(!json_wire_has_nul_escape(literal_escape, strlen(literal_escape)));
+   assert(json_wire_has_nul_escape(nul_action, strlen(nul_action)));
+   assert(json_wire_has_nul_escape(nul_agent, strlen(nul_agent)));
    assert(kb_management_action_body_parse(literal_escape, strlen(literal_escape), &a));
    db2_management_action_outcome_operation_t decoded = {0};
    const char *reversed = "{\"effect\":\"applied\",\"result\":\"succeeded\"}";
