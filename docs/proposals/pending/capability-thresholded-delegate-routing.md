@@ -1119,8 +1119,10 @@ now REPORTS:
   eligible under this packet's scope and capability requirements. Absent when no such seat exists,
   which is itself the answer: the placement cannot be corrected by spending more.
 
-`escalated` was removed rather than pinned false — a field that is always false is worse than an
-absent one. `delegate_snapshot_worktree()` went with it: it existed only to make a failed
+`escalated` was removed rather than pinned false. Not for tidiness — `verify_outcome` and
+`escalation_warranted` are both emitted unconditionally, so always-present is the house style — but
+because it could only ever have been produced by the same in-process path, so no deployed caller
+has ever read it and there is nothing to break. `delegate_snapshot_worktree()` went with it: it existed only to make a failed
 automatic re-dispatch recoverable, and with nothing re-dispatching there is no partial-worktree
 hazard to guard against. `worktree_may_be_partial` and `pre_escalation_snapshot` are gone for the
 same reason.
@@ -1129,8 +1131,16 @@ same reason.
 is genuinely dearer and still eligible — is the part worth keeping, and is what now backs
 `suggested_escalation_target`. `verify_classify()` still separates an attributable work-product
 failure from an unusable verifier, because that distinction governs whether the placement warning
-is honest. `verify_escalation_warranted()`'s `already_escalated` argument is retained so an
-explicit retry loop consulting it cannot talk itself into the ladder the operator rejected.
+is honest. `verify_escalation_warranted()`'s `already_escalated` argument was CUT: it existed only to stop the
+automatic re-dispatch forming a ladder, and retaining it for a hypothetical future retry loop would
+be exactly the speculative generality this codebase avoids.
+
+**These advisory fields have no in-tree consumer today, and that is stated in the code.** They are
+produced only by an in-process run with `--verify`, and that flag is refused on the server-routed
+path — which is how every supported deployment invokes delegates. They exist so a human reading the
+JSON, or a future operator-owned retry policy, can see the placement judgement without re-deriving
+it. Naming that plainly is the point: the alternative is a field the next reader mistakes for a
+contract something acts on.
 
 If automated escalation returns, it should be an operator-owned recovery policy enabled narrowly
 for specific task and failure classes — never a consequence of a caller-supplied flag.

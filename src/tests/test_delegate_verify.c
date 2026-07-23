@@ -70,12 +70,12 @@ static void test_classification(void)
 
    /* ...and a status above the signal band must still be able to warrant
     * escalation: that is the whole point of narrowing it. */
-   assert(verify_escalation_warranted(0, verify_classify(128 + max_sig + 1), 0) == 1);
+   assert(verify_escalation_warranted(0, verify_classify(128 + max_sig + 1)) == 1);
 
    /* An OOM-killed test suite must NOT warrant escalation - that would blame the
     * model for the machine running out of memory. */
-   assert(verify_escalation_warranted(0, verify_classify(137), 0) == 0);
-   assert(verify_escalation_warranted(0, verify_classify(124), 0) == 0);
+   assert(verify_escalation_warranted(0, verify_classify(137)) == 0);
+   assert(verify_escalation_warranted(0, verify_classify(124)) == 0);
 
    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_PASS), "pass") == 0);
    assert(strcmp(verify_outcome_name(VERIFY_OUTCOME_FAILED), "failed") == 0);
@@ -88,28 +88,22 @@ static void test_escalation_policy(void)
 {
    /* The ONLY case that warrants the misplacement advice: the delegate finished,
     * and a verifier genuinely ran and failed. */
-   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_FAILED, 0) == 1);
+   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_FAILED) == 1);
 
    /* A passing verifier obviously does not. Nor does the no-verifier case: the
     * caller passes PASS when none is configured, because with no objective signal
     * the right answer is "fail for review", never "guess from delegate prose". */
-   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_PASS, 0) == 0);
+   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_PASS) == 0);
 
    /* An unusable verifier says NOTHING about the model. Advising a dearer seat
     * here would blame it for a missing binary. */
-   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_INFRA_ERROR, 0) == 0);
+   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_INFRA_ERROR) == 0);
 
    /* The delegate run itself failing is an AVAILABILITY problem - API error,
     * transport failure, crash, timeout - which belongs to retry/failover. The
     * model is not to blame, so the competence claim must not be raised. */
-   assert(verify_escalation_warranted(1, VERIFY_OUTCOME_FAILED, 0) == 0);
-   assert(verify_escalation_warranted(-1, VERIFY_OUTCOME_FAILED, 0) == 0);
-
-   /* Once a dearer retry has been made, the advice stops. Nothing re-dispatches
-    * automatically any more, but an explicit retry loop consulting this must not
-    * be able to talk itself into cheap -> capable -> more capable, which is the
-    * pattern the operator rejected as the fundamental mechanism. */
-   assert(verify_escalation_warranted(0, VERIFY_OUTCOME_FAILED, 1) == 0);
+   assert(verify_escalation_warranted(1, VERIFY_OUTCOME_FAILED) == 0);
+   assert(verify_escalation_warranted(-1, VERIFY_OUTCOME_FAILED) == 0);
 
    printf("  PASS: test_escalation_policy\n");
 }

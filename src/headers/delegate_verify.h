@@ -63,20 +63,21 @@ extern "C"
     *
     * The caller does not act on this automatically - see the header note.
     *
-    *   delegate_rc      : 0 when the delegate run itself completed
-    *   outcome          : classification of the verify run
-    *   already_escalated: a dearer retry has ALREADY been made for this packet.
-    *                      Suppresses the advice so an explicit retry loop cannot
-    *                      talk itself into a ladder - the thing the operator
-    *                      rejected as a fundamental mechanism.
+    *   delegate_rc: 0 when the delegate run itself completed
+    *   outcome    : classification of the verify run
     *
-    * Returns 1 only when the delegate completed, a verifier genuinely ran and
-    * failed, and no dearer retry has been made. With no verifier configured there
-    * is no objective signal at all, so the caller must pass VERIFY_OUTCOME_PASS
-    * and this returns 0 - report for review rather than guessing from delegate
-    * prose. */
-   int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome,
-                                   int already_escalated);
+    * Returns 1 only when the delegate completed and a verifier genuinely ran and
+    * failed. With no verifier configured there is no objective signal at all, so
+    * the caller must pass VERIFY_OUTCOME_PASS and this returns 0 - report for
+    * review rather than guessing from delegate prose.
+    *
+    * There is deliberately no `already_escalated` argument. It existed to stop
+    * the automatic re-dispatch forming a ladder; with the re-dispatch retired,
+    * no caller passes anything but 0, and keeping a parameter for a hypothetical
+    * future caller is exactly the speculative generality this codebase avoids.
+    * A caller that ever builds an explicit retry loop can track its own attempt
+    * count. */
+   int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome);
 
 #ifdef __cplusplus
 }

@@ -74,10 +74,8 @@ const char *verify_outcome_name(verify_outcome_t o)
    }
 }
 
-int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome, int already_escalated)
+int verify_escalation_warranted(int delegate_rc, verify_outcome_t outcome)
 {
-   if (already_escalated)
-      return 0;
    /* The delegate must have finished. A failed run is an availability problem for
     * retry/failover to handle; reporting a misplacement would blame the model for
     * a transport or process failure it did not cause. */

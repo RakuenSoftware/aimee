@@ -1688,8 +1688,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
        * judgement - which seat is genuinely dearer AND still eligible under the
        * packet's scope and capability requirements - is the part worth keeping.
        */
-      const char *suggested_target = NULL;
-      if (verify_escalation_warranted(rc, verify_outcome, 0))
+      /* A COPY, not a pointer into cfg. cfg is this function's stack and the
+       * name is read much later when the JSON is built; borrowing the pointer
+       * would be correct today and dangling the moment anything between here and
+       * there reloads the config, which delegate paths do elsewhere. */
+      char suggested_target[MAX_AGENT_NAME] = {0};
+      if (verify_escalation_warranted(rc, verify_outcome))
       {
          agent_t *failed_seat = agent_find(&cfg, result.agent_name);
          int failed_tier = failed_seat ? failed_seat->cost_tier : -1;
@@ -1700,7 +1704,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          agent_t *target = agent_route_escalation_target(&cfg, role, failed_tier, 0, scope);
          if (target)
          {
-            suggested_target = target->name;
+            snprintf(suggested_target, sizeof(suggested_target), "%s", target->name);
             LOG_WARN("delegate",
                      "MISPLACEMENT: '%s' (tier %d) completed but failed verification for role "
                      "'%s'. A dearer eligible seat exists ('%s', tier %d). Investigate the "
@@ -1747,19 +1751,31 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             /* Machine-readable category, so a caller can tell an attributable
              * work-product failure from an unusable verifier. */
             cJSON_AddStringToObject(obj, "verify_outcome", verify_outcome_name(verify_outcome));
-            /* ADVISORY. True when the failure is attributable to the work
-             * product rather than to an unusable verifier - i.e. the placement
-             * is worth investigating. Nothing is re-dispatched automatically;
-             * this is routing telemetry, and any retry is the caller's explicit
-             * decision. `escalated` is deliberately gone rather than pinned
-             * false: a field that is always false is worse than absent. */
+            /* ADVISORY, and with NO in-tree consumer today - stated plainly so
+             * the next reader does not mistake it for a contract something acts
+             * on. These fields are produced only by an IN-PROCESS run with
+             * --verify; the flag is refused on the server-routed path, which is
+             * how every supported deployment invokes delegates. They exist so a
+             * human reading the JSON, or a future operator-owned retry policy,
+             * can see the placement judgement without re-deriving it.
+             *
+             * True when the failure is attributable to the work product rather
+             * than to an unusable verifier - i.e. the placement is worth
+             * investigating. Nothing is re-dispatched automatically.
+             *
+             * `escalated` was dropped rather than pinned false. Not for tidiness
+             * - `verify_outcome` and this field are both emitted unconditionally,
+             * so "always-present" is the house style. It is dropped because it
+             * could only ever have been produced by this same in-process path,
+             * so no deployed caller has ever read it and there is nothing to
+             * break. */
             cJSON_AddBoolToObject(obj, "escalation_warranted",
-                                  verify_escalation_warranted(rc, verify_outcome, 0));
+                                  verify_escalation_warranted(rc, verify_outcome));
             /* The seat a retry SHOULD use - genuinely dearer AND still eligible
              * under this packet's scope and capability requirements. Absent when
              * no such seat exists, which is itself the answer: the placement
              * cannot be corrected by spending more. */
-            if (suggested_target)
+            if (suggested_target[0])
                cJSON_AddStringToObject(obj, "suggested_escalation_target", suggested_target);
             if (handoff_checked)
                delegate_handoff_add_validation_json(obj, &handoff_validation);
@@ -1821,7 +1837,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          {
             event_notify(AIMEE_EVENT_VERIFY_FAIL, "cross-verify failed");
             fprintf(stderr, "aimee: cross-verify FAILED (exit %d)\n", cv_rc);
-            if (verify_escalation_warranted(rc, cv_outcome, 0))
+            if (verify_escalation_warranted(rc, cv_outcome))
                LOG_WARN("delegate",
                         "MISPLACEMENT: agent '%s' completed but its work failed verification for "
                         "role '%s'. Escalation is warranted — placement, not the model, is the "
