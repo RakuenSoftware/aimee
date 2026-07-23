@@ -65,8 +65,11 @@ release gate. Branch ordering and prose are not enforcement, so the gate is code
 in the slice that earns it.
 
 Each slice gets its own reviewed plan, adversarial branch review, target
-validation, and merge. E1's plan is
-`tiered-llm-p7-witness-e1-record-checkpoint-evidence-log.plan.md`.
+validation, and merge:
+
+- E1 — `tiered-llm-p7-witness-e1-record-checkpoint-evidence-log.plan.md`
+- E2 — `tiered-llm-p7-witness-e2-append-emission-verification.plan.md`
+- E3 — `tiered-llm-p7-witness-e3-kill-matrix-and-release.plan.md`
 
 E1 and E2 were originally split so that the acknowledgement rules could be proven
 before any budget depended on them. There is no acknowledgement and no budget
