@@ -342,6 +342,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-witness-merkle \
                $(TESTPREFIX)/unit-test-vault-witness-checkpoint \
                $(TESTPREFIX)/unit-test-vault-witness-export \
+               $(TESTPREFIX)/unit-test-vault-witness-verify \
                $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
@@ -3706,6 +3707,12 @@ $(TESTPREFIX)/unit-test-vault-witness-checkpoint: $(OBJDIR)/tests/test_vault_wit
 
 $(TESTPREFIX)/unit-test-vault-witness-export: $(OBJDIR)/tests/test_vault_witness_export.o \
                               $(OBJDIR)/modules/vault/vault_witness_export.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-verify: $(OBJDIR)/tests/test_vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-mutation-budget: \
