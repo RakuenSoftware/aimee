@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "server_mgmt_checkpoint_client.h"
 
-#include "kb/kb_mgmt_client.h"
+#include "kb_client_management.h"
 #include "kb_mgmt_endpoint.h"
 #include "kb_mgmt_status.h"
 #include "kb_tls.h"

@@ -1500,6 +1500,7 @@ clean:
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
 	       tests/fuzz_kb_mgmt_jwks_publication \
 	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+	       tests/fuzz_server_mgmt_action \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
@@ -1686,11 +1687,15 @@ FUZZ_KB_MGMT_CHECKPOINT_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_checkpoint.o \
 FUZZ_KB_MANAGEMENT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_kb_management_action.o \
                                  $(OBJDIR)/kb/kb_management_action.o $(OBJDIR)/cJSON.o
 
+FUZZ_SERVER_MGMT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_action.o \
+                               $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/cJSON.o
+
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse tests/fuzz_config_load \
                tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
                tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
                tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication \
-               tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action
+               tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+               tests/fuzz_server_mgmt_action
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -1744,6 +1749,10 @@ $(OBJDIR)/tests/fuzz_kb_management_action.o: tests/fuzz_kb_management_action.c
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
+$(OBJDIR)/tests/fuzz_server_mgmt_action.o: tests/fuzz_server_mgmt_action.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
 tests/fuzz_extractors: $(FUZZ_EXTRACTOR_OBJS)
 	$(CC) -o $@ $^ $(L_FULL)
 
@@ -1783,6 +1792,9 @@ tests/fuzz_kb_mgmt_checkpoint: $(FUZZ_KB_MGMT_CHECKPOINT_OBJS)
 tests/fuzz_kb_management_action: $(FUZZ_KB_MANAGEMENT_ACTION_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
+tests/fuzz_server_mgmt_action: $(FUZZ_SERVER_MGMT_ACTION_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*
 	./tests/fuzz_json_parse tests/fuzz_corpus/seed.json tests/fuzz_corpus/seed_config.json
@@ -1797,6 +1809,7 @@ fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_kb_mgmt_jwks_publication tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_checkpoint tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_management_action tests/fuzz_corpus/seed.*
+	./tests/fuzz_server_mgmt_action tests/fuzz_corpus/seed.*
 
 # --- Coverage reporting ---
 
