@@ -42,12 +42,13 @@ is unchanged.
 
 ### Exclusive transport selection
 
-A configured remote is an **exclusive** choice. Every `/v1` call goes to it, and
-none go to a co-located unix socket: there is no probe of both and no fallback
-between them. One invocation therefore cannot be served partly by the remote and
-partly by a local server.
+A configured remote is an **exclusive** choice for a thin-client command that
+reaches the `/v1` API: the request goes to the remote, with no probe of a
+co-located unix socket and no fallback between them. One such invocation cannot
+be served partly by the remote and partly by a local server.
 
-This covers the commands that were previously pinned to the local socket:
+Ordinary `/v1` command routing was already remote-aware; this closes the gap for
+the commands that were still pinned to the local socket:
 
 | Command | With a remote configured |
 | --- | --- |
