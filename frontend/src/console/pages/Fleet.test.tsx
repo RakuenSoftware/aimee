@@ -152,6 +152,20 @@ describe('Fleet interactions', () => {
     await selectAgent();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(await screen.findByText('Denied by team policy or the server remote_writes policy.')).toBeTruthy();
+    expect(mocks.ack).toHaveBeenCalledTimes(1);
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('blocks future actions when a definite result cannot be acknowledged', async () => {
+    mocks.get.mockResolvedValueOnce({ servers: [server] });
+    mocks.send.mockRejectedValueOnce(new ApiError(403));
+    mocks.ack.mockRejectedValueOnce(new ApiError(503));
+    render(<FleetHarness />);
+    await loadFleet();
+    await selectAgent();
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
+    expect(await screen.findByText(/session latch could not be acknowledged/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 });

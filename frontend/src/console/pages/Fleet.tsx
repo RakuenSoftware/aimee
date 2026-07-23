@@ -111,7 +111,17 @@ export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps
       setMessage(`${action} succeeded for ${agent} on ${selected}.`);
     } catch (error) {
       // Management mutations are intentionally never retried here.
-      if (!(error instanceof ApiError) || error.status === 409 || error.status === 502) {
+      if (error instanceof ApiError && error.status !== 409 && error.status !== 502) {
+        // fetch delivered a definite HTTP result even though it was non-2xx.
+        // Acknowledge that result before allowing another mutation.
+        try {
+          await acknowledgeFleetMutation();
+        } catch {
+          onMutationBlocked();
+          setMessage('The action result was received, but its session latch could not be acknowledged. Sign in again only after operator verification.');
+          return;
+        }
+      } else {
         onMutationBlocked();
       }
       setMessage(fleetError(error));

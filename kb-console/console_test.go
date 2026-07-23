@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -180,6 +181,62 @@ func TestFleetAmbiguityLatchSurvivesSessionReloadAndBlocksRedispatch(t *testing.
 	}
 	if upstreamCalls != 1 {
 		t.Fatalf("ambiguous action reached upstream %d times, want 1", upstreamCalls)
+	}
+}
+
+func TestFleetMutationClaimAllowsOnlyOneConcurrentDispatch(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var upstreamCalls atomic.Int32
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if upstreamCalls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "indeterminate"})
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	exp := time.Now().Add(time.Hour)
+	sess, err := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
+		t.Fatal(err)
+	}
+	dispatch := func(done chan<- int) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/server-1/actions?team=9",
+			strings.NewReader(`{"action":"agent.enable","agent":"agent.one"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-CSRF-Token", sess.csrf)
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+		w := httptest.NewRecorder()
+		srv.handleAPI(w, r)
+		done <- w.Code
+	}
+	done := make(chan int, 2)
+	go dispatch(done)
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first mutation did not reach upstream")
+	}
+	go dispatch(done)
+	select {
+	case status := <-done:
+		if status != http.StatusConflict {
+			t.Fatalf("competing mutation status = %d, want 409", status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("competing mutation did not fail promptly")
+	}
+	close(release)
+	if status := <-done; status != http.StatusBadGateway {
+		t.Fatalf("dispatched mutation status = %d, want 502", status)
+	}
+	if calls := upstreamCalls.Load(); calls != 1 {
+		t.Fatalf("concurrent mutations reached upstream %d times, want 1", calls)
 	}
 }
 
