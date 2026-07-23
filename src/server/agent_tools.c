@@ -86,6 +86,82 @@ const char *agent_tools_active_toolset(void)
    return g_active_toolset[0] ? g_active_toolset : NULL;
 }
 
+/* Turn-local bound toolset snapshot (server-delegate path).
+ *
+ * bind()/clear() bracket ONE turn on a pooled worker thread. The list and the
+ * bound flag live beside g_active_toolset so all turn-local toolset state sits
+ * in one TU. The flag is independent of count: bound_empty (zero names) is
+ * distinguishable from unbound (legacy fallback path), so an authorized-but-empty
+ * surface never silently falls through to today's default.
+ *
+ * Storage capacity matches TOOLSET_MAX_TOOLS / TOOLSET_TOOL_MAX so a successful
+ * resolution can be snapshotted whole. Consumers iterate only [0, count), so the
+ * full-array memset in bind/clear keeps stale tail bytes out of reach regardless
+ * of the prior length. */
+
+typedef enum
+{
+   TOOLSET_BOUND_UNBOUND = 0,
+   TOOLSET_BOUND_EMPTY = 1,
+   TOOLSET_BOUND_LIST = 2
+} agent_toolset_bound_t;
+
+static _Thread_local char g_effective_tool_names[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+static _Thread_local int g_effective_tool_count = 0;
+static _Thread_local agent_toolset_bound_t g_effective_tool_state = TOOLSET_BOUND_UNBOUND;
+
+void agent_tools_bind_effective_toolset(int tools_on, const char *explicit_override,
+                                        const char *role)
+{
+   if (!tools_on)
+   {
+      /* tools_enabled:false is the existing all-or-nothing off path: route
+       * straight to clear() without ever entering a bound state. */
+      agent_tools_clear_effective_toolset();
+      return;
+   }
+
+   /* Step into bound_empty FIRST so the old list is unreachable immediately,
+    * even if a pooled worker was returned to us without a prior clear. */
+   g_effective_tool_state = TOOLSET_BOUND_EMPTY;
+   memset(g_effective_tool_names, 0, sizeof(g_effective_tool_names));
+   g_effective_tool_count = 0;
+
+   const char *selected = explicit_override;
+   if (!selected || !selected[0])
+      selected = getenv("AIMEE_ACTIVE_TOOLSET");
+   if (!selected || !selected[0])
+      selected = toolset_for_delegate_role(role);
+
+   char scratch[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+   char err[TOOLSET_ERROR_MAX] = "";
+   int n = toolset_resolve_effective(selected, scratch, TOOLSET_MAX_TOOLS, err, sizeof(err));
+   if (n < 0)
+   {
+      /* tools-on resolution failure: state stays bound_empty; emit the same
+       * warning toolset_resolve_effective failures have always emitted. */
+      LOG_WARN("toolset", "failed to resolve toolset '%s': %s",
+               selected ? selected : "(null)", err[0] ? err : "unknown error");
+      return;
+   }
+   if (n > TOOLSET_MAX_TOOLS)
+      n = TOOLSET_MAX_TOOLS;
+   for (int i = 0; i < n; i++)
+      snprintf(g_effective_tool_names[i], TOOLSET_TOOL_MAX, "%s", scratch[i]);
+   g_effective_tool_count = n;
+   g_effective_tool_state = (n == 0) ? TOOLSET_BOUND_EMPTY : TOOLSET_BOUND_LIST;
+}
+
+void agent_tools_clear_effective_toolset(void)
+{
+   /* Unconditional: must be safe even when already unbound (pooled worker
+    * handed back without a prior clear). Zero the full capacity, not just the
+    * prior count, so the old tail is both unreachable by count and byte-zeroed. */
+   g_effective_tool_state = TOOLSET_BOUND_UNBOUND;
+   g_effective_tool_count = 0;
+   memset(g_effective_tool_names, 0, sizeof(g_effective_tool_names));
+}
+
 static int agent_tools_path_under_root(const char *path, const char *root)
 {
    if (!path || !path[0] || !root || !root[0])
@@ -447,9 +523,25 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    if (!tool_name || !tool_name[0])
       return 0;
 
-   /* This thread's turn first: the env var is process-wide, so on a pooled worker a
-    * concurrent delegate's value would otherwise decide what THIS one may call. The
-    * env var stays as the single-process CLI's --toolset channel. */
+   /* First policy branch: read the turn-local bound snapshot.
+    * bound_list returns the exact-equality result against the snapshotted
+    * names; bound_empty denies every name. Bound states have no edge to the
+    * resolver, the role fallback, an alias map, or a registry lookup — the
+    * snapshot was built once at bind time. */
+   if (g_effective_tool_state == TOOLSET_BOUND_EMPTY)
+      return 0;
+   if (g_effective_tool_state == TOOLSET_BOUND_LIST)
+   {
+      for (int i = 0; i < g_effective_tool_count; i++)
+         if (strcmp(g_effective_tool_names[i], tool_name) == 0)
+            return 1;
+      return 0;
+   }
+
+   /* Unbound: today's resolver/role fallback path. The env var is process-wide,
+    * so on a pooled worker a concurrent delegate's value would otherwise decide
+    * what THIS one may call. The env var stays as the single-process CLI's
+    * --toolset channel. */
    const char *toolset_name = agent_tools_active_toolset();
    if (!toolset_name || !toolset_name[0])
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
@@ -539,10 +631,39 @@ static const char *tool_def_name(cJSON *tool)
 
 void agent_tools_filter_for_role(cJSON *tools, const char *role)
 {
-   /* This turn's toolset first (thread-local, panel-safe per #1374), then the
-    * single-process CLI's env channel — matching agent_tools_tool_allowed_for_role
-    * so what we advertise and what we enforce never disagree (e.g. a panel sets its
-    * toolset thread-locally, not via the env). */
+   if (!cJSON_IsArray(tools))
+      return;
+
+   /* First branch: read the turn-local bound snapshot. The bound list is the
+    * same thread-local snapshot POSIX disclosure and native dispatch consume,
+    * so what we advertise and what we enforce never disagree. Survivors keep
+    * their input order — we delete rejected entries in place and advance only
+    * over them. */
+   if (g_effective_tool_state == TOOLSET_BOUND_EMPTY ||
+       g_effective_tool_state == TOOLSET_BOUND_LIST)
+   {
+      int bound_count = g_effective_tool_count;
+      for (int i = 0; i < cJSON_GetArraySize(tools);)
+      {
+         cJSON *tool = cJSON_GetArrayItem(tools, i);
+         const char *name = tool_def_name(tool);
+         int in_toolset = 0;
+         for (int j = 0; name && j < bound_count; j++)
+            if (strcmp(name, g_effective_tool_names[j]) == 0)
+            {
+               in_toolset = 1;
+               break;
+            }
+         if (!in_toolset || !agent_tools_tool_allowed_for_role(role, name))
+            cJSON_DeleteItemFromArray(tools, i);
+         else
+            i++;
+      }
+      return;
+   }
+
+   /* Unbound: today's resolver/role fallback. The bound snapshot is never read
+    * here, matching the same `unbound` contract as agent_tools_tool_allowed_for_role. */
    const char *toolset_name = agent_tools_active_toolset();
    if (!toolset_name || !toolset_name[0])
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
@@ -550,7 +671,7 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
       toolset_name = toolset_for_delegate_role(role);
-   if (!cJSON_IsArray(tools) || (!toolset_name && !agent_tools_role_current_code_only(role)))
+   if (!toolset_name && !agent_tools_role_current_code_only(role))
       return;
    if (toolset_name)
    {

@@ -349,6 +349,16 @@ const char *agent_tools_active_toolset(void)
 {
    return NULL;
 }
+void agent_tools_bind_effective_toolset(int tools_on, const char *explicit_override,
+                                        const char *role)
+{
+   (void)tools_on;
+   (void)explicit_override;
+   (void)role;
+}
+void agent_tools_clear_effective_toolset(void)
+{
+}
 int agent_tools_readonly_delegate_blocks(void)
 {
    return 0;
