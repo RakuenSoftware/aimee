@@ -1784,6 +1784,9 @@ cJSON *marshal_roundtable_review(int argc, char **argv)
    const char *mode = rpc_get(&opts, "mode");
    if (mode)
       cJSON_AddStringToObject(req, "mode", mode);
+   const char *roundtable = rpc_get(&opts, "roundtable");
+   if (roundtable)
+      cJSON_AddStringToObject(req, "roundtable", roundtable);
    const char *turns = rpc_get(&opts, "turns");
    if (turns)
       cJSON_AddStringToObject(req, "turns", turns);

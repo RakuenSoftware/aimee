@@ -54,12 +54,27 @@ static void test_off_bypasses_snapshot(void)
    assert(selected.len == 2);
 }
 
+static void test_proof_gated_empty_registry_is_byte_identical(void)
+{
+   const unsigned char body[] = {'{', ' ', '"', 'x', '"', ':', ' ', '1', ' ', '}'};
+   econ_wire_snapshot_t *snapshot = NULL;
+   econ_wire_bytes_t selected = {0};
+   assert(econ_wire_select(1, ECON_WIRE_OPENAI_CHAT, body, sizeof(body), &snapshot, &selected) ==
+          0);
+   assert(snapshot != NULL);
+   assert(selected.len == sizeof(body));
+   assert(memcmp(selected.data, body, sizeof(body)) == 0);
+   assert(selected.data != body);
+   econ_wire_snapshot_destroy(snapshot);
+}
+
 int main(void)
 {
    test_pristine_copy_is_immutable();
    test_explicit_length_preserves_embedded_nul();
    test_invalid_inputs_fail_without_snapshot();
    test_off_bypasses_snapshot();
+   test_proof_gated_empty_registry_is_byte_identical();
    puts("economizer_wire_snapshot: ALL PASS");
    return 0;
 }
