@@ -186,6 +186,24 @@ each raising an integrity alert.
   incremental walk is a **required follow-up before high-volume production**; it
   is not yet a load concern because the cadence scheduler is not wired.
 
+### Witness signing-key lifecycle (verified property)
+
+The witness Ed25519 key is `HKDF(server_kek)`. Checked against the code: nothing
+rotates the server master key — `vault_server_kek` derives from a persisted
+`<config_dir>/.vault/.server-master.key` generated once, and the whole-vault reseal
+(`org_vault_rewrap` / the reseal orchestrator) does **not** touch it. Two
+consequences, both worth stating rather than discovering later:
+
+- **The witness key is stable across vault reseals.** A reseal rotates the
+  custody-anchored KEK for DEKs; it does not change the witness signer, so
+  previously signed checkpoints stay verifiable against the same anchor. There is
+  no rotation break today.
+- **There is also no witness-key rotation capability today.** When server-master-key
+  rotation is introduced, the anchor set must retain the historical public keys
+  (E1's anchor set already supports multiple keys plus revocation) or every
+  checkpoint signed before the rotation becomes unverifiable. That retention rule is
+  a prerequisite of any future rotation work, not an optional extra.
+
 ### Checkpoint SQL surface (built, PG17-validated)
 
 - `org_vault_witness_verify_shard(tenant, provider)` — the head-vs-log cross-check
