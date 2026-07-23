@@ -192,6 +192,31 @@ static uint64_t get_be64(const uint8_t *p)
           ((uint64_t)p[6] << 8) | (uint64_t)p[7];
 }
 
+/* ESAPI carries TPM response codes in the low 16 bits and software/TCTI layer
+ * failures above them.  Strip the format-one handle/session selector before
+ * comparing an authentication response; no provider prose is consulted. */
+static uint32_t tpm2_base_rc(TSS2_RC rc)
+{
+   uint32_t code = (uint32_t)rc & 0xffffU;
+   return code & ~0x0f00U;
+}
+
+static int tpm2_rc_is_auth(TSS2_RC rc)
+{
+   if (((uint32_t)rc & 0xffff0000U) != 0)
+      return 0;
+   uint32_t code = tpm2_base_rc(rc);
+   return code == tpm2_base_rc(TPM2_RC_BAD_AUTH) || code == tpm2_base_rc(TPM2_RC_AUTH_FAIL);
+}
+
+static vault_custody_auth_result_t tpm2_command_failure(TSS2_RC rc,
+                                                        vault_custody_auth_result_t tpm_failure)
+{
+   if (tpm2_rc_is_auth(rc))
+      return VAULT_CUSTODY_AUTH_WRONG_SECRET;
+   return ((uint32_t)rc & 0xffff0000U) != 0 ? VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE : tpm_failure;
+}
+
 /* HKDF-derive a 32-byte authValue from the operator secret (domain-separated). */
 static int derive_authvalue(const void *secret, size_t len, TPM2B_AUTH *out)
 {
@@ -459,6 +484,60 @@ static int nv_verify_public(tpm2_ctx_t *ctx, ESYS_TR nv)
    return ok;
 }
 
+static vault_custody_auth_result_t nv_authorize_existing_typed(tpm2_ctx_t *ctx, const void *secret,
+                                                               size_t secret_len)
+{
+   TPM2B_AUTH auth;
+   memset(&auth, 0, sizeof(auth));
+   if (!ctx || (!secret && secret_len) || derive_authvalue(secret, secret_len, &auth) != 0)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   vault_custody_auth_result_t result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   if (ctx->nv_handle == ESYS_TR_NONE)
+   {
+      ESYS_TR nv = ESYS_TR_NONE;
+      TSS2_RC trc = Esys_TR_FromTPMPublic(ctx->esys, ctx->nv_index, ESYS_TR_NONE, ESYS_TR_NONE,
+                                          ESYS_TR_NONE, &nv);
+      if (trc != TSS2_RC_SUCCESS)
+      {
+         result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
+         goto out;
+      }
+      ctx->nv_handle = nv;
+   }
+
+   TPM2B_NV_PUBLIC *pub = NULL;
+   TSS2_RC trc = Esys_NV_ReadPublic(ctx->esys, ctx->nv_handle, ESYS_TR_NONE, ESYS_TR_NONE,
+                                    ESYS_TR_NONE, &pub, NULL);
+   if (trc != TSS2_RC_SUCCESS)
+   {
+      result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
+      Esys_Free(pub);
+      goto out;
+   }
+   const TPMA_NV want = TPM2_NV_COUNTER_ATTR | TPMA_NV_AUTHREAD | TPMA_NV_AUTHWRITE | TPMA_NV_NO_DA;
+   TPMA_NV got = pub->nvPublic.attributes;
+   got &= ~(TPMA_NV)(TPMA_NV_WRITTEN | TPMA_NV_WRITELOCKED | TPMA_NV_READLOCKED);
+   if (pub->nvPublic.nvIndex != ctx->nv_index || pub->nvPublic.nameAlg != TPM2_ALG_SHA256 ||
+       pub->nvPublic.dataSize != 8 || pub->nvPublic.authPolicy.size != 0 || got != want)
+   {
+      Esys_Free(pub);
+      goto out;
+   }
+   Esys_Free(pub);
+   trc = Esys_TR_SetAuth(ctx->esys, ctx->nv_handle, &auth);
+   if (trc != TSS2_RC_SUCCESS)
+   {
+      result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
+      goto out;
+   }
+   ctx->nv_auth_ready = 1;
+   result = VAULT_CUSTODY_AUTHORIZED;
+out:
+   OPENSSL_cleanse(&auth, sizeof(auth));
+   return result;
+}
+
 /* Ensure ctx->nv_handle is a VERIFIED handle to our NV monotonic counter with the
  * secret-derived authValue set on it (required for AUTHREAD/AUTHWRITE). If the index
  * is absent and allow_create is set (provision/reseal), DefineSpace it under owner
@@ -551,6 +630,29 @@ static int nv_read(tpm2_ctx_t *ctx, uint64_t *out_gen)
    *out_gen = get_be64(data->buffer);
    Esys_Free(data);
    return 0;
+}
+
+static vault_custody_auth_result_t nv_read_typed(tpm2_ctx_t *ctx, uint64_t *out_gen)
+{
+   if (!ctx || !out_gen || ctx->nv_handle == ESYS_TR_NONE || !ctx->nv_auth_ready)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   *out_gen = 0;
+   TPM2B_MAX_NV_BUFFER *data = NULL;
+   TSS2_RC rc = Esys_NV_Read(ctx->esys, ctx->nv_handle, ctx->nv_handle, ESYS_TR_PASSWORD,
+                             ESYS_TR_NONE, ESYS_TR_NONE, 8, 0, &data);
+   if (rc != TSS2_RC_SUCCESS)
+   {
+      Esys_Free(data);
+      return tpm2_command_failure(rc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
+   }
+   if (!data || data->size != 8)
+   {
+      Esys_Free(data);
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   }
+   *out_gen = get_be64(data->buffer);
+   Esys_Free(data);
+   return VAULT_CUSTODY_AUTHORIZED;
 }
 
 /* Increment the NV counter -> a new generation (AUTHWRITE, auth = the NV authValue).
@@ -832,6 +934,127 @@ static int blob_read(const char *path, int *out_version, uint64_t *out_gen, TPM2
    return 0;
 }
 
+/* Read-only D3b authorization/PolicyNV preflight.  Caller holds ctx->mu.  This
+ * deliberately re-reads the primary Name and NV public area even when ESAPI
+ * handles are cached: a successful earlier lookup is not authority for a later
+ * operator mutation. */
+static vault_custody_auth_result_t tpm2_authorization_preflight_current_locked(tpm2_ctx_t *ctx,
+                                                                               const void *secret,
+                                                                               size_t secret_len,
+                                                                               uint64_t *generation)
+{
+   if (generation)
+      *generation = 0;
+   if (!ctx || !generation || !secret || secret_len == 0 ||
+       secret_len > VAULT_CUSTODY_AUTH_SECRET_MAX)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   if (ensure_ready(ctx) != 0)
+      return VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE;
+   if (ensure_primary(ctx, 0) != 0 || verify_primary_name(ctx, ctx->primary) != 0)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   int version = 0;
+   uint64_t bound_generation = 0;
+   TPM2B_PUBLIC pub;
+   TPM2B_PRIVATE priv;
+   TPM2B_DIGEST policy;
+   memset(&pub, 0, sizeof(pub));
+   memset(&priv, 0, sizeof(priv));
+   memset(&policy, 0, sizeof(policy));
+   vault_custody_auth_result_t result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   if (blob_read(ctx->blob_path, &version, &bound_generation, &pub, &priv) != 0 || version != 2 ||
+       bound_generation == 0 || bound_generation > INT64_MAX)
+      goto out;
+   result = nv_authorize_existing_typed(ctx, secret, secret_len);
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+      goto out;
+
+   uint64_t live_generation = 0;
+   result = nv_read_typed(ctx, &live_generation);
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+      goto out;
+   if (live_generation != bound_generation)
+   {
+      result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+      goto out;
+   }
+
+   /* A trial PolicyNV digest is a pure description of the live policy.  Exact
+    * comparison with the active public object proves the blob is bound to this
+    * canonical NV Name, generation, and PolicyAuthValue sequence. */
+   if (compute_seal_policy(ctx, live_generation, &policy) != 0)
+   {
+      result = VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE;
+      goto out;
+   }
+   TPM2B_PUBLIC expected = seal_template_v2(&policy);
+   if (pub.publicArea.type != expected.publicArea.type ||
+       pub.publicArea.nameAlg != expected.publicArea.nameAlg ||
+       pub.publicArea.objectAttributes != expected.publicArea.objectAttributes ||
+       pub.publicArea.parameters.keyedHashDetail.scheme.scheme != TPM2_ALG_NULL ||
+       pub.publicArea.unique.keyedHash.size != 0 ||
+       pub.publicArea.authPolicy.size != expected.publicArea.authPolicy.size ||
+       CRYPTO_memcmp(pub.publicArea.authPolicy.buffer, expected.publicArea.authPolicy.buffer,
+                     expected.publicArea.authPolicy.size) != 0)
+   {
+      result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+      goto out;
+   }
+   result = VAULT_CUSTODY_AUTHORIZED;
+   *generation = live_generation;
+
+out:
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+      *generation = 0;
+   OPENSSL_cleanse(&policy, sizeof(policy));
+   OPENSSL_cleanse(&priv, sizeof(priv));
+   OPENSSL_cleanse(&pub, sizeof(pub));
+   return result;
+}
+
+static vault_custody_auth_result_t tpm2_authorization_preflight_locked(tpm2_ctx_t *ctx,
+                                                                       const void *secret,
+                                                                       size_t secret_len,
+                                                                       uint64_t expected_generation)
+{
+   uint64_t generation = 0;
+   vault_custody_auth_result_t result =
+       tpm2_authorization_preflight_current_locked(ctx, secret, secret_len, &generation);
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+      return result;
+   return generation == expected_generation ? VAULT_CUSTODY_AUTHORIZED
+                                            : VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+}
+
+static int tpm2_authorization_preflight(void *vctx, const void *secret, size_t secret_len,
+                                        uint64_t expected_generation)
+{
+   tpm2_ctx_t *ctx = vctx;
+   if (tpm2_process_ready() != 0 || !ctx)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   pthread_mutex_lock(&ctx->mu);
+   vault_custody_auth_result_t result =
+       tpm2_authorization_preflight_locked(ctx, secret, secret_len, expected_generation);
+   pthread_mutex_unlock(&ctx->mu);
+   return result;
+}
+
+static int tpm2_authorization_preflight_current(void *vctx, const void *secret, size_t secret_len,
+                                                uint64_t *generation)
+{
+   if (generation)
+      *generation = 0;
+   tpm2_ctx_t *ctx = vctx;
+   if (tpm2_process_ready() != 0 || !ctx || !generation)
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   pthread_mutex_lock(&ctx->mu);
+   vault_custody_auth_result_t result =
+       tpm2_authorization_preflight_current_locked(ctx, secret, secret_len, generation);
+   pthread_mutex_unlock(&ctx->mu);
+   return result;
+}
+
 /* Unmarshal one in-memory v2 blob. Prepared recovery uses this directly on the
  * capsule embedded in the canonical bundle: it must never publish the capsule
  * at the active-blob path merely to reuse blob_read(). */
@@ -1019,8 +1242,11 @@ static int tpm2_local_status(void *vctx, unsigned timeout_ms)
  * provider cache or sealed flag, so prepared-capsule recovery can remain sealed. */
 static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVATE *priv,
                                 uint64_t bound_gen, const void *params, size_t len,
-                                uint8_t out_kek[VAULT_KEK_LEN])
+                                uint8_t out_kek[VAULT_KEK_LEN],
+                                vault_custody_auth_result_t *typed_result)
 {
+   if (typed_result)
+      *typed_result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
    if (out_kek)
       OPENSSL_cleanse(out_kek, VAULT_KEK_LEN);
    if (!ctx || !pub || !priv || !out_kek || (!params && len))
@@ -1034,12 +1260,20 @@ static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVAT
    /* Resolve the NV counter (must already exist) + set its secret-derived auth so the
     * policy-session PolicyNV can read it. NO create on the unseal path. */
    if (nv_ensure(ctx, params, len, 0) != 0)
+   {
+      if (typed_result)
+         *typed_result = VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE;
       goto out;
+   }
 
    TSS2_RC trc = Esys_Load(ctx->esys, ctx->primary, ESYS_TR_PASSWORD, ESYS_TR_NONE, ESYS_TR_NONE,
                            priv, pub, &sealed);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
       goto out;
+   }
 
    if (derive_authvalue(params, len, &auth) != 0)
       goto out;
@@ -1057,7 +1291,11 @@ static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVAT
    trc = Esys_StartAuthSession(ctx->esys, ctx->primary, ESYS_TR_NONE, ESYS_TR_NONE, ESYS_TR_NONE,
                                ESYS_TR_NONE, NULL, TPM2_SE_POLICY, &sym, TPM2_ALG_SHA256, &session);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE);
       goto out;
+   }
 
    /* PolicyNV: the TPM asserts NV counter == the blob's bound generation. A STALE
     * blob (bound_gen < live NV after a reseal) FAILS HERE, at the TPM. operandB is
@@ -1069,10 +1307,18 @@ static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVAT
    trc = Esys_PolicyNV(ctx->esys, ctx->nv_handle, ctx->nv_handle, session, ESYS_TR_PASSWORD,
                        ESYS_TR_NONE, ESYS_TR_NONE, &operand, 0, TPM2_EO_EQ);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
       goto out;
+   }
    trc = Esys_PolicyAuthValue(ctx->esys, session, ESYS_TR_NONE, ESYS_TR_NONE, ESYS_TR_NONE);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE);
       goto out;
+   }
 
    /* CONTINUESESSION so the TPM does NOT auto-flush the policy session after Unseal —
     * we own its FlushContext below; ENCRYPT so the unsealed KEK response is encrypted. */
@@ -1080,11 +1326,19 @@ static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVAT
                                    TPMA_SESSION_CONTINUESESSION | TPMA_SESSION_ENCRYPT,
                                    TPMA_SESSION_CONTINUESESSION | TPMA_SESSION_ENCRYPT);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE);
       goto out;
+   }
 
    trc = Esys_Unseal(ctx->esys, sealed, session, ESYS_TR_NONE, ESYS_TR_NONE, &out_data);
    if (trc != TSS2_RC_SUCCESS)
+   {
+      if (typed_result)
+         *typed_result = tpm2_command_failure(trc, VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE);
       goto out;
+   }
    if (!out_data || out_data->size != TPM2_SEALED_LEN)
       goto out;
 
@@ -1094,11 +1348,22 @@ static int unseal_loaded_locked(tpm2_ctx_t *ctx, TPM2B_PUBLIC *pub, TPM2B_PRIVAT
    {
       uint64_t sealed_gen = get_be64(out_data->buffer + VAULT_KEK_LEN);
       uint64_t live_gen = 0;
-      if (sealed_gen != bound_gen || nv_read(ctx, &live_gen) != 0 || live_gen != bound_gen)
+      if (sealed_gen != bound_gen)
+         goto out;
+      vault_custody_auth_result_t read_result = nv_read_typed(ctx, &live_gen);
+      if (read_result != VAULT_CUSTODY_AUTHORIZED)
+      {
+         if (typed_result)
+            *typed_result = read_result;
+         goto out;
+      }
+      if (live_gen != bound_gen)
          goto out;
    }
 
    memcpy(out_kek, out_data->buffer, VAULT_KEK_LEN);
+   if (typed_result)
+      *typed_result = VAULT_CUSTODY_AUTHORIZED;
    rc = 0;
 
 out:
@@ -1148,7 +1413,7 @@ static int tpm2_unseal(void *vctx, const void *params, size_t len)
 
    if (ensure_ready(ctx) != 0 || ensure_primary(ctx, 0) != 0 ||
        blob_read(ctx->blob_path, &version, &bound_gen, &pub, &priv) != 0 || version != 2 ||
-       unseal_loaded_locked(ctx, &pub, &priv, bound_gen, params, len, recovered) != 0)
+       unseal_loaded_locked(ctx, &pub, &priv, bound_gen, params, len, recovered, NULL) != 0)
       goto out;
    memcpy(ctx->kek, recovered, sizeof(ctx->kek));
    ctx->kek_ready = 1;
@@ -1160,6 +1425,57 @@ out:
    OPENSSL_cleanse(&pub, sizeof(pub));
    pthread_mutex_unlock(&ctx->mu);
    return rc;
+}
+
+static int tpm2_unseal_typed(void *vctx, const void *params, size_t len)
+{
+   tpm2_ctx_t *ctx = vctx;
+   if (tpm2_process_ready() != 0 || !ctx || (!params && len))
+      return VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+
+   pthread_mutex_lock(&ctx->mu);
+   OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek));
+   ctx->kek_ready = 0;
+   ctx->sealed = 1;
+   vault_custody_auth_result_t result = VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE;
+   int version = 0;
+   uint64_t bound_gen = 0;
+   TPM2B_PUBLIC pub;
+   TPM2B_PRIVATE priv;
+   uint8_t recovered[VAULT_KEK_LEN];
+   memset(&pub, 0, sizeof(pub));
+   memset(&priv, 0, sizeof(priv));
+   memset(recovered, 0, sizeof(recovered));
+
+   if (ensure_ready(ctx) != 0)
+   {
+      result = VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE;
+      goto out;
+   }
+   if (ensure_primary(ctx, 0) != 0 ||
+       blob_read(ctx->blob_path, &version, &bound_gen, &pub, &priv) != 0 || version != 2)
+      goto out;
+   result = tpm2_authorization_preflight_locked(ctx, params, len, bound_gen);
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+      goto out;
+   if (unseal_loaded_locked(ctx, &pub, &priv, bound_gen, params, len, recovered, &result) != 0)
+      goto out;
+   memcpy(ctx->kek, recovered, sizeof(ctx->kek));
+   ctx->kek_ready = 1;
+   ctx->sealed = 0;
+   result = VAULT_CUSTODY_AUTHORIZED;
+out:
+   if (result != VAULT_CUSTODY_AUTHORIZED)
+   {
+      OPENSSL_cleanse(ctx->kek, sizeof(ctx->kek));
+      ctx->kek_ready = 0;
+      ctx->sealed = 1;
+   }
+   OPENSSL_cleanse(recovered, sizeof(recovered));
+   OPENSSL_cleanse(&priv, sizeof(priv));
+   OPENSSL_cleanse(&pub, sizeof(pub));
+   pthread_mutex_unlock(&ctx->mu);
+   return result;
 }
 
 static int tpm2_seal(void *vctx)
@@ -1185,6 +1501,9 @@ static const vault_custody_provider_t g_tpm2_provider = {
     .seal = tpm2_seal,
     .local_status = tpm2_local_status,
     .after_fork_child = tpm2_after_fork_child_impl,
+    .authorization_preflight = tpm2_authorization_preflight,
+    .typed_unseal = tpm2_unseal_typed,
+    .authorization_preflight_current = tpm2_authorization_preflight_current,
 };
 
 const vault_custody_provider_t *vault_custody_tpm2_provider(void)
@@ -1730,7 +2049,7 @@ int vault_custody_tpm2_reseal_recover_kek(const vault_tpm2_reseal_receipt_t *rec
    if (blob_bytes_unmarshal_v2(b.capsule, b.capsule_len, &capsule_generation, &pub, &priv) != 0 ||
        capsule_generation != receipt->old_generation ||
        unseal_loaded_locked(&g_ctx, &pub, &priv, capsule_generation, secret, strlen(secret),
-                            recovered) != 0)
+                            recovered, NULL) != 0)
    {
       rc = VAULT_TPM2_RESEAL_INTEGRITY;
       goto out;
@@ -2067,6 +2386,35 @@ static int stub_local_status(void *vctx, unsigned timeout_ms)
    return VAULT_CUSTODY_LOCAL_UNAVAILABLE;
 }
 
+static int stub_authorization_preflight(void *vctx, const void *secret, size_t secret_len,
+                                        uint64_t expected_generation)
+{
+   (void)vctx;
+   (void)secret;
+   (void)secret_len;
+   (void)expected_generation;
+   return VAULT_CUSTODY_AUTH_UNSUPPORTED;
+}
+
+static int stub_unseal_typed(void *vctx, const void *secret, size_t secret_len)
+{
+   (void)vctx;
+   (void)secret;
+   (void)secret_len;
+   return VAULT_CUSTODY_AUTH_UNSUPPORTED;
+}
+
+static int stub_authorization_preflight_current(void *vctx, const void *secret, size_t secret_len,
+                                                uint64_t *generation)
+{
+   (void)vctx;
+   (void)secret;
+   (void)secret_len;
+   if (generation)
+      *generation = 0;
+   return VAULT_CUSTODY_AUTH_UNSUPPORTED;
+}
+
 static const vault_custody_provider_t g_tpm2_stub = {
     .name = "tpm2",
     .ctx = NULL,
@@ -2076,6 +2424,9 @@ static const vault_custody_provider_t g_tpm2_stub = {
     .unseal = stub_unseal,
     .seal = stub_seal,
     .local_status = stub_local_status,
+    .authorization_preflight = stub_authorization_preflight,
+    .typed_unseal = stub_unseal_typed,
+    .authorization_preflight_current = stub_authorization_preflight_current,
 };
 
 const vault_custody_provider_t *vault_custody_tpm2_provider(void)
@@ -2167,8 +2518,8 @@ int vault_custody_tpm2_reseal_cleanup(const vault_tpm2_reseal_receipt_t *receipt
 {
    (void)receipt;
    (void)secret;
-   (void)authorization;
-   return VAULT_TPM2_RESEAL_NOT_BUILT;
+   return authorization == VAULT_TPM2_CLEANUP_TERMINAL_COMPLETED ? VAULT_TPM2_RESEAL_NOT_BUILT
+                                                                 : VAULT_TPM2_RESEAL_ERR;
 }
 
 int vault_custody_tpm2_nv_generation(const char *secret, uint64_t *out_gen)

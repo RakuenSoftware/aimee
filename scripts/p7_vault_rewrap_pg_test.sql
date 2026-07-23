@@ -62,6 +62,21 @@ BEGIN
   END LOOP;
 END; $$;
 
+CREATE OR REPLACE FUNCTION p7_rewrap_stage_finish(p_op TEXT,p_fence BIGINT) RETURNS TEXT
+LANGUAGE plpgsql AS $$
+DECLARE s BIGINT; c BIGINT; d BYTEA; operation_state TEXT;
+BEGIN
+  SELECT state,secret_count,check_count,inventory_digest INTO STRICT operation_state,s,c,d
+    FROM kb_vault_rewrap_operation WHERE operation_id=p_op;
+  IF d IS NULL AND operation_state='custody_prepared' THEN
+    SELECT secret_count,check_count,inventory_digest INTO STRICT s,c,d
+      FROM org_vault_rewrap_inventory_summary(p_op,p_fence);
+  ELSIF d IS NULL THEN
+    s:=0; c:=0; d:=decode(repeat('00',32),'hex');
+  END IF;
+  RETURN org_vault_rewrap_stage_finish(p_op,p_fence,s,c,d);
+END; $$;
+
 -- Owner-only surface: broad grant reapplication must not expose tables, helpers,
 -- inventory pages, or transitions to PUBLIC or the runtime role.
 DO $$
@@ -248,7 +263,7 @@ COMMIT;
 BEGIN ISOLATION LEVEL SERIALIZABLE;
 SELECT p7_rewrap_stage_all('dddddddddddddddddddddddddddddddd',
   current_setting('aimee.p7_abort_staged_fence')::bigint);
-SELECT org_vault_rewrap_stage_finish('dddddddddddddddddddddddddddddddd',
+SELECT p7_rewrap_stage_finish('dddddddddddddddddddddddddddddddd',
   current_setting('aimee.p7_abort_staged_fence')::bigint);
 COMMIT;
 BEGIN;
@@ -257,7 +272,7 @@ SELECT org_vault_rewrap_abort('dddddddddddddddddddddddddddddddd',
 SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_record_prepared(
   'dddddddddddddddddddddddddddddddd',current_setting('aimee.p7_abort_staged_fence')::bigint,
   '\x737461676564',sha256('\x737461676564'::bytea))$q$,'aborted');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect($q$SELECT p7_rewrap_stage_finish(
   'dddddddddddddddddddddddddddddddd',
   current_setting('aimee.p7_abort_staged_fence')::bigint)$q$,'aborted');
 COMMIT;
@@ -279,7 +294,7 @@ BEGIN
   END IF;
   IF p_target IN ('wraps_staged','reseal_committing','resealed','promoted') THEN
     PERFORM p7_rewrap_stage_all(p_op,f);
-    PERFORM org_vault_rewrap_stage_finish(p_op,f);
+    PERFORM p7_rewrap_stage_finish(p_op,f);
   END IF;
   IF p_target IN ('reseal_committing','resealed','promoted') THEN
     PERFORM org_vault_rewrap_mark_committing(p_op,f);
@@ -355,10 +370,10 @@ BEGIN
       p_op,f,before_op.receipt,before_op.receipt_digest),'recovery_required');
   END IF;
   IF p_target IN ('wraps_staged','reseal_committing','resealed','promoted') THEN
-    PERFORM p7_rewrap_expect(format('SELECT org_vault_rewrap_stage_finish(%L,%s)',p_op,f),
+    PERFORM p7_rewrap_expect(format('SELECT p7_rewrap_stage_finish(%L,%s)',p_op,f),
       'recovery_required');
   ELSE
-    PERFORM p7_rewrap_expect_error(format('SELECT org_vault_rewrap_stage_finish(%L,%s)',p_op,f),
+    PERFORM p7_rewrap_expect_error(format('SELECT p7_rewrap_stage_finish(%L,%s)',p_op,f),
       '40001');
   END IF;
   IF p_target IN ('reseal_committing','resealed','promoted') THEN
@@ -418,7 +433,7 @@ SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_record_prepared(
 COMMIT;
 
 BEGIN ISOLATION LEVEL SERIALIZABLE;
-SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect_error($q$SELECT p7_rewrap_stage_finish(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'40001');
 SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_stage_dek(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint-1,
@@ -430,7 +445,7 @@ SELECT p7_rewrap_stage_all('cccccccccccccccccccccccccccccccc',
 INSERT INTO kb_vault_rewrap_dek_stage(operation_id,source_id,principal,agent,cred,version,
   source_digest,new_wrapped_dek) VALUES('cccccccccccccccccccccccccccccccc',9223372036854775807,
   'extra','x','y',1,decode(repeat('01',32),'hex'),decode(repeat('02',40),'hex'));
-SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect_error($q$SELECT p7_rewrap_stage_finish(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'40001');
 DELETE FROM kb_vault_rewrap_dek_stage WHERE operation_id='cccccccccccccccccccccccccccccccc'
   AND source_id=9223372036854775807;
@@ -440,7 +455,7 @@ BEGIN
     WHERE operation_id='cccccccccccccccccccccccccccccccc' ORDER BY source_id LIMIT 1;
   UPDATE kb_vault_rewrap_dek_stage SET agent=agent||'-substituted'
     WHERE operation_id='cccccccccccccccccccccccccccccccc' AND source_id=sid;
-  PERFORM p7_rewrap_expect_error(format('SELECT org_vault_rewrap_stage_finish(%L,%s)',
+  PERFORM p7_rewrap_expect_error(format('SELECT p7_rewrap_stage_finish(%L,%s)',
     'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')),'40001');
   UPDATE kb_vault_rewrap_dek_stage SET agent=old_agent
     WHERE operation_id='cccccccccccccccccccccccccccccccc' AND source_id=sid;
@@ -462,10 +477,10 @@ BEGIN
     RAISE EXCEPTION 'P7 rewrap FAIL: conflicting stage replay accepted';
   EXCEPTION WHEN unique_violation THEN NULL; END;
 END $$;
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect($q$SELECT p7_rewrap_stage_finish(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,
   'wraps_staged');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect($q$SELECT p7_rewrap_stage_finish(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,
   'wraps_staged');
 COMMIT;
@@ -666,7 +681,7 @@ SELECT p7_rewrap_expect_error($q$SELECT org_vault_rewrap_abort(
 SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_record_prepared(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint,
   p7_rewrap_main_receipt(),sha256(p7_rewrap_main_receipt()))$q$,'completed');
-SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_stage_finish(
+SELECT p7_rewrap_expect($q$SELECT p7_rewrap_stage_finish(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'completed');
 SELECT p7_rewrap_expect($q$SELECT org_vault_rewrap_mark_committing(
   'cccccccccccccccccccccccccccccccc',current_setting('aimee.p7_rewrap_fence')::bigint)$q$,'completed');
@@ -697,6 +712,7 @@ END $$;
 COMMIT;
 
 DROP FUNCTION p7_rewrap_recovery_case(TEXT,TEXT,TEXT,BIGINT);
+DROP FUNCTION p7_rewrap_stage_finish(TEXT,BIGINT);
 DROP FUNCTION p7_rewrap_stage_all(TEXT,BIGINT);
 DROP FUNCTION p7_rewrap_main_receipt();
 DROP FUNCTION p7_rewrap_expect_error(TEXT,TEXT);

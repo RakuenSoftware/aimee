@@ -33,6 +33,7 @@ static int g_unterminated_failure_class;
 static int g_embedded_failure_class;
 static int g_sequence, g_first_order[40], g_last_order[40];
 static int64_t g_secret_count, g_check_count;
+static vault_mutation_budget_t g_budget;
 static vault_tpm2_reseal_receipt_t g_receipt;
 static uint8_t g_wire[VAULT_RESEAL_RECEIPT_V1_LEN];
 
@@ -157,6 +158,14 @@ static db2_vault_rewrap_result_t snapshot(const uint8_t op[16], db2_vault_rewrap
       s->has_receipt = 1;
       memcpy(s->receipt, g_wire, sizeof(g_wire));
       assert(vault_reseal_receipt_digest(g_wire, s->receipt_digest) == 0);
+   }
+   if (g_state >= DB2_VAULT_REWRAP_WRAPS_STAGED && g_state <= DB2_VAULT_REWRAP_COMPLETED)
+   {
+      s->has_inventory = 1;
+      s->has_stage = 1;
+      s->secret_count = g_secret_count;
+      s->check_count = g_check_count;
+      memset(s->inventory_digest, 0x51, sizeof(s->inventory_digest));
    }
    return DB2_VAULT_REWRAP_OK;
 }
@@ -319,12 +328,28 @@ static db2_vault_rewrap_result_t stage_check(db2_vault_rewrap_tx_t *t, const uin
    g_calls[C_STAGE_CHECK]++;
    return DB2_VAULT_REWRAP_OK;
 }
-static db2_vault_rewrap_result_t stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
-                                              int64_t f)
+static db2_vault_rewrap_result_t inventory_summary(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                                   int64_t f,
+                                                   db2_vault_rewrap_inventory_summary_t *summary)
 {
    (void)t;
    (void)o;
    (void)f;
+   memset(summary, 0, sizeof(*summary));
+   summary->secret_count = g_secret_count;
+   summary->check_count = g_check_count;
+   memset(summary->inventory_digest, 0x51, sizeof(summary->inventory_digest));
+   return DB2_VAULT_REWRAP_OK;
+}
+static db2_vault_rewrap_result_t stage_finish(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
+                                              int64_t f,
+                                              const db2_vault_rewrap_inventory_summary_t *expected)
+{
+   (void)t;
+   (void)o;
+   (void)f;
+   assert(expected && expected->secret_count == g_secret_count &&
+          expected->check_count == g_check_count);
    g_calls[C_STAGE_FINISH]++;
    if (g_stage_finish_result != DB2_VAULT_REWRAP_OK)
       return g_stage_finish_result;
@@ -381,6 +406,7 @@ static db2_vault_rewrap_result_t summary(db2_vault_rewrap_tx_t *t, const uint8_t
    memset(s, 0, sizeof(*s));
    s->secret_count = g_secret_count;
    s->check_count = g_check_count;
+   memset(s->inventory_digest, 0x51, sizeof(s->inventory_digest));
    return DB2_VAULT_REWRAP_OK;
 }
 static db2_vault_rewrap_result_t verify_ack(db2_vault_rewrap_tx_t *t, const uint8_t o[16],
@@ -421,6 +447,7 @@ static const db2_vault_rewrap_ops_t dbops = {.tx_begin = tx_begin,
                                              .source_check_page = check_page,
                                              .stage_dek = stage_dek,
                                              .stage_check = stage_check,
+                                             .inventory_summary = inventory_summary,
                                              .stage_finish = stage_finish,
                                              .mark_committing = mark_committing,
                                              .mark_resealed = mark_resealed,
@@ -592,6 +619,18 @@ static const vault_reseal_custody_ops_t cops = {
     random_bytes,  wrap,        unwrap,     check_wrap,   check_verify};
 static const vault_reseal_orchestrator_deps_t deps = {&dbops, &cops};
 
+static vault_reseal_orchestrator_result_t
+test_orchestrator_run(const vault_reseal_orchestrator_request_t *request,
+                      const vault_reseal_orchestrator_deps_t *run_deps,
+                      vault_reseal_orchestrator_output_t *output)
+{
+   if (request && request->budget)
+      assert(vault_mutation_budget_init(request->budget) == 0);
+   return vault_reseal_orchestrator_run(request, run_deps, output);
+}
+
+#define vault_reseal_orchestrator_run test_orchestrator_run
+
 static void reset_fakes(void)
 {
    memset(g_calls, 0, sizeof(g_calls));
@@ -619,6 +658,7 @@ static void reset_fakes(void)
    g_unterminated_failure_class = 0;
    g_embedded_failure_class = 0;
    g_secret_count = g_check_count = 0;
+   assert(vault_mutation_budget_init(&g_budget) == 0);
 }
 
 static vault_reseal_orchestrator_result_t run(db2_vault_rewrap_state_t state,
@@ -636,6 +676,7 @@ static vault_reseal_orchestrator_result_t run(db2_vault_rewrap_state_t state,
    r.provider_secret_len = sizeof(secret);
    g_state = state;
    g_status = status;
+   r.budget = &g_budget;
    reset_fakes();
    g_state = state;
    g_status = status;
@@ -662,6 +703,8 @@ static vault_reseal_orchestrator_request_t request(vault_reseal_orchestrator_mod
    r.request_id = "request";
    r.provider_secret = secret;
    r.provider_secret_len = 3;
+   assert(vault_mutation_budget_init(&g_budget) == 0);
+   r.budget = &g_budget;
    return r;
 }
 
