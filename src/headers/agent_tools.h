@@ -101,6 +101,14 @@ void agent_tools_set_active_toolset(const char *toolset);
 const char *agent_tools_active_toolset(void);
 const char *agent_tools_dispatch_role(void);
 
+/* The single clear transition for the effective-tool selection bound to this
+ * thread. On every call: sets the effective-tool state to unbound, zeroes the
+ * count, zeroes the full declared effective-name array capacity, and clears the
+ * active-toolset selection through the same internal transition. Performs no
+ * tool resolution and emits no resolution warning. Idempotent on the already-
+ * unbound state. */
+void agent_tools_clear_effective_toolset(void);
+
 /* Git-write seam (git_commit / git_push / git_branch / git_pr).
  *
  * Those tools are implemented in the SERVER tier (the MCP git dispatch, which owns

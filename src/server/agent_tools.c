@@ -86,6 +86,47 @@ const char *agent_tools_active_toolset(void)
    return g_active_toolset[0] ? g_active_toolset : NULL;
 }
 
+/* Effective-tool selection: the resolved name list THIS THREAD's turn is bound to.
+ *
+ * A zero count alone cannot distinguish "no selection yet" from "explicitly bound
+ * empty selection" — a reader that only checks count would silently fall back to
+ * defaults on the second case. The tri-state tracks the intent:
+ *   unbound    — no selection has been made; count is meaningless, names are stale
+ *   bound_empty — a selection has been bound that yields zero tools
+ *   bound_list  — a selection has been bound that yields >0 tools (count is exact)
+ *
+ * Lives beside g_active_toolset for the same reason: state and the code that
+ * resolves against it belong together. The names array reuses the existing
+ * resolver capacity (TOOLSET_MAX_TOOLS x TOOLSET_TOOL_MAX) — no dynamic policy
+ * representation, no serialized type, no end-user API. Consumers inspect the
+ * half-open range [0, g_effective_tool_count). */
+typedef enum
+{
+   AGENT_TOOLS_EFFECTIVE_UNBOUND = 0,
+   AGENT_TOOLS_EFFECTIVE_BOUND_EMPTY = 1,
+   AGENT_TOOLS_EFFECTIVE_BOUND_LIST = 2,
+} agent_tools_effective_state_t;
+
+_Thread_local static char g_effective_tool_names[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
+_Thread_local static size_t g_effective_tool_count = 0;
+_Thread_local static agent_tools_effective_state_t g_effective_tool_state =
+    AGENT_TOOLS_EFFECTIVE_UNBOUND;
+
+/* The single clear transition. Idempotent and unconditional: every call performs
+ * every reset step regardless of prior state, so a leftover bound_empty or
+ * bound_list cannot survive a reset, and calling it on an already-unbound module
+ * leaves the same cleared state. Performs no tool resolution and emits no
+ * resolution warning — the active-toolset selection is cleared through the same
+ * internal transition (agent_tools_set_active_toolset(NULL)), so the active-string
+ * and the effective-list stay in lockstep. */
+void agent_tools_clear_effective_toolset(void)
+{
+   g_effective_tool_state = AGENT_TOOLS_EFFECTIVE_UNBOUND;
+   g_effective_tool_count = 0;
+   memset(g_effective_tool_names, 0, sizeof(g_effective_tool_names));
+   agent_tools_set_active_toolset(NULL);
+}
+
 static int agent_tools_path_under_root(const char *path, const char *root)
 {
    if (!path || !path[0] || !root || !root[0])
