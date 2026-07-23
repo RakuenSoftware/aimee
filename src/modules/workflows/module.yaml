@@ -17,6 +17,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/workflows/gw_orch_workflows.c",
     "src/modules/workflows/wfe_advance.c",
