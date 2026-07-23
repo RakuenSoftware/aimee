@@ -81,9 +81,9 @@ int main(void)
 
    /* end-to-end through the replay engine: a factual symbol claim reproduces */
    {
-      review_evidence_t ev;
+      aimee_review_evidence_t ev;
       memset(&ev, 0, sizeof ev);
-      ev.kind = EV_SYMBOL;
+      ev.kind = AIMEE_REVIEW_EVIDENCE_SYMBOL;
       snprintf(ev.target, sizeof ev.target, "frobnicate");
       ev.factual = 1;
       reduced_record_t rec;
@@ -97,9 +97,9 @@ int main(void)
    /* no root -> INDEX_UNAVAILABLE (degrade, never contradict) */
    {
       wfe_replay_worktree_set_root(NULL);
-      review_evidence_t ev;
+      aimee_review_evidence_t ev;
       memset(&ev, 0, sizeof ev);
-      ev.kind = EV_SYMBOL;
+      ev.kind = AIMEE_REVIEW_EVIDENCE_SYMBOL;
       snprintf(ev.target, sizeof ev.target, "frobnicate");
       reduced_record_t rec;
       assert(evidence_replay_with(be, &ev, &rec) == REPLAY_INDEX_UNAVAILABLE);

@@ -16,7 +16,6 @@
 #include "server_http.h"
 #include "agent_config.h"
 #include "aimee_home.h"        /* aimee_home() for the origin working dir */
-#include "delegate_ensemble.h" /* ENSEMBLE_MAX_REFS */
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */

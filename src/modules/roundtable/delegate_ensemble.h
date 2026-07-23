@@ -15,7 +15,7 @@
  * (a _Static_assert in delegate_ensemble.c enforces this). The fan-out arrays
  * (agent_result_t results[N] ~1.4KB each, etc.) live on the compute-pool worker
  * stack, which is 32 MB — so 32 panelists (~50KB frame) is well within budget. */
-#define ENSEMBLE_MAX_REFS 32
+#define ENSEMBLE_MAX_REFS AIMEE_PANEL_MAX_PARTICIPANTS
 
 typedef struct
 {

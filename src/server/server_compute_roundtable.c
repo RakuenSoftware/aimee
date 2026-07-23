@@ -34,7 +34,6 @@
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
 #include <aimee/delegates/delegate_role.h>
-#include "delegate_ensemble.h"
 #include "evidence_replay.h"
 #include "guardrails.h"
 #include "liveness.h"
@@ -102,7 +101,7 @@ static int brief_array_append(const char *label, cJSON *arr, char *buf, size_t c
       }
       if (strcmp(label, "questions") == 0)
       {
-         if (out->question_count < ROUNDTABLE_MAX_QUESTIONS)
+         if (out->question_count < AIMEE_PANEL_MAX_QUESTIONS)
          {
             snprintf(out->questions[out->question_count], sizeof(out->questions[0]), "%s",
                      it->valuestring ? it->valuestring : "");
@@ -194,14 +193,14 @@ int normalize_roundtable_brief(cJSON *req, normalized_roundtable_brief_t *out, c
  * leaves ample headroom for the artifact + answered_questions. */
 #define ROUNDTABLE_ITEMS_JSON_BUDGET (96 * 1024)
 
-void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result)
+void add_roundtable_arrays(cJSON *resp, const aimee_panel_result_t *result)
 {
    cJSON *items = cJSON_CreateArray();
    size_t used = 0;
    int items_truncated = 0;
    for (int i = 0; i < result->item_count; i++)
    {
-      const roundtable_review_item_t *it = &result->items[i];
+      const aimee_panel_review_item_t *it = &result->items[i];
       size_t est = strlen(it->severity) + strlen(it->category) + strlen(it->location) +
                    strlen(it->summary) + strlen(it->recommendation) + strlen(it->identity_key) +
                    strlen(it->sources) + 160; /* JSON keys, quotes, count */
@@ -229,7 +228,7 @@ void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result)
    cJSON *answers = cJSON_CreateArray();
    for (int i = 0; i < result->answered_question_count; i++)
    {
-      const roundtable_answered_question_t *a = &result->answered_questions[i];
+      const aimee_panel_answered_question_t *a = &result->answered_questions[i];
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "question", a->question);
       cJSON_AddStringToObject(o, "answer", a->answer);

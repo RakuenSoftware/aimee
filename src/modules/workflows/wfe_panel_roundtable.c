@@ -80,7 +80,7 @@ static int location_grounds(const char *workdir, const char *path, int line)
 
 /* Is this surviving item blocking FOR THE GATE? Severity must say blocking,
  * and a file:line-shaped location must additionally ground in the worktree. */
-static int item_blocks(const roundtable_review_item_t *it, const char *workdir)
+static int item_blocks(const aimee_panel_review_item_t *it, const char *workdir)
 {
    if (strcmp(it->severity, "blocking") != 0)
       return 0;
@@ -91,7 +91,7 @@ static int item_blocks(const roundtable_review_item_t *it, const char *workdir)
    return 1; /* non-file:line location: the evidence replay already vetted it */
 }
 
-static void feedback_append_item(wfe_verdict_t *v, const roundtable_review_item_t *it, int blocks)
+static void feedback_append_item(wfe_verdict_t *v, const aimee_panel_review_item_t *it, int blocks)
 {
    size_t used = strlen(v->feedback);
    if (used >= sizeof v->feedback - 1)
@@ -101,7 +101,7 @@ static void feedback_append_item(wfe_verdict_t *v, const roundtable_review_item_
             it->summary, it->recommendation[0] ? " -> " : "", it->recommendation);
 }
 
-int wfe_panel_verdicts_from_roundtable(const roundtable_result_t *rt, const char *const *lens,
+int wfe_panel_verdicts_from_roundtable(const aimee_panel_result_t *rt, const char *const *lens,
                                        const char *const *seat_agent, int nlens,
                                        const char *artifact_hash, const char *workdir,
                                        wfe_verdict_t *out)
@@ -122,7 +122,7 @@ int wfe_panel_verdicts_from_roundtable(const roundtable_result_t *rt, const char
 
    for (int k = 0; k < rt->item_count; k++)
    {
-      const roundtable_review_item_t *it = &rt->items[k];
+      const aimee_panel_review_item_t *it = &rt->items[k];
       int blocks = item_blocks(it, workdir);
       int attributed = 0;
       for (int i = 0; i < nlens; i++)
