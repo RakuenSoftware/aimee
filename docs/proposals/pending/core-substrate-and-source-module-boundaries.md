@@ -178,6 +178,13 @@ rather than making that safety property optional.
    governance feature design and depends on proposals 2–5's core/module/product boundaries.
 7. [`large-refactor-delivery-and-compatibility.md`](large-refactor-delivery-and-compatibility.md)
    sequences the moves and defines compatibility, cleanup, recovery, and completion gates.
+8. [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) owns the
+   runtime capability-advertisement surface: how a Runtime and a Control Plane project their live
+   capability closure and state to a connecting thin client, refresh it on change, and how the thin
+   client merges both and re-advertises the effective set to its consumer. It consumes proposals
+   2–5's capability-state, config, product, and protocol contracts and adds no taxonomy. It was
+   drafted after the 2026-07-20 suite review and awaits its own roundtable review; it does not
+   inherit the suite approvals.
 
 `git-core-contract.md` is a required forthcoming child of proposal 3 and must be accepted before
 the Git migration slice begins. It owns Git API, event-production, mutation, security,

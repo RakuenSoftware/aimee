@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 19 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 20 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — nineteen proposals (all but one not yet implemented).
+The genuinely open work — twenty proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -91,6 +91,13 @@ The genuinely open work — nineteen proposals (all but one not yet implemented)
   feature implementations from global source buckets into documented, dependency-enforced
   modules; and uses the migration as a deletion-first, DRY refactor rather than a directory
   shuffle. **Recall / Rerank / Route / Translate / Constrain-Verify.**
+- [Advertise the effective capability set to the thin client and its consumer](proposals/pending/thin-client-capability-advertisement.md)
+  — consuming child of the core-substrate suite. Replaces the static `/v1/capabilities` list with a
+  truthful, generation-stamped projection of the module-runtime capability closure and state;
+  delivers it to the thin client on connect and on server/Control-Plane change; and defines how the
+  client merges both services under the dependency law and re-advertises the effective set to its
+  consumer (MCP/ACP handshake, CLI/web). Drafted 2026-07-23; awaits its own review.
+  **Route / Translate / Constrain-Verify / Gate-Promote.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
