@@ -1,5 +1,6 @@
 #include "vault_witness_offline.h"
 
+#include <openssl/sha.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,6 +30,36 @@ typedef struct
    vault_witness_proof_t *v;
    size_t n, cap;
 } pf_vec_t;
+/* A leaf snapshot is variable-length, so it is held by reference into the caller's
+ * stream rather than copied. */
+typedef struct
+{
+   uint64_t seq;
+   const uint8_t *bytes;
+   size_t len;
+} snap_t;
+typedef struct
+{
+   snap_t *v;
+   size_t n, cap;
+} sn_vec_t;
+
+static int sn_push(sn_vec_t *a, const snap_t *r)
+{
+   if (a->n == a->cap)
+   {
+      size_t nc = a->cap ? a->cap * 2 : 32;
+      if (nc > OFFLINE_MAX_ITEMS)
+         return -1;
+      void *nv = realloc(a->v, nc * sizeof *a->v);
+      if (!nv)
+         return -1;
+      a->v = nv;
+      a->cap = nc;
+   }
+   a->v[a->n++] = *r;
+   return 0;
+}
 
 static int rec_push(rec_vec_t *a, const vault_witness_record_t *r)
 {
@@ -109,6 +140,7 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
    rec_vec_t recs = {0};
    cp_vec_t cps = {0};
    pf_vec_t pfs = {0};
+   sn_vec_t sns = {0};
    int rc = 0;
 
    /* Parse the frame stream. */
@@ -173,6 +205,29 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
             continue;
          }
          report->proofs++;
+      }
+      else if (kind == VAULT_WITNESS_EXPORT_SNAPSHOT)
+      {
+         /* Payload: u64 checkpoint_seq (big-endian) || the stored snapshot bytes. */
+         if (payload_len < 8)
+         {
+            report->malformed = 1;
+            report->any_tamper = 1;
+            continue;
+         }
+         snap_t sn;
+         sn.seq = 0;
+         for (unsigned i = 0; i < 8; i++)
+            sn.seq = (sn.seq << 8) | payload[i];
+         sn.bytes = payload + 8;
+         sn.len = payload_len - 8;
+         if (sn_push(&sns, &sn) != 0)
+         {
+            report->malformed = 1;
+            report->any_tamper = 1;
+            continue;
+         }
+         report->snapshots++;
       }
       else
          report->unknown_frames++;
@@ -293,8 +348,40 @@ int vault_witness_offline_verify(const uint8_t *stream, size_t stream_len,
       }
    }
 
+   /* Leaf snapshots against the leaf_snapshot_digest inside their own signed
+    * checkpoint. This is what makes an emitted snapshot trustworthy enough to
+    * rebuild the tree from: the signature already commits to the digest, so a
+    * substituted or truncated snapshot cannot pass. A snapshot whose checkpoint is
+    * not in this stream is unverifiable, not tampered — it is reported separately
+    * so an operator can go fetch the missing checkpoint. */
+   for (size_t k = 0; k < sns.n; k++)
+   {
+      const vault_witness_checkpoint_t *match = NULL;
+      for (size_t c = 0; c < cps.n; c++)
+         if (cps.v[c].seq == sns.v[k].seq)
+         {
+            match = &cps.v[c];
+            break;
+         }
+      if (!match)
+      {
+         report->snapshots_unmatched++;
+         continue;
+      }
+      uint8_t d[32];
+      SHA256(sns.v[k].len ? sns.v[k].bytes : (const uint8_t *)"", sns.v[k].len, d);
+      if (memcmp(d, match->leaf_snapshot_digest, 32) == 0)
+         report->snapshots_ok++;
+      else
+      {
+         report->snapshots_bad++;
+         report->any_tamper = 1;
+      }
+   }
+
    free(recs.v);
    free(cps.v);
    free(pfs.v);
+   free(sns.v);
    return rc;
 }

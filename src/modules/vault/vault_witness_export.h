@@ -31,7 +31,14 @@ typedef enum
 {
    VAULT_WITNESS_EXPORT_RECORD = 0,
    VAULT_WITNESS_EXPORT_CHECKPOINT = 1,
-   VAULT_WITNESS_EXPORT_PROOF = 2
+   VAULT_WITNESS_EXPORT_PROOF = 2,
+   /* A checkpoint's leaf snapshot: u64 checkpoint_seq (big-endian) followed by the
+    * exact stored snapshot bytes the checkpoint's leaf_snapshot_digest covers. With
+    * the snapshot in hand a consumer can rebuild the whole tree offline and check
+    * every shard head, which is what the cross-gap leaf comparison procedure needs.
+    * An older consumer that predates this kind reports it as an unknown frame,
+    * which is tolerated and never counted as tampering. */
+   VAULT_WITNESS_EXPORT_SNAPSHOT = 3
 } vault_witness_export_kind_t;
 
 /* Parse results, kept distinct because they mean different things to an operator:

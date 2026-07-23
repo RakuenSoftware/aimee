@@ -5815,10 +5815,115 @@ BEGIN
   RETURN p_seq;
 END; $$;
 
+-- ---------------------------------------------------------------------------
+-- E2 emission cursor. This is a POSITION, not evidence: it records how far the
+-- emitter has published, nothing more. It is deliberately NOT WORM and carries no
+-- integrity role. Losing or resetting it causes re-emission of already-published
+-- evidence, which is harmless — the offline verifier collapses byte-identical
+-- repeats at the same shard_seq and only treats two DIFFERENT records at one
+-- position as a fork. Emission never gates admission, so a stalled cursor can
+-- never block a source event; it only grows the backlog gauge.
+--   kind 0 = a per-shard record stream, keyed by (tenant, provider)
+--   kind 1 = the checkpoint stream, a single row with empty tenant/provider
+CREATE TABLE IF NOT EXISTS kb_vault_witness_emit_cursor (
+  kind SMALLINT NOT NULL CHECK (kind IN (0,1)),
+  tenant TEXT NOT NULL CHECK (octet_length(tenant) <= 128),
+  provider TEXT NOT NULL CHECK (octet_length(provider) <= 128),
+  last_emitted BIGINT NOT NULL DEFAULT 0 CHECK (last_emitted >= 0),
+  updated_at TEXT NOT NULL DEFAULT (pg_now_text()),
+  PRIMARY KEY (kind, tenant, provider),
+  CHECK (kind = 0 OR (tenant = '' AND provider = ''))
+);
+ALTER TABLE kb_vault_witness_emit_cursor ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE kb_vault_witness_emit_cursor FROM PUBLIC;
+
+-- Backlog across every record shard plus the checkpoint stream. Numbers only; the
+-- caller turns these into the emission-backlog gauge. Shards with no cursor row yet
+-- report last_emitted 0, so a brand-new shard's whole chain is pending.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_pending()
+RETURNS TABLE(kind SMALLINT, tenant TEXT, provider TEXT, last_emitted BIGINT, head_seq BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT 0::smallint, sh.tenant, sh.provider,
+         COALESCE(c.last_emitted,0), sh.seq
+    FROM public.kb_vault_witness_shard sh
+    LEFT JOIN public.kb_vault_witness_emit_cursor c
+      ON c.kind=0 AND c.tenant=sh.tenant AND c.provider=sh.provider
+   WHERE sh.seq > 0
+  UNION ALL
+  SELECT 1::smallint, '', '',
+         COALESCE((SELECT c.last_emitted FROM public.kb_vault_witness_emit_cursor c
+                    WHERE c.kind=1 AND c.tenant='' AND c.provider=''),0),
+         COALESCE((SELECT max(cp.seq) FROM public.kb_vault_witness_checkpoint cp),0)
+  ORDER BY 1,2,3;
+$$;
+
+-- One shard's committed records after p_after, in chain order. Committed state
+-- only: the emitter runs outside the append transaction and never sees a record
+-- that has not durably landed.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_batch(
+  p_tenant TEXT, p_provider TEXT, p_after BIGINT, p_limit INTEGER)
+RETURNS TABLE(shard_seq BIGINT, source_kind SMALLINT, source_id TEXT, source_hash BYTEA,
+              has_source_pred BOOLEAN, source_pred_hash BYTEA, witness_pred_hash BYTEA,
+              record_hash BYTEA, request_id TEXT, principal TEXT, provider_cred TEXT,
+              group_id TEXT, event_ts TEXT, seal_epoch BIGINT, fencing_token BIGINT)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT l.shard_seq, l.source_kind, l.source_id, l.source_hash,
+         l.has_source_pred, l.source_pred_hash, l.witness_pred_hash,
+         l.record_hash, l.request_id, l.principal, l.provider_cred,
+         l.group_id, l.event_ts, l.seal_epoch, l.fencing_token
+    FROM public.kb_vault_witness_log l
+   WHERE l.tenant = p_tenant AND l.provider = p_provider
+     AND l.shard_seq > COALESCE(p_after,0)
+   ORDER BY l.shard_seq
+   LIMIT LEAST(GREATEST(COALESCE(p_limit,0),0), 1000);
+$$;
+
+-- Committed checkpoints after p_after, in sequence order.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_checkpoints(p_after BIGINT, p_limit INTEGER)
+RETURNS TABLE(seq BIGINT, root BYTEA, has_predecessor BOOLEAN, predecessor_digest BYTEA,
+              shard_count BIGINT, leaf_snapshot_digest BYTEA, signer_key_id BYTEA,
+              sig_alg SMALLINT, sig_version INTEGER, signature BYTEA, created_at TEXT,
+              leaf_snapshot BYTEA)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+  SELECT cp.seq, cp.root, cp.has_predecessor, cp.predecessor_digest,
+         cp.shard_count, cp.leaf_snapshot_digest, cp.signer_key_id,
+         cp.sig_alg, cp.sig_version, cp.signature, cp.created_at, cp.leaf_snapshot
+    FROM public.kb_vault_witness_checkpoint cp
+   WHERE cp.seq > COALESCE(p_after,0)
+   ORDER BY cp.seq
+   LIMIT LEAST(GREATEST(COALESCE(p_limit,0),0), 1000);
+$$;
+
+-- Advance a cursor. Monotonic: a lower value is ignored rather than rejected, so a
+-- late or duplicated advance can never rewind the stream and cause a re-emission
+-- storm. Returns the cursor value in force after the call.
+CREATE OR REPLACE FUNCTION org_vault_witness_emit_advance(
+  p_kind SMALLINT, p_tenant TEXT, p_provider TEXT, p_seq BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE v BIGINT;
+BEGIN
+  IF p_kind IS NULL OR p_kind NOT IN (0,1) OR p_seq IS NULL OR p_seq < 0 OR
+     (p_kind = 1 AND (COALESCE(p_tenant,'') <> '' OR COALESCE(p_provider,'') <> '')) THEN
+    RAISE EXCEPTION 'witness_emit_advance: invalid input' USING ERRCODE='22023';
+  END IF;
+  INSERT INTO public.kb_vault_witness_emit_cursor(kind,tenant,provider,last_emitted,updated_at)
+  VALUES(p_kind,COALESCE(p_tenant,''),COALESCE(p_provider,''),p_seq,pg_now_text())
+  ON CONFLICT (kind,tenant,provider) DO UPDATE
+    SET last_emitted = GREATEST(public.kb_vault_witness_emit_cursor.last_emitted, EXCLUDED.last_emitted),
+        updated_at = EXCLUDED.updated_at
+  RETURNING last_emitted INTO v;
+  RETURN v;
+END; $$;
+
 REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_leaves() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_persist(BIGINT,BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_pending() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_checkpoints(BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
@@ -5830,8 +5935,14 @@ DO $$
 BEGIN
   IF EXISTS(SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='aimee_kb_runtime') THEN
     REVOKE ALL ON TABLE public.kb_vault_witness_shard,public.kb_vault_witness_log,
-      public.kb_vault_witness_checkpoint FROM aimee_kb_runtime;
-    REVOKE ALL ON FUNCTION public.org_vault_witness_worm_block(),
+      public.kb_vault_witness_checkpoint,public.kb_vault_witness_emit_cursor
+      FROM aimee_kb_runtime;
+    REVOKE ALL ON FUNCTION
+      public.org_vault_witness_emit_pending(),
+      public.org_vault_witness_emit_batch(TEXT,TEXT,BIGINT,INTEGER),
+      public.org_vault_witness_emit_checkpoints(BIGINT,INTEGER),
+      public.org_vault_witness_emit_advance(SMALLINT,TEXT,TEXT,BIGINT),
+      public.org_vault_witness_worm_block(),
       public.org_vault_witness_genesis(TEXT,TEXT),
       public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
       public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
@@ -7500,6 +7611,20 @@ BEGIN
       SELECT 'aimee_org_witness_checkpoint_age_seconds'::text, NULL::bigint, NULL::text, NULL::text,
              COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(cp.created_at)::timestamp)),0)::numeric
         FROM kb_vault_witness_checkpoint cp
+    -- Emission backlog: evidence that exists durably but has not yet been published
+    -- outward. Numbers only, never bytes. A backlog that grows without bound means
+    -- copies are not reaching any retaining consumer, which is exactly the state in
+    -- which a later coherent-rewrite attack would go undetected — so it is an alert,
+    -- not a curiosity. aimee cannot tell "collector down" from "none configured", so
+    -- this measures only what is locally true: how far behind the cursor is.
+    UNION ALL
+      SELECT 'aimee_org_witness_emit_backlog_records'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(SUM(GREATEST(p.head_seq - p.last_emitted, 0)),0)::numeric
+        FROM org_vault_witness_emit_pending() p WHERE p.kind = 0
+    UNION ALL
+      SELECT 'aimee_org_witness_emit_backlog_checkpoints'::text, NULL::bigint, NULL::text, NULL::text,
+             COALESCE(SUM(GREATEST(p.head_seq - p.last_emitted, 0)),0)::numeric
+        FROM org_vault_witness_emit_pending() p WHERE p.kind = 1
     ORDER BY 1, 2 NULLS FIRST, 3 NULLS FIRST;
 END; $$;
 

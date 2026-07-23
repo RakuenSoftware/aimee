@@ -38,7 +38,7 @@ static uint32_t get_u32(const uint8_t *p)
 static int kind_known(vault_witness_export_kind_t k)
 {
    return k == VAULT_WITNESS_EXPORT_RECORD || k == VAULT_WITNESS_EXPORT_CHECKPOINT ||
-          k == VAULT_WITNESS_EXPORT_PROOF;
+          k == VAULT_WITNESS_EXPORT_PROOF || k == VAULT_WITNESS_EXPORT_SNAPSHOT;
 }
 
 int vault_witness_export_frame(vault_witness_export_kind_t kind, const uint8_t *payload,

@@ -7,7 +7,7 @@
 #include "vault_witness_checkpoint.h"
 
 /* P7-witness-e2: the offline verifier core. Given a captured stream of emitted
- * export frames (records, checkpoints, proofs) and an out-of-band anchor set, it
+ * export frames (records, checkpoints, proofs, leaf snapshots) and an out-of-band anchor set, it
  * verifies everything reachable from bytes alone — no database. This is the
  * "detection by comparison" primitive an operator runs during an incident: it
  * reports what the retained copy proves and what, if anything, is tampered.
@@ -16,7 +16,9 @@
  * delimiting via its header. Records are grouped by shard and their per-shard
  * chains verified; checkpoints are signature-verified against the anchors and
  * their run checked for continuity; proofs are verified against the matching
- * checkpoint's root.
+ * checkpoint's root; and each leaf snapshot is hashed and required to equal the
+ * leaf_snapshot_digest inside its own signed checkpoint, so a substituted snapshot
+ * cannot pass as the leaf set the signature actually committed to.
  */
 
 #ifdef __cplusplus
@@ -36,6 +38,10 @@ typedef struct
    size_t checkpoints_revoked;           /* signer key revoked */
    vault_witness_continuity_t continuity;/* over the checkpoint run */
    size_t proofs_ok, proofs_unmatched, proofs_bad; /* matched-checkpoint / no-cp / bad */
+   size_t snapshots;                     /* leaf-snapshot frames seen */
+   size_t snapshots_ok;                  /* digest matches its checkpoint's leaf_snapshot_digest */
+   size_t snapshots_unmatched;           /* no checkpoint with that seq in this stream */
+   size_t snapshots_bad;                 /* digest disagrees with the signed checkpoint: tamper */
    int malformed;                        /* a frame or payload failed to parse */
    int any_tamper;                       /* 1 if any hard tamper was detected */
 } vault_witness_offline_report_t;

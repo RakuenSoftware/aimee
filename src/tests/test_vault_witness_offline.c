@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <openssl/evp.h>
+#include <openssl/sha.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,6 +259,103 @@ static void test_fork_conflict_detected(void)
    assert(rep.any_tamper == 1);
 }
 
+/* Emit a checkpoint whose leaf_snapshot_digest genuinely covers `snap`, plus the
+ * matching snapshot frame. Returns the anchor. */
+static void emit_checkpoint_with_snapshot(uint64_t cp_seq, const uint8_t *snap, size_t snap_len,
+                                          const uint8_t priv[32], const uint8_t pub[32],
+                                          vault_witness_anchor_t *anchor)
+{
+   vault_witness_checkpoint_t cp;
+   memset(&cp, 0, sizeof cp);
+   cp.version = 1;
+   cp.seq = cp_seq;
+   cp.has_predecessor = 0;
+   cp.shard_count = 1;
+   cp.sig_alg = VAULT_WITNESS_SIG_ED25519;
+   cp.sig_version = 1;
+   memset(cp.root, 0x77, 32);
+   SHA256(snap_len ? snap : (const uint8_t *)"", snap_len, cp.leaf_snapshot_digest);
+   uint8_t key_id[16];
+   memset(key_id, 0xC1, 16);
+   memcpy(cp.signer_key_id, key_id, 16);
+   snprintf(cp.created_at, sizeof cp.created_at, "2026-07-23T00:00:00Z");
+   assert(vault_witness_checkpoint_sign_ed25519(&cp, priv) == 0);
+
+   uint8_t cw[VAULT_WITNESS_CHECKPOINT_WIRE_MAX];
+   size_t cl = 0;
+   assert(vault_witness_checkpoint_encode(&cp, cw, sizeof cw, &cl) == 0);
+   frame_payload(VAULT_WITNESS_EXPORT_CHECKPOINT, cw, cl);
+
+   uint8_t payload[512];
+   assert(8 + snap_len <= sizeof payload);
+   for (unsigned i = 0; i < 8; i++)
+      payload[i] = (uint8_t)(cp_seq >> (56U - 8U * i));
+   memcpy(payload + 8, snap, snap_len);
+   frame_payload(VAULT_WITNESS_EXPORT_SNAPSHOT, payload, 8 + snap_len);
+
+   memset(anchor, 0, sizeof *anchor);
+   memcpy(anchor->key_id, key_id, 16);
+   memcpy(anchor->ed25519_pub, pub, 32);
+}
+
+/* A snapshot whose bytes hash to the digest the checkpoint signature commits to
+ * verifies; this is what lets a consumer rebuild the leaf set offline. */
+static void test_snapshot_verified(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t snap[64];
+   for (unsigned i = 0; i < sizeof snap; i++)
+      snap[i] = (uint8_t)(i * 7 + 3);
+   vault_witness_anchor_t anchor;
+   emit_checkpoint_with_snapshot(1, snap, sizeof snap, priv, pub, &anchor);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.snapshots == 1 && rep.snapshots_ok == 1);
+   assert(rep.snapshots_bad == 0 && rep.snapshots_unmatched == 0);
+   assert(rep.any_tamper == 0);
+}
+
+/* A substituted snapshot cannot pass: the signature already commits to the digest
+ * of the real leaf set, so any edit is caught. */
+static void test_snapshot_substituted_detected(void)
+{
+   reset_stream();
+   uint8_t priv[32], pub[32];
+   gen_keypair(priv, pub);
+   uint8_t snap[64];
+   memset(snap, 0x11, sizeof snap);
+   vault_witness_anchor_t anchor;
+   emit_checkpoint_with_snapshot(1, snap, sizeof snap, priv, pub, &anchor);
+
+   /* Flip a byte inside the snapshot payload (past the frame header and the u64
+    * checkpoint seq) — the checkpoint frame itself is left untouched, so its
+    * signature still verifies and only the snapshot check can catch this. */
+   g_stream[g_len - 1] ^= 0xFF;
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
+   assert(rep.checkpoints_ok == 1); /* signature still good */
+   assert(rep.snapshots_bad == 1 && rep.snapshots_ok == 0);
+   assert(rep.any_tamper == 1);
+}
+
+/* A snapshot with no checkpoint in the stream is unverifiable, not tampered. */
+static void test_snapshot_unmatched_is_not_tamper(void)
+{
+   reset_stream();
+   uint8_t payload[16] = {0};
+   payload[7] = 9; /* checkpoint seq 9, which is not in this stream */
+   frame_payload(VAULT_WITNESS_EXPORT_SNAPSHOT, payload, sizeof payload);
+
+   vault_witness_offline_report_t rep;
+   assert(vault_witness_offline_verify(g_stream, g_len, NULL, 0, &rep) == 0);
+   assert(rep.snapshots == 1 && rep.snapshots_unmatched == 1);
+   assert(rep.snapshots_bad == 0 && rep.any_tamper == 0);
+}
+
 int main(void)
 {
    test_clean_stream();
@@ -266,6 +364,9 @@ int main(void)
    test_tampered_record();
    test_wrong_anchor();
    test_malformed_frame();
+   test_snapshot_verified();
+   test_snapshot_substituted_detected();
+   test_snapshot_unmatched_is_not_tamper();
    printf("test_vault_witness_offline: all passed\n");
    return 0;
 }

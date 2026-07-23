@@ -7,7 +7,8 @@
  *
  *   aimee-witness-verify <stream-file> <anchor-file>
  *
- * <stream-file>  concatenated emitted export frames (records, checkpoints, proofs).
+ * <stream-file>  concatenated emitted export frames (records, checkpoints, proofs,
+ *                leaf snapshots).
  * <anchor-file>  one trust anchor per line, out of band:
  *                  <32-hex key_id>:<64-hex ed25519 pubkey>[:revoked]
  *                blank lines and lines starting with '#' are ignored.
@@ -184,6 +185,8 @@ int main(int argc, char **argv)
    printf("checkpoints: ok=%zu bad_sig=%zu unknown_key=%zu revoked=%zu\n", r.checkpoints_ok,
           r.checkpoints_bad_sig, r.checkpoints_unknown_key, r.checkpoints_revoked);
    printf("proofs: ok=%zu unmatched=%zu bad=%zu\n", r.proofs_ok, r.proofs_unmatched, r.proofs_bad);
+   printf("leaf-snapshots: ok=%zu unmatched=%zu bad=%zu\n", r.snapshots_ok, r.snapshots_unmatched,
+          r.snapshots_bad);
    const char *cont = r.continuity == VAULT_WITNESS_CONTINUITY_OK        ? "ok"
                       : r.continuity == VAULT_WITNESS_CONTINUITY_UNPROVEN ? "UNPROVEN (work item: "
                                                                            "compare cross-gap leaves)"

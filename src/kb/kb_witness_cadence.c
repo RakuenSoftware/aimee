@@ -2,11 +2,14 @@
 
 #include <openssl/crypto.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "db2/db2_witness_checkpoint.h"
+#include "db2/db2_witness_emit.h"
 #include "kb/kb_vault_policy.h"
 #include "log.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "util.h"
 
 int kb_witness_boot_check(char *err, size_t errlen)
 {
@@ -29,6 +32,87 @@ int kb_witness_boot_check(char *err, size_t errlen)
    OPENSSL_cleanse(pub, sizeof pub);
    OPENSSL_cleanse(key_id, sizeof key_id);
    return 0;
+}
+
+/* The log sink. Evidence rides the log path as base64 of the exact export frame —
+ * bytes, not a re-rendering — so a consumer that retains these lines can feed them
+ * straight to aimee-witness-verify after decoding. The kind tag is redundant with
+ * the frame header and is present only so an operator can grep one stream apart
+ * from another; the verifier reads the header, never the tag. */
+static const char *kind_tag(vault_witness_export_kind_t k)
+{
+   switch (k)
+   {
+   case VAULT_WITNESS_EXPORT_RECORD:
+      return "record";
+   case VAULT_WITNESS_EXPORT_CHECKPOINT:
+      return "checkpoint";
+   case VAULT_WITNESS_EXPORT_PROOF:
+      return "proof";
+   case VAULT_WITNESS_EXPORT_SNAPSHOT:
+      return "snapshot";
+   default:
+      return "unknown";
+   }
+}
+
+static int log_sink(void *ctx, vault_witness_export_kind_t kind, const uint8_t *frame, size_t len)
+{
+   (void)ctx;
+   size_t need = aimee_base64_encoded_len(len);
+   char *b64 = malloc(need);
+   if (!b64)
+      return -1; /* not emitted; the cursor stops here and the next tick retries */
+   if (aimee_base64_encode(frame, len, b64, need) == 0)
+   {
+      free(b64);
+      return -1;
+   }
+   LOG_INFO("kb.witness.evidence", "kind=%s b64=%s", kind_tag(kind), b64);
+   free(b64);
+   return 0;
+}
+
+/* Drain bound per tick. Large enough that a normal backlog clears in one tick,
+ * small enough that a huge one drains over several rather than monopolising the
+ * periodic loop — emission must never starve the rest of the tick. */
+#define KB_WITNESS_EMIT_MAX_PER_STREAM 256
+
+static void emit_once(void)
+{
+   db2_witness_emit_stats_t s;
+   db2_witness_emit_result_t r = db2_witness_emit_run(log_sink, NULL, KB_WITNESS_EMIT_MAX_PER_STREAM, &s);
+   switch (r)
+   {
+   case DB2_WITNESS_EMIT_OK:
+      if (s.records_emitted || s.checkpoints_emitted)
+         LOG_DEBUG("kb.witness",
+                   "emitted records=%llu checkpoints=%llu snapshots=%llu backlog=%llu/%llu",
+                   (unsigned long long)s.records_emitted,
+                   (unsigned long long)s.checkpoints_emitted,
+                   (unsigned long long)s.snapshots_emitted,
+                   (unsigned long long)s.backlog_records,
+                   (unsigned long long)s.backlog_checkpoints);
+      break;
+   case DB2_WITNESS_EMIT_PARITY_MISMATCH:
+      /* The stored row and its canonical encoding disagree. Emitting past this
+       * would publish evidence that can never match the store, so emission stops
+       * here and stays stopped until an operator resolves it. Admission is
+       * untouched: the durable log is still the system of record. */
+      LOG_ERROR("kb.witness",
+                "INTEGRITY: witness record digest parity failed; emission halted at the "
+                "offending record (stored hash does not match its canonical encoding)");
+      break;
+   case DB2_WITNESS_EMIT_SINK_FAILED:
+      LOG_WARN("kb.witness", "evidence emission sink rejected a frame; backlog will retry");
+      break;
+   case DB2_WITNESS_EMIT_TRANSIENT:
+      break; /* no connection or a retryable read failure; next tick retries */
+   case DB2_WITNESS_EMIT_ERROR:
+   default:
+      LOG_WARN("kb.witness", "evidence emission failed; will retry");
+      break;
+   }
 }
 
 void kb_witness_cadence_tick(time_t now)
@@ -71,4 +155,10 @@ void kb_witness_cadence_tick(time_t now)
       LOG_WARN("kb.witness", "checkpoint attempt failed (transient/config); will retry");
       break;
    }
+
+   /* Emission runs after the checkpoint attempt so a checkpoint signed this tick
+    * goes out on the same tick, and runs regardless of the checkpoint result:
+    * records accrue whether or not a new root was signed, and a stalled checkpoint
+    * is exactly when getting the record stream off-host matters most. */
+   emit_once();
 }

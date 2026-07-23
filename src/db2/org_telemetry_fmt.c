@@ -92,6 +92,11 @@ static const prom_meta_t k_meta[] = {
     {"aimee_org_witness_checkpoint_age_seconds", "gauge",
      "Age of the latest signed witness checkpoint; a growing value means new signed roots "
      "have stopped."},
+    {"aimee_org_witness_emit_backlog_records", "gauge",
+     "Witness evidence records not yet published on the log/OTLP path. A backlog that only "
+     "grows means retained off-host copies are falling behind."},
+    {"aimee_org_witness_emit_backlog_checkpoints", "gauge",
+     "Signed witness checkpoints not yet published on the log/OTLP path."},
 };
 
 static const prom_meta_t *meta_lookup(const char *name)
