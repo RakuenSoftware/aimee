@@ -938,6 +938,37 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+static int agent_set_enabled_commit(const char *name, int enabled, cJSON **response)
+{
+   if (response)
+      *response = NULL;
+   if (!name || !name[0])
+      return -1;
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *ag = agent_find(&cfg, name);
+   if (!ag)
+      return -1;
+   ag->enabled = enabled ? 1 : 0;
+   cJSON *rendered = response ? server_agent_to_json(ag) : NULL;
+   if ((response && !rendered) || agent_save_config(&cfg) != 0)
+   {
+      cJSON_Delete(rendered);
+      return -1;
+   }
+   if (rendered)
+      cJSON_AddStringToObject(rendered, "status", "ok");
+   if (response)
+      *response = rendered;
+   return 0;
+}
+
+int server_agent_management_set_enabled(const char *name, int enabled)
+{
+   return agent_set_enabled_commit(name, enabled, NULL);
+}
+
 static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, int enabled)
 {
    (void)ctx;
@@ -947,19 +978,9 @@ static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSO
       return server_send_error(
           conn, enabled ? "agent.enable requires name" : "agent.disable requires name", NULL);
 
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      return server_send_error(conn, "agents.json not found or invalid", NULL);
-   agent_t *ag = agent_find(&cfg, argv[0]);
-   if (!ag)
-      return server_send_error(conn, "agent not found", NULL);
-   ag->enabled = enabled ? 1 : 0;
-
-   if (agent_save_config(&cfg) != 0)
-      return server_send_error(conn, "could not save agents.json", NULL);
-
-   cJSON *resp = server_agent_to_json(ag);
-   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON *resp = NULL;
+   if (agent_set_enabled_commit(argv[0], enabled, &resp) != 0)
+      return server_send_error(conn, "agent enablement change failed before commit", NULL);
    return server_send_ok(conn, resp);
 }
 

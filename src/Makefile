@@ -433,7 +433,7 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
               modules/workflows/wfe_engine.c modules/workflows/wfe_blocks.c modules/workflows/wfe_approval.c \
               modules/workflows/wfe_verdict.c modules/workflows/wfe_roundtable.c modules/workflows/wfe_autonomy.c \
               server/server_workflow_api.c
-SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_status.c kb/kb_mgmt_status.c
+SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
@@ -469,7 +469,7 @@ KB_SRCS += kb/kb_management_cert_codec.c kb/kb_management_cert_crypto.c \
            kb/kb_management_cert_binding.c \
            kb/kb_management_cert_storage.c kb/kb_management_cert_lifecycle.c \
            kb/kb_management_health_exchange.c kb/kb_mgmt_status_client.c \
-           kb/kb_management_runtime.c
+           kb/kb_management_action.c kb/kb_management_runtime.c
 KB_SRCS += kb/kb_mgmt_token_authority_ipc.c
 $(OBJDIR)/kb/kb_workload_jwt.o: C_FLAGS += -Imodules/aws
 
@@ -1499,6 +1499,8 @@ clean:
 	       tests/fuzz_config_load tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
 	       tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
 	       tests/fuzz_kb_mgmt_jwks_publication \
+	       tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+	       tests/fuzz_server_mgmt_action \
 	       coverage.info coverage-report agent_help_data.h tool_prompts_data.h
 
 # Pinned clang-format version. Must match what CI installs so `make lint`
@@ -1676,10 +1678,24 @@ FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publicati
                                      $(OBJDIR)/kb/kb_mgmt_token_roots_provision.o \
                                      $(OBJDIR)/kb/kb_mgmt_token_public.o
 
+FUZZ_KB_MGMT_CHECKPOINT_OBJS = $(OBJDIR)/tests/fuzz_kb_mgmt_checkpoint.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_authority.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_listener.o \
+                               $(OBJDIR)/kb/kb_mgmt_status_peer.o \
+                               $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/cJSON.o
+
+FUZZ_KB_MANAGEMENT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_kb_management_action.o \
+                                 $(OBJDIR)/kb/kb_management_action.o $(OBJDIR)/cJSON.o
+
+FUZZ_SERVER_MGMT_ACTION_OBJS = $(OBJDIR)/tests/fuzz_server_mgmt_action.o \
+                               $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/cJSON.o
+
 FUZZ_TARGETS = tests/fuzz_extractors tests/fuzz_json_parse tests/fuzz_config_load \
                tests/fuzz_memory_search tests/fuzz_message_frame tests/fuzz_acl_parse \
                tests/fuzz_kb_workload_wire tests/fuzz_server_mgmt_token tests/fuzz_kb_mgmt_token \
-               tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication
+               tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_kb_mgmt_jwks_publication \
+               tests/fuzz_kb_mgmt_checkpoint tests/fuzz_kb_management_action \
+               tests/fuzz_server_mgmt_action
 
 $(OBJDIR)/tests/fuzz_extractors.o: tests/fuzz_extractors.c
 	@mkdir -p $(OBJDIR)/tests
@@ -1725,6 +1741,18 @@ $(OBJDIR)/tests/fuzz_kb_mgmt_jwks_publication.o: tests/fuzz_kb_mgmt_jwks_publica
 	@mkdir -p $(OBJDIR)/tests
 	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
 
+$(OBJDIR)/tests/fuzz_kb_mgmt_checkpoint.o: tests/fuzz_kb_mgmt_checkpoint.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
+$(OBJDIR)/tests/fuzz_kb_management_action.o: tests/fuzz_kb_management_action.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
+$(OBJDIR)/tests/fuzz_server_mgmt_action.o: tests/fuzz_server_mgmt_action.c
+	@mkdir -p $(OBJDIR)/tests
+	$(CC) -c $(C_FLAGS) -DFUZZ_STANDALONE -o $@ $<
+
 tests/fuzz_extractors: $(FUZZ_EXTRACTOR_OBJS)
 	$(CC) -o $@ $^ $(L_FULL)
 
@@ -1758,6 +1786,15 @@ tests/fuzz_kb_mgmt_token_authority_ipc: $(FUZZ_KB_MGMT_TOKEN_AUTHORITY_IPC_OBJS)
 tests/fuzz_kb_mgmt_jwks_publication: $(FUZZ_KB_MGMT_JWKS_PUBLICATION_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
 
+tests/fuzz_kb_mgmt_checkpoint: $(FUZZ_KB_MGMT_CHECKPOINT_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
+tests/fuzz_kb_management_action: $(FUZZ_KB_MANAGEMENT_ACTION_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
+tests/fuzz_server_mgmt_action: $(FUZZ_SERVER_MGMT_ACTION_OBJS)
+	$(CC) -o $@ $^ $(L_AGENT)
+
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*
 	./tests/fuzz_json_parse tests/fuzz_corpus/seed.json tests/fuzz_corpus/seed_config.json
@@ -1770,6 +1807,9 @@ fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_kb_mgmt_token tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_token_authority_ipc tests/fuzz_corpus/seed.*
 	./tests/fuzz_kb_mgmt_jwks_publication tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_mgmt_checkpoint tests/fuzz_corpus/seed.*
+	./tests/fuzz_kb_management_action tests/fuzz_corpus/seed.*
+	./tests/fuzz_server_mgmt_action tests/fuzz_corpus/seed.*
 
 # --- Coverage reporting ---
 

@@ -817,6 +817,10 @@ BEGIN
   REVOKE ALL ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION kb_management_status_lookup(TEXT,TEXT,TEXT,TEXT,TEXT)
     TO aimee_kb_status;
+  REVOKE ALL ON FUNCTION kb_management_action_checkpoint(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT)
+    FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_management_action_checkpoint(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT)
+    TO aimee_kb_status;
   GRANT EXECUTE ON FUNCTION kb_management_status_key_candidate(TEXT,TEXT,BIGINT),
     kb_management_status_key_admit(TEXT,TEXT,TEXT,BIGINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,BYTEA),
     kb_management_status_key_use_guard(BIGINT),

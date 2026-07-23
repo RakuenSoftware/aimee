@@ -54,6 +54,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p1_rls_isolation_test.sql"
 echo "== P5-B status authority + revocation generation assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b_status_pg17_test.sql"
 
+echo "== P5-C3 action-checkpoint primary admission assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c3-action-checkpoint-pg17-test.sql"
+
 echo "== P5-B2b management-instance lineage assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5b2b_management_instance_pg_test.sql"
 

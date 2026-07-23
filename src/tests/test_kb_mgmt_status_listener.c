@@ -21,6 +21,16 @@ int main(void)
    assert(kb_mgmt_status_http_parse((const unsigned char *)good, strlen(good), &body, &body_len) ==
           KB_MGMT_STATUS_HTTP_COMPLETE);
    assert(body_len == 2 && !memcmp(body, "{}", 2));
+   static const char checkpoint[] =
+       "POST /v1/management/action-checkpoint HTTP/1.1\r\nHost: authority\r\n"
+       "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}";
+   kb_mgmt_status_route_t route = 0;
+   assert(kb_mgmt_status_http_parse_route((const unsigned char *)checkpoint, strlen(checkpoint),
+                                          &route, &body,
+                                          &body_len) == KB_MGMT_STATUS_HTTP_COMPLETE);
+   assert(route == KB_MGMT_STATUS_ROUTE_ACTION_CHECKPOINT && body_len == 2);
+   assert(kb_mgmt_status_http_parse((const unsigned char *)checkpoint, strlen(checkpoint), &body,
+                                    &body_len) == KB_MGMT_STATUS_HTTP_BAD);
    for (size_t i = 0; i < strlen(good); ++i)
    {
       body = (const char *)1;

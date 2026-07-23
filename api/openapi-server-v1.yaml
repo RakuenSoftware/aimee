@@ -345,6 +345,28 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /management/action/challenge:
+    post:
+      summary: Issue a nonce for a management control-plane action
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and management.action.v1 purpose. The
+        subsequent action request must use the same live TLS connection.
+      responses:
+        "200":
+          description: Management action challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management action verification is not configured }
   /management/challenge:
     post:
       summary: Issue a nonce for a read-only management health check

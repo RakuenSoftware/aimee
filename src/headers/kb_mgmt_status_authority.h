@@ -13,6 +13,24 @@ typedef struct
    char purpose[32];
 } kb_mgmt_status_request_t;
 
+typedef struct
+{
+   uint32_t version;
+   unsigned char nonce[KB_MGMT_STATUS_NONCE_LEN];
+   char caller_issuer[601];
+   char caller_serial_norm[129];
+   char caller_fingerprint[65];
+   char target_server_id[128];
+   uint64_t staple_generation;
+   char staple_sha256[65];
+   char correlation_id[65];
+   char jti[65];
+   char action_request_sha256[65];
+   char canonical_sha256[65];
+   /* Filled only after verified-mTLS admission; never part of request JSON. */
+   char authenticated_peer_fingerprint[65];
+} kb_mgmt_checkpoint_request_t;
+
 #define KB_MGMT_STATUS_REQUEST_JSON_MAX 1024
 
 typedef enum
@@ -43,6 +61,12 @@ typedef int (*kb_mgmt_status_lookup_fn)(const char *issuer, const char *serial,
                                         char *target_fingerprint, size_t target_fingerprint_len,
                                         void *ctx);
 typedef int (*kb_mgmt_status_sign_fn)(kb_mgmt_status_t *status, void *ctx);
+typedef int (*kb_mgmt_checkpoint_lookup_fn)(const char *peer_issuer, const char *peer_serial,
+                                            const char *peer_fingerprint,
+                                            const kb_mgmt_checkpoint_request_t *request,
+                                            int *revoked, int64_t *generation, void *ctx);
+typedef int (*kb_mgmt_checkpoint_sign_fn)(kb_mgmt_checkpoint_t *checkpoint,
+                                          const kb_mgmt_checkpoint_request_t *request, void *ctx);
 
 /* Strict length-aware request decoder.  The body must be one JSON object with
  * exactly the four string fields nonce, target, target_mgmt_fp and purpose.
@@ -58,5 +82,13 @@ kb_mgmt_status_authority_result_t kb_mgmt_status_authority_issue(
     const kb_mgmt_status_request_t *, const char *peer_issuer, const char *peer_serial_norm,
     const char *peer_fingerprint, const char *key_id, uint64_t now, kb_mgmt_status_lookup_fn,
     void *lookup_ctx, kb_mgmt_status_sign_fn, void *sign_ctx, kb_mgmt_status_t *out);
+
+kb_mgmt_status_authority_result_t
+kb_mgmt_checkpoint_request_from_json(const char *raw, size_t raw_len,
+                                     kb_mgmt_checkpoint_request_t *out);
+kb_mgmt_status_authority_result_t kb_mgmt_checkpoint_authority_issue(
+    const kb_mgmt_checkpoint_request_t *, const char *peer_issuer, const char *peer_serial_norm,
+    const char *peer_fingerprint, const char *key_id, uint64_t now, kb_mgmt_checkpoint_lookup_fn,
+    void *lookup_ctx, kb_mgmt_checkpoint_sign_fn, void *sign_ctx, kb_mgmt_checkpoint_t *out);
 
 #endif

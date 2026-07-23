@@ -441,6 +441,9 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Returns 0 only after the atomic agents.json replacement committed; every
+ * nonzero result is proven pre-effect.  Used by the management action barrier. */
+int server_agent_management_set_enabled(const char *name, int enabled);
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

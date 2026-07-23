@@ -373,11 +373,10 @@ static int result_class_valid(db2_management_action_outcome_result_t r,
           (r == DB2_MANAGEMENT_ACTION_DENIED_RESULT &&
            c == DB2_MANAGEMENT_ACTION_CLASS_REMOTE_DENIED) ||
           (r == DB2_MANAGEMENT_ACTION_INDETERMINATE &&
-           c == DB2_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS) ||
-          (r == DB2_MANAGEMENT_ACTION_FAILED &&
-           (c == DB2_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE ||
-            c == DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE ||
-            c == DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE));
+           (c == DB2_MANAGEMENT_ACTION_CLASS_TRANSPORT_AMBIGUOUS ||
+            c == DB2_MANAGEMENT_ACTION_CLASS_PROTOCOL_FAILURE)) ||
+          (r == DB2_MANAGEMENT_ACTION_FAILED && (c == DB2_MANAGEMENT_ACTION_CLASS_REMOTE_FAILURE ||
+                                                 c == DB2_MANAGEMENT_ACTION_CLASS_LOCAL_FAILURE));
 }
 
 static db2_management_action_result_t first_row(aimee_pg_stmt_t *st)

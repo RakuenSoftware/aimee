@@ -549,8 +549,11 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-org-model-catalog-target \
                $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
                $(TESTPREFIX)/unit-test-kb-mgmt-status \
+               $(TESTPREFIX)/unit-test-kb-mgmt-status-listener \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-token \
+               $(TESTPREFIX)/unit-test-server-mgmt-endpoint \
+               $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
                $(TESTPREFIX)/unit-test-kb-mgmt-token \
                $(TESTPREFIX)/unit-test-server-management-jti \
                $(TESTPREFIX)/unit-test-server-management-tls \
@@ -559,6 +562,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-mgmt-status-client \
                $(TESTPREFIX)/unit-test-kb-management-runtime \
                $(TESTPREFIX)/unit-test-kb-http-servers-health \
+               $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-kb-mgmt-status-custody \
                 $(TESTPREFIX)/unit-test-management-status-key-ctx \
@@ -1799,6 +1803,11 @@ $(TESTPREFIX)/unit-test-kb-mgmt-status: $(OBJDIR)/tests/test_kb_mgmt_status.o \
                                         $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-mgmt-status-listener: \
+    $(OBJDIR)/tests/test_kb_mgmt_status_listener.o \
+    $(OBJDIR)/kb/kb_mgmt_status_listener.o $(OBJDIR)/kb/kb_mgmt_status_peer.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-server-mgmt-status: $(OBJDIR)/tests/test_server_mgmt_status.o \
                                             $(OBJDIR)/server/server_mgmt_status.o \
                                             $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
@@ -1809,6 +1818,18 @@ $(TESTPREFIX)/unit-test-server-mgmt-token: $(OBJDIR)/tests/test_server_mgmt_toke
                                            $(OBJDIR)/server/server_mgmt_token.o \
                                            $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-mgmt-endpoint: $(OBJDIR)/tests/test_server_mgmt_endpoint.o \
+                                              $(OBJDIR)/server/server_mgmt_endpoint.o \
+                                              $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
+
+$(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client: \
+    $(OBJDIR)/tests/test_server_mgmt_checkpoint_client.o \
+    $(OBJDIR)/server/server_mgmt_checkpoint_client.o $(OBJDIR)/server/server_mgmt_status.o \
+    $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db.o \
+    $(OBJDIR)/db1/db_schema.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lcrypto
 
 $(TESTPREFIX)/unit-test-kb-mgmt-token: $(OBJDIR)/tests/test_kb_mgmt_token.o \
                                        $(OBJDIR)/kb/kb_mgmt_token.o \
@@ -1836,6 +1857,14 @@ $(TESTPREFIX)/unit-test-kb-management-health-exchange: \
     $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-management-action: \
+    $(OBJDIR)/tests/test_kb_management_action.o \
+    $(OBJDIR)/kb/kb_management_action.o $(OBJDIR)/kb/kb_management_health_exchange.o \
+    $(OBJDIR)/kb/kb_mgmt_status_authority.o $(OBJDIR)/kb/kb_mgmt_status.o \
+    $(OBJDIR)/kb/kb_mgmt_endpoint.o $(OBJDIR)/kb/kb_mgmt_client.o \
+    $(OBJDIR)/kb/http/kb_tls.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-kb-mgmt-status-client: \
     $(OBJDIR)/tests/test_kb_mgmt_status_client.o \
     $(OBJDIR)/kb/kb_mgmt_status_client.o $(OBJDIR)/kb/kb_mgmt_client.o \
@@ -1850,7 +1879,8 @@ $(TESTPREFIX)/unit-test-kb-management-runtime: \
 
 $(TESTPREFIX)/unit-test-kb-http-servers-health: \
     $(OBJDIR)/tests/test_kb_http_servers_health.o \
-    $(OBJDIR)/kb/http/kb_http_servers.o $(OBJDIR)/kb/kb_reqctx.o \
+    $(OBJDIR)/kb/http/kb_http_servers.o $(OBJDIR)/kb/kb_management_action.o \
+    $(OBJDIR)/kb/kb_reqctx.o \
     $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -3978,7 +4008,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_keepalive.o $(OBJDIR)/server/server_http_management.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/shadow_mirror.o $(OBJDIR)/server/server_http_routes_git.o $(OBJDIR)/server/server_dev_submit.o $(OBJDIR)/server/server_ci_route.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/modules/vault/vault_principal.o $(OBJDIR)/server/presence.o \
-                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_status.o \
+                           $(OBJDIR)/server/server_mgmt_status.o $(OBJDIR)/server/server_mgmt_endpoint.o $(OBJDIR)/server/server_mgmt_audit.o $(OBJDIR)/server/server_mgmt_token.o $(OBJDIR)/kb/kb_mgmt_status.o $(OBJDIR)/kb/kb_mgmt_endpoint.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                            $(OBJDIR)/modules/git/forge_credentials.o \

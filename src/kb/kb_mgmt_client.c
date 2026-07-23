@@ -91,6 +91,34 @@ static int response_status(const char *raw, const char *end)
    return (raw[9] - '0') * 100 + (raw[10] - '0') * 10 + raw[11] - '0';
 }
 
+static int response_json_content_type(const char *raw, const char *end)
+{
+   const char *line = strstr(raw, "\r\n");
+   int seen = 0;
+   if (!line || line >= end)
+      return 0;
+   line += 2;
+   while (line < end)
+   {
+      const char *next = strstr(line, "\r\n");
+      if (!next || next > end || next == line)
+         return 0;
+      static const char name[] = "Content-Type:";
+      if ((size_t)(next - line) >= sizeof(name) - 1 &&
+          strncasecmp(line, name, sizeof(name) - 1) == 0)
+      {
+         const char *value = line + sizeof(name) - 1;
+         while (value < next && (*value == ' ' || *value == '\t'))
+            value++;
+         if (seen++ || (size_t)(next - value) != sizeof("application/json") - 1 ||
+             memcmp(value, "application/json", sizeof("application/json") - 1))
+            return 0;
+      }
+      line = next + 2;
+   }
+   return seen == 1;
+}
+
 static int request_headers_valid(const char *headers)
 {
    if (!headers || !headers[0])
@@ -213,11 +241,13 @@ int kb_mgmt_client_session_open(kb_mgmt_client_session_t *s, const char *endpoin
                                                      expected_serial, expected_fp, now + 30000, 0);
 }
 
-int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const char *method,
-                                            const char *path, const char *body,
-                                            const char *extra_headers, uint64_t deadline,
-                                            char *resp, size_t cap, int *status_out)
+static int session_request_deadline(kb_mgmt_client_session_t *s, const char *method,
+                                    const char *path, const char *body, const char *extra_headers,
+                                    uint64_t deadline, char *resp, size_t cap, int *status_out,
+                                    int strict_action, size_t *bytes_sent)
 {
+   if (bytes_sent)
+      *bytes_sent = 0;
    if (resp && cap)
       resp[0] = '\0';
    if (status_out)
@@ -239,10 +269,11 @@ int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const c
       return -1;
    int n = snprintf(req, req_cap,
                     "%s %s HTTP/1.1\r\nHost: %s\r\n%sContent-Type: application/json\r\n"
-                    "Content-Length: %zu\r\nConnection: keep-alive\r\n\r\n%s",
-                    method, path, s->endpoint.host_header, headers, blen, b);
+                    "Content-Length: %zu\r\nConnection: %s\r\n\r\n%s",
+                    method, path, s->endpoint.host_header, headers, blen,
+                    strict_action ? "close" : "keep-alive", b);
    int rc = -1;
-   if (n <= 0 || (size_t)n >= req_cap)
+   if (n <= 0 || (size_t)n >= req_cap || (strict_action && (size_t)n >= 8192U))
       goto done;
    size_t sent = 0;
    while (sent < (size_t)n)
@@ -255,6 +286,8 @@ int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const c
          goto done;
       }
       sent += (size_t)wr;
+      if (bytes_sent)
+         *bytes_sent = sent;
       if (monotonic_ms() >= deadline)
          goto done;
    }
@@ -285,14 +318,15 @@ int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const c
          size_t exact = (size_t)(end + 4 - raw) + content_length;
          int status = response_status(raw, end);
          if (status < 0 || (!strcmp(path, "/v1/management/challenge") && !reusable) ||
-             total != exact || memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
+             (!strcmp(path, "/v1/management/action-checkpoint") && reusable) || total != exact ||
+             memchr(end + 4, '\0', content_length) || SSL_pending(s->ssl) > 0 ||
              monotonic_ms() >= deadline)
             break;
          memcpy(resp, end + 4, content_length);
          resp[content_length] = '\0';
          if (status_out)
-            *status_out = status;
-         rc = status >= 300 && status < 400 ? -1 : 0;
+            *status_out = strict_action && !response_json_content_type(raw, end) ? 0 : status;
+         rc = !strict_action && status >= 300 && status < 400 ? -1 : 0;
          break;
       }
    }
@@ -302,6 +336,37 @@ done:
    if (rc != 0)
       kb_mgmt_client_session_close(s);
    return rc;
+}
+
+int kb_mgmt_client_session_checkpoint_deadline(kb_mgmt_client_session_t *s, const char *body,
+                                               uint64_t deadline, char *resp, size_t cap,
+                                               int *status_out)
+{
+   return session_request_deadline(s, "POST", "/v1/management/action-checkpoint", body, NULL,
+                                   deadline, resp, cap, status_out, 1, NULL);
+}
+
+int kb_mgmt_client_session_request_deadline(kb_mgmt_client_session_t *s, const char *method,
+                                            const char *path, const char *body,
+                                            const char *extra_headers, uint64_t deadline,
+                                            char *resp, size_t cap, int *status_out)
+{
+   return session_request_deadline(s, method, path, body, extra_headers, deadline, resp, cap,
+                                   status_out, 0, NULL);
+}
+
+kb_mgmt_client_send_result_t kb_mgmt_client_session_action_deadline(kb_mgmt_client_session_t *s,
+                                                                    const char *body,
+                                                                    const char *extra_headers,
+                                                                    uint64_t deadline, char *resp,
+                                                                    size_t cap, int *status_out)
+{
+   size_t sent = 0;
+   int rc = session_request_deadline(s, "POST", "/v1/management/action", body, extra_headers,
+                                     deadline, resp, cap, status_out, 1, &sent);
+   if (rc == 0)
+      return KB_MGMT_CLIENT_SENT_RESPONSE;
+   return sent ? KB_MGMT_CLIENT_SENT_AMBIGUOUS : KB_MGMT_CLIENT_NOT_SENT;
 }
 
 int kb_mgmt_client_session_request(kb_mgmt_client_session_t *s, const char *method,
