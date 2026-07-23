@@ -19,38 +19,38 @@
 
 #define D3B_DB_MS 2000
 #define API       "aimee_kb_vault_orchestrator_api."
-#define ORCHESTRATOR_FUNCTIONS_SQL                                                               \
-   "ARRAY['aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()',"                 \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_dispatch(text,text)',"                     \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_reserve(text,text,text,bigint,bigint)',"   \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_active()',"                                \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(text,text,text)',"               \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed_active(text,text)',"             \
-   "'aimee_kb_vault_orchestrator_api.org_vault_current_check_page(bytea,integer)',"              \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(text,text,text,bigint,"     \
-   "bigint,bytea,bytea,bytea)',"                                                                 \
-   "'aimee_kb_vault_orchestrator_api.org_vault_open_idle(text,text,bigint,bigint,bigint)',"      \
-   "'aimee_kb_vault_orchestrator_api.org_vault_open_event(text)',"                               \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_snapshot(text)',"                          \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_record_prepared(text,bigint,bytea,bytea)'," \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_secret_page(text,bigint,bigint,integer)'," \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_check_page(text,bigint,bytea,integer)',"   \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_dek(text,bigint,bigint,text,text,"   \
-   "text,bigint,bytea,bytea)',"                                                                  \
+#define ORCHESTRATOR_FUNCTIONS_SQL                                                                 \
+   "ARRAY['aimee_kb_vault_orchestrator_api.org_vault_rewrap_operator_status()',"                   \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_dispatch(text,text)',"                       \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_reserve(text,text,text,bigint,bigint)',"     \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_active()',"                                  \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed(text,text,text)',"                 \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_completed_active(text,text)',"               \
+   "'aimee_kb_vault_orchestrator_api.org_vault_current_check_page(bytea,integer)',"                \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_open_completed(text,text,text,bigint,"       \
+   "bigint,bytea,bytea,bytea)',"                                                                   \
+   "'aimee_kb_vault_orchestrator_api.org_vault_open_idle(text,text,bigint,bigint,bigint)',"        \
+   "'aimee_kb_vault_orchestrator_api.org_vault_open_event(text)',"                                 \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_snapshot(text)',"                            \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_record_prepared(text,bigint,bytea,bytea)',"  \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_secret_page(text,bigint,bigint,integer)',"   \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_check_page(text,bigint,bytea,integer)',"     \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_dek(text,bigint,bigint,text,text,"     \
+   "text,bigint,bytea,bytea)',"                                                                    \
    "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_check(text,bigint,text,bytea,bytea)'," \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_inventory_summary(text,bigint)',"          \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(text,bigint,bigint,bigint,"  \
-   "bytea)',"                                                                                    \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_committing(text,bigint)',"            \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_resealed(text,bigint,bytea)',"        \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_promote(text,bigint)',"                    \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_abort(text,bigint,text)',"                 \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_recovery_required(text,bigint,text)',"     \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_summary(text,bigint)',"             \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_secret_page(text,bigint,bigint,"   \
-   "integer)',"                                                                                  \
-   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_check_page(text,bigint,bytea,"      \
-   "integer)',"                                                                                  \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_inventory_summary(text,bigint)',"            \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_stage_finish(text,bigint,bigint,bigint,"     \
+   "bytea)',"                                                                                      \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_committing(text,bigint)',"              \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_mark_resealed(text,bigint,bytea)',"          \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_promote(text,bigint)',"                      \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_abort(text,bigint,text)',"                   \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_recovery_required(text,bigint,text)',"       \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_summary(text,bigint)',"               \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_secret_page(text,bigint,bigint,"      \
+   "integer)',"                                                                                    \
+   "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_verify_check_page(text,bigint,bytea,"        \
+   "integer)',"                                                                                    \
    "'aimee_kb_vault_orchestrator_api.org_vault_rewrap_complete(text,bigint,bytea,bytea,bytea)']"
 
 enum
@@ -416,8 +416,8 @@ static int recover_uncertain_locked(db2_vault_operator_runtime_t *runtime)
        "pg_catalog.has_schema_privilege(current_user,'aimee_kb_vault_orchestrator_api','USAGE') "
        "AND NOT pg_catalog.has_schema_privilege(current_user,"
        "'aimee_kb_vault_orchestrator_api','CREATE') AND (SELECT pg_catalog.count(*)=27 AND "
-       "pg_catalog.count(*) FILTER (WHERE (p.oid::pg_catalog.regprocedure)::TEXT=ANY("
-       ORCHESTRATOR_FUNCTIONS_SQL
+       "pg_catalog.count(*) FILTER (WHERE "
+       "(p.oid::pg_catalog.regprocedure)::TEXT=ANY(" ORCHESTRATOR_FUNCTIONS_SQL
        ") AND pg_catalog.has_function_privilege(current_user,p.oid,'EXECUTE'))=27 FROM "
        "pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE "
        "n.nspname='aimee_kb_vault_orchestrator_api') AND NOT EXISTS (SELECT "
