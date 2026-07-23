@@ -107,12 +107,19 @@ describe('Fleet interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
     expect(mocks.send).toHaveBeenCalledTimes(1);
     rejectRequest(new Error('connection reset'));
-    expect(await screen.findByText(/Further mutations are blocked/)).toBeTruthy();
+    expect(await screen.findByText(/Further mutations are blocked for this session/)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(mocks.send).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByLabelText('Team id'), { target: { value: '8' } });
-    expect(screen.getByText(/Further mutations are blocked/)).toBeTruthy();
+    expect(screen.getByText(/Further mutations are blocked for this session/)).toBeTruthy();
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    mocks.get.mockResolvedValueOnce({ servers: [server] });
+    fireEvent.click(screen.getByRole('button', { name: 'Load fleet' }));
+    await screen.findByRole('button', { name: 'server-1' });
+    await selectAgent();
+    expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 

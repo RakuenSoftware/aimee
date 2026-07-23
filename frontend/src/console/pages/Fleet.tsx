@@ -66,7 +66,6 @@ export default function Fleet() {
       const result = await apiGet<{ servers: FleetServer[] }>(`/v1/servers?team=${teamID}`);
       setServers(result.servers ?? []);
       setSelected('');
-      setIndeterminate(false);
     } catch (error) {
       setMessage(fleetError(error));
     } finally {
@@ -134,7 +133,7 @@ export default function Fleet() {
           ))}
         </tbody>
       </table>
-      {indeterminate && <p className="kbc-error">Further mutations are blocked until the fleet is reloaded and the prior result is resolved.</p>}
+      {indeterminate && <p className="kbc-error">Further mutations are blocked for this session. Resolve the prior result before signing in again.</p>}
       {selected && (
         <fieldset>
           <legend>Agent action on {selected}</legend>
