@@ -19,13 +19,126 @@ func newTestServer(t *testing.T, kbURL string) *server {
 	if err != nil {
 		t.Fatalf("session store: %v", err)
 	}
+	vault := newCredentialVault(maxOIDCCredentials)
+	ss.vault = vault
 	return &server{
-		cfg:      cfg,
-		auth:     newAuthenticator(cfg),
-		sessions: ss,
-		kbBearer: "scope:console-admin:c1:secret",
-		kbClient: &http.Client{},
-		logins:   newRateLimiter(5, time.Minute),
+		cfg:              cfg,
+		auth:             newAuthenticator(cfg),
+		sessions:         ss,
+		kbBearer:         "scope:console-admin:c1:secret",
+		kbClient:         &http.Client{},
+		oidcTokens:       vault,
+		fleetOIDCEnabled: true,
+		logins:           newRateLimiter(5, time.Minute),
+	}
+}
+
+func TestProxyForwardsFleetWithOIDCOnly(t *testing.T) {
+	var seen http.Request
+	kb := stubKB(t, &seen)
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	exp := time.Now().Add(time.Hour)
+	sess, _ := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/servers?team=9", nil)
+	r.Header.Set("Authorization", "Bearer attacker-selected")
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("fleet proxy status = %d", w.Code)
+	}
+	if got := seen.Header.Get("Authorization"); got != "Bearer signed-oidc-token" {
+		t.Fatalf("fleet Authorization = %q", got)
+	}
+}
+
+func TestProxyFleetBreakGlassAndMissingVaultFailBeforeUpstream(t *testing.T) {
+	var seen http.Request
+	kb := stubKB(t, &seen)
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	bg, _ := srv.sessions.create(&principal{iss: "break-glass", sub: "break-glass"}, true)
+	r := httptest.NewRequest("GET", "/api/v1/servers?team=9", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: bg.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusForbidden || seen.Method != "" {
+		t.Fatalf("break-glass fleet request reached upstream: status=%d method=%q", w.Code, seen.Method)
+	}
+
+	seen = http.Request{}
+	exp := time.Now().Add(time.Hour)
+	oidc, _ := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	r = httptest.NewRequest("GET", "/api/v1/servers?team=9", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: oidc.id})
+	w = httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusUnauthorized || seen.Method != "" {
+		t.Fatalf("missing-vault fleet request reached upstream: status=%d method=%q", w.Code, seen.Method)
+	}
+}
+
+func TestProxyResponseLimitIsAtomic(t *testing.T) {
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, strings.Repeat("x", maxProxyResponseBytes+1))
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	sess, _ := srv.sessions.create(&principal{iss: "i", sub: "u"}, false)
+	r := httptest.NewRequest("GET", "/api/v1/console/overview", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "xxx") {
+		t.Fatalf("overflow must be atomic 502, got status=%d body-prefix=%q", w.Code, w.Body.String()[:min(32, w.Body.Len())])
+	}
+}
+
+func TestProxyResponseExactLimitSucceeds(t *testing.T) {
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, strings.Repeat("x", maxProxyResponseBytes))
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	sess, _ := srv.sessions.create(&principal{iss: "i", sub: "u"}, false)
+	r := httptest.NewRequest("GET", "/api/v1/console/overview", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusOK || w.Body.Len() != maxProxyResponseBytes {
+		t.Fatalf("exact-limit response status=%d bytes=%d", w.Code, w.Body.Len())
+	}
+}
+
+func TestFleetUpstreamUnauthorizedInvalidatesSession(t *testing.T) {
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "expired"})
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	exp := time.Now().Add(time.Hour)
+	sess, _ := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/servers?team=9", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("upstream status = %d", w.Code)
+	}
+	if _, err := srv.sessions.get(sess.id); err == nil {
+		t.Fatal("401 did not invalidate session")
+	}
+	if _, ok := srv.oidcTokens.get(sess); ok {
+		t.Fatal("401 did not cleanse vault entry")
 	}
 }
 
@@ -58,6 +171,21 @@ func TestProxyDenyByDefault(t *testing.T) {
 	}
 	if seen.Method != "" {
 		t.Fatalf("denied request must not reach the kb")
+	}
+}
+
+func TestProxyRejectsEncodedPathBeforeUpstream(t *testing.T) {
+	var seen http.Request
+	kb := stubKB(t, &seen)
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	sess, _ := srv.sessions.create(&principal{iss: "i", sub: "u"}, false)
+	r := httptest.NewRequest("GET", "/api/v1/%63onsole/overview", nil)
+	r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+	w := httptest.NewRecorder()
+	srv.handleAPI(w, r)
+	if w.Code != http.StatusForbidden || seen.Method != "" {
+		t.Fatalf("encoded path reached upstream: status=%d method=%q raw=%q", w.Code, seen.Method, r.URL.RawPath)
 	}
 }
 

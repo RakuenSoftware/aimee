@@ -61,6 +61,8 @@ func main() {
 	if fi, err := os.Stat(sessDB); err != nil || fi.Mode().Perm()&0o077 != 0 {
 		die("session db %s is not 0600", sessDB)
 	}
+	oidcTokens := newCredentialVault(maxOIDCCredentials)
+	sessions.vault = oidcTokens
 
 	kbClient := &http.Client{Timeout: 15 * time.Second}
 	if *insecureKB {
@@ -76,7 +78,9 @@ func main() {
 	srv := &server{
 		cfg: cfg, auth: newAuthenticator(cfg), sessions: sessions,
 		kbBearer: bearer, kbClient: kbClient,
-		logins: newRateLimiter(5, time.Minute),
+		oidcTokens:       oidcTokens,
+		fleetOIDCEnabled: cfg.fleetOIDCAligned(cfg.kbBaseURL, bearer, kbClient),
+		logins:           newRateLimiter(5, time.Minute),
 	}
 	srv.loadSPA()
 
@@ -89,6 +93,9 @@ func main() {
 	}
 	if !cfg.oidcConfigured() {
 		log.Printf("kb-console: WARNING oidc not configured — break-glass-only until OIDC is set")
+	}
+	if cfg.oidcConfigured() && !srv.fleetOIDCEnabled {
+		log.Printf("kb-console: WARNING OIDC issuer/audience differs from kb; fleet proxy disabled")
 	}
 
 	certFile, keyFile, err := ensureTLS(cfg)

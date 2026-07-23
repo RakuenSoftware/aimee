@@ -23,6 +23,7 @@ type principal struct {
 	iss           string
 	sub           string
 	viaBreakGlass bool
+	expires       time.Time
 }
 
 // jwksCache fetches and caches the operator-configured JWKS keyed by kid.
@@ -182,12 +183,26 @@ func (a *authenticator) verifyOIDC(raw string) (*principal, error) {
 	if !a.hasAdminClaim(claims) {
 		return nil, errors.New("missing admin claim")
 	}
+	aud, ok := claims["aud"].(string)
+	if !ok || aud != a.cfg.oidc.Audience {
+		return nil, errors.New("aud must be the single configured audience")
+	}
+	if azp, exists := claims["azp"]; exists {
+		azpString, ok := azp.(string)
+		if !ok || azpString != a.cfg.oidc.Audience {
+			return nil, errors.New("azp does not match configured audience")
+		}
+	}
 	iss, _ := claims["iss"].(string)
 	sub, _ := claims["sub"].(string)
 	if sub == "" {
 		return nil, errors.New("missing sub")
 	}
-	return &principal{iss: iss, sub: sub}, nil
+	exp, err := claims.GetExpirationTime()
+	if err != nil || exp == nil || !time.Now().Before(exp.Time) {
+		return nil, errors.New("missing or expired exp")
+	}
+	return &principal{iss: iss, sub: sub, expires: exp.Time}, nil
 }
 
 // hasAdminClaim reports whether claims[AdminClaim] contains any configured admin

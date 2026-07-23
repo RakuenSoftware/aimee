@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -84,18 +85,25 @@ func (c *config) loadOIDC(path string) error {
 // once at startup; restart the console to re-apply an edited config. Best-effort:
 // a failure just leaves the console break-glass-only.
 func (c *config) fetchOIDCFromKB(kbBase, bearer string, client *http.Client) {
+	d, ok := fetchOIDCConfigFromKB(kbBase, bearer, client)
+	if ok {
+		c.oidc = d
+	}
+}
+
+func fetchOIDCConfigFromKB(kbBase, bearer string, client *http.Client) (oidcConfig, bool) {
 	req, err := http.NewRequest("GET", strings.TrimRight(kbBase, "/")+"/v1/config/oidc", nil)
 	if err != nil {
-		return
+		return oidcConfig{}, false
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := client.Do(req)
 	if err != nil {
-		return
+		return oidcConfig{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return
+		return oidcConfig{}, false
 	}
 	var d struct {
 		Issuer      string   `json:"issuer"`
@@ -105,13 +113,20 @@ func (c *config) fetchOIDCFromKB(kbBase, bearer string, client *http.Client) {
 		AdminValues []string `json:"admin_values"`
 		Configured  bool     `json:"configured"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&d) != nil || !d.Configured {
-		return
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(payload) > 1<<20 || json.Unmarshal(payload, &d) != nil || !d.Configured {
+		return oidcConfig{}, false
 	}
-	c.oidc = oidcConfig{
+	return oidcConfig{
 		Issuer: d.Issuer, Audience: d.Audience, JWKSURL: d.JWKSURL,
 		AdminClaim: d.AdminClaim, AdminValues: d.AdminValues,
-	}
+	}, true
+}
+
+func (c *config) fleetOIDCAligned(kbBase, bearer string, client *http.Client) bool {
+	active, ok := fetchOIDCConfigFromKB(kbBase, bearer, client)
+	return ok && c.oidcConfigured() && c.oidc.Issuer == active.Issuer &&
+		c.oidc.Audience == active.Audience
 }
 
 // oidcConfigured reports whether OIDC login is available (vs break-glass-only).

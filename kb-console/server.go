@@ -15,14 +15,16 @@ import (
 const sessionCookie = "kbc_session"
 
 type server struct {
-	cfg      *config
-	auth     *authenticator
-	sessions *sessionStore
-	kbBearer string
-	kbClient *http.Client
-	spa      []byte // cached SPA bytes (read once at startup)
-	spaCSP   string // CSP for the SPA route, with inline-content hashes
-	logins   *rateLimiter
+	cfg              *config
+	auth             *authenticator
+	sessions         *sessionStore
+	kbBearer         string
+	kbClient         *http.Client
+	oidcTokens       *credentialVault
+	fleetOIDCEnabled bool
+	spa              []byte // cached SPA bytes (read once at startup)
+	spaCSP           string // CSP for the SPA route, with inline-content hashes
+	logins           *rateLimiter
 }
 
 var (
@@ -118,6 +120,18 @@ func (s *server) requireSession(r *http.Request) (*session, error) {
 	return s.sessions.get(c.Value)
 }
 
+func (s *server) retainOIDCCredential(sess *session, p *principal, raw string) error {
+	if s.oidcTokens == nil {
+		s.sessions.del(sess.id)
+		return errors.New("OIDC credential vault unavailable")
+	}
+	if err := s.oidcTokens.put(sess.id, sess.iss, sess.sub, p.expires, raw); err != nil {
+		s.sessions.del(sess.id)
+		return err
+	}
+	return nil
+}
+
 // handleLogin accepts an OIDC id_token (primary) or, when the presence-flag is
 // set, a break-glass bearer. On success it rotates in a fresh session.
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +188,14 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session create failed"})
 		return
+	}
+	if !breakGlass {
+		if s.retainOIDCCredential(sess, p, req.IDToken) != nil {
+			req.IDToken = ""
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "OIDC session capacity unavailable"})
+			return
+		}
+		req.IDToken = ""
 	}
 	s.logins.reset(ipKey)
 	http.SetCookie(w, &http.Cookie{

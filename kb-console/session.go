@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -19,18 +20,20 @@ const (
 // session is a logged-in console session, bound to a verified (iss, sub) so a
 // lifted DB row is not portable across identities/IdPs.
 type session struct {
-	id         string
-	csrf       string
-	iss        string
-	sub        string
-	breakGlass bool
-	created    time.Time
-	lastSeen   time.Time
-	expires    time.Time
+	id          string
+	csrf        string
+	iss         string
+	sub         string
+	breakGlass  bool
+	created     time.Time
+	lastSeen    time.Time
+	expires     time.Time
+	oidcExpires time.Time
 }
 
 type sessionStore struct {
-	db *sql.DB
+	db    *sql.DB
+	vault *credentialVault
 }
 
 // openSessionStore opens (creating if needed) the SQLite session DB. The caller
@@ -48,8 +51,14 @@ func openSessionStore(path string) (*sessionStore, error) {
 		break_glass INTEGER NOT NULL DEFAULT 0,
 		created INTEGER NOT NULL,
 		last_seen INTEGER NOT NULL,
-		expires INTEGER NOT NULL
+		expires INTEGER NOT NULL,
+		oidc_expires INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN oidc_expires INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		_ = db.Close()
 		return nil, err
 	}
 	return &sessionStore{db: db}, nil
@@ -69,18 +78,27 @@ func (s *sessionStore) create(p *principal, breakGlass bool) (*session, error) {
 	if breakGlass {
 		abs = breakGlassSessionTTL
 	}
+	expires := now.Add(abs)
+	if !breakGlass && !p.expires.IsZero() && p.expires.Before(expires) {
+		expires = p.expires
+	}
 	sess := &session{
 		id: randToken(), csrf: randToken(),
 		iss: p.iss, sub: p.sub, breakGlass: breakGlass,
-		created: now, lastSeen: now, expires: now.Add(abs),
+		created: now, lastSeen: now, expires: expires, oidcExpires: p.expires,
 	}
 	bg := 0
 	if breakGlass {
 		bg = 1
 	}
+	oidcExpires := int64(0)
+	if !sess.oidcExpires.IsZero() {
+		oidcExpires = sess.oidcExpires.Unix()
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO sessions(id,csrf,iss,sub,break_glass,created,last_seen,expires) VALUES(?,?,?,?,?,?,?,?)`,
-		sess.id, sess.csrf, sess.iss, sess.sub, bg, now.Unix(), now.Unix(), sess.expires.Unix())
+		`INSERT INTO sessions(id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires) VALUES(?,?,?,?,?,?,?,?,?)`,
+		sess.id, sess.csrf, sess.iss, sess.sub, bg, now.Unix(), now.Unix(), sess.expires.Unix(),
+		oidcExpires)
 	if err != nil {
 		return nil, err
 	}
@@ -94,10 +112,11 @@ func (s *sessionStore) get(id string) (*session, error) {
 		return nil, errors.New("no session")
 	}
 	row := s.db.QueryRow(
-		`SELECT id,csrf,iss,sub,break_glass,created,last_seen,expires FROM sessions WHERE id=?`, id)
+		`SELECT id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires FROM sessions WHERE id=?`, id)
 	var sess session
-	var bg, created, lastSeen, expires int64
-	if err := row.Scan(&sess.id, &sess.csrf, &sess.iss, &sess.sub, &bg, &created, &lastSeen, &expires); err != nil {
+	var bg, created, lastSeen, expires, oidcExpires int64
+	if err := row.Scan(&sess.id, &sess.csrf, &sess.iss, &sess.sub, &bg, &created, &lastSeen,
+		&expires, &oidcExpires); err != nil {
 		return nil, errors.New("no session")
 	}
 	now := time.Now()
@@ -109,16 +128,32 @@ func (s *sessionStore) get(id string) (*session, error) {
 	sess.created = time.Unix(created, 0)
 	sess.lastSeen = time.Unix(lastSeen, 0)
 	sess.expires = time.Unix(expires, 0)
+	if oidcExpires > 0 {
+		sess.oidcExpires = time.Unix(oidcExpires, 0)
+	}
 	_, _ = s.db.Exec(`UPDATE sessions SET last_seen=? WHERE id=?`, now.Unix(), id)
 	return &sess, nil
 }
 
-func (s *sessionStore) del(id string) { _, _ = s.db.Exec(`DELETE FROM sessions WHERE id=?`, id) }
+func (s *sessionStore) del(id string) {
+	_, _ = s.db.Exec(`DELETE FROM sessions WHERE id=?`, id)
+	if s.vault != nil {
+		s.vault.del(id)
+	}
+}
 
 // invalidateSub drops all sessions for a principal. S0 provides the mechanism;
 // S2a wires the enrollment-revoke path to call it.
 func (s *sessionStore) invalidateSub(iss, sub string) {
 	_, _ = s.db.Exec(`DELETE FROM sessions WHERE iss=? AND sub=?`, iss, sub)
+	if s.vault != nil {
+		s.vault.delPrincipal(iss, sub)
+	}
 }
 
-func (s *sessionStore) close() error { return s.db.Close() }
+func (s *sessionStore) close() error {
+	if s.vault != nil {
+		s.vault.clear()
+	}
+	return s.db.Close()
+}
