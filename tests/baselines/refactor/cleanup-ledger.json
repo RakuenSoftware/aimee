@@ -401,6 +401,23 @@
       "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains IR-specific missing-source, planted-source/header, and missing-document failures.",
       "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
       "evidence": ["docs/validation/core-modularization-slice-31.md", "docs/modules/ir.md", "src/modules/ir/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
+    },
+    {
+      "slice": 32,
+      "state": "present_and_verified",
+      "disposition": "Completed required-core translation module-local ownership after proving every source contains a shipping path and separating seven test-only adapter helpers as explicit cleanup or activation candidates.",
+      "production": {"added": [], "deleted": [], "consolidated": []},
+      "fallbacks": ["legacy serve, shadow, and direct wire translators remain outside module ownership pending parity-backed separation", "seven intended buffered-egress or Bedrock-streaming helpers currently have test callers only"],
+      "net_growth": {
+        "status": "none",
+        "rationale": "The slice changes ownership metadata, validation coverage, documentation, and cleanup accounting only, not shipped production code.",
+        "rejected_simpler_alternative": "Filesystem enumeration alone would hide test-only exported helpers, while deleting them inside a metadata slice would skip compatibility and readiness decisions.",
+        "revisit": "Audit each test-only helper family for focused activation, privatization, or deletion, and separate legacy translators only after parity evidence."
+      },
+      "consumers": ["translation maintainers", "IR serve and shadow", "agent runtimes", "KB Bedrock egress", "protocols", "future descriptor-generated builds"],
+      "blast_radius": "No production source, public symbol, build membership, runtime, or wire behavior changes; descriptor validation gains translation source-family, planted-file, and missing-document failures.",
+      "independent_review": "Technical-writer review and exact-final-diff roundtable approval are required before merge.",
+      "evidence": ["docs/validation/core-modularization-slice-32.md", "docs/modules/translation.md", "src/modules/translation/module.yaml", "scripts/tests/test_validate_module_descriptors.py"]
     }
   ]
 }

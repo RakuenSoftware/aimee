@@ -9,6 +9,13 @@ HTTP retries, authorize tool calls, or own the external protocol listener.
 
 ## Public contracts
 
+`src/modules/translation/module.yaml` is the complete module-local ownership inventory: eight shipping
+translation units, three canonical public headers, five direct tests, and this module document.
+`ownership_complete: true` rejects an unlisted module-local C or private-header file and omission of the
+canonical document. Canonical public-header placement remains enforced by the descriptor-derived
+header-layout gate. This physical ownership claim does not imply that every exported adapter helper is
+selected by a production journey.
+
 The canonical ingress adapters are
 `src/modules/translation/aimee_frontend_anthropic.c`,
 `src/modules/translation/aimee_frontend_openai.c`, and
@@ -129,3 +136,9 @@ Add an adapter through the shared IR conversion interface and capability contrac
 ingress handler. The parallel legacy and typed builders in `anthropic_http.c` and `openai_chat.c` are
 consolidation candidates, not automatically dead code; parity and mutation branches must be traced first.
 Translation cannot be removed while Aimee supports more than one external/provider wire.
+
+The [slice 32 liveness audit](../validation/core-modularization-slice-32.md) proves that every owned source
+ships and that each translation unit contains a production path. It separately records seven helpers
+whose exact current-worktree callers are tests only. Removing, privatizing, or activating those intended
+egress and Bedrock-streaming contracts requires focused compatibility/readiness slices; they are not
+silently treated as live merely because their source files ship.
