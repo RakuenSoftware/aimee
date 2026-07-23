@@ -1347,6 +1347,45 @@ static void test_delegate_context_file_folded_into_prompt(void)
    printf("  PASS: test_delegate_context_file_folded_into_prompt\n");
 }
 
+/* --verify and --scope govern SPEND (escalation) and what a seat may attempt
+ * (scope), and are honoured only by the in-process delegate path. The marshaller
+ * forwards a fixed allowlist and drops the rest, so routing a run with either
+ * flag used to return a normal, successful-looking result while the verifier
+ * never ran. Refusing the run is the only honest answer until they are plumbed
+ * end to end - so pin that it EXITS rather than quietly marshaling. */
+static int marshal_delegate_exit_status(char **argv, int argc)
+{
+   pid_t pid = fork();
+   assert(pid >= 0);
+   if (pid == 0)
+   {
+      /* The guard writes to stderr before exiting; keep the test output clean. */
+      freopen("/dev/null", "w", stderr);
+      cJSON *req = marshal_delegate(argc, argv);
+      /* Reached only if the guard did NOT fire. */
+      cJSON_Delete(req);
+      _exit(0);
+   }
+   int status = 0;
+   assert(waitpid(pid, &status, 0) == pid);
+   assert(WIFEXITED(status));
+   return WEXITSTATUS(status);
+}
+
+static void test_delegate_unsupported_routed_flags_are_refused(void)
+{
+   char *verify_argv[] = {"review", "task", "--verify", "false"};
+   assert(marshal_delegate_exit_status(verify_argv, 4) == 1);
+
+   char *scope_argv[] = {"review", "task", "--scope", "bounded"};
+   assert(marshal_delegate_exit_status(scope_argv, 4) == 1);
+
+   /* A run WITHOUT them still marshals normally - the guard must not be a
+    * blanket refusal. */
+   char *plain_argv[] = {"review", "task"};
+   assert(marshal_delegate_exit_status(plain_argv, 2) == 0);
+}
+
 int main(void)
 {
    printf("test_cli_v1_delegate\n");
@@ -1398,6 +1437,7 @@ int main(void)
    test_trajectory_export_route_marshaled();
    test_trajectory_batch_route_marshaled();
    test_client_endpoint_selection();
+   test_delegate_unsupported_routed_flags_are_refused();
    printf("All tests passed.\n");
    return 0;
 }

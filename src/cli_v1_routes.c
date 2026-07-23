@@ -1909,6 +1909,29 @@ cJSON *marshal_delegate(int argc, char **argv)
 
    cJSON *req = marshal_no_args("delegate");
 
+   /* --verify and --scope are honoured ONLY when the delegate runs in-process
+    * (cmd_agent_delegate.c). This marshaller forwards a fixed allowlist to the
+    * server, the server's delegate path implements neither, and anything not on
+    * the allowlist is simply dropped - so routing a run with either flag used to
+    * return a normal, successful-looking result while the verifier never ran and
+    * the scope ceiling never bound. Silently ignoring a flag that governs
+    * SPEND (escalation) or what a seat is allowed to attempt (scope) is worse
+    * than refusing the run. Fail here until they are plumbed end to end. */
+   if (rpc_get(&opts, "verify"))
+   {
+      fprintf(stderr, "aimee: delegate --verify is not supported for a server-routed run: "
+                      "verification and escalation run in-process only, and this request is "
+                      "dispatched to the server.\n");
+      exit(1);
+   }
+   if (rpc_get(&opts, "scope"))
+   {
+      fprintf(stderr, "aimee: delegate --scope is not supported for a server-routed run: "
+                      "the scope ceiling is applied by in-process routing, and this request is "
+                      "dispatched to the server.\n");
+      exit(1);
+   }
+
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "role", opts.positional[0]);
 
