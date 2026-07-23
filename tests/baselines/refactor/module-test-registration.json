@@ -59,6 +59,108 @@
       "ctest": false,
       "make": true,
       "module": "delegates",
+      "test": "src/tests/test_delegate_backend.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_docker.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_local.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_ssh.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_context_shed.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_credentials.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_dispatch_reliability.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_driver.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_economics.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_ephemeral_ws.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_handoff.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_patch_coordinator.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_plan.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_role.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_sandbox_image.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_xml_fallback.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_gw_orch_delegates.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
       "test": "src/tests/test_panel_provider.c"
     },
     {
