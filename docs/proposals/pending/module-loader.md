@@ -59,6 +59,32 @@ or exceed policy without core's admission. Artifact **signing authority** stays 
 stay with `module-runtime`; `module-loader` refuses to load a module whose install/dependency
 preconditions are unmet, naming the missing dependency.
 
+## Trust of the loader itself (optional, but not untrusted)
+
+`module-loader` is optional — a deployment without external modules omits it — yet it hosts the
+sandbox that confines *untrusted* code, which makes its own integrity trust-critical. Optional does
+not mean untrusted: `module-loader` is **first-party code**, built and signed like the core, and its
+artifact is attested before it runs; it is never itself a user-authored or externally supplied
+module. Three properties keep a bug in the loader from becoming a sandbox escape:
+
+- **Confinement rests on a hardened runtime, not loader-authored logic.** Isolation is enforced by
+  the OS kernel (seccomp/namespaces/container) or a mature WebAssembly engine, not by
+  `module-loader`'s own code. The loader configures and launches confinement; it does not implement
+  the memory boundary itself.
+- **Core admission is independent and still gates the bus.** Even a compromised loader cannot grant a
+  hosted module bus access: `module-runtime` (core) is the sole admission authority and independently
+  applies identity, installation, `execution-policy`, and per-queue routing. A module the loader
+  starts reaches nothing until core admits it, and only its authorized queues thereafter. The loader
+  cannot exceed policy on a module's behalf.
+- **The loader is in scope for attestation.** Its integrity is measured and audited on the same
+  footing as the core trust kernel; a deployment that requires signed modules also requires an
+  attested loader, so a substituted or tampered loader is detectable.
+
+This is defense in depth, not a claim that the loader is unimportant: it narrows a loader compromise
+to "can start and stop sandboxes it is entitled to," not "can read `vault` or inject onto the bus."
+Hardening and formal ownership of the confinement contract are `module-loader`'s to specify; the
+core-side admission and policy gates are owned by `module-runtime` and hold regardless of the loader.
+
 ## Non-goals
 
 - Owning the bus, admission, routing, capability state, or the trust kernel (all `module-runtime`/core).
@@ -77,6 +103,7 @@ preconditions are unmet, naming the missing dependency.
 - {id: 3, tier: integration, check: "scripts/test_module_sandbox_hosts.sh --backend os-sandboxed-process --backend wasm --reaches-only-authorized-bus-queues --cannot-read-core-vault-or-peer-memory --crash-is-isolated-fault-domain --deployment-selectable-backend"}
 - {id: 4, tier: integration, check: "scripts/test_module_lifecycle.sh --start --health --restart-on-crash --drain-and-upgrade --stop --independent-per-module --crash-does-not-take-down-core-or-peers"}
 - {id: 5, tier: integration, check: "scripts/test_loader_safety_boundary.sh --loader-not-admission-authority --core-grants-bus-handle-after-admission --loader-cannot-exceed-execution-policy --refuse-load-with-unmet-install-or-dependency --signing-authority-stays-governance"}
+- {id: 6, tier: integration, check: "scripts/test_loader_trust.sh --loader-is-first-party-attested --confinement-by-os-kernel-or-wasm-engine-not-loader-code --core-admission-independent-of-loader --compromised-loader-cannot-grant-bus-access-or-read-vault --loader-in-attestation-scope --signed-module-deployment-requires-attested-loader"}
 ```
 
 ## Review status

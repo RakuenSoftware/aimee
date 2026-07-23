@@ -72,12 +72,17 @@ is now the suite index and shared contract; it does not duplicate the child prop
     that cost bounded rather than pretending it is zero. Governance capture and record must not push
     the hot path outside budget (record is asynchronous; only action-class verdicts are synchronous
     and cheap).
-16. **Installation is dependency-complete.** Each of the Runtime and the Control Plane owns its own
-    shared-memory event bus; core is the bus owner in each. A module registers by publishing its
-    capabilities to core over that bus, and a module may not be installed unless every module it
-    declares a dependency on is already installed. Installation and selection are transactional and
-    fail closed on a missing dependency; a module cannot be removed while an installed module still
-    depends on it.
+16. **Installation is dependency-complete for hard dependencies.** Each of the Runtime and the
+    Control Plane owns its own shared-memory event bus; core is the bus owner in each. A module
+    registers by publishing its capabilities to core over that bus, and a module may not be installed
+    unless every module it declares a **hard** dependency on is already installed. Installation and
+    selection are transactional and fail closed on a missing hard dependency; a module cannot be
+    removed while an installed module still hard-depends on it. A **soft dependency** is declared
+    separately: the module uses the target capability when present but must function without it via a
+    declared fallback, so a soft dependency never blocks install or removal. `module-loader`'s use of
+    optional `governance` artifact trust (falling back to a hash-pin baseline) is the canonical soft
+    dependency; an optional module may soft-depend on another optional module, but never hard-depend on
+    one it could be selected without.
 17. **Bus admission is core-controlled; the shared segment is not open.** The shared-memory bus is
     not a segment any process may map. Core is the sole admission authority: a module is granted the
     bus handle and its own queue mappings only when it is installed and registered, its
@@ -229,6 +234,20 @@ module requests `memory` (or any dependency), it observes that dependency's `rea
 the same generation-stamped projection the thin client uses. Discovery, for a module and for a
 client, is one mechanism.
 
+**Intra-service versus cross-service.** The shared-memory bus is intra-service: a module reaches
+the `memory` (and every other capability) **of its own service** — the Runtime hosts per-user memory,
+the Control Plane hosts shared memory. When a module must reach the *other* service's capability (a
+Runtime module reading Control-Plane shared memory), the request does not travel the shared-memory
+bus; it crosses on the **existing Runtime↔Control network transport**, carrying the *same* typed event
+contract, auth, and capability advertisement, and is marked cross-service. That crossing is
+explicitly **not** on the shared-memory fast path — it carries network latency and is subject to the
+performance budget's separate, looser cross-service class, and cross-service readiness is gated by the
+merged advertisement across both services. This proposal fixes only that a cross-service request
+reuses the event contract over the network transport rather than inventing a second path; the exact
+routing and which capabilities are cross-service-reachable are owned by the product boundary in
+[`product-governance-web-and-config.md`](product-governance-web-and-config.md) and the advertisement
+child.
+
 ### Bus admission and isolation
 
 The bus carries every module's traffic, including the near-universal `memory` path and every
@@ -324,8 +343,7 @@ reviewable and audited, not an ambient consequence of being on the bus.
 Because every inter-module message is one typed event on one construct, the bus is a complete,
 ordered record of the system's cross-module behavior — and that record is **replayable**. The bus
 supports capturing the event stream (per service, within the performance budget) and re-driving it
-against modules to reproduce a run deterministically. This is a first-class capability, not a
-side effect (shared invariant 13):
+against modules. This is a first-class capability, not a side effect (shared invariant 13):
 
 - **Debugging.** One ordered stream shows exactly what every module published, requested, and
   received, with the trust-kernel verdict on each hop. A failure is inspected on the recorded stream
@@ -336,10 +354,22 @@ side effect (shared invariant 13):
   verdict (complementing, not replacing, the durable audit chain in
   [`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)).
 
-Record and replay are deterministic with respect to the captured stream: replay presents the same
-events in the same order; module non-determinism (clocks, randomness, external I/O) is captured as
-events or stubbed at replay so a replayed run does not diverge silently. Capture obeys the same
-redaction and principal-scoping as the audit tap; a recorded stream is a governed artifact.
+Determinism has honest limits, because modules are separate programs, not one lockstep runtime. The
+suite does **not** promise bit-identical global re-execution of every process. It defines two replay
+modes:
+
+- **Observational replay (always faithful).** Re-present the recorded, ordered stream for inspection,
+  forensics, and debugging. Nothing is re-executed, so this is exact by construction and is the
+  default for governance and triage.
+- **Module replay (bounded, divergence-detecting).** Re-drive one module — or a chosen subset —
+  against its recorded inbound events and compare its produced outbound events to the recording.
+  Replay is deterministic **only to the extent a module is a function of its bus inputs**: any
+  clock, randomness, or external I/O a module uses must be sourced from the bus or injected from the
+  recording, or the module is not bit-reproducible and the spec marks it so. Divergence between
+  replayed and recorded output is **detected and reported**, never silently absorbed.
+
+Capture obeys the same redaction and principal-scoping as the audit tap; a recorded stream is a
+governed artifact.
 
 ### Performance budget (the speed constraint)
 
@@ -352,6 +382,15 @@ without cgo. This is not free — splitting `memory` into its own program costs 
 monolithic in-process call — so a benchmark gate bounds per-event dispatch overhead and batching and
 streaming keep the `memory` round trip small; the round-trip proof exercises the `memory` stages
 *across* the bus, not as an in-proc shortcut.
+
+The budget is not a slogan; it is a **committed baseline artifact with named metrics and thresholds**,
+owned by `module-runtime` and enforced by the benchmark gate. It fixes, at minimum: a ceiling on
+per-event bus dispatch overhead (host enqueue → client dequeue, excluding module work); the `memory`
+round-trip latency at p50 and p99 measured against a recorded pre-migration baseline; and a maximum
+allowed regression factor for that round trip. The concrete numbers live in a committed baseline file
+(not in prose), are set from a measured baseline before the `memory` migration slice, and are a
+merge gate: the slice may not land while the gate is red. Changing a threshold is a reviewed change to
+that file, so "within budget" always names a real, checkable number.
 
 Governance capture must live within this budget. The tap observes every event, but **recording** to
 the durable audit chain is asynchronous and batched (consistent with the WORM hot-path cost noted in
@@ -637,3 +676,18 @@ Technical-writing review approved the final phased wording. Roundtable review re
 mixed taxonomy/implementation gate, then approved the revision after pre-child taxonomy checks and
 post-child Git implementation checks were separated; its final artifact reported no issues, with
 zero surviving findings after replay verification.
+
+**The 2026-07-23 amendment is not covered by any of the approvals above.** It makes core a C
+communication substrate and every module a separate program in any conforming language over a
+core-owned shared-memory event bus (bus host vs bus client, admission, observer routing,
+record/replay, dependency-complete install, `module-loader` renamed from `plugin-loader`). This
+changes shared invariants and the taxonomy's language axis, so it **reopens** the suite index and the
+`module-runtime` and `aimee-core-capability-contract` children for fresh technical-writing,
+architecture, adversarial, and verification review, and it requires reconciling the sibling children
+(`memory-learning-and-inference-boundaries`, `product-governance-web-and-config`,
+`feature-liveness-and-background-curator-removal`, `large-refactor-delivery-and-compatibility`), which
+carry 2026-07-23 reconciliation notes pending that review. Until that review completes, the suite
+holds its prior roundtable-approved state only for the parts the amendment did not touch; the amended
+surface is DRAFT. The three new consuming children
+(`thin-client-capability-advertisement`, `event-bus-governance-and-capture`, `module-loader`) are
+freshly drafted and unreviewed.

@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 22 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 23 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — twenty-two proposals (all but one not yet implemented).
+The genuinely open work — twenty-three proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -110,6 +110,12 @@ The genuinely open work — twenty-two proposals (all but one not yet implemente
   WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
   optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
   **Gate-Promote / Enforce.**
+- [Aimee shared-memory event bus — wire and segment spec (v0 DRAFT)](proposals/pending/event-bus-wire-spec.md)
+  — the normative spec the single in-source C bus host and the C/Go reference clients implement:
+  segment layout, SPSC rings, event encoding, attach/admission handshake, observer routing, the
+  governance/audit tap, credit-based backpressure, ordering, versioning, and capture/replay format.
+  Owned by `module-runtime`; validated by two independent client implementations + conformance
+  vectors. Drafted 2026-07-23. **Translate / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.

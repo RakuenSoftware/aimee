@@ -47,9 +47,10 @@ module layout.
 ## Descriptor contract
 
 Every descriptor declares identity, kind, required/optional state, default selection, runtime
-toggle support, dependencies, required components, providers, source and public-header globs,
-config ownership/read evidence, routes/commands/protocols, data ownership, tests, docs, and
-compatibility aliases. Invalid, duplicate, cyclic, unowned, or incomplete descriptors fail before
+toggle support, **hard and soft dependencies** (see below), required components, providers, source
+and public-header globs, config ownership/read evidence, routes/commands/protocols, data ownership,
+tests, docs, and compatibility aliases. Invalid, duplicate, cyclic, unowned, or incomplete
+descriptors fail before
 build generation.
 
 Config read evidence is compiler-derived, not trusted descriptor prose. The inventory maps each key
@@ -146,10 +147,10 @@ the **bus host** and the **bus client** — and only one of them is a public, re
   else to reimplement, and there is exactly one of it.
 - **The bus client is a language-neutral spec with reference implementations in C and Go.** Because
   modules are separate programs in any language, the client side is the public contract: the wire
-  spec defines the segment/ring layout, the attach/admission handshake seen by a client, and the
-  event encoding, and `module-runtime` ships a **C reference client** (for C-authored modules and
-  core-adjacent bus clients) and a **Go reference client** (the first-party client every Go module
-  links).
+  spec ([`event-bus-wire-spec.md`](event-bus-wire-spec.md)) defines the segment/ring layout, the
+  attach/admission handshake seen by a client, and the event encoding, and `module-runtime` ships a
+  **C reference client** (for C-authored modules and core-adjacent bus clients) and a **Go reference
+  client** (the first-party client every Go module links).
 
 Two independent client references, **not one**, are what keep the bus-client spec honest: a
 cross-language conformance suite runs shared wire-vector fixtures against both C and Go, and an
@@ -205,16 +206,25 @@ infrastructure, not a feature module.
   ([`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md)). Core does
   not poll a module for its capabilities. A module that registers without publishing a capability
   contract, or that serves an event kind it never advertised, fails validation.
-- **Dependency-complete installation.** Each descriptor declares its module dependencies. The
-  installer/profile generator computes the dependency closure and refuses — fail closed, naming the
-  missing module — any install or selection that would leave a declared dependency uninstalled, and
-  refuses any removal that would strand an installed dependent. This is an install-time precondition
-  distinct from runtime readiness; `memory`, as near-universal dependency, orders first and cannot be
-  removed while a dependent remains.
-- **Record and replay.** The bus supports deterministic capture of the per-service event stream and
-  replay against modules to reproduce a run. Capture obeys the audit tap's redaction and
-  principal-scoping; replay presents the same events in the same order, with module non-determinism
-  captured or stubbed so a replayed run does not diverge. Replay is the primary debugging and
+- **Dependency-complete installation (hard) and soft dependencies.** Each descriptor declares its
+  module dependencies as **hard** or **soft**. The installer/profile generator computes the hard
+  dependency closure and refuses — fail closed, naming the missing module — any install or selection
+  that would leave a hard dependency uninstalled, and refuses any removal that would strand an
+  installed hard dependent; this is an install-time precondition distinct from runtime readiness, and
+  `memory`, as near-universal hard dependency, orders first. A **soft** dependency declares a
+  capability the module *uses when present* plus a required fallback for when it is absent; it never
+  blocks install, selection, or removal. The validator requires every soft dependency to name a
+  fallback and forbids an optional module from declaring a **hard** dependency on another optional
+  module (only a soft one). `module-loader`→`governance` artifact trust is the canonical soft edge.
+- **Record and replay.** The bus supports capturing the per-service event stream and re-driving it.
+  Two modes, per suite invariant 13: **observational replay** re-presents the recorded ordered stream
+  (no re-execution, exact by construction), and **module replay** re-drives one module or a subset
+  against its recorded inbound events and compares produced outbound events to the recording,
+  **detecting and reporting divergence** rather than absorbing it. Determinism holds only to the
+  extent a module is a function of its bus inputs; clocks, randomness, and external I/O must be sourced
+  from the bus or injected from the recording, and a module that is not bit-reproducible is marked so.
+  The suite makes no promise of bit-identical global re-execution across all processes. Capture obeys
+  the audit tap's redaction and principal-scoping. Replay is the primary debugging and
   regression-seeding surface.
 
 ## Generated builds and dependencies
@@ -276,10 +286,10 @@ logic or a second provider implementation.
 - {id: 10, tier: mechanical, check: "scripts/check_language_boundary.sh --core-c --modules-any-language --forbid-core-to-module-link --forbid-cross-module-link --forbid-cgo --require-eventcontract-only-cross-participant-surface --trust-kernel-placement-from src/modules/aimee-core-capability-contract"}
 - {id: 11, tier: mechanical, check: "scripts/check_event_contracts.sh --schema src/modules/eventcontract.schema.json --single-owner-per-event-kind --single-server-per-request-kind --no-cycles --no-core-to-optional --memory-is-sink --forbid-undeclared-publish-subscribe --forbid-non-bus-module-path --descriptor-kind-evidence"}
 - {id: 12, tier: mechanical, check: "scripts/check_generated_module_builds.sh --module-closure --all-profiles --byte-equal --fail-drift && scripts/check_module_deps.sh --event-edge-graph --per-language-import-graph --no-cross-module-linkage --no-cycles --no-core-to-optional --file-line-and-event-kind-evidence"}
-- {id: 13, tier: integration, check: "scripts/bench_event_bus.sh --shared-memory-ring --zero-copy-payloads --no-syscall-on-fast-path --memory-roundtrip-within-budget --bound-per-event-dispatch-overhead --async-record-off-hot-path --synchronous-verdict-only-action-class"}
-- {id: 14, tier: mechanical, check: "scripts/check_install_dependencies.sh --descriptor-declared-module-deps --transactional --refuse-install-with-unmet-dep --refuse-remove-with-installed-dependent --name-missing-module --dependency-closure --memory-orders-first --distinct-from-runtime-readiness"}
+- {id: 13, tier: integration, check: "scripts/bench_event_bus.sh --baseline tests/baselines/bus/perf-budget.yaml --require-committed-baseline --metrics per-event-dispatch-overhead-ceiling,memory-roundtrip-p50,memory-roundtrip-p99,max-regression-factor --shared-memory-ring --zero-copy-payloads --no-syscall-on-fast-path --fail-if-baseline-absent-before-memory-migration --merge-gate --async-record-off-hot-path --synchronous-verdict-only-action-class"}
+- {id: 14, tier: mechanical, check: "scripts/check_install_dependencies.sh --descriptor-declared-hard-and-soft-deps --transactional --refuse-install-with-unmet-hard-dep --refuse-remove-with-installed-hard-dependent --soft-dep-never-blocks-install-or-removal --require-soft-dep-fallback --forbid-optional-hard-dep-on-optional --name-missing-module --hard-dependency-closure --memory-orders-first --distinct-from-runtime-readiness"}
 - {id: 15, tier: integration, check: "scripts/test_capability_publication.sh --modules-publish-to-core-over-bus --no-core-poll --aggregate-into-closure-and-advertisement --fail-register-without-capability-contract --fail-serve-unadvertised-event-kind"}
-- {id: 16, tier: integration, check: "scripts/test_event_replay.sh --capture-per-service-stream --deterministic-same-events-same-order --capture-or-stub-nondeterminism --replay-reproduces-run --capture-obeys-audit-redaction-and-principal-scope"}
+- {id: 16, tier: integration, check: "scripts/test_event_replay.sh --observational-replay-exact --module-replay-detects-and-reports-divergence --deterministic-only-as-function-of-bus-inputs --require-nondeterminism-sourced-from-bus-or-injected --mark-non-bit-reproducible-modules --no-global-lockstep-promise --capture-obeys-audit-redaction-and-principal-scope"}
 - {id: 17, tier: mechanical, check: "scripts/check_user_module_boundary.sh --only-surface bus,event-contract,capability-publication --any-language --untrusted-principal --sandbox-os-process-or-wasm --reaches-only-authorized-bus-queues --memory-and-fault-isolated --events-authorized-by-execution-policy --recorded-by-audit --no-ambient-access --declared-event-kinds-only --dependency-must-be-installed --no-core-recompile-or-relink"}
 - {id: 18, tier: integration, check: "scripts/test_bus_admission.sh --core-sole-admission-authority --shared-segment-not-mappable-by-arbitrary-process --grant-handle-and-queues-only-on-admission --require-attested-identity --reuse-vault-principal-cert-cn-and-governance-artifact-trust --verify-external-artifact-before-start --admit-only-installed-registered-authorized --least-privilege-declared-kinds-only --refused-module-not-started-holds-no-handle --fail-closed-and-audited"}
 - {id: 19, tier: integration, check: "scripts/test_bus_routing.sh --observer-pattern --per-event-kind-observer-set --deliver-only-to-authorized-observers --module-maps-only-own-queues --no-all-events-subscription --request-reply-point-to-point --subscribe-requires-descriptor-edge-and-execution-policy --refuse-undeclared-or-unauthorized-subscription-fail-closed-audited --module-cannot-observe-or-enumerate-others-traffic --only-governance-audit-tap-sees-full-stream"}
