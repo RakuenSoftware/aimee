@@ -47,6 +47,10 @@ The record is the *evidence*, not the audited event's payload. It carries:
   `(operation_id, event_kind)` for the rewrap outbox, `event_id` for the open
   event);
 - the shard key `(tenant, provider)` in canonical bounded form;
+- the non-secret identifying fields of the source event — request id, principal
+  or team, and `provider:cred` — carried explicitly, not merely committed to by
+  the source hash. A 32-byte hash cannot be inverted, so any field an operator
+  must be able to read during reconstruction has to be exported in the clear;
 - the source entry's own hash and its predecessor hash, so the witness can verify
   linkage without holding the payload;
 - the emitting seal epoch and fencing token;
@@ -68,19 +72,31 @@ on both sides.
 
 ## 2. Signed-head checkpoint format
 
-Add the checkpoint record to the same module. A checkpoint binds, at a defined
-instant, the set of per-shard heads: for each shard, the shard key, its highest
-witnessed sequence, and that entry's hash. Shards are serialized in a fixed
-canonical order — byte order over the packed shard key — so two instances
-computing the same checkpoint produce identical bytes.
+Add the checkpoint record to the same module. A checkpoint commits to the set of
+per-shard heads at a defined instant.
 
-The checkpoint carries its own domain label, the checkpoint sequence, the
-predecessor checkpoint digest, the shard-head vector, and the count. It is signed
-under an existing vault-held key through the current custody seam; E1 defines the
-format, the canonical serialization, the digest, and the verification entry point.
-E1 does **not** wire checkpoint generation to a timer or to any production
-scheduler — that is E3, which owns the "every N entries or T seconds, whichever
-first" cadence.
+**The commitment is a Merkle root, not a shard-head vector.** The number of
+`(tenant, provider)` shards grows without bound over the system's lifetime, so a
+checkpoint that serializes every shard head would grow without bound with it —
+unbounded read, unbounded sort, unbounded signed output — and a monotonic
+deadline would not make that bounded, it would only make checkpoint generation
+start failing once the fleet got large enough. Since budget release depends on
+checkpoints, that would be a scale-triggered permanent egress outage.
+
+The checkpoint therefore carries its own domain label, the checkpoint sequence,
+the predecessor checkpoint digest, the shard count, and a single Merkle root over
+the canonically ordered `(shard key, sequence, head hash)` leaves. The tree is
+maintained incrementally as shards advance rather than rebuilt per checkpoint. A
+per-shard inclusion proof is exportable separately and independently verifiable
+against the signed root, so a consumer interested in one tenant retains a small
+proof rather than the whole fleet's heads.
+
+The checkpoint is signed under an existing vault-held key through the current
+custody seam; E1 defines the format, the canonical serialization, the leaf
+ordering, the root computation, the inclusion-proof format, the digest, and the
+verification entry points. E1 does **not** wire checkpoint generation to a timer
+or to any production scheduler — that is **E2**, which owns the "every N entries
+or T seconds, whichever first" cadence together with the drain.
 
 Checkpoint verification is a pure function over bytes: given a checkpoint, its
 predecessor digest, and a public verification key, decide valid or invalid with a
@@ -214,8 +230,10 @@ E2 owns.
 - C-versus-SQL digest agreement for the same logical event.
 - Canonical shard ordering is stable and independent of insertion order.
 - Checkpoint verification accepts a valid checkpoint and rejects a tampered
-  shard head, a reordered shard vector, a wrong predecessor digest, and a wrong
-  signature, each with a distinct typed reason.
+  leaf, a reordered leaf set, a wrong predecessor digest, a forged inclusion
+  proof, and a wrong signature, each with a distinct typed reason.
+- Merkle root stability: incremental maintenance and a full rebuild agree for the
+  same leaf set, and the root is independent of shard insertion order.
 - Deterministic rendering: the same evidence renders byte-identically twice, and
   across two independently constructed module instances.
 - Every watermark transition, including replayed confirmation (no second
