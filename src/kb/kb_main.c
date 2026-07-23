@@ -1712,6 +1712,21 @@ int main(int argc, char **argv)
       }
    }
 
+   {
+      /* P7-witness-e2: a key-holding kb must have a working checkpoint signer
+       * before serving, so org key use can never outrun the evidence that witnesses
+       * it. No-op on a dev/no-live-key kb. */
+      char witness_err[220] = "";
+      if (kb_witness_boot_check(witness_err, sizeof(witness_err)) != 0)
+      {
+         fprintf(stderr, "aimee-kb: %s\n", witness_err);
+         db2_shutdown();
+         kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+         agent_http_cleanup();
+         return 1;
+      }
+   }
+
    if (vault_operator_enabled)
    {
       char operator_error[256] = "";

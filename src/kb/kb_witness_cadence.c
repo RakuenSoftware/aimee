@@ -1,7 +1,35 @@
 #include "kb_witness_cadence.h"
 
+#include <openssl/crypto.h>
+#include <stdio.h>
+
 #include "db2/db2_witness_checkpoint.h"
+#include "kb/kb_vault_policy.h"
 #include "log.h"
+#include "modules/vault/vault_witness_signer.h"
+
+int kb_witness_boot_check(char *err, size_t errlen)
+{
+   if (err && errlen)
+      err[0] = '\0';
+   /* Only a key-holding kb (real external anchor, live keys allowed) must be able
+    * to sign witness evidence. A dev/no-live-key kb witnesses nothing that gates a
+    * real key, so the signer is not required at boot. */
+   if (!kb_vault_live_keys_allowed())
+      return 0;
+   uint8_t pub[VAULT_WITNESS_ED25519_PUB_LEN], key_id[VAULT_WITNESS_SIGNER_KEY_ID_LEN];
+   if (vault_witness_signer_identity(pub, key_id) != 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen,
+                  "witness signing key not derivable; a key-holding kb refuses to start without a "
+                  "working checkpoint signer");
+      return -1;
+   }
+   OPENSSL_cleanse(pub, sizeof pub);
+   OPENSSL_cleanse(key_id, sizeof key_id);
+   return 0;
+}
 
 void kb_witness_cadence_tick(time_t now)
 {

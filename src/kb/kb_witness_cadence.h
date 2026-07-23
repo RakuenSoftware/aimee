@@ -25,6 +25,16 @@ extern "C"
  * when the interval has elapsed; otherwise returns immediately. */
 void kb_witness_cadence_tick(time_t now);
 
+#include <stddef.h>
+
+/* Boot fail-closed check. On a key-holding kb (kb_vault_live_keys_allowed) the
+ * witness signer must be functional — its key derivable and its public anchor
+ * available — before the kb serves, so no org key is ever used on a kb that cannot
+ * sign the evidence of that use. Returns 0 when startup may proceed, -1 with a
+ * reason in `err` when a key-holding kb must refuse to start. On a dev/no-live-key
+ * kb it is a no-op (returns 0): there are no org keys to witness. */
+int kb_witness_boot_check(char *err, size_t errlen);
+
 #ifdef __cplusplus
 }
 #endif
