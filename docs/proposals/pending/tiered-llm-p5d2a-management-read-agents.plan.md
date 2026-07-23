@@ -71,22 +71,54 @@ intent table. Each row immutably binds a fresh correlation/JTI, team, composite 
 server, selector (CHECK exactly `agents`), capability (CHECK exactly `remote_reads`), canonical
 external method/path, the 32-byte challenge nonce, request digest, actual kb peer certificate
 issuer/serial, enrolled target certificate issuer/serial, revocation generation, token-publication
-generation, exact audience and issuer, and issuance deadline. A shared authority namespace (or an
-equivalent single authority query) rejects a correlation/JTI found in both action and read sources
-and requires exactly one typed source; a cross-kind collision can never select claims.
+generation, exact audience and issuer, and issuance deadline. Add the database-enforced shared
+`kb_management_token_intent_namespace` table with UNIQUE `correlation_id`, UNIQUE `jti`, and a
+kind CHECK of exactly `action` or `read`. In one transaction, the exact action/read creation
+function first inserts its namespace row and then the typed intent row with a composite foreign key
+to that namespace kind. Migrate existing action intents into the namespace and require every future
+action creation to reserve it too. No preflight query substitutes for the unique constraints;
+concurrent cross-kind inserts for either identifier yield exactly one reservation and one closed
+conflict. Authority admission joins exactly one namespace row to exactly one matching typed row and
+rejects missing, mismatched, or multiple sources.
 
 The closed state machine is `pending -> signing -> issued`, with `expired` terminal. Runtime creates
-only `pending` rows through an exact definer function and cannot update them. The authority alone
-leases/claims a row, signs the immutable claims, durably records WORM key use and the token hash,
-then finalizes `issued` before a token is returned. A crash in `signing` resumes the same immutable
-claims and JTI after the bounded lease; it never invents a replacement. `issued` is terminal and
-cannot mint again. Racing admissions yield exactly one issued result and closed conflicts for the
-rest. Reuse the C2d admit/use/readback/finalize discipline where applicable, without weakening the
-new table's type separation.
+only `pending` rows through an exact definer function and cannot update them. That function freezes
+every JWT claim before insertion, including version, issuer, audience, subject, team, capability,
+JTI, correlation, digest, peer issuer/serial/fingerprint, kid and key generation, `iat`, and `exp`;
+`iat`, `exp`, and the issuance deadline derive from primary database time, not runtime input.
+
+Only these authority-definer transitions exist, guarded with locked rows and database time:
+
+- `pending -> signing` when `now < issuance_deadline`, recording a random lease owner and bounded
+  `lease_until`; `pending -> expired` when `now >= issuance_deadline` through the authority expiry
+  function;
+- `signing -> signing` only as lease recovery when `lease_until <= now < issuance_deadline`, changing
+  only lease metadata and preserving every claim; `signing -> expired` whenever
+  `now >= issuance_deadline`, even if a lease just expired; and
+- `signing -> issued` only for the current lease owner while `now < issuance_deadline`, the frozen
+  `exp > now`, the selected key id/generation still exactly matches, and the supplied token parses
+  back to the frozen claims.
+
+`issued` and `expired` have no outgoing transitions. An issued row remains issued after JWT expiry;
+expiry is enforced from its frozen `exp`. Authority admission invokes the expiration transition
+before any claim or signing readback. At the equality boundary (`now == issuance_deadline`) expiry
+wins and signing/finalization is forbidden.
+
+After signing, one authority transaction atomically stores the exact bounded JWT bytes in the
+authority-owned row, stores their SHA-256, appends the WORM key-use record, and moves the row to
+`issued`; there is no committed state with the audit/token hash but no issued token. The token is
+returned only by exact post-commit authority readback of those retained bytes, never by rebuilding
+it. A crash before that transaction commits leaves `signing` with no durable token/audit and lease
+recovery signs the same frozen claims with the same frozen key generation; a crash after commit
+returns the byte-identical retained token and never signs again. Ordinary kb roles have no direct
+access to retained bearer bytes. Racing admissions yield exactly one issued result and closed
+conflicts for the rest. Reuse the C2d admit/use/readback/finalize discipline where applicable,
+without weakening the new table's type separation.
 
 The request digest is SHA-256 over this exact length-prefixed binary encoding. It begins with the
 19 bytes `aimee-mgmt-read-v1\0`, followed in order by: external method `GET`, canonical external
-path `/v1/servers/{server_id}/agents`, selector `agents`, server id, team as unsigned big-endian
+path formed by byte-concatenating `/v1/servers/`, the concrete validated `server_id`, and `/agents`
+(there are no literal braces), selector `agents`, server id, team as unsigned big-endian
 64-bit, the raw 32-byte nonce, kb peer certificate issuer, kb peer certificate serial, enrolled
 server certificate issuer, enrolled server certificate serial, revocation generation as unsigned
 big-endian 64-bit, and token-publication generation as unsigned big-endian 64-bit. Each string is
@@ -95,6 +127,21 @@ invalid UTF-8, noncanonical identifiers, or exceeding 65535 bytes are rejected r
 normalized. Integers have no textual encoding. There are no optional fields, separators, JSON,
 escaping, or Unicode normalization. A checked-in known-answer vector freezes every input byte and
 the resulting digest; alternate order, encoding, path alias, or unknown field fails.
+
+Certificate issuer is the existing enrollment/status canonical slash-form byte string obtained by
+`X509_NAME_oneline(X509_get_issuer_name(cert), ...)`, persisted and compared byte-for-byte with no
+case folding, whitespace change, or re-rendering. Certificate serial is the non-negative ASN.1
+INTEGER converted by `ASN1_INTEGER_to_BN` plus `BN_bn2hex`, then lowercase ASCII hex with no `0x`,
+separator, whitespace, or added leading zero beyond `BN_bn2hex`'s even-length representation;
+empty or negative serials fail. The live peer and
+primary snapshot must already compare equal in these canonical forms before hashing.
+
+The normative known-answer inputs are method `GET`, path `/v1/servers/server-a/agents`, selector
+`agents`, server id `server-a`, team 42, nonce bytes `00 01 ... 1f`, kb issuer `/CN=kb-ca`, kb serial
+`01af`, server issuer `/CN=server-ca`, server serial `10be`, revocation generation 7, and publication
+generation 9. The complete 165 encoded bytes in hex are:
+`61696d65652d6d676d742d726561642d7631000003474554001b2f76312f736572766572732f7365727665722d612f6167656e747300066167656e747300087365727665722d61000000000000002a000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f00092f434e3d6b622d6361000430316166000d2f434e3d7365727665722d636100043130626500000000000000070000000000000009`.
+Their SHA-256 is `c66354428fbcdb9648b532b8de71b748e0d058711cfb441c608f5460564efcbf`.
 
 Mint the existing short-lived management JWT shape with a new closed capability
 `remote_reads`, audience equal to the exact stable registry `server_id` (never endpoint, DNS name,
@@ -181,11 +228,32 @@ environment references, headers, auth config, personas/roles/instructions, tool 
 paths, or raw config fragments. Bound object count, every string, nesting, and total encoded body;
 use strict UTF-8/JSON and fail rather than truncate or partially return.
 
+"Unknown internal fields" means additional fields already accepted in an authoritative local
+`agent_t` object but absent from this projection; the projector never reads or emits them. Unknown
+external selectors, query keys, JSON/envelope members, token/status purposes or capabilities,
+projection enum values, and fields in any newly parsed management-read wire object are rejected.
+This does not make the projector a generic raw-config parser and does not change existing agent
+configuration compatibility.
+
 Every external and management-listener failure uses the closed shape
 `{"error":{"code":"<enum>","message":"<fixed text>","correlation_id":"<43-character unpadded base64url>"}}`.
-The code is exactly one of `invalid_request`, `forbidden`, `not_found`, `conflict`, `unavailable`,
-or `integrity`; each code has one fixed public message. Never copy upstream response text or
-headers, parser detail, certificate/path/endpoint data, SQL detail, or internal identifiers.
+The exact mapping is:
+
+- HTTP 400, `invalid_request`, `Invalid request.`
+- HTTP 403, `forbidden`, `Forbidden.`
+- HTTP 404, `not_found`, `Not found.`
+- HTTP 409, `conflict`, `Request conflict.`
+- HTTP 502, `integrity`, `Integrity verification failed.`
+- HTTP 503, `unavailable`, `Service unavailable.`
+
+Checks stop at the first failing protocol step in the fixed ten-step sequence above. Within one
+step, precedence is `invalid_request`, `forbidden`, `not_found`, `conflict`, `integrity`, then
+`unavailable`; no later check may replace the selected error. Cross-team and unauthorized callers
+always receive `forbidden`, not target existence. A missing target is `not_found` only after actor
+authorization for that team. Cryptographic mismatch, replay, rollback, binding failure, or malformed
+authenticated upstream proof is `integrity`; dependency timeout/outage/capacity is `unavailable`.
+Never copy upstream response text or headers, parser detail, certificate/path/endpoint data, SQL
+detail, or internal identifiers.
 
 ## Database isolation and failure semantics
 
@@ -229,8 +297,9 @@ Unit and integration coverage must include:
   refresh, signed generation rollback, nonce purpose/replay, checkpoint race, revocation at every
   challenge/dispatch/response boundary, no redirect/reconnect, and runtime unregister races;
 - projection canaries proving raw secrets/endpoints/commands/env references never appear; exact
-  count/string/integer/body boundaries; load failure != empty; duplicate/unknown/wrong-type/NUL/
-  invalid UTF-8 rejection; fuzz corpus plus ASAN/UBSAN; and
+  count/string/integer/body boundaries; load failure != empty; duplicate names, unknown external
+  selectors/wire members, wrong-type/NUL/invalid UTF-8 rejection; accepted extra internal agent
+  fields ignored and absent from output; fuzz corpus plus ASAN/UBSAN; and
 - frontend rendering, canonical team/server reset, degraded errors, in-flight dedupe, and proof
   that agents reads issue neither mutation nor ACK.
 
