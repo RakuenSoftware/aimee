@@ -282,7 +282,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
 - **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
-- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
 - **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`telemetry`** — `metrics_token`

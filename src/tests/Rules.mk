@@ -58,6 +58,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(OBJDIR)/code_outline.o $(OBJDIR)/posix/agent_tools_anchored.o \
                              $(OBJDIR)/posix/web_read.o \
                              $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                              $(OBJDIR)/server/token_tracker.o \
                              $(OBJDIR)/server/process_mgr.o \
                              $(OBJDIR)/modules/lsp/lsp_manager.o $(OBJDIR)/modules/lsp/lsp_client.o \
@@ -163,6 +164,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-web-egress \
                $(TESTPREFIX)/unit-test-web-page-cache \
                $(TESTPREFIX)/unit-test-web-search-fusion \
+               $(TESTPREFIX)/unit-test-web-search-fuse \
+               $(TESTPREFIX)/unit-test-web-search-breaker \
                $(TESTPREFIX)/unit-test-kb-rrf-purity \
                $(TESTPREFIX)/unit-test-wfe-deliver \
                $(TESTPREFIX)/unit-test-wfe-manager-flow \
@@ -1664,9 +1667,24 @@ $(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OB
 
 $(TESTPREFIX)/unit-test-web-search-fusion: $(OBJDIR)/tests/test_web_search_fusion.o \
                                     $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                                     $(OBJDIR)/posix/web_read.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/posix/web_read.o \
+                                    $(OBJDIR)/rrf.o \
+                                    $(OBJDIR)/db1/web_page_cache.o $(OBJDIR)/db1/db1_init.o \
+                                    $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/db1_write.o \
+                                    $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+
+$(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
+                                    $(OBJDIR)/server/web_search_breaker.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 $(TESTPREFIX)/unit-test-web-page-cache: $(OBJDIR)/tests/test_web_page_cache.o \
@@ -3046,6 +3064,7 @@ $(TESTPREFIX)/unit-test-skill-review: $(OBJDIR)/tests/test_skill_review.o \
 
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/web_search.o $(TEST_CORE_OBJS) \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                             $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o

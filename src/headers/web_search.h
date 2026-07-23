@@ -13,6 +13,20 @@
 /* Maximum bytes in the formatted output block before truncation */
 #define WEB_SEARCH_MAX_OUTPUT_BYTES 8192
 
+/* Pass as `fetch_pages` to mean "the caller has no opinion" -- config decides,
+ * falling back to WEB_SEARCH_FETCH_PAGES_DEFAULT. Distinct from an explicit 0,
+ * which means the caller really does want snippets only. */
+#define WEB_SEARCH_FETCH_PAGES_UNSET (-1)
+
+/* Built-in default for page fetching: ON.
+ *
+ * A search that returns the answer beats one that returns links to the answer,
+ * and the alternative costs a whole extra agent turn to read one of the results.
+ * The price is latency -- bounded by the per-page and total deadlines in
+ * web_search.c, with partial results tolerated -- and it is why `fetch_pages:
+ * false` on the tool, or `search.fetch_pages: false` in config, exists. */
+#define WEB_SEARCH_FETCH_PAGES_DEFAULT 1
+
 typedef struct
 {
    char *title;
