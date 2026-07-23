@@ -1025,3 +1025,88 @@ func TestReconcileRejectsNonFiniteCost(t *testing.T) {
 		t.Fatalf("cum_cost polluted by rejected cost: %+v err=%v", got, err)
 	}
 }
+
+// A replay whose durable result is gone recovers per reservation state: an
+// 'unresolved' (interrupted) reservation is released for a fresh dispatch; an
+// 'actual' (measured, reconciled) reservation commits its cost and parks for a
+// human rather than silently re-billing it.
+func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
+	ctx := t.Context()
+
+	t.Run("unresolved_redispatches", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_unresolved", Repo: "r", ProposalPath: "u", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		// Ambiguous post-dispatch failure leaves the reservation 'unresolved'.
+		if err := store.ParkRunnerFailure(ctx, item.ID, "impl", "owner1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		// A restart resumes: a new owner takes replay ownership.
+		if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
+		if err != nil || !res.ReplayOnly {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		redispatch, err := store.RecoverLostReplay(ctx, item.ID, "impl", "owner2")
+		if err != nil || !redispatch {
+			t.Fatalf("redispatch=%v err=%v", redispatch, err)
+		}
+		got, err := store.WorkItem(ctx, item.ID)
+		if err != nil || got.State != "active" || got.PauseReason != "" || got.ReservationState != "" || got.ReservedCostUSD != 0 {
+			t.Fatalf("item not runnable/cleared: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("actual_parks_for_human", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_actual", Repo: "r", ProposalPath: "a", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		if allowed, err := store.ReconcileWorkflowBudget(ctx, item.ID, "owner1", 0.4); err != nil || !allowed {
+			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
+		}
+		if _, err := store.db.ExecContext(ctx, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
+		if err != nil || !res.ReplayOnly {
+			t.Fatalf("res=%+v err=%v", res, err)
+		}
+		redispatch, err := store.RecoverLostReplay(ctx, item.ID, "impl", "owner2")
+		if err != nil || redispatch {
+			t.Fatalf("redispatch=%v err=%v", redispatch, err)
+		}
+		got, err := store.WorkItem(ctx, item.ID)
+		if err != nil || got.PauseReason != "replay_unrecoverable" || got.ReservationState != "" || got.ReservedCostUSD != 0 || got.CumulativeCostUSD != 0.4 {
+			t.Fatalf("expected parked with committed cost: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("wrong_owner_refused", func(t *testing.T) {
+		store := newTestStore(t)
+		item := CreateWorkItem{ID: "wi_lost_owner", Repo: "r", ProposalPath: "o", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ParkRunnerFailure(ctx, item.ID, "impl", "owner1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.RecoverLostReplay(ctx, item.ID, "impl", "intruder"); err == nil {
+			t.Fatal("recover accepted a non-owner")
+		}
+	})
+}

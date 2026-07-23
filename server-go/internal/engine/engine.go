@@ -218,6 +218,23 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		defer budgetLock.Unlock()
 	}
 	if err != nil {
+		// A replay-only invocation whose durable result is gone can never succeed
+		// by retrying: recover it (re-dispatch a recoverable interruption, or park a
+		// lost reconciled result for a human) instead of looping runner_unavailable.
+		if errors.Is(err, ErrDelegateReplayUnavailable) {
+			retainBudget = true // RecoverLostReplay owns the reservation transition.
+			redispatch, recErr := e.db.RecoverLostReplay(context.WithoutCancel(ctx), item.ID, item.Stage, owner)
+			if recErr != nil {
+				return out, recErr
+			}
+			if redispatch {
+				// The item is left runnable with no reservation; the next scheduler
+				// pass re-reserves and dispatches fresh work.
+				return out, nil
+			}
+			out.Parked, out.PauseReason = true, "replay_unrecoverable"
+			return out, nil
+		}
 		reason := "runner_unavailable"
 		if errors.Is(err, context.DeadlineExceeded) {
 			reason = "wall_cap"

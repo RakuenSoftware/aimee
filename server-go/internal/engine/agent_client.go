@@ -125,6 +125,13 @@ var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not 
 var ErrDelegateNoJobID = errors.New("agent service returned no job id")
 var ErrDelegateTerminal = errors.New("delegate job reached a failed terminal state")
 
+// ErrDelegateReplayUnavailable is returned when a replay-only invocation cannot
+// find the durable delegate result it is required to reuse (e.g. the in-flight
+// job was killed by a restart and its mapping was lost). Replay can never
+// succeed, so the engine must recover — re-dispatch a recoverable interruption
+// or park a lost reconciled result for a human — instead of retrying forever.
+var ErrDelegateReplayUnavailable = errors.New("replay-only delegate result is unavailable")
+
 // DelegateExecutionError carries the billing boundary across transport and
 // runner layers. A caller must not infer provider dispatch merely because the
 // delegate API was called: validation and admission failures are pre-dispatch,
@@ -303,7 +310,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 	}
 	if launched.JobID <= 0 && request.ReplayOnly {
-		return DelegateResult{}, &DelegateExecutionError{Err: errors.New("replay-only delegate result is unavailable"), Dispatched: true, CostKnown: false}
+		return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
 	}
 	if launched.JobID == 0 {
 		if err := c.doJSONKey(ctx, http.MethodPost, "/v1/delegate/run", payload, &launched, key); err != nil {

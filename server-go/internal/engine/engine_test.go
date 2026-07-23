@@ -17,6 +17,18 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
+func execOnDB(t *testing.T, path, query string, args ...any) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // expireBudgetLease simulates a crashed owner whose reservation lease has run
 // out. Replay ownership is only transferable once the lease lapses.
 func expireBudgetLease(t *testing.T, path, workItemID string) {
@@ -898,4 +910,93 @@ func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
 	if got.CumulativeCostUSD != 0 {
 		t.Fatalf("measured zero was inflated to %v: %+v", got.CumulativeCostUSD, got)
 	}
+}
+
+type replayUnavailableRunner struct{ t *testing.T }
+
+func (r replayUnavailableRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	if !req.ReplayOnly {
+		r.t.Fatal("replay-unavailable runner invoked without ReplayOnly")
+	}
+	return StepResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
+}
+
+// A replay-only invocation whose durable result is gone must recover, not loop:
+// an interrupted (unresolved) reservation re-dispatches; a lost reconciled
+// (actual) one parks for a human.
+func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
+	setup := func(t *testing.T, id string) (*db1.Store, *Engine, string) {
+		root := t.TempDir()
+		workflowDir := filepath.Join(root, "workflows")
+		if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+		if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		def, err := wfe.ParseDefinition(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, err := db1.Open(filepath.Join(root, "aimee.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+		if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+			t.Fatal(err)
+		}
+		eng, err := New(store, artifacts, workflowDir, replayUnavailableRunner{t: t})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store, eng, filepath.Join(root, "aimee.db")
+	}
+
+	t.Run("unresolved_redispatches", func(t *testing.T) {
+		store, eng, dbPath := setup(t, "wi_replay_lost_unresolved")
+		if _, err := store.ReserveWorkflowBudget(t.Context(), "wi_replay_lost_unresolved", "o1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ParkRunnerFailure(t.Context(), "wi_replay_lost_unresolved", "work", "o1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_unresolved")
+		out, err := eng.Advance(t.Context(), "wi_replay_lost_unresolved")
+		if err != nil || out.Parked || out.Ran {
+			t.Fatalf("expected a silent redispatch: out=%+v err=%v", out, err)
+		}
+		got, err := store.WorkItem(t.Context(), "wi_replay_lost_unresolved")
+		if err != nil || got.State != "active" || got.PauseReason != "" || got.ReservationState != "" {
+			t.Fatalf("item not left runnable: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("actual_parks_for_human", func(t *testing.T) {
+		store, eng, dbPath := setup(t, "wi_replay_lost_actual")
+		if _, err := store.ReserveWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1"); err != nil {
+			t.Fatal(err)
+		}
+		if allowed, err := store.ReconcileWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1", 0.3); err != nil || !allowed {
+			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
+		}
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_actual")
+		out, err := eng.Advance(t.Context(), "wi_replay_lost_actual")
+		if err != nil || !out.Parked || out.PauseReason != "replay_unrecoverable" {
+			t.Fatalf("expected park replay_unrecoverable: out=%+v err=%v", out, err)
+		}
+		got, err := store.WorkItem(t.Context(), "wi_replay_lost_actual")
+		if err != nil || got.PauseReason != "replay_unrecoverable" || got.CumulativeCostUSD != 0.3 || got.ReservationState != "" {
+			t.Fatalf("expected committed cost + human park: %+v err=%v", got, err)
+		}
+	})
 }
