@@ -40,8 +40,20 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
 
 
 class LocalUdsSentinel:
+    """A local unix socket that must never be contacted.
+
+    `connect()` to a listening socket succeeds as soon as the kernel queues the
+    connection, well before this server accepts it. Reading `contacts` right
+    after the client exits would therefore race a forbidden connection still
+    sitting in the backlog, and the test would pass on exactly the regression it
+    exists to catch. `contacts_after_settle()` closes that race: accepts are
+    FIFO, so once the sentinel has served a probe connection opened *after* the
+    client exited, every earlier queued connection has already been counted.
+    """
+
     def __init__(self, path: pathlib.Path) -> None:
         self.contacts = 0
+        self._path = path
         self._stop = threading.Event()
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(str(path))
@@ -60,6 +72,10 @@ class LocalUdsSentinel:
                 continue
             with conn:
                 self.contacts += 1
+                # Bound the handler: a contact that connects without sending
+                # would otherwise block the accept loop forever, so nothing
+                # queued behind it could be counted.
+                conn.settimeout(2)
                 try:
                     conn.recv(65536)
                     body = b'{"status":"ok","agents":[],"any_delegate_available":false}'
@@ -70,6 +86,21 @@ class LocalUdsSentinel:
                     )
                 except OSError:
                     pass
+
+    def contacts_after_settle(self) -> int:
+        """Drain the accept backlog, then report contacts excluding the probe."""
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+            probe.settimeout(5)
+            probe.connect(str(self._path))
+            probe.sendall(b"\n")
+            probe.shutdown(socket.SHUT_WR)
+            while probe.recv(65536):
+                pass
+        # The probe was served, so every connection queued before it was too.
+        # Both increments happened on the sentinel thread; this read is ordered
+        # after them by the probe's own completed response.
+        self.contacts -= 1
+        return self.contacts
 
     def close(self) -> None:
         self._stop.set()
@@ -141,7 +172,9 @@ def main() -> int:
             result = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["agent", "list"], True)
             assert result.returncode == 0, (result.stdout, result.stderr)
             assert RemoteHandler.requests >= 2, RemoteHandler.requests
-            assert sentinel.contacts == 0, "configured remote also contacted local UDS"
+            assert sentinel.contacts_after_settle() == 0, (
+                "configured remote also contacted local UDS"
+            )
 
             # Each independently special-cased path must obey the same exclusive
             # selection rule as ordinary /v1 routing. Their semantic response
@@ -151,7 +184,7 @@ def main() -> int:
                 before = RemoteHandler.requests
                 special = run_client(binary, home, f"tcp:127.0.0.1:{port}", command)
                 assert RemoteHandler.requests > before, (command, special.stderr)
-                assert sentinel.contacts == 0, f"{command} contacted local UDS"
+                assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
 
             for command in (["hooks", "pre"], ["session-start"], ["optimize", "points"]):
                 failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)
@@ -162,7 +195,9 @@ def main() -> int:
                     assert failed.returncode != 0, (
                         f"{command}: unreachable remote unexpectedly succeeded"
                     )
-                assert sentinel.contacts == 0, f"{command}: remote failure fell back to local UDS"
+                assert sentinel.contacts_after_settle() == 0, (
+                    f"{command}: remote failure fell back to local UDS"
+                )
         finally:
             server.shutdown()
             server.server_close()
