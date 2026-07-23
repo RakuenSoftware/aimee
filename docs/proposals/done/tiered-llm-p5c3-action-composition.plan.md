@@ -1,6 +1,7 @@
 # P5-C3 management-action composition
 
-- **State:** roundtable-converged (jobs 8803, 8805–8808); implementation in progress.
+- **State:** complete; plan review converged in jobs 8803 and 8805–8808, implementation review
+  converged after jobs 8816 and 8819–8821.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–3.
 - **Depends on:** P5-A/B3, C1a/C1b/C1c, and C2a–C2d.
 - **Followed by:** P5-D console/OIDC propagation.
@@ -222,3 +223,22 @@ proves replay/parallel requests never cause a second side effect.
 Run production builds, focused sanitizer/fuzz gates, schema/role/isolation checks, exact-head CT260
 validation, and an adversarial full-branch roundtable. Incorporate every genuinely valid finding,
 converge, merge through the normal PR flow, update delivery status, and store the next final tally.
+
+## Delivered outcome
+
+The completed slice composes the C1/C2/B3 authorities into the bounded action route and the
+dedicated server management lane. It preserves one pinned mTLS session across the action challenge
+and final request, binds both certificate snapshots and the signed status generation exactly to the
+committed intent, obtains the isolated token only after those checks, and retains the transport's
+not-sent versus ambiguous classification. The server validates the token/staple/checkpoint chain,
+durably consumes the JTI, rechecks process-lifetime write policy at the final seam, and calls a
+commit-aware enable/disable core whose nonzero result is proven pre-effect. Shutdown closes the
+action gate and joins the complete admitted request lifetime before checkpoint-client teardown.
+
+Validation covered production server/status-authority builds, focused unit and sanitizer suites,
+the three action/checkpoint fuzz targets, boundary/schema/tier/tenant guards, an exact-head CT260
+build, and the full real-PostgreSQL 17 isolation/concurrency gate. Review-discovered fixes included
+same-session HTTP framing, exact staple-generation equality, byte-length-preserving request
+dispatch, credential cleanup on failed loads, commit-aware effect reporting, and full-request
+shutdown ownership. Equal highest-seen checkpoint generations are explicitly regression-tested as
+valid while rollback remains denied.
