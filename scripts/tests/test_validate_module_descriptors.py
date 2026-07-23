@@ -299,6 +299,8 @@ class DescriptorTests(unittest.TestCase):
             ("delegates", "sources", "src/modules/delegates/delegate_driver.c"),
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
+            ("memory", "sources", "src/modules/memory/memory_core.c"),
+            ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -319,7 +321,8 @@ class DescriptorTests(unittest.TestCase):
 
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git", "delegates", "workflows"):
+                           "workspace", "vault", "config", "git", "delegates", "workflows",
+                           "memory"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -423,7 +426,8 @@ class DescriptorTests(unittest.TestCase):
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git", "delegates", "workflows"):
+                           "workspace", "vault", "config", "git", "delegates", "workflows",
+                           "memory"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
