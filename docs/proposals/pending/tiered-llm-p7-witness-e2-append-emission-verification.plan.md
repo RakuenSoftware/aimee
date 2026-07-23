@@ -149,6 +149,53 @@ signing), persist before emit, typed `head_log_mismatch` /
 `checkpoint_shard_ceiling_exceeded` / `checkpoint_deadline_exceeded` failures
 each raising an integrity alert.
 
+### Architecture decisions (architect review 11384)
+
+- **Signer: a vault-held witness Ed25519 key (not external KMS).** The umbrella's
+  own invariant downgrades signatures to transport-integrity and rotation
+  hygiene — comparison against retained copies is the load-bearing defense — so
+  coupling the hot-path cadence (every N records / T seconds) to KMS availability
+  buys a stronger posture than the threat model needs. This differs from the
+  `vault_hwm` precedent (external KMS) because HWM is a one-shot externally
+  published boundary marker, not a hot internal control loop. The signing is
+  reached through a clean seam `vault_witness_sign(digest32, sig64)` whose current
+  implementation is the vault-held key and behind which a future KMS
+  implementation drops in with **no schema change** — the documented B→A path.
+- **Key provisioning: reuse the vault KEK + custody seam.** The witness private
+  key is a normal vault-keyed secret, sealed by the KEK under the selected custody
+  anchor, generated during the existing vault provision step, unsealed in-process
+  only to sign. Its public key is the out-of-band anchor consumers pin
+  (`AIMEE_VAULT_WITNESS_PUBKEY`-style), recorded in E1's anchor set with the
+  revocation the rotation story needs. Hardening for the in-process unsealed key:
+  `mlock` the buffer and `explicit_bzero` it immediately after the sign call, no
+  logging of the unsealed bytes. The witness key is **not** a release-gating
+  artifact — holding it does not change the `kb_egress_release_allowed()` story.
+- **C/SQL split: one C-driven `REPEATABLE READ` transaction.** Open txn → SQL
+  revalidates the `kb_vault_control` fence (`FOR UPDATE` on the fence row only,
+  never on shard heads) → SQL scans + cross-checks and returns the verified leaf
+  set (`org_vault_witness_checkpoint_leaves`, done) → C builds the depth-64 root
+  and signs → SQL persists the signed checkpoint → commit. Holding the txn across
+  the in-process Ed25519 sign does **not** violate E1's no-txn-across-TPM rule:
+  that rule targets blocking physical I/O; Ed25519 is microseconds, no I/O. This
+  single snapshot is what makes the signed root match the persisted leaf set.
+- **Cross-check walk: from the previous checkpoint's leaf snapshot** in
+  production (O(records since last checkpoint)), read inside the same
+  `REPEATABLE READ` snapshot. `org_vault_witness_verify_shard` currently walks from
+  genesis — provably correct and the right primitive for the first-ever checkpoint
+  and an operator `--from-genesis` rebuild, but O(all records/shard). The
+  incremental walk is a **required follow-up before high-volume production**; it
+  is not yet a load concern because the cadence scheduler is not wired.
+
+### Checkpoint SQL surface (built, PG17-validated)
+
+- `org_vault_witness_verify_shard(tenant, provider)` — the head-vs-log cross-check
+  (§ above), returns the verified head or raises `P7W01`.
+- `org_vault_witness_checkpoint_leaves()` — one-snapshot scan of all shards,
+  cross-checks each, enforces the 2^20 ceiling (`P7W02`), returns verified leaves.
+- `org_vault_witness_checkpoint_persist(...)` — fenced monotonic-seq insert of an
+  already-signed checkpoint (persist-before-emit). The C producer computes the
+  root, predecessor digest, and signature, then calls this to durably commit.
+
 A stalled checkpoint producer is a degradation, not a safe idle state: appends
 and emission continue while new signed roots stop, so the unanchored window
 grows. E2 surfaces the age of the latest signed checkpoint as a first-class

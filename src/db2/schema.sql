@@ -5769,9 +5769,49 @@ BEGIN
   END LOOP;
 END; $$;
 
+-- Persist an already-signed checkpoint (E2), fenced and monotonic. The C producer
+-- runs this inside the same REPEATABLE READ transaction as the leaf scan: it
+-- revalidates the control fence (FOR UPDATE on the fence row; a concurrent fence
+-- advance surfaces as a serialization failure under REPEATABLE READ, so the loser
+-- aborts before this commits), assigns the next checkpoint seq, enforces the
+-- first-checkpoint-has-no-predecessor rule, and inserts. This is persist-before-emit:
+-- the checkpoint is durably committed here; emission (E2) reads only committed rows.
+CREATE OR REPLACE FUNCTION org_vault_witness_checkpoint_persist(
+  p_root BYTEA, p_has_pred BOOLEAN, p_predecessor BYTEA, p_shard_count BIGINT,
+  p_leaf_snapshot BYTEA, p_leaf_digest BYTEA, p_signer_key_id BYTEA,
+  p_sig_alg SMALLINT, p_sig_version INTEGER, p_signature BYTEA, p_expected_fence BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+DECLARE c public.kb_vault_control%ROWTYPE; v_seq BIGINT;
+BEGIN
+  IF p_root IS NULL OR octet_length(p_root)<>32 OR p_signer_key_id IS NULL OR
+     octet_length(p_signer_key_id)<>16 OR p_signature IS NULL OR octet_length(p_signature)<>64 OR
+     p_leaf_digest IS NULL OR octet_length(p_leaf_digest)<>32 OR p_shard_count IS NULL OR
+     p_shard_count<0 OR p_shard_count>1048576 OR p_expected_fence IS NULL THEN
+    RAISE EXCEPTION 'checkpoint_persist: invalid input' USING ERRCODE='22023';
+  END IF;
+  SELECT * INTO STRICT c FROM public.kb_vault_control WHERE singleton=1 FOR UPDATE;
+  IF c.fencing_token <> p_expected_fence THEN
+    RAISE EXCEPTION 'checkpoint_fence_stale: control fence % <> expected %',
+      c.fencing_token, p_expected_fence USING ERRCODE='P7W03';
+  END IF;
+  SELECT COALESCE(max(cp.seq),0)+1 INTO v_seq FROM public.kb_vault_witness_checkpoint cp;
+  IF (v_seq=1) <> (NOT p_has_pred) THEN
+    RAISE EXCEPTION 'checkpoint_predecessor_inconsistent: seq % has_pred %', v_seq, p_has_pred
+      USING ERRCODE='P7W04';
+  END IF;
+  INSERT INTO public.kb_vault_witness_checkpoint(seq,root,has_predecessor,predecessor_digest,
+    shard_count,leaf_snapshot,leaf_snapshot_digest,signer_key_id,sig_alg,sig_version,signature)
+  VALUES(v_seq,p_root,p_has_pred,COALESCE(p_predecessor,decode(repeat('00',32),'hex')),
+    p_shard_count,COALESCE(p_leaf_snapshot,''::bytea),p_leaf_digest,p_signer_key_id,
+    p_sig_alg,p_sig_version,p_signature);
+  RETURN v_seq;
+END; $$;
+
 REVOKE ALL ON FUNCTION org_vault_witness_worm_block() FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_verify_shard(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_leaves() FROM PUBLIC;
+REVOKE ALL ON FUNCTION org_vault_witness_checkpoint_persist(BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_genesis(TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA) FROM PUBLIC;
@@ -5789,7 +5829,8 @@ BEGIN
       public.org_vault_witness_record_digest(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA,BYTEA,BIGINT,BIGINT,BIGINT),
       public.org_vault_witness_append(SMALLINT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,BYTEA,BOOLEAN,BYTEA),
       public.org_vault_witness_verify_shard(TEXT,TEXT),
-      public.org_vault_witness_checkpoint_leaves()
+      public.org_vault_witness_checkpoint_leaves(),
+      public.org_vault_witness_checkpoint_persist(BYTEA,BOOLEAN,BYTEA,BIGINT,BYTEA,BYTEA,BYTEA,SMALLINT,INTEGER,BYTEA,BIGINT)
       FROM aimee_kb_runtime;
   END IF;
 END $$;

@@ -203,4 +203,56 @@ BEGIN
   RAISE NOTICE 'WITNESS OK: head-vs-log cross-check catches a forged row';
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- 8. Checkpoint persist: fenced, monotonic seq, first-checkpoint-no-predecessor,
+--    append-only, fence-stale refusal. (Synthetic signed values; the real root and
+--    signature are produced by the C producer — this validates the DB contract.)
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE v_fence BIGINT; v_seq BIGINT;
+  z BYTEA := decode(repeat('00',32),'hex');
+  root1 BYTEA := decode(repeat('a1',32),'hex');
+  root2 BYTEA := decode(repeat('a2',32),'hex');
+  kid BYTEA := decode(repeat('cc',16),'hex');
+  sig BYTEA := decode(repeat('dd',64),'hex');
+  ld BYTEA := decode(repeat('ee',32),'hex');
+BEGIN
+  SELECT fencing_token INTO v_fence FROM public.kb_vault_control WHERE singleton=1;
+
+  -- First checkpoint: seq 1, no predecessor.
+  v_seq := public.org_vault_witness_checkpoint_persist(
+    root1, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+  IF v_seq <> 1 THEN RAISE EXCEPTION 'WITNESS FAIL: first checkpoint seq % (want 1)', v_seq; END IF;
+
+  -- A non-first checkpoint (seq 2) WITHOUT a predecessor is rejected.
+  BEGIN
+    PERFORM public.org_vault_witness_checkpoint_persist(
+      root2, false, NULL, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+    RAISE EXCEPTION 'WITNESS FAIL: seq-2 checkpoint without predecessor accepted';
+  EXCEPTION WHEN sqlstate 'P7W04' THEN NULL; -- expected checkpoint_predecessor_inconsistent
+  END;
+
+  -- Second checkpoint: seq 2, WITH predecessor -> accepted.
+  v_seq := public.org_vault_witness_checkpoint_persist(
+    root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence);
+  IF v_seq <> 2 THEN RAISE EXCEPTION 'WITNESS FAIL: second checkpoint seq % (want 2)', v_seq; END IF;
+
+  -- Fence-stale refusal.
+  BEGIN
+    PERFORM public.org_vault_witness_checkpoint_persist(
+      root2, true, root1, 1, ''::bytea, ld, kid, 1::smallint, 1, sig, v_fence + 999);
+    RAISE EXCEPTION 'WITNESS FAIL: stale fence accepted';
+  EXCEPTION WHEN sqlstate 'P7W03' THEN NULL; -- expected checkpoint_fence_stale
+  END;
+
+  -- Append-only: UPDATE on a checkpoint row is blocked.
+  BEGIN
+    UPDATE public.kb_vault_witness_checkpoint SET shard_count=9 WHERE seq=1;
+    RAISE EXCEPTION 'WITNESS FAIL: checkpoint UPDATE allowed';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE 'WORM:%' THEN RAISE; END IF;
+  END;
+  RAISE NOTICE 'WITNESS OK: checkpoint persist fenced/monotonic/append-only';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_pg_test: all checks passed'; END $$;
