@@ -2066,7 +2066,8 @@ int config_load(config_t *cfg);
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
  * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
  *   config_snapshot_init  — seed the snapshot from a loaded config (once, at startup).
- *   config_snapshot_get   — copy the live snapshot into `out` (seqlock read). -1 if uninit.
+ *   config_snapshot_get   — copy the live snapshot into `out` under a reader pin. -1 if uninit
+ *                           or the bounded reader counter is saturated.
  *   config_reload         — re-read the file, VALIDATE-or-keep, and publish only if the
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
