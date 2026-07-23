@@ -17,12 +17,31 @@ type Scheduler struct {
 	concurrencySource func() int
 	policySource      func() RunPolicy
 	pollEvery         time.Duration
+	transientPauses   []transientPause
 	log               *slog.Logger
 
 	mu      sync.Mutex
 	running map[string]struct{}
 	cancels map[string]context.CancelFunc
 	wake    chan struct{}
+}
+
+type transientPause struct {
+	reason  string
+	backoff time.Duration
+}
+
+// Scheduler-owned pauses describe unavailable execution machinery, not a
+// lifecycle decision. Retrying them creates a new execution version, so
+// cancelled or malformed durable delegate results cannot poison every future
+// attempt. Work-item cost and turn caps remain the bounded safety backstops.
+var schedulerTransientPauses = []transientPause{
+	{reason: "runner_unavailable", backoff: 5 * time.Second},
+	{reason: "ci_pending", backoff: 15 * time.Second},
+	{reason: "merge_pending", backoff: 15 * time.Second},
+	{reason: "panel_unreachable", backoff: 60 * time.Second},
+	{reason: "roundtable_discussion", backoff: 60 * time.Second},
+	{reason: "roundtable_chairman", backoff: 60 * time.Second},
 }
 
 func (s *Scheduler) SetConcurrencySource(source func() int) {
@@ -54,7 +73,8 @@ func NewScheduler(db *db1.Store, engine *Engine, concurrency int, logger *slog.L
 		logger = slog.Default()
 	}
 	return &Scheduler{db: db, engine: engine, concurrency: concurrency,
-		pollEvery: time.Second, log: logger, running: make(map[string]struct{}),
+		pollEvery: time.Second, transientPauses: append([]transientPause(nil), schedulerTransientPauses...),
+		log: logger, running: make(map[string]struct{}),
 		cancels: make(map[string]context.CancelFunc), wake: make(chan struct{}, 1)}
 }
 
@@ -114,11 +134,11 @@ func (s *Scheduler) fill(ctx context.Context) {
 			}
 		}
 	}
-	for reason, backoff := range map[string]time.Duration{"runner_unavailable": 5 * time.Second, "ci_pending": 15 * time.Second, "merge_pending": 15 * time.Second, "panel_unreachable": 60 * time.Second} {
-		if resumed, err := s.db.ResumeTransient(ctx, reason, backoff); err != nil {
-			s.log.Error("resume transient workflows", "reason", reason, "error", err)
+	for _, pause := range s.transientPauses {
+		if resumed, err := s.db.ResumeTransient(ctx, pause.reason, pause.backoff); err != nil {
+			s.log.Error("resume transient workflows", "reason", pause.reason, "error", err)
 		} else if resumed > 0 {
-			s.log.Info("resumed transient workflows", "reason", reason, "count", resumed)
+			s.log.Info("resumed transient workflows", "reason", pause.reason, "count", resumed)
 		}
 	}
 	if resumed, err := s.db.ResumeReadyParents(ctx); err != nil {
