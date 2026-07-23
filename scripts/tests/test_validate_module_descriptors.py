@@ -273,6 +273,8 @@ class DescriptorTests(unittest.TestCase):
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
+            ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
+            ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -292,7 +294,7 @@ class DescriptorTests(unittest.TestCase):
                 tmp.cleanup()
 
         for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway"):
+                           "module-runtime", "plugin-loader", "gateway", "governance"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -388,7 +390,7 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway"):
+                           "module-runtime", "plugin-loader", "gateway", "governance"):
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
