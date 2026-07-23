@@ -907,8 +907,16 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_VAULT_TPM2_NV_INDEX);
    cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
+   cfg->prefer_local_agents = 0;
    cfg->model_meta_refresh_minutes = 60;
-   cfg->model_meta_capability_routing = 0;
+   /* Capability routing ON by default. Routing previously consulted cost_tier
+    * and role support only, so a packet could be handed to a model whose context
+    * window could not hold it — the failure surfaced as a provider error rather
+    * than a routing decision. Safe to default on now that the gate FAILS UPWARD
+    * (agent_route_with_caps escalates to the most capable seat instead of
+    * returning no route), so enabling it cannot cost an operator a route they
+    * had. Set model_meta.capability_routing=false to restore cost-tier-only. */
+   cfg->model_meta_capability_routing = 1;
    snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "auto");
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;

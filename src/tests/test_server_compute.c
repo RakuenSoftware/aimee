@@ -409,6 +409,35 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
    (void)min_context;
    return agent_route(cfg, role);
 }
+/* The compute path now routes through the SCOPED variant so a packet's scope
+ * ceiling is enforced server-side. Honour the ceiling in the stub rather than
+ * ignoring the argument: routing that silently admitted an over-scope seat is
+ * exactly the bug this replaced, and a stub that drops the parameter could not
+ * catch a regression to it. */
+agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
+                                      const config_t *sys_cfg, unsigned required_caps,
+                                      int min_context, agent_scope_t scope)
+{
+   agent_t *ag = agent_route_with_caps(cfg, role, sys_cfg, required_caps, min_context);
+   if (ag && scope != AGENT_SCOPE_UNSET && ag->max_scope != AGENT_SCOPE_UNSET &&
+       ag->max_scope < scope)
+      return NULL;
+   return ag;
+}
+const char *agent_scope_name(agent_scope_t s)
+{
+   return s == AGENT_SCOPE_BOUNDED      ? "bounded"
+          : s == AGENT_SCOPE_WHOLE_TASK ? "whole_task"
+                                        : "unset";
+}
+agent_scope_t agent_scope_from_string(const char *s)
+{
+   if (s && strcmp(s, "bounded") == 0)
+      return AGENT_SCOPE_BOUNDED;
+   if (s && strcmp(s, "whole_task") == 0)
+      return AGENT_SCOPE_WHOLE_TASK;
+   return AGENT_SCOPE_UNSET;
+}
 int agent_is_claude_cli(const agent_t *agent)
 {
    (void)agent;
@@ -422,6 +451,16 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
       if (strcmp(cfg->agents[i].name, name) == 0)
          return &cfg->agents[i];
    return NULL;
+}
+
+/* Mirrors agent_config.c: the catalog (vendor) identity for capability lookup,
+ * falling back to the wire provider when unset. Stubbed here because these tests
+ * link delegate_routing.o without agent_config.o. */
+const char *agent_catalog_provider(const agent_t *agent)
+{
+   if (!agent)
+      return "";
+   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
 }
 
 int agent_has_role(const agent_t *agent, const char *role)

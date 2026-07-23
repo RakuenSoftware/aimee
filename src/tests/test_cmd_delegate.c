@@ -49,6 +49,16 @@ int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 
 /* ---- Helpers ---- */
 
+/* Mirrors agent_config.c: the catalog (vendor) identity for capability lookup,
+ * falling back to the wire provider when unset. Stubbed here because these tests
+ * link delegate_routing.o without agent_config.o. */
+const char *agent_catalog_provider(const agent_t *agent)
+{
+   if (!agent)
+      return "";
+   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
+}
+
 int agent_has_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role)
@@ -1163,6 +1173,66 @@ static void test_inline_acp_agent_no_args_and_guards(void)
    printf("  PASS: test_inline_acp_agent_no_args_and_guards\n");
 }
 
+/* agent_config.c is not linked here (this test stubs the agent layer), so the
+ * scope name helper is mirrored. Kept behaviourally identical. */
+const char *agent_scope_name(agent_scope_t s)
+{
+   switch (s)
+   {
+   case AGENT_SCOPE_BOUNDED:
+      return "bounded";
+   case AGENT_SCOPE_WHOLE_TASK:
+      return "whole_task";
+   default:
+      return "";
+   }
+}
+
+/* The scope filter is what makes `--scope bounded` actually shift work to a local
+ * seat, and what stops `--scope whole_task` reaching one that cannot serve it.
+ * Its error must name the fleet and each ceiling: "nothing can serve this" alone
+ * leaves the operator guessing which seat to change. */
+static void test_delegate_filter_route_scope(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   strcpy(cfg.agents[0].name, "local");
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
+   strcpy(cfg.agents[1].name, "capable");
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].max_scope = AGENT_SCOPE_UNSET; /* no ceiling */
+
+   char err[512];
+
+   /* Bounded work: both seats remain eligible. */
+   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_BOUNDED, err, sizeof(err)) == 0);
+   assert(cfg.agents[0].enabled == 1 && cfg.agents[1].enabled == 1);
+
+   /* Whole-task work: the ceiling disables the local seat, not the fleet. */
+   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) == 0);
+   assert(cfg.agents[0].enabled == 0);
+   assert(cfg.agents[1].enabled == 1);
+
+   /* UNSET is a no-op here — the routing filter resolves it to whole_task. */
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 1;
+   strcpy(cfg.agents[0].name, "local");
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].max_scope = AGENT_SCOPE_BOUNDED;
+   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_UNSET, err, sizeof(err)) == 0);
+   assert(cfg.agents[0].enabled == 1);
+
+   /* Nothing can serve it: fail, and SAY WHICH SEATS EXIST and their ceilings. */
+   assert(delegate_filter_route_scope(&cfg, AGENT_SCOPE_WHOLE_TASK, err, sizeof(err)) != 0);
+   assert(strstr(err, "whole_task") != NULL);
+   assert(strstr(err, "local") != NULL);
+   assert(strstr(err, "bounded") != NULL);
+
+   printf("  PASS: test_delegate_filter_route_scope\n");
+}
+
 int main(void)
 {
    printf("test_cmd_delegate\n");
@@ -1206,6 +1276,7 @@ int main(void)
    test_capability_filter_hard_cap_still_fails();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
+   test_delegate_filter_route_scope();
    printf("All tests passed.\n");
    return 0;
 }
