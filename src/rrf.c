@@ -1,4 +1,4 @@
-/* kb_rrf.c: see kb_rrf.h. Reciprocal Rank Fusion over ranked signal lists. */
+/* rrf.c: see headers/kb_rrf.h. Reciprocal Rank Fusion over ranked signal lists. */
 #include "kb_rrf.h"
 
 #include <math.h>

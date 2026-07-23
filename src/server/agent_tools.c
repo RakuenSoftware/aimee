@@ -993,6 +993,9 @@ static cJSON *tp_web_search(void)
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "query", "string", "The search query");
    tp_prop(props, "max_results", "integer", "Maximum results to return (default 5, max 10)");
+   tp_prop(props, "fetch_pages", "boolean",
+           "Fetch the top results and return relevant extracted page text as well as engine "
+           "snippets (default true). Set false for a faster, snippets-only search.");
    cJSON_AddItemToObject(params, "properties", props);
    cJSON *req = cJSON_CreateArray();
    cJSON_AddItemToArray(req, cJSON_CreateString("query"));
