@@ -752,9 +752,38 @@ already the routing key (`agent_supports_role()` is consulted in every routing l
 `agent_config.c:1661, 1688, 1708, 1727, 1751, 1816, 1847`). Per-(model, role) competence
 therefore refines a dimension the router already has, rather than adding a new one.
 
-### Prerequisite: role filtering is currently bypassed twice
+### CORRECTED 2026-07-23: role filtering is not bypassed — the DEFAULT is permissive
 
-Splitting roles finely accomplishes nothing until both bypasses are closed.
+An earlier version of this section claimed role filtering was "bypassed twice" and that a role
+split therefore required a code change first. **That was wrong.** Operator correction, verified
+against source and pinned by `test_declared_roles_route_precisely`.
+
+`agent_is_exec_role()` (`agent_config.c`) consults the 18-role default set **only while an agent
+declares no `exec_roles`**:
+
+```c
+if (agent->exec_role_count > 0) { /* exact match against the declared list */ return 0; }
+/* ...otherwise fall back to default_exec_roles */
+```
+
+So a non-empty `exec_roles` REPLACES the permissive default rather than adding to it. Two
+declarations give precise routing today, with no code change:
+
+- `roles` must not contain the `"all"` wildcard, which matches every role;
+- `exec_roles` must be declared, which makes exec eligibility exact.
+
+Verified: two specialists declaring `code_simple` / `code_complex` each receive exactly their
+own role — **including the dearer one, which cheapest-first would never select if role
+filtering were inert** — and a built-in role neither declares reaches neither.
+
+**Consequence for Slice 2:** splitting a broad role into specific ones is a CONFIGURATION
+action, not a blocked code change. What remains genuinely missing is the competence *data* to
+decide which model earns which role, not the routing mechanism to honour it.
+
+The live fleet is permissive only because three of four agents declare `roles: ["all"]` and
+none declares `exec_roles`. That is a config posture, not a defect.
+
+### Historical note: what the earlier claim got right
 
 1. **The `all` wildcard.** `agent_has_role()` (`agent_config.c:1353-1362`) treats a literal
    `"all"` entry as matching every role. Per §2.2 the live config has **three of four agents
@@ -945,10 +974,11 @@ These were present before this work and are the reason it was worth doing:
 
 ### Not delivered
 
-- **Slice 2 — competence axis and role split.** Blocked on its own prerequisite: role
-  filtering is bypassed twice (three of four live agents declare `roles: ["all"]`, and
-  `agent_supports_role()` admits any agent for the 18 default exec roles), so splitting
-  `code_simple`/`code_complex` changes nothing until that is closed.
+- **Slice 2 — competence axis.** NOT blocked on routing: §5c is corrected — declaring narrow
+  `roles` plus an explicit `exec_roles` gives precise per-role routing today, proven by
+  `test_declared_roles_route_precisely`. The live fleet is permissive by CONFIG (three of four
+  agents declare `roles: ["all"]`, none declares `exec_roles`), not by defect. What is missing
+  is the competence DATA to decide which model earns which role.
 - **Slice 4 — bandit reconciliation.** The existing `cheapest`/`premium` DB2 bandit
   (`server_compute.c`) is still capability-blind.
 - **Registration-scoped health keys.** Health keys on the agent name, which is now unique

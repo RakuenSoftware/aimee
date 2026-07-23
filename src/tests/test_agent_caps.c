@@ -1360,6 +1360,81 @@ void test_registration_prefix(void)
    printf("  PASS: test_registration_prefix\n");
 }
 
+/* Fine-grained role routing WORKS TODAY; it is the DEFAULT that is permissive.
+ *
+ * An earlier note in the routing proposal claimed role filtering was "bypassed
+ * twice" and that a role split therefore needed a code change first. That is
+ * wrong, and this test is the evidence. Two declarations control it:
+ *
+ *   - `roles` must not contain the "all" wildcard, which matches every role;
+ *   - `exec_roles`, once non-empty, makes exec-role eligibility EXACT — the
+ *     18-role default set applies only while an agent declares none.
+ *
+ * So splitting a broad role into specific ones (code_simple vs code_complex) is
+ * a CONFIGURATION action, and routing already honours it. */
+void test_declared_roles_route_precisely(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+
+   cfg.agent_count = 2;
+
+   /* Specialist: narrow roles AND an explicit exec_roles list. */
+   strcpy(cfg.agents[0].name, "simple_specialist");
+   strcpy(cfg.agents[0].provider, "anthropic");
+   strcpy(cfg.agents[0].model, "claude-haiku-4-5");
+   strcpy(cfg.agents[0].roles[0], "code_simple");
+   cfg.agents[0].role_count = 1;
+   strcpy(cfg.agents[0].exec_roles[0], "code_simple");
+   cfg.agents[0].exec_role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0; /* cheapest, so only role filtering can exclude it */
+   strcpy(cfg.agents[0].api_key, "k");
+
+   strcpy(cfg.agents[1].name, "complex_specialist");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "code_complex");
+   cfg.agents[1].role_count = 1;
+   strcpy(cfg.agents[1].exec_roles[0], "code_complex");
+   cfg.agents[1].exec_role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 3; /* dearest: chosen only because the role demands it */
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* Each role reaches exactly its specialist — including the DEARER one, which
+    * cheapest-first would never pick if role filtering were inert. */
+   assert(agent_route(&cfg, "code_simple") == &cfg.agents[0]);
+   assert(agent_route(&cfg, "code_complex") == &cfg.agents[1]);
+   assert(agent_route_with_caps(&cfg, "code_simple", &sys_cfg, 0, 0) == &cfg.agents[0]);
+   assert(agent_route_with_caps(&cfg, "code_complex", &sys_cfg, 0, 0) == &cfg.agents[1]);
+
+   /* A built-in exec role neither declares is served by NEITHER: an explicit
+    * exec_roles list replaces the permissive default set rather than adding to
+    * it. This is the half an earlier claim got wrong. */
+   assert(agent_is_exec_role(&cfg.agents[0], "review") == 0);
+   assert(agent_route(&cfg, "review") == NULL);
+
+   /* Clearing the explicit list restores the permissive DEFAULT, which is what
+    * the earlier claim actually described — a default, not a broken gate. */
+   cfg.agents[0].exec_role_count = 0;
+   assert(agent_is_exec_role(&cfg.agents[0], "review") == 1);
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+
+   /* And the "all" wildcard in `roles` re-opens everything, so a fine-grained
+    * deployment must avoid it. */
+   strcpy(cfg.agents[0].roles[0], "all");
+   strcpy(cfg.agents[0].exec_roles[0], "code_simple");
+   cfg.agents[0].exec_role_count = 1;
+   assert(agent_route(&cfg, "code_complex") == &cfg.agents[0]); /* wildcard wins on tier */
+
+   printf("  PASS: test_declared_roles_route_precisely\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as
