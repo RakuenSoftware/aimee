@@ -15,7 +15,7 @@ notification, and trigger dispatch through `gw_orch_workflows_run`. Definitions 
 must remain deterministic and versioned; provider seams perform effects without owning the lifecycle.
 
 The descriptor declares this module's thirty sources, twenty-four module-root headers, thirty-three
-direct tests, and this document; it does not yet set `ownership_complete`. All twenty-four headers are
+direct tests, and this document; it sets `ownership_complete: true`. All twenty-four headers are
 declared as `private_headers` because they live at the module root rather than under
 `src/modules/workflows/include/aimee/workflows/`, the layout the header-layout checker treats as
 private; every one pairs with a like-named source, and six sources carry no paired header
@@ -25,8 +25,9 @@ CMake compiles twenty-four, omitting `gw_orch_workflows.c`, `wfe_live_foreach.c`
 `wfe_live_panel.c`, `wfe_panel_roundtable.c`, and `wfe_replay_worktree.c` — the live, panel, forge,
 replay, and gateway-orchestration units that are server-side — the same intentional thin-client
 boundary recorded for the earlier modules. `docs/validation/core-modularization-slice-54.md` records
-the audit; latching follows in a separate slice so the completeness audit does not review declarations
-authored in the same change.
+the declaration audit and `docs/validation/core-modularization-slice-55.md` the completeness audit; the
+two were split so the latch reviews declarations merged on their own first. Adding a new module-local
+source or module-root header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 
