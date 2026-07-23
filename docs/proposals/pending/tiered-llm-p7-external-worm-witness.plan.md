@@ -41,17 +41,28 @@ ordered:
    durable evidence log plus per-`(tenant, provider)` shard counter rows created
    by DML upsert (no runtime DDL). No admission caller, no emission, no
    production invocation.
-2. **E2 — emission, continuous verification, and release-gate flip.** Checkpoint
-   cadence ("every N entries or T seconds, whichever first"), metrics emission of
-   signed checkpoints, log/OTLP emission of per-entry evidence, continuous chain
-   verification with typed integrity alerts, boot fail-closed for any key-holding
-   kb whose chain verification is off, and only then a real
-   `kb_egress_release_allowed()`.
-3. **E3 — full kill matrix.** The exhaustive CT103/CT260 restart and signal-level
-   kill matrix across every P7 durable boundary — the reseal boundaries D3b
-   enumerated plus the new evidence-append, shard-advance, checkpoint, and
-   emission boundaries — with raw-key canary scans over database, files, logs,
-   and crash artifacts.
+2. **E2 — atomic witness append, emission, and continuous verification.** The
+   witness append and shard advance committed *in the same transaction* as the
+   source event (see the atomicity invariant), checkpoint cadence ("every N
+   entries or T seconds, whichever first"), log/OTLP emission of records,
+   checkpoints, and inclusion proofs, numeric-only metrics for health and
+   backlog, continuous chain verification with typed integrity alerts, the
+   offline verifier tool, and boot fail-closed for any key-holding kb whose
+   chain verification is off. **E2 does not touch
+   `kb_egress_release_allowed()`.**
+3. **E3 — full kill matrix, then the release-gate flip.** The exhaustive
+   CT103/CT260 restart and signal-level kill matrix across every P7 durable
+   boundary — the reseal boundaries D3b enumerated plus the new evidence-append,
+   shard-advance, checkpoint, and emission boundaries — with raw-key canary scans
+   over database, files, logs, and crash artifacts. Only after that matrix passes
+   does E3 make `kb_egress_release_allowed()` return a real answer.
+
+**The gate flip is in E3 on purpose.** An earlier ordering put it at the end of
+E2, which contradicted this umbrella's own header: E2 would have opened
+production org egress before the kill matrix proved crash and restart behavior at
+the boundaries E2 introduced. A test matrix that runs after release is not a
+release gate. Branch ordering and prose are not enforcement, so the gate is code
+in the slice that earns it.
 
 Each slice gets its own reviewed plan, adversarial branch review, target
 validation, and merge. E1's plan is
@@ -70,15 +81,23 @@ the system of record for it. Everything in that store is exported outward
 continuously as logs and metrics. There is no third-party append-only sink, no
 delivery receipt, no per-consumer watermark, and no confirmation protocol.
 
-The security property is simple and does not require any downstream cooperation:
+The security property has two halves, and they are not equally strong. Stating
+them precisely matters more than stating them impressively:
 
-- A break in aimee's own chain — a bad link, a regressing sequence, a checkpoint
-  that fails signature verification — proves tampering, locally, immediately.
-- A privileged actor who instead rewrites *consistently*, or rolls the database
-  back to an earlier valid state, produces a locally clean chain that
-  **contradicts copies already exported to other machines**. Those copies are on
-  hosts the attacker does not control and cannot reach backwards in time to
-  amend. Comparison exposes the rewrite.
+- **Locally inconsistent tampering is detected immediately, unconditionally.** A
+  bad link, a regressing sequence, or a checkpoint that fails verification is
+  caught by aimee's own continuous verification with no external round-trip and
+  no dependency on any collector.
+- **Consistent tampering and clean rollback are detectable only by comparison,
+  and only for evidence that actually reached a collector before the compromise.**
+  A privileged actor who rewrites every local artifact coherently — chain, shard
+  heads, Merkle state, checkpoint sequence — leaves nothing locally wrong. What
+  exposes it is the contradiction with copies already on hosts the attacker
+  cannot reach backwards in time to amend. Evidence that never left the host
+  before compromise has no external anchor and is not covered.
+
+That second half is a real limit, not a caveat to bury. No slice may write that
+tampering "cannot go unnoticed" without qualification.
 
 Either signal is sufficient. **This umbrella's deliverable is detection and
 bounding: proving tampering occurred and establishing when.** Reconstructing what
@@ -95,14 +114,24 @@ act on a detection (request id, principal, `provider:cred`), because §6 require
 them for the audit purpose regardless. But the investigation claim rests on the
 bus, and slices must cite it rather than overstating what the chain provides.
 
-This reuses what P9a already built rather than inventing a transport. Signed
-checkpoints ride the metrics surface — `GET /v1/metrics`, behind org-admin auth
-or the constant-time scrape token (`src/kb/http/kb_http_telemetry.c`,
-`src/headers/kb_http_telemetry.h`) — because they are small, bounded, and
-constant-shape, which is what a Prometheus sample carries honestly. Per-entry
-evidence rides the log/OTLP path, because Prometheus exposition is a sampled
-snapshot: entries appearing between scrapes can be missed, and record bytes as
-labels are unbounded cardinality.
+**All evidence bytes ride the log/OTLP path. Metrics carry numbers only.**
+Records, signed checkpoints, and inclusion proofs are emitted as log/OTLP events.
+The Prometheus surface (`GET /v1/metrics`, behind org-admin auth or the
+constant-time scrape token — `src/kb/http/kb_http_telemetry.c`,
+`src/headers/kb_http_telemetry.h`) carries only numeric health signals: current
+checkpoint sequence, evidence count, emission backlog, and verification-failure
+counters.
+
+An earlier draft put signed checkpoints on the metrics surface on the theory that
+they were "small and constant-shape." That does not survive contact with the
+Prometheus data model. Samples are numeric values plus labels: carrying changing
+roots, signatures, and sequence numbers as labels mints a new time series per
+checkpoint (unbounded cardinality), while packing bytes into numeric samples
+risks float64 precision loss. Exposition is also a sampled snapshot, so
+checkpoints produced between scrapes would simply be missed — and a missed
+checkpoint breaks predecessor-linked verification for every consumer that
+retained the ones on either side of it. Metrics are a health surface, not an
+evidence transport.
 
 **Why there is no unwitnessed budget.** The hardened-vault §6 backlog bound
 existed because evidence sat in a local outbox *waiting* to reach an off-host
@@ -128,16 +157,37 @@ because those copies are already gone from the host's reach.
 
 - **No single source of authority.** Neither aimee's chain nor any single
   exported copy is authoritative alone. A local chain break proves tampering by
-  itself; a locally clean chain that contradicts an exported copy proves it just
-  as well. No slice may describe a durable local append or the primary hash chain
-  as sufficient on its own.
+  itself; a locally clean chain that contradicts a retained exported copy proves
+  it just as well. No slice may describe a durable local append or the primary
+  hash chain as sufficient on its own.
+- **Coverage is conditional and must be stated that way.** External detection
+  covers exactly the evidence that reached a collector before compromise.
+  Evidence that was never emitted, or emitted but never retained, has no external
+  anchor. Slices state this limit wherever they state the property.
 - **This umbrella delivers detection and bounding; the event bus delivers
   reconstruction.** No slice may claim the witness export alone rebuilds the
   original event history. Claims about determining what was done must cite the
-  event-bus record/replay mechanism, not the chain.
-- **Export everything, gate nothing on it.** All evidence is exported; export lag
-  raises a typed integrity alert and never blocks admission. There is no delivery
-  receipt, no watermark, no consumer registry, and no unwitnessed budget.
+  event-bus record/replay mechanism, not the chain. Within these documents the
+  word "reconstruction" is reserved for that mechanism; witness-side grouping
+  supports incident *triage*.
+- **Emit everything, gate nothing on it.** All evidence is *emitted*; whether a
+  downstream service retained it is not observable from aimee and must never be
+  claimed. Alerts fire on what is actually measurable locally — emission backlog
+  depth and failed OTLP sends — never on "a collector is down," which a design
+  with no consumer registry cannot know. There is no delivery receipt, no
+  watermark, no consumer registry, and no unwitnessed budget.
+- **The witness append is atomic with the source event.** The witness row and its
+  shard-head advance commit in the *same transaction* as the source WORM append
+  that gates key attachment. A separate or asynchronous append would allow a
+  crash between them to leave an admitted key use with no witness row, which
+  would falsify the whole "evidence exists before use" claim. This is an E2
+  release prerequisite, not something E3's kill matrix discovers.
+- **Comparison is operator-driven, and the docs say so.** No automated
+  cross-consumer comparator is in scope. What this umbrella guarantees is that
+  the material needed for comparison exists, is signed, and is independently
+  verifiable offline; E2 ships a verifier tool so an operator can actually run
+  it. Slices may claim "detectable by comparison," never "detected."
+
 - **Evidence is durably committed before key use.** This is the existing P7
   admission rule and the actual fail-closed property. No slice may weaken it, and
   no slice may add a second, weaker gate that appears to replace it.
@@ -152,9 +202,17 @@ because those copies are already gone from the host's reach.
 - **Shared state only.** The evidence log and shard counters are PostgreSQL
   state. Nothing load-bearing lives in instance-local memory or on an instance's
   disk, because autoscale teardown destroys it.
-- **Bounded work.** Checkpoint generation is bounded by construction — an
-  incrementally maintained Merkle root, never a full scan of every shard head —
-  and every export call carries a monotonic deadline.
+- **Bounded work, with a named structure.** Checkpoint generation touches
+  O(log N) durable nodes of a sparse Merkle tree, never a full scan of every
+  shard head. "Incrementally maintained" is not a design; the concrete tree
+  shape, its durable schema, and its update and proof bounds are specified in E1
+  §2 and §6. Every emission call carries a monotonic deadline.
+- **Signature verification requires an out-of-band trust anchor.** Consumers must
+  obtain checkpoint verification keys through a channel independent of the
+  emitting host. A signature checked against a key taken from the same surface as
+  the checkpoint proves nothing against a host attacker, who can substitute both.
+  Signatures are integrity-of-transport and rotation hygiene; they are not the
+  defense against host compromise. Comparison is.
 
 ## Threat model and honest residual
 
@@ -188,14 +246,20 @@ already beyond the attacker's reach. No slice may claim the residual is zero.
   transition.
 - **Real PG17 on CT103:** in-place schema upgrade plus the full P1 RLS gate;
   concurrent shard appends produce gap-free sequences with correct linkage;
-  forced disconnect at each transaction boundary never advances a shard head
-  without its evidence row; append-only rules reject update/delete/truncate on
-  every new table.
+  the witness row, shard head, and Merkle node updates commit atomically with the
+  source event or not at all; forced disconnect at each transaction boundary
+  never advances a shard head without its evidence row; sparse-Merkle updates are
+  O(log N) and a checkpoint never scans all shards; append-only rules reject
+  update/delete/truncate on every new table.
 - **CT260 real daemon:** the E3 kill matrix against a real aimee-kb process, real
   PG17, swtpm, and real metrics/log consumers, proving that a rewritten local
   chain is caught by comparison against previously exported copies.
 - **Canary scan:** database, files, logs, crash artifacts, and the bytes actually
-  exported to every consumer.
+  emitted.
+- **Offline verifier:** the E2 verifier tool validates a checkpoint, an inclusion
+  proof, and a record range using only emitted bytes and an out-of-band trust
+  anchor, with no access to aimee's database, and correctly reports a planted
+  divergence.
 
 ## Deferred beyond this umbrella
 
