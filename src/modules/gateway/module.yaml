@@ -12,6 +12,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/gateway/gateway_delegate.c",
     "src/modules/gateway/gateway_pipeline.c",
