@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -25,6 +27,48 @@ func TestCredentialVaultCapacityBindingAndCleanup(t *testing.T) {
 	v.del("one")
 	if _, ok := v.get(&session{id: "one", iss: "iss", sub: "sub", oidcExpires: exp}); ok {
 		t.Fatal("deleted credential remained available")
+	}
+}
+
+func TestConcurrentCredentialInsertionCompensatesLosingSessions(t *testing.T) {
+	const contenders = 16
+	srv := newTestServer(t, "http://127.0.0.1:1")
+	srv.oidcTokens = newCredentialVault(1)
+	srv.sessions.vault = srv.oidcTokens
+	exp := time.Now().Add(time.Hour)
+	p := &principal{iss: "iss", sub: "sub", expires: exp}
+	sessions := make([]*session, contenders)
+	for i := range sessions {
+		var err error
+		sessions[i], err = srv.sessions.create(p, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var successes atomic.Int32
+	for _, sess := range sessions {
+		wg.Add(1)
+		go func(sess *session) {
+			defer wg.Done()
+			<-start
+			if srv.retainOIDCCredential(sess, p, "token") == nil {
+				successes.Add(1)
+			}
+		}(sess)
+	}
+	close(start)
+	wg.Wait()
+	if got := successes.Load(); got != 1 {
+		t.Fatalf("successful insertions = %d, want 1", got)
+	}
+	var durable int
+	if err := srv.sessions.db.QueryRow(`SELECT count(*) FROM sessions`).Scan(&durable); err != nil {
+		t.Fatal(err)
+	}
+	if durable != 1 {
+		t.Fatalf("durable sessions after capacity race = %d, want 1", durable)
 	}
 }
 

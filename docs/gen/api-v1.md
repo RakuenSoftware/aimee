@@ -1006,7 +1006,7 @@ Returns the primary-backed, tenant-scoped server registry view.
 
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
-| `team` | query | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
 
 Responses:
 
@@ -1025,7 +1025,7 @@ Executes one identity-propagating, journaled management action. The server's rem
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `server_id` | path | yes | string |  |
-| `team` | query | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
 
 Request body (`application/json`).
 
@@ -1034,9 +1034,9 @@ Responses:
 - `200` — Action succeeded
 - `400` — Invalid team or action envelope
 - `401` — Authentication required
-- `403` — Actor
+- `403` — Actor, team, capability, or server policy denied the action
 - `404` — Server not found
-- `409` — Replay
+- `409` — Replay, registry conflict, or unresolved prior intent
 - `502` — Action result is indeterminate
 - `503` — Management runtime or dependency unavailable
 

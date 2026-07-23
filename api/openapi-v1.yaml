@@ -1078,9 +1078,11 @@ paths:
         - name: team
           in: query
           required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
           schema:
-            type: string
-            pattern: "^[1-9][0-9]*$"
+            type: integer
+            format: int64
+            minimum: 1
       responses:
         "200":
           description: Bounded server registry list
@@ -1202,9 +1204,11 @@ paths:
         - name: team
           in: query
           required: true
+          description: Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero.
           schema:
-            type: string
-            pattern: "^[1-9][0-9]*$"
+            type: integer
+            format: int64
+            minimum: 1
       requestBody:
         required: true
         content:
@@ -1220,9 +1224,9 @@ paths:
         "200": { description: Action succeeded }
         "400": { description: Invalid team or action envelope }
         "401": { description: Authentication required }
-        "403": { description: Actor, team, capability, or server policy denied the action }
+        "403": { description: "Actor, team, capability, or server policy denied the action" }
         "404": { description: Server not found }
-        "409": { description: Replay, registry conflict, or unresolved prior intent }
+        "409": { description: "Replay, registry conflict, or unresolved prior intent" }
         "502": { description: Action result is indeterminate }
         "503": { description: Management runtime or dependency unavailable }
 
