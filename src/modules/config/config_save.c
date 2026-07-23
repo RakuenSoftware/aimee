@@ -179,8 +179,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    if (cfg->max_background_processes > 0)
       cJSON_AddNumberToObject(root, "max_background_processes", cfg->max_background_processes);
 
-   /* model_meta.* (defaults refresh_minutes=60, capability_routing=0) */
-   if (cfg->model_meta_refresh_minutes != 60 || cfg->model_meta_capability_routing)
+   /* model_meta.* (defaults refresh_minutes=60, capability_routing=1) */
+   if (cfg->model_meta_refresh_minutes != 60 || !cfg->model_meta_capability_routing)
    {
       cJSON *mm = cJSON_AddObjectToObject(root, "model_meta");
       if (mm)

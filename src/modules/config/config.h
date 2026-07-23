@@ -1947,7 +1947,10 @@ typedef struct config
 
    /* Model metadata refresh (model_meta.*).
     * model_meta_refresh_minutes: interval for background models.dev cache refresh; default 60.
-    * model_meta_capability_routing: 0 = cost-tier only (default), 1 = filter by capability flags.
+    * model_meta_capability_routing: 1 = filter by capability flags (default),
+    *   0 = cost-tier only. When on, a candidate must satisfy the packet's
+    *   required capabilities and minimum context window; when nothing does,
+    *   routing escalates to the most capable seat rather than failing.
     */
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
