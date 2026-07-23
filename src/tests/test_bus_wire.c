@@ -21,7 +21,7 @@
  * generator and commit the byte diff. This test has no --regen path, because a
  * test that can rewrite its own expectations is not a test.
  */
-#include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,16 +71,73 @@ static void hex_encode(const uint8_t *in, size_t n, char *out)
    out[2 * n] = '\0';
 }
 
-/* Parse one "k=v;k=v" field column into a frame. The table is authoritative,
- * so a field this parser does not know is a hard error rather than a default —
- * silently ignoring it would let a vector assert something never checked. */
+/* A behavioural check that survives -DNDEBUG. assert() would compile these
+ * away, leaving a test that passes because it stopped looking. */
+static void must(int cond, const char *what)
+{
+   if (!cond)
+   {
+      fprintf(stderr, "FAIL: %s\n", what);
+      abort();
+   }
+}
+
+/* Parse one "k=v;k=v" field column into a frame.
+ *
+ * The table is authoritative, so this parser is strict in all three directions
+ * a corrupted table could otherwise slip through: an unknown key is an error
+ * rather than a default, a repeated key is an error rather than an overwrite,
+ * and a value that does not consume its whole token is an error rather than a
+ * silent zero. A lenient parser here would let a damaged vector assert
+ * something that was never actually checked. */
+typedef enum
+{
+   FLD_FLAGS, FLD_VER, FLD_KIND, FLD_PRINCIPAL, FLD_CORR, FLD_SEQ,
+   FLD_LTS, FLD_PREF, FLD_PLEN, FLD_SRC, FLD_DST, FLD_COUNT
+} field_id_t;
+
+static const char *const FIELD_NAMES[FLD_COUNT] = {
+   "flags", "ver", "kind", "principal", "corr", "seq", "lts", "pref", "plen", "src", "dst"
+};
+
+static unsigned long long parse_u(const char *name, const char *key, const char *text,
+                                  unsigned long long limit)
+{
+   if (*text == '\0' || *text == '-')
+   {
+      fprintf(stderr, "vector '%s': field '%s' has no value\n", name, key);
+      exit(1);
+   }
+   char *end = NULL;
+   errno = 0;
+   unsigned long long v = strtoull(text, &end, 0);
+   if (errno != 0 || !end || *end != '\0')
+   {
+      fprintf(stderr, "vector '%s': field '%s' value '%s' is not a whole number\n", name, key,
+              text);
+      exit(1);
+   }
+   if (v > limit)
+   {
+      fprintf(stderr, "vector '%s': field '%s' value %llu exceeds its width\n", name, key, v);
+      exit(1);
+   }
+   return v;
+}
+
 static void parse_fields(const char *name, const char *spec, bus_frame_t *f)
 {
    char buf[512];
-   snprintf(buf, sizeof buf, "%s", spec);
+   if (snprintf(buf, sizeof buf, "%s", spec) >= (int)sizeof buf)
+   {
+      fprintf(stderr, "vector '%s': field column too long\n", name);
+      exit(1);
+   }
    memset(f, 0, sizeof *f);
 
-   int seen = 0;
+   int seen[FLD_COUNT];
+   memset(seen, 0, sizeof seen);
+
    for (char *tok = strtok(buf, ";"); tok; tok = strtok(NULL, ";"))
    {
       char *eq = strchr(tok, '=');
@@ -91,42 +148,70 @@ static void parse_fields(const char *name, const char *spec, bus_frame_t *f)
       }
       *eq = '\0';
       const char *k = tok;
-      unsigned long long v = strtoull(eq + 1, NULL, 0);
+      const char *text = eq + 1;
 
-      if (!strcmp(k, "flags"))
-         f->hdr_flags = (uint16_t)v;
-      else if (!strcmp(k, "ver"))
-         f->wire_version = (uint16_t)v;
-      else if (!strcmp(k, "kind"))
-         f->event_kind = (uint32_t)v;
-      else if (!strcmp(k, "principal"))
-         f->principal_ref = (uint32_t)v;
-      else if (!strcmp(k, "corr"))
-         f->correlation_id = (uint64_t)v;
-      else if (!strcmp(k, "seq"))
-         f->seq = (uint64_t)v;
-      else if (!strcmp(k, "lts"))
-         f->logical_ts = (uint64_t)v;
-      else if (!strcmp(k, "pref"))
-         f->payload_ref = (uint64_t)v;
-      else if (!strcmp(k, "plen"))
-         f->payload_len = (uint32_t)v;
-      else if (!strcmp(k, "src"))
-         f->src_handle = (uint32_t)v;
-      else if (!strcmp(k, "dst"))
-         f->dst_handle = (uint32_t)v;
-      else
+      int id = -1;
+      for (int i = 0; i < FLD_COUNT; i++)
+         if (!strcmp(k, FIELD_NAMES[i]))
+            id = i;
+      if (id < 0)
       {
          fprintf(stderr, "vector '%s': unknown field '%s'\n", name, k);
          exit(1);
       }
-      seen++;
+      if (seen[id])
+      {
+         fprintf(stderr, "vector '%s': field '%s' appears twice\n", name, k);
+         exit(1);
+      }
+      seen[id] = 1;
+
+      switch ((field_id_t)id)
+      {
+      case FLD_FLAGS:
+         f->hdr_flags = (uint16_t)parse_u(name, k, text, UINT16_MAX);
+         break;
+      case FLD_VER:
+         f->wire_version = (uint16_t)parse_u(name, k, text, UINT16_MAX);
+         break;
+      case FLD_KIND:
+         f->event_kind = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_PRINCIPAL:
+         f->principal_ref = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_CORR:
+         f->correlation_id = parse_u(name, k, text, UINT64_MAX);
+         break;
+      case FLD_SEQ:
+         f->seq = parse_u(name, k, text, UINT64_MAX);
+         break;
+      case FLD_LTS:
+         f->logical_ts = parse_u(name, k, text, UINT64_MAX);
+         break;
+      case FLD_PREF:
+         f->payload_ref = parse_u(name, k, text, UINT64_MAX);
+         break;
+      case FLD_PLEN:
+         f->payload_len = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_SRC:
+         f->src_handle = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_DST:
+         f->dst_handle = (uint32_t)parse_u(name, k, text, UINT32_MAX);
+         break;
+      case FLD_COUNT:
+         break;
+      }
    }
-   if (seen != 11)
-   {
-      fprintf(stderr, "vector '%s': expected 11 fields, saw %d\n", name, seen);
-      exit(1);
-   }
+
+   for (int i = 0; i < FLD_COUNT; i++)
+      if (!seen[i])
+      {
+         fprintf(stderr, "vector '%s': missing field '%s'\n", name, FIELD_NAMES[i]);
+         exit(1);
+      }
 }
 
 /* ------------------------------------------------------------------ */
@@ -333,7 +418,7 @@ static void test_pattern_matrix(void)
    max.payload_ref = 0x40000;
    check_roundtrip("payload.max", max);
    max.payload_len = BUS_WIRE_MAX_PAYLOAD + 1;
-   assert(bus_wire_validate(&max) == BUS_WIRE_ERR_PAYLOAD_LEN);
+   must(bus_wire_validate(&max) == BUS_WIRE_ERR_PAYLOAD_LEN, "payload bound + 1 rejected");
 
    printf("  pattern matrix: %d cases + payload bound both sides\n", cases);
 }
@@ -347,7 +432,8 @@ static void encode_unchecked(const bus_frame_t *f, uint8_t *out)
 {
    bus_frame_t ok = base_frame();
    ok.hdr_flags = BUS_F_NOTIFICATION;
-   assert(bus_wire_encode(&ok, out, BUS_WIRE_HDR_LEN) == BUS_WIRE_HDR_LEN);
+   must(bus_wire_encode(&ok, out, BUS_WIRE_HDR_LEN) == BUS_WIRE_HDR_LEN,
+        "encode_unchecked base frame");
    out[4] = (uint8_t)(f->hdr_flags & 0xff);
    out[5] = (uint8_t)((f->hdr_flags >> 8) & 0xff);
    out[6] = (uint8_t)(f->wire_version & 0xff);
@@ -385,7 +471,7 @@ static void test_rejections(void)
    uint8_t buf[BUS_WIRE_HDR_LEN], bad[BUS_WIRE_HDR_LEN];
    bus_frame_t good = base_frame();
    good.hdr_flags = BUS_F_NOTIFICATION;
-   assert(bus_wire_encode(&good, buf, sizeof buf) == BUS_WIRE_HDR_LEN);
+   must(bus_wire_encode(&good, buf, sizeof buf) == BUS_WIRE_HDR_LEN, "encode good frame");
 
    for (size_t n = 0; n < BUS_WIRE_HDR_LEN; n++)
       expect_reject("short", buf, n, BUS_WIRE_ERR_SHORT);
@@ -447,13 +533,65 @@ static void test_rejections(void)
       /* The encoder must refuse exactly what the decoder refuses, so a caller
        * cannot build a frame this process would then reject. */
       uint8_t scratch[BUS_WIRE_HDR_LEN];
-      assert(bus_wire_encode(&f, scratch, sizeof scratch) == 0);
+      must(bus_wire_encode(&f, scratch, sizeof scratch) == 0,
+           "encoder must refuse what the decoder refuses");
    }
 
-   assert(bus_wire_encode(&good, buf, BUS_WIRE_HDR_LEN - 1) == 0);
+   must(bus_wire_encode(&good, buf, BUS_WIRE_HDR_LEN - 1) == 0, "encode into a short buffer");
 
    printf("  rejections: %zu malformed shapes + %d truncations, encoder agrees\n",
           sizeof cases / sizeof cases[0] + 2, BUS_WIRE_HDR_LEN);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4. placement bounds, which need geometry the codec does not own      */
+
+static void test_placement_bounds(void)
+{
+   const uint32_t slot = 256;
+   const uint64_t arena = 1u << 20;
+
+   bus_frame_t f = base_frame();
+
+   /* Inline: must sit after the header and inside the slot. */
+   f.hdr_flags = BUS_F_NOTIFICATION | BUS_F_INLINE;
+   f.payload_ref = BUS_WIRE_HDR_LEN;
+   f.payload_len = slot - BUS_WIRE_HDR_LEN;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_OK, "inline exactly fills slot");
+
+   f.payload_len = slot - BUS_WIRE_HDR_LEN + 1;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "inline one byte past the slot");
+
+   f.payload_ref = BUS_WIRE_HDR_LEN - 1;
+   f.payload_len = 8;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "inline overlapping the header");
+
+   /* Arena: must lie inside the arena. */
+   f.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
+   f.payload_ref = arena - 128;
+   f.payload_len = 128;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_OK, "arena exactly reaches end");
+
+   f.payload_len = 129;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "arena one byte past the end");
+
+   /* A reference chosen to wrap the 64-bit sum must be caught by the overflow
+    * guard rather than by the comparison it would otherwise defeat. */
+   f.payload_ref = UINT64_MAX - 4;
+   f.payload_len = 64;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "arena reference that wraps");
+
+   /* An empty payload needs no geometry at all. */
+   f.hdr_flags = BUS_F_NOTIFICATION;
+   f.payload_ref = 0;
+   f.payload_len = 0;
+   must(bus_wire_check_placement(&f, slot, arena) == BUS_WIRE_OK, "empty payload");
+
+   printf("  placement bounds: slot, arena, header overlap, and 64-bit wrap\n");
 }
 
 int main(void)
@@ -462,6 +600,7 @@ int main(void)
    verify_vectors();
    test_pattern_matrix();
    test_rejections();
+   test_placement_bounds();
    printf("test_bus_wire: OK\n");
    return 0;
 }
