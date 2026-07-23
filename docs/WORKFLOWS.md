@@ -131,6 +131,14 @@ Strict majority is measured over successful seats returning a complete valid
 ballot in that cycle; abstentions remain in the denominator but do not alone
 extend discussion. The preset's `deadline_ms` covers analysis and discussion
 together, with zero/omitted legacy values normalized to 360 seconds.
+That overall budget is divided evenly among enabled analysis, Discussion, and
+Chairman phases so a slow seat cannot consume the time required by a later
+configured phase.
+The compatibility proxy uses the acquired preset deadline plus bounded
+transport grace, so its socket timeout cannot preempt valid configured work.
+An unavailable independent-analysis seat remains visible as degraded
+participation, but it parks the gate only when complete reports fall below the
+preset's `min_successful`; meeting that configured minimum continues normally.
 
 An optional configured chairman runs once after deterministic synthesis and
 submits the final structured feedback. The chairman is a positive, visible agent
