@@ -39,6 +39,7 @@ export async function apiSend<T = unknown>(method: string, path: string, body?: 
 export interface SessionInfo {
   csrf: string;
   break_glass: boolean;
+  fleet_indeterminate: boolean;
 }
 
 // loadSession returns the current session (and stashes its CSRF token) or null.

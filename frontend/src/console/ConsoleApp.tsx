@@ -12,13 +12,20 @@ import Fleet from './pages/Fleet';
 // and S5 (governance).
 export default function ConsoleApp() {
   const [session, setSession] = useState<SessionInfo | null | undefined>(undefined);
+  const [fleetMutationBlocked, setFleetMutationBlocked] = useState(false);
 
   useEffect(() => {
-    loadSession().then(setSession).catch(() => setSession(null));
+    loadSession().then((loaded) => {
+      setSession(loaded);
+      setFleetMutationBlocked(loaded?.fleet_indeterminate ?? false);
+    }).catch(() => setSession(null));
   }, []);
 
   if (session === undefined) return <div className="kbc-loading">Loading…</div>;
-  if (session === null) return <LoginGate onLogin={setSession} />;
+  if (session === null) return <LoginGate onLogin={(loggedIn) => {
+    setFleetMutationBlocked(loggedIn.fleet_indeterminate);
+    setSession(loggedIn);
+  }} />;
 
   return (
     <div className="kbc-shell">
@@ -35,7 +42,7 @@ export default function ConsoleApp() {
           <Route path="/dashboard" element={<ConsoleDashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/governance" element={<Governance />} />
-          <Route path="/fleet" element={<Fleet />} />
+          <Route path="/fleet" element={<Fleet mutationBlocked={fleetMutationBlocked} onMutationBlocked={() => setFleetMutationBlocked(true)} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

@@ -142,6 +142,47 @@ func TestFleetUpstreamUnauthorizedInvalidatesSession(t *testing.T) {
 	}
 }
 
+func TestFleetAmbiguityLatchSurvivesSessionReloadAndBlocksRedispatch(t *testing.T) {
+	upstreamCalls := 0
+	kb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalls++
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "indeterminate"})
+	}))
+	defer kb.Close()
+	srv := newTestServer(t, kb.URL)
+	exp := time.Now().Add(time.Hour)
+	sess, err := srv.sessions.create(&principal{iss: "https://idp", sub: "alice", expires: exp}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.oidcTokens.put(sess.id, sess.iss, sess.sub, exp, "signed-oidc-token"); err != nil {
+		t.Fatal(err)
+	}
+	dispatch := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/server-1/actions?team=9",
+			strings.NewReader(`{"action":"agent.enable","agent":"agent.one"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-CSRF-Token", sess.csrf)
+		r.AddCookie(&http.Cookie{Name: sessionCookie, Value: sess.id})
+		w := httptest.NewRecorder()
+		srv.handleAPI(w, r)
+		return w
+	}
+	if w := dispatch(); w.Code != http.StatusBadGateway {
+		t.Fatalf("first action status = %d", w.Code)
+	}
+	reloaded, err := srv.sessions.get(sess.id)
+	if err != nil || !reloaded.fleetIndeterminate {
+		t.Fatalf("ambiguity latch did not survive session reload: %+v err=%v", reloaded, err)
+	}
+	if w := dispatch(); w.Code != http.StatusConflict {
+		t.Fatalf("redispatch status = %d, want 409", w.Code)
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("ambiguous action reached upstream %d times, want 1", upstreamCalls)
+	}
+}
+
 // stubKB records the last request it saw and echoes a canned 200.
 func stubKB(t *testing.T, seen *http.Request) *httptest.Server {
 	t.Helper()

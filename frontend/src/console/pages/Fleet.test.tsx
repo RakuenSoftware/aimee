@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api';
 import Fleet, { canonicalTeam, managementAvailable, validAgent, type FleetServer } from './Fleet';
@@ -19,6 +20,21 @@ const server: FleetServer = {
   health: 'ok',
   version: '1.2.3',
 };
+
+function FleetHarness() {
+  const [blocked, setBlocked] = useState(false);
+  return <Fleet mutationBlocked={blocked} onMutationBlocked={() => setBlocked(true)} />;
+}
+
+function FleetNavigationHarness() {
+  const [blocked, setBlocked] = useState(false);
+  const [showFleet, setShowFleet] = useState(true);
+  return <>
+    <button onClick={() => setShowFleet(false)}>Navigate away</button>
+    <button onClick={() => setShowFleet(true)}>Return to fleet</button>
+    {showFleet && <Fleet mutationBlocked={blocked} onMutationBlocked={() => setBlocked(true)} />}
+  </>;
+}
 
 async function loadFleet() {
   fireEvent.change(screen.getByLabelText('Team id'), { target: { value: '7' } });
@@ -64,7 +80,7 @@ describe('fleet input contracts', () => {
 describe('Fleet interactions', () => {
   it('renders registry state and management availability', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
-    render(<Fleet />);
+    render(<FleetHarness />);
     await loadFleet();
     expect(screen.getByText('1.2.3')).toBeTruthy();
     expect(screen.getByText('Configured')).toBeTruthy();
@@ -73,7 +89,7 @@ describe('Fleet interactions', () => {
 
   it('surfaces live-health degradation', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] }).mockRejectedValueOnce(new ApiError(503));
-    render(<Fleet />);
+    render(<FleetHarness />);
     await loadFleet();
     fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
     expect(await screen.findByText('Fleet request failed (HTTP 503).')).toBeTruthy();
@@ -82,7 +98,7 @@ describe('Fleet interactions', () => {
   it('requires confirmation and sends each confirmed action once', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
     mocks.send.mockResolvedValue({ status: 'applied' });
-    render(<Fleet />);
+    render(<FleetHarness />);
     await loadFleet();
     await selectAgent();
     vi.mocked(window.confirm).mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -99,7 +115,7 @@ describe('Fleet interactions', () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
     let rejectRequest!: (error: Error) => void;
     mocks.send.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRequest = reject; }));
-    render(<Fleet />);
+    render(<FleetNavigationHarness />);
     await loadFleet();
     await selectAgent();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
@@ -111,6 +127,9 @@ describe('Fleet interactions', () => {
     expect((screen.getByRole('button', { name: 'Enable' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
     expect(mocks.send).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate away' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Return to fleet' }));
+    expect(screen.getByText(/Further mutations are blocked for this session/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Team id'), { target: { value: '8' } });
     expect(screen.getByText(/Further mutations are blocked for this session/)).toBeTruthy();
     expect(mocks.send).toHaveBeenCalledTimes(1);
@@ -126,7 +145,7 @@ describe('Fleet interactions', () => {
   it('surfaces policy denial without locking future actions', async () => {
     mocks.get.mockResolvedValueOnce({ servers: [server] });
     mocks.send.mockRejectedValueOnce(new ApiError(403));
-    render(<Fleet />);
+    render(<FleetHarness />);
     await loadFleet();
     await selectAgent();
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }));

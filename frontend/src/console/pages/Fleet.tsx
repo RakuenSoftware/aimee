@@ -41,14 +41,18 @@ export function fleetError(error: unknown): string {
   return 'Fleet request failed.';
 }
 
-export default function Fleet() {
+interface FleetProps {
+  mutationBlocked: boolean;
+  onMutationBlocked: () => void;
+}
+
+export default function Fleet({ mutationBlocked, onMutationBlocked }: FleetProps) {
   const [team, setTeam] = useState('');
   const [servers, setServers] = useState<FleetServer[]>([]);
   const [selected, setSelected] = useState('');
   const [agent, setAgent] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [indeterminate, setIndeterminate] = useState(false);
   const teamID = canonicalTeam(team);
 
   function changeTeam(value: string) {
@@ -88,7 +92,7 @@ export default function Fleet() {
   }
 
   async function mutate(action: 'agent.enable' | 'agent.disable') {
-    if (!teamID || !selected || !validAgent(agent) || busy || indeterminate) return;
+    if (!teamID || !selected || !validAgent(agent) || busy || mutationBlocked) return;
     if (!window.confirm(`${action === 'agent.enable' ? 'Enable' : 'Disable'} ${agent} on ${selected}?`)) return;
     setBusy(true);
     setMessage('');
@@ -101,7 +105,7 @@ export default function Fleet() {
     } catch (error) {
       // Management mutations are intentionally never retried here.
       if (!(error instanceof ApiError) || error.status === 409 || error.status === 502) {
-        setIndeterminate(true);
+        onMutationBlocked();
       }
       setMessage(fleetError(error));
     } finally {
@@ -133,13 +137,13 @@ export default function Fleet() {
           ))}
         </tbody>
       </table>
-      {indeterminate && <p className="kbc-error">Further mutations are blocked for this session. Resolve the prior result before signing in again.</p>}
+      {mutationBlocked && <p className="kbc-error">Further mutations are blocked for this session. Resolve the prior result before signing in again.</p>}
       {selected && (
         <fieldset>
           <legend>Agent action on {selected}</legend>
           <label>Agent <input value={agent} onChange={(e) => setAgent(e.target.value)} /></label>
-          <button disabled={busy || indeterminate || !validAgent(agent)} onClick={() => mutate('agent.enable')}>Enable</button>
-          <button disabled={busy || indeterminate || !validAgent(agent)} onClick={() => mutate('agent.disable')}>Disable</button>
+          <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.enable')}>Enable</button>
+          <button disabled={busy || mutationBlocked || !validAgent(agent)} onClick={() => mutate('agent.disable')}>Disable</button>
           {agent && !validAgent(agent) && <p className="kbc-error">Agent names use 1–63 letters, digits, dot, underscore, or dash.</p>}
         </fieldset>
       )}

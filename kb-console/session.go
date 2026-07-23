@@ -20,15 +20,16 @@ const (
 // session is a logged-in console session, bound to a verified (iss, sub) so a
 // lifted DB row is not portable across identities/IdPs.
 type session struct {
-	id          string
-	csrf        string
-	iss         string
-	sub         string
-	breakGlass  bool
-	created     time.Time
-	lastSeen    time.Time
-	expires     time.Time
-	oidcExpires time.Time
+	id                 string
+	csrf               string
+	iss                string
+	sub                string
+	breakGlass         bool
+	created            time.Time
+	lastSeen           time.Time
+	expires            time.Time
+	oidcExpires        time.Time
+	fleetIndeterminate bool
 }
 
 type sessionStore struct {
@@ -52,11 +53,17 @@ func openSessionStore(path string) (*sessionStore, error) {
 		created INTEGER NOT NULL,
 		last_seen INTEGER NOT NULL,
 		expires INTEGER NOT NULL,
-		oidc_expires INTEGER NOT NULL DEFAULT 0
+		oidc_expires INTEGER NOT NULL DEFAULT 0,
+		fleet_indeterminate INTEGER NOT NULL DEFAULT 0
 	)`); err != nil {
 		return nil, err
 	}
 	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN oidc_expires INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN fleet_indeterminate INTEGER NOT NULL DEFAULT 0`); err != nil &&
 		!strings.Contains(err.Error(), "duplicate column name") {
 		_ = db.Close()
 		return nil, err
@@ -96,7 +103,7 @@ func (s *sessionStore) create(p *principal, breakGlass bool) (*session, error) {
 		oidcExpires = sess.oidcExpires.Unix()
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO sessions(id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires) VALUES(?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO sessions(id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires,fleet_indeterminate) VALUES(?,?,?,?,?,?,?,?,?,0)`,
 		sess.id, sess.csrf, sess.iss, sess.sub, bg, now.Unix(), now.Unix(), sess.expires.Unix(),
 		oidcExpires)
 	if err != nil {
@@ -112,11 +119,11 @@ func (s *sessionStore) get(id string) (*session, error) {
 		return nil, errors.New("no session")
 	}
 	row := s.db.QueryRow(
-		`SELECT id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires FROM sessions WHERE id=?`, id)
+		`SELECT id,csrf,iss,sub,break_glass,created,last_seen,expires,oidc_expires,fleet_indeterminate FROM sessions WHERE id=?`, id)
 	var sess session
-	var bg, created, lastSeen, expires, oidcExpires int64
+	var bg, created, lastSeen, expires, oidcExpires, fleetIndeterminate int64
 	if err := row.Scan(&sess.id, &sess.csrf, &sess.iss, &sess.sub, &bg, &created, &lastSeen,
-		&expires, &oidcExpires); err != nil {
+		&expires, &oidcExpires, &fleetIndeterminate); err != nil {
 		return nil, errors.New("no session")
 	}
 	now := time.Now()
@@ -128,6 +135,7 @@ func (s *sessionStore) get(id string) (*session, error) {
 		return nil, errors.New("session expired")
 	}
 	sess.breakGlass = bg == 1
+	sess.fleetIndeterminate = fleetIndeterminate == 1
 	sess.created = time.Unix(created, 0)
 	sess.lastSeen = time.Unix(lastSeen, 0)
 	sess.expires = time.Unix(expires, 0)
@@ -136,6 +144,18 @@ func (s *sessionStore) get(id string) (*session, error) {
 	}
 	_, _ = s.db.Exec(`UPDATE sessions SET last_seen=? WHERE id=?`, now.Unix(), id)
 	return &sess, nil
+}
+
+func (s *sessionStore) markFleetIndeterminate(id string) error {
+	result, err := s.db.Exec(`UPDATE sessions SET fleet_indeterminate=1 WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil || n != 1 {
+		return errors.New("session unavailable")
+	}
+	return nil
 }
 
 func (s *sessionStore) del(id string) {

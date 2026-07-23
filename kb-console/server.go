@@ -207,7 +207,7 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		action = "break_glass_login"
 	}
 	recordAudit(auditEvent{Actor: p.sub, Iss: p.iss, Action: action, SourceIP: clientIP(r)})
-	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": breakGlass})
+	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": breakGlass, "fleet_indeterminate": false})
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +226,8 @@ func (s *server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": sess.breakGlass})
+	writeJSON(w, http.StatusOK, map[string]any{"csrf": sess.csrf, "break_glass": sess.breakGlass,
+		"fleet_indeterminate": sess.fleetIndeterminate})
 }
 
 func (s *server) handleAPI(w http.ResponseWriter, r *http.Request) {
