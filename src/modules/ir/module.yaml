@@ -4,6 +4,7 @@
   "dependencies": [
     "module-runtime"
   ],
+  "ownership_complete": true,
   "runtime_toggle": {
     "supported": false
   },

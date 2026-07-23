@@ -10,6 +10,14 @@ route work, or define a provider's external JSON contract.
 
 ## Public contracts
 
+`src/modules/ir/module.yaml` is the complete module-local ownership inventory: two production
+translation units, three canonical public headers, three direct contract tests, and
+`docs/modules/ir.md`.
+`ownership_complete: true` makes unlisted module-local C or private-header files and omission of the
+canonical document fail descriptor validation. Canonical public-header placement remains enforced by
+the descriptor-derived header-layout gate. This completeness claim is about physical ownership; it does
+not claim that every exported helper is a live production API.
+
 The canonical implementations are `src/modules/ir/aimee_ir.c` and
 `src/modules/ir/aimee_ir_metrics.c`. Their matching public contracts are
 `src/modules/ir/include/aimee/ir/aimee_ir.h`,
@@ -130,3 +138,8 @@ can preserve or explicitly reject it. Per-provider convenience fields belong in 
 the core type. Duplicate legacy representations should be removed after caller inventories and parity
 tests prove replacement. Removal of the canonical `ir` contract would break every supported execution
 journey and is disallowed.
+
+The [slice 31 liveness audit](../validation/core-modularization-slice-31.md) found both production sources
+in the shipping server build with non-test consumers. It also records three narrower test-support or
+currently test-only API cleanup candidates. Removing or privatizing them requires a separate
+compatibility-focused slice rather than being hidden in an ownership-metadata change.

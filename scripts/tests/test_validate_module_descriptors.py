@@ -254,6 +254,7 @@ class DescriptorTests(unittest.TestCase):
             ("protocols", "sources", "src/modules/protocols/acp/acp_server.c"),
             ("protocols", "private_headers",
              "src/modules/protocols/mcp/mcp_tools_gateway.h"),
+            ("ir", "sources", "src/modules/ir/aimee_ir.c"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -272,7 +273,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("roundtable", "protocols"):
+        for identifier in ("roundtable", "protocols", "ir"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -291,17 +292,18 @@ class DescriptorTests(unittest.TestCase):
                     tmp.cleanup()
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        tmp = self.production_repo()
-        try:
-            repo = Path(tmp.name)
-            self.mutate_descriptor(repo, "roundtable",
-                                   lambda value: value.__setitem__("docs", []))
-            with self.assertRaisesRegex(
-                validator.DescriptorError, r"rule=ownership-complete pointer=/docs"
-            ):
-                validator.validate_roots(repo, [Path("src/modules")])
-        finally:
-            tmp.cleanup()
+        for identifier in ("roundtable", "ir"):
+            tmp = self.production_repo()
+            try:
+                repo = Path(tmp.name)
+                self.mutate_descriptor(repo, identifier,
+                                       lambda value: value.__setitem__("docs", []))
+                with self.subTest(identifier=identifier), self.assertRaisesRegex(
+                    validator.DescriptorError, r"rule=ownership-complete pointer=/docs"
+                ):
+                    validator.validate_roots(repo, [Path("src/modules")])
+            finally:
+                tmp.cleanup()
 
     def test_complete_ownership_excludes_undeclared_public_headers(self) -> None:
         tmp = self.production_repo()
