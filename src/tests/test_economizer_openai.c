@@ -24,7 +24,7 @@ typedef struct
 
 static fixture_t fixture_make_endpoint(const char *baseline, uint64_t baseline_tokens,
                                        const char *candidate, uint64_t candidate_tokens,
-                                       econ_openai_endpoint_t endpoint)
+                                       econ_openai_endpoint_t endpoint, econ_token_source_t source)
 {
    fixture_t f;
    memset(&f, 0, sizeof(f));
@@ -35,10 +35,10 @@ static fixture_t fixture_make_endpoint(const char *baseline, uint64_t baseline_t
        .output_per_token = 60,
    };
    f.context = econ_test_openai_context_create("gpt-5.6-sol-snapshot", prices, 0, 1);
-   f.baseline_evidence = econ_test_token_evidence_create(
-       ECON_PROVIDER_OPENAI, endpoint, baseline, baseline_tokens, ECON_TOKEN_SOURCE_LOCAL_EXACT);
-   f.candidate_evidence = econ_test_token_evidence_create(
-       ECON_PROVIDER_OPENAI, endpoint, candidate, candidate_tokens, ECON_TOKEN_SOURCE_LOCAL_EXACT);
+   f.baseline_evidence = econ_test_token_evidence_create(ECON_PROVIDER_OPENAI, endpoint, baseline,
+                                                         baseline_tokens, source);
+   f.candidate_evidence = econ_test_token_evidence_create(ECON_PROVIDER_OPENAI, endpoint, candidate,
+                                                          candidate_tokens, source);
    f.input.baseline_json = baseline;
    f.input.candidate_json = candidate;
    f.input.context = f.context;
@@ -52,7 +52,7 @@ static fixture_t fixture_make(const char *baseline, uint64_t baseline_tokens, co
                               uint64_t candidate_tokens)
 {
    return fixture_make_endpoint(baseline, baseline_tokens, candidate, candidate_tokens,
-                                ECON_OPENAI_RESPONSES);
+                                ECON_OPENAI_RESPONSES, ECON_TOKEN_SOURCE_LOCAL_EXACT);
 }
 
 static void fixture_free(fixture_t *f)
@@ -72,6 +72,18 @@ static void test_threshold_crossing_cost_evidence_is_not_authority(void)
    assert(plan.scenario.candidate_upper == 4600000);
    fixture_free(&f);
    PASS("threshold_crossing_cost_evidence_is_not_authority");
+}
+
+static void test_remote_exact_count_is_unpriced_not_authority(void)
+{
+   fixture_t f =
+       fixture_make_endpoint(baseline_no_cache, 300000, candidate_no_cache, 200000,
+                             ECON_OPENAI_RESPONSES, ECON_TOKEN_SOURCE_REMOTE_EXACT_UNPRICED);
+   econ_openai_plan_t plan = econ_openai_gpt56_plan(&f.input);
+   assert(plan.cost_verdict == ECON_COST_INDETERMINATE);
+   assert(plan.reason == ECON_REASON_REMOTE_TOKEN_COUNT_UNPRICED);
+   fixture_free(&f);
+   PASS("remote_exact_count_is_unpriced_not_authority");
 }
 
 static void test_strict_threshold_and_guard(void)
@@ -155,8 +167,8 @@ static void test_chat_shape_and_cache_intent(void)
        "{\"model\":\"gpt-5.6-sol-snapshot\",\"max_completion_tokens\":10000,"
        "\"prompt_cache_key\":\"stable-key\",\"prompt_cache_options\":{\"mode\":\"explicit\"},"
        "\"messages\":[{\"role\":\"user\",\"content\":\"small\"}]}";
-   fixture_t f =
-       fixture_make_endpoint(baseline, 300000, candidate, 200000, ECON_OPENAI_CHAT_COMPLETIONS);
+   fixture_t f = fixture_make_endpoint(baseline, 300000, candidate, 200000,
+                                       ECON_OPENAI_CHAT_COMPLETIONS, ECON_TOKEN_SOURCE_LOCAL_EXACT);
    assert(econ_openai_gpt56_plan(&f.input).cost_verdict == ECON_COST_PROVEN);
    fixture_free(&f);
 
@@ -164,7 +176,8 @@ static void test_chat_shape_and_cache_intent(void)
        "{\"model\":\"gpt-5.6-sol-snapshot\",\"max_completion_tokens\":10000,"
        "\"prompt_cache_key\":\"changed-key\",\"prompt_cache_options\":{\"mode\":\"explicit\"},"
        "\"messages\":[{\"role\":\"user\",\"content\":\"small\"}]}";
-   f = fixture_make_endpoint(baseline, 300000, changed_key, 200000, ECON_OPENAI_CHAT_COMPLETIONS);
+   f = fixture_make_endpoint(baseline, 300000, changed_key, 200000, ECON_OPENAI_CHAT_COMPLETIONS,
+                             ECON_TOKEN_SOURCE_LOCAL_EXACT);
    assert(econ_openai_gpt56_plan(&f.input).reason == ECON_REASON_UNSUPPORTED_CACHE_LAYOUT);
    fixture_free(&f);
    PASS("chat_shape_and_cache_intent");
@@ -174,6 +187,7 @@ int main(void)
 {
    printf("economizer_openai tests:\n");
    test_threshold_crossing_cost_evidence_is_not_authority();
+   test_remote_exact_count_is_unpriced_not_authority();
    test_strict_threshold_and_guard();
    test_implicit_and_breakpoint_cache_are_denied();
    test_evidence_is_bound_to_buffer_and_duplicates_rejected();

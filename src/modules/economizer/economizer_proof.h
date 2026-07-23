@@ -45,6 +45,7 @@ extern "C"
       ECON_REASON_MODEL_NOT_PINNED,
       ECON_REASON_TOKENIZER_NOT_LOCAL_EXACT,
       ECON_REASON_REMOTE_TOKEN_COUNT,
+      ECON_REASON_REMOTE_TOKEN_COUNT_UNPRICED,
       ECON_REASON_INVALID_REQUEST_SHAPE,
       ECON_REASON_UNSUPPORTED_CACHE_LAYOUT,
       ECON_REASON_INVALID_CACHE_CONTROL,
@@ -65,7 +66,12 @@ extern "C"
    {
       ECON_TOKEN_SOURCE_NONE = 0,
       ECON_TOKEN_SOURCE_LOCAL_EXACT,
-      ECON_TOKEN_SOURCE_REMOTE_ESTIMATE
+      ECON_TOKEN_SOURCE_REMOTE_ESTIMATE,
+      /* The provider says the returned request count is exact, but does not
+       * publish a finite monetary upper bound for the counting call itself.
+       * Exact tokens are insufficient to authorize a transform when obtaining
+       * them may add an unknown cost to the candidate path. */
+      ECON_TOKEN_SOURCE_REMOTE_EXACT_UNPRICED
    } econ_token_source_t;
 
    typedef struct
