@@ -158,6 +158,32 @@ func TestPausedParentIsNotReconciledOrCancelledAsTerminal(t *testing.T) {
 	}
 }
 
+func TestStopTreeStopsPausedRootAndPausedDescendant(t *testing.T) {
+	store := newTestStore(t)
+	ctx := t.Context()
+	for _, item := range []CreateWorkItem{
+		{ID: "wi_paused_tree", Repo: "repo", ProposalPath: "paused-root", WorkflowName: "build", StartStage: "slices"},
+		{ID: "wi_paused_tree.child", Repo: "repo", ProposalPath: "paused-child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_tree"},
+	} {
+		if err := store.CreateWorkItem(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Park(ctx, item.ID, item.StartStage, "manual", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopped, err := store.StopTree(ctx, "wi_paused_tree")
+	if err != nil || len(stopped) != 2 {
+		t.Fatalf("stop paused tree: ids=%v err=%v", stopped, err)
+	}
+	for _, id := range stopped {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.State != "stopped" || item.PauseReason != "" {
+			t.Fatalf("paused member not stopped: item=%+v err=%v", item, err)
+		}
+	}
+}
+
 func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 	store := newTestStore(t)
 	const attempts = 12
