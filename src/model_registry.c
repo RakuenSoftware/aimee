@@ -95,9 +95,19 @@ typedef struct
 } detect_entry_t;
 
 static const detect_entry_t g_detect[] = {
-    {"claude", "anthropic"}, {"gpt-", "openai"},         {"gpt4", "openai"},     {"o1", "openai"},
-    {"o3", "openai"},        {"text-davinci", "openai"}, {"gemini", "gemini"},   {"palm", "gemini"},
-    {"mistral", "mistral"},  {"codestral", "mistral"},   {"minimax", "minimax"}, {NULL, NULL},
+    {"claude", "anthropic"},
+    {"gpt-", "openai"},
+    {"gpt4", "openai"},
+    {"o1", "openai"},
+    {"o3", "openai"},
+    {"text-davinci", "openai"},
+    {"gemini", "gemini"},
+    {"palm", "gemini"},
+    {"mistral", "mistral"},
+    {"codestral", "mistral"},
+    {"minimax", "minimax"},
+    {"kimi", "moonshotai"},
+    {NULL, NULL},
 };
 
 const char *model_detect_provider(const char *model_id)
@@ -190,10 +200,24 @@ static const ctx_window_entry_t g_ctx_windows[] = {
     {"mistral-small", 128000},
     {"mistral", 128000}, /* fallback */
 
-    /* MiniMax */
+    /* MiniMax. Prefix matching is first-match-wins, so the bare "minimax"
+     * fallback must stay LAST in this group. NOTE the fallback is a KNOWN
+     * UNDER-estimate for any family newer than the named entries: a future
+     * MiniMax-M4 matches "minimax" and reports 200000. That is deliberate —
+     * under-reporting a window excludes a model from routing, while
+     * over-reporting admits a prompt the model cannot hold — but it means a new
+     * family needs an entry here (or catalog data) to be routable at its real
+     * size. Same applies to the "kimi" fallback below. */
+    {"MiniMax-M3", 1000000},
+    {"minimax-m3", 1000000},
     {"MiniMax-M2", 200000},
     {"minimax-m2", 200000},
-    {"minimax", 200000}, /* fallback */
+    {"minimax", 200000}, /* fallback: oldest known family; under-estimates newer ones */
+
+    /* Moonshot / Kimi */
+    {"kimi-k3", 1048576},
+    {"kimi-k2", 262144},
+    {"kimi", 262144}, /* fallback */
 
     /* Sentinel */
     {NULL, 0},
@@ -304,6 +328,22 @@ static int model_capability_get_heuristic(const char *provider, const char *mode
    else if (effective_provider && strcasecmp(effective_provider, "minimax") == 0)
    {
       out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
+   }
+   /* Moonshot/Kimi. Required once an agent's CATALOG identity resolves to
+    * "moonshotai": without this branch the heuristic falls through with flags
+    * == 0 whenever the models.dev cache is cold, which is STRICTLY WORSE than
+    * the old (wrong) "anthropic" identity that at least yielded TOOLS.
+    * REASONING is granted only to the k2/k3 families it is actually known for —
+    * an unknown or future Moonshot id gets the tool-using floor and must earn
+    * REASONING from catalog data, since over-granting it here would select the
+    * long per-call timeout and satisfy a REASONING capability requirement for a
+    * model nobody has verified. */
+   else if (effective_provider && (strcasecmp(effective_provider, "moonshotai") == 0 ||
+                                   strcasecmp(effective_provider, "moonshot") == 0))
+   {
+      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
+      if (model_has_prefix(semantic_id, "kimi-k2") || model_has_prefix(semantic_id, "kimi-k3"))
+         out->flags |= MODEL_CAP_REASONING;
    }
 
    /* Output-token ceiling inferred when the model isn't in the static table.
@@ -894,9 +934,18 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
       }
    }
 
-   /* models.dev cache (disk cache → bundled snapshot). */
+   /* models.dev cache (disk cache → bundled snapshot). Both cache readers set
+    * the capability FLAGS from the registry's modalities object but leave the
+    * derived `modalities` string empty, so fill it here rather than in each
+    * reader - every other source already arrives with it populated, and a
+    * consumer reading the field would otherwise see "" only for catalogued
+    * models. This went unnoticed while the bundled snapshot was unreachable and
+    * these lookups never succeeded. */
    if (models_dev_cache_lookup(lookup_provider, lookup_model, out))
+   {
+      capability_set_modalities(out);
       return 1;
+   }
 
    return model_capability_get_heuristic(lookup_provider, lookup_model, out);
 }

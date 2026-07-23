@@ -112,38 +112,53 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
    /* Fail fast at a peer's limit so we move to the next free peer instead of queueing on
     * a busy one; the caller's own turn already queued at its admission point. */
    agent_dispatch_set_fail_fast(1);
-   for (int i = 0; i < cfg->agent_count && rc != 0; i++)
-   {
-      agent_t *peer = &cfg->agents[i];
-      if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
-          !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
-          agent_is_named_in_fallback_chain(cfg, peer->name))
-         continue;
-      if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)
+   /* Two passes: peers from the SAME provider registration first, then the rest.
+    * A sibling model shares the wire protocol, credentials, tool conventions and
+    * request features, so switching within a registration preserves far more
+    * about the request than crossing to another vendor. Cross-provider fallback
+    * is still valuable for availability, just a bigger semantic jump — so it is
+    * the second choice, not the first. A legacy agent has no ':' and therefore no
+    * siblings, which makes pass 0 empty and costs it nothing. */
+   for (int pass = 0; pass < 2 && rc != 0; pass++)
+      for (int i = 0; i < cfg->agent_count && rc != 0; i++)
       {
-         aimee_log(LOG_DEBUG, "agent", "skipping DOWN same-tier agent '%s'", peer->name);
-         continue;
+         agent_t *peer = &cfg->agents[i];
+         /* agent_same_registration compares the STORED registration, never a
+          * name prefix - see its contract for the two ways a prefix parse
+          * groups unrelated seats. */
+         int same_reg = agent_same_registration(ag, peer);
+         if ((pass == 0) != (same_reg != 0))
+            continue;
+         if (peer == ag || !peer->enabled || peer->cost_tier != tier ||
+             !agent_supports_delegate_role(peer, role) || !agent_is_available_for_routing(peer) ||
+             agent_is_named_in_fallback_chain(cfg, peer->name))
+            continue;
+         if (provider_catalog_get_health(peer->name) == CATALOG_HEALTH_DOWN)
+         {
+            aimee_log(LOG_DEBUG, "agent", "skipping DOWN same-tier agent '%s'", peer->name);
+            continue;
+         }
+
+         peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+
+         free(out->response);
+         out->response = NULL;
+         out->error[0] = '\0';
+
+         aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s' (%s registration)",
+                   peer->name, pass == 0 ? "same" : "other");
+         /* Through the single guarded executor: enforces peer->max_parallel and
+          * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
+          * non-zero so the loop simply moves to the next same-tier peer. */
+         rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
+                                 0.3, 1 /* use_tools */, out);
+         if (rc == 0)
+         {
+            ag = peer;
+            if (current)
+               *current = peer;
+         }
       }
-
-      peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
-
-      free(out->response);
-      out->response = NULL;
-      out->error[0] = '\0';
-
-      aimee_log(LOG_INFO, "agent", "fallback: trying same-tier agent '%s'", peer->name);
-      /* Through the single guarded executor: enforces peer->max_parallel and
-       * records peer health (success or failure). An AGENT_RC_AT_LIMIT keeps rc
-       * non-zero so the loop simply moves to the next same-tier peer. */
-      rc = agent_dispatch_one(peer, &cfg->network, role, system_prompt, user_prompt, max_tokens,
-                              0.3, 1 /* use_tools */, out);
-      if (rc == 0)
-      {
-         ag = peer;
-         if (current)
-            *current = peer;
-      }
-   }
    agent_dispatch_set_fail_fast(0);
 
    return rc;

@@ -15,6 +15,8 @@
 
 #include "agent_request_build.h"
 #include "model_provider.h"
+#include "model_registry.h"
+#include "agent_config.h"
 #include "cJSON.h"
 
 int model_max_output(const char *provider, const char *model_id)
@@ -27,6 +29,23 @@ model_provider_t *model_provider_get(const char *name)
 {
    (void)name;
    return NULL;
+}
+/* agent_request_max_tokens() clamps an oversized output cap against the agent's
+ * effective context window, falling back to the catalog when no operator
+ * override is set. These goldens pin WIRE SHAPE, not capability resolution, so
+ * report "no catalog entry" and let the middleware value (unset here) decide. */
+const char *agent_catalog_provider(const agent_t *agent)
+{
+   if (!agent)
+      return "";
+   return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
+}
+int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
+{
+   (void)provider;
+   (void)model_id;
+   (void)out;
+   return 0;
 }
 
 static agent_t mk_agent(const char *provider, const char *model)

@@ -19,6 +19,25 @@ agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const config_t *sys_cfg,
                                unsigned required_caps, int min_context);
+
+/* Same, but for a packet of a declared SCOPE. An agent whose max_scope ceiling is
+ * below the packet's scope is excluded, and unlike min_context that exclusion is
+ * BINDING - escalation must never relax it, or a whole_task packet would escalate
+ * into the very seat the operator declared unable to handle it. An UNSET packet
+ * scope resolves to WHOLE_TASK: under uncertainty prefer the capable seat, because
+ * over-selecting costs less, in tokens and wall-clock, than a misplacement.
+ * agent_route_with_caps() is this with AGENT_SCOPE_UNSET. */
+/* Target for a MISPLACEMENT escalation: the most capable eligible seat strictly
+ * dearer than `failed_tier`. Most capable rather than one step up, because the
+ * escalation allowance is spent once and over-selecting beats laddering. The
+ * scope ceiling still binds. NULL when nothing dearer is eligible, in which case
+ * the caller must fail for review rather than re-run the same class of seat. */
+agent_t *agent_route_escalation_target(agent_config_t *cfg, const char *role, int failed_tier,
+                                       unsigned required_caps, agent_scope_t scope);
+
+agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
+                                      const config_t *sys_cfg, unsigned required_caps,
+                                      int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
@@ -63,6 +82,15 @@ int agent_any_delegate_available(void);
  * gains no link dependency on provider_catalog. */
 void agent_set_route_health_filter(int (*fn)(const char *agent_name));
 
+/* Optional route-time DEGRADED predicate (returns nonzero if the named agent is
+ * degraded). Unlike the health filter it does NOT exclude the agent: routing
+ * PREFERS a healthy peer when one can serve the role, and falls back to a
+ * degraded seat only when none can. NULL (the default) disables the preference,
+ * so filter-less CLI / test builds keep the prior cost-only behaviour and
+ * agent_config.o gains no link dependency on the provider catalog. The server
+ * registers a predicate reporting CATALOG_HEALTH_DEGRADED. */
+void agent_set_route_degraded_filter(int (*fn)(const char *agent_name));
+
 /* Optional route-time delegate-POLICY filter, same mechanism as the health
  * filter (returns nonzero to EXCLUDE the agent; NULL disables). The server
  * registers a predicate enforcing ONE invariant everywhere routing happens,
@@ -92,6 +120,40 @@ void agent_set_route_policy_filter(int (*fn)(const agent_t *agent));
  * threads stays policed); the server's policy predicate consults it. */
 void agent_routing_set_primary_turn(int on);
 int agent_routing_primary_turn(void);
+
+/* Vendor identity for model-capability lookup: `catalog_provider` when set,
+ * otherwise `provider`. Use this for EVERY model_capability_get() call that
+ * would otherwise pass an agent's provider — `provider` names the wire shape and
+ * is wrong for a third-party vendor served over another vendor's API (MiniMax,
+ * Kimi over Anthropic). Never use it for auth, headers, or request building. */
+const char *agent_catalog_provider(const agent_t *agent);
+
+/* Registration prefix of a route-target name: everything before the first ':'.
+ * Provider-general registration names its targets `<registration>:<model>`, so
+ * this identifies siblings sharing credentials, endpoint and wire protocol —
+ * used to prefer a same-registration peer during fallback. A legacy
+ * single-model agent has no ':' and is its own registration. */
+void agent_registration_prefix(const char *name, char *out, size_t out_len);
+
+/* 1 if `a` and `b` belong to the same provider registration, and so share
+ * credentials, endpoint and wire protocol. This is what fallback consults to
+ * prefer a sibling model before crossing to another vendor.
+ *
+ * Compares the STORED registration, never a name prefix: a prefix parse groups
+ * a legacy agent coincidentally named "gw:backup" with the targets of a
+ * registration "gw", and flattens a registration named "gw:east" down to "gw" —
+ * both group seats with unrelated endpoints and credentials.
+ *
+ * An agent with no registration (a legacy single-model entry, or one written by
+ * hand) is its own group and has no siblings, so it never matches — including
+ * against another unregistered agent.
+ *
+ * NOTE: after a save/load cycle `registration` is trusted operator-supplied
+ * grouping metadata, not authenticated provenance. Expansion collapses the
+ * operator's `models` form into individual agents, so a hand-edited agents.json
+ * can assign any value. That is the same trust level as every other field in
+ * that file (endpoints, credentials policy, routing eligibility). */
+int agent_same_registration(const agent_t *a, const agent_t *b);
 
 int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);

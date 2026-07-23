@@ -5,10 +5,46 @@
 #include "models_dev.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #define MODELS_DEV_MAX_SIZE (8 * 1024 * 1024)
+
+/* The cache is DOWNLOADED and therefore untrusted. A JSON number outside int
+ * range converted straight to int is undefined behaviour, so every numeric field
+ * goes through this: non-finite, negative, and out-of-range values are rejected
+ * rather than truncated into a nonsense capability. */
+static int json_int_checked(cJSON *v, int *out)
+{
+   if (!cJSON_IsNumber(v))
+      return 0;
+   double d = v->valuedouble;
+   if (!(d >= 0.0) || d > 2147483647.0) /* also rejects NaN */
+      return 0;
+   /* Must be integral: a context window of 199999.9 is malformed data, and
+    * silently truncating it would contradict the reject-don't-truncate rule. */
+   if (d != (double)(long long)d)
+      return 0;
+   *out = (int)d;
+   return 1;
+}
+
+static int json_double_checked(cJSON *v, double *out)
+{
+   if (!cJSON_IsNumber(v))
+      return 0;
+   double d = v->valuedouble;
+   if (!(d >= 0.0) || d > 1e12) /* also rejects NaN */
+      return 0;
+   *out = d;
+   return 1;
+}
+
+/* Defined below: resolves provider/model against the NESTED live api.json shape
+ * after the flat key lookup misses. */
+static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
+                                 model_capability_t *out);
 
 static void fill_cap_from_json(cJSON *entry, const char *provider, const char *model_id,
                                model_capability_t *out)
@@ -19,17 +55,15 @@ static void fill_cap_from_json(cJSON *entry, const char *provider, const char *m
 
    cJSON *tmp;
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "contextWindow");
-   if (cJSON_IsNumber(tmp))
-      out->context_window = (int)tmp->valuedouble;
+   (void)json_int_checked(tmp, &out->context_window);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "maxTokens");
-   if (cJSON_IsNumber(tmp))
-      out->max_output = (int)tmp->valuedouble;
+   (void)json_int_checked(tmp, &out->max_output);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "inputCost");
-   if (cJSON_IsNumber(tmp))
-      out->cost_in_per_mtok = tmp->valuedouble;
+   (void)json_double_checked(tmp, &out->cost_in_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "outputCost");
-   if (cJSON_IsNumber(tmp))
-      out->cost_out_per_mtok = tmp->valuedouble;
+   (void)json_double_checked(tmp, &out->cost_out_per_mtok);
+   tmp = cJSON_GetObjectItemCaseSensitive(entry, "cacheReadCost");
+   (void)json_double_checked(tmp, &out->cost_cache_read_per_mtok);
    tmp = cJSON_GetObjectItemCaseSensitive(entry, "tools");
    if (cJSON_IsTrue(tmp))
       out->flags |= MODEL_CAP_TOOLS;
@@ -76,10 +110,214 @@ static int lookup_in_json(cJSON *root, const char *provider, const char *model_i
 {
    char key[256];
    snprintf(key, sizeof(key), "%s/%s", provider, model_id);
+   /* Flat form wins only when it carries USABLE content. Mere presence must not
+    * suppress the nested lookup: a null, a string, or an EMPTY object would
+    * otherwise mask a perfectly good nested entry and return zeroed
+    * capabilities — which downstream reads as "no context window, no price". */
    cJSON *entry = cJSON_GetObjectItemCaseSensitive(root, key);
-   if (!entry)
+   if (cJSON_IsObject(entry))
+   {
+      model_capability_t flat;
+      fill_cap_from_json(entry, provider, model_id, &flat);
+      if (flat.context_window > 0 || flat.max_output > 0 || flat.cost_in_per_mtok > 0.0 ||
+          flat.cost_out_per_mtok > 0.0 || flat.flags != 0)
+      {
+         *out = flat;
+         return 1;
+      }
+   }
+   return lookup_in_nested_json(root, provider, model_id, out);
+}
+
+/* ---- models.dev live api.json (NESTED) ----------------------------------
+ *
+ * Two on-disk schemas must both resolve:
+ *
+ *  FLAT   {"provider/model": {"contextWindow":…, "inputCost":…}}
+ *         - data/models_dev_snapshot.json (bundled) and model_overrides.json.
+ *
+ *  NESTED {"provider": {"models": {"model": {"limit":{"context":…},
+ *                                            "cost":{"input":…}, …}}}}
+ *         - exactly what https://models.dev/api.json serves, which
+ *           models_dev_refresh() curls verbatim into the cache with no
+ *           transform. Before this reader existed the downloaded cache could
+ *           never resolve a single model: the flat key lookup returned NULL
+ *           against a nested root, so every capability fell through to the
+ *           heuristic and every price stayed 0.
+ *
+ * Reading both keeps the atomic-rename download and leaves the override format
+ * untouched, instead of rewriting bytes we did not author. */
+/* Context-band prices from `cost.tiers[]`.
+ *
+ * Only the structured tier entries are read. The registry also publishes a
+ * `context_over_200k` alias, but its KEY DOES NOT ENCODE THE THRESHOLD —
+ * gpt-5.6-sol's real boundary is 272000 and MiniMax-M3's is 512000, both under
+ * that same key — so trusting the name would price large-context requests at the
+ * wrong band. Only `tier.type == "context"` is understood; any other tier type
+ * is skipped rather than guessed at. Bands are kept ascending so a lookup can
+ * take the last one whose threshold the context exceeds. */
+static void fill_price_bands(cJSON *cost, model_capability_t *out)
+{
+   cJSON *tiers = cJSON_GetObjectItemCaseSensitive(cost, "tiers");
+   if (!cJSON_IsArray(tiers))
+      return;
+
+   cJSON *t;
+   cJSON_ArrayForEach(t, tiers)
+   {
+      if (!cJSON_IsObject(t))
+         continue;
+      cJSON *spec = cJSON_GetObjectItemCaseSensitive(t, "tier");
+      if (!cJSON_IsObject(spec))
+         continue;
+      const char *type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(spec, "type"));
+      if (!type || strcmp(type, "context") != 0)
+         continue;
+      int above = 0;
+      if (!json_int_checked(cJSON_GetObjectItemCaseSensitive(spec, "size"), &above) || above <= 0)
+         continue;
+      /* A threshold of INT_MAX breaks both consumers: `above + 1` overflows
+       * (undefined behaviour) when emitting the schedule, and a band applies
+       * strictly ABOVE its threshold so INT_MAX could never be selected anyway.
+       * Reject rather than store an unusable entry. */
+      if (above == INT_MAX)
+         continue;
+
+      model_price_band_t band;
+      memset(&band, 0, sizeof(band));
+      band.above_tokens = above;
+      /* A band with no usable input/output price tells us nothing. */
+      if (!json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "input"), &band.in_per_mtok) ||
+          !json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "output"), &band.out_per_mtok))
+         continue;
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(t, "cache_read"),
+                                &band.cache_read_per_mtok);
+
+      /* Duplicate threshold FIRST: last definition wins and consumes no slot.
+       * Checking this before the capacity logic matters — at capacity, an
+       * eviction pass would otherwise discard a replacement for the largest
+       * threshold, or evict a distinct band to make room for an entry that
+       * needed none, losing real data and spuriously marking the schedule
+       * truncated. */
+      int dup = -1;
+      for (int k = 0; k < out->price_band_count; k++)
+      {
+         if (out->price_bands[k].above_tokens == band.above_tokens)
+         {
+            dup = k;
+            break;
+         }
+      }
+      if (dup >= 0)
+      {
+         out->price_bands[dup] = band;
+         continue;
+      }
+
+      /* Insertion sort, ascending. When full, keep the LOWEST thresholds and
+       * flag the schedule as truncated rather than dropping whichever entries
+       * happened to arrive last: taking the first N in input order silently
+       * corrupts pricing (a descending registry would lose the lowest band, so
+       * mid-size requests keep the base rate). The flag makes consumers treat
+       * an incomplete schedule conservatively instead of trusting it. */
+      if (out->price_band_count >= MODEL_PRICE_BANDS_MAX)
+      {
+         out->price_bands_truncated = 1;
+         if (band.above_tokens >= out->price_bands[MODEL_PRICE_BANDS_MAX - 1].above_tokens)
+            continue; /* higher than everything kept: drop it */
+         out->price_band_count = MODEL_PRICE_BANDS_MAX - 1; /* evict the largest */
+      }
+      int i = out->price_band_count;
+      while (i > 0 && out->price_bands[i - 1].above_tokens > band.above_tokens)
+      {
+         out->price_bands[i] = out->price_bands[i - 1];
+         i--;
+      }
+      out->price_bands[i] = band;
+      out->price_band_count++;
+   }
+}
+
+static void fill_cap_from_nested(cJSON *entry, const char *provider, const char *model_id,
+                                 model_capability_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   snprintf(out->provider, sizeof(out->provider), "%s", provider);
+   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+
+   cJSON *limit = cJSON_GetObjectItemCaseSensitive(entry, "limit");
+   if (cJSON_IsObject(limit))
+   {
+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "context"),
+                             &out->context_window);
+      (void)json_int_checked(cJSON_GetObjectItemCaseSensitive(limit, "output"), &out->max_output);
+   }
+
+   cJSON *cost = cJSON_GetObjectItemCaseSensitive(entry, "cost");
+   if (cJSON_IsObject(cost))
+   {
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "input"),
+                                &out->cost_in_per_mtok);
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "output"),
+                                &out->cost_out_per_mtok);
+      (void)json_double_checked(cJSON_GetObjectItemCaseSensitive(cost, "cache_read"),
+                                &out->cost_cache_read_per_mtok);
+      fill_price_bands(cost, out);
+   }
+
+   /* models.dev spells tool use "tool_call". REASONING has no flat-schema
+    * equivalent at all, so before this it could only ever come from a
+    * per-vendor heuristic branch. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "tool_call")))
+      out->flags |= MODEL_CAP_TOOLS;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "reasoning")))
+      out->flags |= MODEL_CAP_REASONING;
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "open_weights")))
+      out->open_weights = 1;
+
+   cJSON *modalities = cJSON_GetObjectItemCaseSensitive(entry, "modalities");
+   if (cJSON_IsObject(modalities))
+   {
+      cJSON *input = cJSON_GetObjectItemCaseSensitive(modalities, "input");
+      cJSON *m;
+      cJSON_ArrayForEach(m, input)
+      {
+         const char *s = cJSON_GetStringValue(m);
+         if (!s)
+            continue;
+         if (strcmp(s, "image") == 0)
+            out->flags |= MODEL_CAP_VISION;
+         else if (strcmp(s, "pdf") == 0)
+            out->flags |= MODEL_CAP_PDF;
+         else if (strcmp(s, "audio") == 0)
+            out->flags |= MODEL_CAP_AUDIO;
+      }
+   }
+
+   /* A model the upstream registry still lists is not deprecated unless it says
+    * so; absent key means live. */
+   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entry, "deprecated")))
+      out->deprecated = 1;
+
+   const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(entry, "name"));
+   if (name && name[0])
+      snprintf(out->display_name, sizeof(out->display_name), "%s", name);
+}
+
+/* Resolve provider/model against a NESTED root. Returns 1 on hit. */
+static int lookup_in_nested_json(cJSON *root, const char *provider, const char *model_id,
+                                 model_capability_t *out)
+{
+   cJSON *prov = cJSON_GetObjectItemCaseSensitive(root, provider);
+   if (!cJSON_IsObject(prov))
       return 0;
-   fill_cap_from_json(entry, provider, model_id, out);
+   cJSON *models = cJSON_GetObjectItemCaseSensitive(prov, "models");
+   if (!cJSON_IsObject(models))
+      return 0;
+   cJSON *entry = cJSON_GetObjectItemCaseSensitive(models, model_id);
+   if (!cJSON_IsObject(entry))
+      return 0;
+   fill_cap_from_nested(entry, provider, model_id, out);
    return 1;
 }
 

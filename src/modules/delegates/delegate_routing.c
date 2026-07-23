@@ -65,7 +65,7 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
                               int drop_deprecated)
 {
    model_capability_t cap;
-   int have_cap = model_capability_get(ag->provider, ag->model, &cap);
+   int have_cap = model_capability_get(agent_catalog_provider(ag), ag->model, &cap);
    if (drop_deprecated && have_cap && cap.deprecated)
       return 0;
    unsigned effective_flags = have_cap ? cap.flags : 0;
@@ -95,6 +95,51 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
          return 0;
    }
    return 1;
+}
+
+/* Disable every agent whose declared ceiling cannot serve this packet's scope.
+ *
+ * The error deliberately LISTS the fleet and its ceilings: the panel's operational
+ * caveat was that "no agent can serve this" leaves the operator guessing unless it
+ * says which seats exist and what each is limited to. */
+int delegate_filter_route_scope(agent_config_t *cfg, agent_scope_t scope, char *errbuf,
+                                size_t errbuf_sz)
+{
+   if (errbuf && errbuf_sz > 0)
+      errbuf[0] = '\0';
+   if (!cfg || scope == AGENT_SCOPE_UNSET)
+      return 0; /* unset resolves to whole_task at the routing filter */
+
+   int kept = 0;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->enabled)
+         continue;
+      if (ag->max_scope != AGENT_SCOPE_UNSET && scope > ag->max_scope)
+      {
+         ag->enabled = 0;
+         continue;
+      }
+      kept++;
+   }
+   if (kept > 0)
+      return 0;
+
+   size_t n = 0;
+   n += (size_t)snprintf(errbuf + n, errbuf_sz - n,
+                         "no agent can serve scope '%s'. Fleet ceilings:", agent_scope_name(scope));
+   for (int i = 0; i < cfg->agent_count && n + 40 < errbuf_sz; i++)
+   {
+      const char *ceil = cfg->agents[i].max_scope == AGENT_SCOPE_UNSET
+                             ? "unbounded"
+                             : agent_scope_name(cfg->agents[i].max_scope);
+      n += (size_t)snprintf(errbuf + n, errbuf_sz - n, " %s=%s", cfg->agents[i].name, ceil);
+   }
+   if (n + 60 < errbuf_sz)
+      snprintf(errbuf + n, errbuf_sz - n,
+               ". Raise a ceiling, lower the packet scope, or add a capable agent.");
+   return -1;
 }
 
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,

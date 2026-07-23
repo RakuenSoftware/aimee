@@ -1963,8 +1963,23 @@ typedef struct config
 
    /* Model metadata refresh (model_meta.*).
     * model_meta_refresh_minutes: interval for background models.dev cache refresh; default 60.
-    * model_meta_capability_routing: 0 = cost-tier only (default), 1 = filter by capability flags.
+    * model_meta_capability_routing: 1 = filter by capability flags (default),
+    *   0 = cost-tier only. When on, a candidate must satisfy the packet's
+    *   required capabilities and minimum context window; when nothing does,
+    *   routing escalates to the most capable seat rather than failing.
     */
+   /* routing.prefer_local: try FREE local delegates first whenever one is
+    * eligible, before falling back to paid remote seats. Off by default.
+    *
+    * This is an ORDERING preference among agents that already satisfy the packet
+    * - never a relaxation of eligibility. A local agent still cannot exceed its
+    * declared max_scope: local tokens are free, which removes the COST argument
+    * for over-selecting, but not the wall-clock one. A local model failing
+    * whole-task work still burns a session, a review and an escalation, and still
+    * produces a bad diff. So "free" changes which seat is preferred, not which
+    * seats are eligible. */
+   int prefer_local_agents;
+
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 

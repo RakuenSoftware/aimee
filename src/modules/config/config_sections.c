@@ -1382,6 +1382,13 @@ void config_parse_model_meta_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->model_meta_capability_routing = cJSON_IsTrue(item) ? 1 : 0;
    }
+   cJSON *routing_cfg = cJSON_GetObjectItemCaseSensitive(root, "routing");
+   if (cJSON_IsObject(routing_cfg))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(routing_cfg, "prefer_local");
+      if (cJSON_IsBool(item))
+         cfg->prefer_local_agents = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_db2_section(config_t *cfg, cJSON *root)
 {
