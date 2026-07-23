@@ -1,6 +1,6 @@
 # Event bus v0 — rendered decisions (D1–D10)
 
-- **State:** DECIDED — 2026-07-23, revision 5, after four rounds of roundtable review.
+- **State:** DECIDED — 2026-07-23, revision 6, after five rounds of roundtable review.
 - **Companion:** [`EVENT_BUS_FEATURE_TREE.md`](EVENT_BUS_FEATURE_TREE.md) — scope, the twelve slices,
   the dependency graph, and **acceptance ids 1–6**, each of which names the decisions it enforces.
   This document holds only the decisions; the tree references them by id and is reviewed alongside it.
@@ -70,6 +70,10 @@ access and slot enumeration, and re-states slice 3, slice 5, and acceptance id 3
 requires **re-running the roundtable on D1 and D2** and re-issuing this document — it may not be taken
 by silently widening D2. Revision 2 of the tree understated this; it is corrected here.
 
+The gate is mechanically observable, not a matter of prose: `scripts/check_bus_d1_gate.sh` runs at
+slice-3 PR open and passes only when the `module-runtime` decision record names the D1 amendment as
+accepted. Until that record exists, slice 3 cannot open.
+
 ---
 
 ## D2 — Threat model
@@ -108,15 +112,34 @@ copied through the host; only lease bookkeeping is host-mediated. Direct produce
 without host bookkeeping is **overruled** for v0: it has no ownership story that survives a client
 dying mid-write.
 
-Review found three lifetime gaps in earlier revisions. All three are closed here.
+Review found four lifetime gaps in earlier revisions. All four are closed here.
 
-**Generations and refcounts.** Every lease carries a generation and a consumer refcount. Publishing to
-`k` observers takes `k` references; each consumer's release drops one. A region returns to the free
-pool only at refcount zero. A consumer validates the lease generation before reading; a stale
-generation is a typed error, never a read of whatever now occupies those bytes.
+**Generations and refcounts.** Every lease carries a generation and a refcount. A consumer validates
+the lease generation before reading; a stale generation is a typed error, never a read of whatever now
+occupies those bytes. A region returns to the free pool only at refcount zero.
 
-**Producer reap does not reclaim live regions.** Reaping a producer marks its leases
-orphaned-but-live; they drain as consumers release and are reclaimed at zero.
+**The producer holds the first reference, and publishing transfers it.** The full lifecycle, so no
+state is left implicit:
+
+| Transition | Refcount effect |
+|---|---|
+| `bus_arena_alloc` succeeds | region created with refcount **1**, held by the allocating producer |
+| `bus_publish` referencing it, routed to `k` authorized observers | **+k** consumer references, **−1** producer reference — ownership transfers to the consumers |
+| a consumer releases | **−1** |
+| `bus_arena_release` on an allocated-but-unpublished lease | **−1** (the producer's) — the ordinary cancellation and error path |
+| producer reap | drops any producer reference it still holds |
+| consumer reap | drops every reference attributed to that consumer |
+
+Publishing to zero authorized observers takes the refcount straight to zero and reclaims the region
+immediately, which is correct — nobody can read it. Because allocation always takes a reference and
+every path that ends a producer's interest drops exactly one, **an allocated-but-unpublished lease
+cannot leak without the producer either cancelling or dying**; it is never permanently live by
+omission. *(Added in revision 6; earlier revisions defined consumer references only and left the
+producer's own reference undefined between `bus_arena_alloc` and `bus_publish`.)*
+
+**Producer reap does not reclaim live regions.** Reaping a producer drops its own reference but leaves
+consumer references intact — its leases become orphaned-but-live, drain as consumers release, and are
+reclaimed at zero.
 
 **Consumer reap releases that consumer's references.** Each reference is attributed to the consumer
 slot that holds it. Reaping a consumer drops every reference attributed to it, which may take a region
@@ -199,6 +222,11 @@ only itself. A slow consumer therefore stalls exactly those producers that publi
 to it, and no one else. That is head-of-line blocking scoped to the pair that caused it, and it is
 accepted: the alternative is either an unbounded host queue or silent loss.
 
+**"In-flight" means popped from the producer's outbound ring and not yet fully resolved across all of
+its destinations.** The residual destination set is the per-producer, per-event tracker that holds
+such an event, and there is exactly one tracker per slot — which is what bounds the structure by slot
+count rather than by traffic.
+
 ### Reap under in-flight publishes
 
 *(Added in revision 3; revision 2 left the fate of in-flight publishes on reap undefined.)*
@@ -236,10 +264,17 @@ same total-stream rule, so they are ordinary members of the ordered stream and n
 `seq`-stamped and tapped, carrying **the shed event's `seq`, its kind, and the destination slot id**.
 
 Tapping alone would make a shed visible to governance but not to the consumer that lost it, so the
-delivery path is decided rather than left open: **`overflow` and `producer_reaped` are control-class
-events, delivered into the affected client's own inbound ring.** Control-class events differ from
-ordinary traffic in exactly two ways, both of which exist to stop the pathological recursion of an
-overflow notice itself overflowing:
+delivery path is decided rather than left open: **`overflow` is a control-class event, delivered into
+the losing consumer's own inbound ring.**
+
+**`producer_reaped` is tap-only.** It describes a client that no longer exists and whose queue pair
+has already been discarded, so there is no inbound ring to deliver it to and no other client with a
+stake in it. Naming a substitute recipient would invent a subscriber the bus does not have. It is
+recorded for governance and forensics and delivered to no one. *(Revision 5 wrongly grouped it with
+`overflow` as deliverable, which contradicted D5's own reap semantics.)*
+
+Control-class events differ from ordinary traffic in exactly two ways, both of which exist to stop
+the pathological recursion of an overflow notice itself overflowing:
 
 - They draw on a **small reserved credit pool** in each queue-pair region that ordinary traffic cannot
   consume, so a client saturated with data events still has room to be told it lost some.
@@ -293,8 +328,15 @@ conformance authority.
 
 ## D9 — The tap in this tree is a callback plus a recording test double
 
-**Decision: the host invokes a registered `bus_tap_fn` per D6.** This tree owes the seam and the proof
-that the seam is total — every `seq`-stamped event, exactly once, in `seq` order. Durable chaining,
+**Decision: the host invokes a registered `bus_tap_fn` per D6.**
+
+"The tap contract" splits across two trees, and the line is drawn here so it is traceable: **this
+tree decides the callback's invocation contract** — when it fires (D6), what it receives, and the
+proof that it is total — **and the later tree decides what is done with the stream** — durable
+chaining, `policy_rev`, signing, and the attestation bundle. Nothing about the callback's timing or
+totality is left to that tree, and nothing about ledger semantics is decided here.
+
+This tree owes the seam and the proof that the seam is total — every `seq`-stamped event, exactly once, in `seq` order. Durable chaining,
 `policy_rev`, and the attestation bundle belong to
 [`event-bus-governance-and-capture.md`](../proposals/pending/event-bus-governance-and-capture.md) and
 are not built here. The recording test double is the conformance vehicle, not a shipped feature.
@@ -386,12 +428,36 @@ extent.
   anywhere but at the end reports **corrupt** and refuses the stream — it does not attempt to
   distinguish a bus defect from a recorder defect, because from the reader's position they are the
   same fact. Only an incomplete *final* record is truncation.
-- **Three terminal states, all explicit.** A stream whose final record is complete and CRC-valid but
-  is *not* `epoch_change` is **open** — a valid capture of a still-running host, not an error. A
-  trailing record that is short or fails CRC means the stream was cut mid-write: the reader stops at
-  the last complete CRC-valid record and reports **truncated**, with the last good `seq`. A CRC
-  failure on a record that is *not* last, a `record_len`/`payload_len` mismatch, a `seq` gap, or a
-  record following `epoch_change` means **corrupt**: a hard error, never a partial read.
+### Terminal states, decided from the bytes alone
+
+"Truncated" and "corrupt" must be separable by a reader with nothing but the file, so the rule is an
+algorithm rather than a description. `REC_MIN` is `8 + BUS_WIRE_HDR_LEN + 4` and `REC_MAX` is
+`REC_MIN + max_payload`; both are constants of the format.
+
+Scan from `header_len`. At each record position `p`, with `remaining = filesize − p`:
+
+1. `remaining == 0` → the stream ends cleanly. **complete** if the previous record was
+   `epoch_change`, otherwise **open** — a valid capture of a still-running host, not an error.
+2. `remaining < 8` → **truncated** at `p`. There is not even a length prefix.
+3. Read `record_len`. If it is outside `[REC_MIN, REC_MAX]`: **truncated** when
+   `remaining ≤ REC_MAX`, because a torn final write is the only thing that could have left a short,
+   partially-written tail there; **corrupt** when `remaining > REC_MAX`, because a plausible tail
+   cannot be that long and the damage is therefore interior.
+4. `remaining < record_len` → **truncated** at `p`. The final write was cut.
+5. `record_len` bytes are present but the CRC fails → **truncated** if `remaining == record_len`
+   (this record ends exactly at EOF and may be a torn final write); **corrupt** otherwise, because
+   bytes were written *after* it, which proves it was once complete and has since been damaged.
+6. CRC passes but `record_len ≠ 8 + BUS_WIRE_HDR_LEN + payload_len + 4`, or `seq` is not exactly one
+   greater than the previous record's, or the previous record was `epoch_change` → **corrupt**.
+   These are structural contradictions that no interrupted write can produce.
+
+The rule is total: every byte sequence lands in exactly one of complete, open, truncated, or corrupt.
+Only the *last* record can ever be truncated, which is what makes the classification decidable —
+anything wrong before the end is corruption by construction.
+
+**A corrupt or truncated result is reported, never returned as data.** The report carries the last
+good `seq`, the byte offset of the offending record, and the rule number above that fired, so slice
+11 has a normative error shape to implement rather than inventing one.
 - **`format_version` is independent** of `wire_version` and `layout_version`. A reader refuses an
   unknown `format_version` outright rather than guessing at the framing.
 
@@ -445,3 +511,12 @@ re-executed.
   contiguity claim does not rest on unstated recorder correctness. D1's fd accounting is reworded to
   separate the host's fd table from the per-attach message, and D3 names `bus_arena_alloc` as the
   cap's enforcement surface.
+- **r6** (2026-07-23) — this revision, closing the r5 findings. D10's terminal states become a
+  six-rule byte-decidable algorithm over `remaining` and `record_len`, total over every input, with a
+  normative error report shape (last good `seq`, offending offset, rule number). D3 renders the full
+  refcount lifecycle as a table: `bus_arena_alloc` takes the producer's reference, `bus_publish`
+  transfers it to the `k` consumers, `bus_arena_release` is the cancellation path — so an
+  allocated-but-unpublished lease cannot leak by omission. D6 corrects `producer_reaped` to tap-only,
+  since r5 required delivering it into a queue pair the reap had already discarded. Plus: D1 names
+  `check_bus_d1_gate.sh` as the mechanical gate, D9 draws the tap-contract boundary explicitly, and
+  D5 pins what "in-flight" means.
