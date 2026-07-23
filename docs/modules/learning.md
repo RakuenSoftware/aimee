@@ -14,6 +14,18 @@ and the router API. `learning_implicit.h`, `learning_bundle.h`, and `learning_ev
 evidence assembly, and candidate generation, while DB2 persistence currently remains in
 `src/db2/db2_learning.h` and related source files as explicit physical-ownership debt.
 
+The descriptor declares this module's four sources (`learning_bundle.c`, `learning_evidence.c`,
+`learning_implicit.c`, `learning_router.c`), its four module-root headers, its two direct tests, and
+this document; it does not yet set `ownership_complete`. All four headers are declared as
+`private_headers` because they live at the module root rather than under
+`src/modules/learning/include/aimee/learning/`, which is the layout the header-layout checker treats as
+private. `learning.h` is nonetheless a de-facto public contract: it is included repository-wide via the
+`-Imodules/learning` search path, including by `src/headers/aimee.h`. Promoting it to a canonical public
+header would move the file under the include tree and rewrite every include site, which is a separate
+header-layout slice; an ownership-declaration slice moves nothing. `docs/validation/core-modularization-slice-42.md`
+records the audit; latching follows in a separate slice so the completeness audit does not review
+declarations authored in the same change.
+
 ## Dependencies and consumers
 
 - `config`: supplies learning thresholds, limits, synthesis provider settings, and policy gates.
@@ -70,10 +82,15 @@ useful changes without silently exceeding their weekly limits.
 
 ## Tests and failure behavior
 
-`test_learning_bundle.c`, `test_learning_metrics.c`, `learning_implicit_replay.c`,
-`test_learning_synth.c`, and `test_learning_version.c` cover evidence, detection, proposals, metrics,
-candidate synthesis, and version behavior. Invalid signals and unavailable storage fail closed; optional
-synthesis failure leaves evidence/proposals inspectable and must not fabricate an accepted action.
+The descriptor's two direct tests are `test_learning_bundle.c` (the evidence-bundle builder) and
+`test_learning_metrics.c` (the router metrics through the public learning API). `test_learning_synth.c`
+and `test_learning_version.c` exercise `kb/kb_learning_synth.c` and `kb/kb_learning_version.c`; they
+carry the `learning` name and link `learning_bundle.o` as a dependency but are KB tests, so they are not
+claimed here, the same way gateway does not claim the delivery-binary `test_gateway_*` tests.
+`learning_implicit_replay.c` is a replay harness, not a `unit-test-learning-*` target. Together these
+cover evidence, detection, proposals, metrics, candidate synthesis, and version behavior. Invalid
+signals and unavailable storage fail closed; optional synthesis failure leaves evidence/proposals
+inspectable and must not fabricate an accepted action.
 
 ## Operational diagnostics
 

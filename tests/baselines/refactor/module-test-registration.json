@@ -80,6 +80,18 @@
       "test": "src/tests/test_panel_ir_contract.c"
     },
     {
+      "ctest": false,
+      "make": true,
+      "module": "learning",
+      "test": "src/tests/test_learning_bundle.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "learning",
+      "test": "src/tests/test_learning_metrics.c"
+    },
+    {
       "ctest": true,
       "make": true,
       "module": "module-runtime",
