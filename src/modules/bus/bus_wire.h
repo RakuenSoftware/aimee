@@ -102,9 +102,29 @@ typedef enum
  * process would then reject. */
 size_t bus_wire_encode(const bus_frame_t *f, uint8_t *out, size_t outsz);
 
-/* Decode from in. On BUS_WIRE_OK, *out holds the frame. On any error *out is
- * untouched, so a caller cannot accidentally act on a partial decode. */
+/* Decode framing only. On BUS_WIRE_OK, *out holds a structurally valid frame;
+ * on any error *out is untouched, so a caller cannot act on a partial decode.
+ *
+ * "Structurally valid" does NOT mean the payload is safe to touch: this
+ * function has no geometry, so it cannot bounds-check payload_ref. It exists
+ * for callers that genuinely only want framing — the vector tests, offline
+ * tools, a capture reader working on materialized bytes. A caller that is
+ * going to dereference the payload wants bus_wire_decode_checked instead. */
 bus_wire_result_t bus_wire_decode(const uint8_t *in, size_t insz, bus_frame_t *out);
+
+/* Decode and bounds-check in one step. This is the path the host's ingress and
+ * every payload-reading consumer must use.
+ *
+ * Splitting decode from the bounds check made the unsafe call the short,
+ * obvious one and left the safe call to documentation, which is a poor way to
+ * carry a memory-safety obligation. This entry point makes the safe path the
+ * default one: it cannot return BUS_WIRE_OK for a frame whose payload
+ * reference lies outside the geometry it was given.
+ *
+ * Still not sufficient on its own for an arena reference — see
+ * bus_wire_check_placement below for what only the lease table can decide. */
+bus_wire_result_t bus_wire_decode_checked(const uint8_t *in, size_t insz, uint32_t slot_size,
+                                          uint64_t arena_size, bus_frame_t *out);
 
 /* Validate a frame without encoding it. */
 bus_wire_result_t bus_wire_validate(const bus_frame_t *f);

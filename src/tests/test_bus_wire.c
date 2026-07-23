@@ -250,7 +250,7 @@ static size_t verify_vectors(void)
    int shape_seen[REQUIRED_SHAPE_COUNT];
    memset(shape_seen, 0, sizeof shape_seen);
 
-   size_t n = 0;
+   size_t n = 0, negatives = 0;
    char line[2048];
    while (fgets(line, sizeof line, fp))
    {
@@ -270,8 +270,14 @@ static size_t verify_vectors(void)
          exit(1);
       }
 
+      /* A negative row has no valid frame to describe, so it carries "-" in the
+       * field column: the bytes and the expected refusal are the whole claim. */
+      int negative = (strcmp(fields, "-") == 0);
       bus_frame_t want;
-      parse_fields(name, fields, &want);
+      if (!negative)
+         parse_fields(name, fields, &want);
+      else
+         memset(&want, 0, sizeof want);
 
       uint8_t raw[BUS_WIRE_HDR_LEN];
       size_t rawn = 0;
@@ -292,7 +298,12 @@ static size_t verify_vectors(void)
                  bus_wire_result_name(r), expect);
          exit(1);
       }
-      if (r == BUS_WIRE_OK && memcmp(&want, &got, sizeof want) != 0)
+      if (negative && r == BUS_WIRE_OK)
+      {
+         fprintf(stderr, "vector '%s': a negative row decoded successfully\n", name);
+         exit(1);
+      }
+      if (!negative && r == BUS_WIRE_OK && memcmp(&want, &got, sizeof want) != 0)
       {
          fprintf(stderr, "vector '%s': decoded fields differ from the table\n", name);
          exit(1);
@@ -300,7 +311,7 @@ static size_t verify_vectors(void)
 
       /* Encode direction: the committed fields must yield the committed bytes.
        * Compared against the table's hex, never against freshly encoded bytes. */
-      if (r == BUS_WIRE_OK)
+      if (!negative && r == BUS_WIRE_OK)
       {
          uint8_t enc[BUS_WIRE_HDR_LEN];
          char enc_hex[2 * BUS_WIRE_HDR_LEN + 1];
@@ -321,6 +332,8 @@ static size_t verify_vectors(void)
             if (want.hdr_flags == REQUIRED_SHAPES[i].flags)
                shape_seen[i] = 1;
       }
+      if (negative)
+         negatives++;
       n++;
    }
    fclose(fp);
@@ -338,8 +351,14 @@ static size_t verify_vectors(void)
          exit(1);
       }
 
-   printf("  vectors: %zu rows, both directions, all %zu required shapes covered\n", n,
-          REQUIRED_SHAPE_COUNT);
+   if (negatives == 0)
+   {
+      fprintf(stderr, "vector table has no negative rows — a decoder that accepted\n"
+                      "everything would pass conformance against it\n");
+      exit(1);
+   }
+   printf("  vectors: %zu rows (%zu negative), both directions, all %zu shapes covered\n", n,
+          negatives, REQUIRED_SHAPE_COUNT);
    return n;
 }
 
@@ -426,56 +445,155 @@ static void test_pattern_matrix(void)
 /* The matrix above round-trips the combinations that are *valid*. This one
  * decides, independently, what every combination should be — including the ones
  * that must be refused — and checks the validator against that judgement rather
- * than against whatever it happens to do. Enumerating only the valid half would
- * leave the refusals resting on the hand-written rejection table alone. */
+ * than against whatever it happens to do.
+ *
+ * The oracle covers every axis the validator has, not just the flag shape:
+ * pattern, placement, payload length against its bound, whether payload_ref is
+ * consistent with having a payload at all, and correlation against the pattern.
+ * An oracle that judged only flags would have declared the correlation and
+ * length rules "covered" while never testing them. */
 static void test_combination_matrix(void)
 {
    const uint16_t patterns[] = {0, BUS_F_NOTIFICATION, BUS_F_REQUEST, BUS_F_REPLY, BUS_F_CANCEL,
                                 BUS_F_REQUEST | BUS_F_REPLY};
    const uint16_t placements[] = {0, BUS_F_INLINE, BUS_F_ARENA, BUS_F_INLINE | BUS_F_ARENA};
-   const uint32_t lens[] = {0, 64};
+   const uint32_t lens[] = {0, 64, BUS_WIRE_MAX_PAYLOAD, BUS_WIRE_MAX_PAYLOAD + 1};
+   const uint64_t refs[] = {0, 0x40000};
+   const uint64_t corrs[] = {0, 0xdeadbeefcafef00dull};
    int accepted = 0, refused = 0;
 
    for (size_t p = 0; p < sizeof patterns / sizeof patterns[0]; p++)
       for (size_t q = 0; q < sizeof placements / sizeof placements[0]; q++)
          for (size_t l = 0; l < sizeof lens / sizeof lens[0]; l++)
-            for (int control = 0; control <= 1; control++)
-            {
-               bus_frame_t f = base_frame();
-               f.hdr_flags = (uint16_t)(patterns[p] | placements[q] |
-                                        (control ? BUS_F_CONTROL : 0));
-               f.payload_len = lens[l];
-               if (lens[l] > 0)
-                  f.payload_ref = (placements[q] & BUS_F_ARENA) ? 0x40000 : BUS_WIRE_HDR_LEN;
-               if (patterns[p] != 0 && patterns[p] != BUS_F_NOTIFICATION)
-                  f.correlation_id = 0xdeadbeefcafef00dull;
+            for (size_t rr = 0; rr < sizeof refs / sizeof refs[0]; rr++)
+               for (size_t c = 0; c < sizeof corrs / sizeof corrs[0]; c++)
+                  for (int control = 0; control <= 1; control++)
+                  {
+                     bus_frame_t f = base_frame();
+                     f.hdr_flags = (uint16_t)(patterns[p] | placements[q] |
+                                              (control ? BUS_F_CONTROL : 0));
+                     f.payload_len = lens[l];
+                     f.payload_ref = refs[rr];
+                     f.correlation_id = corrs[c];
 
-               /* Decided here from the contract, not read back from the code. */
-               int one_pattern = (patterns[p] == BUS_F_NOTIFICATION ||
-                                  patterns[p] == BUS_F_REQUEST || patterns[p] == BUS_F_REPLY ||
-                                  patterns[p] == BUS_F_CANCEL);
-               int one_placement = (placements[q] == BUS_F_INLINE || placements[q] == BUS_F_ARENA);
-               int placement_ok = lens[l] > 0 ? one_placement : (placements[q] == 0);
-               int want_ok = one_pattern && placement_ok;
+                     /* The contract, restated here rather than read back from
+                      * the implementation. */
+                     int one_pattern =
+                        (patterns[p] == BUS_F_NOTIFICATION || patterns[p] == BUS_F_REQUEST ||
+                         patterns[p] == BUS_F_REPLY || patterns[p] == BUS_F_CANCEL);
+                     int one_placement =
+                        (placements[q] == BUS_F_INLINE || placements[q] == BUS_F_ARENA);
 
-               bus_wire_result_t got = bus_wire_validate(&f);
-               if (want_ok && got != BUS_WIRE_OK)
-               {
-                  fprintf(stderr, "FAIL: flags=0x%04x plen=%u should be accepted, got %s\n",
-                          f.hdr_flags, f.payload_len, bus_wire_result_name(got));
-                  abort();
-               }
-               if (!want_ok && got == BUS_WIRE_OK)
-               {
-                  fprintf(stderr, "FAIL: flags=0x%04x plen=%u should be refused\n", f.hdr_flags,
-                          f.payload_len);
-                  abort();
-               }
-               want_ok ? accepted++ : refused++;
-            }
+                     int placement_ok, length_ok, ref_ok;
+                     if (lens[l] > 0)
+                     {
+                        placement_ok = one_placement;
+                        length_ok = lens[l] <= BUS_WIRE_MAX_PAYLOAD;
+                        ref_ok = 1; /* any ref is framing-legal with a payload */
+                     }
+                     else
+                     {
+                        placement_ok = (placements[q] == 0);
+                        length_ok = 1;
+                        ref_ok = (refs[rr] == 0); /* no payload means no reference */
+                     }
 
-   printf("  combination matrix: %d accepted, %d refused, judged independently\n", accepted,
+                     int corr_ok;
+                     if (patterns[p] == BUS_F_NOTIFICATION)
+                        corr_ok = (corrs[c] == 0);
+                     else if (one_pattern)
+                        corr_ok = (corrs[c] != 0);
+                     else
+                        corr_ok = 1; /* pattern already refused; do not double-judge */
+
+                     int want_ok = one_pattern && placement_ok && length_ok && ref_ok && corr_ok;
+
+                     bus_wire_result_t got = bus_wire_validate(&f);
+                     if (want_ok && got != BUS_WIRE_OK)
+                     {
+                        fprintf(stderr,
+                                "FAIL: flags=0x%04x plen=%u ref=0x%llx corr=0x%llx should be "
+                                "accepted, got %s\n",
+                                f.hdr_flags, f.payload_len,
+                                (unsigned long long)f.payload_ref,
+                                (unsigned long long)f.correlation_id,
+                                bus_wire_result_name(got));
+                        abort();
+                     }
+                     if (!want_ok && got == BUS_WIRE_OK)
+                     {
+                        fprintf(stderr,
+                                "FAIL: flags=0x%04x plen=%u ref=0x%llx corr=0x%llx should be "
+                                "refused\n",
+                                f.hdr_flags, f.payload_len,
+                                (unsigned long long)f.payload_ref,
+                                (unsigned long long)f.correlation_id);
+                        abort();
+                     }
+                     want_ok ? accepted++ : refused++;
+                  }
+
+   printf("  combination matrix: %d accepted, %d refused across 5 validator axes\n", accepted,
           refused);
+}
+
+/* event_kind, the handles, seq and logical_ts are deliberately unconstrained by
+ * this layer: the kind registry belongs to the event-contract schema, and the
+ * host assigns handles and seq at routing. Asserting that here keeps the claim
+ * honest — "validated message patterns" is a statement about flags and
+ * correlation, not about every field in the frame. */
+static void test_intentionally_unconstrained_fields(void)
+{
+   const uint32_t kinds[] = {0, 1, BUS_KIND_MODULE_BASE, UINT32_MAX};
+   for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++)
+   {
+      bus_frame_t f = base_frame();
+      f.hdr_flags = BUS_F_NOTIFICATION;
+      f.event_kind = kinds[i];
+      f.src_handle = UINT32_MAX;
+      f.dst_handle = UINT32_MAX;
+      f.seq = UINT64_MAX;
+      f.logical_ts = UINT64_MAX;
+      must(bus_wire_validate(&f) == BUS_WIRE_OK,
+           "event_kind, handles, seq and logical_ts are not this layer's to judge");
+   }
+   printf("  unconstrained fields: kind/handles/seq/ts pass through by design\n");
+}
+
+/* The checked decode path must refuse what the raw one accepts, so the safe
+ * entry point is genuinely safer rather than just differently named. */
+static void test_decode_checked(void)
+{
+   const uint32_t slot = 256;
+   const uint64_t arena = 1u << 20;
+
+   bus_frame_t good = base_frame();
+   good.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
+   good.payload_len = 128;
+   good.payload_ref = 0x1000;
+
+   uint8_t buf[BUS_WIRE_HDR_LEN];
+   must(bus_wire_encode(&good, buf, sizeof buf) == BUS_WIRE_HDR_LEN, "encode in-bounds frame");
+
+   bus_frame_t out;
+   must(bus_wire_decode_checked(buf, sizeof buf, slot, arena, &out) == BUS_WIRE_OK,
+        "checked decode accepts an in-bounds frame");
+
+   /* Out of bounds for the arena, but structurally perfect. */
+   bus_frame_t bad = good;
+   bad.payload_ref = arena - 8;
+   must(bus_wire_encode(&bad, buf, sizeof buf) == BUS_WIRE_HDR_LEN, "encode out-of-bounds frame");
+
+   memset(&out, 0xa5, sizeof out);
+   bus_frame_t before = out;
+   must(bus_wire_decode(buf, sizeof buf, &out) == BUS_WIRE_OK,
+        "raw decode accepts it — framing is all it can see");
+   memset(&out, 0xa5, sizeof out);
+   must(bus_wire_decode_checked(buf, sizeof buf, slot, arena, &out) == BUS_WIRE_ERR_PAYLOAD_LEN,
+        "checked decode refuses it");
+   must(memcmp(&before, &out, sizeof out) == 0, "checked decode leaves *out untouched on refusal");
+
+   printf("  checked decode: refuses an out-of-bounds frame the raw path accepts\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -661,8 +779,10 @@ int main(void)
    verify_vectors();
    test_pattern_matrix();
    test_combination_matrix();
+   test_intentionally_unconstrained_fields();
    test_rejections();
    test_placement_bounds();
+   test_decode_checked();
    printf("test_bus_wire: OK\n");
    return 0;
 }

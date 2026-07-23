@@ -122,6 +122,44 @@ VECTORS = [
 ]
 
 
+# Negative vectors: byte sequences a conforming decoder must refuse, with the
+# result name it must report. Built by mutating a known-good frame at the byte
+# level, so they exercise the decoder's own guards rather than the encoder's.
+#
+# Without these the table was all-OK rows, which would let a decoder that
+# accepted everything pass conformance — and "the Go client agrees with the C
+# client" would then be a statement about two permissive parsers.
+def negatives():
+    good = bytearray(encode(frame(flags=F_NOTIFICATION)))
+    out = []
+
+    def mut(name, expect, edits):
+        b = bytearray(good)
+        for off, fmt, val in edits:
+            struct.pack_into(fmt, b, off, val)
+        out.append((name, expect, b))
+
+    b = bytearray(good); b[0] ^= 0xFF
+    out.append(("neg.bad_magic", "ERR_MAGIC", b))
+
+    b = bytearray(good); b[60] = 1
+    out.append(("neg.reserved_nonzero", "ERR_RESERVED", b))
+
+    mut("neg.version_above", "ERR_VERSION", [(6, "<H", WIRE_VERSION + 1)])
+    mut("neg.version_zero", "ERR_VERSION", [(6, "<H", 0)])
+    mut("neg.no_pattern", "ERR_FLAGS", [(4, "<H", 0)])
+    mut("neg.two_patterns", "ERR_FLAGS", [(4, "<H", F_REQUEST | F_REPLY), (16, "<Q", CORR)])
+    mut("neg.unknown_flag_bit", "ERR_FLAGS", [(4, "<H", F_NOTIFICATION | 0x8000)])
+    mut("neg.payload_without_placement", "ERR_FLAGS", [(48, "<I", 32)])
+    mut("neg.both_placements", "ERR_FLAGS",
+        [(4, "<H", F_NOTIFICATION | F_INLINE | F_ARENA), (48, "<I", 32)])
+    mut("neg.placement_without_payload", "ERR_FLAGS", [(4, "<H", F_NOTIFICATION | F_INLINE)])
+    mut("neg.ref_without_payload", "ERR_PAYLOAD_LEN", [(40, "<Q", 4096)])
+    mut("neg.notification_with_correlation", "ERR_CORRELATION", [(16, "<Q", 5)])
+    mut("neg.request_without_correlation", "ERR_CORRELATION", [(4, "<H", F_REQUEST)])
+    return out
+
+
 def fields_str(f):
     return ("flags=0x%04x;ver=%u;kind=%u;principal=%u;corr=0x%016x;seq=%u;"
             "lts=0x%016x;pref=0x%016x;plen=%u;src=%u;dst=%u") % (
@@ -145,6 +183,16 @@ def main():
             raise SystemExit(f"duplicate vector name {name}")
         seen.add(name)
         out.write("%s\tOK\t%s\t%s\n" % (name, encode(f).hex(), fields_str(f)))
+
+    # Negative rows carry no field column — there is no valid frame to describe.
+    # A dash keeps every row four columns wide for any consumer.
+    for name, expect, blob in negatives():
+        if name in seen:
+            raise SystemExit(f"duplicate vector name {name}")
+        seen.add(name)
+        if len(blob) != HDR_LEN:
+            raise SystemExit(f"negative vector {name} is {len(blob)} bytes")
+        out.write("%s\t%s\t%s\t-\n" % (name, expect, bytes(blob).hex()))
 
 
 if __name__ == "__main__":
