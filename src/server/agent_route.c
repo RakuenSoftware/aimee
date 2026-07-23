@@ -129,6 +129,24 @@ void agent_set_route_health_filter(int (*fn)(const char *agent_name))
    g_route_health_filter = fn;
 }
 
+/* Optional route-time DEGRADED predicate; see agent_set_route_degraded_filter.
+ * Unlike the health filter this does NOT exclude - a degraded seat stays
+ * routable - it only lets selection PREFER a healthy peer when one exists. */
+static int (*g_route_degraded_filter)(const char *agent_name) = NULL;
+
+void agent_set_route_degraded_filter(int (*fn)(const char *agent_name))
+{
+   g_route_degraded_filter = fn;
+}
+
+/* 1 if the agent is currently degraded (recovering from a failure streak, or
+ * intermittently failing) per the registered predicate. Never true in
+ * filter-less builds (CLI / tests), which keep the prior behaviour. */
+static int agent_is_degraded(const agent_t *ag)
+{
+   return g_route_degraded_filter && ag->name[0] && g_route_degraded_filter(ag->name);
+}
+
 /* Optional route-time delegate-policy filter; see agent_set_route_policy_filter. */
 static int (*g_route_policy_filter)(const agent_t *agent) = NULL;
 
@@ -671,6 +689,36 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       }
    }
 
+   /* Prefer HEALTHY over DEGRADED, same shape as prefer_local: decide up front
+    * whether any eligible seat is healthy, and if so drop degraded seats from
+    * contention for the whole selection. A degraded seat is still a valid
+    * fallback - it is only excluded WHEN a healthy peer can serve the role - so
+    * this narrows the cheapest-with-capability choice to reliable seats rather
+    * than letting a flapping one keep winning on price. This is the routing half
+    * of the fix for the six-day codex quota outage: the breaker backoff stops it
+    * re-entering the set every minute, and this stops a degraded seat beating a
+    * healthy one while it is in the set. */
+   int healthy_only = 0;
+   if (g_route_degraded_filter)
+   {
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         agent_t *ag = &cfg->agents[i];
+         if (!ag->enabled || !agent_supports_role(ag, role) ||
+             !agent_is_available_for_routing(ag) || agent_is_degraded(ag))
+            continue;
+         if (locals_only && !agent_is_local(ag))
+            continue;
+         if (!agent_scope_admits(ag, scope))
+            continue;
+         if ((required_caps || min_context > 0) &&
+             !agent_satisfies_required_caps(ag, required_caps, min_context, scope))
+            continue;
+         healthy_only = 1;
+         break;
+      }
+   }
+
    int min_tier = -1;
    int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -679,6 +727,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
       if (!ag->enabled || !agent_supports_role(ag, role) || !agent_is_available_for_routing(ag))
          continue;
       if (locals_only && !agent_is_local(ag))
+         continue;
+      if (healthy_only && agent_is_degraded(ag))
          continue;
 
       /* The scope ceiling binds even when NOTHING else is required: it is a
@@ -718,6 +768,8 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
          continue;
 
       if (locals_only && !agent_is_local(ag))
+         continue;
+      if (healthy_only && agent_is_degraded(ag))
          continue;
       if (!agent_scope_admits(ag, scope))
          continue;

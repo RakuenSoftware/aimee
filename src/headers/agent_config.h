@@ -82,6 +82,15 @@ int agent_any_delegate_available(void);
  * gains no link dependency on provider_catalog. */
 void agent_set_route_health_filter(int (*fn)(const char *agent_name));
 
+/* Optional route-time DEGRADED predicate (returns nonzero if the named agent is
+ * degraded). Unlike the health filter it does NOT exclude the agent: routing
+ * PREFERS a healthy peer when one can serve the role, and falls back to a
+ * degraded seat only when none can. NULL (the default) disables the preference,
+ * so filter-less CLI / test builds keep the prior cost-only behaviour and
+ * agent_config.o gains no link dependency on the provider catalog. The server
+ * registers a predicate reporting CATALOG_HEALTH_DEGRADED. */
+void agent_set_route_degraded_filter(int (*fn)(const char *agent_name));
+
 /* Optional route-time delegate-POLICY filter, same mechanism as the health
  * filter (returns nonzero to EXCLUDE the agent; NULL disables). The server
  * registers a predicate enforcing ONE invariant everywhere routing happens,

@@ -1723,6 +1723,78 @@ void test_prefer_local_orders_but_never_bypasses(void)
    printf("  PASS: test_prefer_local_orders_but_never_bypasses\n");
 }
 
+/* A degraded seat must not beat a healthy one on price. This is the routing half
+ * of the codex quota-outage fix: the breaker backoff keeps a hopeless seat out
+ * of the routable set for longer, and this keeps a degraded-but-still-routable
+ * seat from winning seat resolution while a healthy peer can serve the role. */
+static const char *g_degraded_name = NULL;
+static int route_test_is_degraded(const char *name)
+{
+   return g_degraded_name && name && strcmp(name, g_degraded_name) == 0;
+}
+static int route_test_degrade_all(const char *name)
+{
+   (void)name;
+   return 1;
+}
+
+void test_prefer_healthy_over_degraded(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+   cfg.agent_count = 2;
+
+   /* The CHEAPER seat is the degraded one - exactly codex's position: tier 0 and
+    * flapping. Only the health preference can lose it to the dearer healthy seat. */
+   strcpy(cfg.agents[0].name, "cheap-flaky");
+   strcpy(cfg.agents[0].provider, "openai");
+   strcpy(cfg.agents[0].model, "gpt-5.6-luna");
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 0;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   strcpy(cfg.agents[1].name, "dear-healthy");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 1; /* dearer, so only the preference can win it */
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* No degraded filter (CLI/test default): cheapest wins, as before. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
+
+   /* With the cheaper seat degraded, the healthy dearer seat wins every time. */
+   agent_set_route_degraded_filter(route_test_is_degraded);
+   g_degraded_name = "cheap-flaky";
+   for (int i = 0; i < 6; i++)
+      assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[1]);
+
+   /* Fallback, not exclusion: when the ONLY capable seat is degraded, it is still
+    * chosen - a degraded seat beats no seat. */
+   cfg.agents[1].enabled = 0;
+   for (int i = 0; i < 6; i++)
+      assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
+   cfg.agents[1].enabled = 1;
+
+   /* When EVERY seat is degraded, none can be preferred, so price decides again -
+    * the preference narrows the field only when a healthy alternative exists. */
+   agent_set_route_degraded_filter(route_test_degrade_all);
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
+
+   agent_set_route_degraded_filter(NULL);
+   g_degraded_name = NULL;
+   printf("  PASS: test_prefer_healthy_over_degraded\n");
+}
+
 /* Escalation target selection. An escalation is a placement CORRECTION, so it
  * must land on a genuinely dearer seat, must still respect the scope ceiling, and
  * must report "nothing" rather than re-running the class of seat that just failed. */
