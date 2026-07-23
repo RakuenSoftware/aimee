@@ -109,29 +109,75 @@ done < <(grep -rnE '#include[[:space:]]*[<"][^">]*bus_[a-z_]+\.h[">]|#include[[:
    src/ 2>/dev/null || true)
 
 # ------------------------------------------------------- 4. built artefacts
-# The shipping binary list and its paths both come from the Makefile itself, via
-# make, so that $(OBJDIR)-style variables are actually expanded. An earlier
-# version sed'd the literal right-hand side, which meant every path containing a
-# variable failed the -f test and the whole layer silently did nothing.
-shipping_bins=$(make -C src --no-print-directory \
-   --eval 'bus-print-shipping-bins:; @echo $(BINARY) $(SERVER) $(WEBCHAT) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)' \
-   bus-print-shipping-bins 2>/dev/null || true)
+# The backstop that reasons about the compiled result rather than the build
+# text, and the only layer that catches what 1-3 structurally cannot see.
+#
+# Three ways this layer can fail to do its job, all of which must be loud:
+#   - make cannot tell us what the shipping binaries are  -> gate failure
+#   - the list comes back empty                           -> gate failure
+#   - a binary exists but nm cannot read it               -> gate failure
+# Only "the binary was never built" is a legitimate skip, and even that is
+# reported rather than folded into a clean result.
+# Each variable is resolved on its own and required to be non-empty. Asking for
+# them in one echo would let a name that has drifted out of src/Makefile expand
+# to nothing while its neighbours still produce a plausible list — the gate
+# would go on inspecting five binaries and never mention the sixth it lost.
+shipping_var_names="BINARY SERVER WEBCHAT KB KB_RESOLVER GATEWAY FORWARDER"
+shipping_bins=""
+for v in $shipping_var_names; do
+   if ! val=$(make -C src --no-print-directory \
+      --eval "bus-print-var:; @echo \$($v)" bus-print-var 2>/dev/null); then
+      note "FAIL: cannot ask make to resolve \$$v — the artefact layer cannot run,"
+      note "      and a gate that cannot run must not report clean."
+      exit 1
+   fi
+   val=$(printf '%s' "$val" | tr -d '[:space:]')
+   if [ -z "$val" ]; then
+      note "FAIL: src/Makefile variable \$$v resolved to nothing."
+      note "      The shipping-binary list in this gate has drifted from the build;"
+      note "      a binary it believes it is covering is invisible to it."
+      exit 1
+   fi
+   shipping_bins="$shipping_bins $val"
+done
+
+# shellcheck disable=SC2086
+set -- $shipping_bins
+if [ "$#" -eq 0 ]; then
+   note "FAIL: the shipping binary list is empty — the artefact layer is blind."
+   exit 1
+fi
+
+# Any symbol the bus actually exports, read from the bus sources rather than a
+# hand-kept prefix list, so a new bus_* entry point is covered the day it is
+# written. Falls back to the module prefix if the headers cannot be read.
+bus_syms=$({ grep -hoE 'bus_[a-z_]+[[:space:]]*\(' src/modules/bus/*.h 2>/dev/null || true; } |
+   grep -oE 'bus_[a-z_]+' | sort -u || true)
+[ -n "$bus_syms" ] || bus_syms='bus_'
+sym_pattern=$(printf '%s|' $bus_syms | sed 's/|$//')
 
 checked=0
 missing=0
-for bin in $shipping_bins; do
+for bin in "$@"; do
    path="src/$bin"
    [ -f "$path" ] || path="$bin"
    if [ ! -f "$path" ]; then
       missing=$((missing + 1))
       continue
+    fi
+   # Defined symbols catch a linked bus object; undefined ones catch a shipping
+   # object that references the bus and is only waiting for someone to satisfy
+   # it. Both tables are queried, and an unreadable binary fails closed.
+   if ! syms=$(nm -A "$path" 2>/dev/null) && ! syms=$(nm -D -A "$path" 2>/dev/null); then
+      note "FAIL: cannot read symbols from '$path' — the artefact check cannot"
+      note "      clear a binary it is unable to inspect."
+      fail=1
+      continue
    fi
    checked=$((checked + 1))
-   # Defined symbols catch a linked bus object. Undefined ones catch a shipping
-   # object that references the bus and is only waiting for someone to satisfy
-   # it — the state just before a link edge appears.
-   if nm -C "$path" 2>/dev/null | grep -qE '\bbus_(wire|ring|region|arena|host|client)_'; then
+   if printf '%s\n' "$syms" | grep -qE "\b(${sym_pattern})"; then
       note "FAIL: built binary '$path' references a bus symbol"
+      printf '%s\n' "$syms" | grep -E "\b(${sym_pattern})" | head -5 >&2
       fail=1
    fi
 done
@@ -146,8 +192,8 @@ fi
 # Report what actually ran. A skipped layer must never read as coverage, so the
 # artefact count is stated rather than implied — but its absence is not itself a
 # failure, because a fresh checkout has no build and lint must still run there.
-if [ "$checked" -gt 0 ]; then
-   echo "check_bus_blast_radius: ok — build graph clean; $checked shipping binary(s) carry no bus symbol"
+if [ "$missing" -gt 0 ]; then
+   echo "check_bus_blast_radius: ok — build graph clean; $checked binary(s) inspected, $missing not built (artefact layer partial)"
 else
-   echo "check_bus_blast_radius: ok — build graph clean; artefact layer SKIPPED ($missing binary(s) not built)"
+   echo "check_bus_blast_radius: ok — build graph clean; all $checked shipping binary(s) carry no bus symbol"
 fi

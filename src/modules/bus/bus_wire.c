@@ -221,6 +221,24 @@ bus_wire_result_t bus_wire_decode(const uint8_t *in, size_t insz, bus_frame_t *o
    return BUS_WIRE_OK;
 }
 
+bus_wire_result_t bus_wire_decode_checked(const uint8_t *in, size_t insz, uint32_t slot_size,
+                                          uint64_t arena_size, bus_frame_t *out)
+{
+   bus_frame_t f;
+   bus_wire_result_t r = bus_wire_decode(in, insz, &f);
+   if (r != BUS_WIRE_OK)
+      return r;
+
+   r = bus_wire_check_placement(&f, slot_size, arena_size);
+   if (r != BUS_WIRE_OK)
+      return r;
+
+   /* Committed only once both the framing and the geometry hold, so this
+    * entry point cannot hand back a frame whose payload is out of bounds. */
+   *out = f;
+   return BUS_WIRE_OK;
+}
+
 const char *bus_wire_result_name(bus_wire_result_t r)
 {
    switch (r)
