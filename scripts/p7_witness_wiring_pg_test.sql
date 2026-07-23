@@ -143,4 +143,77 @@ BEGIN
   RAISE NOTICE 'WITNESS OK: head-vs-log cross-check catches a forged row';
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- Emission cursor. The cursor is a position, not evidence, but it has one
+-- property that matters for correctness: it must never rewind. A rewind would
+-- re-emit history every tick, which is not a data-loss bug but is a runaway one.
+DO $$
+DECLARE v BIGINT;
+BEGIN
+  -- Advance, then attempt to rewind: the lower value must be ignored, not applied.
+  v := public.org_vault_witness_emit_advance(0::smallint,'emit-t','emit-p',10);
+  IF v <> 10 THEN RAISE EXCEPTION 'WITNESS FAIL: first advance returned %', v; END IF;
+  v := public.org_vault_witness_emit_advance(0::smallint,'emit-t','emit-p',4);
+  IF v <> 10 THEN RAISE EXCEPTION 'WITNESS FAIL: cursor rewound to %', v; END IF;
+  v := public.org_vault_witness_emit_advance(0::smallint,'emit-t','emit-p',11);
+  IF v <> 11 THEN RAISE EXCEPTION 'WITNESS FAIL: forward advance returned %', v; END IF;
+
+  -- The checkpoint stream is a single row: a keyed checkpoint cursor is rejected
+  -- rather than silently creating a second, divergent checkpoint position.
+  BEGIN
+    PERFORM public.org_vault_witness_emit_advance(1::smallint,'t','p',1);
+    RAISE EXCEPTION 'WITNESS FAIL: keyed checkpoint cursor accepted';
+  EXCEPTION WHEN sqlstate '22023' THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.org_vault_witness_emit_advance(0::smallint,'emit-t','emit-p',-1);
+    RAISE EXCEPTION 'WITNESS FAIL: negative cursor accepted';
+  EXCEPTION WHEN sqlstate '22023' THEN NULL;
+  END;
+  RAISE NOTICE 'WITNESS OK: emission cursor is monotonic and rejects invalid input';
+END $$;
+
+-- The batch readers must never hand back more than asked, and must start strictly
+-- after the cursor: an off-by-one here silently drops or duplicates evidence.
+DO $$
+DECLARE v_n BIGINT; v_min BIGINT;
+BEGIN
+  SELECT count(*), COALESCE(min(shard_seq),0) INTO v_n, v_min
+    FROM public.org_vault_witness_emit_batch('!kb','!audit',0,2);
+  IF v_n > 2 THEN RAISE EXCEPTION 'WITNESS FAIL: batch returned % rows for limit 2', v_n; END IF;
+  IF v_n > 0 AND v_min <> 1 THEN
+    RAISE EXCEPTION 'WITNESS FAIL: batch from cursor 0 started at %', v_min;
+  END IF;
+  IF v_n > 0 THEN
+    SELECT COALESCE(min(shard_seq),0) INTO v_min
+      FROM public.org_vault_witness_emit_batch('!kb','!audit',1,10);
+    IF v_min <> 0 AND v_min <= 1 THEN
+      RAISE EXCEPTION 'WITNESS FAIL: batch after cursor 1 returned seq %', v_min;
+    END IF;
+  END IF;
+  RAISE NOTICE 'WITNESS OK: emission batch reader is bounded and cursor-exclusive';
+END $$;
+
+-- Least privilege: the emission surface is no more reachable than the rest of the
+-- witness surface. PUBLIC holds nothing on the cursor table or its functions.
+DO $$
+DECLARE v_bad TEXT;
+BEGIN
+  SELECT string_agg(p.proname, ', ') INTO v_bad
+    FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname='public' AND p.proname LIKE 'org_vault_witness_emit%'
+     AND has_function_privilege('public', p.oid, 'EXECUTE');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'WITNESS FAIL: PUBLIC can execute emission functions: %', v_bad;
+  END IF;
+  IF has_table_privilege('public','public.kb_vault_witness_emit_cursor','SELECT') THEN
+    RAISE EXCEPTION 'WITNESS FAIL: PUBLIC can read the emission cursor table';
+  END IF;
+  IF NOT (SELECT relrowsecurity FROM pg_catalog.pg_class
+           WHERE oid='public.kb_vault_witness_emit_cursor'::regclass) THEN
+    RAISE EXCEPTION 'WITNESS FAIL: emission cursor table has RLS disabled';
+  END IF;
+  RAISE NOTICE 'WITNESS OK: emission surface is least-privilege and RLS-enabled';
+END $$;
+
 DO $$ BEGIN RAISE NOTICE 'p7_witness_wiring_pg_test: all checks passed'; END $$;
