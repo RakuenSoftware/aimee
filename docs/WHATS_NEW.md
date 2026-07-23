@@ -25,6 +25,27 @@ current version and prints it once after an upgrade.
   answers `UNKNOWN_METHOD`; the command could not do anything but fail. The
   client plumbing is now gone too.
 
+- **Connection reuse is now the default.** Server→KB mTLS pooling
+  (`transport.kb_pool_enabled`) and resident thin-client HTTPS keep-alive
+  (`transport.server_keepalive_enabled`) both default **on** after live
+  three-node validation: pooling took warm p50 from 4.762 ms to 1.589 ms, and
+  keep-alive took p50 from 4.900 ms to 0.109 ms. Each rolls back independently —
+  set the config key false, or `AIMEE_TRANSPORT_KB_POOL_ENABLED=0` /
+  `AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED=0`. Short-lived CLI invocations are
+  unchanged (a process-local socket can't outlive the process). Both gzip
+  settings stay **off**: the same capture cut a request from 51,592 to 18,110
+  wire bytes but raised latency from 2.849 ms to 4.766 ms, which fails the
+  latency gate. See [BENCHMARKS.md](BENCHMARKS.md).
+
+- **A configured remote is now an exclusive transport.** When a remote endpoint
+  is set, the thin client no longer probes or falls back to a co-located unix
+  socket for `hooks`, `session-start`, `optimize`, or the delegate-availability
+  probe — those went to the local socket before, so one invocation could contact
+  both servers. **Behavior change:** `aimee optimize …` against an unreachable
+  remote now fails instead of quietly answering from a local server. `aimee
+  hooks …` still fails open when the policy server is unavailable, as before.
+  Clear the remote for local execution. See [THIN_CLIENT.md](THIN_CLIENT.md).
+
 - **Roundtable panels run in parallel**: the workflow `gate.roundtable` now
   dispatches all reviewers concurrently (bounded by the compute-thread ceiling,
   with a per-round deadline so one hung model can't wedge the panel) instead of

@@ -40,6 +40,40 @@ A remote endpoint is "tcp" (`http(s)://host:port`) vs. a co-located unix socket.
 The behaviors below activate only for a **remote tcp** endpoint; co-located use
 is unchanged.
 
+### Exclusive transport selection
+
+A configured remote is an **exclusive** choice. Every `/v1` call goes to it, and
+none go to a co-located unix socket: there is no probe of both and no fallback
+between them. One invocation therefore cannot be served partly by the remote and
+partly by a local server.
+
+This covers the commands that were previously pinned to the local socket:
+
+| Command | With a remote configured |
+| --- | --- |
+| `aimee hooks pre` / `hooks post` | dispatched to the remote |
+| `aimee session-start` | served by the remote, selected before any local availability probe |
+| `aimee optimize points\|baseline\|replay\|run\|compare` | dispatched to the remote |
+| delegate-availability probe (ordinary startup) | dispatched to the remote |
+
+When the remote is **unreachable**:
+
+- `aimee optimize …` fails. It does not fall back to a co-located server, so a
+  mistyped or down endpoint surfaces as an error rather than silently reporting
+  some other server's data.
+- `aimee hooks …` still **fails open** (the tool call is allowed). That is the
+  established policy-server-unavailable behavior, not a local fallback — no
+  local socket is contacted either way.
+
+For local execution, clear the remote (`aimee remote clear`, or drop `--server` /
+`AIMEE_SERVER_URL` / `AIMEE_API_ENDPOINT` from the environment).
+
+The memory-file guard is unaffected. On a remote-only host the pre-tool hook used
+to run a narrowed local path that enforced only the `memory_redirect` check,
+because the full `pre_tool_check` needed local session state. The full check now
+runs on the remote instead, so the guard is enforced by the server rather than
+partially reimplemented on the client.
+
 ### Server write posture
 
 Mutating `/v1` calls require the server to allow remote writes. Set it in the
