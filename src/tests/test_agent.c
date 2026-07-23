@@ -38,6 +38,8 @@ void test_catalog_provider_host_matching_is_label_anchored(void);
 void test_catalog_provider_namespaced_model_ids(void);
 void test_moonshot_heuristic_scopes_reasoning_to_known_families(void);
 void test_catalog_provider_maps_cli_provider_names(void);
+void test_primary_turn_reaches_default_above_min_tier(void);
+void test_primary_turn_default_must_still_satisfy_caps(void);
 
 /* Defined in test_agent_responses.c (split out to keep this file under the
  * 2000-line hard limit); called from main() below. */
@@ -3180,6 +3182,8 @@ int main(void)
    test_catalog_provider_namespaced_model_ids();
    test_moonshot_heuristic_scopes_reasoning_to_known_families();
    test_catalog_provider_maps_cli_provider_names();
+   test_primary_turn_reaches_default_above_min_tier();
+   test_primary_turn_default_must_still_satisfy_caps();
    test_agent_config_cache_detects_same_mtime_rewrite();
    test_agent_adapter_registry();
    test_agent_config_deletion_guard();

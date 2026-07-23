@@ -1892,11 +1892,35 @@ int agent_pick_named_for_role(agent_config_t *cfg, const char *name, const char 
    return -1;
 }
 
+/* A PRIMARY (user-facing) turn must reach the configured default agent whatever
+ * its cost_tier. The default is the operator's "most capable seat" choice, and a
+ * user must never be handed a weaker model just because a cheaper peer exists —
+ * a session the user interacts with has to be coherent before it is cheap.
+ *
+ * This used to be expressed by consulting `default_agent` on a primary turn and
+ * then returning it only from inside the min_tier-filtered pass below, which
+ * meant a default above min_tier was never returned. With a premium default
+ * (cost_tier 1) and any cheaper peer serving the same role (cost_tier 0), the
+ * primary turn silently routed to the cheap peer — the exact opposite of the
+ * intent. Resolve the primary default up front instead, subject only to the
+ * eligibility every route requires. */
+static agent_t *agent_primary_turn_default(agent_config_t *cfg, const char *role)
+{
+   if (!agent_routing_primary_turn() || !cfg->default_agent[0])
+      return NULL;
+   agent_t *ag = agent_find(cfg, cfg->default_agent);
+   if (!ag || !ag->enabled || !agent_supports_role(ag, role) ||
+       !agent_is_available_for_routing(ag))
+      return NULL;
+   return ag;
+}
+
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
-   agent_t *primary_default = NULL;
-   if (agent_routing_primary_turn() && cfg->default_agent[0])
-      primary_default = agent_find(cfg, cfg->default_agent);
+   /* Tier is a COST ordering; it must not gate the user-facing seat. */
+   agent_t *primary_default = agent_primary_turn_default(cfg, role);
+   if (primary_default)
+      return primary_default;
 
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
@@ -1930,8 +1954,6 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
          continue;
       if (has_tmux && strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) != 0)
          continue;
-      if (ag == primary_default)
-         return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }
@@ -2034,6 +2056,16 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    if (!sys_cfg || !sys_cfg->model_meta_capability_routing)
       return agent_route(cfg, role);
 
+   /* Same primary-turn rule as agent_route(): the user-facing seat is chosen by
+    * capability, not by price. It must still SATISFY the requirements — a
+    * default that cannot hold the prompt or lacks a required modality is not a
+    * usable seat — but its cost_tier is irrelevant to that decision. */
+   agent_t *primary_default = agent_primary_turn_default(cfg, role);
+   if (primary_default && (!(required_caps || min_context > 0) ||
+                           agent_satisfies_required_caps(primary_default, required_caps,
+                                                         min_context)))
+      return primary_default;
+
    int min_tier = -1;
    int has_tmux = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -2061,10 +2093,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
    if (min_tier < 0)
       return NULL;
 
-   agent_t *primary_default = NULL;
-   if (agent_routing_primary_turn() && cfg->default_agent[0])
-      primary_default = agent_find(cfg, cfg->default_agent);
-
    agent_t *candidates[MAX_AGENTS];
    int count = 0;
    for (int i = 0; i < cfg->agent_count; i++)
@@ -2083,8 +2111,6 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
             continue;
       }
 
-      if (ag == primary_default)
-         return ag;
       if (count < MAX_AGENTS)
          candidates[count++] = ag;
    }

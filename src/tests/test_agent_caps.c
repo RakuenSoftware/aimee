@@ -461,6 +461,117 @@ void test_context_window_table_covers_live_vendors(void)
    printf("  PASS: test_context_window_table_covers_live_vendors\n");
 }
 
+/* A PRIMARY (user-facing) turn must reach the configured default agent whatever
+ * its cost_tier. The default is the operator's most-capable-seat choice, and a
+ * user must never be handed a weaker model because a cheaper peer exists.
+ * Previously the default was only returned from inside the min_tier-filtered
+ * pass, so a premium default with ANY cheaper peer serving the same role was
+ * silently skipped — the exact opposite of the intent. */
+void test_primary_turn_reaches_default_above_min_tier(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   strcpy(cfg.default_agent, "premium");
+
+   strcpy(cfg.agents[0].name, "premium");
+   strcpy(cfg.agents[0].provider, "anthropic");
+   strcpy(cfg.agents[0].model, "claude-opus-4-8");
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 1; /* dearer than the peer below */
+   strcpy(cfg.agents[0].api_key, "k");
+
+   strcpy(cfg.agents[1].name, "cheap");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-haiku-4-5");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 0;
+   strcpy(cfg.agents[1].api_key, "k");
+
+   /* Delegation (NOT a primary turn) still minimises cost. */
+   agent_routing_set_primary_turn(0);
+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
+
+   /* A primary turn reaches the premium default despite its higher tier. */
+   agent_routing_set_primary_turn(1);
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+
+   /* A disabled default must not be handed back; fall through to routing. */
+   cfg.agents[0].enabled = 0;
+   assert(agent_route(&cfg, "review") == &cfg.agents[1]);
+   cfg.agents[0].enabled = 1;
+
+   /* A default that does not serve the role is not a usable seat either. This
+    * must be checked with a NON-exec role: agent_supports_role() waves any agent
+    * through for the 18 default exec roles (deploy/validate/test/diagnose/
+    * execute/review/code/refactor/draft/implement/...), so a `roles` list is not
+    * consulted at all for those. "explain" is not among them. */
+   strcpy(cfg.agents[0].roles[0], "review");
+   strcpy(cfg.agents[1].roles[0], "explain");
+   assert(agent_route(&cfg, "explain") == &cfg.agents[1]);
+
+   /* Guard rail for the above: for an EXEC role the default is reachable even
+    * though its roles list names something else, because the exec-role fallback
+    * bypasses role filtering entirely. Documented so a future role split does
+    * not assume `roles` gates these. */
+   strcpy(cfg.agents[0].roles[0], "explain");
+   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+
+   agent_routing_set_primary_turn(0);
+   printf("  PASS: test_primary_turn_reaches_default_above_min_tier\n");
+}
+
+/* Under capability routing the primary default still wins on price, but it must
+ * genuinely SATISFY the requirements — a seat that cannot hold the prompt is not
+ * usable just because it is the default. */
+void test_primary_turn_default_must_still_satisfy_caps(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 2;
+   strcpy(cfg.default_agent, "small_default");
+
+   strcpy(cfg.agents[0].name, "small_default");
+   strcpy(cfg.agents[0].provider, "openai");
+   strcpy(cfg.agents[0].model, "gpt-4"); /* 8192 catalog window */
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].cost_tier = 1;
+   strcpy(cfg.agents[0].api_key, "k");
+
+   strcpy(cfg.agents[1].name, "big_peer");
+   strcpy(cfg.agents[1].provider, "anthropic");
+   strcpy(cfg.agents[1].model, "claude-opus-4-8");
+   strcpy(cfg.agents[1].roles[0], "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].cost_tier = 0;
+   cfg.agents[1].middleware.context_window = 200000;
+   strcpy(cfg.agents[1].api_key, "k");
+
+   agent_routing_set_primary_turn(1);
+   /* No requirement: the default wins regardless of tier. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 0) == &cfg.agents[0]);
+   /* A 50k prompt does not fit the default -> it is skipped, not forced. */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, 0, 50000) == &cfg.agents[1]);
+   agent_routing_set_primary_turn(0);
+
+   printf("  PASS: test_primary_turn_default_must_still_satisfy_caps\n");
+}
+
 /* agent_default_primary must never hand back a disabled seat: a disabled
  * agents[0] (e.g. an unconfigured "claude") otherwise becomes the fallback
  * primary and every ingress request that doesn't name a model fast-fails as
