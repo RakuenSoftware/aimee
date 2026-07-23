@@ -17,7 +17,7 @@ search, `memory_assemble`, and `gw_stage_memory` are one required capability fam
 physical paths have not all reached the module directory.
 
 The descriptor declares this module's thirty-two sources, twelve module-root headers, sixteen direct
-tests, and this document; it does not yet set `ownership_complete`. All twelve headers are declared as
+tests, and this document; it sets `ownership_complete: true`. All twelve headers are declared as
 `private_headers` because they live at the module root rather than under
 `src/modules/memory/include/aimee/memory/`, the layout the header-layout checker treats as private;
 five carry no paired source (`memory_assemble_util.h`, `memory_core_internal.h`, `memory_ontology.h`,
@@ -25,8 +25,10 @@ five carry no paired source (`memory_assemble_util.h`, `memory_core_internal.h`,
 compiles all thirty-two sources; CMake compiles nineteen, omitting the memory-core CRUD, search, tiers
 and scope family, extraction, the fact and PII gates, graph fusion, and the gateway stage — the
 server/kb-side units — the same intentional thin-client boundary recorded for the earlier modules.
-`docs/validation/core-modularization-slice-56.md` records the audit; latching follows in a separate
-slice so the completeness audit does not review declarations authored in the same change.
+`docs/validation/core-modularization-slice-56.md` records the declaration audit and
+`docs/validation/core-modularization-slice-57.md` the completeness audit; the two were split so the
+latch reviews declarations merged on their own first. Adding a new module-local source or module-root
+header without declaring it now fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 

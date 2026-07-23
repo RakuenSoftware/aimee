@@ -9,6 +9,7 @@
   "runtime_toggle": {
     "supported": false
   },
+  "ownership_complete": true,
   "sources": [
     "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/memory_advanced.c",
