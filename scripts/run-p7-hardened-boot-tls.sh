@@ -58,4 +58,35 @@ grep -iE "kb.witness|checkpoint" /tmp/hf.err | head -4
 echo "--- checkpoints produced ---"
 su - postgres -c "psql -qtA -d $DB -c \"SELECT count(*) FROM kb_vault_witness_checkpoint\"" 2>/dev/null
 kill -TERM $KBPID 2>/dev/null; sleep 1; kill -9 $KBPID 2>/dev/null
+
+echo "=== NEGATIVE: un-migrated schema -> hardened boot must FAIL CLOSED ==="
+NDB=aimee_hardened_unmigrated
+su - postgres -c "dropdb --if-exists $NDB 2>/dev/null; createdb $NDB"
+su - postgres -c "psql -qtA -d $NDB -c \"CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm\"" >/dev/null
+# roles only (so the runtime role exists) — but NOT schema.sql (no kb_meta/dim/version/objects).
+su - postgres -c "psql -q -d $NDB -f $SRC/schema_roles.sql" >/dev/null 2>&1
+su - postgres -c "psql -qtA -d $NDB -c \"GRANT CONNECT ON DATABASE $NDB TO $RTLOGIN\"" >/dev/null 2>&1
+echo "hostssl $NDB $RTLOGIN $CONN_CIDR trust $MARK" >> "$HBA"
+su - postgres -c "psql -qtA -c \"SELECT pg_reload_conf()\"" >/dev/null
+NH=$(mktemp -d)
+NDSN="postgresql://$RTLOGIN@$DBHOST:5432/$NDB?sslmode=verify-full&sslrootcert=$CACERT"
+AIMEE_KB_HARDENED=1 AIMEE_DB2_URL="$NDSN" AIMEE_HOME=$NH /tmp/gate/aimee-kb --http-port=18796 --log-level=info >/tmp/hfn.out 2>/tmp/hfn.err &
+NPID=$!
+sleep 6
+# kb_main RETRIES db2_init on failure (process stays alive), so refusal is proven by
+# db2 never connecting + the fail-closed message — NOT by the process exiting.
+if grep -aqE "hardened schema verification failed" /tmp/hfn.err; then
+  echo "NEG OK: hardened kb refused (fail-closed) against an un-migrated schema. Reason:"
+  grep -aoE "hardened schema verification failed: [^\"]*" /tmp/hfn.err | head -1
+  # and db2 must NOT be serving
+  if curl -s http://localhost:18796/v1/health 2>/dev/null | grep -q '"db2_ok":true'; then
+    echo "NEG FAIL: db2 reported connected despite the verification failure"
+  fi
+else
+  echo "NEG FAIL: hardened kb did NOT emit the fail-closed verification refusal"; tail -5 /tmp/hfn.err
+fi
+kill -9 $NPID 2>/dev/null
+su - postgres -c "dropdb --if-exists $NDB 2>/dev/null" >/dev/null 2>&1
+rm -rf $NH
+
 rm -rf $H

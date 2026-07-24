@@ -841,10 +841,13 @@ int db2_init(const char *libpq_url)
    }
    if (apply_rc != 0)
    {
-      /* Surface the postgres error so callers see WHICH statement failed.
-       * Silently returning -1 hid bugs like a stale CREATE INDEX referencing
-       * a table that lives in a different tier's schema. */
-      fprintf(stderr, "aimee: db2_init: schema apply failed: %s\n", errbuf);
+      /* Surface the postgres error so callers see WHICH statement failed (apply
+       * path), or the fail-closed reason (hardened verify path — no DDL was run).
+       * Silently returning -1 hid bugs like a stale CREATE INDEX referencing a
+       * table that lives in a different tier's schema. */
+      fprintf(stderr, "aimee: db2_init: %s: %s\n",
+              pre_provisioned ? "hardened schema verification failed" : "schema apply failed",
+              errbuf);
       if (dim_lock_held)
          db2_dim_lock_release(conn);
       aimee_pg_close(conn);
