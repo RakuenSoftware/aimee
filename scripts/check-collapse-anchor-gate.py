@@ -21,25 +21,24 @@ Resolution of the contract:
    ``BASE_SHA..HEAD`` and the anchor MUST be present at ``BASE_SHA``
    (the target branch head).  This is the explicit PR-base/PR-head
    semantics required by F001.
-2. Local repository with a usable ``HEAD~1`` -> diff is the union of
+2. Local repository with a usable ``HEAD~1`` -> combined diff of
    ``HEAD~1..HEAD`` (committed) and ``HEAD`` vs working tree
-   (staged + unstaged + untracked-eligible), so pending edits are
-   covered even before the developer commits.  This is the pre-PR
-   dev workflow.
+   (staged + unstaged + untracked-eligible).  Working-tree Phase 1+
+   edits are permitted when the anchors are present in the working tree
+   or in the local base (``HEAD~1`` or ``HEAD`` if no parent), so the
+   pre-PR development workflow can iterate on implementation once the
+   anchors are in hand.  Committed-only Phase 1+ changes still require
+   the anchors to be present in the local base.
 3. Local repository without ``HEAD~1`` (initial commit or shallow
-   clone) -> diff is the union of ``HEAD``'s tracked files and the
-   working tree, so a Phase 1+ path committed in the initial commit
-   (invisible to a HEAD~1..HEAD diff) still trips the gate.  This is
-   the F3 follow-up: a clean initial commit that introduces Phase 1+
-   paths must not pass silently.
-4. Otherwise the gate fails closed -- silently passing would defeat the
-   enforcement contract.
+   clone) -> union of ``HEAD``'s tracked files and the working tree.
+   Phase 1+ work is permitted only when the anchors are present at
+   ``HEAD`` or in the working tree.
+4. Otherwise the gate fails closed -- silently passing would defeat
+   the enforcement contract.
 
 CI mode (the ``GITHUB_ACTIONS`` env var is set) requires a non-empty
 ``BASE_SHA``; an unset ``BASE_SHA`` in CI mode is a configuration
-failure and the gate fails closed.  This is the F001 fix: the
-base-reference contract is mandatory whenever the runner signals it
-is operating in CI mode.  The generic ``CI=true`` env var is
+failure and the gate fails closed.  The generic ``CI=true`` env var is
 intentionally NOT treated as CI mode (F3 follow-up) because many
 local development tools and IDEs set it and would otherwise turn
 ordinary local dev runs into confusing "BASE_SHA unset" failures.
@@ -272,9 +271,10 @@ def _head_tree_names(cwd: Path) -> list[str]:
     Used as the initial-commit fallback: when ``HEAD~1`` is unavailable
     there is no prior commit to diff against, but a Phase 1+ path
     present in the initial commit itself is exactly the scenario the
-    contract forbids.  Git failures are propagated as :class:`GateError`
-    so the gate fails closed rather than silently treating a failed
-    tree query as an empty diff (F002).
+    contract forbids.  The initial commit IS the base in this scenario,
+    so the gate must inspect HEAD's tree as well.  Git failures are
+    propagated as :class:`GateError` so the gate fails closed rather
+    than silently treating a failed tree query as an empty diff (F002).
     """
     out = _git_text("ls-tree", "-r", "--name-only", "HEAD", cwd=cwd)
     return [line for line in out.splitlines() if line]
@@ -292,7 +292,7 @@ def diff_against_base(cwd: Path) -> list[str]:
     2. Local repository with a usable ``HEAD~1`` -> combined diff of
        ``HEAD~1..HEAD`` (committed) and ``HEAD`` vs the working tree
        (staged + unstaged).  The union is required by F002: a Phase 1+
-       change staged but not committed must still trip the gate.
+       change staged but not committed must still be visible to the gate.
     3. Local repository without ``HEAD~1`` (initial commit or shallow
        clone) -> union of ``HEAD``'s tracked files and the working
        tree, so a Phase 1+ path committed in the initial commit
@@ -344,11 +344,10 @@ def diff_against_base(cwd: Path) -> list[str]:
         #   head); otherwise the Phase 1+ commit sneaks ahead of the
         #   Phase 0 anchors.
         # * working tree vs ``HEAD`` -- Phase 1+ changes staged or
-        #   edited but not yet committed.  The F002 closure requires
-        #   these to trip the gate even when ``HEAD`` itself already
-        #   carries the anchors, because in-flight Phase 1+ work
-        #   before the anchors are merged on the target branch is
-        #   exactly the scenario the contract forbids.
+        #   edited but not yet committed.  These are permitted when the
+        #   anchors are present in the working tree or in the local
+        #   base (HEAD~1), so the pre-PR workflow can iterate locally
+        #   on top of the merged anchors.
         committed = _diff_names("HEAD~1", "HEAD", cwd=cwd)
         working_tree = _working_tree_names(cwd)
         seen: set[str] = set()
@@ -450,6 +449,20 @@ def _anchor_decisions_at(ref: str, cwd: Path) -> list[str]:
     ]
 
 
+def _contract_present_at_ref(ref: str, cwd: Path) -> tuple[bool, list[str]]:
+    """Verify the anchor contract at an arbitrary git revision.
+
+    Returns ``(True, [])`` if ``collapse_anchors.md`` exists at ``ref``
+    and contains every ``## Decision N`` heading for N in 1..6.
+    Otherwise returns ``(False, missing-decisions)``.
+    """
+    if not _anchor_path_exists_at(ref, cwd):
+        return False, [str(n) for n in range(1, 7)]
+    headings = _anchor_decisions_at(ref, cwd)
+    missing = [str(n) for n in (str(i) for i in range(1, 7)) if n not in headings]
+    return not missing, missing
+
+
 def contract_present(cwd: Path) -> tuple[bool, list[str]]:
     """Return (ok, missing-decision-list).  The anchor file must exist
     in the working tree and must contain every ``## Decision N``
@@ -515,15 +528,7 @@ def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
         else:
             base_sha = local_base
 
-    if not _anchor_path_exists_at(base_sha, cwd):
-        return False, [str(n) for n in range(1, 7)]
-
-    headings = _anchor_decisions_at(base_sha, cwd)
-    missing = [
-        str(n) for n in (str(i) for i in range(1, 7))
-        if n not in headings
-    ]
-    return not missing, missing
+    return _contract_present_at_ref(base_sha, cwd)
 
 
 def main() -> int:
@@ -538,52 +543,42 @@ def main() -> int:
         print("collapse anchor gate: OK (no Phase 1+ paths changed)")
         return 0
 
-    # F002: in-flight (working-tree) Phase 1+ changes are forbidden
-    # outright, regardless of HEAD's merge state.  Only Phase 1+
-    # changes that are already committed at HEAD are eligible for the
-    # base-reference contract check.  ``_working_tree_names`` returns
-    # the union of staged, unstaged, and pure-untracked paths, so a
-    # single Phase 1+ path present there is sufficient to trip the
-    # gate.
+    # F002: distinguish the bootstrap prerequisite from ordinary local
+    # dirty-tree validation.  In CI mode the target branch must carry
+    # the anchors.  In local mode, working-tree Phase 1+ changes are
+    # permitted when the anchors are already present in the working
+    # tree or in the local base, so a developer can iterate on Phase 1+
+    # implementation before committing.  Committed Phase 1+ changes still
+    # require the anchors to be present in the local base.
     working_tree_paths = _working_tree_names(ROOT)
-    if any(
-        path not in _PHASE_ONE_EXEMPT
-        and any(_matches_prefix(path, prefix) for prefix in PHASE_ONE_PREFIXES)
-        for path in working_tree_paths
-    ):
-        print(
-            f"error: Phase 1+ paths are present in the working tree "
-            f"(staged, unstaged, or untracked) without being committed; "
-            f"matched prefix: {match}. "
-            f"{ANCHORS} is required to be merged on the target branch "
-            "before Phase 1+ implementation begins; run with the working tree clean "
-            "(e.g. git stash) to validate committed work only; commit the Phase 0 "
-            "anchors on the target branch first, then re-stage your "
-            "Phase 1+ change on top of that merge.",
-            file=sys.stderr,
-        )
-        return 1
+    working_tree_match = _phase_one_match(working_tree_paths)
 
-    try:
-        base_ok, base_missing = contract_present_at_base(ROOT)
-    except GateError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-
-    if not base_ok:
-        if base_missing and len(base_missing) == 6:
-            base_sha = os.environ.get("BASE_SHA", "").strip()
-            if _ci_mode() and not base_sha:
-                print(
-                    "error: BASE_SHA is unset in CI mode; refusing to "
-                    "validate. The Phase 0 anchor contract requires the "
-                    "target branch head to be supplied so the gate can "
-                    "verify that collapse_anchors.md is already merged "
-                    "on the target branch before Phase 1+ implementation "
-                    "begins.",
-                    file=sys.stderr,
-                )
-            else:
+    base_sha = os.environ.get("BASE_SHA", "").strip()
+    if base_sha or _ci_mode():
+        # Target-branch semantics: the supplied BASE_SHA is the head of
+        # the branch being targeted (e.g. a PR base).  The anchors must
+        # already be merged there before Phase 1+ implementation begins.
+        # This branch is used whenever BASE_SHA is explicitly set, even in
+        # local test harnesses, so the target-branch contract can be
+        # exercised without GITHUB_ACTIONS.
+        if not base_sha:
+            print(
+                "error: BASE_SHA is unset in CI mode; refusing to "
+                "validate. The Phase 0 anchor contract requires the "
+                "target branch head to be supplied so the gate can "
+                "verify that collapse_anchors.md is already merged "
+                "on the target branch before Phase 1+ implementation "
+                "begins.",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            base_ok, base_missing = _contract_present_at_ref(base_sha, ROOT)
+        except GateError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if not base_ok:
+            if base_missing and len(base_missing) == 6:
                 print(
                     f"error: Phase 1+ paths changed against a target branch "
                     f"({base_sha}) that does not yet contain the merged "
@@ -595,14 +590,92 @@ def main() -> int:
                     f"(matched prefix: {match}).",
                     file=sys.stderr,
                 )
+            else:
+                print(
+                    "error: collapse anchor decisions missing on the target "
+                    "branch: " + ", ".join(base_missing),
+                    file=sys.stderr,
+                )
+            return 1
+        print(
+            "collapse anchor gate: OK "
+            f"({ANCHORS} present with all six decisions on the target branch "
+            f"{base_sha})"
+        )
+        return 0
+
+    # Local mode.
+    if working_tree_match is not None:
+        # If the anchors are present in the working tree, the developer
+        # is iterating on Phase 1+ implementation on top of the anchors.
+        ok, _ = contract_present(ROOT)
+        if ok:
+            print(
+                "collapse anchor gate: OK (local Phase 1+ work on top of "
+                f"present {ANCHORS})"
+            )
+            return 0
+        # Anchors are not in the working tree; check the local base so
+        # a developer can keep the anchors in an earlier commit and
+        # iterate on Phase 1+ files in the working tree.
+        local_base = _local_base_ref(ROOT)
+        base_ref = local_base if local_base is not None else "HEAD"
+        try:
+            base_ok, _ = _contract_present_at_ref(base_ref, ROOT)
+        except GateError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if base_ok:
+            print(
+                "collapse anchor gate: OK (local Phase 1+ work on top of "
+                f"{ANCHORS} at base {base_ref})"
+            )
+            return 0
+        # Bootstrap: Phase 1+ paths in the working tree before any
+        # anchor document exists.
+        print(
+            f"error: Phase 1+ paths are present in the working tree "
+            f"(staged, unstaged, or untracked) before the anchor document "
+            f"is present; matched prefix: {working_tree_match}. "
+            f"Create {ANCHORS} with all six decisions first, then re-stage "
+            "your Phase 1+ change on top of it.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Only committed Phase 1+ changes.  Verify the anchors are present
+    # in the local base (HEAD~1 or HEAD if no parent).
+    local_base = _local_base_ref(ROOT)
+    base_ref = local_base if local_base is not None else "HEAD"
+    try:
+        base_ok, base_missing = _contract_present_at_ref(base_ref, ROOT)
+    except GateError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if not base_ok:
+        if base_missing and len(base_missing) == 6:
+            print(
+                f"error: Phase 1+ paths changed against a local base "
+                f"({base_ref}) that does not yet contain the merged anchor "
+                f"document ({ANCHORS}). The Phase 0 anchor contract requires "
+                "collapse_anchors.md to be merged on the target branch before "
+                "Phase 1+ implementation begins; "
+                f"{ANCHORS} is required when Phase 1+ paths change "
+                f"(matched prefix: {match}).",
+                file=sys.stderr,
+            )
         else:
             print(
-                "error: collapse anchor decisions missing on the target "
+                "error: collapse anchor decisions missing on the local base "
                 "branch: " + ", ".join(base_missing),
                 file=sys.stderr,
             )
         return 1
 
+    # The base has anchors; also ensure the working tree still carries
+    # a complete copy (defensive: if the developer deleted the anchor
+    # file in the working tree while editing Phase 1+ files, the local
+    # dev workflow should still satisfy the literal contract).
     ok, missing = contract_present(ROOT)
     if not ok:
         if missing and len(missing) == 6:
@@ -620,7 +693,7 @@ def main() -> int:
 
     print(
         "collapse anchor gate: OK "
-        f"({ANCHORS} present with all six decisions on the target branch "
+        f"({ANCHORS} present with all six decisions on the local base "
         "and in the working tree)"
     )
     return 0

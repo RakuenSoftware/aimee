@@ -464,13 +464,14 @@ def _write_unstaged(repo: Path, rel: str, content: str) -> None:
     target.write_text(content)
 
 
-def test_gate_rejects_phase_one_change_when_uncommitted_in_local_mode(
+def test_gate_accepts_phase_one_change_when_uncommitted_in_local_mode(
     fake_worktree: Path,
 ) -> None:
-    """F002 closure: in local mode (no BASE_SHA, no CI env), a Phase 1+
-    file that exists in the working tree but has not been committed
-    must still trip the gate.  ``HEAD~1..HEAD`` would miss it; the
-    combined working-tree diff must catch it."""
+    """F002 fix: local dirty-tree Phase 1+ work is permitted once the
+    anchors are present in the working tree or in the local base.  This
+    is the ordinary pre-PR development workflow: a developer iterates
+    on a Phase 1+ file while the merged anchor document remains on disk.
+    """
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
 
@@ -478,35 +479,37 @@ def test_gate_rejects_phase_one_change_when_uncommitted_in_local_mode(
     _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
-    assert result.returncode == 1, (
-        f"gate must catch uncommitted Phase 1+ changes in local mode; "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 0, (
+        f"gate must accept uncommitted Phase 1+ changes when anchors are "
+        f"present; stdout={result.stdout!r} stderr={result.stderr!r}"
     )
+    assert "local Phase 1+ work on top of" in result.stdout
 
 
-def test_gate_rejects_phase_one_change_when_staged_in_local_mode(
+def test_gate_accepts_phase_one_change_when_staged_in_local_mode(
     fake_worktree: Path,
 ) -> None:
-    """F002 closure: a Phase 1+ file staged (added to the index) but
-    not committed must still trip the gate in local mode."""
+    """F002 fix: a staged Phase 1+ file is permitted in local mode when
+    the anchors are already present in the working tree or local base."""
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
 
     _stage(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
-    assert result.returncode == 1, (
-        f"gate must catch staged Phase 1+ changes in local mode; "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.returncode == 0, (
+        f"gate must accept staged Phase 1+ changes when anchors are "
+        f"present; stdout={result.stdout!r} stderr={result.stderr!r}"
     )
+    assert "local Phase 1+ work on top of" in result.stdout
 
 
-def test_gate_combines_committed_and_working_tree_changes_in_local_mode(
+def test_gate_accepts_phase_one_change_spread_across_commit_and_working_tree(
     fake_worktree: Path,
 ) -> None:
-    """F002 closure: a Phase 1+ change spread across the last commit
-    AND the working tree must still trip the gate; the union of both
-    diffs is required for the contract to hold."""
+    """F002 fix: the union of committed and working-tree diffs is still
+    computed, but once the anchors are present a Phase 1+ change that
+    spans both is permitted (the developer is iterating locally)."""
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
     # Last commit: a non-Phase 1+ file only.
@@ -515,9 +518,31 @@ def test_gate_combines_committed_and_working_tree_changes_in_local_mode(
     _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
+    assert result.returncode == 0, (
+        f"gate must accept local Phase 1+ changes spanning commit and "
+        f"working tree when anchors are present; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
+def test_gate_rejects_uncommitted_phase_one_change_when_local_base_lacks_anchors(
+    fake_worktree: Path,
+) -> None:
+    """F002 fix (bootstrap counterpart): uncommitted Phase 1+ work is
+    still rejected when the local base does not carry the merged anchors
+    and the working tree also lacks them.  This preserves the bootstrap
+    prerequisite: Phase 0 anchors must land before Phase 1+ implementation
+    can begin."""
+    # Base has no anchor file.
+    _commit(fake_worktree, "base: readme only", {"README.md": "base\n"})
+
+    # Working tree: add a Phase 1+ file without ever adding the anchors.
+    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+
+    result = _run_gate(fake_worktree)
     assert result.returncode == 1, (
-        f"gate must catch Phase 1+ changes that only appear in the "
-        f"working tree; stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"gate must reject uncommitted Phase 1+ changes when local base "
+        f"lacks anchors; stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
 
