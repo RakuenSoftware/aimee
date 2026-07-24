@@ -277,7 +277,18 @@ def _anchor_decisions_at(ref: str, cwd: Path) -> list[str]:
 def contract_present(cwd: Path) -> tuple[bool, list[str]]:
     """Return (ok, missing-decision-list).  The anchor file must exist
     in the working tree and must contain every ``## Decision N``
-    heading for N in 1..6."""
+    heading for N in 1..6.
+
+    NOTE -- working-tree vs CI asymmetry (F4 review finding): this
+    working-tree check is intentionally local-only.  CI mode skips
+    it because the CI checkout represents the PR head, and the
+    merge-first contract is enforced separately against ``BASE_SHA``
+    by :func:`contract_present_at_base`.  Re-verifying the working
+    tree in CI would be redundant: the PR head always carries the
+    pending Phase 1+ diff that we are trying to gate, so the only
+    authoritative question is whether ``BASE_SHA`` (the target
+    branch) already merged the anchor document.
+    """
     anchor = cwd / ANCHORS
     if not anchor.is_file():
         return False, [str(n) for n in range(1, 7)]
