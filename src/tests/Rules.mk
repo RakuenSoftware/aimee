@@ -5364,7 +5364,13 @@ $(TESTPREFIX)/unit-test-memory-audit-hook: $(OBJDIR)/tests/test_memory_audit_hoo
                                            $(OBJDIR)/modules/bus/bus_capture.o \
                                            $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
-TEST_TARGETS += $(TESTPREFIX)/unit-test-memory-audit-hook
+
+# NOT in TEST_TARGETS: it links the bus objects, which the standard unit-tests
+# build does not assemble — so the bench gate (check_bus_perf_gate.sh) force-builds
+# and runs it via this .PHONY target, like the other bus tests.
+.PHONY: unit-test-memory-audit-hook
+unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
+	$<
 
 $(TESTPREFIX)/unit-test-cmd-identity: $(OBJDIR)/tests/test_cmd_identity.o \
                      $(OBJDIR)/cmd_identity.o $(OBJDIR)/working_profile.o \
