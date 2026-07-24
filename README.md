@@ -67,6 +67,7 @@ aimee wires its hooks and MCP server into your AI coding tools on first run — 
 
 [QUICKSTART.md](docs/QUICKSTART.md) walks the full setup. Every deployment topology and the
 from-source install live in [Deployment and operations](src/README.md#deployment-and-operations).
+Upgrading an existing install? [UPGRADING.md](docs/UPGRADING.md) lists user-facing changes.
 Questions? Join the [Discord](https://discord.gg/FjGjvcgAqz).
 
 ```bash
