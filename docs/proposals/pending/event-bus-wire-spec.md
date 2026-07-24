@@ -56,7 +56,7 @@ use this segment; it leaves on the network transport carrying the same event enc
 > (D1, D2). `module-runtime` owns this document; the feature tree's slice 3 is blocked until this
 > amendment is accepted or declined.
 >
-> **Amendment status: REQUESTED.** This line is the machine-readable record
+> **Amendment status: ACCEPTED.** This line is the machine-readable record
 > `scripts/check_bus_d1_gate.sh` reads at slice-3 PR open. The document's owner changes it to
 > `ACCEPTED` or `DECLINED`; while it reads `REQUESTED`, slice 3 and everything downstream of it
 > cannot open. Declining is not a one-slice fallback — see D1's gate section for what it re-opens.
