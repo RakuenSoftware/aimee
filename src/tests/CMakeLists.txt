@@ -171,6 +171,12 @@ aimee_add_test(test_bus_memory_recall test_bus_memory_recall.c ../modules/bus/bu
 target_include_directories(test_bus_memory_recall PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 target_link_libraries(test_bus_memory_recall PRIVATE Threads::Threads)
 
+# Real mutating memory op over the bus: upsert (insert + update), verified by
+# reading the real store back. Same rationale as the recall test above (D7-clean).
+aimee_add_test(test_bus_memory_upsert test_bus_memory_upsert.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_memory_upsert PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_link_libraries(test_bus_memory_upsert PRIVATE Threads::Threads)
+
 
 
 

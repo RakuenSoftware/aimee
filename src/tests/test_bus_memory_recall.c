@@ -45,6 +45,20 @@ static uint64_t now_ns(void)
    return (uint64_t)ts.tv_sec * 1000000000ull + ts.tv_nsec;
 }
 
+static int cmp_u64(const void *a, const void *b)
+{
+   uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+   return (x > y) - (x < y);
+}
+
+/* Percentile of a sample array (sorts in place). p in [0,100]. */
+static uint64_t pctl(uint64_t *v, int n, int p)
+{
+   qsort(v, (size_t)n, sizeof *v, cmp_u64);
+   int idx = (int)(((int64_t)p * (n - 1)) / 100);
+   return v[idx];
+}
+
 #define KIND_MEM_RECALL 2000
 #define MAX_ROWS        8
 
@@ -256,29 +270,47 @@ int main(void)
    printf("  bus recall:    %d rows, identical to the direct answer\n", bn);
    printf("    e.g. row[0] key=%s content=\"%s\"\n", viabus[0].key, viabus[0].content);
 
-   /* Baseline timing: the module's own work, and the same work over the bus. */
+   /* Baseline timing: the module's own work, and the same work over the bus.
+    * Per-call samples, not a mean, so p50/p99 are honest — the batched
+    * percentiles the performance budget wants, measured the same way the
+    * dispatch bench measures (median over samples), not a single averaged run. */
    const int ITERS = 20000;
-   uint64_t t0 = now_ns();
+   uint64_t *ds = malloc((size_t)ITERS * sizeof *ds);
+   uint64_t *bs = malloc((size_t)ITERS * sizeof *bs);
+   must(ds && bs, "sample buffers");
+
    for (int i = 0; i < ITERS; i++)
    {
       db1_user_memory_row_t tmp[MAX_ROWS];
+      uint64_t s = now_ns();
       (void)db1_user_memory_list_recall(DB1_USER_RECALL_IDENTITY, tmp, MAX_ROWS);
+      ds[i] = now_ns() - s;
    }
-   uint64_t direct_ns = (now_ns() - t0) / ITERS;
-
-   t0 = now_ns();
    for (int i = 0; i < ITERS; i++)
    {
       db1_user_memory_row_t tmp[MAX_ROWS];
+      uint64_t s = now_ns();
       (void)bus_recall(&h, &req, &server, (uint64_t)(i + 2), tmp, MAX_ROWS);
+      bs[i] = now_ns() - s;
    }
-   uint64_t bus_ns = (now_ns() - t0) / ITERS;
 
-   printf("  timing: direct recall %llu ns, over the bus %llu ns (bus adds %llu ns)\n",
-          (unsigned long long)direct_ns, (unsigned long long)bus_ns,
-          (unsigned long long)(bus_ns > direct_ns ? bus_ns - direct_ns : 0));
-   printf("  -> pre-migration baseline: the bus request/reply adds ~%llu ns over a direct call\n",
-          (unsigned long long)(bus_ns > direct_ns ? bus_ns - direct_ns : 0));
+   uint64_t d50 = pctl(ds, ITERS, 50), d99 = pctl(ds, ITERS, 99);
+   uint64_t b50 = pctl(bs, ITERS, 50), b99 = pctl(bs, ITERS, 99);
+   free(ds);
+   free(bs);
+
+   printf("  timing over %d samples:\n", ITERS);
+   printf("    direct recall  p50=%llu ns  p99=%llu ns\n", (unsigned long long)d50,
+          (unsigned long long)d99);
+   printf("    over the bus   p50=%llu ns  p99=%llu ns\n", (unsigned long long)b50,
+          (unsigned long long)b99);
+   printf("    bus adds       p50=%llu ns  p99=%llu ns\n",
+          (unsigned long long)(b50 > d50 ? b50 - d50 : 0),
+          (unsigned long long)(b99 > d99 ? b99 - d99 : 0));
+   printf("  -> pre-migration first-light: the bus request/reply adds ~%llu ns (p50) over a "
+          "direct recall. NOT the committed budget number — bench/bus_baseline.json keeps the "
+          "memory round-trip rows pending until the migration slice measures them.\n",
+          (unsigned long long)(b50 > d50 ? b50 - d50 : 0));
 
    bus_client_detach(&req);
    bus_client_detach(&server);

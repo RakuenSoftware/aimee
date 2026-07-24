@@ -2691,6 +2691,24 @@ $(TESTPREFIX)/unit-test-bus-memory-recall: $(OBJDIR)/tests/test_bus_memory_recal
 unit-test-bus-memory-recall: $(TESTPREFIX)/unit-test-bus-memory-recall
 	$<
 
+# Real mutating memory op over the bus (upsert insert + update, verified by a
+# direct read-back of the store). Same DB1 path + bus objects as the recall test.
+$(OBJDIR)/tests/test_bus_memory_upsert.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-memory-upsert: $(OBJDIR)/tests/test_bus_memory_upsert.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-memory-upsert
+unit-test-bus-memory-upsert: $(TESTPREFIX)/unit-test-bus-memory-upsert
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<
