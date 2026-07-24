@@ -1,10 +1,10 @@
 # Spec: Aimee shared-memory event bus — wire and segment specification (v0)
 
-- **State:** IMPLEMENTED (v0) — 2026-07-24. The v0 substrate this spec describes is built and merged
-  on `feat/event-bus`: one in-source C host, C and Go reference clients, a governance tap with
-  capture and observational replay, and a committed dispatch-overhead budget. The spec remains
-  normative; exact byte offsets and sizes are frozen by the conformance vectors, and both reference
-  clients are held to them. See [Implementation status](#implementation-status).
+- **State:** PENDING — the v0 substrate this spec describes is written and green on the
+  `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to
+  the mainline. It stays under `pending/` for that reason. The spec is normative; exact byte offsets
+  and sizes are frozen by the conformance vectors, and both reference clients are held to them. See
+  [Implementation status](#implementation-status) for the slice-by-slice map.
 - **Owner:** `module-runtime` (per
   [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)).
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
@@ -296,8 +296,8 @@ Still open for a later version (out of v0 scope):
 
 ## Implementation status
 
-Built and merged on `feat/event-bus` (2026-07-24), one slice per PR, each green under the normal and
-sanitizer builds and self-reviewed. The twelve slices map to this spec's sections:
+Written and merged onto the `feat/event-bus` integration branch (2026-07-24), one slice per PR, each
+green under the normal and sanitizer builds and self-reviewed. Not yet promoted to the mainline. The twelve slices map to this spec's sections:
 
 | Spec section | Slice(s) | Module |
 |---|---|---|
