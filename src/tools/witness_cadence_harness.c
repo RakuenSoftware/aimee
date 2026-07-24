@@ -35,6 +35,7 @@
 #include <unistd.h>
 
 #include "db2.h"
+#include "db2/db_postgres.h"
 #include "kb/kb_witness_cadence.h"
 #include "log.h"
 #include "modules/vault/vault_witness_signer.h"
@@ -63,6 +64,25 @@ int main(void)
    {
       fprintf(stderr, "harness: db2_init failed\n");
       return 1;
+   }
+
+   /* Optionally downgrade to the low-privilege runtime role for everything after
+    * schema apply, so the boot check and cadence execute exactly as they do on the
+    * hardened tier (the kb connects as aimee_kb_runtime there). This is the live
+    * check that the runtime-role grants are sufficient — schema was applied as the
+    * owner (db2_init), but the cadence/boot/gate must run as the restricted role. */
+   const char *role = getenv("AIMEE_WITNESS_HARNESS_ROLE");
+   if (role && role[0])
+   {
+      char setrole[128], serr[256];
+      snprintf(setrole, sizeof setrole, "SET ROLE %s", role);
+      if (aimee_pg_exec(db2_conn(), setrole, serr, sizeof serr) != 0)
+      {
+         fprintf(stderr, "harness: SET ROLE %s failed: %s\n", role, serr);
+         db2_shutdown();
+         return 1;
+      }
+      fprintf(stderr, "harness: acting as role %s for boot check + cadence\n", role);
    }
 
    /* The real boot gate. Under file custody this is a no-op; under a real anchor it
