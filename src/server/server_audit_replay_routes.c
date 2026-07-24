@@ -8,10 +8,10 @@
  * modules/audit/audit_replay.c; these are thin request/response adapters. */
 #include "server.h"
 
-#include <aimee/audit/audit_replay.h>          /* audit_replay_capture_list / _to_json / _valid_basename */
-#include "config.h"                /* config_default_dir */
-#include "json_fluent.h"           /* jo_ok / jo_err */
-#include "server_state_internal.h" /* send_and_free */
+#include <aimee/audit/audit_replay.h> /* audit_replay_capture_list / _to_json / _valid_basename */
+#include "config.h"                   /* config_default_dir */
+#include "json_fluent.h"              /* jo_ok / jo_err */
+#include "server_state_internal.h"    /* send_and_free */
 
 /* GET /v1/audit/captures: list the audit-on-bus capture files (the recorded
  * governed-action event streams) available for replay. A dashboard read. */

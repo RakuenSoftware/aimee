@@ -33,8 +33,8 @@
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
-#include "vault_service.h" /* VAULT_SERVER_PRINCIPAL (rotation target) */
-#include <aimee/audit/audit_replay.h>  /* --audit-replay: inspect a governed-action capture file */
+#include "vault_service.h"            /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>

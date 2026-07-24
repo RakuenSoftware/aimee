@@ -20,7 +20,6 @@
 
 #define DASHBOARD_MAX_AUDIT_EVENTS 256
 
-
 /* --- Embedded HTML dashboard --- */
 
 /* --- JSON API handlers --- */
@@ -191,7 +190,6 @@ char *api_dashboard_onboard(void)
    cJSON_Delete(report);
    return json ? json : strdup("{}");
 }
-
 
 char *api_doctor(void)
 {

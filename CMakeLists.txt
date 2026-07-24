@@ -1014,14 +1014,28 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_service_artifacts.c
     ${AIMEE_SRC_DIR}/kb/kb_intel_payload.c
     ${AIMEE_SRC_DIR}/kb/kb_reflection.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_queue.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_extract.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_extract_code.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_custom.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_drain.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_contradictions.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_custom.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_drain.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_extract.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_extract_code.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_grounding.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_index_claims.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_index_code_unit.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_index_narrative.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_judge.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_link_artifacts.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_llm.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_notify.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_pipeline.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_promote.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_queue.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_resolve_entities.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_serve.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_sidecar.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_synthesize.c
+    ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_version.c
     ${AIMEE_SRC_DIR}/kb/memory_rewrite_llm.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_notify.c
-    ${AIMEE_SRC_DIR}/kb/kb_curator_version.c
     ${AIMEE_SRC_DIR}/kb/kb_mining.c
     ${AIMEE_SRC_DIR}/kb/kb_workload_provider.c
     ${AIMEE_SRC_DIR}/kb/kb_workload_helper_posix.c

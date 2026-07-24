@@ -35,7 +35,6 @@
 #define SERVER_DASHBOARD_FALLBACK
 #endif
 
-
 char *api_delegations(void)
 {
    db1_agent_log_display_t rows[50];
@@ -231,7 +230,6 @@ SERVER_DASHBOARD_FALLBACK char *api_dashboard_onboard(void)
 {
    return strdup("{\"error\":\"onboard report is not available from the server-hosted webchat\"}");
 }
-
 
 SERVER_DASHBOARD_FALLBACK char *api_doctor(void)
 {

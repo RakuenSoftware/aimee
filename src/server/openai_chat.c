@@ -18,21 +18,21 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
-#include <aimee/gateway/gateway_pipeline.h>         /* gw_request_t + gw_pipeline_run_request — shared seam */
-#include "gw_stage_memory.h"          /* gw_stage_memory + gw_memory_system_prompt (P3) */
-#include "gw_stage_registry.h"        /* Slice 7: config-driven stage catalog */
-#include "gw_stage_governance.h"      /* response seam Slice 2: togglable governance */
-#include "dogfood.h"                  /* dogfood_autolabel_next_turn_live */
-#include "learning_implicit.h"        /* learning_implicit_detect_turn */
-#include "retrieval_outcome_bridge.h" /* retrieval_outcome_bridge_on_autolabel */
-#include "openai_responses_store.h"   /* previous_response_id continuation store */
-#include "openai_runs_store.h"        /* GET /v1/runs/{id} record store */
+#include <aimee/gateway/gateway_pipeline.h> /* gw_request_t + gw_pipeline_run_request — shared seam */
+#include "gw_stage_memory.h"                /* gw_stage_memory + gw_memory_system_prompt (P3) */
+#include "gw_stage_registry.h"              /* Slice 7: config-driven stage catalog */
+#include "gw_stage_governance.h"            /* response seam Slice 2: togglable governance */
+#include "dogfood.h"                        /* dogfood_autolabel_next_turn_live */
+#include "learning_implicit.h"              /* learning_implicit_detect_turn */
+#include "retrieval_outcome_bridge.h"       /* retrieval_outcome_bridge_on_autolabel */
+#include "openai_responses_store.h"         /* previous_response_id continuation store */
+#include "openai_runs_store.h"              /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
 #include "aimee_errors.h"
 #include "config.h" /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
-#include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
+#include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
 #include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
 #include "economizer_wire_snapshot.h"
@@ -42,9 +42,9 @@
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
 #include <aimee/gateway/gateway_policy.h> /* gateway_policy_apply_request — tool-policing stage */
-#include "router_advise.h"  /* gw_stage_router — the request->workflow seam */
-#include "aimee_ir_serve.h" /* IR-routed /v1/responses parse */
-#include "memory.h"         /* memory_embed_text */
+#include "router_advise.h"                /* gw_stage_router — the request->workflow seam */
+#include "aimee_ir_serve.h"               /* IR-routed /v1/responses parse */
+#include "memory.h"                       /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
 #include "token_tracker.h"

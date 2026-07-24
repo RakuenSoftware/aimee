@@ -325,7 +325,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    if (db1_init(cfg.db1_path) != 0)
       fatal("cannot open database");
 
-
    if (strcmp(phase, "pre") == 0)
    {
       /* Load session state from DB1 */

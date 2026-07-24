@@ -15,7 +15,6 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
-
 static void test_vector_dashboard_falls_back_without_kb_service(void)
 {
    char tmpdir[512];
