@@ -79,7 +79,8 @@ typedef bus_attach_status_t (*bus_admit_fn)(void *ctx, const bus_attach_request_
 /* The governance/audit tap: invoked once per event, after seq stamping and
  * before any routing decision (D6). It is the single full-stream observer; a
  * would_block that the host never accepted is not an event and is not tapped. */
-typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame);
+typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame,
+                           const uint8_t *payload, uint32_t payload_len);
 
 typedef struct
 {

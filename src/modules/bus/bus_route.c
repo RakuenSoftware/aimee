@@ -179,7 +179,7 @@ static void emit_control(bus_host_t *h, int dst, uint32_t kind, uint64_t corr,
    f.seq = ++h->seq;
    f.dst_handle = dst < 0 ? 0 : (uint32_t)dst;
    if (h->tap)
-      h->tap(h->tap_ctx, &f);
+      h->tap(h->tap_ctx, &f, (const uint8_t *)payload, plen);
    if (dst < 0)
       return; /* tap-only */
    bus_slot_t *d = &h->slots[dst];
@@ -402,7 +402,8 @@ uint32_t bus_host_pump(bus_host_t *h)
             f.seq = ++h->seq;
             f.src_handle = s;
             if (h->tap)
-               h->tap(h->tap_ctx, &f); /* seq-stamped, pre-routing, once */
+               h->tap(h->tap_ctx, &f, inl, (f.hdr_flags & BUS_F_INLINE) ? f.payload_len : 0);
+            /* seq-stamped, pre-routing, once */
             memset(slot->blocked_delivered, 0, sizeof slot->blocked_delivered);
             done = route_fresh(h, s, &f, inl, slot->blocked_delivered);
             routed++; /* count each accepted event once, at first sight */
