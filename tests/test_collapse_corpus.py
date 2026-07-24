@@ -158,6 +158,27 @@ def _is_primitive(value):
     return isinstance(value, PRIMITIVE_TYPES)
 
 
+def _primitive_type_label(value):
+    """Return a canonical primitive type label for a JSON leaf value.
+
+    bool is checked before int because isinstance(True, int) is True in Python.
+    Two JSON numbers that parse as int and float respectively are considered
+    different primitive types, matching the grammar's 'compatible primitive leaf
+    types' requirement.
+    """
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    return None
+
+
 def _common_string_keys(records):
     if not records:
         return set()
@@ -246,7 +267,13 @@ def _validate_discriminator_array(payload):
 
 
 def _validate_stable_keys_array(payload):
-    """Shape 3: arrays (top-level or nested) of objects with stable keys + primitive leaves."""
+    """Shape 3: arrays (top-level or nested) of objects with stable keys,
+    primitive leaves, and compatible per-key primitive leaf types across records.
+
+    Compatible primitive leaf types means the JSON type label for each key is the
+    same in every record. A key that is int in one record and str in another
+    (e.g. [{"x": 1}, {"x": "a"}]) excludes the array from shape 3.
+    """
     found_any = False
     for array in _walk_arrays(payload):
         if not array or not all(isinstance(el, dict) for el in array):
@@ -254,11 +281,17 @@ def _validate_stable_keys_array(payload):
         common_keys = _all_keys_common(array)
         if not common_keys:
             return False
+        key_types = {key: None for key in common_keys}
         for record in array:
             if set(record.keys()) != common_keys:
                 return False
-            for value in record.values():
+            for key, value in record.items():
                 if not _is_primitive(value):
+                    return False
+                label = _primitive_type_label(value)
+                if key_types[key] is None:
+                    key_types[key] = label
+                elif key_types[key] != label:
                     return False
         found_any = True
     return found_any
@@ -401,4 +434,34 @@ def test_no_fire_bodies_have_no_mechanical_fire_period():
             f"consequence of structure, not a label-only assertion. Offending "
             f"periods: {[(s, off, bytes(p)) for s, off, p in periods[:5]]}; "
             f"fixture: {path}"
+        )
+
+
+def test_shape3_rejects_per_key_type_changes():
+    """Shape 3's 'compatible primitive leaf types' requirement means a single key
+    must keep the same primitive type across every record. Mixed int/str, int/float,
+    str/bool, and str/null all break shape-3 membership.
+    """
+    bad_cases = [
+        [{"x": 1}, {"x": "a"}],            # int -> str
+        [{"x": 1}, {"x": 1.5}],            # int -> float
+        [{"x": "a"}, {"x": True}],         # str -> bool
+        [{"x": "a"}, {"x": None}],         # str -> null
+        [{"x": 1, "y": 2}, {"x": 1, "y": "b"}],  # mixed only on y
+    ]
+    for payload in bad_cases:
+        assert not _validate_stable_keys_array(payload), (
+            f"expected shape-3 rejection for per-key type change: {payload!r}"
+        )
+
+    good_cases = [
+        [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+        [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}],
+        [{"x": None}, {"x": None}],
+        [{"x": True}, {"x": False}],
+        [{"x": 1.5}, {"x": 2.5}],
+    ]
+    for payload in good_cases:
+        assert _validate_stable_keys_array(payload), (
+            f"expected shape-3 acceptance for uniform per-key types: {payload!r}"
         )
