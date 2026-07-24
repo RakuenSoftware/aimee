@@ -1380,7 +1380,6 @@ int agent_supports_persona(const agent_t *agent, const char *persona)
    return 0;
 }
 
-
 /* --- Exec role check --- */
 
 static const char *default_exec_roles[] = {
