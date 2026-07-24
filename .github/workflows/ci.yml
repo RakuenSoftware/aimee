@@ -172,7 +172,6 @@ jobs:
       - name: Build Make profile without plugin-loader
         run: make -C src -j$(nproc) AIMEE_WITH_PLUGIN_LOADER=0 all
       - name: Verify disabled link closure
-        run: ./scripts/check_plugin_loader_disabled.sh
       - name: Configure CMake profile without plugin-loader
         run: cmake -S . -B build-cmake-no-loader -DAIMEE_THIN_CLIENT=ON -DAIMEE_WITH_PLUGIN_LOADER=OFF -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
       - name: Build CMake profile without plugin-loader

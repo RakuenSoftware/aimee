@@ -239,8 +239,8 @@ class ModuleInventoryTest(unittest.TestCase):
         self.assert_failed(
             self.run_checker(data),
             "rule=optional-count",
-            "OPTIONAL_COUNT=8",
-            "actual 7",
+            "OPTIONAL_COUNT=7",
+            "actual 6",
         )
 
     def test_duplicate_id(self):

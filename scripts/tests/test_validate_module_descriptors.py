@@ -92,8 +92,8 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_production_graph(self) -> None:
         required, optional = self.taxonomy()
-        self.assertEqual(len(required | optional), 26)
-        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 26)
+        self.assertEqual(len(required | optional), 25)
+        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 25)
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -214,7 +214,6 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             [item["path"] for item in runtime["ownership"]["sources"]],
             [
-                "src/modules/module-runtime/extension.c",
                 "src/modules/module-runtime/pre_llm_hook.c",
             ],
         )
@@ -254,7 +253,7 @@ class DescriptorTests(unittest.TestCase):
         report = validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
-            {"sources": 2, "private_headers": 0, "public_headers": 2, "tests": 1,
+            {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
              "docs": 1},
         )
 
@@ -277,11 +276,7 @@ class DescriptorTests(unittest.TestCase):
             ("audit", "sources", "src/modules/audit/audit_action.c"),
             ("audit", "sources", "src/modules/audit/audit_worm.c"),
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
-            ("module-runtime", "sources", "src/modules/module-runtime/extension.c"),
             ("module-runtime", "sources", "src/modules/module-runtime/pre_llm_hook.c"),
-            ("plugin-loader", "sources", "src/modules/plugin-loader/plugin.c"),
-            ("plugin-loader", "sources", "src/modules/plugin-loader/plugin_loader.c"),
-            ("plugin-loader", "private_headers", "src/modules/plugin-loader/plugin_internal.h"),
             ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
@@ -329,7 +324,7 @@ class DescriptorTests(unittest.TestCase):
                 tmp.cleanup()
 
         for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "protocols", "ir", "translation", "skills",
-                           "audit", "module-runtime", "plugin-loader", "gateway", "governance",
+                           "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
             for name in ("undeclared.c", "undeclared.h"):
@@ -434,7 +429,7 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
         for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway", "governance", "learning",
+                           "module-runtime", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):
             tmp = self.production_repo()
@@ -457,7 +452,7 @@ class DescriptorTests(unittest.TestCase):
             public.parent.mkdir(parents=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
             self.assertEqual(
-                validator.validate_roots(repo, [Path("src/modules")]), 26
+                validator.validate_roots(repo, [Path("src/modules")]), 25
             )
         finally:
             tmp.cleanup()
@@ -802,8 +797,8 @@ class DescriptorTests(unittest.TestCase):
             path = repo / validator.INVENTORY_PATH
             value = json.loads(path.read_text(encoding="utf-8"))
             value["required"].remove("config")
-            value["required"].append("plugin-loader")
-            value["optional"].remove("plugin-loader")
+            value["required"].append("benchmarks")
+            value["optional"].remove("benchmarks")
             value["optional"].append("config")
             path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(
@@ -884,7 +879,7 @@ class OwnershipCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["result"], "PASS")
-        self.assertEqual(len(payload["descriptors"]), 26)
+        self.assertEqual(len(payload["descriptors"]), 25)
         for descriptor in payload["descriptors"]:
             self.assertEqual(
                 set(descriptor), {"id", "module_root", "ownership", "result"}
