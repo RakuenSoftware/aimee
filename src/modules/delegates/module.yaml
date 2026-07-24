@@ -63,6 +63,7 @@
     "src/modules/delegates/delegate_run_phases.c",
     "src/modules/delegates/delegate_sandbox_image.c",
     "src/modules/delegates/delegate_source_authority.c",
+    "src/modules/delegates/delegate_verify.c",
     "src/modules/delegates/delegate_xml_fallback.c",
     "src/modules/delegates/gw_orch_delegates.c",
     "src/modules/delegates/panel_provider.c",

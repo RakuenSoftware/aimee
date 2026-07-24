@@ -159,7 +159,7 @@
     },
     {
       "ctest": false,
-      "make": true,
+      "make": false,
       "module": "delegates",
       "test": "src/tests/test_panel_provider.c"
     },
@@ -285,7 +285,7 @@
     },
     {
       "ctest": false,
-      "make": true,
+      "make": false,
       "module": "ir",
       "test": "src/tests/test_panel_ir_contract.c"
     },

@@ -32,7 +32,8 @@
     "src/modules/config/config_internal.h",
     "src/modules/config/config_learning.h",
     "src/modules/config/config_memory.h",
-    "src/modules/config/config_sections.h"
+    "src/modules/config/config_sections.h",
+    "src/modules/config/config_snapshot_test.h"
   ],
   "tests": [
     "src/tests/test_config.c",

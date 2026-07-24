@@ -12,7 +12,9 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/audit/audit_action.c",
+    "src/modules/audit/audit_bus.c",
     "src/modules/audit/audit_ledger.c",
+    "src/modules/audit/audit_replay.c",
     "src/modules/audit/audit_worm.c",
     "src/modules/audit/audit_worm_chain.c"
   ],
@@ -30,5 +32,9 @@
   ],
   "docs": [
     "docs/modules/audit.md"
+  ],
+  "private_headers": [
+    "src/modules/audit/audit_bus.h",
+    "src/modules/audit/audit_replay.h"
   ]
 }
