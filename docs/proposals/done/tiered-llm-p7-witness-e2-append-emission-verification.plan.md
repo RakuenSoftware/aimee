@@ -1,13 +1,12 @@
 # P7-witness-e2 atomic append, emission, and continuous verification
 
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
-  `ecbfbc35`); awaiting merge to `testing`. Atomic witness append is wired into all
+  `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). Atomic witness append is wired into all
   three source ledgers (audit, reseal, open) — proven by the wiring + atomicity gate
   enforced from `run-p1-rls-gate.sh`. Emission on the log path, numeric-only health
   metrics, continuous chain verification with typed integrity alerts, the offline
   verifier tool, and boot fail-closed for a key-holding kb are all delivered. Does
-  not touch `kb_egress_release_allowed()` (that flip is E3). Moves to
-  `docs/proposals/done/` when the branch merges.
+  not touch `kb_egress_release_allowed()` (that flip is E3).
 - **Depends on:** E1 (record, checkpoint, export form, evidence log), P7-reseal
   D3b, the kb audit chain, and the P9a telemetry seam.
 - **Enables:** E3's kill matrix and, only after it, the release-gate flip.
