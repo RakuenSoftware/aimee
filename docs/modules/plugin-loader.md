@@ -31,10 +31,7 @@ call is absent — so in the tracked startup path bundled discovery takes the
 `$AIMEE_INSTALL_PREFIX`-then-`./plugins/` fallback. Both remain declared in public headers and
 shipped as external symbols, so a downstream host can link and call them — including calling the
 setter before discovery; their removal is an API and ABI compatibility decision, not a dead-code
-cleanup. The
-`plugin_load_all_registered` header comment still promises a call to
-`plugin_collect_delegate_backends`, which the ABI/loader split in #1722 removed; the comment was
-not updated with it.
+cleanup.
 
 ## Dependencies and consumers
 

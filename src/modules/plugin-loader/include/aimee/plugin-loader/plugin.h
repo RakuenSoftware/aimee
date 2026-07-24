@@ -84,8 +84,8 @@ int plugin_manifest_parse(const char *dir, plugin_t *out, char *err_buf, size_t 
 int plugin_load_and_register(const plugin_t *plugin, char *err_buf, size_t err_len);
 
 /* Load all enabled plugins from the registry and call their register(ctx).
- * Calls plugin_collect_delegate_backends() after registration.
- * Returns 0 on success (even if no plugins), -1 on critical error. */
+ * Returns 0 on success (even if no plugins are enabled), -1 if any enabled
+ * plugin failed to load. */
 int plugin_load_all_registered(char *err_buf, size_t err_len);
 
 /* --- Install / enable / disable / remove --- */
