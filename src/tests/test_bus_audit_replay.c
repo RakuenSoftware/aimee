@@ -12,6 +12,7 @@
  * A test/integration harness; the bus is not linked into a shipping binary by it.
  */
 #include <assert.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,13 +117,30 @@ int main(void)
    }
    audit_bus_stop(); /* final flush persists the capture stream */
 
-   /* Read the real capture file back. */
+   /* Find this session's capture file (named audit-bus-capture-<time>-<pid>.aimeecap). */
    char path[4096];
-   snprintf(path, sizeof path, "%s/audit-bus-capture.aimeecap", home);
+   path[0] = '\0';
+   DIR *d = opendir(home);
+   assert(d);
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      if (strncmp(e->d_name, "audit-bus-capture-", 18) == 0 && strstr(e->d_name, ".aimeecap"))
+      {
+         snprintf(path, sizeof path, "%s/%s", home, e->d_name);
+         break;
+      }
+   }
+   closedir(d);
+   if (!path[0])
+   {
+      fprintf(stderr, "FAIL: no capture file in %s (record+replay stream not written)\n", home);
+      return 1;
+   }
    int fd = open(path, O_RDONLY);
    if (fd < 0)
    {
-      fprintf(stderr, "FAIL: no capture file at %s (record+replay stream not written)\n", path);
+      fprintf(stderr, "FAIL: cannot open capture file %s\n", path);
       return 1;
    }
    struct stat st;

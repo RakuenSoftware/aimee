@@ -197,6 +197,11 @@ aimee_add_test(test_bus_audit_replay test_bus_audit_replay.c ../modules/audit/au
 target_include_directories(test_bus_audit_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_replay PRIVATE Threads::Threads)
 
+# audit-on-bus capture retention: prior sessions kept, files bounded.
+aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/audit/audit_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_retention PRIVATE Threads::Threads)
+
 
 
 

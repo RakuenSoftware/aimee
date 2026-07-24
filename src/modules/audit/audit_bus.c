@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include "audit_bus.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -212,13 +213,63 @@ static void capture_flush(void)
    g.capture.len = 0; /* keep header_written/first_seq: the header is already on disk */
 }
 
-/* Open a per-session capture file under the home dir and register the tap that
+/* One capture file per host SESSION: the reader requires seq-contiguity, which a
+ * new host (new epoch, seq restarting) would break, so sessions cannot share a
+ * file. Files are named by start time + pid so a restart RETAINS prior sessions'
+ * replayable records rather than clobbering them; the ledger already keeps the
+ * durable rows, but the ordered, full-fidelity replay stream is worth keeping too.
+ * Retention is bounded — the newest AB_CAP_KEEP files survive, older ones are
+ * pruned on start — so the streams do not accumulate without limit. */
+#define AB_CAP_PREFIX "audit-bus-capture-"
+#define AB_CAP_SUFFIX ".aimeecap"
+#define AB_CAP_KEEP   16
+
+static int cmp_str_desc(const void *a, const void *b)
+{
+   return -strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+/* Keep the newest AB_CAP_KEEP session files in `dir`, unlink older ones. Names
+ * embed a fixed-width-ish start time so a lexical sort is chronological for the
+ * current era; good enough for retention (a stale extra file is pruned next
+ * start). Best-effort: any failure just leaves files in place. */
+static void capture_prune(const char *dir, int keep)
+{
+   DIR *d = opendir(dir);
+   if (!d)
+      return;
+   char *names[512];
+   int n = 0;
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL && n < (int)(sizeof names / sizeof names[0]))
+   {
+      size_t plen = strlen(AB_CAP_PREFIX);
+      size_t nlen = strlen(e->d_name);
+      if (strncmp(e->d_name, AB_CAP_PREFIX, plen) == 0 && nlen > plen &&
+          strcmp(e->d_name + nlen - strlen(AB_CAP_SUFFIX), AB_CAP_SUFFIX) == 0)
+      {
+         char *dup = strdup(e->d_name);
+         if (dup)
+            names[n++] = dup;
+      }
+   }
+   closedir(d);
+   qsort(names, (size_t)n, sizeof names[0], cmp_str_desc); /* newest (largest) first */
+   for (int i = keep; i < n; i++)
+   {
+      char path[4096];
+      snprintf(path, sizeof path, "%s/%s", dir, names[i]);
+      unlink(path);
+   }
+   for (int i = 0; i < n; i++)
+      free(names[i]);
+}
+
+/* Open this session's capture file under the home dir and register the tap that
  * records every routed event into it. Best-effort: if there is no writable home
  * the tap is NOT registered (capture off; the sink would otherwise grow unbounded
  * with nowhere to flush), and audit still works — the ledger is the durable
- * record. One file per host session; the reader requires seq-contiguity, which a
- * new host (new epoch, seq from the start) would break, so each session truncates
- * its own file. Cross-session retention/rotation is a later tree. */
+ * record, capture is the replay layer on top. */
 static void capture_open(void)
 {
    g.cap_fd = -1;
@@ -230,8 +281,14 @@ static void capture_open(void)
       aimee_log(LOG_WARN, "audit_bus", "no home dir; audit capture/replay stream disabled");
       return;
    }
+   /* time+pid identifies the process/session; a per-process counter breaks ties
+    * so restarting the bus twice within one second (same pid) cannot collide and
+    * truncate the earlier file. capture_open runs under start_lock, so the counter
+    * needs no atomic. */
+   static unsigned session_seq = 0;
    char path[4096];
-   snprintf(path, sizeof path, "%s/audit-bus-capture.aimeecap", dir);
+   snprintf(path, sizeof path, "%s/%s%010lld-%d-%03u%s", dir, AB_CAP_PREFIX,
+            (long long)time(NULL), (int)getpid(), session_seq++, AB_CAP_SUFFIX);
    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
    if (fd < 0)
    {
@@ -240,6 +297,7 @@ static void capture_open(void)
    }
    g.cap_fd = fd;
    bus_host_set_tap(&g.host, bus_capture_tap, &g.capture);
+   capture_prune(dir, AB_CAP_KEEP); /* retain the newest sessions, prune older */
 }
 
 static void *consumer_main(void *arg)
