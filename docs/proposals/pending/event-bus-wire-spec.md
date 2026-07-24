@@ -1,14 +1,20 @@
-# Spec: Aimee shared-memory event bus — wire and segment specification (v0 DRAFT)
+# Spec: Aimee shared-memory event bus — wire and segment specification (v0)
 
-- **State:** DRAFT v0 — 2026-07-23. Normative for the bus host and every bus client; exact byte
-  offsets and sizes are frozen by the conformance vectors, not by prose, and may change until v1.
+- **State:** PENDING — the v0 substrate this spec describes is written and green on the
+  `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to
+  the mainline. It stays under `pending/` for that reason. The spec is normative; exact byte offsets
+  and sizes are frozen by the conformance vectors, and both reference clients are held to them. See
+  [Implementation status](#implementation-status) for the slice-by-slice map.
 - **Owner:** `module-runtime` (per
   [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)).
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Decisions and feature tree:** [`docs/dev/EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
+  (D1–D10) and [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md) (the twelve
+  slices).
 - **Validated by:** the single in-source **C bus host**, the **C and Go reference clients**, and the
   cross-language conformance suite. Two independent client implementations, not one, keep this spec
   honest.
-- **Date:** 2026-07-23
+- **Date:** 2026-07-23 (implemented 2026-07-24)
 
 ## Scope
 
@@ -44,30 +50,87 @@ use this segment; it leaves on the network transport carrying the same event enc
 
 ## Segment layout
 
+> **Amendment requested 2026-07-23 (implementation feedback).** This section originally described
+> one shared segment containing the control block, the queue directory, every client's rings, and
+> the arena. Implementing it that way was found to make this spec's own Security section untrue:
+> once a client is admitted it holds the segment, so it can map and read every other client's rings
+> and enumerate the whole queue directory. "A client cannot read another client's traffic, matching
+> observer routing at the memory level, not only the API level" then holds only by the client
+> library's good manners. The revision below is what the layout has to be for that sentence to be a
+> guarantee. It changes no frame bytes, so the conformance vectors are untouched. Rationale and the
+> resulting v0 threat model are in [`EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
+> (D1, D2). `module-runtime` owns this document; the feature tree's slice 3 is blocked until this
+> amendment is accepted or declined.
+>
+> **Amendment status: ACCEPTED.** This line is the machine-readable record
+> `scripts/check_bus_d1_gate.sh` reads at slice-3 PR open. The document's owner changes it to
+> `ACCEPTED` or `DECLINED`; while it reads `REQUESTED`, slice 3 and everything downstream of it
+> cannot open. Declining is not a one-slice fallback — see D1's gate section for what it re-opens.
+
+The bus is realized as **several fd-backed regions**, not one segment. A client receives file
+descriptors only for what it is allowed to map, so isolation is enforced by the kernel rather than
+by convention.
+
 ```
+  Control region — one memfd, mapped PROT_READ by clients
 +===========================================================+
-|  Control block (fixed, cache-line aligned)                |
-|    magic | spec_version | layout_version | flags          |
-|    segment_size | ctrl_size | arena_off | arena_size       |
-|    queue_dir_off | queue_slot_count | host_epoch           |
-|    host_heartbeat (monotonic) | host_pid/liveness          |
-+-----------------------------------------------------------+
-|  Queue directory: queue_slot_count entries, one per        |
-|  admittable client slot:                                    |
-|    handle_id | state | principal_ref | inbound_ring_off     |
-|    outbound_ring_off | ring_capacity | client_heartbeat     |
-+-----------------------------------------------------------+
-|  Rings region: per slot, inbound + outbound SPSC rings      |
-+-----------------------------------------------------------+
-|  Payload arena: shared, allocatable regions referenced by   |
-|  events too large to inline (see Payloads)                  |
+|  magic | spec_version | layout_version | flags             |
+|  slot_size | inline_budget | arena_size                    |
+|  host_epoch | host_heartbeat (monotonic)                   |
++===========================================================+
+
+  Queue-pair region — one memfd PER ADMITTED SLOT,
+  mapped read/write by that client and no other
++===========================================================+
+|  inbound ring (host -> client)                             |
+|  outbound ring (client -> host)                            |
+|  credit counters | reserved control-class credits          |
+|  client_heartbeat | control_lost flag                      |
++===========================================================+
+
+  Arena region — one memfd, mapped read/write by all
++===========================================================+
+|  payload regions referenced by (offset, len)               |
++===========================================================+
+
+  Queue directory — HOST-PRIVATE ordinary memory, not shared
++===========================================================+
+|  per slot: handle_id | state | principal_ref | geometry     |
 +===========================================================+
 ```
 
-The control block is versioned and read-mostly. `host_epoch` changes on host restart and invalidates
+Three consequences, each of which was the point:
+
+- **A client cannot map another client's rings**, because it holds no descriptor for them. This is
+  an MMU fault, not a policy violation.
+- **A client cannot enumerate slots**, because the queue directory is never shared. It learns its own
+  geometry from the attach reply and has no address through which to observe that another slot
+  exists.
+- **The control region is read-only to clients**, so a client cannot forge the geometry its peers
+  read.
+
+What this does *not* close is the arena: zero-copy fan-out requires every admitted client to map it
+read-write, so arena lease bounds remain a cooperative contract validated by conformance rather than
+enforced by hardware. That limit is stated rather than papered over, and it is consistent with this
+spec's existing note that a hostile native client in the trusted tier is outside this boundary's
+threat model. Untrusted code does not run as a native admitted client; it runs sandboxed under
+`module-loader`, whose tier will need per-lease arena sub-regions or a copy-on-deliver mode.
+
+Attach carries three descriptors — control, arena, and that client's queue pair — in a single
+`sendmsg` over the `SOCK_SEQPACKET` attach socket, via `SCM_RIGHTS`, only after admission succeeds.
+An unadmitted process receives no descriptors and, because the regions are anonymous `memfd`s with
+no filesystem name, has nothing to open. The host's descriptor table grows by one per admitted slot
+plus the two shared regions.
+
+The control region is versioned and read-mostly. `host_epoch` changes on host restart and invalidates
 every prior handle and mapping (clients must re-attach). Heartbeats give liveness both ways: a client
 whose heartbeat stalls is reaped by the host; a stalled `host_heartbeat`/`host_epoch` change tells a
 client the host is gone.
+
+`slot_size` and `inline_budget` are region *parameters*, read by a client at attach and used to
+choose inline-versus-arena placement. They are not frame fields and they do not participate in
+`layout_version`, which changes only when the *structure* of a region changes. Re-tuning them
+therefore never re-issues a conformance vector.
 
 ## Rings
 
@@ -165,8 +228,11 @@ without a copy through the host, and how to bound arena fragmentation and huge/s
 
 ## Security
 
-- The segment is created by the host with restrictive OS permissions; only admitted clients receive a
-  handle, and each maps only its own queue pair plus the arena — never another client's rings.
+- The regions are anonymous `memfd`s with no filesystem name, so there is nothing for an unadmitted
+  process to open; descriptors are passed only after admission succeeds. Each client receives
+  descriptors for the control region (read-only), the arena, and its own queue pair — and for
+  nothing else, so "never another client's rings" is enforced by the descriptor it was not given
+  rather than by permission bits on a shared object.
 - The host is the only multi-queue reader/writer; a client cannot read another client's traffic,
   matching observer routing at the memory level, not only the API level.
 - Arena access is bounded to leased regions; a client cannot read arbitrary arena bytes outside its
@@ -176,17 +242,24 @@ without a copy through the host, and how to bound arena fragmentation and huge/s
 
 ## Conformance
 
-The spec is validated, not defined, by its implementations:
+The spec is validated, not defined, by its implementations. All of the following are built and green
+(see [Implementation status](#implementation-status)):
 
 - **Wire vectors** — shared encode/decode fixtures for headers, each message pattern, version
-  negotiation, and error frames; the C and Go reference clients must both produce and accept the exact
-  bytes.
-- **Interop** — the single in-source C host driven with a C client and a Go client on one segment,
-  exchanging notifications and request/replies in both directions, including `capability_absent`,
-  cancel, backpressure/credit exhaustion, and reaped-client recovery.
-- **No-second-host** — there is exactly one host implementation; conformance forbids a second.
+  negotiation, and error frames; the C and Go reference clients both produce and accept the exact
+  bytes. Committed in `src/tests/fixtures/bus/wire_vectors.tsv`, generated independently of either
+  codec by `scripts/gen_bus_wire_vectors.py` (10 positive + 13 negative rows). ✔
+- **Interop** — the single in-source C host driven with a C client and a real Go client across a
+  process boundary, exchanging notifications and request/replies in both directions, including
+  `capability_absent`, cancel, and reaped-client recovery. Backpressure/credit exhaustion is a
+  language-independent host and client-ring property, proven in-process
+  (`test_bus_flow`, and the C/Go client `would_block` paths). ✔
+- **No-second-host** — exactly one host implementation; `scripts/check_bus_single_host.sh` fails a
+  second `bus_host_create` and confirms the Go side is client-only. ✔
 - **Third-language proof** — a client in a language other than C/Go, written only from this spec and
-  the vectors, attaches and interoperates — the credibility test for "any language."
+  the vectors, attaches and interoperates — the credibility test for "any language." *Not yet
+  written; the two-language agreement and the language-neutral vectors are what make it possible, and
+  a later contributor can add one without any change here.*
 
 ## Non-goals
 
@@ -197,8 +270,48 @@ The spec is validated, not defined, by its implementations:
 
 ## Open questions
 
-- Direct zero-copy vs host-mediated arena leases; arena allocation/fragmentation strategy.
-- Huge and streamed payloads (chunking over the ring vs a dedicated arena stream).
-- Final backpressure policy (credit-based confirmed for v0; shed-vs-block defaults per kind).
-- NUMA/placement of the segment and rings on multi-socket hosts.
-- Exact slot size and inline-payload budget (set with the performance-budget baseline).
+Answered in v0 (settled by the decisions in
+[`EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md) and the implementation):
+
+- ~~Direct zero-copy vs host-mediated arena leases; arena allocation/fragmentation strategy.~~
+  **Host-mediated leases** (D3): generation + consumer refcount, first-fit with coalescing, a
+  synchronous per-client cap. Direct producer→consumer allocation is overruled for v0.
+- ~~Final backpressure policy (credit-based confirmed for v0; shed-vs-block defaults per kind).~~
+  **Block by default, shed opt-in per kind** (D5/D7), with a control-class reserve and a sticky
+  `control_lost` backstop.
+- ~~Exact slot size and inline-payload budget.~~ **Control-region parameters** read at attach, not
+  wire fields (D4); provisional 256/192/1024 set in slice 3, the dispatch-overhead ceiling committed
+  in `bench/bus_baseline.json`.
+
+Still open for a later version (out of v0 scope):
+
+- **Huge and streamed payloads** (chunking over the ring vs a dedicated arena stream).
+- **Arena-payload routing** — the host publishing a lease to the resolved observer set before
+  forwarding the reference. The allocator exists (slice 4) and inline routing works; the composition
+  is a focused slice-4/6 follow-up. Arena-flagged frames are currently dropped-with-count, not
+  delivered to a consumer that could not read them.
+- **NUMA/placement** of the regions on multi-socket hosts.
+- **`shm_open` portability fallback** — v0 is Linux-only (`memfd_create`) by D1; a fallback carries
+  its own threat-model note.
+
+## Implementation status
+
+Written and merged onto the `feat/event-bus` integration branch (2026-07-24), one slice per PR, each
+green under the normal and sanitizer builds and self-reviewed. Not yet promoted to the mainline. The twelve slices map to this spec's sections:
+
+| Spec section | Slice(s) | Module |
+|---|---|---|
+| Event encoding, message patterns, versioning | 1, 9 | `bus_wire.{c,h}`, `server-go/bus/wire.go` |
+| Rings | 2, 9 | `bus_ring.{c,h}`, `server-go/bus/ring.go` |
+| Segment layout (multi-region, D1) | 3, 9 | `bus_region.{c,h}`, `server-go/bus/region.go` |
+| Payloads and arena leases | 4 | `bus_arena.{c,h}` |
+| Attach and admission, security | 5, 8, 9 | `bus_host.{c,h}`, `bus_client.{c,h}`, `server-go/bus/client.go` |
+| Routing and the tap | 6 | `bus_route.c` |
+| Flow control and backpressure | 7 | `bus_route.c` |
+| Conformance | 10 | `scripts/test_bus_conformance.sh`, harness + Go interop |
+| Capture / observational replay | 11 | `bus_capture.{c,h}` |
+| Performance budget | 12 | `bench/bus_baseline.json`, `scripts/check_bus_perf_gate.sh` |
+
+The bus is not linked into any shipping binary; the D7 gate
+(`scripts/check_bus_blast_radius.sh`, in `make lint`) enforces that until the separate
+memory-migration tree links it onto the hot path.

@@ -10,15 +10,27 @@ int db1_guardrail_event_insert(const guardrail_event_t *e)
    if (!db || !e)
       return -1;
 
+   /* Wrap in db1's transaction gate (g_txn_gate) rather than issuing a bare
+    * autocommit INSERT. The shared connection has ONE transaction context: an
+    * unguarded autocommit write can run inside another thread's open explicit
+    * transaction (BEGIN IMMEDIATE ... COMMIT) and be committed or rolled back
+    * with it. Taking the gate serializes this insert against those transactions,
+    * which also makes it correct to call from the audit-bus consumer thread. */
+   if (db1_txn_begin(db, "BEGIN IMMEDIATE") != 0)
+      return -1;
+
    const char *sql =
        "INSERT INTO guardrail_events"
        " (session_id, tool_name, overall_risk, action_risk, diff_risk, drift_risk,"
        "  antipattern_similarity, recommendation, labels, final_action, explanation, dry_run)"
        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
 
-   sqlite3_stmt *stmt;
+   sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+   {
+      db1_txn_end(db, "ROLLBACK");
       return -1;
+   }
 
    sqlite3_bind_text(stmt, 1, e->session_id, -1, SQLITE_STATIC);
    sqlite3_bind_text(stmt, 2, e->tool_name, -1, SQLITE_STATIC);
@@ -33,9 +45,14 @@ int db1_guardrail_event_insert(const guardrail_event_t *e)
    sqlite3_bind_text(stmt, 11, e->explanation, -1, SQLITE_STATIC);
    sqlite3_bind_int(stmt, 12, e->dry_run);
 
-   sqlite3_step(stmt);
+   int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
-   return 0;
+   if (rc != SQLITE_DONE)
+   {
+      db1_txn_end(db, "ROLLBACK");
+      return -1; /* real failure, not a silent success */
+   }
+   return db1_txn_end(db, "COMMIT"); /* 0 on commit, -1 if the commit failed */
 }
 
 int db1_guardrail_event_counts_7d(guardrail_event_counts_t *out)

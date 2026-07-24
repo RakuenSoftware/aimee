@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "audit_bus.h" /* gsem_record now records via the bus; drain it before asserting */
 #include "db1.h"
 #include "guardrail_events.h"
 #include "guardrails_semantic.h"
@@ -246,6 +247,11 @@ static void test_gsem_record(const char *path)
 {
    platform_test_remove_sqlite(path);
    assert(db1_init(path) == 0);
+   /* gsem_record publishes over the event bus now; give the bus a writable home
+    * for its capture stream so it does not litter the real config dir. */
+   char home[] = "/tmp/aimee-gsemrec-XXXXXX";
+   if (mkdtemp(home))
+      setenv("AIMEE_HOME", home, 1);
 
    gsem_input_t in;
    memset(&in, 0, sizeof(in));
@@ -267,6 +273,10 @@ static void test_gsem_record(const char *path)
    out.overall = 0.95;
    snprintf(out.recommendation, sizeof(out.recommendation), "block");
    gsem_record("sess-g2", &in, &out, "dry_run", 1);
+
+   /* The insert is now asynchronous (bus consumer). Drain before asserting: stop
+    * flushes every in-flight event to db1 before it returns. */
+   audit_bus_stop();
 
    guardrail_event_counts_t counts;
    assert(db1_guardrail_event_counts_7d(&counts) == 0);

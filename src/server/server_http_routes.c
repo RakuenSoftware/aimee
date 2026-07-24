@@ -1953,6 +1953,8 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/audit", NULL, RM_EXACT, "dashboard.audit", 0, rh_dispatch_op},
     {"GET", "/v1/audit/verify", NULL, RM_EXACT, "audit.verify", 0, rh_dispatch_op},
+    {"GET", "/v1/audit/captures", NULL, RM_EXACT, "audit.captures", 0, rh_dispatch_op},
+    {"POST", "/v1/audit/replay", NULL, RM_EXACT, "audit.replay", 0, rh_dispatch_op},
     {"POST", "/v1/audit/checkpoint", NULL, RM_EXACT, "audit.checkpoint", 0, rh_dispatch_op},
     {"POST", "/v1/audit/seal", NULL, RM_EXACT, "audit.seal", 0, rh_dispatch_op},
     {"POST", "/v1/audit/snapshot", NULL, RM_EXACT, "audit.snapshot", 0, rh_dispatch_op},

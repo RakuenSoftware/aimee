@@ -1532,8 +1532,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hosts.list", handle_hosts_list},
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
-    /* Work queue */
-    /* Attempt log */
     {"attempt.record", handle_attempt_record},
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
@@ -1552,6 +1550,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.all", handle_dashboard_all},
     {"dashboard.audit", handle_dashboard_audit},
     {"audit.verify", handle_audit_verify},
+    {"audit.captures", handle_audit_captures},
+    {"audit.replay", handle_audit_replay},
     {"audit.checkpoint", handle_audit_checkpoint},
     {"audit.seal", handle_audit_seal},
     {"audit.snapshot", handle_audit_snapshot},
