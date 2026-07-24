@@ -1,4 +1,4 @@
-module github.com/JBailes/aimee/kb-console
+module github.com/JBailes/aimee/control-web
 
 go 1.24.0
 

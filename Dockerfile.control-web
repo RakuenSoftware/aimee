@@ -1,0 +1,43 @@
+# aimee-control-web: the Control Plane web console for a shared aimee-kb (dashboard /
+# accounts / governance). Optional module `control-web`: it ships ENABLED and is turned
+# off for fully scripted deployments with AIMEE_CONTROL_WEB_ENABLED=0 (the container then
+# idles without a listener). It runs as its own isolated, low-privilege container and
+# fronts the kb /v1 with a scoped console-admin credential. See docs/KB_CONSOLE.md.
+
+# --- frontend: build the console SPA into a single inlined html ---
+FROM node:20-bookworm AS frontend
+WORKDIR /frontend
+# @rakuensoftware/smoothgui is vendored (frontend/vendor/) so the build needs no
+# credentials — same as the runtime-web SPA.
+COPY frontend/package.json frontend/package-lock.json ./
+COPY frontend/vendor/ ./vendor/
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build:console
+
+# --- console service: the standalone Go server (cgo: sqlite sessions) ---
+FROM golang:1.24-bookworm AS gobuild
+WORKDIR /src/control-web
+COPY control-web/go.mod control-web/go.sum ./
+RUN go mod download
+COPY control-web/ ./
+RUN CGO_ENABLED=1 go build -o /out/control-web .
+
+# --- runtime ---
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=gobuild /out/control-web /usr/local/bin/control-web
+COPY --from=frontend /frontend/dist-console /opt/control-web/frontend/dist-console
+# Run as a non-root user — a 0600 cred file is meaningless against root, and this
+# bounds any console compromise. CONTROL_WEB_HOME must be writable by this user.
+RUN useradd --system --uid 10001 --home-dir /var/lib/control-web --create-home controlweb \
+    && chown -R controlweb /var/lib/control-web
+USER controlweb
+WORKDIR /opt/control-web
+EXPOSE 8744
+# The console needs a console-admin credential (CONTROL_WEB_CRED_FILE, mode 0600)
+# and the kb URL; supply them via compose/env. The SPA path is passed explicitly
+# because the binary lives in /usr/local/bin.
+ENTRYPOINT ["/usr/local/bin/control-web", "-spa", "/opt/control-web/frontend/dist-console/console.html"]

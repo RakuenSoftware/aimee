@@ -39,11 +39,11 @@ type oidcConfig struct {
 // file is group/world-readable (0600 contract) — a stolen or over-shared cred is
 // full console-admin access, so this is fail-closed.
 func (c *config) loadCred() (string, error) {
-	if os.Getenv("KB_CONSOLE_CRED") != "" {
-		return "", fmt.Errorf("inline KB_CONSOLE_CRED env is disallowed; use KB_CONSOLE_CRED_FILE (mode 0600)")
+	if os.Getenv("CONTROL_WEB_CRED") != "" {
+		return "", fmt.Errorf("inline CONTROL_WEB_CRED env is disallowed; use CONTROL_WEB_CRED_FILE (mode 0600)")
 	}
 	if c.credFile == "" {
-		return "", fmt.Errorf("no console-admin credential: set KB_CONSOLE_CRED_FILE")
+		return "", fmt.Errorf("no console-admin credential: set CONTROL_WEB_CRED_FILE")
 	}
 	fi, err := os.Stat(c.credFile)
 	if err != nil {

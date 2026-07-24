@@ -98,23 +98,26 @@ services:
     volumes:
       - aimee-kb-home:/var/lib/aimee
 
-  # aimee-kb web console (dashboard / accounts / governance). DEFAULT-OFF: it only
-  # starts under the `console` profile (`docker compose --profile console up`), and
-  # is bound to localhost on the host. It fronts the kb /v1 with a scoped
-  # console-admin credential the operator must provide (see docs/KB_CONSOLE.md):
+  # aimee-control-web: the Control Plane web console (dashboard / accounts / governance).
+  # Optional module `control-web` — ships ENABLED. Turn it off for a fully scripted
+  # deployment with AIMEE_CONTROL_WEB_ENABLED=0 (the container then idles without a
+  # listener). Bound to localhost on the host. It fronts the kb /v1 with a scoped
+  # console-admin credential the operator provisions (see docs/KB_CONSOLE.md):
   #   1. mint a scope:console-admin enrollment on the kb, write it to ./console.cred
-  #      (chmod 600), and 2. optionally configure OIDC via the console UI.
-  aimee-kb-console:
-    profiles: ["console"]
+  #      (chmod 600), and 2. optionally configure OIDC via the console UI. Without the
+  #   cred the container idles healthy with a clear log rather than crash-looping.
+  aimee-control-web:
     restart: unless-stopped
-    image: ${AIMEE_KB_CONSOLE_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-console:latest}
+    image: ${AIMEE_CONTROL_WEB_IMAGE:-ghcr.io/rakuensoftware/aimee-control-web:latest}
     build:
       context: .
-      dockerfile: Dockerfile.kb-console
+      dockerfile: Dockerfile.control-web
     command: ["-addr", "0.0.0.0:8744", "-kb", "http://aimee-kb:8741"]
     environment:
-      KB_CONSOLE_CRED_FILE: /run/kb-console/console.cred
-      KB_CONSOLE_HOME: /var/lib/kb-console
+      # Ships on; set to 0 for a fully scripted / headless deployment.
+      AIMEE_CONTROL_WEB_ENABLED: "1"
+      CONTROL_WEB_CRED_FILE: /run/control-web/console.cred
+      CONTROL_WEB_HOME: /var/lib/control-web
     ports:
       # Localhost-only on the host — the console is a trusted-LAN admin surface.
       - "127.0.0.1:8744:8744"
@@ -128,9 +131,9 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - kb-console-home:/var/lib/kb-console
+      - control-web-home:/var/lib/control-web
       # The operator supplies the console-admin credential (mode 0600).
-      - ${KB_CONSOLE_CRED_FILE:-./console.cred}:/run/kb-console/console.cred:ro
+      - ${CONTROL_WEB_CRED_FILE:-./console.cred}:/run/control-web/console.cred:ro
 
   # Bundled local LLM for the synthesis / curator passes — llama.cpp's
   # llama-server (OpenAI-compatible API at /v1). On by default; Gemma 3n E4B
@@ -204,7 +207,7 @@ services:
 
 volumes:
   aimee-kb-home:
-  kb-console-home:
+  control-web-home:
   aimee-kb-postgres:
   aimee-embedder-models:
   aimee-llm-models:
