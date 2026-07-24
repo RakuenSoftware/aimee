@@ -4,7 +4,7 @@ This merged Phase 0 packet gates Phase 1. It records six binding decisions with 
 
 ## Decision 1 — Paths diverge
 
-Phase 2 must split per handler. Only the Anthropic compatibility relay traverses `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) and `anthropic_delta_emit` (`:539`); OpenAI Chat emits at `src/server/openai_chat.c:689`, Responses through `src/server/server_http.c:1260`, webchat through `src/db1/webchat_live.c:10`, and roundtable persists at `src/db1/roundtable_pipeline.c:310-403`.
+Phase 2 must split per handler. Only the Anthropic compatibility relay traverses `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) and `anthropic_delta_emit` (`:539`); OpenAI Chat emits at `src/server/openai_chat.c:689` (`emit_chunk`, called from `chat_stream_handler` `src/server/openai_chat.c:720`), Responses through `sse_event_emit` at `src/server/server_http.c:1260` (handler `responses_stream_handler`, `src/server/openai_chat.c:1081`), webchat through `db1_webchat_live_set`/`db1_webchat_live_get` at `src/db1/webchat_live.c:10` and `:51`, delegate relay through `agent_execute` (`src/server/agent_runtime.c:1100`) and `agent_ir_parse_json_response` (`src/posix/agent_ir_parse.c:86`), and roundtable relay through `live_panel` (`src/modules/workflows/wfe_live_panel.c:125`) → `delegate_roundtable_run` (`src/modules/roundtable/delegate_ensemble.c:1906`) persisting via `rtp_pass_*` in `src/db1/roundtable_pipeline.c:300-403`.
 
 ## Decision 2 — Config source and namespace
 
@@ -12,7 +12,7 @@ Phase 2 must split per handler. Only the Anthropic compatibility relay traverses
 
 ## Decision 3 — Relay choke points and verified symbols
 
-There is no repository-wide choke point; Phase 2 uses the handler sites in `collapse_recon.md`. The typed Anthropic path uses `aimee_delta_type_t` and `aimee_delta_t` from `src/headers/aimee_ir.h:186-210`. Its actual lifecycle constants are `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`, `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`, and `AIMEE_DELTA_ERROR` (`:188-193`). Text resides in `aimee_delta_t.text_delta` for `AIMEE_DELTA_BLOCK_DELTA` (`:196-210`) and is rendered at `src/server/aimee_ir_stream.c:450-464`.
+There is no repository-wide choke point; Phase 2 uses the handler sites in `collapse_recon.md`. The typed Anthropic path uses `aimee_delta_type_t` and `aimee_delta_t` from `src/headers/aimee_ir.h:186-210`. Its actual lifecycle constants are `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`, `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`, and `AIMEE_DELTA_ERROR` (`:188-193`). Text resides in `aimee_delta_t.text_delta` for `AIMEE_DELTA_BLOCK_DELTA` (`:196-210`) and is rendered at `src/server/aimee_ir_stream.c:450-464`. The other five surfaces (`/v1/responses`, `/v1/chat/completions`, webchat, delegate, roundtable) do not traverse this envelope and require handler-specific adapters (Phase 2.1 and Phase 2.2).
 
 ## Decision 4 — Sampling scope
 
