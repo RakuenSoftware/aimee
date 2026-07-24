@@ -1821,6 +1821,39 @@
         "docs/validation/core-modularization-slice-61-execution-policy-migration.md",
         "docs/modules/execution-policy.md"
       ]
+    },
+    {
+      "slice": 62,
+      "state": "present_and_verified",
+      "disposition": "Migrated the optional kb-synthesis module (Class A #5, final movable): relocated the KB curator family (21 sources + 16 headers) from src/kb/ into src/modules/kb-synthesis/ and latched. The curator is KB-tier — it includes KB-internal service headers — so it compiles with the KB build flags into $(OBJDIR)/kb/modules/kb-synthesis/ and links only into aimee-kb.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the 21 curator sources and 16 headers gained their canonical kb-synthesis owner under src/modules/kb-synthesis/"
+        ]
+      },
+      "fallbacks": [
+        "curator sources moved out of KB_SRCS into a KB_SYNTHESIS_SRCS/OBJS pair so they keep KB build flags and the kb obj tree; -Imodules/kb-synthesis added to the global C_FLAGS for the in-KB and server/CLI consumers; kb_curator_provider.c (core adapter) and the DB2 artifact/link storage APIs stay their owners'; config_kb_curator.c (config module) is untouched"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A path relocation (whole family) plus descriptor declaration and latch; no code, symbols, or behaviour changed. The linker enforces the partition; the KB obj tree keeps the KB compile flags.",
+        "rejected_simpler_alternative": "Keeping curator in KB_SRCS with a modules/ path was rejected: KB_OBJS would path it to the generic (server-flags) obj tree, losing the KB build defines curator needs.",
+        "revisit": "Only the three no-source modules remain (control-web, runtime-web, response-composition); their code does not exist yet and they are correctly kept unlatched."
+      },
+      "consumers": [
+        "aimee-kb (kb.c, cmd_kb.c, curator config/profile)",
+        "server/CLI binaries that include curator config/profile headers",
+        "the 22 test_curator_* tests",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "The 37-file family move, a KB_SYNTHESIS_SRCS/OBJS pair wired into the aimee-kb/negation-eval/blast-radius link targets and ALL_SRCS/ALL_OBJS, one global -I addition, 20 test obj-ref repoints, and 7 CMake source repoints; the KB-internal service headers and the DB2 storage APIs are unchanged.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only, informed by the panel review that flagged kb-synthesis as the hardest remainder. Validated on the .253 aimee-test container (aimee-kb build KB-tier + curator tests); the linker enforces the partition.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-62-kb-synthesis-migration.md",
+        "docs/modules/kb-synthesis.md"
+      ]
     }
   ]
 }

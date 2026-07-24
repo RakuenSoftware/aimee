@@ -17,8 +17,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"
-#include "kb/kb_curator_grounding.h"
-#include "kb/kb_curator_sidecar.h"
+#include "kb_curator_grounding.h"
+#include "kb_curator_sidecar.h"
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config

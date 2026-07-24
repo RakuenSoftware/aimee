@@ -27,9 +27,9 @@ class CuratorAbsenceTests(unittest.TestCase):
             "src/modules/memory/memory_maintenance.c",
             "src/db1/maintenance.c",
             "src/modules/config/config_kb_curator.c",
-            "src/kb/kb_curator_pipeline.c",
-            "src/kb/kb_curator_queue.c",
-            "src/kb/kb_curator_drain.c",
+            "src/modules/kb-synthesis/kb_curator_pipeline.c",
+            "src/modules/kb-synthesis/kb_curator_queue.c",
+            "src/modules/kb-synthesis/kb_curator_drain.c",
             "src/tests/test_config.c",
             checker.DISPOSITION,
         ))
@@ -96,7 +96,7 @@ class CuratorAbsenceTests(unittest.TestCase):
             "memory-maintenance-preserved",
         )
         self.assert_rejected(
-            lambda root: (root / "src/kb/kb_curator_pipeline.c").unlink(),
+            lambda root: (root / "src/modules/kb-synthesis/kb_curator_pipeline.c").unlink(),
             "kb-curator-preserved",
         )
 

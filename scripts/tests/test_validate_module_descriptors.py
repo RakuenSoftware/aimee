@@ -288,6 +288,8 @@ class DescriptorTests(unittest.TestCase):
             ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
             ("routing", "sources", "src/modules/routing/routing.c"),
             ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
+            ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
+            ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
@@ -326,7 +328,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "plugin-loader", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -369,7 +371,7 @@ class DescriptorTests(unittest.TestCase):
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
-            "control-web", "kb-synthesis",
+            "control-web",
             "response-composition", "runtime-web",
         )
         for identifier in empty:
@@ -431,7 +433,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):

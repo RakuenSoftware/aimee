@@ -12,9 +12,9 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_resolve_entities.h"
-#include "../kb/kb_curator_index_code_unit.h"
-#include "../kb/kb_curator_link_artifacts.h"
+#include "kb_curator_resolve_entities.h"
+#include "kb_curator_index_code_unit.h"
+#include "kb_curator_link_artifacts.h"
 #include "../kb_curator_serve.h"
 
 /* ── stubs: embedding + vector sinks (return "unavailable"/no-op) ─────────── */
