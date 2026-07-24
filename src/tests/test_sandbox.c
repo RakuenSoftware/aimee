@@ -110,6 +110,37 @@ static void test_command_program(void)
    sandbox_command_program("  FOO=1 BAR=2 /bin/ls -la", out, sizeof out);
    assert(strcmp(out, "ls") == 0);
 
+   /* A value with no shell-special byte (even one containing '=') is a simple
+    * assignment and is skipped whole. */
+   sandbox_command_program("URL=http://x/a-b_c /usr/bin/wget", out, sizeof out);
+   assert(strcmp(out, "wget") == 0);
+
+   /* The first program of a pipeline is named; the rest are arguments (no leak). */
+   sandbox_command_program("npm run build | tee out.log", out, sizeof out);
+   assert(strcmp(out, "npm") == 0);
+
+   /* --- adversarial forms that MUST NOT leak: each yields the "unparsed" marker,
+    * never the secret-bearing bytes. These pin the safe-by-construction parser. */
+   const char *leaky[] = {
+       "(TOKEN=sk-secret-123 npm publish)",         /* subshell prefix */
+       "PASS='hunter2 secretword' /usr/bin/deploy", /* quoted value spanning ws */
+       "TOKEN=$(cat /run/secrets/api_key) curl x",  /* command substitution */
+       "'TOKEN=sk-secret' cmd",                     /* leading quote */
+       "\"KEY=sk-secret\" cmd",                     /* leading dquote */
+       "FOO=a\\ b realcmd",                         /* backslash-escaped space */
+       "FOO=x;curl evil",                           /* metachar in value */
+       "$SECRETVAR",                                /* leading '$' */
+       "`id`",                                      /* backtick */
+       NULL,
+   };
+   for (int i = 0; leaky[i]; i++)
+   {
+      sandbox_command_program(leaky[i], out, sizeof out);
+      assert(strcmp(out, "unparsed") == 0);
+      assert(strstr(out, "secret") == NULL && strstr(out, "hunter2") == NULL &&
+             strstr(out, "api_key") == NULL);
+   }
+
    sandbox_command_program("", out, sizeof out);
    assert(out[0] == '\0');
    out[0] = 'x';
@@ -151,6 +182,13 @@ static int avail_unavailable(const char **reason)
    if (reason)
       *reason = "forced-unavailable (test)";
    return 0;
+}
+
+/* Forces "available" so the real sandboxed path is taken (which must NOT audit). */
+static int avail_available(const char **reason)
+{
+   (void)reason;
+   return 1;
 }
 
 static void test_audit_hook_degraded(void)
@@ -200,7 +238,20 @@ static void test_audit_hook_degraded(void)
    waitpid(pid, NULL, 0);
    assert(g_last.calls == 0);
 
+   /* When the sandbox IS available, the exec takes the real isolated path and the
+    * degradation hook must stay SILENT — only exceptions are recorded, never a
+    * routine sandboxed run. (The child may still degrade post-fork on a kernel
+    * without userns, but that non-require path is out of parent-audit scope.) */
+   sandbox_set_audit_hook(capture_hook);
+   sandbox_set_available_override_for_test(avail_available);
+   memset(&g_last, 0, sizeof g_last);
+   pid = sandbox_exec(&cfg, "/usr/bin/true", devnull, devnull, NULL);
+   if (pid > 0)
+      waitpid(pid, NULL, 0);
+   assert(g_last.calls == 0);
+
    /* A NULL hook records nothing (no crash). */
+   sandbox_set_available_override_for_test(avail_unavailable);
    sandbox_set_audit_hook(NULL);
    memset(&g_last, 0, sizeof g_last);
    pid = sandbox_exec(&cfg, "/usr/bin/true", devnull, devnull, NULL);

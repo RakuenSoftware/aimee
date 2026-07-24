@@ -76,10 +76,24 @@ int main(void)
    cfg.network_isolated = 1;
 
    /* A guarded exec that falls back to unsandboxed (secret in the env prefix). */
-   const char *secret = "sk-sandbox-DO-NOT-LOG-4b2a";
-   char cmd[128];
-   snprintf(cmd, sizeof cmd, "APIKEY=%s /usr/bin/true", secret);
+   const char *env_secret = "sk-sandbox-env-DO-NOT-LOG-4b2a";
+   char cmd[160];
+   snprintf(cmd, sizeof cmd, "APIKEY=%s /usr/bin/true", env_secret);
    pid_t pid = sandbox_exec(&cfg, cmd, devnull, devnull, NULL);
+   assert(pid > 0);
+   waitpid(pid, NULL, 0);
+
+   /* A fallback with network isolation OFF and a secret in the ARGUMENTS: the mode
+    * must have no "+netiso" suffix, and the arg secret must not reach the ledger
+    * (only the program name "curl" is surfaced). */
+   const char *arg_secret = "sk-sandbox-arg-DO-NOT-LOG-9c3e";
+   sandbox_config_t noneti;
+   memset(&noneti, 0, sizeof noneti);
+   noneti.mode = SANDBOX_MODE_ALLOWLIST;
+   noneti.network_isolated = 0;
+   char cmd2[160];
+   snprintf(cmd2, sizeof cmd2, "/usr/bin/curl -H authorization:%s https://x", arg_secret);
+   pid = sandbox_exec(&noneti, cmd2, devnull, devnull, NULL);
    assert(pid > 0);
    waitpid(pid, NULL, 0);
 
@@ -92,23 +106,32 @@ int main(void)
    cJSON *rows = audit_ledger_read(NULL, NULL);
    assert(rows);
 
-   /* The fallback row: actor=sandbox, program in command, mode workspace_only+netiso. */
+   /* The fallback row: actor=sandbox, program in command, mode workspace_only+netiso,
+    * and the reason_code carries the (test-forced) availability reason verbatim. */
    cJSON *fb = find_row(rows, "sandbox.exec", "true");
    assert(fb);
    assert(strcmp(sval(fb, "actor"), "sandbox") == 0);
    assert(strcmp(sval(fb, "verdict"), "unsandboxed_fallback") == 0);
    assert(strcmp(sval(fb, "mode"), "workspace_only+netiso") == 0);
-   assert(sval(fb, "reason_code")[0] != '\0');
+   assert(strcmp(sval(fb, "reason_code"), "forced-unavailable (test)") == 0);
+
+   /* The network-isolation-off row: mode is "allowlist" with NO "+netiso" suffix. */
+   cJSON *nn = find_row(rows, "sandbox.exec", "curl");
+   assert(nn);
+   assert(strcmp(sval(nn, "mode"), "allowlist") == 0);
+   assert(strstr(sval(nn, "mode"), "netiso") == NULL);
 
    /* The refused row. */
    cJSON *rf = find_row(rows, "sandbox.exec", "npm");
    assert(rf);
    assert(strcmp(sval(rf, "verdict"), "refused") == 0);
 
-   /* THE invariant: the secret in the command's env prefix never reached the ledger. */
+   /* THE invariant: NO secret — from the env prefix OR the arguments — ever reached
+    * any field of any ledger row. */
    char *dump = cJSON_PrintUnformatted(rows);
    assert(dump);
-   assert(!strstr(dump, secret));
+   assert(!strstr(dump, env_secret));
+   assert(!strstr(dump, arg_secret));
    free(dump);
 
    cJSON_Delete(rows);
