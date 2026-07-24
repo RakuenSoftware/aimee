@@ -1789,6 +1789,38 @@
         "docs/validation/core-modularization-slice-60-routing-migration.md",
         "docs/modules/routing.md"
       ]
+    },
+    {
+      "slice": 61,
+      "state": "present_and_verified",
+      "disposition": "Migrated the required execution-policy module (Class A #4): extracted the tool-action policy decision (policy_load + policy_check_tool + g_policy_json, the contiguous /* Policy checking */ section) from src/server/agent_policy.c into src/modules/execution-policy/execution_policy.c and latched. Schema/argument validation (tool_validate), side-effect classification (tool_side_effect), and the trace/metrics/manifest half stay in agent_policy.c per the module boundary.",
+      "production": {
+        "added": [],
+        "deleted": [],
+        "consolidated": [
+          "the policy-decision section gained its canonical execution-policy owner; agent_policy.c keeps validation, side-effect classification, and trace/metrics"
+        ]
+      },
+      "fallbacks": [
+        "a broad first extraction that pulled tool_validate and the schema-validation helpers into execution-policy was rejected on review as doc-violating and redone decision-only; the decision contract stays in the shared headers/agent_exec.h, which the module implements while the server implements the rest; guardrails pre_tool_check and gateway policing remain enforcement consumers; execution-policy has no module-private header"
+      ],
+      "net_growth": {
+        "status": "none",
+        "rationale": "A code relocation (contiguous section move) plus descriptor declaration and latch; no code, symbols, or behaviour changed. nm confirms execution_policy.o defines policy_check_tool and not tool_validate/trace; the linker enforces the partition.",
+        "rejected_simpler_alternative": "Moving the whole agent_policy.c policy region (including tool_validate) was rejected: execution-policy.md assigns schema/argument validation to tools, not execution-policy.",
+        "revisit": "Consolidating the distributed enforcement points (guardrails pre_tool_check, gateway policing) onto this decision engine is future work. Four Class A modules remain; kb-synthesis is a large KB-coupled extraction, the web/IR modules have no located source."
+      },
+      "consumers": [
+        "external callers of policy_check_tool/policy_load via agent_exec.h",
+        "guardrails pre_tool_check and gateway policing (decision consumers)",
+        "Make and CMake build graphs"
+      ],
+      "blast_radius": "The policy-section move plus adding execution_policy.o next to agent_policy.o in the source/object/test-link lists; the shared agent_exec.h and its consumers are unchanged, and the validation/trace half of agent_policy.c is untouched beyond the removed section.",
+      "independent_review": "Self-reviewed under explicit operator authorization for self-review-only (roundtable unavailable this cycle); the broad-extraction error was caught by self-review against execution-policy.md. Validated on the .253 aimee-test container (Make + CMake); nm + the linker confirm the partition.",
+      "evidence": [
+        "docs/validation/core-modularization-slice-61-execution-policy-migration.md",
+        "docs/modules/execution-policy.md"
+      ]
     }
   ]
 }

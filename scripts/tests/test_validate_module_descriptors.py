@@ -287,6 +287,7 @@ class DescriptorTests(unittest.TestCase):
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
             ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
             ("routing", "sources", "src/modules/routing/routing.c"),
+            ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
@@ -325,7 +326,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "plugin-loader", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -368,7 +369,7 @@ class DescriptorTests(unittest.TestCase):
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
-            "control-web", "execution-policy", "kb-synthesis",
+            "control-web", "kb-synthesis",
             "response-composition", "runtime-web",
         )
         for identifier in empty:
@@ -430,7 +431,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):
