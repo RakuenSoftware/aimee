@@ -693,6 +693,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/primary_session_adapter.c
     ${AIMEE_SRC_DIR}/server/primary_cli_ingestor.c
     ${AIMEE_SRC_DIR}/server/agent_policy.c
+    ${AIMEE_SRC_DIR}/modules/execution-policy/execution_policy.c
     ${AIMEE_SRC_DIR}/server/agent_policy_intercept.c
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
     ${AIMEE_SRC_DIR}/modules/benchmarks/agent_eval.c

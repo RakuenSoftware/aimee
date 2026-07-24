@@ -9,11 +9,19 @@ optional governance policy authoring, or append-only audit ledger.
 
 ## Public contracts
 
-The target public contract is represented by `src/modules/execution-policy/module.yaml`. The
-`pre_tool_check` path at `src/modules/guardrails/guardrails_action_audit.c:136`, policy loading at
-`src/server/agent_policy.c:395`, and discovery interception are relocation candidates. Schema and
-argument validation such as `tool_validate` stays with `tools`; gateway request policing stays a
-gateway enforcement point that consumes the canonical decision vocabulary. This is not one engine yet.
+`src/modules/execution-policy/execution_policy.c` owns the tool-action policy decision: `policy_load`
+(reads the operator policy `.aimee-policy.json`) and `policy_check_tool` (the fail-closed allow/deny
+decision), extracted from `src/server/agent_policy.c`. The decision contract is declared in the shared
+`src/headers/agent_exec.h`, which this module implements while the server implements the rest of
+`agent_policy.c` and reaches the decision through the same header — the arrangement by which `memory`
+owns its contract while DB1/DB2 implement storage. Per the module boundary, **schema and argument
+validation (`tool_validate`) and side-effect classification (`tool_side_effect`) stay with the
+server/`tools` surface** and are not part of this module; likewise the execution trace, metrics, env
+introspection, and manifest half of `agent_policy.c`. `pre_tool_check`
+(`src/modules/guardrails/guardrails_action_audit.c`) is a guardrails enforcement point that consumes
+this decision, and gateway request policing stays a gateway enforcement point — both consume the
+canonical decision vocabulary rather than owning it. Consolidating the distributed enforcement points
+onto this single decision engine remains future work.
 
 ## Dependencies and consumers
 
