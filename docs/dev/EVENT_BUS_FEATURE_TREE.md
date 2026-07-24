@@ -191,9 +191,13 @@ a no-op D7 gate among them.
   (generation + holder gated) and releases. `bus_client_publish_arena` is the producer emit. Two narrow
   pieces remain deliberately deferred, each awaiting a real consumer to validate against rather than
   built speculatively:
-    - *Correlated arena patterns* (arena request/reply/cancel). Their lease is reclaimed so it cannot
-      leak, and the frame is dropped-with-count, until the memory recall round-trip that needs a large
-      request/reply payload lands.
+    - *Correlated arena patterns — DONE.* An arena request is published to the kind's server and
+      delivered by reference (no server → reclaim + capability_absent); the server's arena reply is
+      published back to the original requester and the correlation retired on delivery. Only the server
+      may answer (a forged reply is dropped + reclaimed); a shed request retires its correlation; a
+      departed peer's ref is dropped by reap. An arena cancel carries no meaningful payload, so its
+      lease is reclaimed and it is dropped. The remaining gap is a real large-payload request/reply
+      *consumer* (the memory recall round-trip), which is a separate memory-migration slice.
     - *Cross-thread producer allocation — DONE.* The host-private lease table is now guarded by an
       in-process mutex (bus_arena.c), so a co-located producer may allocate and fill a lease from its
       own thread while the pump thread publishes/releases/reaps and a consumer thread reads/releases in

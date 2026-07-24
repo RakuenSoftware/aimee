@@ -368,10 +368,11 @@ static void test_tap_order_and_completeness(void)
 
 /* The producer's path, co-located with the host (D7): allocate a lease on the
  * host arena as this client's slot, fill it, read its generation, then emit the
- * reference frame into the outbound ring. No payload bytes travel through the
- * ring — only the lease id + generation in the header. */
-static void emit_arena(bus_host_t *h, client_t *pub, uint32_t kind, uint32_t len, uint8_t fill,
-                       uint32_t *lease_out, uint32_t *gen_out)
+ * reference frame (of the given pattern) into the outbound ring. No payload bytes
+ * travel through the ring — only the lease id + generation in the header. */
+static void emit_arena_pat(bus_host_t *h, client_t *pub, uint16_t pattern, uint32_t kind,
+                           uint64_t corr, uint32_t len, uint8_t fill, uint32_t *lease_out,
+                           uint32_t *gen_out)
 {
    uint32_t lease = 0;
    must(bus_arena_alloc(&h->arena, pub->reply.handle_id, len, &lease) == BUS_ARENA_OK,
@@ -386,9 +387,10 @@ static void emit_arena(bus_host_t *h, client_t *pub, uint32_t kind, uint32_t len
    must(slot != NULL, "outbound has room");
    bus_frame_t f;
    memset(&f, 0, sizeof f);
-   f.hdr_flags = BUS_F_NOTIFICATION | BUS_F_ARENA;
+   f.hdr_flags = pattern | BUS_F_ARENA;
    f.wire_version = BUS_WIRE_VERSION;
    f.event_kind = kind;
+   f.correlation_id = corr;
    f.payload_ref = lease; /* ARENA (v2): payload_ref is the lease id */
    f.generation = ref.generation;
    f.payload_len = len;
@@ -397,6 +399,12 @@ static void emit_arena(bus_host_t *h, client_t *pub, uint32_t kind, uint32_t len
 
    *lease_out = lease;
    *gen_out = ref.generation;
+}
+
+static void emit_arena(bus_host_t *h, client_t *pub, uint32_t kind, uint32_t len, uint8_t fill,
+                       uint32_t *lease_out, uint32_t *gen_out)
+{
+   emit_arena_pat(h, pub, BUS_F_NOTIFICATION, kind, 0, len, fill, lease_out, gen_out);
 }
 
 /* A co-located consumer reads its arena payload in place, gated by the lease
@@ -706,6 +714,115 @@ static void test_arena_length_mismatch_dropped(void)
    printf("  arena: a frame lying about its length is dropped, never routed\n");
 }
 
+/* An arena request reaches the kind's server by reference; the server's arena
+ * reply reaches the original requester. Both spans drain to reclaim once read. */
+static void test_arena_request_reply(void)
+{
+   bus_host_config_t c = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
+
+   client_t req, server, bystander;
+   attach(&h, 1, &req);
+   attach(&h, 2, &server);
+   attach(&h, 3, &bystander);
+   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK, "server serves A");
+
+   const uint64_t corr = 0xA5A5;
+   uint32_t qlease, qgen;
+   emit_arena_pat(&h, &req, BUS_F_REQUEST, KIND_A, corr, ALEN, 0x33, &qlease, &qgen);
+   must(bus_host_pump(&h) == 1, "request routed");
+
+   bus_frame_t f;
+   must(recv_event(&server, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_REQUEST) &&
+            (f.hdr_flags & BUS_F_ARENA) && f.correlation_id == corr &&
+            (uint32_t)f.payload_ref == qlease,
+        "server got the arena request");
+   must(recv_event(&bystander, &f, NULL, 0) == 0, "bystander got nothing");
+   consume_arena(&h, &f, server.reply.handle_id, ALEN, 0x33);
+   must(bus_arena_live_leases(&h.arena, req.reply.handle_id) == 0, "request span drained");
+
+   /* Server replies with its own arena lease. */
+   uint32_t rlease, rgen;
+   emit_arena_pat(&h, &server, BUS_F_REPLY, KIND_A, corr, ALEN + 200, 0x44, &rlease, &rgen);
+   must(bus_host_pump(&h) == 1, "reply routed");
+   must(recv_event(&req, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_REPLY) &&
+            (f.hdr_flags & BUS_F_ARENA) && f.correlation_id == corr,
+        "requester got the arena reply");
+   must(recv_event(&server, &f, NULL, 0) == 0, "server got nothing back");
+   consume_arena(&h, &f, req.reply.handle_id, ALEN + 200, 0x44);
+   must(bus_arena_live_leases(&h.arena, server.reply.handle_id) == 0, "reply span drained");
+
+   detach(&req);
+   detach(&server);
+   detach(&bystander);
+   bus_host_destroy(&h);
+   printf("  arena: a request reaches the server and its reply the requester, by reference\n");
+}
+
+/* An arena request for a kind with no server is answered with capability_absent,
+ * and its lease is reclaimed (not leaked, not routed to nobody). */
+static void test_arena_request_no_server(void)
+{
+   bus_host_config_t c = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
+
+   client_t req;
+   attach(&h, 1, &req);
+   const uint64_t corr = 0xBEEF;
+   uint32_t lease, gen;
+   emit_arena_pat(&h, &req, BUS_F_REQUEST, KIND_A, corr, ALEN, 0x77, &lease, &gen);
+   must(bus_host_pump(&h) == 1, "request routed");
+
+   bus_frame_t f;
+   must(recv_event(&req, &f, NULL, 0) == 1 && f.event_kind == BUS_KIND_CAPABILITY_ABSENT &&
+            f.correlation_id == corr,
+        "requester got capability_absent");
+   must(bus_arena_refcount(&h.arena, lease) == 0, "lease reclaimed, not leaked");
+   must(bus_arena_live_leases(&h.arena, req.reply.handle_id) == 0, "no live lease");
+
+   detach(&req);
+   bus_host_destroy(&h);
+   printf("  arena: a request with no server is answered and its lease reclaimed\n");
+}
+
+/* Only the kind's server may answer a correlation: a forged arena reply from a
+ * non-server is dropped and its lease reclaimed, never delivered to the requester. */
+static void test_arena_reply_forged_dropped(void)
+{
+   bus_host_config_t c = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
+
+   client_t req, server, attacker;
+   attach(&h, 1, &req);
+   attach(&h, 2, &server);
+   attach(&h, 3, &attacker);
+   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK, "server serves A");
+
+   const uint64_t corr = 0x5EED;
+   uint32_t qlease, qgen;
+   emit_arena_pat(&h, &req, BUS_F_REQUEST, KIND_A, corr, ALEN, 0x11, &qlease, &qgen);
+   must(bus_host_pump(&h) == 1, "request routed");
+   bus_frame_t f;
+   must(recv_event(&server, &f, NULL, 0) == 1, "server got the request");
+   consume_arena(&h, &f, server.reply.handle_id, ALEN, 0x11);
+
+   /* The attacker (not the server) forges an arena reply for the correlation. */
+   uint32_t flease, fgen;
+   emit_arena_pat(&h, &attacker, BUS_F_REPLY, KIND_A, corr, ALEN, 0x99, &flease, &fgen);
+   must(bus_host_pump(&h) == 1, "forged reply processed");
+   must(recv_event(&req, &f, NULL, 0) == 0, "forged reply did not reach the requester");
+   must(bus_arena_refcount(&h.arena, flease) == 0, "forged reply's lease reclaimed");
+
+   detach(&req);
+   detach(&server);
+   detach(&attacker);
+   bus_host_destroy(&h);
+   printf("  arena: a forged (non-server) reply is dropped and its lease reclaimed\n");
+}
+
 int main(void)
 {
    printf("test_bus_route:\n");
@@ -721,6 +838,9 @@ int main(void)
    test_arena_block_publishes_once();
    test_arena_reaped_consumer_drains();
    test_arena_length_mismatch_dropped();
+   test_arena_request_reply();
+   test_arena_request_no_server();
+   test_arena_reply_forged_dropped();
    printf("test_bus_route: OK\n");
    return 0;
 }
