@@ -1257,8 +1257,8 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
    g_test_delegation_id = "test-deleg";
    char *result = tool_bash("echo escalated", 5000);
    assert(result != NULL);
-   assert(strstr(result, "refused") != NULL);       /* fail-closed */
-   assert(strstr(result, "escalated") == NULL);      /* the command did NOT run */
+   assert(strstr(result, "refused") != NULL);   /* fail-closed */
+   assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
    assert(strstr(result, "\"exit_code\":-1") != NULL);
    free(result);
 
