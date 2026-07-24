@@ -96,4 +96,20 @@ if [ "$p50" -gt "$audit_ceiling" ]; then
    exit 1
 fi
 
-echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; memory rows pending"
+# 4. The vault credential-access audit trail (delivery step 3, another module on
+#    the bus): a functional check that vault access flows through the REAL server
+#    bridge -> audit_bus -> ledger with the fields mapped and NO secret leaked.
+#    Run here (like the durability test) because it needs the same special bus
+#    link set the standard unit-tests build does not assemble.
+echo "checking vault-access-on-bus audit trail..."
+vault_out=$(make -C src --no-print-directory unit-test-bus-vault-audit 2>&1 || true)
+if ! printf '%s\n' "$vault_out" | grep -q "test_bus_vault_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the vault-access-on-bus audit test did not pass — credential access" >&2
+   echo "      is not being recorded correctly through the bridge, or a secret leaked." >&2
+   printf '%s\n' "$vault_out" | tail -8 >&2
+   exit 1
+fi
+echo "vault-access audit: ok (access -> bridge -> bus -> ledger; no secret leak)"
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access audit holds; memory rows pending"
