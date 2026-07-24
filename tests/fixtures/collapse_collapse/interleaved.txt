@@ -1,9 +1,10 @@
-# shape: interleaved loop x3 with connective between iterations; expected: fire; expected_loop_start_offset: 143; expected_loop_span_bytes: 11
+# shape: interleaved loop x3 with non-repeating connective; expected: fire; expected_loop_start_offset: 138; expected_loop_span_bytes: 11
 item
 value
-connective
+connective-A
 item
 value
-connective
+connective-B
 item
 value
+connective-C
