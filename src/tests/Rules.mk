@@ -344,6 +344,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-pii-gate \
                $(TESTPREFIX)/unit-test-sandbox \
                $(TESTPREFIX)/unit-test-slop-detect \
+               $(TESTPREFIX)/unit-test-repetition-collapse \
                $(TESTPREFIX)/unit-test-vault-principal \
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-check \
@@ -3746,6 +3747,11 @@ $(TESTPREFIX)/unit-test-sandbox: $(OBJDIR)/tests/test_sandbox.o \
 
 $(TESTPREFIX)/unit-test-slop-detect: $(OBJDIR)/tests/test_slop_detect.o \
                               $(OBJDIR)/slop_detect.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-repetition-collapse: $(OBJDIR)/tests/test_repetition_collapse.o \
+                              $(OBJDIR)/repetition_collapse.o \
+                              $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-principal: $(OBJDIR)/tests/test_vault_principal.o \

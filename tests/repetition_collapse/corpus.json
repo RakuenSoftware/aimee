@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "repetition_collapse_allowlist_corpus",
+  "description": "Legitimate-repeat fixtures and one heterogeneous-object fixture for repetition_collapse. Each fixture carries an explicit expected_label: 'loop' means the buffer is a degenerate repetition collapse the detector MUST flag; 'allow' means the buffer is a legitimate repeating structure the detector MUST NOT flag. The detector output is compared byte-for-byte across runs.",
+  "fixtures": [
+    {
+      "id": "legit_fenced_ascii_art",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "ASCII art inside a fenced block repeats the same line many times - must be suppressed.",
+      "body": "Example:\n\n```\n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n```\n"
+    },
+    {
+      "id": "legit_list_bodies",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items echo a repeated bullet body - must be suppressed.",
+      "body": "Steps:\n\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n"
+    },
+    {
+      "id": "legit_indented_code_block",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines.",
+      "body": "Output:\n\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n"
+    },
+    {
+      "id": "legit_pipe_table",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated sep/body rows.",
+      "body": "Results:\n\n| name  | value |\n|-------|-------|\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n"
+    },
+    {
+      "id": "legit_json_fragments",
+      "label": "allow",
+      "kind": "json_fragment",
+      "expected_loop_hit": false,
+      "comment": "Two well-formed JSON fragments whose internal keys repeat verbatim - allowlist must suppress.",
+      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n"
+    },
+    {
+      "id": "heterogeneous_object_curls",
+      "label": "loop",
+      "kind": "heterogeneous",
+      "expected_loop_hit": true,
+      "comment": "Heterogeneous object: looks JSON-ish (it has braces and keys) but is NOT valid JSON - the JSON allowlist MUST NOT match it, so the periodicity check fires.",
+      "body": "declare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\n"
+    },
+    {
+      "id": "real_collapse_after_intro",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Real collapse: short intro then a trailing line repeated verbatim >=4 times.",
+      "body": "The result is computed as follows.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\n"
+    }
+  ]
+}
