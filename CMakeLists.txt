@@ -634,7 +634,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_orchestrator.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_action_audit.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_tdd.c
-   _learn.c
+    ${AIMEE_SRC_DIR}/workflow_learn.c
     ${AIMEE_SRC_DIR}/session_state.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/file_safety.c
