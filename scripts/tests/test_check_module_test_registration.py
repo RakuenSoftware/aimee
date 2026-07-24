@@ -140,11 +140,11 @@ class RegistrationTests(unittest.TestCase):
             path = root / checker.CMAKE_TESTS
             path.write_text(
                 path.read_text(encoding="utf-8")
-                + "\nadd_executable(plugin_bin test_plugin.c)\n"
-                + "add_test(NAME unrelated_case COMMAND plugin_bin)\n",
+                + "\nadd_executable(econ_bin test_config_economizer.c)\n"
+                + "add_test(NAME unrelated_case COMMAND econ_bin)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin.c"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer.c"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -156,16 +156,16 @@ class RegistrationTests(unittest.TestCase):
             root = Path(tmp.name)
             path = root / checker.CMAKE_TESTS
             path.write_text(
-                path.read_text(encoding="utf-8") + "\nadd_executable(test_plugin test_plugin.c)\n",
+                path.read_text(encoding="utf-8") + "\nadd_executable(test_config_economizer test_config_economizer.c)\n",
                 encoding="utf-8",
             )
             checker.check(root)
             path.write_text(
                 path.read_text(encoding="utf-8")
-                + "add_test(NAME test_plugin COMMAND test_plugin)\n",
+                + "add_test(NAME test_config_economizer COMMAND test_config_economizer)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -206,10 +206,10 @@ class RegistrationTests(unittest.TestCase):
             root = Path(tmp.name)
             path = root / checker.CMAKE_TESTS
             path.write_text(
-                path.read_text(encoding="utf-8") + "\naimee_add_test(test_plugin test_plugin.c)\n",
+                path.read_text(encoding="utf-8") + "\naimee_add_test(test_config_economizer test_config_economizer.c)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_plugin"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer"):
                 checker.check(root)
         finally:
             tmp.cleanup()
