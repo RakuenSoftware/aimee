@@ -3750,7 +3750,7 @@ $(TESTPREFIX)/unit-test-slop-detect: $(OBJDIR)/tests/test_slop_detect.o \
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-repetition-collapse: $(OBJDIR)/tests/test_repetition_collapse.o \
-                              $(OBJDIR)/repetition_collapse.o \
+                              $(OBJDIR)/detect/repetition_collapse.o \
                               $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 

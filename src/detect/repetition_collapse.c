@@ -5,6 +5,12 @@
  * single left-to-right pass over the byte buffer with hand-rolled
  * recursive-descent for both markdown structural regions and the JSON
  * grammar that backs the fragment allowlist.
+ *
+ * The in-module JSON parser is the canonical grammar for the JSON-fragment
+ * allowlist on this slice. Heterogeneous objects (input that is NOT valid
+ * JSON per this grammar) are passed straight to the periodicity check; the
+ * heterogeneous-object fixture is locked against this grammar. If the
+ * grammar is widened, the heterogeneous-object fixture must be re-validated.
  */
 #include "headers/repetition_collapse.h"
 
@@ -21,7 +27,6 @@ static int is_ws(char c)
    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }
 
-/* Find the byte offset of the first byte of the line containing `pos`. */
 /* Find the byte offset one past the next '\n' (or len if none). */
 static size_t next_line_end(const char *buf, size_t len, size_t pos)
 {
@@ -102,47 +107,45 @@ static int line_is_fence_close(const char *line, size_t llen, int fence_char, si
    return k == llen; /* closing fence: trailing ws only */
 }
 
+/* Clean state machine: scan for '|' outside an open code-span. Tracks the
+ * opening backtick run so '`|`' (a span containing a pipe) does not match. */
 static int line_is_table_row(const char *line, size_t llen)
 {
-   /* A pipe on the line (ignoring leading whitespace and code-spans) marks it
-    * as a table row. The separator line (---|---|---) is also a table row. */
-   for (size_t i = 0; i < llen; i++)
+   size_t i        = 0;
+   int    in_code  = 0;
+   size_t code_run = 0;
+   while (i < llen)
    {
-      if (line[i] == '`')
+      char c = line[i];
+      if (in_code)
       {
-         /* skip inline code span: `` ` `` ... `` ` `` */
+         if (c == '`')
+         {
+            size_t j = i;
+            while (j < llen && line[j] == '`')
+               j++;
+            size_t run = j - i;
+            if (run >= code_run)
+               in_code = 0;
+            i = j;
+            continue;
+         }
+         i++;
+         continue;
+      }
+      if (c == '`')
+      {
          size_t j = i;
          while (j < llen && line[j] == '`')
             j++;
-         if (j > i)
-         {
-            size_t run = j - i;
-            size_t k   = j;
-            while (k < llen)
-            {
-               if (k + run <= llen && memcmp(line + k, "`", 1) == 0)
-               {
-                  size_t end_run = 0;
-                  while (k + end_run < llen && line[k + end_run] == '`')
-                     end_run++;
-                  if (end_run >= run)
-                  {
-                     k += end_run;
-                     i  = k;
-                     if (i >= llen)
-                        goto done;
-                     break;
-                  }
-               }
-               k++;
-            }
-            continue;
-         }
+         code_run = j - i;
+         in_code  = 1;
+         i        = j;
+         continue;
       }
-      if (line[i] == '|')
+      if (c == '|')
          return 1;
-   done:
-      ;
+      i++;
    }
    return 0;
 }
@@ -161,11 +164,22 @@ static int line_is_indented_code(const char *line, size_t llen)
    return spaces >= 4;
 }
 
+/* A list marker must be preceded by < 4 spaces (or it is an indented code line).
+ * CommonMark: top-level list items have 0-3 spaces of leading whitespace, but
+ * in practice 0-3 spaces is the only safe interpretation here. We enforce
+ * leading whitespace < 4 strictly so an indented code block is never
+ * misclassified as a list. */
 static int line_is_list_marker(const char *line, size_t llen, size_t *marker_end_out)
 {
    size_t i = 0;
+   size_t spaces = 0;
    while (i < llen && (line[i] == ' ' || line[i] == '\t'))
+   {
+      spaces += (line[i] == '\t') ? 4 : 1;
       i++;
+   }
+   if (spaces >= 4)
+      return 0; /* indented code block; not a list marker */
    if (i >= llen)
       return 0;
    char c = line[i];
@@ -331,6 +345,11 @@ size_t rc_parse_regions(const char *buf, size_t len, rc_region_set_t *out)
  * well-formed JSON fragments. Input that is not well-formed produces zero
  * spans - those inputs are heterogeneous objects. Skips over leading
  * whitespace between fragments so multiple fragments parse cleanly.
+ *
+ * This is the CANONICAL JSON grammar for the JSON-fragment allowlist on
+ * this slice. The heterogeneous-object fixture (heterogeneous_object_curls)
+ * is locked against this grammar and must be re-validated if the grammar is
+ * widened.
  * --------------------------------------------------------------------------- */
 
 typedef struct
@@ -604,9 +623,22 @@ size_t rc_parse_json_spans(const char *buf, size_t len, rc_json_span_set_t *out)
  * Verbatim periodicity check
  *
  * A "repeat" is a contiguous byte range [s, s+L) that occurs consecutively
- * >=N times in the buffer. We want the LONGEST such trailing repeat (matching
- * the "the loop is decided at one token" thesis in the proposal) but only if
- * it does NOT overlap a suppressed region (structural or JSON-grammar).
+ * >= N times in the buffer. The detector scans the FULL buffer (sliding
+ * windows starting at every possible offset) and emits the most-extended
+ * candidate. If the candidate's range overlaps a suppressed region
+ * (structural or JSON-grammar), the detector trims the rightmost copy and
+ * re-checks until the range no longer overlaps; if no candidate passes, the
+ * detector abstains.
+ *
+ * The repeat count is recomputed exactly from the bytes at the candidate
+ * position so the reported range is exact and not coupled to the buffer
+ * length. This addresses the original-request acceptance criterion: "repeats
+ * whose overlap with any marked region is non-empty are excluded from the
+ * periodicity check" implies the check considers repeats at all positions,
+ * not just the tail.
+ *
+ * Detected anywhere in the buffer, not just the tail. The flag mid-stream
+ * corpus fixture mid_stream_collapse_no_lock locks the documented behavior.
  * --------------------------------------------------------------------------- */
 
 static int region_suppresses_range(const rc_region_set_t   *regions,
@@ -632,72 +664,82 @@ static int region_suppresses_range(const rc_region_set_t   *regions,
    return 0;
 }
 
-/* Returns the start of the longest trailing repeat, or 0 if none within
- * `min_span_bytes` exists. The match is greedy: starting from the latest
- * possible position, we widen leftward while the trailing N copies remain
- * byte-equal. */
-static size_t find_loop_start(const char *buf, size_t len,
-                              size_t min_span, size_t min_repeats,
-                              size_t *out_span_bytes, size_t *out_repeats)
+/* Count the exact number of consecutive byte-equal repeats of length L
+ * starting at position `start` in the buffer. The first copy is at [start,
+ * start+L); further copies are at [start+L, start+2L) etc. The function
+ * returns the number of copies (>= 1) on success and 0 if the first copy
+ * would run past the buffer. The exclusive end position is returned via
+ * *end_out. */
+static size_t count_repeats(const char *buf, size_t len, size_t start, size_t L,
+                            size_t *end_out)
 {
-   if (len < min_repeats * min_span)
-      return SIZE_MAX;
-   /* Try each candidate period length L from min_span..max. */
-   size_t max_period = len / min_repeats;
-   /* Walk backwards from the end and find the largest L such that the final
-    * N=L*repeats bytes repeat verbatim. For each L, check all N copies. */
-   size_t best_start = 0;
-   size_t best_len   = 0;
-   size_t best_rep   = 0;
-   for (size_t L = min_span; L <= max_period; L++)
+   if (start + L > len || L == 0)
    {
-      size_t total     = L * min_repeats;
-      size_t start     = len - total;
-      /* Verify each copy is byte-equal to bytes [start, start+L). */
-      int bad = 0;
-      for (size_t r = 1; r < min_repeats; r++)
+      *end_out = start;
+      return 0;
+   }
+   size_t copies = 1;
+   size_t pos    = start + L;
+   while (pos + L <= len && memcmp(buf + start, buf + pos, L) == 0)
+   {
+      copies++;
+      pos += L;
+   }
+   *end_out = pos;
+   return copies;
+}
+
+/* Find the most-extended candidate: at every starting position in the buffer,
+ * for every period length L in [min_span, max_span], count the actual repeats
+ * at that position. Pick the candidate with the longest repeat count (ties
+ * broken by the longest period). Returns SIZE_MAX if none. */
+static size_t find_best_candidate(const char *buf, size_t len,
+                                  size_t min_span, size_t min_repeats,
+                                  size_t *out_start, size_t *out_span_bytes,
+                                  size_t *out_repeats, size_t *out_end)
+{
+   size_t best_copies = 0;
+   size_t best_period = 0;
+   size_t best_start  = 0;
+   size_t best_end    = 0;
+   /* max_period is bounded by len / min_repeats so we have enough room for the
+    * required minimum number of copies. */
+   size_t max_period = len / min_repeats;
+   if (max_period < min_span)
+      return SIZE_MAX;
+
+   for (size_t start = 0; start + min_span <= len; start++)
+   {
+      for (size_t L = min_span; L <= max_period; L++)
       {
-         if (memcmp(buf + start, buf + start + r * L, L) != 0)
-         {
-            bad = 1;
+         if (start + L > len)
             break;
+         size_t end_pos = 0;
+         size_t copies  = count_repeats(buf, len, start, L, &end_pos);
+         if (copies < min_repeats)
+            continue;
+         if (copies > best_copies || (copies == best_copies && L > best_period))
+         {
+            best_copies = copies;
+            best_period = L;
+            best_start  = start;
+            best_end    = end_pos;
          }
       }
-      if (bad)
-         continue;
-      /* Count possible extra repeats to the left. */
-      size_t repeats = min_repeats;
-      while (start >= L && memcmp(buf + start - L, buf + start, L) == 0)
-      {
-         repeats++;
-         start -= L;
-      }
-      if (L > best_len || (L == best_len && repeats > best_rep))
-      {
-         best_start = start;
-         best_len   = L;
-         best_rep   = repeats;
-      }
    }
-   /* Also check the common case where the input consists of an exact N-period
-    * block with no leading non-repeating prefix: try L from min_span up to len. */
-   if (best_len == 0)
-   {
-      /* Already exhausted via the loop above (which considered all L from
-       * min_span..max_period with required N copies at the tail). */
-   }
-   if (best_len == 0)
+   if (best_copies == 0)
       return SIZE_MAX;
-   *out_span_bytes = best_len;
-   *out_repeats    = best_rep;
+   *out_start      = best_start;
+   *out_span_bytes = best_period;
+   *out_repeats    = best_copies;
+   *out_end        = best_end;
    return best_start;
 }
 
-/* Public detector. The "trailing" check is fine for direct invocation - the
- * caller always passes the most-recent bytes of the stream. If the candidate
- * repeat falls inside a structural region or a JSON grammar span, fall back
- * to earlier repeats of the same period; if all of them are suppressed, the
- * detector abstains (hit=0). */
+/* Public detector. Starts from the most-extended verbatim repeat in the full
+ * buffer; if its range overlaps a suppressed region, trims the rightmost copy
+ * and re-checks until the range no longer overlaps. If all candidates are
+ * suppressed, the detector abstains (hit=0). */
 void rc_detect(const char *buf, size_t len,
                size_t min_span_bytes, size_t min_repeats,
                rc_result_t *out)
@@ -720,33 +762,35 @@ void rc_detect(const char *buf, size_t len,
 
    size_t span_bytes = 0;
    size_t repeats    = 0;
-   size_t start      = find_loop_start(buf, len, min_span_bytes, min_repeats, &span_bytes, &repeats);
-   if (start == SIZE_MAX)
+   size_t start_pos  = 0;
+   size_t end_pos    = 0;
+   if (find_best_candidate(buf, len, min_span_bytes, min_repeats,
+                           &start_pos, &span_bytes, &repeats, &end_pos) == SIZE_MAX)
       return;
-   /* Walk candidate loop-start positions backwards (each is span_bytes apart)
-    * and pick the first one whose repeat range does NOT overlap a suppressed
-    * region. */
-   size_t candidate = start;
+
+   /* Walk candidates: trim the rightmost copy repeatedly, recompute the
+    * exact end each time, until the range no longer overlaps a suppressed
+    * region. If trimming exhausts the minimum repeat count, the detector
+    * abstains. */
+   size_t cur_start  = start_pos;
+   size_t cur_L      = span_bytes;
+   size_t cur_copies = repeats;
+   size_t cur_end    = end_pos; /* exact end; no clamp to len */
    for (;;)
    {
-      size_t cand_end = candidate + repeats * span_bytes;
-      if (cand_end > len)
-         cand_end = len;
-      if (!region_suppresses_range(&regions, &jsons, candidate, cand_end))
+      if (!region_suppresses_range(&regions, &jsons, cur_start, cur_end))
       {
          out->hit               = 1;
-         out->loop_start_offset = candidate;
-         out->loop_span_bytes   = span_bytes;
-         out->repeats           = repeats;
+         out->loop_start_offset = cur_start;
+         out->loop_span_bytes   = cur_L;
+         out->repeats           = cur_copies;
          return;
       }
-      if (candidate < span_bytes)
+      if (cur_copies <= min_repeats)
          break;
-      candidate -= span_bytes;
-      if (repeats > 1)
-         repeats--;
-      else
-         break;
+      cur_copies--;
+      cur_end -= cur_L;
+      /* cur_end is now exactly cur_start + cur_copies * cur_L; no clamp to len. */
    }
    /* All candidates were suppressed - detector abstains. */
 }
