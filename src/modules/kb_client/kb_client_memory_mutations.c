@@ -31,21 +31,30 @@ int kb_client_memory_supersede(int64_t old_id, const char *new_content, double c
       return -1;
 
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
-   if (out)
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   int64_t new_id = old_id;
+   if (ok)
    {
       cJSON *mem = cJSON_GetObjectItemCaseSensitive(resp, "memory");
       if (cJSON_IsObject(mem))
-         kbc_memory_row_from_json(mem, out);
-      else
+      {
+         if (out)
+            kbc_memory_row_from_json(mem, out);
+         cJSON *id_j = cJSON_GetObjectItemCaseSensitive(mem, "id");
+         if (cJSON_IsNumber(id_j))
+            new_id = (int64_t)id_j->valuedouble;
+      }
+      else if (out)
+      {
          memset(out, 0, sizeof(*out));
+      }
    }
    cJSON_Delete(resp);
-   return 0;
+   /* supersede rewrites an existing memory's content — a server-initiated
+    * mutation, audited like the others (id-only; no kind/key, never content). */
+   kb_client_memory_audit_note("memory.supersede", new_id, NULL, NULL, NULL, confidence, session_id,
+                               ok);
+   return ok ? 0 : -1;
 }
 
 int kb_client_memory_fact_history(const char *key, memory_t *out, int max)
@@ -309,14 +318,10 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
       return -1;
 
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
-   {
-      cJSON_Delete(resp);
-      return -1;
-   }
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
 
    int64_t rec_id = 0;
-   if (out)
+   if (ok && out)
    {
       memset(out, 0, sizeof(*out));
       cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
@@ -332,7 +337,7 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
       }
       rec_id = out->id;
    }
-   else
+   else if (ok)
    {
       /* Extract the id for the audit note even when the caller wants no row back. */
       cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
@@ -342,9 +347,12 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
          rec_id = (int64_t)id_j->valuedouble;
    }
    cJSON_Delete(resp);
-   /* NON-CONTENT audit: identity + confidence + session only, never the content. */
-   kb_client_memory_audit_note("memory.insert", rec_id, tier, kind, key, confidence, session_id, 1);
-   return 0;
+   /* NON-CONTENT audit: identity + confidence + session only, never the content.
+    * Fires on the kb's verdict (a kb-rejected insert is recorded as ok=0), so the
+    * trail records rejected stores too — symmetric with update/delete/reject. */
+   kb_client_memory_audit_note("memory.insert", rec_id, tier, kind, key, confidence, session_id,
+                               ok);
+   return ok ? 0 : -1;
 }
 
 int kb_client_memory_list_low_effectiveness(double threshold, int limit,

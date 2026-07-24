@@ -623,9 +623,10 @@ typedef void (*kb_client_memory_audit_hook_fn)(const char *op, int64_t id, const
                                                const char *session_id, int ok);
 void kb_client_set_memory_audit_hook(kb_client_memory_audit_hook_fn fn);
 
-/* Internal: fire the memory-audit hook (if installed). Defined in
- * kb_client_memory_mutations.c; callable from the other kb_client memory TUs
- * (e.g. kb_client_memory.c for delete). */
+/* Internal: fire the memory-audit hook (if installed). Defined in the dep-free
+ * kb_client_memory_audit.c (kept free of RPC/cJSON so the bridge->bus test can
+ * link the seam without the whole kb_client stack); callable from the kb_client
+ * memory TUs (mutations, and kb_client_memory.c for delete). */
 void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, const char *kind,
                                  const char *key, double confidence, const char *session_id,
                                  int ok);

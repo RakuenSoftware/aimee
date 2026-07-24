@@ -65,32 +65,38 @@ int main(void)
    /* Install the REAL bridge: kb_client memory note -> hook -> obs_bus -> ledger. */
    memory_audit_bridge_install();
 
-   /* A distinctive content-like string we NEVER pass to the note — it must not
-    * appear anywhere in the ledger (the hook carries no content by construction). */
-   const char *content_marker = "MEMORY-CONTENT-DO-NOT-LOG-7f2a";
+   /* A memory KEY carrying PII (the KB gates content but not the key): it must be
+    * FINGERPRINTED, never surfaced verbatim, in the ledger. This is the load-
+    * bearing assertion — a naive "kind/key" mapping would leak this. */
+   const char *pii_key = "email:PIILEAK-alice@example.com";
 
-   kb_client_memory_audit_note("memory.insert", 101, "L2", "fact", "ReleasePlan", 0.88, "sess-A",
-                               1);
+   kb_client_memory_audit_note("memory.insert", 101, "L2", "fact", pii_key, 0.88, "sess-A", 1);
    kb_client_memory_audit_note("memory.update", 101, NULL, NULL, NULL, 0.0, NULL, 1);
    kb_client_memory_audit_note("memory.delete", 202, NULL, NULL, NULL, 0.0, NULL, 1);
    kb_client_memory_audit_note("memory.reject", 303, NULL, NULL, NULL, 0.0, NULL, 0); /* failed */
+   kb_client_memory_audit_note("memory.supersede", 404, NULL, NULL, NULL, 0.9, "sess-A", 1);
+   kb_client_memory_audit_note("memory.insert", 505, "L2", "fact", "k2", 0.5, "sess-A",
+                               0); /* fail */
 
    obs_bus_stop(); /* drain to the ledger */
 
    cJSON *rows = audit_ledger_read(NULL, NULL);
    assert(rows);
 
-   /* Insert: actor=session, command="kind/key" identity, mode=tier, verdict ok,
-    * task_id = the memory id. */
+   /* Insert: actor=session, mode=tier, verdict ok, task_id = memory id, and the
+    * (kind, key) identity is a "mk:" FINGERPRINT — the raw PII key never appears. */
    cJSON *ins = find_row(rows, "memory.insert", 101);
    assert(ins);
    assert(strcmp(sval(ins, "actor"), "sess-A") == 0);
-   assert(strcmp(sval(ins, "command"), "fact/ReleasePlan") == 0);
+   assert(strncmp(sval(ins, "command"), "mk:", 3) == 0);
+   assert(strstr(sval(ins, "command"), "PIILEAK") == NULL);
+   assert(strstr(sval(ins, "command"), "alice") == NULL);
+   assert(strstr(sval(ins, "command"), "fact") == NULL);
    assert(strcmp(sval(ins, "mode"), "L2") == 0);
    assert(strcmp(sval(ins, "verdict"), "ok") == 0);
    assert(strcmp(sval(ins, "reason_code"), "conf=0.88") == 0);
 
-   /* Update: id-only op — no kind/key identity, actor defaults to "memory". */
+   /* Update: id-only op — no identity, actor defaults to "memory". */
    cJSON *upd = find_row(rows, "memory.update", 101);
    assert(upd);
    assert(strcmp(sval(upd, "actor"), "memory") == 0);
@@ -101,14 +107,25 @@ int main(void)
    cJSON *del = find_row(rows, "memory.delete", 202);
    assert(del && strcmp(sval(del, "verdict"), "ok") == 0);
 
-   /* Reject that FAILED (kb rejected) -> verdict "fail". */
+   /* Reject that FAILED -> verdict "fail". */
    cJSON *rej = find_row(rows, "memory.reject", 303);
    assert(rej && strcmp(sval(rej, "verdict"), "fail") == 0);
 
-   /* THE invariant: memory content never reaches the trail. */
+   /* Supersede is audited (id-only). */
+   cJSON *sup = find_row(rows, "memory.supersede", 404);
+   assert(sup && strcmp(sval(sup, "verdict"), "ok") == 0);
+
+   /* A kb-REJECTED insert is recorded too (ok=0 -> verdict "fail"), symmetric with
+    * the other verbs — the trail does not silently drop rejected stores. */
+   cJSON *insf = find_row(rows, "memory.insert", 505);
+   assert(insf && strcmp(sval(insf, "verdict"), "fail") == 0);
+
+   /* THE invariant: no PII (from the key) and no content reach ANY field of ANY
+    * row — the whole ledger dump is free of the plaintext key. */
    char *dump = cJSON_PrintUnformatted(rows);
    assert(dump);
-   assert(!strstr(dump, content_marker));
+   assert(!strstr(dump, "PIILEAK"));
+   assert(!strstr(dump, "alice@example.com"));
    free(dump);
 
    cJSON_Delete(rows);
