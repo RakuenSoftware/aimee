@@ -68,11 +68,12 @@ aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)
 # the module + cJSON directly rather than linking aimee-core, so the test's
 # agent_http_get/git_host_cred_get stubs don't clash with the real symbols.
 add_executable(test_git_org_repos test_git_org_repos.c
-  ../server/git_org_repos.c ../vendor/cJSON.c)
+  ../modules/git/git_org_repos.c ../vendor/cJSON.c)
 target_include_directories(test_git_org_repos PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_org_repos)
 add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
@@ -83,11 +84,13 @@ set_tests_properties(test_git_org_repos PROPERTIES
 # GitLab/Gitea device flow. HTTP + vault externals stubbed in the test (never
 # invoked by the pure functions under test).
 add_executable(test_git_oauth_device test_git_oauth_device.c
-  ../server/git_oauth_device.c ../vendor/cJSON.c)
+  ../modules/git/git_oauth_device.c ../vendor/cJSON.c)
 target_include_directories(test_git_oauth_device PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/vault
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_oauth_device)
 add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
@@ -99,11 +102,12 @@ set_tests_properties(test_git_oauth_device PROPERTIES
 # (never invoked by the pure functions under test). POSIX-only (<pty.h>).
 if(NOT WIN32)
   add_executable(test_git_oauth_gh test_git_oauth_gh.c
-    ../server/git_oauth_gh.c)
+    ../modules/git/git_oauth_gh.c)
   target_include_directories(test_git_oauth_gh PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_git_oauth_gh PRIVATE Threads::Threads)
   aimee_enable_test_asserts(test_git_oauth_gh)
