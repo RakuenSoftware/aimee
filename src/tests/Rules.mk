@@ -348,6 +348,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-witness-offline \
                $(TESTPREFIX)/unit-test-witness-tamper-scenarios \
                $(TESTPREFIX)/unit-test-witness-offline-fuzz \
+               $(TESTPREFIX)/unit-test-witness-gate-race \
                $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
@@ -3731,6 +3732,10 @@ $(TESTPREFIX)/unit-test-vault-witness-proof: $(OBJDIR)/tests/test_vault_witness_
                               $(OBJDIR)/modules/vault/vault_witness_merkle.o \
                               $(OBJDIR)/modules/vault/vault_witness_record.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-witness-gate-race: $(OBJDIR)/tests/test_witness_gate_race.o \
+                              $(OBJDIR)/kb/kb_witness_gate_state.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-witness-offline: $(OBJDIR)/tests/test_vault_witness_offline.o \
                               $(OBJDIR)/modules/vault/vault_witness_offline.o \

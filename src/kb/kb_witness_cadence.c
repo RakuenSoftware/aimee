@@ -1,30 +1,24 @@
 #include "kb_witness_cadence.h"
 
 #include <openssl/crypto.h>
-#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "db2/db2_witness_checkpoint.h"
 #include "db2/db2_witness_emit.h"
 #include "kb/kb_vault_policy.h"
+#include "kb/kb_witness_gate_state.h"
 #include "log.h"
 #include "modules/vault/vault_witness_signer.h"
 #include "util.h"
 
-/* Result of the most recent continuous verification pass, read by the release gate.
- * -1 = never run yet (fail-closed: the gate treats it as not-clean); 0 = last pass
- * was not clean; 1 = last pass was clean. Written by the cadence (main-loop thread),
- * read by the HTTP egress path (listener thread, kb_http_egress.c). This gates real
- * production egress, so the cross-thread hand-off is a C11 atomic with release/acquire
- * ordering rather than a bare `volatile` (which the C memory model does not define for
- * inter-thread synchronisation): a store that flips clean->not-clean must be visible to
- * the very next gate read, never a stale "clean". */
-static _Atomic int g_last_verify_clean = -1;
-
+/* The cross-thread verification-result cell lives in kb_witness_gate_state.c so the
+ * concurrency contract (a C11-atomic store/load between the cadence thread and the
+ * egress-gate thread) is isolated and testable in one small unit. This accessor is
+ * the public read the release gate calls. */
 int kb_witness_verification_last_clean(void)
 {
-   return atomic_load_explicit(&g_last_verify_clean, memory_order_acquire);
+   return kb_witness_gate_state_get();
 }
 
 int kb_witness_boot_check(char *err, size_t errlen)
@@ -272,13 +266,13 @@ void kb_witness_cadence_tick(time_t now)
             /* Could not verify is not verified. It is not proof of tampering
              * either, so this is a warning rather than an integrity alert — but it
              * must never be silent. The release gate reads this as NOT clean. */
-            atomic_store_explicit(&g_last_verify_clean, 0, memory_order_release);
+            kb_witness_gate_state_set(0);
             LOG_WARN("kb.witness", "checkpoint verification could not run; evidence is unverified "
                                    "until it succeeds");
          }
          else if (vr.bad_signature > 0 || vr.unknown_key > 0 || vr.continuity_broken)
          {
-            atomic_store_explicit(&g_last_verify_clean, 0, memory_order_release);
+            kb_witness_gate_state_set(0);
             LOG_ERROR("kb.witness",
                       "INTEGRITY: retained checkpoints failed verification "
                       "(checked=%lld bad_signature=%lld unknown_key=%lld continuity_broken=%d)",
@@ -292,7 +286,7 @@ void kb_witness_cadence_tick(time_t now)
              * copies — deliberately not reported as clean, and not as tampering. The
              * release gate treats UNPROVEN as NOT clean (fail-closed): egress stays
              * closed until an operator resolves the gap. */
-            atomic_store_explicit(&g_last_verify_clean, 0, memory_order_release);
+            kb_witness_gate_state_set(0);
             LOG_WARN("kb.witness",
                      "checkpoint continuity UNPROVEN over the retained window (checked=%lld); "
                      "compare cross-gap leaf sets against retained copies before concluding clean",
@@ -302,7 +296,7 @@ void kb_witness_cadence_tick(time_t now)
          {
             /* Clean: signatures valid, keys known, continuity ok (including the
              * vacuous checked==0 case on a fresh kb — nothing to disagree with). */
-            atomic_store_explicit(&g_last_verify_clean, 1, memory_order_release);
+            kb_witness_gate_state_set(1);
             LOG_DEBUG("kb.witness", "checkpoint run verified: %lld checkpoints",
                       (long long)vr.checked);
          }
