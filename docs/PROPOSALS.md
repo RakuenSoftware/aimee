@@ -110,12 +110,17 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
   optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
   **Gate-Promote / Enforce.**
-- [Aimee shared-memory event bus — wire and segment spec (v0 DRAFT)](proposals/pending/event-bus-wire-spec.md)
+- [Aimee shared-memory event bus — wire and segment spec (v0, **IMPLEMENTED**)](proposals/pending/event-bus-wire-spec.md)
   — the normative spec the single in-source C bus host and the C/Go reference clients implement:
   segment layout, SPSC rings, event encoding, attach/admission handshake, observer routing, the
   governance/audit tap, credit-based backpressure, ordering, versioning, and capture/replay format.
-  Owned by `module-runtime`; validated by two independent client implementations + conformance
-  vectors. Drafted 2026-07-23. **Translate / Constrain-Verify.**
+  **Built and merged on `feat/event-bus` as of 2026-07-24** — twelve slices, one PR each, C host +
+  C/Go reference clients proven to interoperate across a process boundary and agree on the wire
+  byte-for-byte, with capture/observational replay and a committed dispatch-overhead budget. Not
+  linked into any shipping binary; the memory-migration tree that will link it is separate. Owned by
+  `module-runtime`. Remains under `pending/` because its parent core-substrate suite is still open;
+  see the spec's Implementation status section and
+  [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](dev/EVENT_BUS_FEATURE_TREE.md). **Translate / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
