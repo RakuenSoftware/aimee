@@ -1,5 +1,25 @@
-# shape: short contiguous verbatim repeat of single token; expected: fire; expected_loop_start_offset: 161; expected_loop_span_bytes: 6; expected_repetitions: 4
-alpha
-alpha
-alpha
-alpha
+# shape: short contiguous verbatim repeat of compact token block; expected: fire; expected_loop_start_offset: 169; expected_loop_span_bytes: 96; expected_repetitions: 4
+alpha-01: token
+alpha-02: token
+alpha-03: token
+alpha-04: token
+alpha-05: token
+alpha-06: token
+alpha-01: token
+alpha-02: token
+alpha-03: token
+alpha-04: token
+alpha-05: token
+alpha-06: token
+alpha-01: token
+alpha-02: token
+alpha-03: token
+alpha-04: token
+alpha-05: token
+alpha-06: token
+alpha-01: token
+alpha-02: token
+alpha-03: token
+alpha-04: token
+alpha-05: token
+alpha-06: token

@@ -34,11 +34,11 @@ DETECTOR_THRESHOLD_N = 4
 
 _CANONICAL_HEADER = re.compile(
     r"^"
-    r"shape:\s*(?P<shape>[^;]+); "
-    r"expected:\s*(?P<expected>fire|no-fire); "
-    r"expected_loop_start_offset:\s*(?P<offset>-?\d+); "
-    r"expected_loop_span_bytes:\s*(?P<span>-?\d+); "
-    r"expected_repetitions:\s*(?P<reps>-?\d+)"
+    r"shape:(?P<shape>[^;]+); "
+    r"expected:(?P<expected>fire|no-fire); "
+    r"expected_loop_start_offset:(?P<offset>-?[0-9]+); "
+    r"expected_loop_span_bytes:(?P<span>-?[0-9]+); "
+    r"expected_repetitions:(?P<reps>-?[0-9]+)"
     r"$"
 )
 
@@ -103,10 +103,11 @@ def _canonical_header_text(header_bytes, p):
         )
         body = "shape: " + m.group(1)
     elif kind == "meta":
-        assert s.lstrip().startswith("shape:"), (
-            f"{p}: .meta file must start with 'shape:' field, got: {s!r}"
+        assert s.startswith("shape:"), (
+            f"{p}: .meta file must start with 'shape:' field with no "
+            f"leading whitespace, got: {s!r}"
         )
-        body = s.strip()
+        body = s
     else:
         raise AssertionError(f"unknown envelope kind {kind!r}")
     return body
@@ -190,43 +191,40 @@ def _connectives(body, iterations, sp):
     return out
 
 
-def _first_body_position_with_reps_iterations(body, declared_period, span, reps):
-    """Find the first body position at which a verbatim period of
-    `span` bytes EQUAL to `declared_period` yields at least `reps`
-    walk-forward iterations using the same byte-stepping rule as
-    `_count_verbatim_iterations`: after accepting a match at offset
-    p, the next probe starts at p + span; on a mismatch the probe
-    advances by one byte. The iterations are non-overlapping and
-    each is at a boundary-aligned start position, but the
+def _first_body_position_with_reps_iterations(body, span, reps):
+    """Find the first body position `pos` such that the slice
+    `body[pos:pos+span]` yields at least `reps` walk-forward
+    verbatim iterations, where the candidate period is derived
+    FROM THE SCAN ITSELF (i.e. `body[pos:pos+span]`), not from
+    any externally-supplied comparison value. Returns the tuple
+    `(pos, period_bytes)` or `(None, None)` if no such position
+    exists.
+
+    Walk-forward rule (matches `_count_verbatim_iterations`):
+    after a match at offset `p`, the next probe starts at
+    `p + span`; on a mismatch the probe advances by one byte.
+    Iterations are non-overlapping, boundary-aligned, and the
     connective between consecutive iterations may be non-empty
-    (so this scan captures both the contiguous and the interleaved
+    (so this scan captures both contiguous and interleaved
     shapes).
 
-    The function is intentionally narrower than
-    `_has_genuine_verbatim_loop`: it pins the period string to the
-    declared period AND the period length to the declared span, so
-    substring artifacts (e.g. a 10-byte "alph" inside "alpha")
-    cannot mask a real period of declared length.
-
-    Used by `test_fire_declared_offsets_match_file_position` to
-    cross-check the declared offset against an independent
-    byte-oracle scan that does NOT derive its comparison value
-    from the declared offset. The declared period is the bytes at
-    the declared offset in the body; if the declared offset is
-    wrong, the declared period is wrong, and the scan lands at a
-    different position than the declared offset. That is the
-    fail-loud signature this oracle is designed to detect.
+    Independent of any declared header fields: the comparison
+    bytes are read directly from the body position the scan
+    accepts. A regression where the fixture header's
+    `expected_loop_start_offset` is a placeholder copy-pasted
+    across fixtures fails because the scan discovers the period
+    at the body-true position, which is then compared against
+    the declared offset and the declared slice.
     """
-    if span < 1 or len(declared_period) != span:
-        return None
+    if span < 1 or span > len(body):
+        return None, None
     last_start = len(body) - span * reps + 1
     for pos in range(0, max(last_start, 0)):
-        if body[pos:pos + span] != declared_period:
-            continue
-        iterations = _count_verbatim_iterations(body, pos, declared_period)
+        period = body[pos:pos + span]
+        iterations = _count_verbatim_iterations(body, pos, period)
         if len(iterations) >= reps:
-            return pos
-    return None
+            return pos, period
+    return None, None
 
 
 def _has_genuine_verbatim_loop(body, min_period=60):
@@ -617,32 +615,47 @@ class TestCollapseCollapse(unittest.TestCase):
             fields = _parse_header_for(p)
             header_len = _header_length(p, file_bytes)
             declared_off_in_body = fields["offset"] - header_len
-            declared_period = body[declared_off_in_body:declared_off_in_body + fields["span"]]
-            scan_off = _first_body_position_with_reps_iterations(
-                body, declared_period, fields["span"], fields["repetitions"],
+            declared_slice = body[declared_off_in_body:declared_off_in_body + fields["span"]]
+            # Independent scan: the candidate period is derived FROM
+            # the body position the scan accepts (not from
+            # declared_off_in_body), so a regression where the
+            # declared offset is a placeholder copy-pasted across
+            # fixtures fails because the scan discovers the period
+            # at the body-true position and the declared offset is
+            # then compared against that independent position.
+            scan_off, scan_period = _first_body_position_with_reps_iterations(
+                body, fields["span"], fields["repetitions"],
             )
             self.assertIsNotNone(
                 scan_off,
                 f"{p}: independent byte-oracle scan found no body "
-                f"position where the declared period "
-                f"({declared_period!r}, {fields['span']} bytes) "
+                f"position where a period of {fields['span']} bytes "
                 f"yields at least expected_repetitions="
                 f"{fields['repetitions']} walk-forward iterations; "
-                f"cannot verify declared offset",
+                f"the body does not actually repeat that many times",
+            )
+            self.assertEqual(
+                scan_period, declared_slice,
+                f"{p}: declared slice at the declared offset does not "
+                f"match the independent scan's discovered period; the "
+                f"declared offset {fields['offset']} (body offset "
+                f"{declared_off_in_body}) yields slice {declared_slice!r} "
+                f"but the scan discovers period {scan_period!r} at body "
+                f"offset {scan_off}; the declared offset must point at "
+                f"the scan's first occurrence",
             )
             file_off_first_period = header_len + scan_off
             self.assertEqual(
                 file_off_first_period, fields["offset"],
                 f"{p}: declared offset {fields['offset']} does not "
                 f"match the independent byte-oracle scan; the scan "
-                f"finds the first body position where the declared "
-                f"period ({declared_period!r}, {fields['span']} bytes) "
-                f"yields at least {fields['repetitions']} "
-                f"walk-forward iterations at file offset "
-                f"{file_off_first_period} (header_len {header_len} + "
-                f"body_off {scan_off}); the declared offset must equal "
-                f"the absolute byte position of the first period byte "
-                f"in the file",
+                f"finds the first body position where a period of "
+                f"{fields['span']} bytes yields at least "
+                f"{fields['repetitions']} walk-forward iterations at "
+                f"file offset {file_off_first_period} (header_len "
+                f"{header_len} + body_off {scan_off}); the declared "
+                f"offset must equal the absolute byte position of the "
+                f"first period byte in the file",
             )
 
 

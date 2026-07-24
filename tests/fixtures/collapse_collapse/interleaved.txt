@@ -10,4 +10,3 @@ value
 connector-y
 item
 value
-connector-z
