@@ -137,6 +137,11 @@ aimee_add_test(test_bus_wire test_bus_wire.c ../modules/bus/bus_wire.c)
 target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 target_compile_definitions(test_bus_wire PRIVATE
   BUS_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bus")
+aimee_add_test(test_bus_ring test_bus_ring.c ../modules/bus/bus_ring.c)
+target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+find_package(Threads REQUIRED)
+target_link_libraries(test_bus_ring PRIVATE Threads::Threads)
+
 
 aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
