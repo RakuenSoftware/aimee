@@ -252,12 +252,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    kb_cache_configure(-1);
    kb_client_ws_start();
 
-   /* Parse plugin extension config keys not covered by config_load(). */
-   config_load_plugin_extensions(&cfg);
-
-   /* Register bundled context engine and discover plugins from all sources.
-    * Must run after config_load so plugin_loader can read install prefix from env.
-    * Set active engine from config (empty = default compactor). */
+   /* Register the bundled context engine and set the active engine from config
+    * (empty = default compactor). */
    context_engine_register_compactor();
    if (cfg.context_engine[0])
       context_engine_set_active(cfg.context_engine);
@@ -265,14 +261,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
    guardrails_action_audit_register_reload();
-#if AIMEE_WITH_PLUGIN_LOADER
-   {
-      char perr[256] = {0};
-      plugin_loader_discover_all(perr, sizeof(perr));
-      if (perr[0])
-         LOG_WARN("server", "plugin discovery: %s", perr);
-   }
-#endif
 
    /* DB2 + pgvector startup and supervision are owned by aimee-kb, not
     * aimee-server.  Keep the server on the DB1 side of the service split. */

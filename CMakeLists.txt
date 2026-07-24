@@ -18,7 +18,6 @@ if(DEFINED AIMEE_VERSION_STR AND NOT AIMEE_VERSION_STR STREQUAL "")
     add_compile_definitions(AIMEE_VERSION="${AIMEE_VERSION_STR}")
 endif()
 
-option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)
 option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)
@@ -57,8 +56,6 @@ if(NOT WIN32)
 endif()
 
 set(AIMEE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-set(AIMEE_PLUGIN_LOADER_INCLUDE_DIR
-    "${AIMEE_SRC_DIR}/modules/plugin-loader/include")
 set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR
     "${AIMEE_SRC_DIR}/modules/module-runtime/include")
 set(AIMEE_AUDIT_INCLUDE_DIR
@@ -545,16 +542,12 @@ set(CORE_SRCS
     /mcp_tools_gateway.c
     /mcp_client.c
     /mcp_client_registry.c
-    ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c
-    ${AIMEE_SRC_DIR}/modules/plugin-loader/plugin_loader.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_provider.c
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/modules/module-runtime/pre_llm_hook.c
-    ${AIMEE_SRC_DIR}/modules/module-runtime/extension.c
-    ${AIMEE_SRC_DIR}/modules/config/config_plugin.c
     ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/codex_auth.c
     ${AIMEE_SRC_DIR}/events.c
@@ -801,7 +794,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_table.c
     ${AIMEE_SRC_DIR}/cmd_doctor.c
     ${AIMEE_SRC_DIR}/cmd_toolset.c
-    ${AIMEE_SRC_DIR}/cmd_plugin.c
     ${AIMEE_SRC_DIR}/cmd_slop.c
     ${AIMEE_SRC_DIR}/cmd_job.c
     ${AIMEE_SRC_DIR}/cmd_roles.c
@@ -916,7 +908,6 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state_index.c
-    ${AIMEE_SRC_DIR}/server/server_plugin.c
     ${AIMEE_SRC_DIR}/server/server_delegate_monitor.c
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c

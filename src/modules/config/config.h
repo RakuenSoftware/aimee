@@ -2048,7 +2048,6 @@ typedef struct config
 /* Parse plugin extension config keys (context.engine, etc.) that were
  * excluded from config_load() due to file-size constraints.
  * Call after config_load() in server startup. */
-void config_load_plugin_extensions(config_t *cfg);
 
 #define CONFIG_LSP_MAX_SERVERS    8
 #define CONFIG_LSP_MAX_ARGS       16
