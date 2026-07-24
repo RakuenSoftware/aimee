@@ -4,6 +4,7 @@ import { loadSession, login, type SessionInfo } from './api';
 import ConsoleDashboard from './pages/ConsoleDashboard';
 import Accounts from './pages/Accounts';
 import Governance from './pages/Governance';
+import Fleet from './pages/Fleet';
 
 // ConsoleApp is the shell for the aimee-kb web console: a session gate wrapping a
 // nav + the Dashboard / Accounts / Governance surfaces. S0 ships the shell and
@@ -11,13 +12,20 @@ import Governance from './pages/Governance';
 // and S5 (governance).
 export default function ConsoleApp() {
   const [session, setSession] = useState<SessionInfo | null | undefined>(undefined);
+  const [fleetMutationBlocked, setFleetMutationBlocked] = useState(false);
 
   useEffect(() => {
-    loadSession().then(setSession).catch(() => setSession(null));
+    loadSession().then((loaded) => {
+      setSession(loaded);
+      setFleetMutationBlocked(loaded?.fleet_indeterminate ?? false);
+    }).catch(() => setSession(null));
   }, []);
 
   if (session === undefined) return <div className="kbc-loading">Loading…</div>;
-  if (session === null) return <LoginGate onLogin={setSession} />;
+  if (session === null) return <LoginGate onLogin={(loggedIn) => {
+    setFleetMutationBlocked(loggedIn.fleet_indeterminate);
+    setSession(loggedIn);
+  }} />;
 
   return (
     <div className="kbc-shell">
@@ -27,12 +35,14 @@ export default function ConsoleApp() {
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/accounts">Accounts</NavLink>
         <NavLink to="/governance">Governance</NavLink>
+        <NavLink to="/fleet">Fleet</NavLink>
       </nav>
       <main className="kbc-main">
         <Routes>
           <Route path="/dashboard" element={<ConsoleDashboard />} />
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/governance" element={<Governance />} />
+          <Route path="/fleet" element={<Fleet mutationBlocked={fleetMutationBlocked} onMutationBlocked={() => setFleetMutationBlocked(true)} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

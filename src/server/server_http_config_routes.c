@@ -378,10 +378,38 @@ int route_roundtable_show(const char *name, char *resp, int cap)
    return emit(resp, cap, roundtable_preset_to_json(&p));
 }
 
+/* Roundtable definitions are execution policy, not ordinary agent-writable
+ * configuration. CAP_SESSION_ADMIN alone is insufficient because every local
+ * UDS peer receives CAPS_ALL. Require the separately attested browser operator
+ * identity as well: X-Aimee-Webuser is accepted only when authenticated with
+ * server.token by server_http_identity_capture(), and only the appliance's
+ * bootstrap administrator may mutate global policy. A shell/delegate/agent
+ * using the UDS is attributed as uid:<n> and therefore remains read-only. */
+int route_roundtable_mutation_authorized(const char *principal)
+{
+   return principal && strcmp(principal, "webuser:admin") == 0;
+}
+
+int roundtable_policy_config_key(const char *key)
+{
+   return key && strncmp(key, "roundtable.", 11) == 0;
+}
+
+static int require_roundtable_operator(char *resp, int cap)
+{
+   if (route_roundtable_mutation_authorized(server_http_identity_principal()))
+      return 0;
+   return err_json(resp, cap, 403,
+                   "roundtable changes require the authenticated appliance administrator");
+}
+
 /* Create (POST, name in body) or edit (PUT /v1/roundtables/<name>) a preset. If
  * the saved preset is the active one, re-apply it so live config stays in sync. */
 int route_roundtable_upsert(const char *url_name, const char *body, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    roundtable_preset_t p;
    const char *errmsg = NULL;
    if (roundtable_preset_from_json(body, url_name, &p, &errmsg) != 0)
@@ -400,6 +428,9 @@ int route_roundtable_upsert(const char *url_name, const char *body, char *resp, 
 
 int route_roundtable_remove(const char *name, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    if (!name || !roundtable_preset_name_valid(name))
       return err_json(resp, cap, 400, "invalid preset name");
    if (roundtable_preset_delete(name) != 0)
@@ -414,6 +445,9 @@ int route_roundtable_remove(const char *name, char *resp, int cap)
  * its values into the live ensemble/roundtable config and persist. */
 int route_roundtable_set_active(const char *body, char *resp, int cap)
 {
+   int denied = require_roundtable_operator(resp, cap);
+   if (denied)
+      return denied;
    cJSON *req = body ? cJSON_Parse(body) : NULL;
    cJSON *jn = req ? cJSON_GetObjectItemCaseSensitive(req, "name") : NULL;
    char name[RT_PRESET_NAME_MAX] = {0};

@@ -49,6 +49,10 @@ void vault_kek_cache_evict(const char *principal);
 /* Cleanse + drop every cached KEK (server shutdown / test teardown). */
 void vault_kek_cache_clear(void);
 
+/* pthread_atfork child hook: locklessly wipe inherited slots and permanently
+ * fail this cache closed until exec. Only call from the registered child hook. */
+void vault_kek_cache_after_fork_child(void);
+
 /* Number of live slots currently held (after evicting any expired) — for
  * observability + tests. */
 int vault_kek_cache_count(long now_epoch);

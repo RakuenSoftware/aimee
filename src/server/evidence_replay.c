@@ -203,6 +203,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_rev
       return REPLAY_INDEX_UNAVAILABLE;
 
    int n = -1;
+   int captured = 0;
    /* Collect file paths + lines for the idkey from whichever hit type applies. */
    char(*files)[MAX_PATH_LEN] = NULL;
    int *lines = NULL;
@@ -215,10 +216,11 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_rev
       n = be->find_symbol ? be->find_symbol(target, hits, REPLAY_MAX_HITS) : -1;
       if (n > 0)
       {
-         files = calloc((size_t)n, sizeof(*files));
-         lines = calloc((size_t)n, sizeof(*lines));
+         captured = n < REPLAY_MAX_HITS ? n : REPLAY_MAX_HITS;
+         files = calloc((size_t)captured, sizeof(*files));
+         lines = calloc((size_t)captured, sizeof(*lines));
          if (files && lines)
-            for (int i = 0; i < n; i++)
+            for (int i = 0; i < captured; i++)
             {
                snprintf(files[i], MAX_PATH_LEN, "%s", hits[i].file_path);
                lines[i] = hits[i].line;
@@ -234,10 +236,11 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_rev
       n = be->find_callers ? be->find_callers(project, target, hits, REPLAY_MAX_HITS) : -1;
       if (n > 0)
       {
-         files = calloc((size_t)n, sizeof(*files));
-         lines = calloc((size_t)n, sizeof(*lines));
+         captured = n < REPLAY_MAX_HITS ? n : REPLAY_MAX_HITS;
+         files = calloc((size_t)captured, sizeof(*files));
+         lines = calloc((size_t)captured, sizeof(*lines));
          if (files && lines)
-            for (int i = 0; i < n; i++)
+            for (int i = 0; i < captured; i++)
             {
                snprintf(files[i], MAX_PATH_LEN, "%s", hits[i].file_path);
                lines[i] = hits[i].line;
@@ -253,10 +256,11 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_rev
       n = be->code_search ? be->code_search(target, project, hits, REPLAY_MAX_HITS) : -1;
       if (n > 0)
       {
-         files = calloc((size_t)n, sizeof(*files));
-         lines = calloc((size_t)n, sizeof(*lines));
+         captured = n < REPLAY_MAX_HITS ? n : REPLAY_MAX_HITS;
+         files = calloc((size_t)captured, sizeof(*files));
+         lines = calloc((size_t)captured, sizeof(*lines));
          if (files && lines)
-            for (int i = 0; i < n; i++)
+            for (int i = 0; i < captured; i++)
             {
                snprintf(files[i], MAX_PATH_LEN, "%s", hits[i].file_path);
                lines[i] = 0; /* search hits are file-level; line 0 keeps the set stable */
@@ -278,7 +282,7 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const aimee_rev
 
    out->count = n;
    if (files && lines)
-      evidence_idkey((const char(*)[MAX_PATH_LEN])files, lines, n, out->idkey);
+      evidence_idkey((const char(*)[MAX_PATH_LEN])files, lines, captured, out->idkey);
    free(files);
    free(lines);
 

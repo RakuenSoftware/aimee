@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include "cJSON.h"
 #include "cli_session.h"
@@ -39,6 +40,7 @@ static char g_createlog[300];
 /* Path the fake tmux appends every `send-keys` invocation to, so a test can
  * assert which interrupt key (if any) the cancel path sent. */
 static char g_sendlog[320];
+static char g_capturelog[320];
 
 static void install_fake_tmux(void)
 {
@@ -47,6 +49,7 @@ static void install_fake_tmux(void)
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
    snprintf(g_sendlog, sizeof(g_sendlog), "%s/sendlog", g_fake_dir);
+   snprintf(g_capturelog, sizeof(g_capturelog), "%s/capturelog", g_fake_dir);
    snprintf(g_createlog, sizeof(g_createlog), "%s/createlog", g_fake_dir);
    char script[320];
    snprintf(script, sizeof(script), "%s/tmux", g_fake_dir);
@@ -57,14 +60,17 @@ static void install_fake_tmux(void)
     * line (never stabilises); `banner_retry` animates a │-prefixed box line whose
     * prose contains "Retrying in" (mimics the welcome banner — must NOT be read as
     * a provider error); `busy_tool` returns a STATIC pane whose footer still shows
-    * "esc to interrupt" (a long-running tool — recv must NOT finalize it); anything
-    * else returns a static pane. send-keys is logged so the cancel/error tests can
+    * "esc to interrupt" (a long-running tool — recv must NOT finalize it);
+    * `prompt_then_answer` holds a pasted prompt static past the stability threshold
+    * before rendering a Claude assistant bullet; anything else returns a static
+    * pane. send-keys is logged so the cancel/error tests can
     * assert the interrupt key. */
    fprintf(f,
            "#!/bin/sh\n"
            "case \"$1\" in\n"
            "  has-session) [ \"$FAKE_TMUX_MODE\" = dead ] && exit 1; exit 0 ;;\n"
            "  capture-pane)\n"
+           "    echo \"$*\" >> '%s';\n"
            "    if [ \"$FAKE_TMUX_MODE\" = changing ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo \"frame $c\";\n"
@@ -80,13 +86,18 @@ static void install_fake_tmux(void)
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo '\xe2\x94\x82 stream-stall hint now reads Retrying in seconds frame "
            "'\"$c\"' end';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = prompt_then_answer ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      if [ \"$c\" -le 6 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
+           "else printf '%%s\\n' '\xe2\x9d\xaf pasted repair prompt' "
+           "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
            "  new-session) shift; for a in \"$@\"; do echo \"ARG:[$a]\" >> '%s'; done; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
-           counter, counter, counter, counter, counter, counter, counter, counter, counter,
-           g_sendlog, g_createlog);
+           g_capturelog, counter, counter, counter, counter, counter, counter, counter, counter,
+           counter, counter, counter, counter, g_sendlog, g_createlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -120,6 +131,18 @@ static int sendlog_has(const char *needle)
 static int createlog_has(const char *needle)
 {
    FILE *f = fopen(g_createlog, "r");
+   if (!f)
+      return 0;
+   char buf[4096];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   return strstr(buf, needle) != NULL;
+}
+
+static int capturelog_has(const char *needle)
+{
+   FILE *f = fopen(g_capturelog, "r");
    if (!f)
       return 0;
    char buf[4096];
@@ -185,6 +208,59 @@ static void test_recv_ok_on_stable_pane(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
    assert(rc == 0);
    assert(strstr(buf, "STATIC OUTPUT") != NULL);
+}
+
+static int g_hb_calls;
+static void hb_counter_cb(void *ud)
+{
+   (void)ud;
+   g_hb_calls++;
+}
+
+/* A tmux-CLI turn makes no aimee HTTP calls, so recv must drive the liveness
+ * heartbeat itself or the stale-idle monitor reaps a healthy long turn (the
+ * claude roundtable-seat regression). The heartbeat fires on the first loop
+ * iteration, so even a short recv proves the wiring. */
+static void test_recv_drives_heartbeat(void)
+{
+   setenv("FAKE_TMUX_MODE", "changing", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   g_hb_calls = 0;
+   cli_session_set_heartbeat_cb(hb_counter_cb, NULL);
+   (void)cli_session_recv(&s, buf, sizeof(buf), 1000);
+   cli_session_set_heartbeat_cb(NULL, NULL);
+   assert(g_hb_calls >= 1);
+
+   /* With no callback set, recv must not crash and must not call the old one. */
+   g_hb_calls = 0;
+   s = fake_session();
+   (void)cli_session_recv(&s, buf, sizeof(buf), 1000);
+   assert(g_hb_calls == 0);
+}
+
+static void test_capture_joins_wraps_and_includes_scrollback(void)
+{
+   unlink(g_capturelog);
+   setenv("FAKE_TMUX_MODE", "stable", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   assert(cli_session_capture(&s, buf, sizeof(buf)) == 0);
+   assert(capturelog_has("capture-pane -p -J -S - -t aimee-faketest"));
+}
+
+static void test_recv_does_not_return_static_prompt_as_answer(void)
+{
+   setenv("FAKE_TMUX_MODE", "prompt_then_answer", 1);
+   char counter[300];
+   snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
+   unlink(counter);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   assert(rc == 0);
+   assert(strcmp(buf, "{\"ok\":true}") == 0);
 }
 
 static void test_recv_dead_session(void)
@@ -377,6 +453,48 @@ static void test_make_name_null_role(void)
    free(name);
 }
 
+static void test_execution_name_isolates_override_less_delegates(void)
+{
+   int reuse_a = 1, reuse_b = 1;
+   char *a =
+       cli_session_make_execution_name("claude", 1, "process-fallback", 0, "deleg-a", 0, &reuse_a);
+   char *b =
+       cli_session_make_execution_name("claude", 1, "process-fallback", 0, "deleg-b", 0, &reuse_b);
+   char *again = cli_session_make_execution_name("claude", 1, NULL, 0, "deleg-a", 0, NULL);
+   assert(a && b && again);
+   assert(strcmp(a, b) != 0);
+   assert(strcmp(a, again) == 0);
+   assert(reuse_a == 0 && reuse_b == 0);
+   free(a);
+   free(b);
+   free(again);
+}
+
+static void test_execution_name_preserves_primary_reuse(void)
+{
+   int reuse = 0;
+   char *bound = cli_session_make_execution_name("claude", 0, "web-123", 1, NULL, 0, &reuse);
+   assert(bound && reuse == 1);
+   char *want = cli_session_make_name("web-123", "cli");
+   assert(want && strcmp(bound, want) == 0);
+   free(bound);
+   free(want);
+
+   char *shared = cli_session_make_execution_name("claude", 1, NULL, 0, NULL, 0, &reuse);
+   assert(shared && reuse == 1);
+   want = cli_session_make_name("claude", "shared");
+   assert(want && strcmp(shared, want) == 0);
+   free(shared);
+   free(want);
+
+   char *isolated = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, &reuse);
+   char *isolated_again = cli_session_make_execution_name("claude", 1, "web-123", 1, NULL, 1, NULL);
+   assert(isolated && isolated_again && reuse == 0);
+   assert(strcmp(isolated, isolated_again) != 0);
+   free(isolated);
+   free(isolated_again);
+}
+
 /* --- cli_session_resolve_cwd tests --- */
 
 /* A bound cwd that exists on this host is used verbatim; no fallback. */
@@ -554,6 +672,27 @@ static void test_extract_claude_multiline(void)
    char *r = cli_session_extract_response(pane, "claude", NULL);
    assert(r != NULL);
    assert(strcmp(r, "line one\nline two") == 0);
+   free(r);
+}
+
+/* Claude renders long JSON strings as hard terminal rows.  tmux marks those as
+ * real newlines (not soft wraps), so extraction must make the structured result
+ * valid without flattening pretty-printed newlines between JSON fields. */
+static void test_extract_claude_json_hard_wrap_inside_string(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f {\"status\":\"ok\",\"evidence\":\"long text at the hard\n"
+                      "  terminal wrap\",\n"
+                      "  \"findings\":[]}\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   cJSON *parsed = cJSON_Parse(r);
+   assert(parsed != NULL);
+   cJSON *evidence = cJSON_GetObjectItemCaseSensitive(parsed, "evidence");
+   assert(cJSON_IsString(evidence));
+   assert(strstr(evidence->valuestring, "hard terminal wrap") != NULL);
+   cJSON_Delete(parsed);
    free(r);
 }
 
@@ -876,8 +1015,63 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
    }
 }
 
+/* Per-session claude HOME isolation: a fresh HOME with the OAuth token symlinked
+ * from the shared home and ~/.claude.json seeded from it; missing credentials
+ * fall back (-1) so a seat is never launched unauthenticated. */
+static void test_isolated_claude_home(void)
+{
+   char shared[128];
+   snprintf(shared, sizeof(shared), "/tmp/aimee-iso-%d", (int)getpid());
+   char cdir[192], creds[288], json[288], settings[288];
+   snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
+   mkdir(shared, 0700);
+   mkdir(cdir, 0700);
+   snprintf(creds, sizeof(creds), "%s/.credentials.json", cdir);
+   snprintf(json, sizeof(json), "%s/.claude.json", shared);
+   snprintf(settings, sizeof(settings), "%s/settings.json", cdir);
+   FILE *f = fopen(creds, "w");
+   assert(f);
+   fputs("{\"token\":\"x\"}", f);
+   fclose(f);
+   f = fopen(json, "w");
+   assert(f);
+   fputs("{\"oauthAccount\":{\"id\":\"a\"}}", f);
+   fclose(f);
+   f = fopen(settings, "w");
+   assert(f);
+   fputs("{}", f);
+   fclose(f);
+   setenv("HOME", shared, 1);
+
+   char home[PATH_MAX];
+   assert(cli_session_isolated_claude_home("/w/d", home, sizeof(home)) == 0);
+   assert(strncmp(home, shared, strlen(shared)) == 0); /* under the shared home */
+
+   struct stat st;
+   char p[512];
+   snprintf(p, sizeof(p), "%s/.claude/.credentials.json", home);
+   assert(lstat(p, &st) == 0 && S_ISLNK(st.st_mode)); /* creds SHARED via symlink */
+   snprintf(p, sizeof(p), "%s/.claude.json", home);
+   assert(stat(p, &st) == 0 && st.st_size > 0); /* per-session json seeded */
+   FILE *rf = fopen(p, "r");
+   assert(rf);
+   char buf[4096] = {0};
+   fread(buf, 1, sizeof(buf) - 1, rf);
+   fclose(rf);
+   assert(strstr(buf, "oauthAccount") && strstr(buf, "hasCompletedOnboarding"));
+   assert(strstr(buf, "/w/d")); /* trust seeded for the worktree */
+
+   /* No credentials in the shared home -> fall back to shared HOME (-1). */
+   unlink(creds);
+   char home2[PATH_MAX];
+   assert(cli_session_isolated_claude_home("/w/d", home2, sizeof(home2)) == -1);
+   printf("  PASS: test_isolated_claude_home\n");
+}
+
 int main(void)
 {
+   test_isolated_claude_home();
+
    printf("test_resolve_cwd_existing_used... ");
    test_resolve_cwd_existing_used();
    printf("OK\n");
@@ -916,6 +1110,10 @@ int main(void)
 
    printf("test_extract_claude_multiline... ");
    test_extract_claude_multiline();
+   printf("OK\n");
+
+   printf("test_extract_claude_json_hard_wrap_inside_string... ");
+   test_extract_claude_json_hard_wrap_inside_string();
    printf("OK\n");
 
    printf("test_extract_claude_skips_effort_status... ");
@@ -978,6 +1176,14 @@ int main(void)
    test_make_name_null_role();
    printf("OK\n");
 
+   printf("test_execution_name_isolates_override_less_delegates... ");
+   test_execution_name_isolates_override_less_delegates();
+   printf("OK\n");
+
+   printf("test_execution_name_preserves_primary_reuse... ");
+   test_execution_name_preserves_primary_reuse();
+   printf("OK\n");
+
    printf("test_strip_ansi_plain_text... ");
    test_strip_ansi_plain_text();
    printf("OK\n");
@@ -1034,6 +1240,15 @@ int main(void)
 
    printf("test_recv_ok_on_stable_pane... ");
    test_recv_ok_on_stable_pane();
+   test_recv_drives_heartbeat();
+   printf("OK\n");
+
+   printf("test_capture_joins_wraps_and_includes_scrollback... ");
+   test_capture_joins_wraps_and_includes_scrollback();
+   printf("OK\n");
+
+   printf("test_recv_does_not_return_static_prompt_as_answer... ");
+   test_recv_does_not_return_static_prompt_as_answer();
    printf("OK\n");
 
    printf("test_recv_dead_session... ");

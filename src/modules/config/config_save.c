@@ -181,8 +181,15 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    if (cfg->max_background_processes > 0)
       cJSON_AddNumberToObject(root, "max_background_processes", cfg->max_background_processes);
 
-   /* model_meta.* (defaults refresh_minutes=60, capability_routing=0) */
-   if (cfg->model_meta_refresh_minutes != 60 || cfg->model_meta_capability_routing)
+   if (cfg->prefer_local_agents)
+   {
+      cJSON *rt = cJSON_AddObjectToObject(root, "routing");
+      if (rt)
+         cJSON_AddBoolToObject(rt, "prefer_local", 1);
+   }
+
+   /* model_meta.* (defaults refresh_minutes=60, capability_routing=1) */
+   if (cfg->model_meta_refresh_minutes != 60 || !cfg->model_meta_capability_routing)
    {
       cJSON *mm = cJSON_AddObjectToObject(root, "model_meta");
       if (mm)
@@ -195,7 +202,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* search.* (web-search backend config) */
    if (cfg->search_backend[0] || cfg->search_max_results > 0 || cfg->search_searxng_url[0] ||
-       cfg->search_tavily_api_key[0])
+       cfg->search_tavily_api_key[0] || cfg->search_backends[0] || cfg->search_fetch_pages >= 0)
    {
       cJSON *sr = cJSON_AddObjectToObject(root, "search");
       if (sr)
@@ -208,6 +215,10 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(sr, "searxng_url", cfg->search_searxng_url);
          if (cfg->search_tavily_api_key[0])
             cJSON_AddStringToObject(sr, "tavily_api_key", cfg->search_tavily_api_key);
+         if (cfg->search_backends[0])
+            cJSON_AddStringToObject(sr, "backends", cfg->search_backends);
+         if (cfg->search_fetch_pages >= 0)
+            cJSON_AddBoolToObject(sr, "fetch_pages", cfg->search_fetch_pages ? 1 : 0);
       }
    }
 
@@ -449,12 +460,20 @@ int config_save(const config_t *cfg)
       if (cfg->memory_query_expansion_k > 0)
          cJSON_AddNumberToObject(qe, "k", cfg->memory_query_expansion_k);
    }
-   if (cfg->cache_aware_rewrite_enabled || cfg->cache_aware_rewrite_min_savings_tokens != 500 ||
+   if (cfg->transport_kb_pool_enabled || cfg->transport_server_keepalive_enabled ||
+       cfg->transport_thinclient_gzip_enabled || cfg->transport_kb_gzip_enabled ||
+       cfg->cache_aware_rewrite_enabled || cfg->cache_aware_rewrite_min_savings_tokens != 500 ||
        cfg->cache_aware_rewrite_hard_context_threshold != 0.85 ||
        cfg->cache_aware_rewrite_max_defer_turns != 20 ||
        cfg->cache_aware_rewrite_segment_check_turns != 5)
    {
       cJSON *transport = cJSON_AddObjectToObject(root, "transport");
+      cJSON_AddBoolToObject(transport, "kb_pool_enabled", cfg->transport_kb_pool_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "server_keepalive_enabled",
+                            cfg->transport_server_keepalive_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "thinclient_gzip_enabled",
+                            cfg->transport_thinclient_gzip_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(transport, "kb_gzip_enabled", cfg->transport_kb_gzip_enabled ? 1 : 0);
       cJSON *cr = cJSON_AddObjectToObject(transport, "cache_aware_rewrite");
       cJSON_AddBoolToObject(cr, "enabled", cfg->cache_aware_rewrite_enabled ? 1 : 0);
       cJSON_AddNumberToObject(cr, "min_savings_tokens",
@@ -906,6 +925,8 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "ocr_command", cfg->ocr_command);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
+   if (!cfg->code_cochange_git_enabled) /* default-on: persist only the opt-out */
+      cJSON_AddBoolToObject(root, "code_cochange_git_enabled", 0);
    if (cfg->wfe_live_forge_enabled) /* default-off: persist only the opt-in (enable) */
       cJSON_AddBoolToObject(root, "wfe_live_forge_enabled", 1);
    if (cfg->wfe_proposals_autoscan_enabled) /* default-off: persist only the opt-in */
@@ -1114,14 +1135,22 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* The economizer tier -- persist as a string only when non-default (default: safe). */
-   if (cfg->economizer_tier != ECON_TIER_SAFE)
-      cJSON_AddStringToObject(root, "economizer", econ_tier_name(cfg->economizer_tier));
+   /* SAFE is the default. Persist either non-default choice explicitly. */
+   if (cfg->economizer_mode != ECON_MODE_SAFE)
+   {
+      cJSON *econ = cJSON_AddObjectToObject(root, "economizer");
+      if (econ)
+         cJSON_AddStringToObject(econ, "mode", econ_mode_name(cfg->economizer_mode));
+   }
 
    /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
-    * unit_retry 2, unit_max 16, ci_retry_max 2). */
+    * unit_retry 2, unit_max 16, ci_retry_max 2; caps: max_turns 300, max_wall 1800,
+    * stale_abandon 3600, concurrency 8, auto_resume ON, max_resumes 50). */
    if (cfg->autonomy_skeptics != 0 || cfg->autonomy_fanout != 0 || cfg->autonomy_unit_retry != 2 ||
-       cfg->autonomy_unit_max != 16 || cfg->autonomy_ci_retry_max != 2)
+       cfg->autonomy_unit_max != 16 || cfg->autonomy_ci_retry_max != 2 ||
+       cfg->autonomy_max_turns != 300 || cfg->autonomy_max_wall_secs != 1800 ||
+       cfg->autonomy_stale_abandon_secs != 3600 || cfg->autonomy_concurrency != 8 ||
+       cfg->autonomy_auto_resume_cap_parks != 1 || cfg->autonomy_max_resumes != 50)
    {
       cJSON *autonomy = cJSON_AddObjectToObject(root, "autonomy");
       if (cfg->autonomy_skeptics != 0)
@@ -1134,6 +1163,19 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(autonomy, "unit_max", cfg->autonomy_unit_max);
       if (cfg->autonomy_ci_retry_max != 2)
          cJSON_AddNumberToObject(autonomy, "ci_retry_max", cfg->autonomy_ci_retry_max);
+      if (cfg->autonomy_max_turns != 300)
+         cJSON_AddNumberToObject(autonomy, "max_turns", cfg->autonomy_max_turns);
+      if (cfg->autonomy_max_wall_secs != 1800)
+         cJSON_AddNumberToObject(autonomy, "max_wall_secs", cfg->autonomy_max_wall_secs);
+      if (cfg->autonomy_stale_abandon_secs != 3600)
+         cJSON_AddNumberToObject(autonomy, "stale_abandon_secs", cfg->autonomy_stale_abandon_secs);
+      if (cfg->autonomy_concurrency != 8)
+         cJSON_AddNumberToObject(autonomy, "concurrency", cfg->autonomy_concurrency);
+      if (cfg->autonomy_auto_resume_cap_parks != 1)
+         cJSON_AddBoolToObject(autonomy, "auto_resume_cap_parks",
+                               cfg->autonomy_auto_resume_cap_parks);
+      if (cfg->autonomy_max_resumes != 50)
+         cJSON_AddNumberToObject(autonomy, "max_resumes", cfg->autonomy_max_resumes);
    }
 
    /* Session/worktree cleanup policy (only save if non-default) */

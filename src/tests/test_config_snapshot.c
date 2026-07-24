@@ -8,28 +8,29 @@
 #include <string.h>
 
 #include "aimee.h"
+#include "config_snapshot_test.h"
 #include "config_sections.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 
 /* P3 re-applier probe. */
 static _Atomic int g_reapply_calls = 0;
-static int g_last_agg = -1;
+static int g_last_mode = -1;
 static void probe_reapplier(const config_t *o, const config_t *n)
 {
    (void)o;
-   g_last_agg = n->economizer_tier;
+   g_last_mode = n->economizer_mode;
    atomic_fetch_add_explicit(&g_reapply_calls, 1, memory_order_relaxed);
 }
 
-/* Author a config file with a MARKER PAIR (aggressive, budget) via config_save so reload
+/* Author a config file with a MARKER PAIR (safe, budget) via config_save so reload
  * observes a real change. The pair is what the torn-read check keys on. */
-static void write_marker(int aggressive, int budget)
+static void write_marker(int safe, int budget)
 {
    static config_t c;
    memset(&c, 0, sizeof c);
    config_load(&c);
-   c.economizer_tier = aggressive ? ECON_TIER_AGGRESSIVE : ECON_TIER_OFF;
+   c.economizer_mode = safe ? ECON_MODE_SAFE : ECON_MODE_OFF;
    c.coord_closet_budget_bytes = budget;
    assert(config_save(&c) == 0);
 }
@@ -37,7 +38,120 @@ static void write_marker(int aggressive, int budget)
 static _Atomic int g_stop = 0;
 static _Atomic long g_reads = 0, g_torn = 0;
 
-/* The two configs written by the writer are {agg=1,budget=1111} and {agg=0,budget=2222};
+typedef struct
+{
+   pthread_mutex_t mutex;
+   pthread_cond_t changed;
+   int enabled[7][2];
+   int released[7][2];
+   unsigned hits[7][2];
+} snapshot_gate_t;
+
+typedef struct
+{
+   config_t value;
+   _Atomic int started;
+   _Atomic int done;
+} publish_once_t;
+
+typedef struct
+{
+   config_t value;
+   int result;
+   _Atomic int done;
+} read_once_t;
+
+static void snapshot_gate_hook(config_snapshot_test_event_t event, unsigned slot, void *opaque)
+{
+   snapshot_gate_t *gate = opaque;
+   assert(event > 0 && event < 7 && slot < 2);
+   pthread_mutex_lock(&gate->mutex);
+   gate->hits[event][slot]++;
+   pthread_cond_broadcast(&gate->changed);
+   while (gate->enabled[event][slot] && !gate->released[event][slot])
+      pthread_cond_wait(&gate->changed, &gate->mutex);
+   pthread_mutex_unlock(&gate->mutex);
+}
+
+static void snapshot_gate_init(snapshot_gate_t *gate)
+{
+   memset(gate, 0, sizeof(*gate));
+   assert(pthread_mutex_init(&gate->mutex, NULL) == 0);
+   assert(pthread_cond_init(&gate->changed, NULL) == 0);
+}
+
+static void snapshot_gate_destroy(snapshot_gate_t *gate)
+{
+   pthread_cond_destroy(&gate->changed);
+   pthread_mutex_destroy(&gate->mutex);
+}
+
+static void snapshot_gate_enable(snapshot_gate_t *gate, config_snapshot_test_event_t event,
+                                 unsigned slot)
+{
+   pthread_mutex_lock(&gate->mutex);
+   gate->enabled[event][slot] = 1;
+   gate->released[event][slot] = 0;
+   pthread_mutex_unlock(&gate->mutex);
+}
+
+static void snapshot_gate_wait(snapshot_gate_t *gate, config_snapshot_test_event_t event,
+                               unsigned slot, unsigned count)
+{
+   pthread_mutex_lock(&gate->mutex);
+   while (gate->hits[event][slot] < count)
+      pthread_cond_wait(&gate->changed, &gate->mutex);
+   pthread_mutex_unlock(&gate->mutex);
+}
+
+static unsigned snapshot_gate_hits(snapshot_gate_t *gate, config_snapshot_test_event_t event,
+                                   unsigned slot)
+{
+   pthread_mutex_lock(&gate->mutex);
+   unsigned hits = gate->hits[event][slot];
+   pthread_mutex_unlock(&gate->mutex);
+   return hits;
+}
+
+static void snapshot_gate_release(snapshot_gate_t *gate, config_snapshot_test_event_t event,
+                                  unsigned slot)
+{
+   pthread_mutex_lock(&gate->mutex);
+   gate->released[event][slot] = 1;
+   pthread_cond_broadcast(&gate->changed);
+   pthread_mutex_unlock(&gate->mutex);
+}
+
+static void *read_once_thread(void *opaque)
+{
+   read_once_t *once = opaque;
+   once->result = config_snapshot_get(&once->value);
+   atomic_store_explicit(&once->done, 1, memory_order_release);
+   return NULL;
+}
+
+static void *publish_once_thread(void *opaque)
+{
+   publish_once_t *once = opaque;
+   atomic_store_explicit(&once->started, 1, memory_order_release);
+   config_snapshot_init(&once->value);
+   atomic_store_explicit(&once->done, 1, memory_order_release);
+   return NULL;
+}
+
+static config_t snapshot_image(int marker)
+{
+   config_t image;
+   assert(config_snapshot_get(&image) == 0);
+   image.economizer_mode = marker & 1 ? ECON_MODE_SAFE : ECON_MODE_OFF;
+   image.coord_closet_budget_bytes = marker * 1009;
+   image.autonomy_max_turns = marker * 17;
+   image.server_api_rate_limit_per_min = marker * 31;
+   image.require_aimee_git = marker & 1;
+   return image;
+}
+
+/* The two configs are {safe,budget=1111} and {off,budget=2222};
  * a reader must never observe a mismatched pair (that would be a torn cross-slot read). */
 static void *reader_thread(void *arg)
 {
@@ -48,8 +162,8 @@ static void *reader_thread(void *arg)
       if (config_snapshot_get(&c) != 0)
          continue;
       atomic_fetch_add_explicit(&g_reads, 1, memory_order_relaxed);
-      int a = (c.economizer_tier == ECON_TIER_AGGRESSIVE && c.coord_closet_budget_bytes == 1111);
-      int b = (c.economizer_tier == ECON_TIER_OFF && c.coord_closet_budget_bytes == 2222);
+      int a = (c.economizer_mode == ECON_MODE_SAFE && c.coord_closet_budget_bytes == 1111);
+      int b = (c.economizer_mode == ECON_MODE_OFF && c.coord_closet_budget_bytes == 2222);
       if (!a && !b)
          atomic_fetch_add_explicit(&g_torn, 1, memory_order_relaxed);
    }
@@ -82,7 +196,7 @@ int main(void)
       config_snapshot_init(&c0);
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_tier == ECON_TIER_AGGRESSIVE);
+      assert(got.economizer_mode == ECON_MODE_SAFE);
       assert(got.coord_closet_budget_bytes == 1111);
    }
 
@@ -95,7 +209,7 @@ int main(void)
    {
       config_t got;
       assert(config_snapshot_get(&got) == 0);
-      assert(got.economizer_tier == ECON_TIER_OFF);
+      assert(got.economizer_mode == ECON_MODE_OFF);
       assert(got.coord_closet_budget_bytes == 2222);
    }
    /* reloading the same file again is a no-op */
@@ -105,10 +219,10 @@ int main(void)
    {
       config_reload_register_reapplier(probe_reapplier);
       int before = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
-      write_marker(1, 1111); /* change back to aggressive=1 */
+      write_marker(1, 1111); /* change back to safe */
       assert(config_reload() == 1);
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == before + 1);
-      assert(g_last_agg == ECON_TIER_AGGRESSIVE); /* re-applier saw the NEW value */
+      assert(g_last_mode == ECON_MODE_SAFE); /* re-applier saw the NEW value */
       /* a no-op reload does NOT fire the re-applier */
       int mid = atomic_load_explicit(&g_reapply_calls, memory_order_relaxed);
       assert(config_reload() == 0);
@@ -136,8 +250,8 @@ int main(void)
    {
       long v;
       /* a non-config autonomy var -> 0 so the caller uses its own env/default */
-      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
-      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 0);
+      platform_unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_USD_PER_SEC", &v) == 0);
       /* operator env override wins */
       platform_setenv("AIMEE_AUTONOMY_SKEPTICS", "7");
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 7);
@@ -150,6 +264,142 @@ int main(void)
       assert(config_save(&sc) == 0);
       assert(config_reload() == 1);
       assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 9);
+
+      /* Run-safety caps are now config-backed + live too (GUI-tunable). Env override
+       * wins; otherwise the live snapshot; a config.set applies without a restart. */
+      platform_setenv("AIMEE_AUTONOMY_MAX_WALL_SECS", "5400");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 5400);
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_WALL_SECS");
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+      memset(&sc, 0, sizeof sc);
+      config_load(&sc);
+      sc.autonomy_max_turns = 1234;
+      sc.autonomy_max_wall_secs = 7200;
+      sc.autonomy_auto_resume_cap_parks = 0; /* flip the default (ON) so the read is meaningful */
+      assert(config_save(&sc) == 0);
+      assert(config_reload() == 1);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 1 && v == 1234);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_WALL_SECS", &v) == 1 && v == 7200);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_AUTO_RESUME_CAP_PARKS", &v) == 1 && v == 0);
+   }
+
+   /* --- bounded saturation + WRITER_RESERVED is retryable contention --- */
+   {
+      unsigned active = config_snapshot_test_active_slot();
+      config_t out, before;
+      memset(&out, 0xa5, sizeof(out));
+      before = out;
+      assert(config_snapshot_test_set_slot_state(active, config_snapshot_test_reader_max()) == 0);
+      assert(config_snapshot_get(&out) == -1);
+      assert(memcmp(&out, &before, sizeof(out)) == 0);
+      assert(config_snapshot_test_get_slot_state(active) == config_snapshot_test_reader_max());
+      assert(config_snapshot_test_set_slot_state(active, 0) == 0);
+
+      snapshot_gate_t gate;
+      snapshot_gate_init(&gate);
+      config_snapshot_test_set_hook(snapshot_gate_hook, &gate);
+      assert(config_snapshot_test_set_slot_state(active, config_snapshot_test_writer_reserved()) ==
+             0);
+      read_once_t reader = {0};
+      pthread_t thread;
+      assert(pthread_create(&thread, NULL, read_once_thread, &reader) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, active, 3);
+      assert(!atomic_load_explicit(&reader.done, memory_order_acquire));
+      assert(config_snapshot_test_set_slot_state(active, 0) == 0);
+      pthread_join(thread, NULL);
+      assert(reader.result == 0);
+      config_snapshot_test_set_hook(NULL, NULL);
+      snapshot_gate_destroy(&gate);
+   }
+
+   /* --- delayed reader: writer reservation wins, so the old payload is unreachable --- */
+   {
+      config_t base = snapshot_image(10), next = snapshot_image(11), final = snapshot_image(12);
+      config_snapshot_init(&base);
+      unsigned old = config_snapshot_test_active_slot();
+      snapshot_gate_t gate;
+      snapshot_gate_init(&gate);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_WRITE, old);
+      config_snapshot_test_set_hook(snapshot_gate_hook, &gate);
+
+      read_once_t reader = {0};
+      publish_once_t writer = {.value = final};
+      pthread_t read_thread, write_thread;
+      assert(pthread_create(&read_thread, NULL, read_once_thread, &reader) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old, 1);
+      config_snapshot_init(&next); /* first publication makes old the inactive target */
+      assert(pthread_create(&write_thread, NULL, publish_once_thread, &writer) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_WRITE, old, 1);
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old);
+      pthread_join(read_thread, NULL);
+      assert(reader.result == 0);
+      assert(snapshot_gate_hits(&gate, CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, old) == 0);
+      assert(!atomic_load_explicit(&writer.done, memory_order_acquire));
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_WRITE, old);
+      pthread_join(write_thread, NULL);
+      config_snapshot_test_set_hook(NULL, NULL);
+      snapshot_gate_destroy(&gate);
+   }
+
+   /* --- delayed reader: reader pin wins, so the writer cannot reserve early --- */
+   {
+      config_t base = snapshot_image(20), next = snapshot_image(21), final = snapshot_image(22);
+      config_snapshot_init(&base);
+      unsigned old = config_snapshot_test_active_slot();
+      snapshot_gate_t gate;
+      snapshot_gate_init(&gate);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, old);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE, old);
+      config_snapshot_test_set_hook(snapshot_gate_hook, &gate);
+
+      read_once_t reader = {0};
+      publish_once_t writer = {.value = final};
+      pthread_t read_thread, write_thread;
+      assert(pthread_create(&read_thread, NULL, read_once_thread, &reader) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old, 1);
+      config_snapshot_init(&next);
+      assert(pthread_create(&write_thread, NULL, publish_once_thread, &writer) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE, old, 1);
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_AFTER_OBSERVE, old);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, old, 1);
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_BEFORE_RESERVE, old);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED, old, 1);
+      assert(!atomic_load_explicit(&writer.done, memory_order_acquire));
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_PIN_ACQUIRED, old);
+      pthread_join(read_thread, NULL);
+      pthread_join(write_thread, NULL);
+      assert(reader.result == 0);
+      config_snapshot_test_set_hook(NULL, NULL);
+      snapshot_gate_destroy(&gate);
+   }
+
+   /* --- validated old-slot pin blocks the consecutive publisher that would reuse it --- */
+   {
+      config_t base = snapshot_image(30), next = snapshot_image(31), final = snapshot_image(32);
+      config_snapshot_init(&base);
+      unsigned old = config_snapshot_test_active_slot();
+      snapshot_gate_t gate;
+      snapshot_gate_init(&gate);
+      snapshot_gate_enable(&gate, CONFIG_SNAPSHOT_TEST_PIN_VALIDATED, old);
+      config_snapshot_test_set_hook(snapshot_gate_hook, &gate);
+
+      read_once_t reader = {0};
+      publish_once_t writer = {.value = final};
+      pthread_t read_thread, write_thread;
+      assert(pthread_create(&read_thread, NULL, read_once_thread, &reader) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_PIN_VALIDATED, old, 1);
+      config_snapshot_init(&next);
+      assert(pthread_create(&write_thread, NULL, publish_once_thread, &writer) == 0);
+      snapshot_gate_wait(&gate, CONFIG_SNAPSHOT_TEST_RESERVE_CONTENDED, old, 1);
+      assert(!atomic_load_explicit(&writer.done, memory_order_acquire));
+      snapshot_gate_release(&gate, CONFIG_SNAPSHOT_TEST_PIN_VALIDATED, old);
+      pthread_join(read_thread, NULL);
+      pthread_join(write_thread, NULL);
+      assert(reader.result == 0);
+      config_snapshot_test_set_hook(NULL, NULL);
+      snapshot_gate_destroy(&gate);
    }
 
    /* --- concurrent torn-read stress: readers spin while the writer toggles + reloads --- */

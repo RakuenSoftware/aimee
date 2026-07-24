@@ -4,7 +4,15 @@
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
 - **Owns:** feature-liveness evidence/dispositions and deletion of the current background curator
 - **Implementation dependencies:** none; this proposal may land first
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
+
+> **2026-07-23 amendment reconciliation.** This proposal is essentially unaffected by the suite
+> amendment: its liveness-evidence rule and the background-curator removal stand. The amendment only
+> strengthens the evidence surface — because every inter-module interaction is now a bus event
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)),
+> a feature that publishes and subscribes no bus event and has no consumer outside its own cluster is
+> demonstrably dead by construction, which the liveness audit may use as additional mechanical
+> evidence. No change to this proposal's dispositions is required; it still may land first.
 
 ## Decision
 

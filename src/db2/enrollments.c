@@ -7,6 +7,8 @@
 #include "kb_identity.h" /* kb_cert_serial_normalize for the (issuer,serial) key */
 #include "log.h"
 
+#include <openssl/rand.h>
+
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,45 +36,107 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_enrollment_row_t *row)
    c = aimee_pg_column_text(st, 8);
    snprintf(row->revoked_at, sizeof(row->revoked_at), "%s", c ? c : "");
    row->legacy = (int)aimee_pg_column_int64(st, 9);
+   c = aimee_pg_column_text(st, 10);
+   snprintf(row->authority_id, sizeof(row->authority_id), "%s", c ? c : "");
 }
 
 #define ENROLL_COLS                                                                                \
    "id, scope, fingerprint, serial, state, issued_at, last_seen_at, expires_at, revoked_at, "      \
-   "legacy"
+   "legacy, authority_id"
+
+static int authority_generate(char out[33])
+{
+   static const char hex[] = "0123456789abcdef";
+   unsigned char raw[16];
+   if (RAND_bytes(raw, sizeof(raw)) != 1)
+      return -1;
+   for (size_t i = 0; i < sizeof(raw); i++)
+   {
+      out[i * 2] = hex[raw[i] >> 4];
+      out[i * 2 + 1] = hex[raw[i] & 0xf];
+   }
+   out[32] = '\0';
+   return 0;
+}
 
 static void revcache_put(const char *fp, int revoked); /* defined below */
 
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id)
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
 {
-   if (!fingerprint || !fingerprint[0])
+   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
+       !cert_serial_norm[0])
       return -1;
    void *conn = db2_conn();
    if (!conn)
+      return -1;
+   char authority_id[33];
+   if (authority_generate(authority_id) != 0)
       return -1;
    /* On a fingerprint conflict, refresh only metadata and ONLY for a non-revoked
     * row (the WHERE guard) — the redeem path must never resurrect a revoked cert.
     * Normal redeems present a fresh cert (new serial => new fingerprint), so the
     * conflict path is just idempotent-retry / re-registration. */
    const char *sql =
-       "INSERT INTO kb_enrollments (scope, fingerprint, serial, expires_at, legacy) "
-       "VALUES (?1, ?2, ?3, ?4, ?5) "
+       "INSERT INTO kb_enrollments (scope, fingerprint, serial, expires_at, legacy, authority_id, "
+       "cert_issuer, cert_serial_norm) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) "
        "ON CONFLICT (fingerprint) DO UPDATE SET scope=EXCLUDED.scope, serial=EXCLUDED.serial, "
-       "expires_at=EXCLUDED.expires_at WHERE kb_enrollments.revoked_at='' RETURNING id";
+       "expires_at=EXCLUDED.expires_at WHERE kb_enrollments.revoked_at='' AND "
+       "kb_enrollments.cert_issuer=EXCLUDED.cert_issuer AND "
+       "kb_enrollments.cert_serial_norm=EXCLUDED.cert_serial_norm RETURNING id";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", scope ? scope : "");
    aimee_pg_bind_text(st, "?2", fingerprint);
-   aimee_pg_bind_text(st, "?3", serial ? serial : "");
+   aimee_pg_bind_text(st, "?3", cert_serial_norm);
    aimee_pg_bind_text(st, "?4", expires_at ? expires_at : "");
    aimee_pg_bind_int64(st, "?5", legacy ? 1 : 0);
+   aimee_pg_bind_text(st, "?6", authority_id);
+   aimee_pg_bind_text(st, "?7", cert_issuer);
+   aimee_pg_bind_text(st, "?8", cert_serial_norm);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    int64_t id = (step == AIMEE_PG_ROW) ? aimee_pg_column_int64(st, 0) : 0;
    aimee_pg_finalize(st);
    if (step != AIMEE_PG_ROW)
       return -1; /* e.g. conflict on an already-revoked fp: left revoked, no id */
+   if (out_id)
+      *out_id = id;
+   return 0;
+}
+
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id)
+{
+   if (!old_fingerprint || !old_fingerprint[0] || !old_issuer || !old_issuer[0] ||
+       !old_serial_norm || !old_serial_norm[0] || !scope || !scope[0] || !new_fingerprint ||
+       !new_fingerprint[0] || !new_issuer || !new_issuer[0] || !new_serial_norm ||
+       !new_serial_norm[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT kb_enrollment_renew(?1,?2,?3,?4,?5,?6,?7)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", old_fingerprint);
+   aimee_pg_bind_text(st, "?2", old_issuer);
+   aimee_pg_bind_text(st, "?3", old_serial_norm);
+   aimee_pg_bind_text(st, "?4", scope);
+   aimee_pg_bind_text(st, "?5", new_fingerprint);
+   aimee_pg_bind_text(st, "?6", new_issuer);
+   aimee_pg_bind_text(st, "?7", new_serial_norm);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int64_t id = step == AIMEE_PG_ROW ? aimee_pg_column_int64(st, 0) : 0;
+   aimee_pg_finalize(st);
+   if (step != AIMEE_PG_ROW || id <= 0)
+      return -1;
    if (out_id)
       *out_id = id;
    return 0;
@@ -296,6 +360,80 @@ int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_s
    return revoked;
 }
 
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm)
+{
+   if (!cert_issuer || !cert_issuer[0] || !cert_serial_norm || !cert_serial_norm[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT state, revoked_at FROM kb_enrollments WHERE cert_issuer=?1 AND "
+                        "cert_serial_norm=?2",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", cert_issuer);
+   aimee_pg_bind_text(st, "?2", cert_serial_norm);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int status = 0; /* an unknown identity is not active */
+   if (step == AIMEE_PG_ROW)
+   {
+      const char *state = aimee_pg_column_text(st, 0);
+      const char *revoked_at = aimee_pg_column_text(st, 1);
+      if (state && strcmp(state, "active") == 0 && (!revoked_at || !revoked_at[0]))
+         status = 1;
+      else if (!state || (strcmp(state, "active") != 0 && strcmp(state, "revoked") != 0))
+         status = -1;
+   }
+   else if (step != AIMEE_PG_DONE)
+      status = -1;
+   aimee_pg_finalize(st);
+   return status;
+}
+
+int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
+                                     const char *cert_serial_norm, char out_authority[33])
+{
+   if (!fingerprint || !fingerprint[0] || !cert_issuer || !cert_issuer[0] || !cert_serial_norm ||
+       !cert_serial_norm[0] || !out_authority)
+      return -1;
+   out_authority[0] = '\0';
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT authority_id FROM kb_enrollments WHERE fingerprint=?1 AND cert_issuer=?2 "
+       "AND cert_serial_norm=?3 AND state='active' AND revoked_at=''",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", fingerprint);
+   aimee_pg_bind_text(st, "?2", cert_issuer);
+   aimee_pg_bind_text(st, "?3", cert_serial_norm);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int rc = 1;
+   if (step == AIMEE_PG_ROW)
+   {
+      const char *authority = aimee_pg_column_text(st, 0);
+      if (authority && strlen(authority) == 32)
+      {
+         memcpy(out_authority, authority, 33);
+         rc = 0;
+      }
+      else
+         rc = -1;
+   }
+   else if (step != AIMEE_PG_DONE)
+      rc = -1;
+   aimee_pg_finalize(st);
+   return rc;
+}
+
 /* Eager one-time backfill of the immutable revocation key on legacy enrollments
  * (P1 I5): populate cert_issuer + cert_serial_norm for every active row that has a
  * serial but no normalized key yet, so revocation-by-key works immediately — no
@@ -407,20 +545,25 @@ void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
    void *conn = db2_conn();
    if (!conn)
       return;
+   char authority_id[33];
+   if (authority_generate(authority_id) != 0)
+      return;
    /* Upsert: backfill a legacy row for a pre-S2a cert on first use, else bump
     * last_seen. The conflict path touches ONLY last_seen_at — never state or
     * revoked_at — so a revoked cert is not resurrected by being used. */
    char err[256] = "";
    aimee_pg_stmt_t *st =
        aimee_pg_prepare(conn,
-                        "INSERT INTO kb_enrollments (scope, fingerprint, legacy, last_seen_at) "
-                        "VALUES (?1, ?2, 1, pg_now_text()) "
+                        "INSERT INTO kb_enrollments "
+                        "(scope, fingerprint, legacy, last_seen_at, authority_id) "
+                        "VALUES (?1, ?2, 1, pg_now_text(), ?3) "
                         "ON CONFLICT (fingerprint) DO UPDATE SET last_seen_at=pg_now_text()",
                         err, sizeof(err));
    if (!st)
       return;
    aimee_pg_bind_text(st, "?1", scope ? scope : "");
    aimee_pg_bind_text(st, "?2", fingerprint);
+   aimee_pg_bind_text(st, "?3", authority_id);
    aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
 }

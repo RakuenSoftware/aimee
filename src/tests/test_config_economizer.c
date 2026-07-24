@@ -1,5 +1,5 @@
-/* test_config_economizer.c: the single tiered economizer control
- * (economizer: off|safe|aggressive) — tier resolution, defaults, and the
+/* test_config_economizer.c: the economizer policy control
+ * (economizer: {mode: off|safe|aggressive}) — mode resolution, defaults, and the
  * save/load round-trip — plus the Coordinate Closet tuning round-trip. Kept
  * separate from test_config.c, which is at the build-integrity line-count limit. */
 #include <assert.h>
@@ -13,62 +13,62 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
-/* Tier resolution: OFF disables all economization; SAFE enables reduction without
- * live gateway mutation; AGGRESSIVE adds live mutation; modules.economizer:false is
- * an authoritative hard-kill over any tier. Pure — no file I/O. */
+/* Mode resolution and modules.economizer hard kill. Pure — no I/O. */
 static void test_tier_resolution(void)
 {
    config_t c;
    memset(&c, 0, sizeof c);
-   c.module_economizer = -1; /* unspecified -> tier is authoritative */
+   c.module_economizer = -1; /* unspecified -> mode is authoritative */
 
    econ_preset_t ep;
 
-   /* OFF tier: no economization at all -> every preset lever is off. */
-   c.economizer_tier = ECON_TIER_OFF;
-   assert(econ_tier(&c) == ECON_TIER_OFF);
+   /* OFF: no economization at all -> every legacy preset lever is off. */
+   c.economizer_mode = ECON_MODE_OFF;
+   assert(econ_mode(&c) == ECON_MODE_OFF);
    assert(econ_reduction_master_on(&c) == 0);
    assert(econ_gateway_mutate_on(&c) == 0);
    econ_preset(&c, &ep);
-   assert(ep.history_fold == 0 && ep.command_filter == 0 && ep.compress == 0 &&
-          ep.gateway_seam == 0);
+   assert(ep.json_compact == 0 && ep.history_fold == 0 && ep.command_filter == 0 &&
+          ep.compress == 0 && ep.gateway_seam == 0);
 
-   /* SAFE tier: reduction on (fold + condensation), but no live gateway mutation. */
-   c.economizer_tier = ECON_TIER_SAFE;
+   /* SAFE: only strict fresh-result JSON compaction. */
+   c.economizer_mode = ECON_MODE_SAFE;
+   assert(econ_mode(&c) == ECON_MODE_SAFE);
    assert(econ_reduction_master_on(&c) == 1);
-   assert(econ_gateway_mutate_on(&c) == 0); /* live mutation is aggressive-only */
+   assert(econ_gateway_mutate_on(&c) == 0);
    econ_preset(&c, &ep);
-   assert(ep.history_fold == 1 && ep.command_filter == 1);
-   assert(ep.compress == 0 && ep.gateway_seam == 0); /* lossy/mutating levers off */
-   assert(ep.freeze_guard_horizon == 1);
+   assert(ep.json_compact == 1 && ep.history_fold == 0 && ep.command_filter == 0 &&
+          ep.compress == 0 && ep.gateway_seam == 0);
 
-   /* AGGRESSIVE tier: reduction on + lossy compress + live mutation (OpenAI-only
-    * enforced at the call site). */
-   c.economizer_tier = ECON_TIER_AGGRESSIVE;
+   /* AGGRESSIVE: safe compaction plus the lossy reducers. */
+   c.economizer_mode = ECON_MODE_AGGRESSIVE;
+   assert(econ_mode(&c) == ECON_MODE_AGGRESSIVE);
    assert(econ_reduction_master_on(&c) == 1);
    assert(econ_gateway_mutate_on(&c) == 1);
    econ_preset(&c, &ep);
-   assert(ep.history_fold == 1 && ep.command_filter == 1);
-   assert(ep.compress == 1 && ep.gateway_seam == 1);
-   assert(ep.gateway_session_disable_ttl_ms == 3600000);
+   assert(ep.json_compact == 1 && ep.history_fold == 1 && ep.command_filter == 1 &&
+          ep.compress == 1 && ep.gateway_seam == 1);
 
-   /* modules.economizer:false is an authoritative hard-kill over any tier. */
+   /* modules.economizer:false is an authoritative hard-kill over either mode. */
    c.module_economizer = 0;
-   assert(econ_tier(&c) == ECON_TIER_OFF);
+   assert(econ_mode(&c) == ECON_MODE_OFF);
    assert(econ_reduction_master_on(&c) == 0);
    assert(econ_gateway_mutate_on(&c) == 0);
    econ_preset(&c, &ep);
    assert(ep.history_fold == 0 && ep.gateway_seam == 0);
 
-   /* the tier parser + names round-trip. */
-   assert(econ_tier_parse("off") == ECON_TIER_OFF);
-   assert(econ_tier_parse("safe") == ECON_TIER_SAFE);
-   assert(econ_tier_parse("aggressive") == ECON_TIER_AGGRESSIVE);
-   assert(econ_tier_parse("aggro") == ECON_TIER_AGGRESSIVE);
-   assert(econ_tier_parse("bogus") == ECON_TIER_SAFE); /* unknown -> safe */
-   assert(strcmp(econ_tier_name(ECON_TIER_OFF), "off") == 0);
-   assert(strcmp(econ_tier_name(ECON_TIER_SAFE), "safe") == 0);
-   assert(strcmp(econ_tier_name(ECON_TIER_AGGRESSIVE), "aggressive") == 0);
+   /* The parser accepts exactly the three public modes, case-insensitively. */
+   assert(econ_mode_parse("off") == ECON_MODE_OFF);
+   assert(econ_mode_parse("safe") == ECON_MODE_SAFE);
+   assert(econ_mode_parse("aggressive") == ECON_MODE_AGGRESSIVE);
+   assert(econ_mode_parse("aggro") == -1);
+   assert(econ_mode_parse("proof_gated") == -1);
+   assert(econ_mode_parse("bogus") == -1);
+   assert(econ_mode_parse("OFF") == ECON_MODE_OFF);
+   assert(econ_mode_parse(NULL) == -1);
+   assert(strcmp(econ_mode_name(ECON_MODE_OFF), "off") == 0);
+   assert(strcmp(econ_mode_name(ECON_MODE_SAFE), "safe") == 0);
+   assert(strcmp(econ_mode_name(ECON_MODE_AGGRESSIVE), "aggressive") == 0);
 
    /* NULL-safe */
    assert(econ_reduction_master_on(NULL) == 0);
@@ -94,15 +94,16 @@ static void test_reload_class(void)
    assert(config_field_lookup("reduce.history_fold") == NULL);
    assert(config_field_lookup("reduce.command_filter") == NULL);
 
-   /* the single `economizer` tier IS a settable HOT field (get/set as a string). */
-   const config_field_t *econ = config_field_lookup("economizer");
+   /* The single economizer.mode field is HOT and accepts only public modes. */
+   const config_field_t *econ = config_field_lookup("economizer.mode");
    assert(econ && econ->reload_class == RELOAD_HOT);
    config_t c;
    memset(&c, 0, sizeof c);
-   c.economizer_tier = ECON_TIER_SAFE;
+   c.economizer_mode = ECON_MODE_OFF;
+   assert(config_field_set_value(&c, econ, "safe") == 0 && c.economizer_mode == ECON_MODE_SAFE);
    assert(config_field_set_value(&c, econ, "aggressive") == 0 &&
-          c.economizer_tier == ECON_TIER_AGGRESSIVE);
-   assert(config_field_set_value(&c, econ, "off") == 0 && c.economizer_tier == ECON_TIER_OFF);
+          c.economizer_mode == ECON_MODE_AGGRESSIVE);
+   assert(config_field_set_value(&c, econ, "off") == 0 && c.economizer_mode == ECON_MODE_OFF);
    assert(config_field_set_value(&c, econ, "bogus") == -1); /* invalid token rejected */
    cJSON *v = config_field_value_json(&c, econ);            /* reads back as a string */
    assert(cJSON_IsString(v) && strcmp(v->valuestring, "off") == 0);
@@ -125,54 +126,64 @@ int main(void)
    platform_unsetenv("AIMEE_HOME");
    platform_setenv("AIMEE_NO_CACHE", "1");
 
-   /* --- defaults: economizer tier SAFE, Coordinate Closet on --- */
+   /* --- defaults: economizer SAFE, Coordinate Closet on --- */
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg); /* missing file -> defaults */
-      assert(cfg.economizer_tier == ECON_TIER_SAFE);
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
       assert(cfg.coord_closet_enabled == 1);
    }
 
-   /* --- economizer tier: save/load round-trip (string form) --- */
+   /* --- economizer mode: save/load round-trip (nested object form) --- */
    {
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
-      assert(cfg.economizer_tier == ECON_TIER_SAFE); /* default is safe */
-      cfg.economizer_tier = ECON_TIER_AGGRESSIVE;
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
+      cfg.economizer_mode = ECON_MODE_AGGRESSIVE;
       assert(config_save(&cfg) == 0);
 
       static config_t cfg2;
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.economizer_tier ==
-             ECON_TIER_AGGRESSIVE); /* persisted as economizer: aggressive */
+      assert(cfg2.economizer_mode == ECON_MODE_AGGRESSIVE);
 
-      /* off also round-trips (non-default); safe is the default and is not persisted. */
-      cfg.economizer_tier = ECON_TIER_OFF;
+      /* OFF is persisted because SAFE is the default. */
+      cfg.economizer_mode = ECON_MODE_OFF;
       assert(config_save(&cfg) == 0);
       memset(&cfg2, 0, sizeof(cfg2));
       config_load(&cfg2);
-      assert(cfg2.economizer_tier == ECON_TIER_OFF);
+      assert(cfg2.economizer_mode == ECON_MODE_OFF);
    }
 
-   /* --- deprecated `economizer: {enabled,aggressive}` object form still maps to a tier --- */
+   /* --- only the exact nested public shape is accepted; legacy forms hard fail --- */
    {
       config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
-      cfg.economizer_tier = ECON_TIER_SAFE;
-      cJSON *root = cJSON_Parse("{\"economizer\":{\"enabled\":false}}");
+      cJSON *root = cJSON_Parse("{\"economizer\":{\"mode\":\"safe\"}}");
       assert(root);
-      config_parse_economizer_section(&cfg, root);
-      assert(cfg.economizer_tier == ECON_TIER_OFF); /* enabled:false -> off */
+      assert(config_parse_economizer_section(&cfg, root) == 0);
+      assert(cfg.economizer_mode == ECON_MODE_SAFE);
       cJSON_Delete(root);
 
-      root = cJSON_Parse("{\"economizer\":{\"enabled\":true,\"aggressive\":true}}");
-      assert(root);
-      config_parse_economizer_section(&cfg, root);
-      assert(cfg.economizer_tier == ECON_TIER_AGGRESSIVE);
-      cJSON_Delete(root);
+      const char *invalid[] = {
+          "{\"economizer\":\"safe\"}",
+          "{\"economizer\":\"aggressive\"}",
+          "{\"economizer\":{\"enabled\":false}}",
+          "{\"economizer\":{\"mode\":\"proof_gated\"}}",
+          "{\"economizer\":{\"mode\":\"off\",\"extra\":true}}",
+          "{\"economizer\":{\"mode\":\"off\",\"mode\":\"safe\"}}",
+          "{\"economizer\":{\"mode\":true}}",
+          "{\"economizer\":{}}",
+      };
+      for (size_t i = 0; i < sizeof invalid / sizeof invalid[0]; i++)
+      {
+         root = cJSON_Parse(invalid[i]);
+         assert(root);
+         assert(config_parse_economizer_section(&cfg, root) == -1);
+         cJSON_Delete(root);
+      }
    }
 
    /* --- Coordinate Closet tuning (compact.coord_closet) round-trips byte-equal --- */
@@ -247,18 +258,20 @@ int main(void)
       assert(config_module_enabled(cfg3.module_memory, 1) == 1);     /* -1 -> env default ON */
       assert(config_module_enabled(cfg3.module_memory, 0) == 0);     /* -1 -> env default OFF */
 
-      /* modules.economizer:false is an authoritative hard-kill over the tier; otherwise the
-       * tier decides. */
+      /* modules.economizer:false hard-kills every active mode. */
       config_t ec;
       memset(&ec, 0, sizeof(ec));
-      ec.economizer_tier = ECON_TIER_SAFE;
-      ec.module_economizer = 0; /* hard kill regardless of tier */
+      ec.economizer_mode = ECON_MODE_AGGRESSIVE;
+      ec.module_economizer = 0;
+      assert(econ_mode(&ec) == ECON_MODE_OFF);
       assert(econ_reduction_master_on(&ec) == 0);
-      ec.module_economizer = 1; /* not killed -> tier decides */
+      ec.module_economizer = 1;
+      assert(econ_mode(&ec) == ECON_MODE_AGGRESSIVE);
       assert(econ_reduction_master_on(&ec) == 1);
-      ec.module_economizer = -1; /* unspecified -> tier decides */
+      ec.module_economizer = -1;
+      assert(econ_mode(&ec) == ECON_MODE_AGGRESSIVE);
       assert(econ_reduction_master_on(&ec) == 1);
-      ec.economizer_tier = ECON_TIER_OFF;
+      ec.economizer_mode = ECON_MODE_OFF;
       assert(econ_reduction_master_on(&ec) == 0);
    }
 

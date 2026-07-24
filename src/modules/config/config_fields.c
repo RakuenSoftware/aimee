@@ -10,7 +10,6 @@
 #include "config_fields.h"
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> /* strcasecmp for the economizer tier token check */
 
 /* Entries omit the trailing reload_class -> RELOAD_HOT (0) by C zero-fill; suppress the
  * pedantic missing-field-initializer warning for the whole intentional table (P2). */
@@ -142,6 +141,8 @@ const config_field_t config_fields[] = {
     {"ocr_command", offsetof(config_t, ocr_command), sizeof(((config_t *)0)->ocr_command), 0,
      CFG_STRING},
     {"css_style_graph_enabled", offsetof(config_t, css_style_graph_enabled), sizeof(int), 0,
+     CFG_BOOL},
+    {"code_cochange_git_enabled", offsetof(config_t, code_cochange_git_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"wfe_live_forge_enabled", offsetof(config_t, wfe_live_forge_enabled), sizeof(int), 0,
      CFG_BOOL},
@@ -299,6 +300,14 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_INT},
     {"cache_aware_rewrite_enabled", offsetof(config_t, cache_aware_rewrite_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"transport.kb_pool_enabled", offsetof(config_t, transport_kb_pool_enabled), sizeof(int), 0,
+     CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.server_keepalive_enabled", offsetof(config_t, transport_server_keepalive_enabled),
+     sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.thinclient_gzip_enabled", offsetof(config_t, transport_thinclient_gzip_enabled),
+     sizeof(int), 0, CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
+    {"transport.kb_gzip_enabled", offsetof(config_t, transport_kb_gzip_enabled), sizeof(int), 0,
+     CFG_BOOL, RELOAD_HOT, FGROUP_ADVANCED},
     {"cost_reward_enabled", offsetof(config_t, cost_reward_enabled), sizeof(int), 0, CFG_BOOL},
     {"cost_reward_lambda_pct", offsetof(config_t, cost_reward_lambda_pct), sizeof(int), 0, CFG_INT,
      RELOAD_HOT, FGROUP_ADVANCED},
@@ -371,11 +380,12 @@ const config_field_t config_fields[] = {
      offsetof(config_t, roundtable_pipeline_parked_releases_slot), sizeof(int), 1, CFG_BOOL},
     {"roundtable.pipeline_unknown_context_tokens",
      offsetof(config_t, roundtable_pipeline_unknown_context_tokens), sizeof(int), 0, CFG_INT},
-    /* The economizer is a SINGLE tiered control: get/set as an "off|safe|aggressive" string
-     * (CFG_ECON_TIER stores the int enum). The old per-lever reduce.* / economizer.enabled|
-     * aggressive keys were removed; the per-tier lever values are internal presets (econ_preset).
-     * HOT: read per-request via config_load, so a config.set applies live. */
-    {"economizer", offsetof(config_t, economizer_tier), sizeof(int), 0, CFG_ECON_TIER, RELOAD_HOT},
+    /* Trigger admission policy. The scheduler reads this from the live config snapshot on
+     * every sweep, so GUI changes take effect without a restart. */
+    {"trigger.max_concurrent", offsetof(config_t, trigger_max_concurrent), sizeof(int), 0, CFG_INT},
+    /* The only economizer control: off, safe, or aggressive. */
+    {"economizer.mode", offsetof(config_t, economizer_mode), sizeof(int), 0, CFG_ECON_MODE,
+     RELOAD_HOT},
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
      * AIMEE_AUTONOMY_* env vars at startup (a set env var still overrides); a change
      * applies on the next server start. */
@@ -384,6 +394,17 @@ const config_field_t config_fields[] = {
     {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
     {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
     {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
+    /* Run safety caps + auto-resume policy — config-backed + live via config_autonomy_lookup
+     * (an exported AIMEE_AUTONOMY_* still overrides). Surfaced in the Workflows GUI's Run
+     * policy panel. */
+    {"autonomy.max_turns", offsetof(config_t, autonomy_max_turns), sizeof(int), 0, CFG_INT},
+    {"autonomy.max_wall_secs", offsetof(config_t, autonomy_max_wall_secs), sizeof(int), 0, CFG_INT},
+    {"autonomy.stale_abandon_secs", offsetof(config_t, autonomy_stale_abandon_secs), sizeof(int), 0,
+     CFG_INT},
+    {"autonomy.concurrency", offsetof(config_t, autonomy_concurrency), sizeof(int), 0, CFG_INT},
+    {"autonomy.auto_resume_cap_parks", offsetof(config_t, autonomy_auto_resume_cap_parks),
+     sizeof(int), 1, CFG_BOOL},
+    {"autonomy.max_resumes", offsetof(config_t, autonomy_max_resumes), sizeof(int), 0, CFG_INT},
     /* Curator pipeline stage gates (kb.curator.*) — exposed so the GUI pipeline editor
      * can toggle stages. Flat config_t fields; config_save reserializes them into the
      * nested kb.curator.* YAML the KB reads on its next load. These MUST stay ahead of the
@@ -484,8 +505,8 @@ cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)
       return cJSON_CreateNumber(*(const int *)base);
    if (f->type == CFG_FLOAT)
       return cJSON_CreateNumber(*(const double *)base);
-   if (f->type == CFG_ECON_TIER)
-      return cJSON_CreateString(econ_tier_name(*(const int *)base));
+   if (f->type == CFG_ECON_MODE)
+      return cJSON_CreateString(econ_mode_name(*(const int *)base));
    return cJSON_CreateString(base);
 }
 
@@ -507,15 +528,12 @@ int config_field_set_value(config_t *cfg, const config_field_t *f, const char *v
       *(int *)base = atoi(value);
    else if (f->type == CFG_FLOAT)
       *(double *)base = atof(value);
-   else if (f->type == CFG_ECON_TIER)
+   else if (f->type == CFG_ECON_MODE)
    {
-      /* Accept only a recognized tier token so `config set economizer bogus` is a clean
-       * error rather than a silent fall-through to safe. */
-      if (strcasecmp(value, "off") && strcasecmp(value, "0") && strcasecmp(value, "false") &&
-          strcasecmp(value, "safe") && strcasecmp(value, "aggressive") &&
-          strcasecmp(value, "aggro"))
+      int parsed = econ_mode_parse(value);
+      if (parsed < 0)
          return -1;
-      *(int *)base = econ_tier_parse(value);
+      *(int *)base = parsed;
    }
    else
       snprintf(base, f->size, "%s", value);

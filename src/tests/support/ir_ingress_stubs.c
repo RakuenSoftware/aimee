@@ -8,6 +8,42 @@
 
 #include "config.h"              /* config_t + econ_preset_t (for the econ_preset stub) */
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
+#include "agent_exec.h"
+
+/* The minimal ingress links do not carry config.o. Mirror the production hard-kill
+ * resolver so the real immutable wire-snapshot fence can be exercised. */
+__attribute__((weak)) int econ_mode(const config_t *cfg)
+{
+   if (!cfg || cfg->module_economizer == 0)
+      return ECON_MODE_OFF;
+   return cfg->economizer_mode;
+}
+
+/* Exact-length transport adapters for ingress tests whose capture doubles expose
+ * the historical string API. Production links the real byte-counted transport. */
+__attribute__((weak)) int agent_http_post_bytes(const char *url, const char *auth_header,
+                                                const void *body, size_t body_len,
+                                                char **response_buf, int timeout_ms,
+                                                const char *extra_headers)
+{
+   const char *s = (const char *)body;
+   if (!s || strlen(s) != body_len)
+      return -1;
+   return agent_http_post(url, auth_header, s, response_buf, timeout_ms, extra_headers);
+}
+
+__attribute__((weak)) int agent_http_post_stream_bytes(const char *url, const char *auth_header,
+                                                       const void *body, size_t body_len,
+                                                       agent_http_stream_cb callback,
+                                                       void *userdata, int timeout_ms,
+                                                       const char *extra_headers)
+{
+   const char *s = (const char *)body;
+   if (!s || strlen(s) != body_len)
+      return -1;
+   return agent_http_post_stream(url, auth_header, s, callback, userdata, timeout_ms,
+                                 extra_headers);
+}
 
 /* Gateway-mutation hooks wired into anthropic_http.c / openai_chat.c (§ economizer
  * gateway mutation). The minimal-link ingress tests exercise the non-mutation shape
@@ -243,12 +279,12 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
 }
 
 /* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
- * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so NEVER entered
- * at runtime). LTO used to dead-code-eliminate the block, but that decision is fragile (any new
- * read of the loaded cfg in that function can retain it, and it differs across gcc versions), so
- * resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win when a
- * test links them. Loose signatures: never called here, matched only by name + ABI (arg count,
- * pointer/enum-as-int). */
+ * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so
+ * NEVER entered at runtime). LTO used to dead-code-eliminate the block, but that decision is
+ * fragile (any new read of the loaded cfg in that function can retain it, and it differs across gcc
+ * versions), so resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win
+ * when a test links them. Loose signatures: never called here, matched only by name + ABI (arg
+ * count, pointer/enum-as-int). */
 __attribute__((weak)) int context_reduce(cJSON *messages, const char *system_prompt,
                                          const char *model, const char *session_id,
                                          reduce_seam_t seam, const reduce_config_t *cfg,

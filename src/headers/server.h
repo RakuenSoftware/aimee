@@ -44,11 +44,12 @@ typedef struct cJSON cJSON;
 #define CONN_WRITE_DEADLINE_MS 10000 /* 10 seconds */
 
 /* Per-method payload size limits */
-#define LIMIT_MEMORY   (256 * 1024)      /* 256KB for memory operations */
-#define LIMIT_TOOL     (4 * 1024 * 1024) /* 4MB for tool I/O */
-#define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
-#define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
+#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -194,6 +195,8 @@ typedef struct
    compute_pool_t pool;
    compute_pool_t request_pool;
    int request_pool_initialized;
+   compute_pool_t orchestration_pool;
+   int orchestration_pool_initialized;
    pthread_mutex_t session_pools_mutex;
    int session_pools_initialized;
    int session_threads;
@@ -364,6 +367,8 @@ int handle_lsp_diagnostics_summary(server_ctx_t *ctx, server_conn_t *conn, cJSON
 int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_captures(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_audit_replay(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_seal(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_audit_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -387,7 +392,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Deepening sweep (Part B): analysis-only — proposes seams per area and re-grounds
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -442,6 +447,9 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Returns 0 only after the atomic agents.json replacement committed; every
+ * nonzero result is proven pre-effect.  Used by the management action barrier. */
+int server_agent_management_set_enabled(const char *name, int enabled);
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

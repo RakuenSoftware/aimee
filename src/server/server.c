@@ -13,9 +13,6 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
-#if AIMEE_WITH_ROUNDTABLE
-#include "roundtable_activation.h"
-#endif
 
 #include "agent_tools.h"     /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
@@ -23,35 +20,33 @@
 #include "wfe_native_gate.h" /* wfe_shell_invokes_git — the shell-git classifier */
 #include "turn_registry.h"
 #include "server_http.h"
-#include "server_tls.h"                      /* server_http_api_status_report */
-#include "config.h"                          /* config_t / config_load for api.status, api.enable */
-#include <aimee/translation/aimee_backend.h> /* aimee_backend_anthropic_set_cache_enabled (economizer tier) */
-#include <aimee/delegates/delegate_backend_docker.h>
+#include "server_tls.h" /* server_http_api_status_report */
+#include "server_mgmt_status.h"
+#include "server_mgmt_jwks_cache.h"
+#include "kb_client_mtls.h"
+#include "config.h" /* config_t / config_load for api.status, api.enable */
+#include "delegate_backend_docker.h"
 #include "workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "workspace_turn.h"     /* the ONE workspace bound, shared with the delegate turn */
-#include <aimee/delegates/delegate_backend_local.h>
-#include <aimee/delegates/delegate_backend_ssh.h>
+#include "delegate_backend_local.h"
+#include "delegate_backend_ssh.h"
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
-#include <aimee/skills/skill_review.h>
+#include "skill_review.h"
 #include "trigger_scheduler.h"
-#include "wfe_live_delegate.h"
-#include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
-#if AIMEE_WITH_ROUNDTABLE
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
-#endif
 #include "commands.h"
 #include "agent.h"
 #include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
 #include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_config.h"
 #include "provider_catalog.h"
-#include <aimee/delegates/delegate_credentials.h>
-#include <aimee/delegates/delegate_sandbox_image.h>
+#include "delegate_credentials.h"
+#include "delegate_sandbox_image.h"
 #include "model_registry.h"
 #include "model_provider.h"
 #include "model_registry.h"
@@ -94,7 +89,8 @@ typedef struct
    const char *method;
    server_method_handler_t handler;
 } server_method_dispatch_t;
-#define SERVER_REQUEST_POOL_MAX_THREADS 4
+#define SERVER_REQUEST_POOL_MAX_THREADS   4
+#define SERVER_ORCHESTRATION_POOL_THREADS 16
 static const server_method_dispatch_t server_dispatch_table[];
 int handle_toolset_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_toolset_resolve(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -118,6 +114,21 @@ static void server_request_pool_shutdown(server_ctx_t *ctx)
    compute_pool_unregister_secondary(&ctx->request_pool);
    compute_pool_shutdown(&ctx->request_pool);
    ctx->request_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_shutdown(server_ctx_t *ctx)
+{
+   if (!ctx || !ctx->orchestration_pool_initialized)
+      return;
+   compute_pool_unregister_secondary(&ctx->orchestration_pool);
+   compute_pool_shutdown(&ctx->orchestration_pool);
+   ctx->orchestration_pool_initialized = 0;
+}
+
+static void server_orchestration_pool_close(server_ctx_t *ctx)
+{
+   if (ctx && ctx->orchestration_pool_initialized)
+      compute_pool_close(&ctx->orchestration_pool);
 }
 
 int server_compute_budget_acquire(server_ctx_t *ctx)
@@ -352,12 +363,7 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (methods)
    {
       for (int i = 0; server_dispatch_table[i].method; i++)
-#if AIMEE_WITH_ROUNDTABLE
-         if (roundtable_operation_available(server_dispatch_table[i].method))
-            cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
-#else
          cJSON_AddItemToArray(methods, cJSON_CreateString(server_dispatch_table[i].method));
-#endif
       cJSON_AddItemToObject(resp, "methods", methods);
    }
    return server_send_ok(conn, resp);
@@ -1526,8 +1532,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hosts.list", handle_hosts_list},
     {"primary.get", handle_primary_get},
     {"primary.clear", handle_primary_clear},
-    /* Work queue */
-    /* Attempt log */
     {"attempt.record", handle_attempt_record},
     {"attempt.list", handle_attempt_list},
     /* Dashboard */
@@ -1537,17 +1541,17 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.traces", handle_dashboard_traces},
     {"dashboard.plans", handle_dashboard_plans},
     {"dashboard.logs", handle_dashboard_logs},
-#if AIMEE_WITH_PLUGIN_LOADER
     {"dashboard.plugins", handle_dashboard_plugins},
     {"plugin.list", handle_plugin_list},
     {"plugin.enable", handle_plugin_enable},
     {"plugin.disable", handle_plugin_disable},
-#endif
     {"dashboard.onboard", handle_dashboard_onboard},
     {"dashboard.memory_stats", handle_dashboard_memory_stats},
     {"dashboard.all", handle_dashboard_all},
     {"dashboard.audit", handle_dashboard_audit},
     {"audit.verify", handle_audit_verify},
+    {"audit.captures", handle_audit_captures},
+    {"audit.replay", handle_audit_replay},
     {"audit.checkpoint", handle_audit_checkpoint},
     {"audit.seal", handle_audit_seal},
     {"audit.snapshot", handle_audit_snapshot},
@@ -1572,13 +1576,11 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Compute (thread pool) */
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
-#if AIMEE_WITH_ROUNDTABLE
     /* Public /v1 delegate aggregate/roundtable routes enqueue through
      * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
-    {"delegate.roundtable", handle_delegate_roundtable},
-#endif
+    {"roundtable.review", handle_roundtable_review_proxy},
     {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
@@ -1606,7 +1608,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"config.show", handle_config_show},
     {"config.get", handle_config_get},
     {"config.set", handle_config_set},
-#if AIMEE_WITH_ROUNDTABLE
     {"pipeline.start", handle_pipeline_start},
     {"pipeline.status", handle_pipeline_status},
     {"pipeline.list", handle_pipeline_list},
@@ -1614,7 +1615,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"pipeline.resume", handle_pipeline_resume},
     {"pipeline.advance", handle_pipeline_advance},
     {"pipeline.gate", handle_pipeline_gate},
-#endif
     {"aux.test", handle_aux_test},
     {"delegate.reply", handle_delegate_reply},
     {"delegate.log", handle_delegate_log},
@@ -1691,13 +1691,10 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY},
-       {"tool.", LIMIT_TOOL},
-       {"delegate", LIMIT_DELEGATE},
-       {"mcp.call", LIMIT_DELEGATE},
-       {"chat.", LIMIT_CHAT},
-       {"index.ingest", LIMIT_INGEST},
-       {"session.record_transcript", LIMIT_TRANSCRIPT},
+       {"memory.", LIMIT_MEMORY},      {"tool.", LIMIT_TOOL},
+       {"delegate", LIMIT_DELEGATE},   {"roundtable.review", LIMIT_ROUNDTABLE},
+       {"mcp.call", LIMIT_DELEGATE},   {"chat.", LIMIT_CHAT},
+       {"index.ingest", LIMIT_INGEST}, {"session.record_transcript", LIMIT_TRANSCRIPT},
        {NULL, LIMIT_DEFAULT},
    };
 
@@ -1760,24 +1757,6 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 
    const char *m = method->valuestring;
    int rc;
-
-   /* Runtime-disabled optional-module methods are absent from the live registry. Keep this
-    * before capability lookup so disabled operations have unknown-method, not
-    * authorization, semantics and can never reach a handler. */
-#if AIMEE_WITH_ROUNDTABLE
-   if (!roundtable_operation_available(m))
-   {
-      cJSON *resp = cJSON_CreateObject();
-      cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "code", "UNKNOWN_METHOD");
-      cJSON_AddStringToObject(resp, "message", "unknown method");
-      cJSON_AddStringToObject(resp, "method", m);
-      rc = server_send_response(conn, resp);
-      cJSON_Delete(resp);
-      cJSON_Delete(req);
-      return rc;
-   }
-#endif
 
    /* Capability check */
    uint32_t required = server_capability_for_method(m);
@@ -1948,6 +1927,13 @@ static int server_agent_route_is_down(const char *agent_name)
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
+/* Route-time DEGRADED predicate (nonzero when degraded): a half-opened breaker
+ * or intermittent failures. Not excluded - routing only PREFERS a healthy peer. */
+static int server_agent_route_is_degraded(const char *agent_name)
+{
+   return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DEGRADED;
+}
+
 /* Route-time delegate-policy predicate (returns nonzero to EXCLUDE):
  * a per-agent "Primary Agent Only" choice (agents.json `primary_only`) excludes
  * the agent from ALL delegation. This is the SOLE per-agent gate: it replaced the
@@ -1959,9 +1945,9 @@ static int server_agent_route_is_down(const char *agent_name)
  * Only unchecked. Now the flag alone decides: a claude-oauth subscription is
  * pre-flagged primary-only at add time (driving a personal Claude plan as an
  * automated delegate may breach Anthropic's terms), and unchecking it is an
- * explicit operator opt-in to self-delegation. Roundtable panels keep their own
- * primary exclusion (delegate_ensemble.c) so a second opinion is never the
- * primary itself.
+ * explicit operator opt-in to self-delegation. Roundtable panels use this same
+ * explicit agent policy plus review-role membership; they do not invent a
+ * second hidden exclusion based on the configured primary provider.
  * The gate is config-independent (it reads the agent record), so it holds even
  * when config_load would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
@@ -2197,31 +2183,40 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
             platform_mkdir_p(cfg_dir, 0700);
       }
    }
-   /* Compose selected optional providers before publishing the pid. A registration
-    * conflict is a broken startup configuration, not a recoverable per-request
-    * outage: continuing would advertise routes that can never execute. */
-   config_t cfg;
-   int config_rc = config_load(&cfg);
-#if AIMEE_WITH_ROUNDTABLE
-   if (roundtable_provider_configure(config_rc == 0 ? &cfg : NULL) < 0)
-   {
-      LOG_ERROR("server", "roundtable panel provider registration failed");
-      platform_evloop_destroy(&ctx->evloop);
-      return -1;
-   }
-#else
-   if (config_rc == 0 && cfg.module_roundtable == 1)
-      LOG_WARN("server", "roundtable is enabled in config but absent from this build");
-#endif
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
    /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
+   config_t cfg;
+   config_load(&cfg);
    if (db1_init(cfg.db1_path) != 0)
       LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
                cfg.db1_path);
    else
+   {
       db1_apply_server_pragmas();
+      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+      if (orphaned < 0)
+         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+      else if (orphaned > 0)
+         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+      if (server_mgmt_status_init() != 0)
+         LOG_WARN("server", "management status nonce initialization failed");
+      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+      if (trust_path && trust_path[0] &&
+          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                         kb_client_mtls_management_jwks_fetch,
+                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
+   }
+   /* Container cleanup is independent of DB availability. No worker pool exists
+    * yet, so a matching container cannot belong to this server generation. */
+   int orphan_containers = delegate_backend_docker_remove_orphans();
+   if (orphan_containers < 0)
+      LOG_WARN("server", "could not reconcile delegate containers from the prior process");
+   else if (orphan_containers > 0)
+      LOG_INFO("server", "removed %d delegate containers orphaned by the prior process",
+               orphan_containers);
    /* Seed personas + role templates so config (not code) is the source of truth. */
    server_seed_config_defaults();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
@@ -2270,9 +2265,27 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    }
    ctx->request_pool_initialized = 1;
    compute_pool_register_secondary(&ctx->request_pool, "requests");
+   /* Provider-backed orchestration is mostly blocked on remote I/O. Give it a
+    * dedicated bounded lane so generic background work cannot consume its
+    * coordinators; per-agent admission still owns actual provider concurrency. */
+   if (compute_pool_init(&ctx->orchestration_pool, SERVER_ORCHESTRATION_POOL_THREADS) != 0)
+   {
+      LOG_ERROR("server", "failed to initialize orchestration pool");
+      server_request_pool_shutdown(ctx);
+      server_session_pools_shutdown(ctx);
+      compute_pool_shutdown(&ctx->pool);
+      pthread_mutex_destroy(&ctx->conns_mutex);
+      close(fd);
+      platform_evloop_destroy(&ctx->evloop);
+      unlink(socket_path);
+      return -1;
+   }
+   ctx->orchestration_pool_initialized = 1;
+   compute_pool_register_secondary(&ctx->orchestration_pool, "orchestration");
    if (pthread_mutex_init(&ctx->compute_budget_mutex, NULL) != 0)
    {
       LOG_ERROR("server", "failed to initialize compute budget mutex");
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2286,6 +2299,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    {
       LOG_ERROR("server", "failed to initialize compute budget condition");
       pthread_mutex_destroy(&ctx->compute_budget_mutex);
+      server_orchestration_pool_shutdown(ctx);
       server_request_pool_shutdown(ctx);
       server_session_pools_shutdown(ctx);
       compute_pool_shutdown(&ctx->pool);
@@ -2330,6 +2344,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * delegates. Routing falls back to a healthy peer; only when every candidate
     * for a role is DOWN does routing return a clean "no agent available". */
    agent_set_route_health_filter(server_agent_route_is_down);
+   /* Prefer a healthy seat over a degraded one when both serve the role, so a
+    * flapping seat stops winning on price alone while healthy peers exist. */
+   agent_set_route_degraded_filter(server_agent_route_is_degraded);
    /* Delegate-policy invariants at every routing decision: the primary never
     * delegates to itself, and an agent flagged "Primary Agent Only"
     * (agents.json `primary_only`) is never a delegation target. */
@@ -2341,11 +2358,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
-   /* Autonomous development is core functionality (default-on): register the
-    * workflow engine's live providers + executors so submitted proposals can run
-    * end-to-end server-side. Registration runs nothing on its own — a run begins
-    * only when intake creates a work item and the autonomy driver advances it. */
-   wfe_autonomy_register();
+   /* WFE lifecycle is Go-only. This process exposes agent/roundtable resources
+    * to the Go control plane but never registers a C workflow executor. */
    /* Give aimee's own agents the MCP tools marked native in mcp_tool_table. Must
     * precede any toolset_registry_init() / build_tools_array(), which snapshot the
     * registrations. aimee's agents and an external MCP client now reach the SAME
@@ -2373,7 +2387,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
     * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
    primary_cli_ingestor_log_posture();
-   wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
@@ -2381,19 +2394,8 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    server_vault_bootstrap();
    return 0;
 }
-/* Push the economizer tier's runtime effects that live outside config_t readers -- the
- * Anthropic-egress caching gate (off -> no cache markers). Called at startup and after
- * every config reload so `economizer` takes effect live. */
-static void server_sync_economizer_runtime(void)
-{
-   config_t cfg;
-   if (config_load(&cfg) == 0)
-      aimee_backend_anthropic_set_cache_enabled(econ_tier(&cfg) != ECON_TIER_OFF);
-}
-
 int server_run(server_ctx_t *ctx)
 {
-   server_sync_economizer_runtime(); /* apply economizer=off caching gate at startup */
    /* enforce-delegate-only: register the delegate-availability provider so the
     * gateway strips provider-native sub-agent tools whenever usable delegates
     * exist (CORE gateway_policy can't read agent state itself). */
@@ -2429,7 +2431,6 @@ int server_run(server_ctx_t *ctx)
          int rc = config_reload();
          aimee_log(rc < 0 ? LOG_WARN : LOG_INFO, "config", "SIGHUP config reload: %s",
                    rc > 0 ? "applied" : (rc == 0 ? "no change" : "rejected (kept running config)"));
-         server_sync_economizer_runtime();
          /* Also live-reload the TLS cert (re-read cert/key + swap SSL_CTX) so a renewed cert
           * is picked up on SIGHUP without dropping the listener (live-config-reload). */
          (void)server_tls_reload();
@@ -2443,8 +2444,6 @@ int server_run(server_ctx_t *ctx)
       {
          aimee_log(cfg_rc < 0 ? LOG_WARN : LOG_INFO, "config", "config file change: %s",
                    cfg_rc > 0 ? "reloaded" : "rejected (kept running config)");
-         if (cfg_rc > 0)
-            server_sync_economizer_runtime();
       }
    }
    return 0;
@@ -2455,19 +2454,25 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
-   wfe_scheduler_shutdown();
    /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
    webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
+   /* Close orchestration admission first, but do not join coordinators until the
+    * provider turns on which they may be waiting have been cancelled. */
+   server_orchestration_pool_close(ctx);
    /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
     * connections (server-owned turn lifecycle), so a long detached turn would
     * otherwise block the drain indefinitely. The atomic cancel flags are
     * observed by the workers within one poll tick; the drain then completes
     * bounded. Presence is torn down after the drain, so a still-running worker
     * never emits onto a closed ring. */
-   turn_registry_cancel_all();
+   turn_registry_begin_shutdown();
+   /* Every queued/running async operation is now bounded by a pool worker and
+    * every provider turn has observed cancellation. Drain before shared stores
+    * and provider state are torn down. */
+   server_orchestration_pool_shutdown(ctx);
    /* Let async chat/tool workers finish while the compute pool is still
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();

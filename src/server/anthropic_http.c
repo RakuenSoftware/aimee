@@ -17,25 +17,25 @@
 #include "agent_config.h"
 #include "aimee_errors.h"
 #include "agent_exec.h"
-#include "economizer.h"
-#include "gateway_mutate_wire.h"
-#include "server_http_identity.h"
 #include "agent_protocol.h"
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
-#include <aimee/delegates/delegate_driver.h>
-#include <aimee/gateway/gateway_policy.h>
-#include <aimee/gateway/gateway_pipeline.h>
+#include "delegate_driver.h"
+#include "economizer_wire_snapshot.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
+#include "gateway_policy.h"
+#include "gateway_pipeline.h"
 #include "gw_stage_memory.h"
 #include "gw_stage_registry.h"
 #include "gw_stage_governance.h"
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
-#include <aimee/ir/aimee_ir_metrics.h>
-#include "aimee_ir_serve.h"                  /* Slice 5: IR live request-build */
-#include <aimee/translation/aimee_backend.h> /* Slice 3: openai_backend_parse (IR response path) */
-#include <aimee/translation/aimee_ir_stream.h> /* Slice 5-wire: IR-delta incremental relay */
+#include "aimee_ir_metrics.h"
+#include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
+#include "aimee_backend.h"   /* Slice 3: openai_backend_parse (IR response path) */
+#include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "log.h"
@@ -300,31 +300,6 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    int cfg_ok = (config_load(&pcfg) == 0);
    int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
 
-   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when the aggressive-tier
-    * gateway seam is on, measure this inbound /v1/messages request's baseline +
-    * foldable opportunity and record a forecast ledger row. measure_only is forced on
-    * here so the request is NEVER mutated — the client transcript is read for the
-    * baseline and the live `req` is forwarded byte-identical (we ignore res.messages,
-    * NULL in measure-only). Done BEFORE the request pipeline so the baseline reflects
-    * the pristine client request, not the memory-injected one. Fully guarded
-    * (config-load, array, free) and context_reduce hard-bypasses on any internal
-    * error, so this can never perturb the client response. Reuses the loaded pcfg;
-    * cheap mtime-cached load keeps it dark by default. */
-   econ_preset_t gw_ep;
-   econ_preset(cfg_ok ? &pcfg : NULL, &gw_ep);
-   if (gw_ep.gateway_seam)
-   {
-      char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
-      const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
-      const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
-      reduce_result_t gw_res;
-      if (gw_economizer_measure(cJSON_GetObjectItemCaseSensitive(req, "messages"), sys_text, model,
-                                pcfg.fold_retained_msgs, &gw_res) == 0)
-         agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
-      context_reduce_result_free(&gw_res);
-      free(sys_text);
-   }
-
    gw_request_t r = {
        .raw = req,
        .driver = driver,
@@ -469,9 +444,11 @@ static int messages_buffered(const char *body, char *resp, int cap)
    char msg_id[48];
    const delegate_driver_t *driver;
    parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
+   econ_wire_snapshot_t *wire_snapshot = NULL;
+   gw_mutate_ctx_t gwmc;
    int status, http_status, rc;
    const char *model;
-   gw_mutate_ctx_t gwmc;
+
    gw_mutate_ctx_init(&gwmc);
 
    if (!req)
@@ -509,11 +486,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Economizer gateway MUTATION (primary-agent reduction). Default-OFF. Reduces
-    * req["messages"] in place (compress-only) BEFORE translate/build so the provider
-    * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
-    * caught below (restore-resend), the session is circuit-broken, and provenance is
-    * cleared. A dark no-op unless the economizer tier is aggressive. */
+   /* Only AGGRESSIVE and only an OpenAI-family upstream. Native Anthropic
+    * requests keep the client's exact cache prefix and cache_control layout. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
@@ -550,29 +524,22 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
    prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
                                          responses_wire);
-   http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
-                                 extra[0] ? extra : NULL);
-
-   /* Gateway mutation post-send: on ANY 4xx of a mutated request, restore the
-    * pristine original, repair, disable the session, and resend ONCE from pristine;
-    * on 5xx, disable the session without resending. No-op unless we mutated. */
-   if (gw_buffered_after_status(req, "messages", http_status, &gwmc) == GW_POST_RESEND)
+   const char *pristine_body = prov_body ? prov_body : "{}";
+   config_t econ_cfg;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
+                                                   : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
+                        &wire_snapshot, &wire_body) != 0)
    {
-      cJSON_Delete(messages);
-      messages = NULL;
-      cJSON_Delete(tools);
-      tools = NULL;
-      free(system_text);
-      system_text = NULL;
-      translate_request(req, driver, ag, &messages, &tools, &system_text);
-      free(prov_body);
-      prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text,
-                                            responses_wire);
-      free(response);
-      response = NULL;
-      http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response,
-                                    ag->timeout_ms, extra[0] ? extra : NULL);
+      status = write_error(resp, cap, 503, "api_error", "economizer wire fence unavailable",
+                           AIMEE_ERR_REQUEST_PIPELINE);
+      goto cleanup;
    }
+   http_status = agent_http_post_bytes(url, auth, wire_body.data, wire_body.len, &response,
+                                       ag->timeout_ms, extra[0] ? extra : NULL);
 
    if (http_status != 200 || !response)
    {
@@ -650,6 +617,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    agent_free_parsed_response(&parsed);
 
 cleanup:
+   econ_wire_snapshot_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
@@ -700,10 +668,6 @@ typedef struct
    int output_tokens;
    int cache_write_tokens;
    int cache_read_tokens;
-   /* Gateway-mutation streaming breaker: when this stream carried a reduced payload
-    * (gwmc->mutated), an invalid-request error frame disables the session for
-    * subsequent turns (§2.5 streaming). NULL when the request was not mutated. */
-   gw_mutate_ctx_t *gwmc;
 } anthropic_relay_ctx_t;
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
@@ -821,13 +785,6 @@ static void relay_flush(anthropic_relay_ctx_t *c)
       relay_capture_usage(c, event, c->data);
       c->emit(c->emit_ctx, event, c->data);
       c->emitted++;
-      /* Inspect-as-forward (§2.5 streaming): the frame is already forwarded above;
-       * if this MUTATED stream carried an invalid-request-class error frame, the
-       * reduced payload is the likely cause -> disable subsequent turns. Transient
-       * frames (rate-limit/overloaded) are forwarded WITHOUT disabling. */
-      if (c->gwmc && c->gwmc->mutated && strcmp(event, "error") == 0 &&
-          gw_stream_anthropic_error_is_invalid_request(c->data))
-         gw_stream_disable(c->gwmc, "stream_invalid_request");
    }
    c->event[0] = '\0';
    c->data_len = 0;
@@ -886,19 +843,19 @@ static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
  * verbatim from messages_stream(); goto cleanup became return (the caller runs the
  * shared cleanup). */
 static void messages_stream_buffered_replay(const char *url, const char *auth,
-                                            const char *prov_body, const char *extra, agent_t *ag,
+                                            const void *prov_body, size_t prov_body_len,
+                                            const char *extra, agent_t *ag,
                                             const delegate_driver_t *driver, const char *model,
                                             const char *msg_id, int responses_wire,
-                                            server_http_sse_event_emit emit, void *ctx,
-                                            gw_mutate_ctx_t *gwmc)
+                                            server_http_sse_event_emit emit, void *ctx)
 {
    char *buf_resp = NULL;
    int buf_status;
    parsed_response_t parsed;
    int raw_responses = responses_wire;
    memset(&parsed, 0, sizeof(parsed));
-   buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp, ag->timeout_ms,
-                                extra[0] ? extra : NULL);
+   buf_status = agent_http_post_bytes(url, auth, prov_body, prov_body_len, &buf_resp,
+                                      ag->timeout_ms, extra[0] ? extra : NULL);
    if (buf_status == 200 && buf_resp)
    {
       if (raw_responses)
@@ -969,15 +926,6 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
                buf_status);
       if (emit)
          emit(ctx, "error", err);
-      /* Buffered-replay streaming: circuit-break subsequent turns only when the
-       * non-200 indicates a bad reduced payload — an invalid-request-class 4xx
-       * (400/413/422) or, fail-safe, a 5xx. Auth / rate-limit / not-found
-       * (401/403/404/429) are NOT reduction bugs and are forwarded WITHOUT
-       * disabling. No restore/resend — the 200 is already committed. */
-      if (gw_status_is_invalid_request(buf_status))
-         gw_stream_disable(gwmc, "stream_invalid_request");
-      else if (buf_status / 100 == 5)
-         gw_stream_disable(gwmc, "stream_decoder_error");
    }
    free(buf_resp);
    return;
@@ -986,10 +934,10 @@ static void messages_stream_buffered_replay(const char *url, const char *auth,
 /* Native Anthropic streaming relay: forward the upstream Anthropic SSE
  * verbatim through the mutation breaker, then record realized/partial cost.
  * Extracted from messages_stream(); goto cleanup became return. */
-static void messages_stream_native_relay(const char *url, const char *auth, const char *prov_body,
-                                         const char *extra, agent_t *ag, const char *model,
-                                         server_http_sse_event_emit emit, void *ctx,
-                                         gw_mutate_ctx_t *gwmc)
+static void messages_stream_native_relay(const char *url, const char *auth, const void *prov_body,
+                                         size_t prov_body_len, const char *extra, agent_t *ag,
+                                         const char *model, server_http_sse_event_emit emit,
+                                         void *ctx)
 {
    anthropic_relay_ctx_t relay;
    int stream_status;
@@ -997,17 +945,13 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
    sse_parser_init(&relay.parser);
    relay.emit = emit;
    relay.emit_ctx = ctx;
-   relay.gwmc = gwmc; /* enable the streaming breaker for a mutated stream */
    stream_status =
-       agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
-                              &relay, ag->timeout_ms, extra[0] ? extra : NULL);
+       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, anthropic_relay_chunk_cb,
+                                    &relay, ag->timeout_ms, extra[0] ? extra : NULL);
    relay_flush(&relay);
    if (stream_status != 200)
    {
       relay_emit_transport_error(&relay, stream_status);
-      /* Fail-safe (§2.5): a non-SSE post-200 upstream failure on a mutated stream
-       * disables subsequent turns (the current turn is already lost). */
-      gw_stream_disable(gwmc, "stream_decoder_error");
    }
    /* Cost accounting for the native Anthropic streaming ingress, from the
     * usage tapped off the relayed SSE. A clean 200 is realized spend; an
@@ -1026,9 +970,9 @@ static void messages_stream_native_relay(const char *url, const char *auth, cons
 /* Slice-5 IR-delta streaming relay: drive the OpenAI-chat -> Anthropic SSE relay
  * through the neutral IR-delta model, synthesize a clean close if the upstream
  * cut off early, and record cost. Extracted from messages_stream(). */
-static void messages_stream_ir_relay(const char *url, const char *auth, const char *prov_body,
-                                     const char *extra, agent_t *ag, const char *model,
-                                     const char *msg_id, int input_est,
+static void messages_stream_ir_relay(const char *url, const char *auth, const void *prov_body,
+                                     size_t prov_body_len, const char *extra, agent_t *ag,
+                                     const char *model, const char *msg_id, int input_est,
                                      server_http_sse_event_emit emit, void *ctx)
 {
    prov_stream_ctx_t pc;
@@ -1044,8 +988,8 @@ static void messages_stream_ir_relay(const char *url, const char *auth, const ch
    pc.emit_ctx = ctx;
    pc.msg_id = msg_id;
    pc.model = model;
-   int ir_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                          &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   int ir_status = agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb,
+                                                &pc, ag->timeout_ms, extra[0] ? extra : NULL);
    sse_parser_free(&pc.parser);
    /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
     * TURN_STOP was produced), synthesize the closing sequence so the client's
@@ -1085,10 +1029,10 @@ static void messages_stream_ir_relay(const char *url, const char *auth, const ch
 /* OpenAI-via-translator streaming: the legacy incremental translator path.
  * Begins an Anthropic stream, feeds upstream OpenAI-chat chunks through it,
  * finishes, and records cost. Extracted from messages_stream(). */
-static void messages_stream_xlate(const char *url, const char *auth, const char *prov_body,
-                                  const char *extra, agent_t *ag, const char *model,
-                                  const char *msg_id, int input_est,
-                                  server_http_sse_event_emit emit, void *ctx, gw_mutate_ctx_t *gwmc)
+static void messages_stream_xlate(const char *url, const char *auth, const void *prov_body,
+                                  size_t prov_body_len, const char *extra, agent_t *ag,
+                                  const char *model, const char *msg_id, int input_est,
+                                  server_http_sse_event_emit emit, void *ctx)
 {
    anthropic_stream_xlate_t *xl;
    prov_stream_ctx_t pc;
@@ -1098,15 +1042,10 @@ static void messages_stream_xlate(const char *url, const char *auth, const char 
 
    sse_parser_init(&pc.parser);
    pc.xl = xl;
-   int xlate_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
-                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+   int xlate_status =
+       agent_http_post_stream_bytes(url, auth, prov_body, prov_body_len, prov_chunk_cb, &pc,
+                                    ag->timeout_ms, extra[0] ? extra : NULL);
    sse_parser_free(&pc.parser);
-
-   /* OpenAI-via-translator streaming: this path lacks per-frame Anthropic error
-    * classification, so a non-200 upstream on a mutated request is a fail-safe
-    * disable of subsequent turns. */
-   if (xlate_status != 200)
-      gw_stream_disable(gwmc, "stream_decoder_error");
 
    anthropic_stream_finish(xl);
 
@@ -1146,7 +1085,11 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    anthropic_stream_xlate_t *xl;
    int input_est;
    int responses_wire = 0;
+   econ_wire_snapshot_t *wire_snapshot = NULL;
    gw_mutate_ctx_t gwmc;
+   const void *wire_prov_body = NULL;
+   size_t wire_prov_body_len = 0;
+
    gw_mutate_ctx_init(&gwmc);
 
    mint_msg_id(msg_id, sizeof(msg_id));
@@ -1189,11 +1132,6 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
 
-   /* Economizer gateway MUTATION (streaming). Reduces req["messages"] in place before
-    * translate/build. Streaming CANNOT restore-resend (the 200 is committed on the
-    * first byte), so on a bad reduction only SUBSEQUENT turns are circuit-broken —
-    * via the SSE error-frame inspect-as-forward in relay_flush + the post-stream
-    * fail-safe below. Default-OFF dark no-op. */
    if (gw_mutate_upstream_ok(parity))
    {
       char *mut_sys = anthropic_system_to_text(req);
@@ -1263,6 +1201,27 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       }
    }
 
+   const char *pristine_body = prov_body ? prov_body : "{}";
+   config_t econ_cfg;
+   int economizer_active = config_load(&econ_cfg) == 0 && econ_mode(&econ_cfg) != ECON_MODE_OFF;
+   econ_wire_route_t wire_route = parity           ? ECON_WIRE_ANTHROPIC_MESSAGES
+                                  : responses_wire ? ECON_WIRE_OPENAI_RESPONSES
+                                                   : ECON_WIRE_OPENAI_CHAT;
+   econ_wire_bytes_t wire_body;
+   if (econ_wire_select(economizer_active, wire_route, pristine_body, strlen(pristine_body),
+                        &wire_snapshot, &wire_body) != 0)
+   {
+      xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
+      if (xl)
+      {
+         anthropic_stream_finish(xl);
+         anthropic_stream_free(xl);
+      }
+      goto cleanup;
+   }
+   wire_prov_body = (const char *)wire_body.data;
+   wire_prov_body_len = wire_body.len;
+
    /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
     * speaks the OpenAI Responses API (`chatgpt` / Codex), the streaming
     * path becomes buffered — we fetch the upstream reply to completion,
@@ -1275,14 +1234,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
     * default) falls through to today's incremental relay/translator. */
    if (gateway_prevent_subagents_enabled() || responses_wire)
    {
-      messages_stream_buffered_replay(url, auth, prov_body, extra, ag, driver, model, msg_id,
-                                      responses_wire, emit, ctx, &gwmc);
+      messages_stream_buffered_replay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag,
+                                      driver, model, msg_id, responses_wire, emit, ctx);
       goto cleanup;
    }
 
    if (driver_is_anthropic(driver))
    {
-      messages_stream_native_relay(url, auth, prov_body, extra, ag, model, emit, ctx, &gwmc);
+      messages_stream_native_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
+                                   emit, ctx);
       goto cleanup;
    }
 
@@ -1290,14 +1250,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    if (aimee_ir_stream_relay_enabled())
    {
-      messages_stream_ir_relay(url, auth, prov_body, extra, ag, model, msg_id, input_est, emit,
-                               ctx);
+      messages_stream_ir_relay(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model,
+                               msg_id, input_est, emit, ctx);
       goto cleanup;
    }
 
-   messages_stream_xlate(url, auth, prov_body, extra, ag, model, msg_id, input_est, emit, ctx,
-                         &gwmc);
+   messages_stream_xlate(url, auth, wire_prov_body, wire_prov_body_len, extra, ag, model, msg_id,
+                         input_est, emit, ctx);
 cleanup:
+   econ_wire_snapshot_destroy(wire_snapshot);
    gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);

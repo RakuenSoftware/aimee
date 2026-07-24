@@ -83,6 +83,142 @@ static int run_git(const char *principal, const char *dir, const char *const arg
    return rc;
 }
 
+static int env_key_is(const char *entry, const char *key)
+{
+   size_t n = strlen(key);
+   return strncmp(entry, key, n) == 0 && entry[n] == '=';
+}
+
+/* Remove every environment-driven git-config injection seam and pin system +
+ * global config off. Repository config remains available only for ordinary
+ * object/ref data; the managed push argv explicitly fixes hooks, credentials,
+ * protocol, destination, and refspec. */
+static char **harden_push_env(char **source)
+{
+   /* Deliberately allowlist only the fd-fed askpass seam. Do not inherit HOME,
+    * GIT_DIR/WORK_TREE/object/index selectors, proxy/TLS/header overrides, or
+    * any other repository/transport control from the daemon environment. */
+   char **out = calloc(8, sizeof(char *));
+   if (!out)
+      return NULL;
+   size_t n = 0;
+   for (size_t i = 0; source && source[i]; i++)
+   {
+      if (!env_key_is(source[i], "GIT_ASKPASS") && !env_key_is(source[i], "GIT_TERMINAL_PROMPT") &&
+          !env_key_is(source[i], "AIMEE_GIT_TOKEN_FD"))
+         continue;
+      out[n] = strdup(source[i]);
+      if (!out[n++])
+         goto fail;
+   }
+   out[n++] = strdup("PATH=/usr/local/bin:/usr/bin:/bin");
+   out[n++] = strdup("GIT_CONFIG_NOSYSTEM=1");
+   out[n++] = strdup("GIT_CONFIG_SYSTEM=/dev/null");
+   out[n++] = strdup("GIT_CONFIG_GLOBAL=/dev/null");
+   if (!out[n - 1] || !out[n - 2] || !out[n - 3] || !out[n - 4])
+      goto fail;
+   return out;
+fail:
+   git_cred_inject_free_env(out);
+   return NULL;
+}
+
+int git_ops_push_dir(const char *principal, const char *repo_dir, const char *remote_url,
+                     const char *branch, char **out, char *err, size_t errlen)
+{
+   if (out)
+      *out = NULL;
+   if (err && errlen)
+      err[0] = '\0';
+   if (!repo_dir || !remote_url || !ref_name_valid(branch))
+   {
+      snprintf(err, errlen, "invalid managed push request");
+      return -1;
+   }
+   char refspec[420];
+   if ((size_t)snprintf(refspec, sizeof(refspec), "%s:%s", branch, branch) >= sizeof(refspec))
+   {
+      snprintf(err, errlen, "managed push ref too long");
+      return -1;
+   }
+   const char *argv[] = {"git",
+                         "-c",
+                         "core.hooksPath=/dev/null",
+                         "-c",
+                         "credential.helper=",
+                         "-c",
+                         "protocol.allow=never",
+                         "-c",
+                         "protocol.https.allow=always",
+                         "push",
+                         "-u",
+                         remote_url,
+                         refspec,
+                         NULL};
+   int token_fd = -1;
+   char **envp =
+       git_cred_inject_build_env_for_repo(principal, remote_url, NULL, NULL, environ, &token_fd);
+   char **hardened = harden_push_env(envp ? envp : environ);
+   if (!hardened)
+   {
+      if (token_fd >= 0)
+         close(token_fd);
+      if (envp)
+         git_cred_inject_free_env(envp);
+      snprintf(err, errlen, "cannot construct hardened git environment");
+      return -1;
+   }
+
+   /* Repository-local config is data controlled by the checkout. Reject every
+    * setting capable of rewriting the explicit URL, injecting auth/headers,
+    * changing TLS/proxy behavior, or selecting an external transport. rc=1 is
+    * git-config's clean 'no matches'; every other nonzero result fails closed. */
+   const char *config_argv[] = {
+       "git",
+       "-C",
+       repo_dir,
+       "config",
+       "--local",
+       "--includes",
+       "--name-only",
+       "--get-regexp",
+       "^(url\\..*\\.insteadof|http\\.|credential\\.|core\\.sshcommand|remote\\..*\\.(proxy|vcs))",
+       NULL};
+   char *unsafe_config = NULL;
+   int config_rc = safe_exec_capture_cwd_env_fd_timeout(config_argv, repo_dir, hardened,
+                                                        &unsafe_config, 65536, 5000, -1, -1);
+   if (config_rc != 1 || (unsafe_config && unsafe_config[0]))
+   {
+      free(unsafe_config);
+      if (token_fd >= 0)
+         close(token_fd);
+      if (envp)
+         git_cred_inject_free_env(envp);
+      git_cred_inject_free_env(hardened);
+      snprintf(err, errlen, "unsafe or unreadable repository-local git configuration");
+      return -1;
+   }
+   free(unsafe_config);
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, repo_dir, hardened, out, GO_OUT_MAX,
+                                                 GO_TIMEOUT_MS, token_fd,
+                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (token_fd >= 0)
+      close(token_fd);
+   if (envp)
+      git_cred_inject_free_env(envp);
+   if (hardened)
+      git_cred_inject_free_env(hardened);
+   if (rc != 0)
+   {
+      /* Preserve the complete capture in *out. The typed resource route carries
+       * it in a separate detail field, so diagnostics are never byte-truncated
+       * into this fixed-size summary buffer. */
+      snprintf(err, errlen, "git push failed (rc=%d)", rc);
+      return -1;
+   }
+   return 0;
+}
+
 /* Resolve the working dir for `project`: the project checkout, or — when
  * `session_id` is non-empty and a session-isolation resolver is registered — that
  * session's sibling worktree (off the default branch, created on demand) so the

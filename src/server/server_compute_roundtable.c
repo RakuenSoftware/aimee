@@ -195,6 +195,14 @@ int normalize_roundtable_brief(cJSON *req, normalized_roundtable_brief_t *out, c
 
 void add_roundtable_arrays(cJSON *resp, const aimee_panel_result_t *result)
 {
+   cJSON *alignment = cJSON_CreateObject();
+   cJSON_AddStringToObject(
+       alignment, "status",
+       result->original_request_alignment[0] ? result->original_request_alignment : "unclear");
+   cJSON_AddStringToObject(alignment, "summary", result->original_request_alignment_summary);
+   cJSON_AddStringToObject(alignment, "sources", result->original_request_alignment_sources);
+   cJSON_AddItemToObject(resp, "original_request_alignment", alignment);
+
    cJSON *items = cJSON_CreateArray();
    size_t used = 0;
    int items_truncated = 0;
@@ -219,6 +227,7 @@ void add_roundtable_arrays(cJSON *resp, const aimee_panel_result_t *result)
       cJSON_AddStringToObject(o, "identity_key", it->identity_key);
       cJSON_AddStringToObject(o, "sources", it->sources);
       cJSON_AddNumberToObject(o, "count", it->count);
+      cJSON_AddBoolToObject(o, "tool_grounded", it->tool_grounded ? 1 : 0);
       cJSON_AddItemToArray(items, o);
    }
    cJSON_AddItemToObject(resp, "items", items);

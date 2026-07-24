@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "modules/aws/aws_eventstream.h"
+#include "tests/support/aws_eventstream_fixture.h"
 
 /* ============================ frame builder ============================ */
 
@@ -165,6 +166,15 @@ static void test_crc32(void)
 
 static void test_valid_decode(void)
 {
+   uint8_t *shared = NULL;
+   size_t shared_len = 0;
+   assert(test_aws_es_event("contentBlockDelta", "{\"delta\":\"hi\"}", &shared, &shared_len) == 0);
+   aws_es_message_t shared_message;
+   size_t shared_consumed = 0;
+   assert(aws_es_decode(shared, shared_len, &shared_message, &shared_consumed) == AWS_ES_OK);
+   assert(shared_consumed == shared_len && shared_message.n_headers == 3);
+   test_aws_es_fixture_free(&shared, shared_len);
+
    bytebuf_t msg;
    build_event(&msg);
 

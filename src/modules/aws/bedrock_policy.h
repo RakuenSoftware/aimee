@@ -43,7 +43,8 @@ extern "C"
    typedef struct
    {
       bedrock_target_type_t type;
-      const char *partition; /* "aws" | "aws-us-gov" | "aws-cn" */
+      const char *partition;     /* "aws" | "aws-us-gov" | "aws-cn" */
+      const char *invoke_region; /* endpoint + SigV4 credential-scope region */
       const char *const *region_set;
       size_t n_regions;
       const char *account; /* required except for foundation-model ARNs */

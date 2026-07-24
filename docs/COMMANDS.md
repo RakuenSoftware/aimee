@@ -100,7 +100,7 @@ provider-CLI-compatible config.
 - `aimee delegate plan <proposal.md> [--output PATH] [--launch]`: generate reviewed work packets.
 - `aimee delegate launch <plan.json> [--parallel N]`: queue a packet plan into a coordinated job.
 - `aimee delegate aggregate "<task>"`: run one Mixture-of-Agents fan-out and synthesis over `ensemble.reference_models`.
-- `aimee delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--brief TEXT] [--brief-json JSON] [--apply]`: run a bounded multi-round collaborative draft or review.
+- `aimee delegate roundtable "<task>" [--roundtable PRESET] [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--brief TEXT] [--brief-json JSON] [--apply]`: run a bounded multi-round collaborative draft or review.
 - `aimee delegate status <job_id> [job_id...]`: inspect background delegate status.
 - `aimee delegate log` / `aimee delegate history`: show delegation episodes.
 - `aimee delegate --list-roles`: list configured delegate roles.
@@ -205,9 +205,9 @@ The hidden `hooks` command is used by configured editor/agent integrations:
 
 ## Webchat
 
-- `aimee-webchat --port 8080`: ask `aimee-server` to host the browser webchat surface.
+- `aimee-runtime-web --port 8080`: ask `aimee-server` to host the browser webchat surface.
 
-`aimee-webchat` is also a thin client. It does not read storage directly.
+`aimee-runtime-web` is also a thin client. It does not read storage directly.
 
 ## MCP Server
 

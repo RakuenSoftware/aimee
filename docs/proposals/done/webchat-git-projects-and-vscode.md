@@ -18,7 +18,7 @@
 
 ## Problem
 
-aimee-webchat is already a multi-user, server-hosted browser app (PAM auth,
+aimee-runtime-web is already a multi-user, server-hosted browser app (PAM auth,
 sessions, `UserManager`, a Chat tab + Dashboard tab). But a webchat user can
 only *chat*. They cannot:
 

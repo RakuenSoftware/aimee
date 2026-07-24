@@ -9,6 +9,52 @@ FAIL=0
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; FAIL=1; }
 
+# The server image entrypoint must honor Docker's explicit command override.
+# Run it outside the image: dispatch must happen before any image-only bootstrap.
+entrypoint_output=$(sh ../deploy/container/server-entrypoint.sh \
+    printf '%s\n' entrypoint-command-override 2>/dev/null)
+if [ "$entrypoint_output" = "entrypoint-command-override" ]; then
+    pass "server entrypoint honors explicit command override"
+else
+    fail "server entrypoint ignored explicit command override"
+fi
+
+# The server image intentionally supervises multiple long-lived planes. Its
+# entrypoint shell therefore cannot be PID 1: orphaned git/agent grandchildren
+# would accumulate as zombies until the appliance could no longer fork.
+if grep -qE '^[[:space:]]+tini \\' ../Dockerfile.server &&
+   grep -qF 'ENTRYPOINT ["/usr/bin/tini", "--", "aimee-server-entrypoint"]' ../Dockerfile.server; then
+    pass "server image uses a PID 1 subreaper"
+else
+   fail "server image must install and enter through tini"
+fi
+
+# A native crash must both produce evidence and cause the two-plane container
+# to restart. `tail --pid` deadlocks on a zombie child because the supervising
+# shell cannot reap that child until tail returns.
+if grep -qF 'aimee_enable_core_dumps' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'aimee_verify_core_dump' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'AIMEE_CORE_SELFTEST: "1"' ../deploy/smoothnas/aimee-server.plugin.yaml &&
+   sh tests/test_server_core_storage.sh; then
+    pass "server entrypoint enables and validates persistent core dumps"
+else
+    fail "server entrypoint leaves native crash core dumps disabled after runuser"
+fi
+if ! grep -qF 'tail -s 0.1 --pid=' ../deploy/container/server-entrypoint.sh &&
+   sh tests/test_server_plane_supervisor.sh; then
+    pass "server plane supervisor detects zombie exits without tail --pid"
+else
+    fail "server plane supervisor can deadlock on an exited zombie child"
+fi
+
+if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
+   grep -q 'wfe_autonomy_register();' server/server.c ||
+   grep -q 'wfe_scheduler_init();' server/server.c; then
+    fail "C WFE runtime ownership is still reachable"
+else
+    pass "Go is the exclusive WFE runtime owner"
+fi
+
 case "$MODE" in
     default) echo "build-integrity:" ;;
     --build-variants) echo "build-variants:" ;;
@@ -52,9 +98,12 @@ for t in $targets; do
     src="tests/test_${name}.c"
     if [ ! -f "$src" ]; then
         # Some variant targets intentionally reuse the base test source with
-        # different backing objects, e.g. unit-test-working-memory-mock.
+        # different backing objects, e.g. unit-test-working-memory-mock. A
+        # shell-backed TEST_TARGET is also valid when the rule installs the
+        # matching script as its executable artifact.
         alt="${src%_mock.c}.c"
-        [ -f "$alt" ] || missing_tests="$missing_tests $src"
+        shell_src="${src%.c}.sh"
+        [ -f "$alt" ] || [ -f "$shell_src" ] || missing_tests="$missing_tests $src"
     fi
 done
 if [ -z "$missing_tests" ]; then
@@ -268,7 +317,7 @@ cmake_target_links() {
     ' "$cmake_file"
 }
 cmake_client_links=$(cmake_target_links aimee)
-cmake_webchat_links=$(cmake_target_links aimee-webchat)
+cmake_webchat_links=$(cmake_target_links aimee-runtime-web)
 cmake_server_links=$(cmake_target_links aimee-server)
 cmake_boundary_failures=""
 for target_block in client webchat; do
@@ -531,7 +580,7 @@ _par_collect() {
 
 _check_existing_shipped_artifacts() {
     local INTEG_BINARY="../aimee"
-    local INTEG_WEBCHAT="../aimee-webchat"
+    local INTEG_WEBCHAT="../aimee-runtime-web"
     local INTEG_SERVER="../aimee-server"
     local INTEG_KB="../aimee-kb"
     local INTEG_GATEWAY="../aimee-gateway"
@@ -681,7 +730,7 @@ _group_integ() {
     INTEG_OBJDIR=build/obj-integrity
     INTEG_BINARY=build/aimee-integrity
     INTEG_SERVER=build/aimee-server-integrity
-    INTEG_WEBCHAT=build/aimee-webchat-integrity
+    INTEG_WEBCHAT=build/aimee-runtime-web-integrity
     INTEG_KB=build/aimee-kb-integrity
     INTEG_GATEWAY=build/aimee-gateway-integrity
     rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB" "$INTEG_GATEWAY"
@@ -769,7 +818,7 @@ _group_integ() {
     fi
 
     # The CLI client (aimee) is a DB-free thin wrapper — no DB libraries allowed.
-    # aimee-webchat is now a full HTTP server process with its own SQLite session
+    # aimee-runtime-web is now a full HTTP server process with its own SQLite session
     # store (PAM auth sessions, rate-limit state); it may link sqlite but must not
     # contain aimee DB1/DB2 API strings (aimee_db_, kb_client, etc.).
     storage_string_leaks=""
@@ -841,7 +890,7 @@ _group_lean() {
     # 9b. Lean build succeeds and meets size limit
     LEAN_BIN=build/aimee-lean-integrity
     LEAN_SRV=build/aimee-server-lean-integrity
-    LEAN_WEB=build/aimee-webchat-lean-integrity
+    LEAN_WEB=build/aimee-runtime-web-lean-integrity
     LEAN_KB=build/aimee-kb-lean-integrity
     LEAN_GW=build/aimee-gateway-lean-integrity
     LEAN_OBJ=build/obj-lean-integrity
@@ -874,7 +923,7 @@ _group_dynlink() {
     DLOBJ=build/obj-dynlink
     DLBIN=build/aimee-dynlink
     DLSRV=build/aimee-server-dynlink
-    DLWEB=build/aimee-webchat-dynlink
+    DLWEB=build/aimee-runtime-web-dynlink
     DLKB=build/aimee-kb-dynlink
     DLGW=build/aimee-gateway-dynlink
     rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB" "$DLGW"
@@ -935,6 +984,10 @@ _group_dynlink() {
             fail "aimee-kb: DB1/sqlite symbols present in DB2-only kb"
             dl_fail=1
         fi
+        if command -v readelf >/dev/null 2>&1 && readelf -Ws "$DLKB" | grep -Eq 'kb_mgmt_status_provision|db2_management_status_provision'; then
+            fail "aimee-kb: offline status-provisioner symbols present in runtime kb"
+            dl_fail=1
+        fi
         # Server must dynamically link ssl and crypto
         if ! ldd "$DLSRV" | grep -q 'libssl'; then
             fail "aimee-server: libssl not dynamically linked"
@@ -960,7 +1013,7 @@ _group_branchswitch() {
     BSOBJ=build/obj-branchswitch
     BSBIN=build/aimee-branchswitch
     BSSRV=build/aimee-server-branchswitch
-    BSWEB=build/aimee-webchat-branchswitch
+    BSWEB=build/aimee-runtime-web-branchswitch
     BSKB=build/aimee-kb-branchswitch
     BSGW=build/aimee-gateway-branchswitch
     BSBRANCH=build/branchswitch-branch.txt

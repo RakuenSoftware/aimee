@@ -231,6 +231,40 @@ static int run_docker(const char *const argv[])
 
 #define DOCKER_PROBE_TIMEOUT_MS 15000
 
+int delegate_backend_docker_remove_orphans(void)
+{
+   const char *list_argv[] = {resolve_docker_bin(),    "ps", "-aq", "--filter",
+                              "name=^aimee-delegate-", NULL};
+   char *out = NULL;
+   if (safe_exec_capture_cwd_env_timeout(list_argv, NULL, NULL, &out, 1 << 20,
+                                         DOCKER_PROBE_TIMEOUT_MS) != 0)
+   {
+      free(out);
+      return -1;
+   }
+   int removed = 0;
+   char *save = NULL;
+   for (char *id = strtok_r(out, "\r\n", &save); id; id = strtok_r(NULL, "\r\n", &save))
+   {
+      size_t len = strlen(id);
+      int valid = len >= 12 && len <= 64;
+      for (size_t i = 0; valid && i < len; i++)
+         valid = isxdigit((unsigned char)id[i]) != 0;
+      if (!valid)
+      {
+         LOG_WARN("delegate-sandbox", "refusing invalid orphan container id from docker: %s", id);
+         continue;
+      }
+      const char *remove_argv[] = {resolve_docker_bin(), "rm", "-f", id, NULL};
+      if (run_docker(remove_argv) == 0)
+         removed++;
+      else
+         LOG_WARN("delegate-sandbox", "failed to remove orphan container %s", id);
+   }
+   free(out);
+   return removed;
+}
+
 /* Determine whether the running sandbox `container` was actually isolated by the
  * runtime, i.e. whether `--network none` was honoured. Asks the HOST daemon (not a
  * binary inside the untrusted image, so distroless/scratch images are fine) for the

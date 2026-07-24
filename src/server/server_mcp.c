@@ -13,7 +13,7 @@
 #include "util.h" /* is_safe_id */
 #include "kb_client.h"
 #include "dashboard.h"
-#include "aimee/protocols/mcp/mcp_tools.h"
+#include "mcp_tools.h"
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
@@ -21,8 +21,8 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "agent_pipeline.h"
-#include <aimee/delegates/delegate_economics.h>
-#include <aimee/delegates/delegate_patch_coordinator.h>
+#include "delegate_economics.h"
+#include "delegate_patch_coordinator.h"
 #include "platform_path.h"
 #include "lsp.h"
 #include "server_mcp_learning.h"
@@ -30,14 +30,12 @@
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
 #include "server_mcp_ensemble.h"
-#include "server_mcp_surface.h"
 #include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
 #include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
 #include "server_http.h"
-#if AIMEE_WITH_ROUNDTABLE
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
-#endif
+#include "wfe_roundtable_proxy.h"
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -106,14 +104,13 @@ static int send_mcp_result_structured(server_conn_t *conn, cJSON *content, cJSON
    return server_send_ok(conn, resp);
 }
 
-#if AIMEE_WITH_ROUNDTABLE
-static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
+static int handle_mcp_roundtable_review(server_conn_t *conn, cJSON *args)
 {
    cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
    if (!cJSON_IsString(diff) || !diff->valuestring || !diff->valuestring[0])
-      return server_send_error(conn, "ensemble_review requires 'diff'", NULL);
+      return server_send_error(conn, "roundtable_review requires 'diff'", NULL);
    if (strlen(diff->valuestring) < 20)
-      return server_send_error(conn, "ensemble_review requires 'diff' of at least 20 characters",
+      return server_send_error(conn, "roundtable_review requires 'diff' of at least 20 characters",
                                NULL);
 
    cJSON *body = cJSON_CreateObject();
@@ -121,13 +118,29 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
       return server_send_error(conn, "out of memory", NULL);
    cJSON_AddStringToObject(body, "prompt", diff->valuestring);
    cJSON_AddStringToObject(body, "mode", "review");
+   for (const char *const *field =
+            (const char *const[]){"original_request", "artifact_stage", "workdir", NULL};
+        *field; field++)
+   {
+      cJSON *value = cJSON_GetObjectItemCaseSensitive(args, *field);
+      if (!value)
+         continue;
+      if (!cJSON_IsString(value) || !value->valuestring || !value->valuestring[0])
+      {
+         cJSON_Delete(body);
+         return server_send_error(
+             conn, "roundtable_review evidence fields must be non-empty strings", NULL);
+      }
+      cJSON_AddStringToObject(body, *field, value->valuestring);
+   }
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
    if (brief)
    {
       if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
       {
          cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'brief' must be a string or object", NULL);
+         return server_send_error(conn, "roundtable_review 'brief' must be a string or object",
+                                  NULL);
       }
       cJSON *brief_copy = cJSON_Duplicate(brief, 1);
       if (!brief_copy)
@@ -137,65 +150,22 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
       }
       cJSON_AddItemToObject(body, "brief", brief_copy);
    }
-   cJSON *rounds = cJSON_GetObjectItemCaseSensitive(args, "rounds");
-   if (rounds)
+   cJSON *roundtable = cJSON_GetObjectItemCaseSensitive(args, "roundtable");
+   if (roundtable)
    {
-      if (!cJSON_IsNumber(rounds) || rounds->valuedouble < 1 || rounds->valuedouble > 16 ||
-          rounds->valuedouble != (double)rounds->valueint)
+      if (!cJSON_IsString(roundtable) || !roundtable->valuestring || !roundtable->valuestring[0])
       {
          cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'rounds' must be an integer from 1 to 16",
+         return server_send_error(conn, "roundtable_review 'roundtable' must name a saved preset",
                                   NULL);
       }
-      cJSON_AddNumberToObject(body, "rounds", rounds->valuedouble);
-   }
-   cJSON *turns = cJSON_GetObjectItemCaseSensitive(args, "turns");
-   if (turns)
-   {
-      if (!cJSON_IsString(turns) || (strcmp(turns->valuestring, "parallel") != 0 &&
-                                     strcmp(turns->valuestring, "sequential") != 0))
-      {
-         cJSON_Delete(body);
-         return server_send_error(conn, "ensemble_review 'turns' must be parallel or sequential",
-                                  NULL);
-      }
-      cJSON_AddStringToObject(body, "turns", turns->valuestring);
+      cJSON_AddStringToObject(body, "roundtable", roundtable->valuestring);
    }
 
-   char *line = cJSON_PrintUnformatted(body);
+   int rc = wfe_roundtable_proxy(conn, body);
    cJSON_Delete(body);
-   if (!line)
-      return server_send_error(conn, "out of memory", NULL);
-
-   char respbuf[8192];
-   int st = server_http_submit_op_run("delegate.roundtable", line, conn->capabilities, respbuf,
-                                      sizeof(respbuf));
-   free(line);
-   if (st < 200 || st >= 300)
-   {
-      cJSON *err = cJSON_Parse(respbuf);
-      cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
-      const char *text = cJSON_IsString(msg) ? msg->valuestring : "could not queue ensemble_review";
-      int rc = server_send_error(conn, text, NULL);
-      cJSON_Delete(err);
-      return rc;
-   }
-
-   cJSON *snap = cJSON_Parse(respbuf);
-   if (!snap)
-      return server_send_error(conn, "could not parse queued run", NULL);
-   cJSON *id = cJSON_GetObjectItemCaseSensitive(snap, "id");
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(snap, "status");
-   cJSON *resp = jo_ok();
-   cJSON_AddStringToObject(resp, "run_id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "id", cJSON_IsString(id) ? id->valuestring : "");
-   cJSON_AddStringToObject(resp, "object", "op.run");
-   cJSON_AddStringToObject(resp, "method", "delegate.roundtable");
-   cJSON_AddStringToObject(resp, "status", cJSON_IsString(status) ? status->valuestring : "queued");
-   cJSON_Delete(snap);
-   return server_send_ok(conn, resp);
+   return rc;
 }
-#endif
 cJSON *tool_get_help(cJSON *args)
 {
    cJSON *jtopic = cJSON_IsObject(args) ? cJSON_GetObjectItemCaseSensitive(args, "topic") : NULL;
@@ -1688,15 +1658,6 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *content = NULL;
    cJSON *structured = NULL;
 
-   /* Check the collapsed served name before family demux; check again after
-    * demux below so direct legacy pipeline_* calls are covered too. */
-   if (!server_mcp_tool_available(tool))
-   {
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return server_send_error(conn, "unknown MCP tool", NULL);
-   }
-
    /* Family multiplex (P4): if `tool` is a collapsed family (pipeline/diagnose/
     * session/lsp/note/…), rewrite it to the legacy <family>_<command> name so all
     * downstream routing + capability gating runs unchanged. */
@@ -1713,15 +1674,6 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       if (fd == 1)
          tool = fam_tool;
-   }
-
-   /* Optional-module tools are absent, not registered-but-disabled. Check after
-    * family demux so both collapsed and legacy names use the owner predicate. */
-   if (!server_mcp_tool_available(tool))
-   {
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return server_send_error(conn, "unknown MCP tool", NULL);
    }
 
    /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.
@@ -1762,15 +1714,13 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return rc;
    }
 
-#if AIMEE_WITH_ROUNDTABLE
-   if (strcmp(tool, "ensemble_review") == 0)
+   if (strcmp(tool, "roundtable_review") == 0)
    {
-      int rc = handle_mcp_ensemble_review(conn, jargs);
+      int rc = handle_mcp_roundtable_review(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;
    }
-#endif
 
    /* Delegate reply: forward to existing handler */
    if (strcmp(tool, "delegate_reply") == 0)
@@ -1790,10 +1740,9 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return rc;
    }
 
-#if AIMEE_WITH_ROUNDTABLE
    /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
     * pipeline_* tool to its handler, which sends its own response on conn (like
-    * ensemble_review/delegate). Capability is enforced against the matching
+    * roundtable_review/delegate). Capability is enforced against the matching
     * pipeline.* method (status/list = read; others = delegate; gate also needs an
     * operator principal inside the handler). MCP arg names mirror the method's. */
    if (strncmp(tool, "pipeline_", 9) == 0)
@@ -1829,7 +1778,6 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return rc;
       }
    }
-#endif
 
    /* Discovery meta-tools (P2): pure introspection of the full catalog; set
     * content and fall through to the normal send path. */

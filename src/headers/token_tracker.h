@@ -26,6 +26,13 @@ double token_estimate_cost(const char *model, const token_usage_t *usage);
  * model as unknown spend. *priced may be NULL. */
 double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int *priced);
 
+/* Convert a positive USD ceiling into a conservative total-token ceiling for a
+ * priced model. Returns 1 with out_tokens set for a bounded model, 0 for an
+ * explicitly free model, and -1 for invalid/unpriced/sub-token ceilings. */
+int token_cost_ceiling(const char *model, double max_cost_usd, int conservative_input_tokens,
+                       int existing_output_limit, int *out_output_tokens,
+                       int *out_total_tokens);
+
 /* Resolve the billable model for the audit/cost key by precedence (ingress
  * cost-accounting §2a): provider-reported model (most specific, echoed in the
  * response) > served model (what aimee actually routed to) > requested model

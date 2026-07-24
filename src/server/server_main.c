@@ -1,5 +1,6 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
 #include "aimee.h"
+#include "agent_tools.h"
 #include "cli_client.h"
 #include "commands.h"
 #include "config.h"
@@ -12,11 +13,13 @@
 #include "guardrails.h"
 #include "workspace.h"
 #include "kb_client_cache.h"
+#include "kb_client_mtls.h"
 #include "kb_client_ws.h"
 #include "db1.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_kb_heartbeat.h"
 #include "cli_session_pty.h"
 #include "presence.h"
 #include "turn_registry.h"
@@ -34,6 +37,7 @@
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
 #include "vault_service.h" /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "audit_replay.h"  /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -176,22 +180,44 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * than the shared project checkout (session_isolation_target, workspace.c). */
    git_ops_register_session_isolation(session_isolation_target);
 
+   /* Fail closed on an undeclared tool BEFORE serving anything. The
+    * externalization gate consults the egress declaration registry, so a
+    * built-in tool with no declaration would be an ungated egress path. Refusing
+    * to start is the whole point: the alternative is a silent bypass that looks
+    * healthy. Cheap (a few dozen string compares) and has no config dependency,
+    * so it runs first. */
+   {
+      char egress_err[256] = "";
+      if (agent_tools_validate_egress_table(egress_err, sizeof(egress_err)) != 0)
+      {
+         startup_notify(notify_fd, "error: tool egress declaration invariant violated\n");
+         aimee_log(LOG_ERROR, "tools", "server startup rejected: %s", egress_err);
+         audit_log_close();
+         return 1;
+      }
+   }
+
    config_t cfg;
    memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
-   config_load(&cfg);
+   if (config_load(&cfg) != 0)
+   {
+      startup_notify(notify_fd, "error: invalid configuration\n");
+      aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
+      audit_log_close();
+      return 1;
+   }
    /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
    config_snapshot_init(&cfg);
+   kb_client_mtls_pool_register_reload();
    /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
     * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
     * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a
     * restart and without an unsafe cross-thread setenv. */
 
-   /* Surface the active economizer tier at startup (observability). off = verbatim
-    * passthrough; safe = caching + lossless reduction; aggressive = + lossy compress
-    * and live inbound /v1 mutation. See docs/features/economizer.md. */
-   aimee_log(LOG_INFO, "economizer", "tier=%s", econ_tier_name(econ_tier(&cfg)));
+   /* Surface the active fail-closed economizer mode at startup. */
+   aimee_log(LOG_INFO, "economizer", "mode=%s", econ_mode_name(econ_mode(&cfg)));
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the
@@ -286,20 +312,39 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
    cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
-   if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_tls_port,
-                         cfg.server_api_bearer_token, cfg.server_api_rate_limit_per_min,
-                         cfg.server_api_remote_writes) != 0)
+   int http_start = server_http_start(
+       NULL, cfg.server_api_http_port, cfg.server_api_tls_port, cfg.server_api_bearer_token,
+       cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes);
+   if (http_start == SERVER_HTTP_START_MGMT_FATAL)
+   {
+      char management_error[256];
+      snprintf(management_error, sizeof(management_error),
+               "error: dedicated management listener failed at %s\n",
+               server_http_management_last_error());
+      startup_notify(notify_fd, management_error);
+      server_http_stop();
+      server_shutdown(&g_ctx);
+      agent_http_cleanup();
+      mcp_client_registry_shutdown();
+      audit_log_close();
+      return 1;
+   }
+   if (http_start != 0)
       LOG_WARN("server.http", "failed to start inbound /v1 HTTP listener");
 
    /* Install signal handlers */
    install_signal_handlers();
 
    g_ctx.running = 1;
+   const char *server_id = getenv("AIMEE_SERVER_ID");
+   if (server_kb_heartbeat_start(server_id) != 0)
+      LOG_WARN("server.kb", "AIMEE_SERVER_ID is required and must be valid for remote kb mTLS");
    (void)shutdown_forensics_record_unclean_exits();
    (void)shutdown_forensics_mark_started("server", g_ctx.start_time);
    startup_notify(notify_fd, "ok\n");
    int rc = server_run(&g_ctx);
 
+   server_kb_heartbeat_stop();
    server_http_stop();
    server_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("server", getpid());
@@ -383,6 +428,23 @@ int main(int argc, char **argv)
       return 0;
    }
 
+   /* Operator record+replay: re-present the governed-action rows recorded to an
+    * audit-on-bus capture file, in order, with the stream's terminal status. This
+    * is the auditability payoff of putting audit on the bus — an offline,
+    * observational replay (nothing re-executed). Lives here because the capture
+    * reader is bus code and aimee-server is the only shipping binary that links the
+    * bus; it runs and exits without starting the server. */
+   if (argc >= 2 && strcmp(argv[1], "--audit-replay") == 0)
+   {
+      if (argc < 3)
+      {
+         fprintf(stderr, "usage: aimee-server --audit-replay <capture-file>\n");
+         return 2;
+      }
+      int rc = audit_bus_replay_print(argv[2], stdout);
+      return rc == 0 ? 0 : 1;
+   }
+
    const char *socket_path = NULL;
    log_level_t log_level = LOG_INFO;
    int service_mode = 0;
@@ -428,6 +490,8 @@ int main(int argc, char **argv)
              "  --service            Run under the Windows Service Control Manager\n"
              "  --rotate-master-key  Re-wrap the vault under a fresh .server-master.key and exit\n"
              "                       (run with the server STOPPED; backs up .vault first)\n"
+             "  --audit-replay FILE  Replay a governed-action audit capture file (the recorded\n"
+             "                       bus event stream) to stdout, in order, and exit\n"
              "  --version            Print version\n"
              "  --help               Show this help\n");
          return 0;

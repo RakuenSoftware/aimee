@@ -487,25 +487,11 @@ char *tool_run_tests(const char *command, int timeout_ms)
       dstr_append_str(&raw, se->valuestring);
    }
 
-   /* Condense: keep the framework summary + every failure, spill the full log.
-    * Reuses the command-aware condenser (test-runner family) + spill store. */
-   config_t cfg;
-   config_load(&cfg);
-   char spill_dir[600];
-   const char *home = aimee_home();
-   const char *sd = NULL;
-   if (home && home[0] &&
-       snprintf(spill_dir, sizeof(spill_dir), "%s/tool-spills", home) < (int)sizeof(spill_dir))
-      sd = spill_dir;
-   char *condensed =
-       tool_condense_apply(&cfg, command, exit_code, raw.data ? raw.data : "", sd, NULL);
-
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "status", exit_code == 0 ? "passed" : "failed");
    cJSON_AddBoolToObject(out, "passed", exit_code == 0);
    cJSON_AddNumberToObject(out, "exit_code", exit_code);
-   cJSON_AddStringToObject(out, "output", condensed ? condensed : (raw.data ? raw.data : ""));
-   free(condensed);
+   cJSON_AddStringToObject(out, "output", raw.data ? raw.data : "");
    dstr_free(&raw);
    cJSON_Delete(bj);
    free(bash_out);

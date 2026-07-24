@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# check_bus_perf_gate.sh — the event-bus performance budget gate (slice 12, D4 /
+# shared invariant 15).
+#
+# It builds and runs the dispatch benchmark, and fails if the measured per-event
+# dispatch overhead exceeds the committed ceiling in bench/bus_baseline.json. A
+# red gate blocks the merge, so "within budget" always names a real, checkable
+# number rather than a slogan.
+#
+# It also asserts the memory round-trip rows are still marked pending — they can
+# only be measured against a pre-migration baseline in the memory-migration
+# slice, and this gate must not let a fabricated number slip in.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+baseline="bench/bus_baseline.json"
+[ -f "$baseline" ] || { echo "FAIL: $baseline not found" >&2; exit 1; }
+
+# 1. The memory round-trip rows must be pending, not fabricated.
+pending=$(python3 - "$baseline" <<'PY'
+import json, sys
+b = json.load(open(sys.argv[1]))
+m = b["metrics"]
+ok = all(m.get(k, {}).get("status") == "pending"
+         for k in ("memory_roundtrip_p50_ns", "memory_roundtrip_p99_ns"))
+print("yes" if ok else "no")
+PY
+)
+if [ "$pending" != "yes" ]; then
+   echo "FAIL: the memory round-trip rows must be marked pending until the" >&2
+   echo "      memory-migration slice measures them against a real baseline." >&2
+   exit 1
+fi
+
+ceiling=$(python3 -c "import json;print(json.load(open('$baseline'))['metrics']['dispatch_overhead_ns']['ceiling_ns'])")
+
+# 2. Build and run the benchmark.
+echo "building the dispatch benchmark..."
+make -C src --no-print-directory bus-bench >/dev/null
+bench=$(find "$repo_root/src" -name bus-bench -type f -perm -u+x 2>/dev/null | head -1)
+[ -x "$bench" ] || { echo "FAIL: benchmark not built" >&2; exit 1; }
+
+# A shorter run in the gate keeps it quick; the measurement is a median so it is
+# stable. The ceiling's headroom absorbs CI variance.
+measured=$("$bench" 500000 2>/dev/null | sed -n 's/^dispatch_overhead_ns=//p')
+if [ -z "$measured" ]; then
+   echo "FAIL: benchmark produced no dispatch_overhead_ns" >&2
+   exit 1
+fi
+
+echo "dispatch overhead: ${measured} ns/event (ceiling ${ceiling} ns)"
+if [ "$measured" -gt "$ceiling" ]; then
+   echo "" >&2
+   echo "FAIL: dispatch overhead ${measured} ns exceeds the committed ceiling" >&2
+   echo "      ${ceiling} ns. Either a real regression landed, or the ceiling" >&2
+   echo "      needs a reviewed change in ${baseline}." >&2
+   exit 1
+fi
+
+# 3. The audit migration (delivery step 3, the first module on the bus): enforce
+#    the committed enqueue-overhead ceiling AND the exactly-once durability
+#    invariant. Both are measured by the real durability test, which emits rows
+#    through the real producer/consumer and reads the real ledger back.
+audit_ceiling=$(python3 -c "import json;print(json.load(open('$baseline'))['metrics']['audit_enqueue_overhead_ns']['ceiling_ns'])")
+max_dropped=$(python3 -c "import json;print(json.load(open('$baseline'))['metrics']['audit_durability']['max_dropped'])")
+
+echo "measuring audit-on-bus (durability + enqueue overhead)..."
+audit_out=$(make -C src --no-print-directory unit-test-bus-audit-durability 2>&1 || true)
+dropped=$(printf '%s\n' "$audit_out" | sed -n 's/.*dropped \([0-9][0-9]*\).*/\1/p' | tail -1)
+p50=$(printf '%s\n' "$audit_out" | sed -n 's/.*enqueue.*p50=\([0-9][0-9]*\) ns.*/\1/p' | tail -1)
+
+if ! printf '%s\n' "$audit_out" | grep -q "test_bus_audit_durability: OK"; then
+   echo "" >&2
+   echo "FAIL: the audit-on-bus durability test did not pass — the exactly-once" >&2
+   echo "      invariant the migration depends on is not holding." >&2
+   printf '%s\n' "$audit_out" | tail -5 >&2
+   exit 1
+fi
+if [ -z "$dropped" ] || [ "$dropped" -gt "$max_dropped" ]; then
+   echo "FAIL: audit rows dropped ('${dropped:-?}' > max ${max_dropped}) — durability violated." >&2
+   exit 1
+fi
+if [ -z "$p50" ]; then
+   echo "FAIL: could not read audit enqueue overhead from the durability test." >&2
+   exit 1
+fi
+echo "audit enqueue overhead: ${p50} ns (ceiling ${audit_ceiling} ns); dropped ${dropped}"
+if [ "$p50" -gt "$audit_ceiling" ]; then
+   echo "" >&2
+   echo "FAIL: audit enqueue overhead ${p50} ns exceeds the committed ceiling" >&2
+   echo "      ${audit_ceiling} ns. Either a real regression landed (e.g. the async" >&2
+   echo "      publish became synchronous), or the ceiling needs a reviewed change" >&2
+   echo "      in ${baseline}." >&2
+   exit 1
+fi
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; memory rows pending"

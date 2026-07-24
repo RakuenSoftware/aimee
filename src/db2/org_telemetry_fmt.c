@@ -84,6 +84,19 @@ static const prom_meta_t k_meta[] = {
     {"aimee_org_catalog_models", "gauge", "Number of enabled models in the org catalog."},
     {"aimee_org_audit_events_total", "counter", "Total governance audit events recorded."},
     {"aimee_org_teams", "gauge", "Number of teams in the org."},
+    {"aimee_org_witness_evidence_records", "gauge",
+     "Witness evidence records currently retained on this kb."},
+    {"aimee_org_witness_shards", "gauge", "Non-empty witness evidence shards."},
+    {"aimee_org_witness_checkpoint_seq", "gauge",
+     "Sequence of the latest signed witness checkpoint (0 if none)."},
+    {"aimee_org_witness_checkpoint_age_seconds", "gauge",
+     "Age of the latest signed witness checkpoint; a growing value means new signed roots "
+     "have stopped."},
+    {"aimee_org_witness_emit_backlog_records", "gauge",
+     "Witness evidence records not yet published on the log/OTLP path. A backlog that only "
+     "grows means retained off-host copies are falling behind."},
+    {"aimee_org_witness_emit_backlog_checkpoints", "gauge",
+     "Signed witness checkpoints not yet published on the log/OTLP path."},
 };
 
 static const prom_meta_t *meta_lookup(const char *name)

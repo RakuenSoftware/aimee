@@ -6,10 +6,10 @@
 #include "cli_session.h"
 #include "log.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* run_cmd cwd control (util.c): the active turn binds the thread-local working
  * directory to the (client) workspace root, and run_cmd prefixes each shell-out
@@ -38,11 +38,9 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
    (void)max_tokens;
    (void)temperature;
 
-   /* Key the tmux session on the aimee session id so concurrent sessions can
-    * never paste into, capture from, or kill (on a recv timeout) each other's
-    * pane. The bound session id is the webchat/turn session via
-    * session_id_set_override; cli_session_make_name embeds it literally and
-    * sanitizes chars tmux rejects.
+   /* Key the tmux session on the strongest available execution identity so
+    * concurrent sessions can never paste into, capture from, or kill (on a
+    * recv timeout) each other's pane.
     *
     * A delegate runs concurrently with its siblings under the SAME session id
     * (delegate_run_ctx_enter binds the originating session for all of them), so
@@ -54,40 +52,16 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
     * name, not reuse) so unique-per-delegation panes don't accumulate — there
     * is no idle reaper for these sessions.
     *
-    * The per-session pane is used ONLY when a real session id is bound on this
-    * thread (session_id_override_active). Without an override, session_id()
-    * returns the process-wide PPID fallback — the SAME value for every
-    * override-less turn in the server — which would collapse them all onto one
-    * "<ppid>-cli" pane and cross-contaminate. In that case fall through to the
-    * agent-keyed / unique-per-turn names below. */
+    * A delegation id always wins, including background op-runs without a bound
+    * client session. The helper falls back to primary-session reuse, configured
+    * agent reuse, or a unique per-turn name in that order. */
    const char *aimee_sid = session_id();
    const char *deleg_id = delegation_active_id();
    int have_session = aimee_sid && aimee_sid[0] && session_id_override_active();
-   int reuse = agent->session_reuse;
-   char *sess_name;
-   if (have_session)
-   {
-      if (deleg_id && deleg_id[0])
-      {
-         sess_name = cli_session_make_name(aimee_sid, deleg_id);
-         reuse = 0;
-      }
-      else
-      {
-         sess_name = cli_session_make_name(aimee_sid, "cli");
-         reuse = 1;
-      }
-   }
-   else if (agent->session_reuse)
-      sess_name = cli_session_make_name(agent->name, "shared");
-   else
-   {
-      static volatile int s_counter = 0;
-      char tmp[CLI_SESSION_NAME_MAX];
-      snprintf(tmp, sizeof(tmp), "aimee-%s-%d-%d", agent->name, (int)getpid(),
-               __sync_fetch_and_add(&s_counter, 1));
-      sess_name = strdup(tmp);
-   }
+   int reuse = 0;
+   char *sess_name =
+       cli_session_make_execution_name(agent->name, agent->session_reuse, aimee_sid, have_session,
+                                       deleg_id, agent->force_cli_isolation, &reuse);
    if (!sess_name)
    {
       snprintf(out->error, sizeof(out->error), "out of memory");
@@ -144,6 +118,26 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
     * other CLIs. */
    if (is_claude)
       cli_session_prepare_claude(cwd, autonomous);
+
+   /* Concurrency isolation for claude DELEGATE seats: several roundtable/impl
+    * seats run at once, and they otherwise share one $HOME -> one ~/.claude.json
+    * and ~/.claude runtime tree, which claude-code writes non-atomically the whole
+    * turn. Concurrent seats then corrupt/block each other and wedge to the CLI
+    * timeout. Give each delegate seat its own HOME (OAuth token + settings shared
+    * by symlink; the rest per-turn) by prefixing the launched command. The primary
+    * interactive session is single, so it keeps the shared HOME. Best-effort: a
+    * failed mint leaves cli_cmd untouched (shared HOME, prior behavior). */
+   char cli_cmd_home[CLI_SESSION_CMD_MAX];
+   if (is_claude && deleg)
+   {
+      char iso_home[PATH_MAX];
+      if (cli_session_isolated_claude_home(cwd, iso_home, sizeof(iso_home)) == 0)
+      {
+         int n = snprintf(cli_cmd_home, sizeof(cli_cmd_home), "HOME='%s' %s", iso_home, cli_cmd);
+         if (n > 0 && n < (int)sizeof(cli_cmd_home))
+            cli_cmd = cli_cmd_home;
+      }
+   }
 
    /* Prefix the launched CLI command with a per-session AIMEE_SESSION_ID assignment
     * (`AIMEE_SESSION_ID=<sid> <cli_cmd>` run by `/bin/sh -c`) so the PreToolUse hook

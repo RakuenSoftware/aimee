@@ -32,6 +32,17 @@ static void db1_run_migrations(sqlite3 *db)
        "ALTER TABLE eval_results ADD COLUMN hardware_profile TEXT NOT NULL DEFAULT ''",
        "ALTER TABLE eval_results ADD COLUMN seed INTEGER NOT NULL DEFAULT 0",
        "ALTER TABLE coord_job_tasks ADD COLUMN preempt_requeues INTEGER NOT NULL DEFAULT 0",
+       "ALTER TABLE agent_jobs ADD COLUMN participant_token TEXT NOT NULL DEFAULT ''",
+       "ALTER TABLE agent_jobs ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0",
+       /* 0 means "no measurement", not "free". Existing rows and every writer
+        * that does not supply an audited cost stay unknown, so a consumer can
+        * never mistake an unmeasured job for genuinely zero spend. */
+       "ALTER TABLE agent_jobs ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0",
+       /* Existing durable jobs must remain continuable after upgrade. The
+        * capability is random and private; unlike a sequential job id it cannot
+        * be enumerated by a roundtable or another coordinator. */
+       "UPDATE agent_jobs SET participant_token = lower(hex(randomblob(32)))"
+       " WHERE participant_token = ''",
        /* Per-task delegate persona (engineer/architect/reviewer/...). The coord
         * queue is the single delegate-dispatch queue; carrying persona lets any
         * orchestrator (coord OR the workflow engine) name the delegate identity

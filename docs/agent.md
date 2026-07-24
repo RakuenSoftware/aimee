@@ -179,20 +179,21 @@ cd src && make lint                       # clang-format check
 pkill aimee-server; cd src && make all server             # rebuild before restart
 ```
 
-Binaries land at repo root (`../aimee`, `../aimee-webchat`, `../aimee-server`, `../aimee-kb`).
+Binaries land at repo root (`../aimee`, `../aimee-runtime-web`, `../aimee-server`, `../aimee-kb`).
 
 ---
 
 ## PR Workflow
 
 ```
-git checkout -b feat/my-feature main
+git checkout -b feat/my-feature testing
 # implement
 git commit -m "feat: short description"
-gh pr create --title "feat: short description" --body "..."
+gh pr create --base testing --title "feat: short description" --body "..."
 ```
 
-PRs target `main`. Wait for CI before merging.
+Feature PRs target `testing`. After CI passes, merge them into `testing`.
+Only the protected promotion PR may flow from `testing` to `main`.
 
 ---
 

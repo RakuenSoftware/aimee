@@ -215,15 +215,54 @@ conservatively so costly delegates are not used speculatively.
 
 ## Routing
 
-The router evaluates delegates using three main pieces of information:
+The router's job is to reach **the cheapest delegate that can actually do the work**. A model that costs less but cannot do the task is never a saving. Selection proceeds in this order:
 
 1. **Role match**: the delegate must support the requested role.
 2. **Enabled state**: only enabled delegates are considered.
-3. **Cost tier**: the cheapest enabled matching delegate is selected.
+3. **Capability gate**: a delegate that cannot meet the task's requirements — context window, required modalities (vision, tools), or a declared scope ceiling — is excluded *before* cost is looked at. Capability comes before price.
+4. **Health**: a delegate the health catalog has marked DOWN is excluded; a DEGRADED one is deprioritized (see [Health-based demotion](#health-based-demotion) below).
+5. **Cost tier**: among the delegates that survive the gate, the cheapest is selected.
 
-In practice, tasks such as `summarize`, `format`, and `draft` usually route to tier-0 delegates first. This means the primary agent often pays only for issuing the delegation request and reading the returned summary or result.
+In practice, tasks such as `summarize`, `format`, and `draft` usually route to tier-0 delegates first, so the primary agent often pays only for issuing the delegation request and reading the result.
 
 If no suitable delegate is available, or if the delegate invocation fails, the system falls back rather than blocking the main task.
+
+### Scope ceilings — `max_scope` and `--scope`
+
+Some delegates can handle a bounded, well-specified change but not a whole open-ended task. Declare that limit per agent with `max_scope` in `agents.json`:
+
+```json
+{ "name": "local-coder", "max_scope": "bounded", ... }
+```
+
+- `bounded` — the agent may only be given work already scoped to a specific change.
+- `whole_task` — the agent may take an open-ended task (the default when unset).
+
+A caller states the scope of a specific packet with `--scope`:
+
+```bash
+aimee delegate code "fix the null check in auth.c:42" --persona engineer --scope bounded
+```
+
+Routing **never relaxes** a scope ceiling: a `--scope whole_task` packet is refused for a `bounded`-only agent even if it is the cheapest, and a run that no eligible seat can serve fails cleanly rather than misplacing the work. `--scope` is enforced server-side, so it applies whether the delegate runs locally or against a remote `aimee-server`. Omit it and the packet is unconstrained.
+
+### Preferring free local delegates — `routing.prefer_local`
+
+With `routing.prefer_local` enabled, routing shifts work to any eligible **local** (free) delegate before considering paid remote seats, even when a remote seat is at a cheaper tier — since a local seat costs nothing, the tier comparison no longer applies. It still respects the capability gate and the scope ceiling, so "prefer free" never becomes "misplace work onto a model that cannot do it".
+
+```bash
+aimee config set routing.prefer_local true
+```
+
+### Health-based demotion
+
+A delegate that keeps failing is demoted so it stops absorbing work it cannot complete:
+
+- After a short streak of consecutive failures its health becomes **DEGRADED**. A degraded delegate is still usable, so routing **prefers a healthy peer** when one can serve the role and only falls back to the degraded seat when none can.
+- After enough consecutive failures the circuit breaker opens and health becomes **DOWN**: the delegate is excluded from routing entirely.
+- The breaker half-opens after a cooldown so a recovered delegate returns automatically, without a restart. The cooldown **grows** each time a recovery probe fails again (60s, doubling to a 30-minute cap), so a delegate that is down for hours — an exhausted quota, say — stops re-entering the routable set every minute. One success resets it.
+
+This is why an out-of-quota or wedged delegate does not keep winning selection and failing: it is demoted below its healthy peers and backed off. The DOWN transition is logged with the failure class and the current cooldown, so a persistent outage is visible as a growing cooldown rather than a silent retry loop.
 
 ## Usage
 
@@ -382,7 +421,7 @@ The panel is configured under `ensemble` in `aimee.yaml`:
 
 | Field | Meaning |
 |-------|---------|
-| `reference_models` | The panel: diverse model/agent names to fan out to |
+| `reference_models` | Positive must-use model/agent pins; runtime fills all other enabled, eligible `max_parallel` seats, provider-diversity first |
 | `aggregator` | Agent that synthesizes the panel's answers |
 | `min_successful` | Minimum panelists that must answer before degrading (default 2) |
 | `max_cost_usd` | Optional per-run cost cap in USD. **Unset/0 means no limit (the default).** Set a positive value to cap a run |
@@ -400,13 +439,17 @@ happened in the result rather than silently dropping the failures:
 |-------|---------|
 | `participants_total` | Reference models fanned out (the panel size) |
 | `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected, the `best_round`) |
+| `participants_required_failed` *(roundtable)* | Failed participants in the adopted best round's caller-authored required prefix; always less than or equal to `participants_failed` |
 | `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
 | `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
 | `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
 
-`participants_failed > 0` with `degraded = 0` means the panel lost some members
-but still had enough to synthesize, the answer is sound but thinner than a full
-panel. `degraded = 1` means the result is a single survivor's answer.
+`participants_failed > 0` with `degraded = 0` means only best-effort capacity
+seats failed while every required participant answered. Their failures remain
+observable but do not turn a complete required panel into a failed gate.
+`degraded` is run-level and sticky across roundtable rounds, so an earlier
+truncation, required-seat failure, or verification degradation cannot be hidden
+by selecting a later artifact.
 
 ## Configuration Reference
 
@@ -510,6 +553,41 @@ To allow a claude-oauth agent to act as a delegate anyway, at your own risk,
 may be routed to / selected as a delegate (and, on a thin client, runs on the
 client exactly like the primary path above). Re-check it to restore the
 primary-only default.
+
+### Provider-general registration
+
+You can register a **provider** once and let `aimee` expand it into one routable
+delegate per model, instead of writing an entry for every model by hand. Add a
+`"models"` list to a single agent entry:
+
+```json
+{
+  "name": "codex",
+  "provider": "openai",
+  "endpoint": "https://chatgpt.com/backend-api/codex",
+  "auth_type": "none",
+  "roles": ["all"],
+  "models": ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+}
+```
+
+This registration expands at load time into three routable seats —
+`codex:gpt-5.6-sol`, `codex:gpt-5.6-terra`, `codex:gpt-5.6-luna` — each carrying
+its own catalog identity, display name (e.g. *GPT-5.6 Sol*), and resolved price.
+Their cost tiers are **derived from the catalog prices**, so a registration whose
+models span cheap-to-premium splits into per-model tiers automatically rather
+than sharing one.
+
+- Use `"models": "auto"` to expand every routable model the catalog lists for the
+  provider, without naming them.
+- Do **not** set both `"model"` and `"models"` on one entry — that is ambiguous
+  and is rejected at load.
+- Anywhere a specific model is selected — roundtable seats in particular — the
+  expanded seats appear as `provider:model` (so a Codex roundtable shows Sol,
+  Terra, and Luna as distinct choices), not as a single opaque `codex`.
+
+A plain single-model entry (no `"models"`) is unchanged; provider-general
+registration is opt-in.
 
 ### Config format
 

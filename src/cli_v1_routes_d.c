@@ -4,7 +4,6 @@
  * =================================================================== */
 
 #include "cli_v1_routes_internal.h"
-#include "headers/aimee_features.h"
 #include "platform_path.h"
 #include "cli_client.h"
 #define V1_PROTOCOL_VERSION 1
@@ -26,9 +25,7 @@ static const struct
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
-#if AIMEE_WITH_ROUNDTABLE
-    {"delegate.roundtable", pt_print_delegate_roundtable},
-#endif
+    {"roundtable.review", pt_print_roundtable_review},
     {"audit.verify", pt_print_audit},
     {"audit.checkpoint", pt_print_audit},
     {"audit.seal", pt_print_audit},
@@ -577,7 +574,9 @@ static const struct
     {"api.status", "GET", "/v1/api/status"},
     {"attempt.list", "POST", "/v1/attempts/list"},
     {"attempt.record", "POST", "/v1/attempts/record"},
+    {"audit.captures", "GET", "/v1/audit/captures"},
     {"audit.checkpoint", "POST", "/v1/audit/checkpoint"},
+    {"audit.replay", "POST", "/v1/audit/replay"},
     {"audit.seal", "POST", "/v1/audit/seal"},
     {"audit.snapshot", "POST", "/v1/audit/snapshot"},
     {"audit.verify", "GET", "/v1/audit/verify"},
@@ -620,9 +619,7 @@ static const struct
     {"dashboard.metrics", "GET", "/v1/dashboard/metrics"},
     {"dashboard.onboard", "GET", "/v1/dashboard/onboard"},
     {"dashboard.plans", "GET", "/v1/dashboard/plans"},
-#if AIMEE_WITH_PLUGIN_LOADER
     {"dashboard.plugins", "GET", "/v1/dashboard/plugins"},
-#endif
     {"dashboard.traces", "GET", "/v1/dashboard/traces"},
     {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
@@ -687,11 +684,9 @@ static const struct
     {"optimize.export", "GET", "/v1/optimize/export"},
     {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
-#if AIMEE_WITH_PLUGIN_LOADER
     {"plugin.disable", "POST", "/v1/plugins/disable"},
     {"plugin.enable", "POST", "/v1/plugins/enable"},
     {"plugin.list", "GET", "/v1/plugins"},
-#endif
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
     {"provider.models", "GET", "/v1/provider/models"},
@@ -758,10 +753,7 @@ static const struct
    const char *path;
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
-#if AIMEE_WITH_ROUNDTABLE
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
-    {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
-#endif
     {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
@@ -772,6 +764,7 @@ static const struct
     {"kb.ingest", "POST", "/v1/kb/ingest"},
     {"kb.update", "POST", "/v1/kb/update"},
     {"memory.benchmark", "POST", "/v1/memory/benchmark"},
+    {"roundtable.review", "POST", "/v1/roundtable/review"},
     {"rules.generate", "POST", "/v1/rules/generate"},
 };
 /* @@GEN-CLI-V1-ROUTES END @@ */

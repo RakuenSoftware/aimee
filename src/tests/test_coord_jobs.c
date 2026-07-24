@@ -396,6 +396,53 @@ static void test_bounded_preempt_release(void)
    printf("  PASS: test_bounded_preempt_release\n");
 }
 
+static void test_previous_boot_recovery_and_fencing(void)
+{
+   sqlite3 *db = setup();
+
+   int plan_id = create_test_plan(db);
+   int job_id = db1_coord_job_create(plan_id, 3);
+   int recover_id = db1_coord_job_add_task(job_id, 0, "[\"src/recover.c\"]", "code", "recover",
+                                           "/wt", "engineer");
+   int live_id =
+       db1_coord_job_add_task(job_id, 0, "[\"src/live.c\"]", "code", "live", "/wt", "engineer");
+   assert(recover_id > 0 && live_id > 0);
+
+   db1_coord_task_t task;
+   assert(db1_coord_job_claim_next(job_id, "coord-old-boot", &task) == recover_id);
+   assert(db1_coord_job_claim_next(job_id, "coord-live-boot", &task) == live_id);
+
+   int requeued = -1, failed = -1;
+   assert(db1_coord_job_recover_owner("coord-old-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 1 && failed == 0);
+
+   db1_coord_task_t tasks[4];
+   assert(db1_coord_job_list_tasks(job_id, tasks, 4) == 2);
+   assert(strcmp(tasks[0].status, "pending") == 0);
+   assert(tasks[0].preempt_requeues == 1);
+   assert(strcmp(tasks[1].status, "claimed") == 0);
+   assert(strcmp(tasks[1].claimed_by, "coord-live-boot") == 0);
+
+   assert(db1_coord_job_claim_next(job_id, "coord-new-boot", &task) == recover_id);
+   /* A late result from the dead attempt is fenced out; the current owner wins. */
+   assert(db1_coord_job_complete_task_owned(recover_id, "coord-old-boot", "stale") == -1);
+   assert(db1_coord_job_complete_task_owned(recover_id, "coord-new-boot", "fresh") == 0);
+
+   /* A second crash exceeds the configured recovery cap and fails explicitly. */
+   assert(db1_coord_job_recover_owner("coord-live-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 1 && failed == 0);
+   assert(db1_coord_job_claim_next(job_id, "coord-next-boot", &task) == live_id);
+   assert(db1_coord_job_recover_owner("coord-next-boot", 1, &requeued, &failed) == 0);
+   assert(requeued == 0 && failed == 1);
+
+   assert(db1_coord_job_list_tasks(job_id, tasks, 4) == 2);
+   assert(strcmp(tasks[1].status, "failed") == 0);
+   assert(strstr(tasks[1].error, "crash retry cap exhausted") != NULL);
+
+   teardown(db);
+   printf("  PASS: test_previous_boot_recovery_and_fencing\n");
+}
+
 /* --- Test: cancel job --- */
 
 static void test_cancel_job(void)
@@ -593,6 +640,7 @@ int main(void)
    test_fail_task();
    test_release_claim();
    test_bounded_preempt_release();
+   test_previous_boot_recovery_and_fencing();
    test_cancel_job();
    test_max_concurrent();
    test_default_parallel();

@@ -528,7 +528,7 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Submit a roundtable pass (draft or review) as a pipeline-owned op-run. The
  * worker captures the terminal envelope into the ledger (#18). */
 
-/* Attach the artifact as `prompt` (handle_delegate_roundtable reads "prompt",
+/* Attach the artifact as `prompt` (the Go roundtable transport reads "prompt",
  * min 20 chars — #1) and the brief — as a JSON object when run.brief holds one
  * (so questions/invariants/fixes reach the panel and the questions bar can be
  * enforced, #3), otherwise as a focus string. */
@@ -816,7 +816,7 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    cJSON_Delete(body);
 
    char runresp[4096];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities,
                                       runresp, (int)sizeof(runresp));
    free(bj);
    if (rc < 200 || rc >= 300)
@@ -929,7 +929,7 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
    char *bj = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
    char rr[2048];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities, rr,
                                       (int)sizeof(rr));
    free(bj);
    if (rc < 200 || rc >= 300)
@@ -1015,7 +1015,7 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
    cJSON_Delete(body);
    free(a);
    char rr[4096];
-   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+   int rc = server_http_submit_op_run("roundtable.review", bj ? bj : "{}", conn->capabilities, rr,
                                       (int)sizeof(rr));
    free(bj);
    cJSON *resp = jo_ok();

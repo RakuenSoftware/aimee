@@ -7,7 +7,10 @@
 #include "cli_session.h"
 #include "util.h"
 #include "workspace_provider.h"
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -102,6 +105,24 @@ cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out)
    return g_cancel_cb;
 }
 
+/* Per-thread liveness heartbeat (set by the delegate worker to bump the job's
+ * heartbeat_at). Thread-local so concurrent turns on the pool never cross. */
+static __thread cli_session_heartbeat_cb_t g_heartbeat_cb = NULL;
+static __thread void *g_heartbeat_ud = NULL;
+
+void cli_session_set_heartbeat_cb(cli_session_heartbeat_cb_t cb, void *ud)
+{
+   g_heartbeat_cb = cb;
+   g_heartbeat_ud = ud;
+}
+
+cli_session_heartbeat_cb_t cli_session_get_heartbeat_cb(void **ud_out)
+{
+   if (ud_out)
+      *ud_out = g_heartbeat_ud;
+   return g_heartbeat_cb;
+}
+
 /* Per-thread provider-error grace (ms); 0 = disabled. Thread-local so concurrent
  * turns on the pool each carry their own bound. */
 static __thread int g_error_grace_ms = 0;
@@ -139,7 +160,11 @@ void cli_session_mark_baseline(cli_session_t *s)
 
 static void cli_session_capture_cmd(const cli_session_t *s, char *cmd, size_t cmd_len)
 {
-   snprintf(cmd, cmd_len, "tmux capture-pane -p -t '%s' 2>/dev/null", s->session_name);
+   /* -J joins visually wrapped pane rows back into their logical line. Without
+    * it, JSON strings wider than the pane acquire literal newlines and become
+    * invalid. -S - includes scrollback from the start of the pane so a long
+    * answer cannot lose its opening object/fields above the visible 50 rows. */
+   snprintf(cmd, cmd_len, "tmux capture-pane -p -J -S - -t '%s' 2>/dev/null", s->session_name);
 }
 
 int cli_session_is_alive(const cli_session_t *s)
@@ -353,6 +378,145 @@ void cli_session_prepare_claude(const char *work_dir, int autonomous)
       close(lf);
    }
    pthread_mutex_unlock(&g_prep_mu);
+}
+
+/* nftw callback: remove one entry. FTW_DEPTH gives post-order so a directory is
+ * removed after its children; FTW_PHYS (set by the caller) means a symlink is
+ * removed as the link, never followed — so the shared .credentials.json target is
+ * never touched. */
+static int cli_home_unlink_cb(const char *p, const struct stat *st, int type, struct FTW *ftw)
+{
+   (void)st;
+   (void)type;
+   (void)ftw;
+   remove(p);
+   return 0;
+}
+
+static void cli_rmrf(const char *path)
+{
+   nftw(path, cli_home_unlink_cb, 16, FTW_DEPTH | FTW_PHYS);
+}
+
+/* Reap per-session claude homes older than an hour so they cannot accumulate on
+ * the volume. Best-effort; an in-use home has a fresh mtime and is skipped. */
+static void cli_claude_homes_sweep(const char *base)
+{
+   DIR *d = opendir(base);
+   if (!d)
+      return;
+   time_t now = time(NULL);
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      char p[PATH_MAX];
+      if ((size_t)snprintf(p, sizeof(p), "%s/%s", base, e->d_name) >= sizeof(p))
+         continue;
+      struct stat st;
+      if (lstat(p, &st) != 0 || !S_ISDIR(st.st_mode))
+         continue;
+      if (now - st.st_mtime < 3600)
+         continue;
+      cli_rmrf(p);
+   }
+   closedir(d);
+}
+
+/* Mint a per-session claude HOME so concurrent delegate seats do not share one
+ * ~/.claude.json and ~/.claude runtime tree (session history, sessions,
+ * session-env). claude-code writes those non-atomically all turn, so N concurrent
+ * seats corrupt/block each other and wedge to the CLI timeout — a review that
+ * finishes solo in ~1 min hangs under load. Each turn gets its own HOME; only the
+ * OAuth token and settings.json are shared, symlinked (read-mostly), and
+ * ~/.claude.json is seeded from the shared one (oauthAccount / onboarding / trust)
+ * then diverges per turn.
+ *
+ * Best-effort: on ANY failure returns -1 and fills nothing, so the caller launches
+ * with the shared HOME (the prior behavior) — this can never make claude
+ * unlaunchable. Fills home_out with the new HOME on success. */
+int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz)
+{
+   if (!home_out || home_out_sz == 0)
+      return -1;
+   home_out[0] = '\0';
+   const char *shared = cli_claude_home();
+
+   char base[PATH_MAX];
+   if ((size_t)snprintf(base, sizeof(base), "%s/.claude-homes", shared) >= sizeof(base))
+      return -1;
+   mkdir(base, 0700); /* ignore EEXIST */
+   cli_claude_homes_sweep(base);
+
+   char home[PATH_MAX];
+   if ((size_t)snprintf(home, sizeof(home), "%s/s.XXXXXX", base) >= sizeof(home))
+      return -1;
+   if (mkdtemp(home) == NULL)
+      return -1;
+
+   char cdir[PATH_MAX];
+   if ((size_t)snprintf(cdir, sizeof(cdir), "%s/.claude", home) >= sizeof(cdir))
+      return -1;
+   if (mkdir(cdir, 0700) != 0 && errno != EEXIST)
+      return -1;
+
+   /* Share the OAuth token (required to authenticate) and settings.json (MCP
+    * servers + hooks + the auto-updater disable) by symlink. The credential is
+    * mandatory: without it claude cannot auth, so a failed link falls back to the
+    * shared HOME rather than launching an unauthenticated seat. */
+   char src[PATH_MAX], dst[PATH_MAX];
+   if ((size_t)snprintf(src, sizeof(src), "%s/.claude/.credentials.json", shared) >= sizeof(src) ||
+       (size_t)snprintf(dst, sizeof(dst), "%s/.credentials.json", cdir) >= sizeof(dst))
+      return -1;
+   /* symlink() happily links to a missing target, so verify the shared token
+    * actually exists — a dangling credential link would launch an unauthenticated
+    * seat. No token -> fall back to the shared HOME. */
+   if (access(src, R_OK) != 0 || symlink(src, dst) != 0)
+      return -1;
+   if ((size_t)snprintf(src, sizeof(src), "%s/.claude/settings.json", shared) < sizeof(src) &&
+       (size_t)snprintf(dst, sizeof(dst), "%s/settings.json", cdir) < sizeof(dst))
+      (void)symlink(src, dst); /* helpful, not fatal */
+
+   /* Seed ~/.claude.json from the shared one for oauthAccount + onboarding, plus
+    * trust for this worktree. A mid-write/corrupt shared file (skip=1) means we
+    * cannot recover the account -> fall back to the shared HOME. */
+   char sharedjson[PATH_MAX], homejson[PATH_MAX];
+   if ((size_t)snprintf(sharedjson, sizeof(sharedjson), "%s/.claude.json", shared) >=
+           sizeof(sharedjson) ||
+       (size_t)snprintf(homejson, sizeof(homejson), "%s/.claude.json", home) >= sizeof(homejson))
+      return -1;
+   int skip = 0;
+   cJSON *root = cli_claude_cfg_load(sharedjson, &skip);
+   if (!root)
+      return -1;
+   cli_json_set_true(root, "hasCompletedOnboarding");
+   if (work_dir && work_dir[0])
+   {
+      cJSON *projects = cJSON_GetObjectItemCaseSensitive(root, "projects");
+      if (!cJSON_IsObject(projects))
+      {
+         cJSON_DeleteItemFromObject(root, "projects");
+         projects = cJSON_AddObjectToObject(root, "projects");
+      }
+      cJSON *proj = projects ? cJSON_GetObjectItemCaseSensitive(projects, work_dir) : NULL;
+      if (projects && !cJSON_IsObject(proj))
+      {
+         cJSON_DeleteItemFromObject(projects, work_dir);
+         proj = cJSON_AddObjectToObject(projects, work_dir);
+      }
+      if (proj)
+         cli_json_set_true(proj, "hasTrustDialogAccepted");
+   }
+   char *out = cJSON_Print(root);
+   int wrote = out && cli_write_file_atomic(homejson, out) == 0;
+   free(out);
+   cJSON_Delete(root);
+   if (!wrote)
+      return -1;
+
+   snprintf(home_out, home_out_sz, "%s", home);
+   return 0;
 }
 
 int cli_session_resolve_cwd(const char *turn_cwd, char *out, size_t n)
@@ -908,9 +1072,50 @@ static char *cli_extract_impl(const char *raw, const char *cli_kind, const char 
    return filtered;
 }
 
+/* Claude's TUI hard-wraps long rendered lines itself.  Those rows are not tmux
+ * soft wraps, so capture-pane -J cannot join them.  In ordinary prose the row
+ * break is harmless, but inside a JSON string it turns otherwise-correct model
+ * output into invalid JSON.  Preserve formatting outside strings and replace
+ * only literal control characters inside a response that starts as JSON. */
+static void cli_normalize_json_string_wraps(char *text)
+{
+   if (!text)
+      return;
+   char *p = text;
+   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+      p++;
+   if (*p != '{' && *p != '[')
+      return;
+
+   int in_string = 0, escaped = 0;
+   for (; *p; p++)
+   {
+      if (in_string && (*p == '\n' || *p == '\r' || *p == '\t'))
+      {
+         *p = ' ';
+         escaped = 0;
+         continue;
+      }
+      if (escaped)
+      {
+         escaped = 0;
+         continue;
+      }
+      if (in_string && *p == '\\')
+      {
+         escaped = 1;
+         continue;
+      }
+      if (*p == '"')
+         in_string = !in_string;
+   }
+}
+
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
 {
-   return cli_extract_impl(raw, cli_kind, baseline, 1);
+   char *response = cli_extract_impl(raw, cli_kind, baseline, 1);
+   cli_normalize_json_string_wraps(response);
+   return response;
 }
 
 /* Recognize the CLI's animated working/status line so the answer extractor can
@@ -1014,6 +1219,9 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    long long start = mono_ms();
    int err_active = 0;      /* 1 once the pane is in a provider-error state */
    long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
+   int saw_answer = 0;
+   int marker_cli = strstr(s->cli_kind, "claude") != NULL || strstr(s->cli_kind, "codex") != NULL;
+   long long last_hb = 0; /* mono_ms of the last liveness heartbeat (0 = never) */
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
 
@@ -1023,6 +1231,21 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       {
          out[0] = '\0';
          return -1;
+      }
+
+      /* Liveness heartbeat: this recv is actively driving the CLI turn, but a
+       * tmux-CLI delegate makes no aimee HTTP calls, so the HTTP progress
+       * heartbeat never fires and the stale-idle monitor would cancel a healthy
+       * long turn. Prove the loop is alive on a throttle well under that
+       * threshold; recv's own idle timeout still bounds a genuinely wedged CLI. */
+      if (g_heartbeat_cb)
+      {
+         long long now_hb = mono_ms();
+         if (last_hb == 0 || now_hb - last_hb >= CLI_SESSION_HEARTBEAT_MS)
+         {
+            g_heartbeat_cb(g_heartbeat_ud);
+            last_hb = now_hb;
+         }
       }
 
       /* Cancellation (steering/interrupt or session close): stop the CLI mid-
@@ -1100,6 +1323,18 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       char cap[CLI_SESSION_BUF_MAX];
       if (cli_session_capture(s, cap, sizeof(cap)) != 0)
          continue;
+
+      /* A freshly pasted prompt can leave the pane static for several polls
+       * before the CLI begins inference. It is user/composer text, not a reply.
+       * Remember whether a known TUI has ever rendered a new assistant marker;
+       * completion below must not return the baseline delta until that happens.
+       * Once seen, the marker may scroll off a long answer, so retain the bit. */
+      if (marker_cli && !saw_answer)
+      {
+         char *marked = cli_extract_impl(cap, s->cli_kind, s->baseline, 0);
+         saw_answer = marked && marked[0];
+         free(marked);
+      }
 
       /* Stream the clean answer's growth as it is produced: extract this turn's
        * response so far and emit only the newly appended suffix. */
@@ -1187,6 +1422,11 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
             }
             else
             {
+               if (marker_cli && !saw_answer)
+               {
+                  stable = 0;
+                  continue;
+               }
                char *resp = cli_session_extract_response(cap, s->cli_kind, s->baseline);
                snprintf(out, out_max, "%s", resp ? resp : "");
                free(resp);
@@ -1226,6 +1466,45 @@ char *cli_session_make_name(const char *agent_name, const char *role)
          *p = '-';
    }
    return name;
+}
+
+char *cli_session_make_execution_name(const char *agent_name, int configured_reuse,
+                                      const char *bound_session_id, int session_override,
+                                      const char *delegation_id, int force_isolation,
+                                      int *reuse_out)
+{
+   const char *agent = agent_name && agent_name[0] ? agent_name : "agent";
+   const int have_session = session_override && bound_session_id && bound_session_id[0];
+
+   /* A delegation id is already the durable identity of one child job. It must
+    * win even for background/op-run work, where no client session override is
+    * bound. Otherwise every such job falls into the agent's shared pane. */
+   if (delegation_id && delegation_id[0])
+   {
+      if (reuse_out)
+         *reuse_out = 0;
+      return cli_session_make_name(have_session ? bound_session_id : agent, delegation_id);
+   }
+   if (have_session && !force_isolation)
+   {
+      if (reuse_out)
+         *reuse_out = 1;
+      return cli_session_make_name(bound_session_id, "cli");
+   }
+   if (configured_reuse && !force_isolation)
+   {
+      if (reuse_out)
+         *reuse_out = 1;
+      return cli_session_make_name(agent, "shared");
+   }
+
+   static volatile int s_counter = 0;
+   char tmp[CLI_SESSION_NAME_MAX];
+   snprintf(tmp, sizeof(tmp), "aimee-%s-%d-%d", agent, (int)getpid(),
+            __sync_fetch_and_add(&s_counter, 1));
+   if (reuse_out)
+      *reuse_out = 0;
+   return strdup(tmp);
 }
 
 char *cli_session_strip_ansi(const char *raw)

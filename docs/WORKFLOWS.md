@@ -111,26 +111,61 @@ A roundtable node carries its panel in `params`:
       required: [security, architect, qa, reviewer]   # persona names
       eligible: [contrarian]                           # may join if available
     quorum: 4
-    max_rounds: 6
   on_pass: proposal_pr
   on_fail: draft
 ```
 
-Panel entries are **persona** names, see [Personas](personas.md). Each panelist
-is a persona run on a delegate model; the gate passes when the quorum of
-panelists approve (or fails after `max_rounds`). Panelists are dispatched **in
-parallel**, so a round costs roughly one model's latency rather than the sum.
+Panel entries are **persona** names, see [Personas](personas.md). Each configured
+seat performs one independent analysis in parallel. The gate passes when the
+roundtable's configured minimum succeeds with no blocking finding.
 
-**Which model reviews each persona** comes from the active roundtable preset (the
-one the GUI edits and `roundtable.default` selects). For each required persona the
-gate looks up the matching seat and honors its model:
+If Discussion mode is enabled on that preset, all successful seats compare the
+independent reports once. Nits, suggestions, and ordinary defects cannot extend
+discussion beyond that cycle. Only disagreement about a foundational issue may
+continue, carrying just the contested stable issue IDs until a strict majority
+forms. Deadline or quorum loss parks the gate instead of inventing consensus;
+the scheduler retries that execution-owned pause after a bounded backoff with a
+new durable execution version. Work-item cost and turn caps remain the safety
+backstops, while operator and convergence parks are never auto-resumed.
+Strict majority is measured over successful seats returning a complete valid
+ballot in that cycle; abstentions remain in the denominator but do not alone
+extend discussion. The preset's `deadline_ms` covers analysis, Discussion, and
+Chairman together, with zero/omitted values normalized to 600 seconds.
+That deadline is one work-conserving budget: the runtime waits for every analysis
+seat to return, fail, or reach the configured deadline instead of silently
+dividing it into much shorter phase slices. Later phases receive the remaining
+time, and the configured deadline remains the hard bound for the whole table.
+The compatibility proxy uses the acquired preset deadline plus bounded
+transport grace, so its socket timeout cannot preempt valid configured work.
+An unavailable independent-analysis seat remains visible as degraded
+participation, but it parks the gate only when complete reports fall below the
+preset's `min_successful`; meeting that configured minimum continues normally.
+
+An optional configured chairman runs once after deterministic synthesis and
+submits the final structured feedback. The chairman is a positive, visible agent
+selection, not an exclusion rule. Transport failure, malformed output, wrong
+artifact stage, or a contradictory verdict parks the gate for scheduler retry;
+it never triggers a roster-wide fallback. A valid `changes` verdict with
+`drifted` or `unclear` alignment becomes structured refinement feedback rather
+than an execution pause. When disabled, deterministic synthesis is final.
+
+Roundtable presets are execution policy. Agents and automation may read and use
+them, but create, edit, delete, and default-selection operations require the
+attested `webuser:admin` appliance administrator. Generic API capabilities,
+other authenticated web users, and local Unix-socket access do not authorize
+those mutations.
+
+**Which models review the artifact** comes from the acquired roundtable preset.
+The preset the GUI edits and `roundtable.default` selects is used unless the gate
+names another preset. Its exact seats are the complete panel; required personas
+are review/verdict dimensions and do not create additional seats:
 
 - a **specific pinned model** is dispatched to that **exact** agent. If that model
   is not enabled/routable for the `review` role — or its dispatch fails — the run
   **fails** (a pinned model is a hard requirement, never silently swapped);
-- a **`$random`** seat (or a persona with no matching seat) picks **any**
-  review-capable agent and retries a different one until one is accepted, so a
-  flaky agent doesn't stall the gate.
+- a **`$random`** seat picks an available review-capable agent;
+- when no saved preset can be acquired, the fallback panel contains at most two
+  review-capable agents, selected across providers where possible.
 
 Set a seat to a specific model or to *Random* in the Roundtable page of the GUI.
 An agent is "review-capable" unless its `exec_roles` explicitly omit `review`
@@ -151,8 +186,8 @@ one workflow can use different panels:
     quorum: 4
 ```
 
-If the named preset does not exist the gate logs a warning and every lens falls
-back to `$random`.
+If an explicitly named or configured-default preset does not exist, the gate
+parks with a configuration error; it never silently substitutes another panel.
 
 There is **no engine privilege** over a user-authored workflow: `build` is just
 one composition of the same catalog you compose from. Clone it and edit freely.

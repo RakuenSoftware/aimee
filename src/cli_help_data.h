@@ -89,8 +89,10 @@
      "                   research -> execute. REQUIRES --persona NAME (e.g.\n"
      "                   engineer, qa, security, reviewer, architect). --tools\n"
      "                   enables tool use for roles that do not enable it by\n"
-     "                   default. See `aimee delegate <role> --help` for the full\n"
-     "                   flag set (--persona, --context-file, --via, etc.).\n"
+     "                   default. --scope bounded|whole_task caps how open-ended\n"
+     "                   the task may be (enforced against each agent's max_scope).\n"
+     "                   See `aimee delegate <role> --help` for the full flag set\n"
+     "                   (--persona, --context-file, --via, --scope, etc.).\n"
      "  plan             Generate read-only work packets from a proposal\n"
      "  launch <plan>    Queue a reviewed packet plan into a coord job\n"
      "  status <job_id> [job_id...]  Check background delegate status\n"
@@ -169,6 +171,10 @@
     {"ensemble", "A panel of agents (mixture-of-agents, roundtable)", CLIENT_TIER_ADVANCED, 0,
      "  aggregate        Mixture-of-Agents ensemble aggregate\n"
      "  roundtable       Multi-round agent roundtable\n"},
+    {"roundtable", "Review an artifact with a configured roundtable", CLIENT_TIER_ADVANCED, 0,
+     "  review <artifact>  Run the configured roundtable review\n"
+     "                     --roundtable NAME selects a saved preset\n"
+     "                     --original-request TEXT supplies the governing request\n"},
     {"pipeline", "Roundtable authoring pipelines", CLIENT_TIER_ADVANCED, 0,
      "  start            Start an authoring pipeline from a one-line idea\n"
      "  status           Show a pipeline's state, phase, latest review digest and gate\n"

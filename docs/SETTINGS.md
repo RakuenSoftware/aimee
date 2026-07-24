@@ -33,24 +33,28 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer: the `economizer` tier
+### Context economizer: `economizer.mode`
 
-The economizer is a **single tiered control** — one string, not a set of levers:
+The economizer has one mode control:
 
 ```yaml
-economizer: safe        # off | safe | aggressive   (default: safe)
+economizer:
+  mode: safe             # off | safe | aggressive (default: safe)
 ```
 
-| Tier | What it does |
+| Mode | What it does |
 | --- | --- |
-| `off` | Verbatim passthrough — no prompt-cache breakpoint, no reduction. |
-| `safe` (default) | Anthropic prompt caching **+** deterministic, freeze-on-first-send tool-output condensation (the full output stays recall-restorable); recall-restorable history fold on OpenAI. Lossless — nothing the model can see is dropped. |
-| `aggressive` | Everything in `safe` **+** lossy tool-body compression and live inbound `/v1` request mutation. Mutation/compression apply to **OpenAI-family egress only** — Anthropic context is never mutated at any tier. |
+| `off` | Disables economizer transforms. |
+| `safe` (default) | Deterministically compacts strict JSON from a fresh local tool result before its first provider dispatch. It does not rewrite history or cache controls. |
+| `aggressive` | Adds the existing lossy history and tool-output reducers on supported OpenAI-family routes. Native Anthropic history is not mutated. |
 
-`modules.economizer: false` is an authoritative hard-kill that forces the tier to `off`
-regardless of the `economizer` value. The per-tier reduction behavior (fold, condensation,
-compression, gateway mutation) is an **internal preset** selected by the tier — there are no
-per-lever config knobs. See [The aimee Economizer](features/economizer.md).
+`modules.economizer: false` is an authoritative hard-kill that forces the effective mode to
+`off`. Provider cache controls are never changed, and retries reuse the selected exact-length wire
+snapshot. `safe` is JSON-semantic rather than byte-preserving: it removes only insignificant
+whitespace from a fresh strict JSON tool result, and otherwise passes the original through.
+`aggressive` is explicitly lossy and does not guarantee a lower provider bill. See
+[The aimee Economizer](features/economizer.md) for request-path behavior, provider cache constraints,
+limits, API configuration, and troubleshooting.
 
 ### Autonomous-development pipeline: `autonomy.*`
 
@@ -89,29 +93,26 @@ and is not affected by this key.
 
 ---
 
-## Choosing an economizer tier
+## Choosing an economizer mode
 
-The economizer is on by default at the `safe` tier (lossless). To change it, in the web UI
-open **⚙️ Settings** and set **`economizer`**, or from the CLI / config file:
+The economizer defaults to `safe`. Select any tier with `economizer.mode`:
 
 ```yaml
-economizer: aggressive   # or: off
+economizer:
+  mode: safe
 ```
 
 ```sh
-aimee config set economizer aggressive
+aimee config set economizer.mode safe
 ```
 
-Tool-output condensation (recognized command output condensed before it enters context, with
-the full output spilled under `<aimee_home>/tool-spills/` and a recovery pointer) is part of
-the `safe` tier and on by default. See
-[features/tool-output-condensation.md](features/tool-output-condensation.md) for the
-condensation safety contract and observability, and
-[features/economizer.md](features/economizer.md) for the full tier model.
+Use `off` for economizer pass-through or `aggressive` when lossy context reduction and possible
+provider-cache churn are acceptable.
+See [features/economizer.md](features/economizer.md) for the provider and safety boundaries.
 
 ## When a change takes effect
 
-- **Immediately (next turn):** the `economizer` tier and most other fields. The
+- **Immediately (next turn):** `economizer.mode` and most other fields. The
   server reloads config per request.
 - **On next server start:** the `autonomy.*` knobs: they are bridged to `AIMEE_AUTONOMY_*`
   environment variables at startup so the workflow engine (which reads them across a module

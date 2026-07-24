@@ -18,9 +18,59 @@
 #include <string.h>
 #include <time.h>
 
+#define AGENT_PARALLEL_PROCESS_MAX 64
+
+/* Bound fan-out workers across the whole process, not once per panel. Provider
+ * admission remains authoritative for actual model concurrency; this limiter
+ * only prevents many simultaneous coordinators from materializing an unbounded
+ * number of pthreads while they wait for those provider slots. */
+static pthread_mutex_t g_parallel_permit_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_parallel_permit_cond;
+static pthread_once_t g_parallel_permit_once = PTHREAD_ONCE_INIT;
+static int g_parallel_permits_active = 0;
+
+static void parallel_permit_init(void)
+{
+   pthread_condattr_t attr;
+   pthread_condattr_init(&attr);
+   pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+   pthread_cond_init(&g_parallel_permit_cond, &attr);
+   pthread_condattr_destroy(&attr);
+}
+
+static int parallel_permit_acquire(const struct timespec *deadline)
+{
+   pthread_once(&g_parallel_permit_once, parallel_permit_init);
+   pthread_mutex_lock(&g_parallel_permit_mutex);
+   while (g_parallel_permits_active >= AGENT_PARALLEL_PROCESS_MAX)
+   {
+      int rc = deadline ? pthread_cond_timedwait(&g_parallel_permit_cond, &g_parallel_permit_mutex,
+                                                 deadline)
+                        : pthread_cond_wait(&g_parallel_permit_cond, &g_parallel_permit_mutex);
+      if (deadline && rc == ETIMEDOUT)
+      {
+         pthread_mutex_unlock(&g_parallel_permit_mutex);
+         return -1;
+      }
+   }
+   g_parallel_permits_active++;
+   pthread_mutex_unlock(&g_parallel_permit_mutex);
+   return 0;
+}
+
+static void parallel_permit_release(void)
+{
+   pthread_once(&g_parallel_permit_once, parallel_permit_init);
+   pthread_mutex_lock(&g_parallel_permit_mutex);
+   if (g_parallel_permits_active > 0)
+      g_parallel_permits_active--;
+   pthread_cond_signal(&g_parallel_permit_cond);
+   pthread_mutex_unlock(&g_parallel_permit_mutex);
+}
+
 /* Completion barrier for the deadline path: workers flip their `done` flag and
- * bump `done_count` under `mtx`, signalling `cv`, so the caller can
- * cond-timedwait and abandon stragglers at the deadline. */
+ * bump `done_count` under `mtx`, signalling `cv`, so the caller can cancel
+ * stragglers at the deadline and then join every admitted worker. */
 typedef struct
 {
    pthread_mutex_t mtx;
@@ -34,10 +84,13 @@ typedef struct
    agent_task_t *task;
    agent_result_t *result;
    const agent_request_creds_t *creds;
+   char cwd[MAX_PATH_LEN];
    /* Deadline path only (NULL otherwise): the worker signals completion here so a
     * straggler can be abandoned without blocking the join. */
    parallel_sync_t *sync;
    int *done;
+   atomic_int cancel;
+   int owns_process_permit;
 } parallel_ctx_t;
 
 static void *parallel_worker(void *arg)
@@ -47,8 +100,12 @@ static void *parallel_worker(void *arg)
     * context (thread-locals are not inherited) so the agent resolves its
     * client-held session key instead of running keyless. */
    agent_request_creds_restore(ctx->creds);
+   run_cmd_set_cwd(ctx->cwd[0] ? ctx->cwd : NULL);
+   agent_set_request_cancel(&ctx->cancel);
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
    double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
+   agent_run_require_initial_tool_call(ctx->task->use_tools &&
+                                       ctx->task->require_initial_tool_call);
    if (ctx->task->agent && ctx->task->agent[0])
       (ctx->task->use_tools ? agent_run_named_with_tools : agent_run_named)(
           ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
@@ -60,6 +117,14 @@ static void *parallel_worker(void *arg)
    else
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
+   agent_run_require_initial_tool_call(0);
+   agent_set_request_cancel(NULL);
+   run_cmd_set_cwd(NULL);
+   if (ctx->owns_process_permit)
+   {
+      ctx->owns_process_permit = 0;
+      parallel_permit_release();
+   }
    if (ctx->sync)
    {
       pthread_mutex_lock(&ctx->sync->mtx);
@@ -71,80 +136,43 @@ static void *parallel_worker(void *arg)
    return NULL;
 }
 
-/* Cap concurrent parallel_worker threads by the shared compute budget. An
- * explicit AIMEE_PARALLEL_MAX can still tighten the ceiling further. */
-static int parallel_worker_ceiling(void)
-{
-   const char *env = getenv("AIMEE_PARALLEL_MAX");
-   if (env && env[0])
-   {
-      int v = atoi(env);
-      if (v >= 1)
-         return v;
-   }
-   return aimee_resolve_compute_threads(0);
-}
-
-/* Deadline-bounded fan-out: spawn all workers, wait on a completion barrier until
- * every spawned worker finishes OR `deadline_ms` elapses, then collect the ones
- * that finished and abandon (detach) the rest. Each worker writes into its OWN
- * heap result cell; finished cells are moved into `out`, and any still-running
- * worker keeps a private cell + shared state alive (intentionally leaked) so its
- * eventual write can never touch freed caller memory. */
+/* Deadline-bounded fan-out: admit workers until the shared absolute deadline,
+ * wait for completion until that same deadline, then cooperatively cancel and
+ * JOIN every unfinished worker. The caller therefore owns a transitive lifetime:
+ * no detached participant can outlive its task/config/result storage or the
+ * server shutdown that is waiting on the coordinator. */
 static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int task_count,
                                  agent_result_t *out, int deadline_ms)
 {
-   parallel_sync_t *sync = calloc(1, sizeof(*sync));
-   agent_request_creds_t *creds = calloc(1, sizeof(*creds));
    parallel_ctx_t *ctxs = calloc((size_t)task_count, sizeof(*ctxs));
-   agent_result_t **cells = calloc((size_t)task_count, sizeof(*cells));
    int *done = calloc((size_t)task_count, sizeof(int));
    int *spawned = calloc((size_t)task_count, sizeof(int));
    pthread_t *threads = calloc((size_t)task_count, sizeof(pthread_t));
-   int *final_done = calloc((size_t)task_count, sizeof(int));
-   if (!sync || !creds || !ctxs || !cells || !done || !spawned || !threads || !final_done)
+   if (!ctxs || !done || !spawned || !threads)
    {
-      free(sync);
-      free(creds);
       free(ctxs);
-      free(cells);
       free(done);
       free(spawned);
       free(threads);
-      free(final_done);
       return 0;
    }
-   pthread_mutex_init(&sync->mtx, NULL);
-   pthread_cond_init(&sync->cv, NULL);
-   agent_request_creds_snapshot(creds);
 
-   int spawned_count = 0;
-   for (int i = 0; i < task_count; i++)
-   {
-      memset(&out[i], 0, sizeof(out[i]));
-      cells[i] = calloc(1, sizeof(agent_result_t));
-      if (!cells[i])
-         continue; /* slot stays a failed result; never spawned */
-      ctxs[i].cfg = cfg;
-      ctxs[i].task = &tasks[i];
-      ctxs[i].result = cells[i];
-      ctxs[i].creds = creds;
-      ctxs[i].sync = sync;
-      ctxs[i].done = &done[i];
-      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
-      {
-         spawned[i] = 1;
-         spawned_count++;
-      }
-      else
-      {
-         free(cells[i]);
-         cells[i] = NULL;
-      }
-   }
+   parallel_sync_t sync;
+   memset(&sync, 0, sizeof(sync));
+   pthread_mutex_init(&sync.mtx, NULL);
+   pthread_condattr_t attr;
+   pthread_condattr_init(&attr);
+   pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+   pthread_cond_init(&sync.cv, &attr);
+   pthread_condattr_destroy(&attr);
+   agent_request_creds_t creds;
+   agent_request_creds_snapshot(&creds);
+   /* Parallel seats inherit the worktree that was active when this fan-out was
+    * invoked. Later parent-thread changes are intentionally not observed. */
+   const char *parent_cwd = run_cmd_get_cwd();
 
    struct timespec abs;
-   clock_gettime(CLOCK_REALTIME, &abs);
+   clock_gettime(CLOCK_MONOTONIC, &abs);
    abs.tv_sec += deadline_ms / 1000;
    abs.tv_nsec += (long)(deadline_ms % 1000) * 1000000L;
    if (abs.tv_nsec >= 1000000000L)
@@ -153,60 +181,76 @@ static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int t
       abs.tv_nsec -= 1000000000L;
    }
 
-   pthread_mutex_lock(&sync->mtx);
-   while (sync->done_count < spawned_count)
+   for (int i = 0; i < task_count; i++)
+      memset(&out[i], 0, sizeof(out[i]));
+
+   int spawned_count = 0;
+   for (int i = 0; i < task_count; i++)
    {
-      if (pthread_cond_timedwait(&sync->cv, &sync->mtx, &abs) == ETIMEDOUT)
+      if (parallel_permit_acquire(&abs) != 0)
+      {
+         for (int j = i; j < task_count; j++)
+            snprintf(out[j].error, sizeof(out[j].error),
+                     "parallel deadline elapsed before worker admission");
+         break;
+      }
+      ctxs[i].cfg = cfg;
+      ctxs[i].task = &tasks[i];
+      ctxs[i].result = &out[i];
+      ctxs[i].creds = &creds;
+      snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
+      ctxs[i].sync = &sync;
+      ctxs[i].done = &done[i];
+      ctxs[i].owns_process_permit = 1;
+      atomic_init(&ctxs[i].cancel, 0);
+      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
+      {
+         spawned[i] = 1;
+         spawned_count++;
+      }
+      else
+      {
+         ctxs[i].owns_process_permit = 0;
+         parallel_permit_release();
+         snprintf(out[i].error, sizeof(out[i].error), "could not create parallel worker");
+      }
+   }
+
+   pthread_mutex_lock(&sync.mtx);
+   while (sync.done_count < spawned_count)
+   {
+      if (pthread_cond_timedwait(&sync.cv, &sync.mtx, &abs) == ETIMEDOUT)
          break;
    }
-   /* Consistent cut: while holding mtx no worker can flip done, so a done==1 cell
-    * has been fully written and is safe to move out. */
    for (int i = 0; i < task_count; i++)
-      final_done[i] = done[i];
-   pthread_mutex_unlock(&sync->mtx);
+      if (spawned[i] && !done[i])
+         atomic_store(&ctxs[i].cancel, 1);
+   pthread_mutex_unlock(&sync.mtx);
 
-   int success = 0, abandoned = 0;
+   int cancelled = 0;
    for (int i = 0; i < task_count; i++)
    {
       if (!spawned[i])
          continue;
-      if (final_done[i])
-      {
-         out[i] = *cells[i]; /* move the result (incl. the response pointer) to the caller */
-         if (out[i].success)
-            success++;
-         free(cells[i]); /* the struct only; the response is now owned by out[i] */
-         cells[i] = NULL;
-      }
-      else
-      {
-         pthread_detach(threads[i]); /* abandon: it writes its leaked cell, never out[i] */
-         abandoned++;
-      }
+      if (atomic_load(&ctxs[i].cancel))
+         cancelled++;
+      pthread_join(threads[i], NULL);
    }
 
-   free(final_done);
+   if (cancelled)
+      aimee_log(LOG_WARN, "agent.parallel", "%d/%d worker(s) cancelled at the %dms deadline",
+                cancelled, spawned_count, deadline_ms);
+   pthread_cond_destroy(&sync.cv);
+   pthread_mutex_destroy(&sync.mtx);
    free(spawned);
-   free(threads); /* pthread_t ids; detached workers don't reference this array */
-   free(cells);   /* the pointer block; abandoned cell STRUCTS stay alive via ctxs[i].result */
-   if (!abandoned)
-   {
-      pthread_mutex_destroy(&sync->mtx);
-      pthread_cond_destroy(&sync->cv);
-      free(sync);
-      free(creds);
-      free(ctxs);
-      free(done);
-   }
-   else
-   {
-      /* Leak sync/creds/ctxs/done + the abandoned cell structs: the still-running
-       * detached workers reference them and must not hit freed memory. Bounded
-       * and rare (a hung model). */
-      aimee_log(LOG_WARN, "agent.parallel",
-                "%d/%d worker(s) abandoned at the %dms deadline (resources leaked)", abandoned,
-                spawned_count, deadline_ms);
-   }
+   free(threads);
+   free(ctxs);
+   free(done);
+
+   int success = 0;
+   for (int i = 0; i < task_count; i++)
+      if (out[i].success)
+         success++;
    return success;
 }
 
@@ -215,10 +259,11 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
 {
    if (task_count <= 0)
       return 0;
-   if (task_count == 1)
+   if (task_count == 1 && deadline_ms <= 0)
    {
       double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
       int rc;
+      agent_run_require_initial_tool_call(tasks[0].use_tools && tasks[0].require_initial_tool_call);
       if (tasks[0].agent && tasks[0].agent[0])
          rc = (tasks[0].use_tools ? agent_run_named_with_tools : agent_run_named)(
              cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
@@ -230,6 +275,7 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       else
          rc = agent_run_ex(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
                            tasks[0].max_tokens, temp, &out[0]);
+      agent_run_require_initial_tool_call(0);
       return rc == 0 ? 1 : 0;
    }
 
@@ -258,6 +304,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
     * thread restores it (thread-locals don't cross pthread_create). */
    agent_request_creds_t creds;
    agent_request_creds_snapshot(&creds);
+   /* Capture-at-call-time, matching the deadline path above. */
+   const char *parent_cwd = run_cmd_get_cwd();
 
    for (int i = 0; i < task_count; i++)
    {
@@ -266,28 +314,26 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
       ctxs[i].creds = &creds;
+      snprintf(ctxs[i].cwd, sizeof(ctxs[i].cwd), "%s", parent_cwd ? parent_cwd : "");
+      atomic_init(&ctxs[i].cancel, 0);
    }
 
-   int ceiling = parallel_worker_ceiling();
-   int wave_start = 0;
-   while (wave_start < task_count)
+   for (int i = 0; i < task_count; i++)
    {
-      int wave_end = wave_start + ceiling;
-      if (wave_end > task_count)
-         wave_end = task_count;
-
-      for (int i = wave_start; i < wave_end; i++)
+      if (parallel_permit_acquire(NULL) != 0)
+         continue;
+      ctxs[i].owns_process_permit = 1;
+      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
+         thread_ok[i] = 1;
+      else
       {
-         if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
-            thread_ok[i] = 1;
+         ctxs[i].owns_process_permit = 0;
+         parallel_permit_release();
       }
-      for (int i = wave_start; i < wave_end; i++)
-      {
-         if (thread_ok[i])
-            pthread_join(threads[i], NULL);
-      }
-      wave_start = wave_end;
    }
+   for (int i = 0; i < task_count; i++)
+      if (thread_ok[i])
+         pthread_join(threads[i], NULL);
 
    free(thread_ok);
    free(threads);

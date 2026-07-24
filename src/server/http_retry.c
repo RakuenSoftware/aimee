@@ -108,6 +108,17 @@ int http_retry_post_context(const char *url, const char *auth_header, const char
                             int max_attempts, int base_ms, int max_ms, const char *provider,
                             const char *model, const char *session_id)
 {
+   return http_retry_post_context_bytes(url, auth_header, body, body ? strlen(body) : 0,
+                                        response_buf, timeout_ms, extra_headers, max_attempts,
+                                        base_ms, max_ms, provider, model, session_id);
+}
+
+int http_retry_post_context_bytes(const char *url, const char *auth_header, const void *body,
+                                  size_t body_len, char **response_buf, int timeout_ms,
+                                  const char *extra_headers, int max_attempts, int base_ms,
+                                  int max_ms, const char *provider, const char *model,
+                                  const char *session_id)
+{
    if (max_attempts <= 0)
       max_attempts = 1; /* at least one attempt */
 
@@ -138,8 +149,8 @@ int http_retry_post_context(const char *url, const char *auth_header, const char
                 model ? model : "?", timeout_ms);
 
       int64_t attempt_start_ms = retry_now_ms();
-      http_status =
-          agent_http_post(url, auth_header, body, response_buf, timeout_ms, extra_headers);
+      http_status = agent_http_post_bytes(url, auth_header, body, body_len, response_buf,
+                                          timeout_ms, extra_headers);
       int64_t attempt_ms = retry_now_ms() - attempt_start_ms;
 
       aimee_log(LOG_INFO, "http_retry", "attempt %d/%d: HTTP %d (provider=%s model=%s)",

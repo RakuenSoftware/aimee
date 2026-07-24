@@ -27,6 +27,29 @@ components:
       properties:
         status: { type: string, example: ok }
         service: { type: string, example: aimee-server }
+    ReadyResponse:
+      type: object
+      properties:
+        ready: { type: boolean, example: true }
+        status:
+          type: string
+          description: "ok when every dependency sampled ok; degraded when one failed; unknown when not sampled yet or the sample is stale"
+          enum: [ok, degraded, unknown]
+        service: { type: string, example: aimee-server }
+        sampled_at:
+          type: integer
+          nullable: true
+          description: "Epoch seconds when the snapshot was taken; null before the first sample"
+        age_seconds:
+          type: integer
+          nullable: true
+          description: "Age of the snapshot in seconds; null before the first sample"
+        dependencies:
+          type: object
+          description: "Per-dependency state; each value is ok, fail, or unknown"
+          properties:
+            db1: { type: string, example: ok }
+            kb: { type: string, example: ok }
     VersionResponse:
       type: object
       properties:
@@ -272,6 +295,29 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /ready:
+    get:
+      summary: Readiness probe
+      description: >
+        Reports whether the server can serve work right now, with per-dependency
+        state. Distinct from /health, which is liveness only and always returns
+        200 while the process is up. An orchestrator should restart on a
+        /health failure but only drain on a /ready failure. The answer comes
+        from a snapshot sampled on a background interval, so this route performs
+        no dependency I/O. It fails closed: before the first sample, past the
+        staleness bound, or when any dependency failed, the answer is 503.
+      security: []
+      responses:
+        "200":
+          description: Every dependency sampled ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+        "503":
+          description: "Not ready: a dependency failed, or state is unknown because no sample has completed or the snapshot is stale"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
   /management/action:
     post:
       summary: Execute an authenticated management control-plane action
@@ -299,6 +345,183 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /management/action/challenge:
+    post:
+      summary: Issue a nonce for a management control-plane action
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and management.action.v1 purpose. The
+        subsequent action request must use the same live TLS connection.
+      responses:
+        "200":
+          description: Management action challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management action verification is not configured }
+  /management/read/challenge:
+    post:
+      summary: Issue a nonce for a bounded management read
+      description: >
+        Requires the dedicated kb management-client mTLS profile. The nonce is
+        short-lived, single-use, same-connection bound, and purpose-separated as
+        management.read.v1.
+      responses:
+        "200":
+          description: Management-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/agents:
+    get:
+      summary: Return the bounded management agent projection
+      description: >
+        Requires a nonce-bound status proof and a remote_reads JWT on the same
+        pinned mTLS connection. The response contains only the frozen safe fields.
+      responses:
+        "200":
+          description: Bounded agent projection
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_id, team, agents]
+                additionalProperties: false
+                properties:
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  agents:
+                    type: array
+                    maxItems: 16
+                    items:
+                      type: object
+                      required: [name, provider, model, enabled, delegate_available, primary_only, max_parallel]
+                      additionalProperties: false
+                      properties:
+                        name: { type: string, pattern: '^[A-Za-z0-9._-]{1,63}$' }
+                        provider: { type: string, pattern: '^[A-Za-z0-9._-]{1,15}$' }
+                        model: { type: string, maxLength: 127 }
+                        enabled: { type: boolean }
+                        delegate_available: { type: boolean }
+                        primary_only: { type: boolean }
+                        max_parallel: { type: integer, minimum: 0, maximum: 1024 }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
+  /management/read/config/challenge:
+    post:
+      summary: Issue a purpose-separated nonce for a bounded configuration read
+      responses:
+        "200":
+          description: Configuration-read challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, purpose, expires_at]
+                additionalProperties: false
+                properties:
+                  nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+                  purpose: { type: string, enum: [management.read.config.v1] }
+                  expires_at: { type: integer }
+        "403": { description: Dedicated management-client certificate required }
+        "503": { description: Management-read verification is unavailable }
+  /management/read/config:
+    get:
+      summary: Return the bounded five-field safe configuration projection
+      responses:
+        "200":
+          description: Safe configuration projection
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [server_id, team, config]
+                properties:
+                  server_id: { type: string, minLength: 1, maxLength: 127, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,126}$' }
+                  team: { type: integer, format: int64, minimum: 1 }
+                  config:
+                    type: object
+                    additionalProperties: false
+                    required: [mtls, remote_writes, client_transport, cli_session_forwarding, require_aimee_git]
+                    properties:
+                      mtls: { type: string, enum: [off, optional, required] }
+                      remote_writes: { type: string, enum: [off, data, full] }
+                      client_transport: { type: string, enum: [socket, http, auto] }
+                      cli_session_forwarding: { type: boolean }
+                      require_aimee_git: { type: boolean }
+        "403": { description: Management read forbidden }
+        "409": { description: Nonce or JTI already consumed }
+        "502": { description: Integrity verification failed }
+        "503": { description: Management read unavailable }
+  /management/challenge:
+    post:
+      summary: Issue a nonce for a read-only management health check
+      description: >
+        Requires the dedicated kb management-client mTLS certificate profile.
+        The nonce is short-lived, single-use, and bound to this TLS connection,
+        peer certificate, target server, and health-check purpose.
+      responses:
+        "200":
+          description: Management challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nonce, expires_at]
+                properties:
+                  nonce: { type: string, description: Canonical base64url without padding }
+                  expires_at: { type: string, pattern: '^[0-9]+$' }
+        "401": { description: Dedicated management-client certificate required }
+        "429": { description: Outstanding challenge capacity reached }
+        "503": { description: Management status verification is not configured }
+  /management/health:
+    get:
+      summary: Verify a nonce-bound online revocation staple
+      description: >
+        Read-only health probe for the reverse management channel. Requires the
+        same live mTLS connection used to obtain the challenge and consumes the
+        nonce on every identifiable verification attempt.
+      parameters:
+        - in: header
+          name: X-Aimee-Management-Status
+          required: true
+          schema: { type: string, maxLength: 4096 }
+          description: Strict signed management-status JSON staple
+      responses:
+        "200":
+          description: Peer and target status verified
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, server_id]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  server_id: { type: string }
+        "401": { description: Missing or invalid peer certificate or staple }
+        "403": { description: Authenticated peer, target, or purpose mismatch }
+        "409": { description: Replayed, expired, conflicting, or rolled-back challenge }
+        "503": { description: Management status verification is unavailable }
   /version:
     get:
       summary: Build version
@@ -1842,6 +2065,10 @@ paths:
   /config/set:
     post:
       summary: Set one configuration value
+      description: >
+        Roundtable policy keys are operator-controlled and require the
+        server-token-attested `webuser:admin` appliance administrator; generic
+        capabilities and local Unix-socket access are insufficient.
       requestBody:
         content:
           application/json:
@@ -1852,6 +2079,11 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "403":
+          description: Roundtable policy mutation was not authorized
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /cron:
     get:
       summary: List cron jobs
@@ -2192,6 +2424,15 @@ paths:
     post:
       summary: Append a hash-chained metric.snapshot row
       responses: { "200": { description: Snapshot result, content: { application/json: { schema: { type: object } } } } }
+  /audit/captures:
+    get:
+      summary: List the audit-on-bus capture files (recorded governed-action event streams) available for replay
+      responses: { "200": { description: Capture file list, content: { application/json: { schema: { type: object } } } } }
+  /audit/replay:
+    post:
+      summary: Replay one audit-on-bus capture file's governed-action rows as JSON (paged; observational)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Replay page, content: { application/json: { schema: { type: object } } } } }
   /agent/local:
     get:
       summary: List local agents
@@ -2841,34 +3082,26 @@ paths:
               properties:
                 prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
-  /delegate/roundtable:
+  /roundtable/review:
     post:
-      summary: Multi-round agent roundtable over ensemble.reference_models (async; poll GET /runs/{id})
+      summary: Review a complete artifact through the resolved roundtable
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [prompt]
+              required: [artifact]
               properties:
-                prompt: { type: string }
-                mode: { type: string, enum: [draft, review] }
-                turns: { type: string, enum: [parallel, sequential] }
-                rounds: { type: integer }
-                apply: { type: boolean }
-                brief:
-                  oneOf:
-                    - { type: string }
-                    - type: object
-                      properties:
-                        focus: { type: array, items: { type: string } }
-                        fixes: { type: array, items: { type: string } }
-                        invariants: { type: array, items: { type: string } }
-                        questions: { type: array, items: { type: string } }
+                artifact: { type: string }
+                original_request: { type: string }
+                artifact_stage: { type: string, enum: [intent, plan, frozen_diff] }
+                roundtable: { type: string }
+                workdir: { type: string }
+                run_id: { type: string }
       responses:
         "200":
-          description: Queued op run; poll GET /runs/{id}. Final result includes artifact, items, answered_questions, and coverage_gaps.
+          description: Completed roundtable review with structured findings and participant accounting.
           content:
             application/json:
               schema: { type: object }
@@ -3934,6 +4167,7 @@ paths:
                         synthesized: { type: boolean }
     post:
       summary: Create a roundtable preset (name in body)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -3950,9 +4184,15 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/active:
     post:
       summary: Make a preset the active roundtable (mirror its values into live config)
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       requestBody:
         required: true
         content:
@@ -3977,6 +4217,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /roundtables/{name}:
     get:
       summary: Show a roundtable preset by name
@@ -3998,6 +4243,7 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
     put:
       summary: Create or edit the named roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -4019,8 +4265,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
     delete:
       summary: Remove a roundtable preset
+      description: Requires the server-token-attested `webuser:admin` appliance administrator.
       parameters:
         - name: name
           in: path
@@ -4038,6 +4290,11 @@ paths:
                   deleted: { type: boolean }
         "404":
           description: No preset to remove
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Authenticated appliance administrator required
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4642,6 +4899,70 @@ paths:
                   kb:
                     type: object
                     additionalProperties: true
+  /internal/forge/execute:
+    post:
+      summary: Mechanically execute an authenticated forge operation for Go WFE
+      description: >
+        Internal Unix-socket-only resource-plane seam. The Go WFE supplies an
+        already-decided typed operation; C confines it to a managed WFE
+        worktree and repository, retains the credential, and performs only the
+        authenticated transport. This endpoint owns no workflow state or
+        lifecycle decision and is unavailable over TCP/TLS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [op, workdir]
+              properties:
+                op: { type: string, enum: [push, open, info, ci, merge] }
+                workdir: { type: string }
+                head:
+                  oneOf:
+                    - { type: string, maxLength: 91, pattern: '^aimee/feat/wi_[A-Za-z0-9_]+$' }
+                    - { type: string, maxLength: 89, pattern: '^aimee/wi/wi_[A-Za-z0-9_]+\.s[0-9a-f]{10}\.g[0-9]+\.[0-9]+$' }
+                base: { type: string }
+                title: { type: string, minLength: 1, maxLength: 256 }
+                number: { type: integer, minimum: 1 }
+              oneOf:
+                - required: [head]
+                  properties: { op: { enum: [push] } }
+                  not:
+                    anyOf: [{ required: [base] }, { required: [title] }, { required: [number] }]
+                - required: [head, base, title]
+                  properties: { op: { enum: [open] } }
+                  not: { required: [number] }
+                - required: [number]
+                  properties: { op: { enum: [info, ci] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [base] }, { required: [title] }]
+                - required: [base, number]
+                  properties: { op: { enum: [merge] } }
+                  not:
+                    anyOf: [{ required: [head] }, { required: [title] }]
+      responses:
+        "200":
+          description: Mechanical forge operation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                required: [ok]
+                properties:
+                  ok: { type: boolean, enum: [true] }
+        "400":
+          description: Invalid request or forge operation failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Non-UDS caller or unmanaged repository/worktree
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

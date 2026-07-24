@@ -35,6 +35,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
 | `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs — Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
+| `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | — |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
 | `cost_reward_ref_usd_milli` | int | Reference cost (USD-milli) normalizing the cost reward. |
@@ -50,7 +51,6 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `delegate_sandbox_learn_packages` | bool | Learned toolchain for delegate sandboxes (default on). aimee captures the apt packages a delegate installs inside its `--network none` sandbox, records them per project (git root), and pre-bakes the learned set into that project's next sandbox image build — augmenting a declared `.aimee/project.yaml` from+packages spec, or synthesizing one (FROM the resolved base + the learned packages) when none is declared. Best-effort: a learned build that fails falls back to the un-augmented image. The first delegate turn after a new package is learned pays a one-time image build. |
 | `delegate_sandbox_package_access` | string | Runtime package-access policy for a `--network none` delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside socket); this selects how much: `proxy` (default) proxies package-manager fetches to any host — egress-via-aimee, for out-of-the-box functionality; `off` no runtime proxy (build-time installs + learned pre-bake only); `gated` host-allowlisted registries, off-allowlist requires human approval; `governance` allowlist from a governance provider, off-allowlist refused. Only meaningful when `delegate_sandbox` is on. |
 | `delegate_sandbox_require_isolation` | bool | Fail-closed guard for the `--network none` delegate sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes `--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the package-access proxy. After the container starts aimee asks the host daemon whether a network with an IP is attached and always logs an error on a breach; when this is set, sandboxing is mandatory — aimee refuses to run the delegate at all (rather than fall back to un-isolated in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker being unavailable, or a failed acquire. |
-| `economizer` | string (off\|safe\|aggressive) | Context economizer tier: `off` (verbatim passthrough), `safe` (default; Anthropic prompt caching + lossless, freeze-guarded reduction), or `aggressive` (adds lossy compression + live OpenAI-side mutation; Anthropic context is never mutated). See docs/features/economizer.md. |
 | `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
 | `embedding_dim` | int | Embedding vector dimension. |
 | `embedding_endpoint` | string | Embeddings provider endpoint URL. |
@@ -240,7 +240,7 @@ Internal dogfood/QA knobs; not part of the user surface.
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
 - **`aimee`** — _Core API/runtime settings._ Keys: `api`
-- **`autonomy`** — `ci_retry_max`, `fanout`, `skeptics`, `unit_max`, `unit_retry`
+- **`autonomy`** — `auto_resume_cap_parks`, `ci_retry_max`, `concurrency`, `fanout`, `max_resumes`, `max_turns`, `max_wall_secs`, `skeptics`, `stale_abandon_secs`, `unit_max`, `unit_retry`
 - **`auxiliary`** — _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
 - **`cache_shaping`** — _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
 - **`charter`** — _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
@@ -254,7 +254,6 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`db2`** — _DB2 / vector store settings._ Keys: `vector`
 - **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
-- **`economizer`** — _Context economizer tier (a single string: `off` | `safe` | `aggressive`). off = verbatim passthrough; safe (default) = Anthropic prompt caching + lossless, freeze-guarded reduction; aggressive = adds lossy tool-body compression + live OpenAI-side gateway mutation. Anthropic context is never mutated at any tier. The `{enabled, aggressive}` object form is deprecated. See docs/features/economizer.md._ Keys: `aggressive`, `enabled`
 - **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
 - **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
 - **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
@@ -281,28 +280,29 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `default`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
+- **`routing`** — _Capability-gated delegate routing: whether to gate seat choice on capability before cost, and whether to prefer free local seats._ Keys: `enabled`, `prefer_local`
 - **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
-- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — _Skill subsystem (capability, dispatch, eval, review; nested objects)._ Keys: `capability`, `dispatch`, `eval`, `review`
+- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
 - **`telemetry`** — `metrics_token`
-- **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
+- **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`, `kb_gzip_enabled`, `kb_pool_enabled`, `server_keepalive_enabled`, `thinclient_gzip_enabled`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
 - **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `mode`, `pipeline`, `schedule`, `source`
 - **`vault`** — `custody`, `tpm2`
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`, `sandbox_image`
 - **`worktree_gc`** — `enabled`, `max_age_days`
 
-## Other top-level config-file keys (4)
+## Other top-level config-file keys (5)
 
 Scalar keys read directly from the config root (not via the CLI allowlist above):
 
-`db2_pool_size`, `modules`, `proxy_token`, `toolsets`
+`db2_pool_size`, `economizer`, `modules`, `proxy_token`, `toolsets`
 
 ## Environment variables
 
-The binaries read 182 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
+The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -336,6 +336,8 @@ The binaries read 182 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SERVER_URL` | aimee-server endpoint the thin client connects to (UDS path or `tcp:host:port`). |
 | `AIMEE_SESSION_ID` | Pre-set the session id (enables non-blocking session attach). |
 | `AIMEE_SESSION_START_VERBOSE` | Verbose logging during session start. |
+| `AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED` | Resident HTTPS connection reuse. Defaults on; set to 0 to restore one request per connection. |
+| `AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED` | Negotiated gzip for eligible buffered thin-client routes. Defaults off; set to 1 only for a measured remote link profile. |
 | `AIMEE_TUI_SESSION` | Identifies the TUI session. |
 
 ### Server runtime
@@ -351,7 +353,7 @@ The binaries read 182 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GITHUB_OAUTH_CLIENT_SECRET` | Client secret of the GitHub OAuth App. Enables the seamless web (redirect) sign-in; without it the button falls back to the device-code flow. Secret — set per deployment, never baked into an image. |
 | `AIMEE_GITLAB_OAUTH_CLIENT_ID` | Client ID of a GitLab OAuth application (device flow enabled) for the webchat "Sign in with GitLab" button on gitlab.com. Public. Overrides the built-in default baked in via oauth_defaults.h. |
 | `AIMEE_INGRESS_PROXY_SECRET` | Shared secret authenticating a trusted ingress proxy's identity headers. |
-| `AIMEE_PARALLEL_MAX` | Maximum parallel agent fan-out. |
+| `AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT` | Permit the operator-configured search backend (`search.searxng_url`) to resolve to a private, loopback, or link-local address. Off by default: every outbound fetch is validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this is set. Deliberately an environment variable rather than a config key, because `config.set` is reachable from inside the running system and pointing the search backend at a cloud metadata address would exfiltrate instance credentials through a tool that looks like search. Set to exactly `1`; any other value is off. Never widens fetches of model-supplied or search-result URLs, which stay denied. |
 | `AIMEE_SERVER_HTTP_BIND` | TCP bind address for the server `/v1` HTTP listener (else UDS-only). |
 | `AIMEE_SERVER_STARTUP_FD` | Inherited fd for startup-readiness signalling (service launch). |
 | `AIMEE_SESSION_THREADS` | Per-session worker thread count. |
@@ -386,6 +388,8 @@ The binaries read 182 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_OIDC_SCOPE_KIND` | OIDC scope-kind interpretation. |
 | `AIMEE_LLM_MODEL` | Model label sent to AIMEE_LLM_URL's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'. |
 | `AIMEE_LLM_URL` | One knob: base URL of the aimee-llm container the kb calls for embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A + Tier-B at {url}/v1). The kb runs no model itself. AIMEE_EMBEDDER_URL/AIMEE_RERANKER_URL override per service. See docs/KB_LLM_BACKENDS.md. |
+| `AIMEE_SERVER_ID` | Registry identity used by the server mTLS heartbeat. |
+| `AIMEE_TRANSPORT_KB_POOL_ENABLED` | Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections. |
 | `AIMEE_VECTOR_KB_BATCH_SIZE` | Embedding batch size for KB vector ingest. |
 
 ### Database & vectors
@@ -505,7 +509,7 @@ The binaries read 182 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_CONCURRENCY`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_STALE_ABANDON_SECS`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_MGMT_AUDIENCE`, `AIMEE_MGMT_CAP`, `AIMEE_MGMT_ISSUER`, `AIMEE_MGMT_JWKS`, `AIMEE_MODULE_ROUNDTABLE`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLISH_DSN`, `AIMEE_KB_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_KB_MTLS_MAX_CONNECTIONS`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_KB_RUNTIME_UID`, `AIMEE_KB_STATUS_BIND`, `AIMEE_KB_STATUS_DSN`, `AIMEE_KB_STATUS_PORT`, `AIMEE_KB_STATUS_PROVISION_DSN`, `AIMEE_KB_STATUS_TLS_CA`, `AIMEE_KB_STATUS_TLS_CERT`, `AIMEE_KB_STATUS_TLS_KEY`, `AIMEE_KB_TOKEN_AUTHORITY_DSN`, `AIMEE_KB_TOKEN_AUTHORITY_SOCKET_GID`, `AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN`, `AIMEE_KB_TOKEN_ROOT_CUSTODY_ID`, `AIMEE_KB_VAULT_OPERATOR_ENABLED`, `AIMEE_KB_VAULT_ORCHESTRATOR_URL`, `AIMEE_MGMT_STATUS_KEY_ID`, `AIMEE_MGMT_STATUS_PUBLIC_KEY`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_SERVER_MGMT_BIND`, `AIMEE_SERVER_MGMT_ISSUER`, `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, `AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TEST_PG_URL`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_ENGINE`, `AIMEE_WFE_HTTP_SOCKET`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WITNESS_CADENCE_TEST_S`, `AIMEE_WITNESS_HARNESS_ROLE`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 
@@ -557,7 +561,7 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 
 ### Undocumented (add to `EXT_DESC`/`EXT_OS_IGNORE` in gen-reference-docs.py)
 
-`LLM_API_KEY`, `LLM_ENDPOINT`, `LLM_MODEL`
+`LISTEN_FDS`, `LISTEN_PID`, `LLM_API_KEY`, `LLM_ENDPOINT`, `LLM_MODEL`
 
 ## Workflow engine
 
@@ -654,6 +658,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `auth_type` | Auth scheme (bearer / oauth / none). |
 | `auto_compact_pct` | Context % at which to auto-compact. |
 | `backend` | Execution backend (http / cli / ssh / docker). |
+| `catalog_provider` | Catalog vendor key used for model lookups (`anthropic`, `openai`, …), when it differs from the wire `provider`. |
 | `cidr` | Allowed CIDR (relay / tunnel networking). |
 | `cli_cmd` | CLI command for a cli-backend agent. |
 | `cli_idle_timeout_ms` | Idle timeout (ms) for a CLI agent. |
@@ -677,18 +682,24 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `ip` | Bind/target IP (relay / tunnel). |
 | `max_parallel` | Max concurrent calls to this agent. |
 | `max_reconnects` | Max reconnect attempts (streaming / relay). |
+| `max_scope` | Largest task scope this agent may be given (`bounded` or `whole_task`). Routing never relaxes this. |
 | `max_tokens` | Max output tokens. |
 | `max_turns` | Max agent-loop turns. |
 | `middleware` | Per-agent middleware overrides (e.g. `context_window`, `max_tokens`). |
 | `model` | Model name. |
+| `models` | Provider-general registration: the models to expand into individual routable agents. Omit to expand every routable model the catalog lists. |
 | `name` | Agent identifier. |
 | `network` | Network mode (backend sandbox). |
 | `networks` | Allowed networks. |
 | `personas` | Personas this agent may be dispatched AS (engineer, architect, …); `"all"` or omitted = every persona. |
 | `port` | Target port (relay / tunnel). |
+| `price_cached_per_mtok` | Cached-input price, USD per million tokens. Overrides the catalog price. |
+| `price_in_per_mtok` | Input price, USD per million tokens. Overrides the catalog price. |
+| `price_out_per_mtok` | Output price, USD per million tokens. Overrides the catalog price. |
 | `provider` | Provider name. |
 | `recommended_sampling` | Provider-recommended sampling parameters. |
 | `reconnect_delay` | Delay between reconnects (ms). |
+| `registration` | Name of the provider registration this agent was expanded from. Set automatically; used to prefer same-provider peers during fallback. |
 | `relay_key` | Relay auth key. |
 | `relay_ssh` | SSH relay config. |
 | `roles` | Roles this agent serves (review, plan, …); `"all"` = every role. |
@@ -698,6 +709,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `stall_threshold` | Stall-detection threshold. |
 | `target_host` | Target host (relay / tunnel). |
 | `target_port` | Target port (relay / tunnel). |
+| `tier_price_exempt` | Reason this agent is exempt from the `cost_tier`-vs-price lint (e.g. a flat-rate seat whose per-token price is not meaningful). |
 | `timeout_ms` | Per-call timeout (ms). |
 | `tokens` | Token budget / accounting block. |
 | `tools_enabled` | Allow tool use for this agent. |

@@ -32,7 +32,7 @@ Two parts:
   panels and human sign-off gates where you want them. See [WORKFLOWS.md](docs/WORKFLOWS.md).
 - **Run your own inference.** Embeddings, reranking, and synthesis in one CPU or GPU
   container. The kb curates locally, no outside API calls. See [KB_LLM_BACKENDS.md](docs/KB_LLM_BACKENDS.md).
-- **A browser workspace.** `aimee-webchat`: chat, a live code graph, a git project manager,
+- **A browser workspace.** `aimee-runtime-web`: chat, a live code graph, a git project manager,
   an in-app VS Code editor, and dashboards. No terminal required. See [DASHBOARD.md](docs/DASHBOARD.md).
 
 Core services are C. Hot paths run in single-digit milliseconds. Nothing phones home.

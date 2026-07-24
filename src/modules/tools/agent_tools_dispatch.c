@@ -1279,11 +1279,16 @@ static char *td_web_search(cJSON *args, const char *name, const char *dispatch_c
    char *result = NULL;
    cJSON *q = cJSON_GetObjectItem(args, "query");
    cJSON *mx = cJSON_GetObjectItem(args, "max_results");
+   cJSON *fp = cJSON_GetObjectItem(args, "fetch_pages");
    if (!q || !cJSON_IsString(q))
       result = safe_strdup("error: missing 'query' parameter");
    else
    {
-      result = web_search(q->valuestring, (mx && cJSON_IsNumber(mx)) ? mx->valueint : 5);
+      /* Absent means "no opinion" -- config, then the built-in default, decide.
+       * Only an explicit false turns page fetching off. */
+      int fetch = cJSON_IsBool(fp) ? (cJSON_IsTrue(fp) ? 1 : 0) : WEB_SEARCH_FETCH_PAGES_UNSET;
+      result =
+          web_search_ex(q->valuestring, (mx && cJSON_IsNumber(mx)) ? mx->valueint : 5, fetch, NULL);
       /* register the result URLs as rN handles so web_read can take "r2" */
       if (result && strncmp(result, "error:", 6) != 0)
          web_handle_register_from_search(result);
@@ -2210,16 +2215,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
    }
 
    cJSON_Delete(args);
-
-   /* Apply compaction to all non-bash tool results. The bash tool already
-    * compacts stdout and stderr individually before building its JSON result,
-    * so applying compaction again here would double-compact it. */
-   if (result && strcmp(name, "bash") != 0)
-   {
-      char *compacted = agent_compress_tool_result(result, strlen(result), name);
-      free(result);
-      result = compacted;
-   }
 
    return result;
 }

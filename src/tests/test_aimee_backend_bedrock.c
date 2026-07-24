@@ -8,6 +8,7 @@
  * role:"tool" message). The IR is built BY HAND -- no frontend parse -- so the test
  * has no dependency beyond the backend + IR + cJSON. */
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,73 @@ static aimee_block_t text_block(char *t)
    b.type = AIMEE_BLK_TEXT;
    b.text = t;
    return b;
+}
+
+static size_t allocation_count, allocation_fail_at;
+
+static void *failing_cjson_malloc(size_t size)
+{
+   allocation_count++;
+   if (allocation_count == allocation_fail_at)
+      return NULL;
+   return malloc(size);
+}
+
+static void test_build_allocation_atomicity(void)
+{
+   aimee_block_t sys = text_block("system");
+   cJSON *tool_input = cJSON_Parse("{\"x\":1}");
+   cJSON *tool_result = cJSON_Parse("{\"ok\":true}");
+   cJSON *schema =
+       cJSON_Parse("{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"}}}");
+   cJSON *choice = cJSON_Parse("{\"type\":\"tool\",\"name\":\"tool\"}");
+   cJSON *raw = cJSON_Parse("{\"text\":\"raw\"}");
+   assert(tool_input && tool_result && schema && choice && raw);
+   aimee_block_t blocks[] = {
+       {.type = AIMEE_BLK_TEXT, .text = "text"},
+       {.type = AIMEE_BLK_TOOL_USE, .tool_id = "id", .tool_name = "tool", .tool_input = tool_input},
+       {.type = AIMEE_BLK_TOOL_RESULT, .tool_id = "id", .tool_result = tool_result},
+       {.type = AIMEE_BLK_IMAGE, .media_type = "image/png", .media_ref = "AA=="},
+       {.type = AIMEE_BLK_THINKING, .text = "thought", .thinking_signature = "sig"},
+       {.type = AIMEE_BLK_UNKNOWN, .raw = raw}};
+   aimee_message_t message = {.role = "user", .blocks = blocks, .n_blocks = 6};
+   aimee_tool_t tool = {.name = "tool", .description = "desc", .schema = schema};
+   char *stops[] = {"STOP"};
+   aimee_request_t ir = {.system = &sys,
+                         .n_system = 1,
+                         .messages = &message,
+                         .n_messages = 1,
+                         .tools = &tool,
+                         .n_tools = 1,
+                         .tool_choice = choice,
+                         .has_max_tokens = 1,
+                         .max_tokens = 10,
+                         .has_temperature = 1,
+                         .temperature = 0.5,
+                         .has_top_p = 1,
+                         .top_p = 0.8,
+                         .stop_sequences = stops,
+                         .n_stop = 1};
+   cJSON_Hooks hooks = {.malloc_fn = failing_cjson_malloc, .free_fn = free};
+   cJSON_InitHooks(&hooks);
+   allocation_count = 0;
+   allocation_fail_at = SIZE_MAX;
+   cJSON *built = bedrock_converse_build(&ir);
+   assert(built != NULL);
+   size_t allocations = allocation_count;
+   cJSON_Delete(built);
+   for (size_t i = 1; i <= allocations; i++)
+   {
+      allocation_count = 0;
+      allocation_fail_at = i;
+      assert(bedrock_converse_build(&ir) == NULL);
+   }
+   cJSON_InitHooks(NULL);
+   cJSON_Delete(tool_input);
+   cJSON_Delete(tool_result);
+   cJSON_Delete(schema);
+   cJSON_Delete(choice);
+   cJSON_Delete(raw);
 }
 
 static void test_build_full(void)
@@ -445,6 +513,7 @@ static void test_tooluse_input_object(void)
 
 int main(void)
 {
+   test_build_allocation_atomicity();
    printf("aimee-backend-bedrock: ");
    test_build_full();
    test_build_minimal();

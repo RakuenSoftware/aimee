@@ -42,11 +42,16 @@ typedef struct
 {
    aimee_block_type_t kind[AIMEE_STREAM_MAX_TOOLS]; /* per contentBlockIndex block kind */
    int kind_set[AIMEE_STREAM_MAX_TOOLS];            /* 1 once kind[i] recorded */
+   int message_stop_seen;
+   int terminal_emitted;
+   aimee_stop_reason_t pending_stop_reason;
 } converse_stream_state_t;
 
 void converse_stream_state_init(converse_stream_state_t *st);
 
 /* Convert one decoded ConverseStream event into up to `max` IR deltas (updates st).
+ * The first text/reasoning delta yields BLOCK_START plus BLOCK_DELTA, so callers
+ * must provide capacity >=2 for content events.
  * `event_type` is the frame's `:event-type` header (e.g. "contentBlockDelta"); payload
  * is the decoded event JSON. Returns the number of deltas written (>=0, <=max), or -1
  * on a structurally-malformed KNOWN event (caller drops the stream). An unknown

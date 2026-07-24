@@ -40,7 +40,7 @@ int main(void)
       cJSON_Delete(pl);
    }
 
-   /* (b) contentBlockStart: tool_use then text */
+   /* (b) contentBlockStart is tool-use only; text/reasoning open on first delta. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
@@ -57,10 +57,7 @@ int main(void)
       cJSON_Delete(pl);
 
       n = run("contentBlockStart", "{\"contentBlockIndex\":1}", &st, d, 8, &pl);
-      assert(n == 1);
-      assert(d[0].type == AIMEE_DELTA_BLOCK_START);
-      assert(d[0].kind == AIMEE_BLK_TEXT);
-      assert(d[0].block_id == 1);
+      assert(n == -1);
       cJSON_Delete(pl);
    }
 
@@ -70,13 +67,18 @@ int main(void)
       converse_stream_state_init(&st);
       int n = run("contentBlockDelta", "{\"contentBlockIndex\":1,\"delta\":{\"text\":\"hi\"}}", &st,
                   d, 8, &pl);
-      assert(n == 1);
-      assert(d[0].type == AIMEE_DELTA_BLOCK_DELTA);
-      assert(d[0].kind == AIMEE_BLK_TEXT);
-      assert(d[0].block_id == 1);
-      assert(d[0].text_delta && strcmp(d[0].text_delta, "hi") == 0);
+      assert(n == 2 && d[0].type == AIMEE_DELTA_BLOCK_START);
+      assert(d[0].kind == AIMEE_BLK_TEXT && d[0].block_id == 1);
+      assert(d[1].type == AIMEE_DELTA_BLOCK_DELTA && d[1].kind == AIMEE_BLK_TEXT);
+      assert(d[1].text_delta && strcmp(d[1].text_delta, "hi") == 0);
       cJSON_Delete(pl);
 
+      n = run("contentBlockStart",
+              "{\"contentBlockIndex\":0,\"start\":{\"toolUse\":{\"toolUseId\":\"t1\","
+              "\"name\":\"fn\"}}}",
+              &st, d, 8, &pl);
+      assert(n == 1);
+      cJSON_Delete(pl);
       n = run("contentBlockDelta",
               "{\"contentBlockIndex\":0,\"delta\":{\"toolUse\":{\"input\":\"{\\\"p\\\":\"}}}", &st,
               d, 8, &pl);
@@ -90,11 +92,21 @@ int main(void)
       n = run("contentBlockDelta",
               "{\"contentBlockIndex\":2,\"delta\":{\"reasoningContent\":{\"text\":\"think\"}}}",
               &st, d, 8, &pl);
-      assert(n == 1);
-      assert(d[0].type == AIMEE_DELTA_BLOCK_DELTA);
-      assert(d[0].kind == AIMEE_BLK_THINKING);
-      assert(d[0].block_id == 2);
-      assert(d[0].text_delta && strcmp(d[0].text_delta, "think") == 0);
+      assert(n == 2 && d[0].type == AIMEE_DELTA_BLOCK_START);
+      assert(d[0].kind == AIMEE_BLK_THINKING && d[0].block_id == 2);
+      assert(d[1].type == AIMEE_DELTA_BLOCK_DELTA);
+      assert(d[1].text_delta && strcmp(d[1].text_delta, "think") == 0);
+      cJSON_Delete(pl);
+
+      converse_stream_state_t fresh;
+      converse_stream_state_init(&fresh);
+      n = run("contentBlockDelta", "{\"contentBlockIndex\":3,\"delta\":{\"text\":\"x\"}}", &fresh,
+              d, 1, &pl);
+      assert(n == -1 && !fresh.kind_set[3]);
+      cJSON_Delete(pl);
+      n = run("contentBlockDelta", "{\"contentBlockIndex\":3,\"delta\":{\"text\":\"x\"}}", &fresh,
+              d, 2, &pl);
+      assert(n == 2);
       cJSON_Delete(pl);
    }
 
@@ -116,33 +128,36 @@ int main(void)
       cJSON_Delete(pl);
    }
 
-   /* (e) messageStop stop-reason mapping */
+   /* (e/f) messageStop defers one terminal delta until metadata supplies usage. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
       int n = run("messageStop", "{\"stopReason\":\"tool_use\"}", &st, d, 8, &pl);
+      assert(n == 0 && st.message_stop_seen);
+      cJSON_Delete(pl);
+      n = run("metadata", "{\"usage\":{\"inputTokens\":12,\"outputTokens\":34}}", &st, d, 8, &pl);
       assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
       assert(d[0].stop_reason == AIMEE_STOP_TOOL_USE);
+      assert(d[0].usage_in == 12 && d[0].usage_out == 34);
       cJSON_Delete(pl);
-
-      n = run("messageStop", "{\"stopReason\":\"guardrail_intervened\"}", &st, d, 8, &pl);
-      assert(n == 1 && d[0].stop_reason == AIMEE_STOP_CONTENT_FILTER);
-      cJSON_Delete(pl);
-
-      n = run("messageStop", "{\"stopReason\":\"context_exceeded\"}", &st, d, 8, &pl);
-      assert(n == 1 && d[0].stop_reason == AIMEE_STOP_UNKNOWN);
+      n = run("metadata", "{\"usage\":{\"inputTokens\":1,\"outputTokens\":1}}", &st, d, 8, &pl);
+      assert(n == -1);
       cJSON_Delete(pl);
    }
 
-   /* (f) metadata usage -> TURN_STOP with usage */
+   /* metadata-before-stop and duplicate messageStop are malformed. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
       int n =
           run("metadata", "{\"usage\":{\"inputTokens\":12,\"outputTokens\":34}}", &st, d, 8, &pl);
-      assert(n == 1 && d[0].type == AIMEE_DELTA_TURN_STOP);
-      assert(d[0].usage_in == 12 && d[0].usage_out == 34);
-      assert(d[0].stop_reason == AIMEE_STOP_UNKNOWN);
+      assert(n == -1);
+      cJSON_Delete(pl);
+      n = run("messageStop", "{\"stopReason\":\"end_turn\"}", &st, d, 8, &pl);
+      assert(n == 0);
+      cJSON_Delete(pl);
+      n = run("messageStop", "{\"stopReason\":\"end_turn\"}", &st, d, 8, &pl);
+      assert(n == -1);
       cJSON_Delete(pl);
    }
 
@@ -166,14 +181,15 @@ int main(void)
                   &st, d, 8, &pl);
       assert(n == 1 && d[0].kind == AIMEE_BLK_TOOL_USE);
       cJSON_Delete(pl);
-      n = run("contentBlockStart", "{\"contentBlockIndex\":1}", &st, d, 8, &pl);
-      assert(n == 1 && d[0].kind == AIMEE_BLK_TEXT);
+      n = run("contentBlockDelta", "{\"contentBlockIndex\":1,\"delta\":{\"text\":\"x\"}}", &st, d,
+              8, &pl);
+      assert(n == 2 && d[0].kind == AIMEE_BLK_TEXT && d[1].kind == AIMEE_BLK_TEXT);
       cJSON_Delete(pl);
       /* block 2's kind established via a reasoning delta (no explicit start) */
       n = run("contentBlockDelta",
               "{\"contentBlockIndex\":2,\"delta\":{\"reasoningContent\":{\"text\":\"r\"}}}", &st, d,
               8, &pl);
-      assert(n == 1 && d[0].kind == AIMEE_BLK_THINKING);
+      assert(n == 2 && d[0].kind == AIMEE_BLK_THINKING && d[1].kind == AIMEE_BLK_THINKING);
       cJSON_Delete(pl);
 
       n = run("contentBlockStop", "{\"contentBlockIndex\":0}", &st, d, 8, &pl);
@@ -203,14 +219,15 @@ int main(void)
       cJSON_Delete(pl);
    }
 
-   /* (k) unknown delta variant -> 0 (skip); non-object delta -> -1 */
+   /* (k) an unknown union member inside a known event is malformed; a
+    * non-object delta is malformed too. */
    {
       converse_stream_state_t st;
       converse_stream_state_init(&st);
       int n = run("contentBlockDelta",
                   "{\"contentBlockIndex\":0,\"delta\":{\"citation\":{\"title\":\"x\"}}}", &st, d, 8,
                   &pl);
-      assert(n == 0);
+      assert(n == -1);
       cJSON_Delete(pl);
 
       n = run("contentBlockDelta", "{\"contentBlockIndex\":0,\"delta\":\"not-an-object\"}", &st, d,

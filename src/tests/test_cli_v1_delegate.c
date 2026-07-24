@@ -119,6 +119,8 @@ static void test_delegate_roundtable_brief_marshaled(void)
    char *argv[] = {"review this change thoroughly",
                    "--mode",
                    "review",
+                   "--roundtable",
+                   "deep-review",
                    "--turns",
                    "parallel",
                    "--rounds",
@@ -128,12 +130,13 @@ static void test_delegate_roundtable_brief_marshaled(void)
                    "--brief-json",
                    "{\"questions\":[\"does auth hold?\"]}",
                    "--apply"};
-   cJSON *req = marshal_delegate_roundtable(12, argv);
+   cJSON *req = marshal_roundtable_review(14, argv);
    assert(req != NULL);
-   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate.roundtable") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "roundtable.review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
                  "review this change thoroughly") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "mode")->valuestring, "review") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "roundtable")->valuestring, "deep-review") == 0);
    assert(strcmp(cJSON_GetObjectItem(req, "turns")->valuestring, "parallel") == 0);
    assert(cJSON_GetObjectItem(req, "rounds")->valueint == 2);
    assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "apply")));
@@ -153,7 +156,7 @@ static void test_delegate_roundtable_invalid_brief_json_exits(void)
    if (pid == 0)
    {
       char *argv[] = {"review this change thoroughly", "--brief-json", "{\"questions\":["};
-      cJSON *req = marshal_delegate_roundtable(3, argv);
+      cJSON *req = marshal_roundtable_review(3, argv);
       cJSON_Delete(req);
       _exit(0);
    }
@@ -179,7 +182,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    close(fd);
 
    char *argv[] = {"critique the block above", "--context-file", path};
-   cJSON *req = marshal_delegate_roundtable(3, argv);
+   cJSON *req = marshal_roundtable_review(3, argv);
    assert(req != NULL);
    const cJSON *prompt = cJSON_GetObjectItem(req, "prompt");
    assert(cJSON_IsString(prompt));
@@ -194,7 +197,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
    /* Preload-only invocation (no positional prompt): the preload still becomes
     * the prompt. Exercises the base == "" branch. */
    char *argv_only[] = {"--context-file", path};
-   cJSON *req_only = marshal_delegate_roundtable(2, argv_only);
+   cJSON *req_only = marshal_roundtable_review(2, argv_only);
    assert(req_only != NULL);
    const cJSON *p_only = cJSON_GetObjectItem(req_only, "prompt");
    assert(cJSON_IsString(p_only));
@@ -205,7 +208,7 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
 
    /* No preload flags => prompt is unchanged (no spurious Source Packet). */
    char *argv2[] = {"a plain roundtable prompt with no preload flags"};
-   cJSON *req2 = marshal_delegate_roundtable(1, argv2);
+   cJSON *req2 = marshal_roundtable_review(1, argv2);
    assert(req2 != NULL);
    const cJSON *p2 = cJSON_GetObjectItem(req2, "prompt");
    assert(cJSON_IsString(p2));
@@ -214,6 +217,88 @@ static void test_delegate_roundtable_context_file_folded_into_prompt(void)
 
    unlink(path);
    printf("  PASS: test_delegate_roundtable_context_file_folded_into_prompt\n");
+}
+
+static cJSON *marshal_roundtable_with_stdin(int argc, char **argv, const char *input)
+{
+   int old_stdin = dup(STDIN_FILENO);
+   assert(old_stdin >= 0);
+   int pipefd[2];
+   assert(pipe(pipefd) == 0);
+   assert(write(pipefd[1], input, strlen(input)) == (ssize_t)strlen(input));
+   close(pipefd[1]);
+   assert(dup2(pipefd[0], STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(pipefd[0]);
+   cJSON *req = marshal_roundtable_review(argc, argv);
+   assert(dup2(old_stdin, STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(old_stdin);
+   return req;
+}
+
+static char *read_limited_with_stdin(const char *input, size_t limit)
+{
+   int old_stdin = dup(STDIN_FILENO);
+   int pipefd[2];
+   assert(old_stdin >= 0 && pipe(pipefd) == 0);
+   assert(write(pipefd[1], input, strlen(input)) == (ssize_t)strlen(input));
+   close(pipefd[1]);
+   assert(dup2(pipefd[0], STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(pipefd[0]);
+   char *result = marshal_read_stdin_limited(limit);
+   assert(dup2(old_stdin, STDIN_FILENO) >= 0);
+   clearerr(stdin);
+   close(old_stdin);
+   return result;
+}
+
+static void test_roundtable_stdin_limit_is_inclusive(void)
+{
+   char *exact = read_limited_with_stdin("12345678", 8);
+   assert(exact != NULL && strcmp(exact, "12345678") == 0);
+   free(exact);
+   assert(read_limited_with_stdin("123456789", 8) == NULL);
+   printf("  PASS: test_roundtable_stdin_limit_is_inclusive\n");
+}
+
+static void test_roundtable_stdin_is_authoritative_artifact(void)
+{
+   char *argv[] = {
+       "-",          "Review PR #1828 only", "--run-id", "review-pr-1828", "--artifact-stage",
+       "frozen_diff"};
+   cJSON *req = marshal_roundtable_with_stdin(6, argv, "diff --git a/PR1828 b/PR1828\n+marker\n");
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring,
+                 "diff --git a/PR1828 b/PR1828\n+marker\n") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
+                 "Review PR #1828 only") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "run_id")->valuestring, "review-pr-1828") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact_stage")->valuestring, "frozen_diff") == 0);
+   assert(cJSON_GetObjectItem(req, "prompt") == NULL);
+   cJSON_Delete(req);
+   printf("  PASS: test_roundtable_stdin_is_authoritative_artifact\n");
+}
+
+static void test_roundtable_path_is_read_not_forwarded(void)
+{
+   char path[] = "/tmp/aimee_rt_artifact_test_XXXXXX";
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   const char *artifact = "diff --git a/ONLY1828 b/ONLY1828\n+exact bytes\n";
+   assert(write(fd, artifact, strlen(artifact)) == (ssize_t)strlen(artifact));
+   close(fd);
+   char *argv[] = {path, "Implement the original request"};
+   cJSON *req = marshal_roundtable_review(2, argv);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "artifact")->valuestring, artifact) == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "original_request")->valuestring,
+                 "Implement the original request") == 0);
+   assert(strstr(cJSON_GetObjectItem(req, "artifact")->valuestring, path) == NULL);
+   cJSON_Delete(req);
+   unlink(path);
+   printf("  PASS: test_roundtable_path_is_read_not_forwarded\n");
 }
 
 static cJSON *marshal_delegate_with_stdin(int argc, char **argv, const char *input)
@@ -1262,6 +1347,78 @@ static void test_delegate_context_file_folded_into_prompt(void)
    printf("  PASS: test_delegate_context_file_folded_into_prompt\n");
 }
 
+/* --verify and --scope govern SPEND (escalation) and what a seat may attempt
+ * (scope), and are honoured only by the in-process delegate path. The marshaller
+ * forwards a fixed allowlist and drops the rest, so routing a run with either
+ * flag used to return a normal, successful-looking result while the verifier
+ * never ran. Refusing the run is the only honest answer until they are plumbed
+ * end to end - so pin that it EXITS rather than quietly marshaling. */
+static int marshal_delegate_exit_status(char **argv, int argc)
+{
+   pid_t pid = fork();
+   assert(pid >= 0);
+   if (pid == 0)
+   {
+      /* The guard writes to stderr before exiting; keep the test output clean. */
+      freopen("/dev/null", "w", stderr);
+      cJSON *req = marshal_delegate(argc, argv);
+      /* Reached only if the guard did NOT fire. */
+      cJSON_Delete(req);
+      _exit(0);
+   }
+   int status = 0;
+   assert(waitpid(pid, &status, 0) == pid);
+   assert(WIFEXITED(status));
+   return WEXITSTATUS(status);
+}
+
+static void test_delegate_unsupported_routed_flags_are_refused(void)
+{
+   /* --verify runs a caller-supplied shell command and its exit status alone
+    * decides whether a model was inadequate, so it is neither forwarded (that
+    * would put caller-supplied code on a shared server and hand the caller
+    * control of spend) nor runnable client-side (the thin client links no
+    * delegate engine). Refuse rather than ignore. */
+   char *verify_argv[] = {"review", "task", "--verify", "false"};
+   assert(marshal_delegate_exit_status(verify_argv, 4) == 1);
+
+   /* A bad --scope spelling fails fast at the client instead of reaching a
+    * server that would parse it as UNSET and admit every seat. */
+   char *bad_scope_argv[] = {"review", "task", "--scope", "enormous"};
+   assert(marshal_delegate_exit_status(bad_scope_argv, 4) == 1);
+
+   /* A run WITHOUT them still marshals normally - the guard must not be a
+    * blanket refusal. */
+   char *plain_argv[] = {"review", "task"};
+   assert(marshal_delegate_exit_status(plain_argv, 2) == 0);
+}
+
+/* --scope is pure routing policy carrying no caller-supplied code, and the
+ * server is already choosing the seat - so unlike --verify it IS forwarded, and
+ * the ceiling is enforced server-side. It used to be dropped by the allowlist,
+ * which left max_scope never binding for any routed run. */
+static void test_delegate_scope_is_forwarded(void)
+{
+   char *argv[] = {"review", "task", "--scope", "bounded"};
+   cJSON *req = marshal_delegate(4, argv);
+   cJSON *scope = cJSON_GetObjectItemCaseSensitive(req, "scope");
+   assert(cJSON_IsString(scope));
+   assert(strcmp(scope->valuestring, "bounded") == 0);
+   cJSON_Delete(req);
+
+   char *whole[] = {"review", "task", "--scope", "whole_task"};
+   req = marshal_delegate(4, whole);
+   scope = cJSON_GetObjectItemCaseSensitive(req, "scope");
+   assert(cJSON_IsString(scope) && strcmp(scope->valuestring, "whole_task") == 0);
+   cJSON_Delete(req);
+
+   /* Absent unless asked for: an omitted flag must not imply a ceiling. */
+   char *plain[] = {"review", "task"};
+   req = marshal_delegate(2, plain);
+   assert(cJSON_GetObjectItemCaseSensitive(req, "scope") == NULL);
+   cJSON_Delete(req);
+}
+
 int main(void)
 {
    printf("test_cli_v1_delegate\n");
@@ -1274,6 +1431,9 @@ int main(void)
    test_delegate_roundtable_brief_marshaled();
    test_delegate_roundtable_invalid_brief_json_exits();
    test_delegate_roundtable_context_file_folded_into_prompt();
+   test_roundtable_stdin_is_authoritative_artifact();
+   test_roundtable_path_is_read_not_forwarded();
+   test_roundtable_stdin_limit_is_inclusive();
    test_delegate_prompt_stdin_marshaled();
    test_delegate_status_multiple_ids_marshaled();
    test_delegate_log_rejects_ignored_args();
@@ -1310,6 +1470,8 @@ int main(void)
    test_trajectory_export_route_marshaled();
    test_trajectory_batch_route_marshaled();
    test_client_endpoint_selection();
+   test_delegate_unsupported_routed_flags_are_refused();
+   test_delegate_scope_is_forwarded();
    printf("All tests passed.\n");
    return 0;
 }

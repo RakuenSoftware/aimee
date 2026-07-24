@@ -18,9 +18,14 @@
 #include "cJSON.h"
 #include "kb_enroll.h" /* KB_ENROLL_SCOPE_MAX */
 #include "kb_http.h"   /* kb_http_route_ex */
+#include "kb_http_egress.h"
 #include "../../db2/server_registry.h"
+#include "../../db2/management_jwks_runtime.h"
+#include "../../db2/db2_tenant.h"
+#include "db2/db2.h"    /* request-scoped DB2 lease */
 #include "kb_ingress.h" /* B5 identity-header ingress guard */
 #include "kb_reqctx.h"
+#include "config.h"
 #include "log.h"             /* LOG_WARN */
 #include "db2/enrollments.h" /* revocation source of truth + last-seen */
 #include "kb_paths.h"        /* kb_default_config_dir */
@@ -28,9 +33,159 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
-#define KB_TLS_REQ_MAX  65536
-#define KB_TLS_RESP_MAX 262144
+#define KB_TLS_REQ_MAX          (64 * 1024 + 1)
+#define KB_TLS_HEADER_MAX       (64 * 1024)
+#define KB_TLS_REQUEST_LINE_MAX 8192
+#define KB_TLS_URI_MAX          4096
+#define KB_TLS_HEADER_COUNT_MAX 64
+#define KB_TLS_RESP_MAX         262144
+
+static int header_name_char(unsigned char c)
+{
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+          strchr("!#$%&'*+-.^_`|~", c) != NULL;
+}
+
+static int header_value_has_token(const char *start, const char *end, const char *token)
+{
+   size_t token_len = strlen(token);
+   while (start < end)
+   {
+      while (start < end && (*start == ' ' || *start == '\t' || *start == ','))
+         start++;
+      const char *item_end = start;
+      while (item_end < end && *item_end != ',')
+         item_end++;
+      const char *trimmed_end = item_end;
+      while (trimmed_end > start && (trimmed_end[-1] == ' ' || trimmed_end[-1] == '\t'))
+         trimmed_end--;
+      if ((size_t)(trimmed_end - start) == token_len && !strncasecmp(start, token, token_len))
+         return 1;
+      start = item_end < end ? item_end + 1 : end;
+   }
+   return 0;
+}
+
+static void set_recv_timeout(SSL *ssl, int seconds)
+{
+   int fd = SSL_get_fd(ssl);
+   struct timeval timeout = {.tv_sec = seconds, .tv_usec = 0};
+   if (fd >= 0)
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+}
+
+/* Read exactly one strict HTTP/1.1 request. Returns an HTTP error status, 0 on
+ * success, or -1 when an idle/cleanly closed peer supplied no request bytes. */
+static int strict_request_read(SSL *ssl, char *buf, size_t cap, int *total_out, int *header_out,
+                               size_t *body_out, int *close_out)
+{
+   size_t total = 0, header_len = 0, content_len = 0;
+   int have_cl = 0;
+   while (total + 1 < cap && total < KB_TLS_HEADER_MAX)
+   {
+      int n = SSL_read(ssl, buf + total, (int)(KB_TLS_HEADER_MAX - total));
+      if (n <= 0)
+         return total == 0 ? -1 : 400;
+      total += (size_t)n;
+      set_recv_timeout(ssl, 10); /* first byte arrived: bound the remaining head */
+      buf[total] = '\0';
+      char *end = strstr(buf, "\r\n\r\n");
+      if (end)
+      {
+         header_len = (size_t)(end + 4 - buf);
+         break;
+      }
+   }
+   if (!header_len || header_len > KB_TLS_HEADER_MAX)
+      return 413;
+   for (size_t i = 0; i < header_len; i++)
+      if (buf[i] == '\0' || (buf[i] == '\r' && (i + 1 >= header_len || buf[i + 1] != '\n')) ||
+          (buf[i] == '\n' && (i == 0 || buf[i - 1] != '\r')))
+         return 400;
+   char *line_end = strstr(buf, "\r\n");
+   if (!line_end || (size_t)(line_end - buf) > KB_TLS_REQUEST_LINE_MAX)
+      return 400;
+   char method[16], target[KB_TLS_URI_MAX + 1], version[16], extra;
+   *line_end = '\0';
+   int fields = sscanf(buf, "%15s %4096s %15s %c", method, target, version, &extra);
+   *line_end = '\r';
+   if (fields != 3 || strcmp(version, "HTTP/1.1") || target[0] != '/' || strstr(target, "://") ||
+       strchr(target, '#'))
+      return 400;
+   char *p = line_end + 2;
+   char *headers_end = buf + header_len - 2;
+   int header_count = 0;
+   while (p < headers_end && !(p[0] == '\r' && p[1] == '\n'))
+   {
+      if (++header_count > KB_TLS_HEADER_COUNT_MAX)
+         return 400;
+      char *e = strstr(p, "\r\n");
+      if (!e || e > headers_end || p[0] == ' ' || p[0] == '\t')
+         return 400;
+      char *colon = memchr(p, ':', (size_t)(e - p));
+      if (!colon || colon == p || colon[-1] == ' ' || colon[-1] == '\t')
+         return 400;
+      for (char *q = p; q < colon; q++)
+         if (!header_name_char((unsigned char)*q))
+            return 400;
+      for (char *q = colon + 1; q < e; q++)
+         if (((unsigned char)*q < 0x20 && *q != '\t') || (unsigned char)*q == 0x7f)
+            return 400;
+      size_t name_len = (size_t)(colon - p);
+      if (name_len == 17 && !strncasecmp(p, "Transfer-Encoding", 17))
+         return 400;
+      if (name_len == 14 && !strncasecmp(p, "Content-Length", 14))
+      {
+         if (have_cl)
+            return 400;
+         have_cl = 1;
+         char *v = colon + 1;
+         while (v < e && (*v == ' ' || *v == '\t'))
+            v++;
+         char *ve = e;
+         while (ve > v && (ve[-1] == ' ' || ve[-1] == '\t'))
+            ve--;
+         if (v == ve || (ve - v > 1 && *v == '0'))
+            return 400;
+         size_t value = 0;
+         for (char *q = v; q < ve; q++)
+         {
+            if (*q < '0' || *q > '9' || value > (cap - 1) / 10)
+               return 400;
+            value = value * 10 + (size_t)(*q - '0');
+         }
+         content_len = value;
+      }
+      if (name_len == 10 && !strncasecmp(p, "Connection", 10) &&
+          header_value_has_token(colon + 1, e, "close"))
+         *close_out = 1;
+      p = e + 2;
+   }
+   int bodyless = !strcmp(method, "GET") || !strcmp(method, "HEAD");
+   if ((bodyless && have_cl) || (!bodyless && !have_cl))
+      return 400;
+   if (content_len > cap - header_len - 1)
+      return 413;
+   if (total > header_len + content_len)
+      return 400;
+   set_recv_timeout(ssl, 30); /* body transfer uses the normal I/O deadline */
+   while (total < header_len + content_len)
+   {
+      int n = SSL_read(ssl, buf + total, (int)(header_len + content_len - total));
+      if (n <= 0)
+         return 400;
+      total += (size_t)n;
+   }
+   buf[total] = '\0';
+   *total_out = (int)total;
+   *header_out = (int)header_len;
+   *body_out = content_len;
+   return 0;
+}
 
 static const char *http_reason(int status)
 {
@@ -42,14 +197,26 @@ static const char *http_reason(int status)
       return "Bad Request";
    case 401:
       return "Unauthorized";
+   case 402:
+      return "Payment Required";
    case 403:
       return "Forbidden";
    case 404:
       return "Not Found";
    case 405:
       return "Method Not Allowed";
+   case 409:
+      return "Conflict";
+   case 429:
+      return "Too Many Requests";
    case 500:
       return "Internal Server Error";
+   case 502:
+      return "Bad Gateway";
+   case 503:
+      return "Service Unavailable";
+   case 504:
+      return "Gateway Timeout";
    default:
       return "OK";
    }
@@ -58,19 +225,40 @@ static const char *http_reason(int status)
 /* Certificate-bound server heartbeat. The server_id is untrusted input but the
  * DB update is keyed by both server_id and the verified peer cert CN, so a
  * certificate cannot refresh another registry row. */
-static int mtls_server_heartbeat(const char *cn, const char *body, char *resp, int cap)
+static int mtls_server_heartbeat(const char *issuer, const char *serial, const char *fingerprint,
+                                 const char *body, char *resp, int cap)
 {
    cJSON *j = body ? cJSON_Parse(body) : NULL;
    cJSON *sid = j ? cJSON_GetObjectItemCaseSensitive(j, "server_id") : NULL;
    cJSON *health = j ? cJSON_GetObjectItemCaseSensitive(j, "health") : NULL;
    cJSON *version = j ? cJSON_GetObjectItemCaseSensitive(j, "version") : NULL;
-   int ok =
-       cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
-       db2_server_registry_heartbeat(cJSON_GetStringValue(sid), cn, cJSON_GetStringValue(health),
-                                     cJSON_GetStringValue(version)) == 0;
+   int ok = cJSON_IsString(sid) && cJSON_IsString(health) && cJSON_IsString(version) &&
+            db2_server_registry_heartbeat(cJSON_GetStringValue(sid), issuer, serial, fingerprint,
+                                          cJSON_GetStringValue(health),
+                                          cJSON_GetStringValue(version)) == 0;
    cJSON_Delete(j);
    snprintf(resp, (size_t)cap, ok ? "{\"ok\":true}" : "{\"error\":\"heartbeat rejected\"}");
    return ok ? 200 : 403;
+}
+
+static int mtls_management_jwks(const char *issuer, const char *serial, const char *fingerprint,
+                                char *resp, int cap)
+{
+   db2_management_jwks_runtime_record_t record;
+   db2_management_jwks_runtime_result_t result =
+       db2_management_jwks_runtime_fetch(issuer, serial, fingerprint, &record);
+   if (result == DB2_MANAGEMENT_JWKS_RUNTIME_DENIED)
+   {
+      snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS fetch denied\"}");
+      return 403;
+   }
+   if (result != DB2_MANAGEMENT_JWKS_RUNTIME_OK || record.envelope_len + 1 > (size_t)cap)
+   {
+      snprintf(resp, (size_t)cap, "{\"error\":\"management JWKS unavailable\"}");
+      return 503;
+   }
+   memcpy(resp, record.envelope, record.envelope_len + 1);
+   return 200;
 }
 
 /* GET /v1/enroll/ca: return the CA certificate (public trust anchor) so a
@@ -102,7 +290,8 @@ static int mtls_get_ca(char *resp, int cap)
  * client rotate its cert before expiry with no token and no operator action. The
  * client keeps its (new) private key. Writes the JSON response into resp[cap];
  * returns the HTTP status. */
-static int mtls_renew(const char *scope_cn, const char *body, char *resp, int cap)
+static int mtls_renew(const char *scope_cn, const char *old_fp, const char *old_issuer,
+                      const char *old_serial_norm, const char *body, char *resp, int cap)
 {
    cJSON *req = body ? cJSON_Parse(body) : NULL;
    const cJSON *jcsr = req ? cJSON_GetObjectItemCaseSensitive(req, "csr") : NULL;
@@ -135,6 +324,32 @@ static int mtls_renew(const char *scope_cn, const char *body, char *resp, int ca
       snprintf(resp, (size_t)cap, "{\"error\":\"renew failed: bad CSR\"}");
       return 400;
    }
+   char new_fp[KB_PKI_FP_HEX] = "", new_issuer[256] = "", raw_serial[128] = "";
+   char new_serial[128] = "";
+   int metadata_ok = kb_pki_ca_fingerprint(cert, new_fp, sizeof(new_fp)) == 0 &&
+                     kb_pki_cert_metadata(cert, new_issuer, sizeof(new_issuer), raw_serial,
+                                          sizeof(raw_serial)) == 0 &&
+                     kb_cert_serial_normalize(raw_serial, new_serial, sizeof(new_serial)) == 0;
+   kb_principal_t renew_actor = {.kind = KB_PRIN_CERT, .authenticated = 1};
+   snprintf(renew_actor.issuer, sizeof(renew_actor.issuer), "%s", old_issuer);
+   snprintf(renew_actor.subject, sizeof(renew_actor.subject), "%s", old_serial_norm);
+   int persisted = -1;
+   if (metadata_ok && db2_tenant_scope_begin(&renew_actor, 0) == 0)
+   {
+      persisted = db2_enrollment_renew(old_fp, old_issuer, old_serial_norm, scope_cn, new_fp,
+                                       new_issuer, new_serial, NULL);
+      if (persisted == 0)
+         persisted = db2_tenant_scope_commit();
+      else
+         db2_tenant_scope_rollback();
+   }
+   if (!metadata_ok || persisted != 0)
+   {
+      OPENSSL_cleanse(cert, KB_PKI_CERT_PEM_MAX);
+      free(cert);
+      snprintf(resp, (size_t)cap, "{\"error\":\"renew persistence unavailable\"}");
+      return 503;
+   }
    cJSON *out = cJSON_CreateObject();
    cJSON_AddStringToObject(out, "client_cert", cert);
    cJSON_AddStringToObject(out, "scope", scope_cn);
@@ -154,6 +369,9 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    if (!ssl)
       return;
    SSL_set_fd(ssl, fd);
+   struct timeval io_timeout = {.tv_sec = 30, .tv_usec = 0};
+   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
+   setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout));
    /* Handshake — REQUIRES + verifies the client cert (server ctx config). */
    if (SSL_accept(ssl) != 1)
    {
@@ -166,174 +384,234 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
    if (!buf || !resp)
       goto done;
 
-   /* Read until the header terminator (or the body, for small requests). */
-   int total = 0;
-   while (total < KB_TLS_REQ_MAX - 1)
+   for (;;)
    {
-      int n = SSL_read(ssl, buf + total, KB_TLS_REQ_MAX - 1 - total);
-      if (n <= 0)
+      /* A reusable connection may idle for 30 seconds before the next request.
+       * strict_request_read shortens the deadline after the first byte arrives. */
+      set_recv_timeout(ssl, 30);
+      int total = 0, header_len = 0;
+      size_t declared_body = 0;
+      int close_after_response = 0;
+      int read_status = strict_request_read(ssl, buf, KB_TLS_REQ_MAX, &total, &header_len,
+                                            &declared_body, &close_after_response);
+      io_timeout.tv_sec = 30;
+      setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout));
+      if (read_status < 0)
          break;
-      total += n;
-      buf[total] = '\0';
-      const char *hdr_end = strstr(buf, "\r\n\r\n");
-      if (hdr_end)
+      if (read_status)
       {
-         /* If there is a Content-Length, keep reading until the body arrives. */
-         const char *cl = strcasestr(buf, "\r\nContent-Length:");
-         long want = 0;
-         if (cl)
-            want = strtol(cl + 17, NULL, 10);
-         int have = total - (int)((hdr_end + 4) - buf);
-         if (have >= want)
-            break;
+         const char *b = read_status == 413 ? "{\"error\":\"request too large\"}"
+                                            : "{\"error\":\"bad request\"}";
+         char head[160];
+         int hn = snprintf(head, sizeof(head),
+                           "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
+                           "%zu\r\nConnection: close\r\n\r\n",
+                           read_status, read_status == 413 ? "Payload Too Large" : "Bad Request",
+                           strlen(b));
+         SSL_write(ssl, head, hn);
+         SSL_write(ssl, b, (int)strlen(b));
+         goto done;
       }
-   }
-   buf[total] = '\0';
 
-   char method[16] = {0}, path[1024] = {0};
-   if (sscanf(buf, "%15s %1023s", method, path) < 2)
-   {
-      const char *b = "{\"error\":\"bad request\"}";
-      char head[160];
-      int hn = snprintf(head, sizeof(head),
-                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-"
-                        "Length: %zu\r\nConnection: close\r\n\r\n",
-                        strlen(b));
-      SSL_write(ssl, head, hn);
-      SSL_write(ssl, b, (int)strlen(b));
-      goto done;
-   }
-
-   /* Body follows the blank line. */
-   const char *body = "";
-   int body_len = 0;
-   const char *be = strstr(buf, "\r\n\r\n");
-   if (be)
-   {
-      body = be + 4;
-      body_len = total - (int)(body - buf);
-      if (body_len < 0)
-         body_len = 0;
-   }
-
-   /* Split query string off the path. */
-   char qs[1024] = "", cpath[1024] = "";
-   const char *qmark = strchr(path, '?');
-   if (qmark)
-   {
-      size_t plen = (size_t)(qmark - path);
-      if (plen >= sizeof(cpath))
-         plen = sizeof(cpath) - 1;
-      memcpy(cpath, path, plen);
-      cpath[plen] = '\0';
-      snprintf(qs, sizeof(qs), "%s", qmark + 1);
-   }
-   else
-   {
-      snprintf(cpath, sizeof(cpath), "%s", path);
-   }
-
-   /* Derive the caller's scope from the verified client certificate. A scoped
-    * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
-    * via verify-then-trust; "global"/owner (no ':') gets full access. */
-   char cn[128] = "";
-   char synth[160] = "", authhdr[180] = "";
-   int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
-   if (have_cert && strchr(cn, ':'))
-   {
-      snprintf(synth, sizeof(synth), "scope:%s:m", cn);
-      snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
-   }
-
-   /* Revocation (mTLS seam): reject a client cert whose enrollment has been
-    * revoked. The DB revoked_at is the source of truth (short-TTL cached); a
-    * live cert also gets a debounced last-seen bump. */
-   int cert_revoked = 0;
-   if (have_cert)
-   {
-      char fp[65] = "";
-      if (kb_tls_peer_fingerprint(ssl, fp, sizeof(fp)) == 0)
+      char method[16] = {0}, path[KB_TLS_URI_MAX + 1] = {0};
+      if (sscanf(buf, "%15s %4096s", method, path) < 2)
       {
-         cert_revoked = db2_enrollment_is_revoked(fp);
-         if (!cert_revoked)
-            db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
+         const char *b = "{\"error\":\"bad request\"}";
+         char head[160];
+         int hn = snprintf(head, sizeof(head),
+                           "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-"
+                           "Length: %zu\r\nConnection: close\r\n\r\n",
+                           strlen(b));
+         SSL_write(ssl, head, hn);
+         SSL_write(ssl, b, (int)strlen(b));
+         goto done;
       }
-   }
 
-   /* Routes reachable WITHOUT a client cert (the enrollment bootstrap): fetch
-    * the CA for TOFU pinning, and redeem a token for a cert. */
-   int is_bootstrap =
-       (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
-
-   int status;
-   /* B5: kb never honors a client-supplied identity header; reject fail-closed
-    * before any route runs. */
-   if (kb_ingress_identity_header_present(buf))
-   {
-      LOG_WARN("kb.tls",
-               "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
-      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
-      status = 400;
-   }
-   /* A revoked client cert is rejected before any route runs. */
-   else if (cert_revoked)
-   {
-      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"client certificate has been revoked\"}");
-      status = 401;
-   }
-   /* A client without a cert yet (still enrolling) may ONLY use bootstrap
-    * routes. Everything else requires an identity, so a cert-less peer is 401. */
-   else if (!have_cert && !is_bootstrap)
-   {
-      snprintf(resp, KB_TLS_RESP_MAX,
-               "{\"error\":\"client certificate required (enroll first via "
-               "/v1/enroll/redeem)\"}");
-      status = 401;
-   }
-   /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
-    * by fingerprint (the value in its connection string). */
-   else if (strcmp(cpath, "/v1/enroll/ca") == 0)
-   {
-      status = (strcmp(method, "GET") == 0) ? mtls_get_ca(resp, KB_TLS_RESP_MAX) : 405;
-      if (status == 405)
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-   }
-   /* Cert rotation: an authenticated client renews its cert for its CURRENT
-    * verified scope (the cert is the credential — no token needed). */
-   else if (have_cert && strcmp(cpath, "/v1/enroll/renew") == 0)
-   {
-      if (strcmp(method, "POST") != 0)
+      /* Body follows the blank line. */
+      const char *body = "";
+      int body_len = 0;
+      if (header_len > 0)
       {
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-         status = 405;
+         body = buf + header_len;
+         body_len = (int)declared_body;
+      }
+
+      /* Worker threads are long-lived, so a lazily acquired DB2 connection
+       * would otherwise remain pinned until shutdown. Bound every routed
+       * request explicitly; this also keeps persistent mTLS connections from
+       * exhausting the shared DB2 pool after one request per worker. */
+      db2_lease_begin();
+
+      /* Split query string off the path. */
+      char qs[KB_TLS_URI_MAX + 1] = "", cpath[KB_TLS_URI_MAX + 1] = "";
+      const char *qmark = strchr(path, '?');
+      if (qmark)
+      {
+         size_t plen = (size_t)(qmark - path);
+         if (plen >= sizeof(cpath))
+            plen = sizeof(cpath) - 1;
+         memcpy(cpath, path, plen);
+         cpath[plen] = '\0';
+         snprintf(qs, sizeof(qs), "%s", qmark + 1);
       }
       else
       {
-         status = mtls_renew(cn, body, resp, KB_TLS_RESP_MAX);
+         snprintf(cpath, sizeof(cpath), "%s", path);
       }
-   }
-   else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
-   {
-      status = (strcmp(method, "POST") == 0)
-                   ? mtls_server_heartbeat(cn, body, resp, KB_TLS_RESP_MAX)
-                   : 405;
-      if (status == 405)
-         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
-   }
-   else
-   {
-      status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
-                                synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
-   }
-   kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
 
-   char head[256];
-   int hn = snprintf(head, sizeof(head),
-                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
-                     "%zu\r\nConnection: close\r\n\r\n",
-                     status, http_reason(status), strlen(resp));
-   SSL_write(ssl, head, hn);
-   SSL_write(ssl, resp, (int)strlen(resp));
+      /* Derive the caller's scope from the verified client certificate. A scoped
+       * CN "<kind>:<id>" becomes a synthetic scoped credential the router enforces
+       * via verify-then-trust; "global"/owner (no ':') gets full access. */
+      char cn[128] = "";
+      char synth[160] = "", authhdr[180] = "";
+      int have_cert = (kb_tls_peer_cn(ssl, cn, sizeof(cn)) == 0);
+      if (have_cert && strchr(cn, ':'))
+      {
+         snprintf(synth, sizeof(synth), "scope:%s:m", cn);
+         snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
+      }
+
+      /* Primary-authoritative mTLS seam: issuer + normalized serial must resolve
+       * to an active enrollment. Unknown, revoked, and authority-error outcomes
+       * all fail closed before routing; active use gets a debounced last-seen bump. */
+      int cert_authority = 0;
+      char fp[65] = "", issuer[256] = "", serial[128] = "";
+      kb_principal_t transport;
+      memset(&transport, 0, sizeof(transport));
+      if (have_cert)
+      {
+         if (kb_tls_peer_fingerprint(ssl, fp, sizeof(fp)) == 0 &&
+             kb_tls_peer_issuer(ssl, issuer, sizeof(issuer)) == 0 &&
+             kb_tls_peer_serial(ssl, serial, sizeof(serial)) == 0 &&
+             kb_principal_from_cert(issuer, serial, cn, &transport) == 0)
+         {
+            cert_authority = db2_enrollment_is_active_by_key(transport.issuer, transport.subject);
+            if (cert_authority == 1)
+               db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
+         }
+      }
+
+      /* Routes reachable WITHOUT a client cert (the enrollment bootstrap): fetch
+       * the CA for TOFU pinning, and redeem a token for a cert. */
+      int is_bootstrap =
+          (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
+
+      int status;
+      /* B5: kb never honors a client-supplied identity header; reject fail-closed
+       * before any route runs. */
+      if (kb_ingress_identity_header_present(buf))
+      {
+         LOG_WARN(
+             "kb.tls",
+             "kb ingress (mtls): rejected request bearing a spoofable X-Aimee-* identity header");
+         snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"identity header not permitted\"}");
+         status = 400;
+      }
+      /* A revoked/unknown cert or unavailable authority is rejected before any
+       * route runs. Authority failure is retryable but never fail-open. */
+      else if (have_cert && cert_authority != 1)
+      {
+         close_after_response = 1;
+         if (cert_authority < 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX,
+                     "{\"error\":\"certificate authority temporarily unavailable\"}");
+            status = 503;
+         }
+         else
+         {
+            snprintf(resp, KB_TLS_RESP_MAX,
+                     "{\"error\":\"client certificate is unknown or revoked\"}");
+            status = 403;
+         }
+      }
+      /* A client without a cert yet (still enrolling) may ONLY use bootstrap
+       * routes. Everything else requires an identity, so a cert-less peer is 401. */
+      else if (!have_cert && !is_bootstrap)
+      {
+         snprintf(resp, KB_TLS_RESP_MAX,
+                  "{\"error\":\"client certificate required (enroll first via "
+                  "/v1/enroll/redeem)\"}");
+         status = 401;
+      }
+      /* GET /v1/enroll/ca: return the CA cert so a bootstrapping client can pin it
+       * by fingerprint (the value in its connection string). */
+      else if (strcmp(cpath, "/v1/enroll/ca") == 0)
+      {
+         status = (strcmp(method, "GET") == 0) ? mtls_get_ca(resp, KB_TLS_RESP_MAX) : 405;
+         if (status == 405)
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+      }
+      /* Certificate-only P2b egress authority: never route through the synthetic
+       * CN bearer. The exact verified issuer/serial/fingerprint are carried in. */
+      else if (have_cert && strcmp(cpath, "/v1/llm/egress") == 0)
+      {
+         status = kb_http_egress_route(method, cpath, body, body_len, &transport, fp, resp,
+                                       KB_TLS_RESP_MAX);
+      }
+      /* P5-C2c public verification artifact: certificate-only, primary-backed,
+       * exact FINAL bytes.  It never enters the bearer/console router. */
+      else if (have_cert && strcmp(cpath, "/v1/management/jwks") == 0)
+      {
+         if (qs[0] || body_len)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"query or body not allowed\"}");
+            status = 400;
+         }
+         else if (strcmp(method, "GET") != 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+            status = 405;
+         }
+         else
+            status = mtls_management_jwks(transport.issuer, transport.subject, fp, resp,
+                                          KB_TLS_RESP_MAX);
+         if (status == 403 || status == 503)
+            close_after_response = 1;
+      }
+      /* Cert rotation: an authenticated client renews its cert for its CURRENT
+       * verified scope (the cert is the credential — no token needed). */
+      else if (have_cert && strcmp(cpath, "/v1/enroll/renew") == 0)
+      {
+         if (strcmp(method, "POST") != 0)
+         {
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+            status = 405;
+         }
+         else
+         {
+            status = mtls_renew(cn, fp, transport.issuer, transport.subject, body, resp,
+                                KB_TLS_RESP_MAX);
+         }
+      }
+      else if (have_cert && strcmp(cpath, "/v1/server/heartbeat") == 0)
+      {
+         status = (strcmp(method, "POST") == 0)
+                      ? mtls_server_heartbeat(transport.issuer, transport.subject, fp, body, resp,
+                                              KB_TLS_RESP_MAX)
+                      : 405;
+         if (status == 405)
+            snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"method not allowed\"}");
+      }
+      else
+      {
+         status = kb_http_route_ex(method, cpath, qs, authhdr[0] ? authhdr : NULL,
+                                   synth[0] ? synth : NULL, body, body_len, resp, KB_TLS_RESP_MAX);
+      }
+      kb_reqctx_clear(); /* drop the request's actor before the next request on this conn */
+      db2_lease_end();
+
+      char head[256];
+      int hn = snprintf(head, sizeof(head),
+                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: "
+                        "%zu\r\nConnection: %s\r\n\r\n",
+                        status, http_reason(status), strlen(resp),
+                        close_after_response ? "close" : "keep-alive");
+      SSL_write(ssl, head, hn);
+      SSL_write(ssl, resp, (int)strlen(resp));
+      if (close_after_response)
+         break;
+   }
 
 done:
    free(buf);
@@ -349,6 +627,7 @@ done:
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <openssl/crypto.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -360,6 +639,72 @@ static int g_mtls_port = 0;
 static volatile int g_mtls_running = 0;
 static pthread_t g_mtls_thread;
 static SSL_CTX *g_mtls_ctx = NULL;
+
+#define KB_MTLS_CONNECTIONS_MAX   64
+#define KB_MTLS_QUEUE_CAP         64
+#define KB_MTLS_WORKER_STACK_SIZE (4 * 1024 * 1024)
+/* Request routes load config_t on the worker stack. Keep ample headroom for
+ * route-local state and TLS/libpq frames; a 1 MiB worker stack crashed live
+ * /v1/health requests because config_t alone is roughly 750 KiB. */
+_Static_assert(KB_MTLS_WORKER_STACK_SIZE >= sizeof(config_t) + 1024 * 1024,
+               "kb mTLS worker stack must accommodate config_t plus route headroom");
+static pthread_t g_mtls_workers[KB_MTLS_CONNECTIONS_MAX];
+static int g_mtls_workers_started = 0;
+static int g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
+static int g_mtls_connections_live = 0;
+static int g_mtls_queue[KB_MTLS_QUEUE_CAP];
+static size_t g_mtls_queue_head = 0;
+static size_t g_mtls_queue_len = 0;
+static pthread_mutex_t g_mtls_queue_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_mtls_queue_cv = PTHREAD_COND_INITIALIZER;
+
+static void *mtls_worker_thread(void *arg)
+{
+   (void)arg;
+   for (;;)
+   {
+      pthread_mutex_lock(&g_mtls_queue_mu);
+      while (g_mtls_queue_len == 0 && g_mtls_running)
+         pthread_cond_wait(&g_mtls_queue_cv, &g_mtls_queue_mu);
+      if (g_mtls_queue_len == 0 && !g_mtls_running)
+      {
+         pthread_mutex_unlock(&g_mtls_queue_mu);
+         break;
+      }
+      int fd = g_mtls_queue[g_mtls_queue_head];
+      g_mtls_queue_head = (g_mtls_queue_head + 1) % KB_MTLS_QUEUE_CAP;
+      g_mtls_queue_len--;
+      pthread_mutex_unlock(&g_mtls_queue_mu);
+
+      int one = 1;
+      (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+      kb_tls_serve_conn(fd, g_mtls_ctx);
+      close(fd);
+      pthread_mutex_lock(&g_mtls_queue_mu);
+      if (g_mtls_connections_live > 0)
+         g_mtls_connections_live--;
+      pthread_mutex_unlock(&g_mtls_queue_mu);
+   }
+   return NULL;
+}
+
+static int mtls_queue_conn(int fd)
+{
+   int queued = 0;
+   pthread_mutex_lock(&g_mtls_queue_mu);
+   if (g_mtls_running && g_mtls_connections_live < g_mtls_connection_limit &&
+       g_mtls_queue_len < KB_MTLS_QUEUE_CAP)
+   {
+      size_t tail = (g_mtls_queue_head + g_mtls_queue_len) % KB_MTLS_QUEUE_CAP;
+      g_mtls_queue[tail] = fd;
+      g_mtls_queue_len++;
+      g_mtls_connections_live++;
+      queued = 1;
+      pthread_cond_signal(&g_mtls_queue_cv);
+   }
+   pthread_mutex_unlock(&g_mtls_queue_mu);
+   return queued ? 0 : -1;
+}
 
 static void *mtls_listener_thread(void *arg)
 {
@@ -373,8 +718,10 @@ static void *mtls_listener_thread(void *arg)
             continue;
          break;
       }
-      kb_tls_serve_conn(fd, g_mtls_ctx);
-      close(fd);
+      /* Bound both concurrent handshakes and queued sockets. Saturation is
+       * fail-closed: the accepted socket is dropped before reading a request. */
+      if (mtls_queue_conn(fd) != 0)
+         close(fd);
    }
    return NULL;
 }
@@ -383,6 +730,17 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
 {
    if (port < 0 || !data_dir || !data_dir[0] || !host || !host[0])
       return -1;
+
+   g_mtls_connection_limit = KB_MTLS_CONNECTIONS_MAX;
+   const char *limit_text = getenv("AIMEE_KB_MTLS_MAX_CONNECTIONS");
+   if (limit_text && limit_text[0])
+   {
+      char *end = NULL;
+      long configured = strtol(limit_text, &end, 10);
+      if (!end || *end || configured < 1 || configured > KB_MTLS_CONNECTIONS_MAX)
+         return -1;
+      g_mtls_connection_limit = (int)configured;
+   }
 
    /* CA (persistent) + a fresh server cert signed by it. */
    char ca_dir[1024];
@@ -416,7 +774,7 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    sa.sin_addr.s_addr = htonl(INADDR_ANY); /* distributed mode: remote peers */
    sa.sin_port = htons((uint16_t)port);
    if (bind(g_mtls_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 ||
-       listen(g_mtls_listen_fd, 16) < 0)
+       listen(g_mtls_listen_fd, KB_MTLS_CONNECTIONS_MAX) < 0)
       goto fail;
 
    /* Resolve the actually-bound port (when started with 0). */
@@ -427,13 +785,52 @@ int kb_mtls_start(int port, const char *data_dir, const char *host)
    else
       g_mtls_port = port;
 
+   pthread_mutex_lock(&g_mtls_queue_mu);
+   g_mtls_queue_head = 0;
+   g_mtls_queue_len = 0;
+   g_mtls_connections_live = 0;
    g_mtls_running = 1;
+   pthread_mutex_unlock(&g_mtls_queue_mu);
+   pthread_attr_t worker_attr;
+   pthread_attr_t *worker_attr_ptr = NULL;
+   int worker_attr_initialized = pthread_attr_init(&worker_attr) == 0;
+   if (worker_attr_initialized)
+   {
+      if (pthread_attr_setstacksize(&worker_attr, KB_MTLS_WORKER_STACK_SIZE) == 0)
+         worker_attr_ptr = &worker_attr;
+   }
+   for (int i = 0; i < g_mtls_connection_limit; i++)
+   {
+      if (pthread_create(&g_mtls_workers[i], worker_attr_ptr, mtls_worker_thread, NULL) != 0)
+      {
+         if (worker_attr_initialized)
+            pthread_attr_destroy(&worker_attr);
+         pthread_mutex_lock(&g_mtls_queue_mu);
+         g_mtls_running = 0;
+         pthread_cond_broadcast(&g_mtls_queue_cv);
+         pthread_mutex_unlock(&g_mtls_queue_mu);
+         for (int j = 0; j < i; j++)
+            pthread_join(g_mtls_workers[j], NULL);
+         g_mtls_workers_started = 0;
+         goto fail;
+      }
+      g_mtls_workers_started++;
+   }
+   if (worker_attr_initialized)
+      pthread_attr_destroy(&worker_attr);
    if (pthread_create(&g_mtls_thread, NULL, mtls_listener_thread, NULL) != 0)
    {
+      pthread_mutex_lock(&g_mtls_queue_mu);
       g_mtls_running = 0;
+      pthread_cond_broadcast(&g_mtls_queue_cv);
+      pthread_mutex_unlock(&g_mtls_queue_mu);
+      for (int i = 0; i < g_mtls_workers_started; i++)
+         pthread_join(g_mtls_workers[i], NULL);
+      g_mtls_workers_started = 0;
       goto fail;
    }
-   LOG_INFO("kb_mtls", "mTLS listening on 0.0.0.0:%d (host %s)", g_mtls_port, host);
+   LOG_INFO("kb_mtls", "mTLS listening on 0.0.0.0:%d (host %s, max connections %d)", g_mtls_port,
+            host, g_mtls_connection_limit);
    return 0;
 
 fail:
@@ -456,11 +853,25 @@ int kb_mtls_bound_port(void)
    return g_mtls_running ? g_mtls_port : 0;
 }
 
+void kb_mtls_connection_stats(int *limit_out, int *live_out, int *queued_out)
+{
+   pthread_mutex_lock(&g_mtls_queue_mu);
+   if (limit_out)
+      *limit_out = g_mtls_connection_limit;
+   if (live_out)
+      *live_out = g_mtls_connections_live;
+   if (queued_out)
+      *queued_out = (int)g_mtls_queue_len;
+   pthread_mutex_unlock(&g_mtls_queue_mu);
+}
+
 void kb_mtls_stop(void)
 {
    if (!g_mtls_running)
       return;
+   pthread_mutex_lock(&g_mtls_queue_mu);
    g_mtls_running = 0;
+   pthread_mutex_unlock(&g_mtls_queue_mu);
    if (g_mtls_listen_fd >= 0)
    {
       shutdown(g_mtls_listen_fd, SHUT_RDWR);
@@ -468,6 +879,12 @@ void kb_mtls_stop(void)
       g_mtls_listen_fd = -1;
    }
    pthread_join(g_mtls_thread, NULL);
+   pthread_mutex_lock(&g_mtls_queue_mu);
+   pthread_cond_broadcast(&g_mtls_queue_cv);
+   pthread_mutex_unlock(&g_mtls_queue_mu);
+   for (int i = 0; i < g_mtls_workers_started; i++)
+      pthread_join(g_mtls_workers[i], NULL);
+   g_mtls_workers_started = 0;
    if (g_mtls_ctx)
    {
       SSL_CTX_free(g_mtls_ctx);

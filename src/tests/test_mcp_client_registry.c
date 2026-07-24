@@ -435,7 +435,6 @@ static void test_osv_offline_cache_miss_allows(void)
    "req:command\n"                                                                                 \
    "ensemble {assignments,channel,command,id,limit,message,reason,speaker,template} "              \
    "req:command\n"                                                                                 \
-   "ensemble_review {brief,diff,rounds,turns} req:diff\n"                                          \
    "epistemic_directive "                                                                          \
    "{anchor_entity,anchor_file,cause,command,id,limit,note,priority,question,resolution_memory_"   \
    "id,state,suppress,topic,valid_until} req:command\n"                                            \
@@ -444,9 +443,9 @@ static void test_osv_offline_cache_miss_allows(void)
    "get_help {topic} req:\n"                                                                       \
    "get_identity {} req:\n"                                                                        \
    "git "                                                                                          \
-   "{action,async,base,body,branch,command,count,depth,diff_stat,files,force,index,job_id,"        \
-   "message,mirror,mode,name,number,path,prune,rebase,ref,remote,source,staged,stat_only,state,"   \
-   "title,url,wait} req:command\n"                                                                 \
+   "{action,async,auto,base,body,branch,command,count,depth,diff_stat,expected_head_sha,files,"    \
+   "force,index,job_id,merge_method,message,mirror,mode,name,number,path,prune,rebase,ref,remote," \
+   "source,staged,stat_only,state,title,url,wait} req:command\n"                                   \
    "graph {command,entity,episode_key,limit,query} req:command\n"                                  \
    "host {command,name} req:command\n"                                                             \
    "index "                                                                                        \
@@ -479,6 +478,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "until} req:command\n"                                                                          \
    "recall {block_type,command,limit,limit_tokens,query,since} req:command\n"                      \
    "roadmap {command,roadmap_id} req:command\n"                                                    \
+   "roundtable_review {artifact_stage,brief,diff,original_request,roundtable,workdir} req:diff\n"  \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {max_results,query} req:query\n"                                                   \
    "search_memory {filter,query} req:query\n"                                                      \
@@ -580,7 +580,7 @@ static void test_tool_profile_filter(void)
    static const char *const core[] = {
        "get_help",        "find_tools",    "describe_tool", "search_docs",
        "search_memory",   "memory_recall", "get_identity",  "find_symbol",
-       "ast_grep_search", "git",           "delegate",      "ensemble_review",
+       "ast_grep_search", "git",           "delegate",      "roundtable_review",
        "ask_user",        "send_message",  "note",          NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)

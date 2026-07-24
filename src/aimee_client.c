@@ -6,11 +6,13 @@
  * identically on Linux, macOS, and Windows.
  */
 #include "aimee_client.h"
+#include "http_content_encoding.h"
 #include "platform.h"
 #include "platform_net.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef AIMEE_POSIX
 #include "http_uds_client.h"
@@ -29,6 +31,114 @@ typedef void aimee_tls_t;
  * suffice — aimee_client_set_remote is documented as not thread-safe. */
 static char g_remote_url[512];
 static char g_remote_token[256];
+/* Learned from an authenticated response. Request compression is deliberately
+ * withheld until the selected server advertises support, preserving rolling
+ * upgrades with older servers that would otherwise parse compressed JSON. */
+static int g_remote_request_gzip;
+static void client_keepalive_close(void);
+
+static _Thread_local int g_keepalive_fd = -1;
+static _Thread_local aimee_tls_t *g_keepalive_tls;
+static _Thread_local char g_keepalive_host[256];
+static _Thread_local char g_keepalive_port[16];
+static _Thread_local time_t g_keepalive_created;
+static _Thread_local time_t g_keepalive_used;
+static _Thread_local unsigned g_keepalive_requests;
+
+static int thinclient_gzip_enabled(void)
+{
+   const char *value = getenv("AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED");
+   return http_content_encoding_available() && value &&
+          (strcmp(value, "1") == 0 || strcmp(value, "true") == 0);
+}
+
+static int thinclient_gzip_route(const char *path)
+{
+   static const char *const allowed[] = {"/v1/responses", "/v1/completions", "/v1/embeddings",
+                                         "/v1/messages", NULL};
+   for (int i = 0; allowed[i]; i++)
+      if (strcmp(path, allowed[i]) == 0)
+         return 1;
+   return 0;
+}
+
+static int body_requests_stream(const char *body)
+{
+   const char *p = body ? strstr(body, "\"stream\"") : NULL;
+   if (!p)
+      return 0;
+   p += 8;
+   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+      p++;
+   if (*p++ != ':')
+      return 0;
+   while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+      p++;
+   return strncmp(p, "true", 4) == 0;
+}
+
+static int thinclient_keepalive_enabled(const char *path, const char *body, int is_https)
+{
+   const char *value = getenv("AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED");
+   /* Default on after live validation. An explicit value other than 1/true is
+    * the process-local rollback; old servers safely answer Connection: close. */
+   if (!is_https || (value && strcmp(value, "1") != 0 && strcmp(value, "true") != 0))
+      return 0;
+   if (strstr(path, "/events") || strstr(path, "/stream") || strstr(path, "/live"))
+      return 0;
+   return !body_requests_stream(body);
+}
+
+static int ascii_equal_ci(const char *left, const char *right, size_t n)
+{
+   for (size_t i = 0; i < n; i++)
+   {
+      unsigned char a = (unsigned char)left[i], b = (unsigned char)right[i];
+      if (a >= 'A' && a <= 'Z')
+         a = (unsigned char)(a + ('a' - 'A'));
+      if (b >= 'A' && b <= 'Z')
+         b = (unsigned char)(b + ('a' - 'A'));
+      if (a != b)
+         return 0;
+   }
+   return 1;
+}
+
+static int response_is_gzip(const char *response, size_t header_len)
+{
+   static const char name[] = "content-encoding:";
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+      if ((i == 0 || response[i - 1] == '\n') &&
+          ascii_equal_ci(response + i, name, sizeof(name) - 1))
+      {
+         const char *value = response + i + sizeof(name) - 1;
+         const char *end = memchr(value, '\n', header_len - (size_t)(value - response));
+         if (!end)
+            return 0;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         return end && (size_t)(end - value) >= 4 && ascii_equal_ci(value, "gzip", 4);
+      }
+   return 0;
+}
+
+static int response_accepts_gzip_requests(const char *response, size_t header_len)
+{
+   static const char name[] = "accept-request-encoding:";
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+      if ((i == 0 || response[i - 1] == '\n') &&
+          ascii_equal_ci(response + i, name, sizeof(name) - 1))
+      {
+         const char *value = response + i + sizeof(name) - 1;
+         const char *end = memchr(value, '\n', header_len - (size_t)(value - response));
+         if (!end)
+            return 0;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         return (size_t)(end - value) >= 4 && ascii_equal_ci(value, "gzip", 4);
+      }
+   return 0;
+}
 
 /* When set, the transport suppresses its connection-failure diagnostics on
  * stderr. `aimee remote set` uses this around the pre-pin reachability probe
@@ -43,6 +153,8 @@ void aimee_client_suppress_conn_errors(int on)
 
 void aimee_client_set_remote(const char *url, const char *token)
 {
+   client_keepalive_close();
+   g_remote_request_gzip = 0;
    if (url && *url)
       snprintf(g_remote_url, sizeof(g_remote_url), "%s", url);
    else
@@ -194,17 +306,119 @@ static long io_read(int fd, aimee_tls_t *tls, void *buf, size_t len)
    return platform_net_recv(fd, buf, len);
 }
 
-static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len)
+static void client_keepalive_close(void)
 {
+   if (g_keepalive_fd < 0)
+      return;
+#ifdef WITH_TLS
+   if (g_keepalive_tls)
+      aimee_tls_free(g_keepalive_tls);
+#endif
+   platform_net_close(g_keepalive_fd);
+   g_keepalive_fd = -1;
+   g_keepalive_tls = NULL;
+   g_keepalive_host[0] = '\0';
+   g_keepalive_port[0] = '\0';
+   g_keepalive_created = 0;
+   g_keepalive_used = 0;
+   g_keepalive_requests = 0;
+}
+
+static int response_content_length(const char *response, size_t header_len, size_t *length_out)
+{
+   static const char name[] = "content-length:";
+   static const char transfer_encoding[] = "transfer-encoding:";
+   int found = 0;
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+   {
+      if (i != 0 && response[i - 1] != '\n')
+         continue;
+      if (i + sizeof(transfer_encoding) - 1 < header_len &&
+          ascii_equal_ci(response + i, transfer_encoding, sizeof(transfer_encoding) - 1))
+         return -1;
+      if (!ascii_equal_ci(response + i, name, sizeof(name) - 1))
+         continue;
+      if (found++)
+         return -1;
+      const char *value = response + i + sizeof(name) - 1;
+      const char *end = memchr(value, '\r', header_len - (size_t)(value - response));
+      if (!end)
+         return -1;
+      while (value < end && (*value == ' ' || *value == '\t'))
+         value++;
+      if (value == end)
+         return -1;
+      size_t n = 0;
+      for (const char *p = value; p < end; p++)
+      {
+         if (*p < '0' || *p > '9' || n > ((1u << 20) - (size_t)(*p - '0')) / 10)
+            return -1;
+         n = n * 10 + (size_t)(*p - '0');
+      }
+      *length_out = n;
+   }
+   return found == 1 ? 0 : -1;
+}
+
+static int response_connection_close(const char *response, size_t header_len)
+{
+   static const char name[] = "connection:";
+   for (size_t i = 0; i + sizeof(name) - 1 < header_len; i++)
+      if ((i == 0 || response[i - 1] == '\n') &&
+          ascii_equal_ci(response + i, name, sizeof(name) - 1))
+      {
+         const char *value = response + i + sizeof(name) - 1;
+         const char *end = memchr(value, '\r', header_len - (size_t)(value - response));
+         if (!end)
+            return 1;
+         while (value < end)
+         {
+            while (value < end && (*value == ' ' || *value == '\t' || *value == ','))
+               value++;
+            const char *item_end = value;
+            while (item_end < end && *item_end != ',')
+               item_end++;
+            const char *trim = item_end;
+            while (trim > value && (trim[-1] == ' ' || trim[-1] == '\t'))
+               trim--;
+            if ((size_t)(trim - value) == 5 && ascii_equal_ci(value, "close", 5))
+               return 1;
+            value = item_end < end ? item_end + 1 : end;
+         }
+      }
+   return 0;
+}
+
+static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len, int want_reuse,
+                           int *reusable_out)
+{
+   const size_t max_response = 64u * 1024u + (1u << 20);
+   if (reusable_out)
+      *reusable_out = 0;
    size_t cap = 8192, len = 0;
+   size_t expected = 0;
+   int framed = 0;
    char *resp = malloc(cap);
    if (!resp)
       return NULL;
    for (;;)
    {
-      if (len + 4096 + 1 > cap)
+      size_t chunk = framed ? expected - len : 4096;
+      if (framed && len == expected)
+         break;
+      if (len >= max_response)
       {
-         cap *= 2;
+         free(resp);
+         return NULL;
+      }
+      if (chunk > max_response - len)
+         chunk = max_response - len;
+      if (len + chunk + 1 > cap)
+      {
+         size_t grown_cap = cap;
+         while (len + chunk + 1 > grown_cap)
+            grown_cap *= 2;
+         cap = grown_cap;
          char *grown = realloc(resp, cap);
          if (!grown)
          {
@@ -213,12 +427,54 @@ static char *read_response(int fd, aimee_tls_t *tls, size_t *out_len)
          }
          resp = grown;
       }
-      long n = io_read(fd, tls, resp + len, 4096);
+      long n = io_read(fd, tls, resp + len, chunk);
       if (n <= 0)
          break;
       len += (size_t)n;
+      resp[len] = '\0';
+      if (!framed)
+      {
+         char *body = strstr(resp, "\r\n\r\n");
+         if (body)
+         {
+            size_t header_len = (size_t)(body + 4 - resp), body_len = 0;
+            if (header_len > 64u * 1024u ||
+                response_content_length(resp, header_len, &body_len) != 0)
+            {
+               if (want_reuse)
+               {
+                  free(resp);
+                  return NULL;
+               }
+               continue;
+            }
+            expected = header_len + body_len;
+            if (len > expected)
+            {
+               free(resp);
+               return NULL;
+            }
+            framed = 1;
+         }
+         else if (len >= 64u * 1024u)
+         {
+            free(resp);
+            return NULL;
+         }
+      }
+   }
+   if (framed && len != expected)
+   {
+      free(resp);
+      return NULL;
    }
    resp[len] = '\0';
+   if (reusable_out)
+   {
+      char *body = strstr(resp, "\r\n\r\n");
+      size_t header_len = body ? (size_t)(body + 4 - resp) : len;
+      *reusable_out = want_reuse && framed && !response_connection_close(resp, header_len);
+   }
    if (out_len)
       *out_len = len;
    return resp;
@@ -281,79 +537,168 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    }
 #endif
 
-   int fd = platform_net_connect(host, port, 10000);
-   if (fd < 0)
-      return NULL;
+   int keepalive = thinclient_keepalive_enabled(path, body, is_https);
+   time_t now = time(NULL);
+   if (g_keepalive_fd >= 0 && (!keepalive || strcmp(g_keepalive_host, host) ||
+                               strcmp(g_keepalive_port, port) || now - g_keepalive_used > 30 ||
+                               now - g_keepalive_created > 600 || g_keepalive_requests >= 1000))
+      client_keepalive_close();
 
+   int fd = g_keepalive_fd;
    aimee_tls_t *tls = NULL;
-#ifdef WITH_TLS
-   if (is_https)
+   if (fd >= 0)
+      tls = g_keepalive_tls;
+   else
    {
-      tls = aimee_tls_connect(fd, host);
-      if (!tls)
-      {
-         if (!g_suppress_conn_errors)
-            fprintf(stderr,
-                    "aimee: TLS handshake with %s failed (untrusted/self-signed cert, or the "
-                    "pinned cert was rotated). Run `aimee remote trust` to (re)pin this server's "
-                    "certificate.\n",
-                    host);
-         platform_net_close(fd);
+      fd = platform_net_connect(host, port, 10000);
+      if (fd < 0)
          return NULL;
+#ifdef WITH_TLS
+      if (is_https)
+      {
+         tls = aimee_tls_connect(fd, host);
+         if (!tls)
+         {
+            if (!g_suppress_conn_errors)
+               fprintf(stderr,
+                       "aimee: TLS handshake with %s failed (untrusted/self-signed cert, or the "
+                       "pinned cert was rotated). Run `aimee remote trust` to (re)pin this "
+                       "server's certificate.\n",
+                       host);
+            platform_net_close(fd);
+            return NULL;
+         }
+      }
+#endif
+      if (keepalive)
+      {
+         g_keepalive_fd = fd;
+         g_keepalive_tls = tls;
+         snprintf(g_keepalive_host, sizeof(g_keepalive_host), "%s", host);
+         snprintf(g_keepalive_port, sizeof(g_keepalive_port), "%s", port);
+         g_keepalive_created = now;
+         g_keepalive_used = now;
+         g_keepalive_requests = 0;
       }
    }
-#endif
 
-   int blen = body ? (int)strlen(body) : 0;
+   int gzip_enabled =
+       thinclient_gzip_enabled() && thinclient_gzip_route(path) && !body_requests_stream(body);
+   size_t body_len = body ? strlen(body) : 0;
+   unsigned char *compressed = NULL;
+   size_t wire_len = body_len;
+   const void *wire_body = body;
+   if (gzip_enabled && g_remote_request_gzip && body_len >= 4096 &&
+       http_gzip_compress(body, body_len, &compressed, &wire_len) == 0 &&
+       (wire_len >= body_len || (body_len > 1024 && (body_len - 1024 + 49) / 50 > wire_len)))
+   {
+      free(compressed);
+      compressed = NULL;
+      wire_len = body_len;
+   }
+   if (compressed)
+      wire_body = compressed;
    char head[1024];
    int hlen;
+   const char *accept_encoding = gzip_enabled ? "Accept-Encoding: gzip\r\n" : "";
+   const char *content_encoding = compressed ? "Content-Encoding: gzip\r\n" : "";
    if (token && *token)
       hlen = snprintf(head, sizeof(head),
                       "%s %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\n"
-                      "Content-Type: application/json\r\nContent-Length: %d\r\n"
-                      "Connection: close\r\n\r\n",
-                      method, path, host, token, blen);
+                      "Content-Type: application/json\r\n%s%sContent-Length: %zu\r\n"
+                      "Connection: %s\r\n\r\n",
+                      method, path, host, token, accept_encoding, content_encoding, wire_len,
+                      keepalive ? "keep-alive" : "close");
    else
       hlen = snprintf(head, sizeof(head),
                       "%s %s HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\n"
-                      "Content-Length: %d\r\nConnection: close\r\n\r\n",
-                      method, path, host, blen);
+                      "%s%sContent-Length: %zu\r\nConnection: %s\r\n\r\n",
+                      method, path, host, accept_encoding, content_encoding, wire_len,
+                      keepalive ? "keep-alive" : "close");
    if (hlen <= 0 || hlen >= (int)sizeof(head))
    {
-      platform_net_close(fd);
+      free(compressed);
+      if (keepalive)
+         client_keepalive_close();
+      else
+      {
+#ifdef WITH_TLS
+         if (tls)
+            aimee_tls_free(tls);
+#endif
+         platform_net_close(fd);
+      }
       return NULL;
    }
 
    if (io_write_all(fd, tls, head, (size_t)hlen) != 0 ||
-       (blen > 0 && io_write_all(fd, tls, body, (size_t)blen) != 0))
+       (wire_len > 0 && io_write_all(fd, tls, wire_body, wire_len) != 0))
+   {
+      free(compressed);
+      if (keepalive)
+         client_keepalive_close();
+      else
+      {
+#ifdef WITH_TLS
+         if (tls)
+            aimee_tls_free(tls);
+#endif
+         platform_net_close(fd);
+      }
+      return NULL;
+   }
+   free(compressed);
+
+   size_t resp_len = 0;
+   int reusable = 0;
+   char *resp = read_response(fd, tls, &resp_len, keepalive, &reusable);
+   if (keepalive && reusable)
+   {
+      g_keepalive_used = time(NULL);
+      g_keepalive_requests++;
+   }
+   else if (keepalive)
+      client_keepalive_close();
+   else
    {
 #ifdef WITH_TLS
       if (tls)
          aimee_tls_free(tls);
 #endif
       platform_net_close(fd);
-      return NULL;
    }
-
-   char *resp = read_response(fd, tls, NULL);
-#ifdef WITH_TLS
-   if (tls)
-      aimee_tls_free(tls);
-#endif
-   platform_net_close(fd);
    if (!resp)
       return NULL;
 
    int status = 0;
    if (sscanf(resp, "HTTP/1.%*d %d", &status) != 1)
    {
+      if (keepalive)
+         client_keepalive_close();
       free(resp);
       return NULL;
    }
+   if (status == 415)
+      g_remote_request_gzip = 0;
    if (status_out)
       *status_out = status;
    char *bstart = strstr(resp, "\r\n\r\n");
-   char *out = bstart ? strdup(bstart + 4) : strdup("");
+   size_t header_len = bstart ? (size_t)(bstart + 4 - resp) : resp_len;
+   if (gzip_enabled && response_accepts_gzip_requests(resp, header_len))
+      g_remote_request_gzip = 1;
+   char *out = NULL;
+   if (bstart && response_is_gzip(resp, header_len))
+   {
+      unsigned char *decoded = NULL;
+      size_t decoded_len = 0;
+      if (http_gzip_decompress(resp + header_len, resp_len - header_len, 1u << 20, 50, &decoded,
+                               &decoded_len) == 0)
+         out = (char *)decoded;
+      else if (keepalive)
+         client_keepalive_close();
+   }
+   else
+      out = bstart ? strdup(bstart + 4) : strdup("");
    free(resp);
    return out;
 }

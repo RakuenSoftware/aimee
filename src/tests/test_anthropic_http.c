@@ -40,6 +40,7 @@ static int g_stream_status = 200;
 static const char *g_stream_payload;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
+static int g_proof_gated = 0;
 
 static void reset_capture(void)
 {
@@ -51,6 +52,7 @@ static void reset_capture(void)
    g_stream_payload = NULL;
    g_response_body = NULL;
    g_response_status = 200;
+   g_proof_gated = 0;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -332,6 +334,8 @@ int config_load(config_t *cfg)
       /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
       cfg->module_memory = cfg->module_governance = -1;
       cfg->module_delegates = cfg->module_workflows = -1;
+      cfg->module_economizer = 1;
+      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
    }
    return 0;
 }
@@ -896,6 +900,53 @@ static void test_messages_preinject_appends_system_block(void)
    PASS("messages_preinject_appends_system_block");
 }
 
+static void test_proof_gated_ingress_wire_parity(void)
+{
+   const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
+                         "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   char resp[4096];
+   char *off_body;
+   emit_capture_t cap;
+
+   reset_capture();
+   g_driver = &anthropic;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_stream_payload = "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   memset(&cap, 0, sizeof(cap));
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+
+   reset_capture();
+   g_driver = &openai;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   off_body = strdup(g_last_body);
+   assert(off_body != NULL);
+   g_proof_gated = 1;
+   assert(messages_buffered(request, resp, sizeof(resp)) == 200);
+   assert(strcmp(g_last_body, off_body) == 0);
+   free(off_body);
+   reset_capture();
+   PASS("proof_gated_ingress_wire_parity");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -913,6 +964,7 @@ int main(void)
    test_messages_buffered_system_prompt_capability_no_duplicate_system();
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
+   test_proof_gated_ingress_wire_parity();
    printf("anthropic_http: OK\n");
    return 0;
 }

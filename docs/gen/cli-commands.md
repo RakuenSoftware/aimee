@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 60
+Total commands: 61
 
 ## Core commands
 
@@ -35,8 +35,10 @@ Subcommands:
                    research -> execute. REQUIRES --persona NAME (e.g.
                    engineer, qa, security, reviewer, architect). --tools
                    enables tool use for roles that do not enable it by
-                   default. See `aimee delegate <role> --help` for the full
-                   flag set (--persona, --context-file, --via, etc.).
+                   default. --scope bounded|whole_task caps how open-ended
+                   the task may be (enforced against each agent's max_scope).
+                   See `aimee delegate <role> --help` for the full flag set
+                   (--persona, --context-file, --via, --scope, etc.).
   plan             Generate read-only work packets from a proposal
   launch <plan>    Queue a reviewed packet plan into a coord job
   status <job_id> [job_id...]  Check background delegate status
@@ -522,6 +524,18 @@ Subcommands:
   set <url> [token]  Persist a remote server target
   status             Show the resolved transport and a health probe
   clear              Revert to the local Unix socket
+```
+
+### `aimee roundtable`
+
+Review an artifact with a configured roundtable.
+
+Subcommands:
+
+```
+  review <artifact>  Run the configured roundtable review
+                     --roundtable NAME selects a saved preset
+                     --original-request TEXT supplies the governing request
 ```
 
 ### `aimee server`

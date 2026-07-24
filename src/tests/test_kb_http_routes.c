@@ -17,10 +17,15 @@
 #include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
+#include "kb_identity.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+
+extern int g_test_registry_heartbeat_allow;
+extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
+    g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
 #include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
 
@@ -1526,17 +1531,49 @@ static void test_capabilities(void)
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
 #include "db2/enrollments.h"
+#include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id)
+int kb_http_egress_route(const char *method, const char *path, const char *body, int body_len,
+                         const kb_principal_t *transport, const char *fingerprint, char *out,
+                         int out_cap)
+{
+   (void)method;
+   (void)path;
+   (void)body;
+   (void)body_len;
+   (void)transport;
+   (void)fingerprint;
+   snprintf(out, (size_t)out_cap, "{\"error\":\"egress unavailable\"}");
+   return 503;
+}
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id)
 {
    (void)scope;
    (void)fingerprint;
-   (void)serial;
+   (void)cert_issuer;
+   (void)cert_serial_norm;
    (void)expires_at;
    (void)legacy;
    if (out_id)
       *out_id = 1;
+   return 0;
+}
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id)
+{
+   (void)old_fingerprint;
+   (void)old_issuer;
+   (void)old_serial_norm;
+   (void)scope;
+   (void)new_fingerprint;
+   (void)new_issuer;
+   (void)new_serial_norm;
+   if (out_id)
+      *out_id = 2;
    return 0;
 }
 static void fill_stub_row(db2_enrollment_row_t *r)
@@ -2030,6 +2067,8 @@ static void test_enroll_route(void)
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", tmp);
    remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", tmp);
+   remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", tmp);
    rmdir(p);
    snprintf(p, sizeof(p), "%s/kb-enroll-tokens", tmp);
@@ -2124,6 +2163,8 @@ static void test_enroll_redeem_route(void)
    remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca/ca-key.pem", cfg);
    remove(p);
+   snprintf(p, sizeof(p), "%s/kb-ca/ca-key.vault", cfg);
+   remove(p);
    snprintf(p, sizeof(p), "%s/kb-ca", cfg);
    rmdir(p);
    snprintf(p, sizeof(p), "%s/kb-enroll-tokens", cfg);
@@ -2178,8 +2219,69 @@ static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *r
    close(sv[1]);
 }
 
+/* Read one Content-Length-framed response without waiting for connection close. */
+static int mtls_read_response(SSL *ssl, char *resp, size_t cap)
+{
+   size_t total = 0, expected = 0;
+   while (total + 1 < cap)
+   {
+      int n = SSL_read(ssl, resp + total, (int)(cap - total - 1));
+      if (n <= 0)
+         return -1;
+      total += (size_t)n;
+      resp[total] = '\0';
+      char *head_end = strstr(resp, "\r\n\r\n");
+      if (head_end && !expected)
+      {
+         char *length = strstr(resp, "Content-Length: ");
+         if (!length || length > head_end)
+            return -1;
+         expected = (size_t)(head_end + 4 - resp) + strtoul(length + 16, NULL, 10);
+         if (expected >= cap)
+            return -1;
+      }
+      if (expected && total >= expected)
+      {
+         resp[expected] = '\0';
+         return (int)expected;
+      }
+   }
+   return -1;
+}
+
+typedef struct
+{
+   pthread_mutex_t lock;
+   pthread_cond_t cv;
+   int ready;
+   int go;
+} mtls_pool_gate_t;
+
+typedef struct
+{
+   mtls_pool_gate_t *gate;
+   int ok;
+} mtls_pool_request_arg_t;
+
+static void *mtls_pool_request_thread(void *opaque)
+{
+   mtls_pool_request_arg_t *arg = opaque;
+   pthread_mutex_lock(&arg->gate->lock);
+   arg->gate->ready++;
+   pthread_cond_broadcast(&arg->gate->cv);
+   while (!arg->gate->go)
+      pthread_cond_wait(&arg->gate->cv, &arg->gate->lock);
+   pthread_mutex_unlock(&arg->gate->lock);
+   int status = -1;
+   char *response = kb_client_mtls_request("GET", "/v1/health", NULL, &status);
+   arg->ok = status == 200 && response && strstr(response, "\"status\":\"ok\"");
+   free(response);
+   return NULL;
+}
+
 static void test_mtls_serve(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
    assert(kb_pki_ca_generate(&ca) == 0);
    char scert[KB_PKI_CERT_PEM_MAX], skey[KB_PKI_KEY_PEM_MAX];
@@ -2199,6 +2301,98 @@ static void test_mtls_serve(void)
                 resp, sizeof(resp));
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
+   assert(strstr(resp, "Connection: close"));
+
+   /* HTTP/1.1 stays reusable by default. The certificate authority is checked
+    * again for request N+1, so revocation takes effect before its route runs. */
+   {
+      int sv[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+      mtls_serve_arg_t sa = {sctx, sv[0]};
+      pthread_t th;
+      assert(pthread_create(&th, NULL, mtls_serve_thread, &sa) == 0);
+      SSL *c = SSL_new(cctx);
+      assert(c);
+      SSL_set_fd(c, sv[1]);
+      assert(SSL_connect(c) == 1);
+      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "200 OK") && strstr(resp, "Connection: keep-alive"));
+
+      test_kb_enrollment_authority_set(0);
+      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      assert(SSL_write(c, second, (int)strlen(second)) == (int)strlen(second));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "403 Forbidden") && strstr(resp, "Connection: close"));
+      assert(!strstr(resp, "\"status\":\"ok\""));
+      test_kb_enrollment_authority_set(1);
+      SSL_shutdown(c);
+      SSL_free(c);
+      pthread_join(th, NULL);
+      close(sv[0]);
+      close(sv[1]);
+   }
+
+   /* Pipelining remains fail-closed: callers must wait for each response. */
+   mtls_request(sctx, cctx,
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n"
+                "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request(sctx, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\rX-Test: no\r\n\r\n", resp,
+                sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   /* Strict framing bounds fail before routing: at most 64 headers, a 4 KiB
+    * request target, and 64 KiB total request head+body. */
+   char oversized_headers[8192];
+   size_t oversized_len = (size_t)snprintf(oversized_headers, sizeof(oversized_headers),
+                                           "GET /v1/health HTTP/1.1\r\nHost: kb\r\n");
+   for (int i = 0; i < 65; i++)
+      oversized_len +=
+          (size_t)snprintf(oversized_headers + oversized_len,
+                           sizeof(oversized_headers) - oversized_len, "X-Test-%d: a\r\n", i);
+   snprintf(oversized_headers + oversized_len, sizeof(oversized_headers) - oversized_len, "\r\n");
+   mtls_request(sctx, cctx, oversized_headers, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   char oversized_uri[4200];
+   const char oversized_uri_suffix[] = " HTTP/1.1\r\nHost: kb\r\n\r\n";
+   memcpy(oversized_uri, "GET /", 5);
+   memset(oversized_uri + 5, 'a', 4096);
+   memcpy(oversized_uri + 5 + 4096, oversized_uri_suffix, sizeof(oversized_uri_suffix));
+   mtls_request(sctx, cctx, oversized_uri, resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+
+   mtls_request(sctx, cctx, "POST /v1/health HTTP/1.1\r\nHost: kb\r\nContent-Length: 65536\r\n\r\n",
+                resp, sizeof(resp));
+   assert(strstr(resp, "413 Payload Too Large"));
+
+   /* P5-A heartbeat carries immutable peer-certificate metadata to the primary
+    * authority function; none of it is accepted from JSON or the CN label. */
+   {
+      const char *hb = "{\"server_id\":\"srv-a\",\"health\":\"ok\",\"version\":\"1.0\"}";
+      char req[512], want_issuer[601], raw_serial[129], want_serial[129], want_fp[65];
+      assert(kb_pki_cert_metadata(ccert, want_issuer, sizeof(want_issuer), raw_serial,
+                                  sizeof(raw_serial)) == 0);
+      assert(kb_cert_serial_normalize(raw_serial, want_serial, sizeof(want_serial)) == 0);
+      assert(kb_pki_ca_fingerprint(ccert, want_fp, sizeof(want_fp)) == 0);
+      snprintf(req, sizeof(req),
+               "POST /v1/server/heartbeat HTTP/1.1\r\nContent-Length: %zu\r\nConnection: "
+               "close\r\n\r\n%s",
+               strlen(hb), hb);
+      g_test_registry_heartbeat_allow = 1;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "200 OK"));
+      assert(strcmp(g_test_registry_server_id, "srv-a") == 0);
+      assert(strcmp(g_test_registry_issuer, want_issuer) == 0);
+      assert(strcmp(g_test_registry_serial, want_serial) == 0);
+      assert(strcmp(g_test_registry_fingerprint, want_fp) == 0);
+      g_test_registry_heartbeat_allow = 0;
+      mtls_request(sctx, cctx, req, resp, sizeof(resp));
+      assert(strstr(resp, "403 Forbidden"));
+   }
 
    /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
     * from the client certificate (project:alpha), not the request. */
@@ -2244,9 +2438,9 @@ static void test_mtls_serve(void)
       SSL_CTX_free(nocert);
    }
 
-   /* Rotation: the authenticated client renews its cert for its CURRENT scope
-    * (project:alpha) by signing a fresh CSR — no token, no operator action. The
-    * renew handler signs with the persisted CA, so save this test's CA there. */
+   /* Rotation without its authoritative PostgreSQL enrollment transaction must
+    * fail closed even though TLS and CA signing are available.  The real-PG P2b
+    * gate covers the successful lineage-preserving renewal path. */
    {
       char cadir[320];
       snprintf(cadir, sizeof(cadir), "%s/kb-ca", kb_default_config_dir());
@@ -2262,10 +2456,8 @@ static void test_mtls_serve(void)
                "close\r\n\r\n%s",
                strlen(rb), rb);
       mtls_request(sctx, cctx, req, resp, sizeof(resp));
-      assert(strstr(resp, "200 OK"));
-      assert(strstr(resp, "client_cert"));
-      assert(strstr(resp, "project:alpha")); /* renewed for the same scope */
-      assert(strstr(resp, "BEGIN CERTIFICATE"));
+      assert(strstr(resp, "503 Service Unavailable"));
+      assert(strstr(resp, "renew persistence unavailable"));
       free(rb);
       cJSON_Delete(rj);
       free(rcsr);
@@ -2274,6 +2466,8 @@ static void test_mtls_serve(void)
       snprintf(p, sizeof(p), "%s/ca.pem", cadir);
       remove(p);
       snprintf(p, sizeof(p), "%s/ca-key.pem", cadir);
+      remove(p);
+      snprintf(p, sizeof(p), "%s/ca-key.vault", cadir);
       remove(p);
       rmdir(cadir);
    }
@@ -2320,6 +2514,7 @@ static void mtls_tcp_request(int port, SSL_CTX *client_ctx, const char *req, cha
  * and serves /v1 with the scope taken from the client cert. */
 static void test_mtls_listener(void)
 {
+   extern void test_kb_enrollment_authority_set(int status);
    /* Production passes kb_default_config_dir() as the listener data_dir, and the
     * bootstrap endpoints (/v1/enroll/ca, /renew) read the CA from there — so use
     * the same dir here. Clean any leftover CA so the listener makes a fresh one. */
@@ -2329,10 +2524,20 @@ static void test_mtls_listener(void)
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
    remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
+   remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
 
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
+   assert(kb_mtls_start(0, cfg, "localhost") == -1);
+   setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == 0);
+   int connection_limit = 0, connections_live = -1, connections_queued = -1;
+   kb_mtls_connection_stats(&connection_limit, &connections_live, &connections_queued);
+   assert(connection_limit == 8);
+   assert(connections_live == 0);
+   assert(connections_queued == 0);
    int port = kb_mtls_bound_port();
    assert(port > 0);
 
@@ -2371,8 +2576,71 @@ static void test_mtls_listener(void)
    char rbody[4096];
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
                                 NULL, rbody, sizeof(rbody), &st) == 0);
+   if (st != 200)
+      fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
    assert(strstr(rbody, "\"status\":\"ok\""));
+
+   /* The reusable client primitive reads Content-Length exactly instead of
+    * waiting for EOF, then safely carries a second request on the same TLS
+    * connection. */
+   kb_tls_client_conn_t *persistent =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(persistent);
+   int reusable = 0;
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
+   kb_tls_client_conn_close(persistent);
+
+   kb_tls_client_conn_t *bounded =
+       kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
+   assert(bounded);
+   char tiny_response[4];
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
+                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(reusable == 0);
+   kb_tls_client_conn_close(bounded);
+
+   /* A long-lived identity context can explicitly carry the negotiated session
+    * into a replacement connection. */
+   SSL_CTX *shared_client_ctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
+   assert(shared_client_ctx);
+   kb_tls_client_conn_t *session_one =
+       kb_tls_client_conn_open_ctx("localhost", port, shared_client_ctx);
+   assert(session_one);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(reusable == 1);
+   SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
+   assert(saved_session);
+   kb_tls_client_conn_close(session_one);
+   kb_tls_client_conn_t *session_two =
+       kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
+   assert(session_two);
+   assert(kb_tls_client_conn_session_reused(session_two) == 1);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
+                                     sizeof(rbody), &st, &reusable) == 0);
+   kb_tls_client_conn_close(session_two);
+   SSL_SESSION_free(saved_session);
+   SSL_CTX_free(shared_client_ctx);
+
+   /* Primary authority is consulted before dispatch. Unknown/revoked peers are
+    * forbidden and an authority outage is retryable but never fail-open. */
+   test_kb_enrollment_authority_set(0);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(-1);
+   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "503 Service Unavailable"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   test_kb_enrollment_authority_set(1);
    /* the dialer's request carries the client cert's scope (project:beta): a
     * cross-scope request is denied. */
    assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET",
@@ -2418,12 +2686,75 @@ static void test_mtls_listener(void)
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       setenv("AIMEE_KB_CONN", conn2, 1);
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
       char *r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      int pool_total = -1, pool_idle = -1, pool_busy = -1, pool_waiters = -1;
+      unsigned long pool_exhausted = 1;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0 && pool_busy == 0 && pool_waiters == 0);
+
+      /* The hot rollout flag opts this identity into reuse without a restart. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "1", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      g_test_registry_heartbeat_allow = 1;
+      assert(kb_client_mtls_heartbeat("srv-delta", "ready", "test") == 0);
+      assert(strcmp(g_test_registry_server_id, "srv-delta") == 0);
+      g_test_registry_heartbeat_allow = 0;
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_exhausted == 0);
+
+      enum
+      {
+         POOL_TEST_CLIENTS = 16
+      };
+      mtls_pool_gate_t gate = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, 0, 0};
+      pthread_t pool_threads[POOL_TEST_CLIENTS];
+      mtls_pool_request_arg_t pool_args[POOL_TEST_CLIENTS];
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pool_args[i] = (mtls_pool_request_arg_t){.gate = &gate, .ok = 0};
+         assert(pthread_create(&pool_threads[i], NULL, mtls_pool_request_thread, &pool_args[i]) ==
+                0);
+      }
+      pthread_mutex_lock(&gate.lock);
+      while (gate.ready != POOL_TEST_CLIENTS)
+         pthread_cond_wait(&gate.cv, &gate.lock);
+      gate.go = 1;
+      pthread_cond_broadcast(&gate.cv);
+      pthread_mutex_unlock(&gate.lock);
+      for (int i = 0; i < POOL_TEST_CLIENTS; i++)
+      {
+         pthread_join(pool_threads[i], NULL);
+         assert(pool_args[i].ok);
+      }
+      pthread_cond_destroy(&gate.cv);
+      pthread_mutex_destroy(&gate.lock);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total >= 1 && pool_total <= 2 && pool_total == pool_idle && pool_busy == 0 &&
+             pool_waiters == 0);
+      unsigned long pool_handshakes = 0, pool_resumed = 0;
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+      /* Disabling live restores one-shot requests and drains every idle socket. */
+      setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      assert(pool_total == 0 && pool_idle == 0);
+      unsetenv("AIMEE_TRANSPORT_KB_POOL_ENABLED");
       unsetenv("AIMEE_KB_CONN");
       assert(kb_client_mtls_configured() == 0);
       remove(store2);
@@ -2440,25 +2771,23 @@ static void test_mtls_listener(void)
       assert(kb_tls_cert_expires_within(sc, 1) == 0);
       assert(kb_tls_cert_expires_within(ca.cert_pem, 60L * 60 * 24 * 14) == 0);
 
-      /* rotate the project:beta identity -> a genuinely new cert, same scope,
-       * chaining to the CA, and usable to dial. */
+      /* With no authoritative enrollment DB in this unit fixture, renewal is
+       * refused before a new certificate can escape. */
       char nc[KB_PKI_CERT_PEM_MAX], nk[KB_PKI_KEY_PEM_MAX];
       assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, nc, sizeof(nc), nk,
-                          sizeof(nk)) == 0);
-      assert(kb_pki_verify_client_cert(ca.cert_pem, nc) == 1);
-      assert(strcmp(nc, ccert) != 0);
-      assert(kb_tls_client_request("localhost", port, ca.cert_pem, nc, nk, "GET", "/v1/health",
-                                   NULL, rbody, sizeof(rbody), &st) == 0);
-      assert(st == 200);
+                          sizeof(nk)) != 0);
    }
 
    SSL_CTX_free(cctx);
    kb_mtls_stop();
+   unsetenv("AIMEE_KB_MTLS_MAX_CONNECTIONS");
    assert(kb_mtls_bound_port() == 0);
 
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca.pem", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.pem", cfg);
+   remove(cp);
+   snprintf(cp, sizeof(cp), "%s/kb-ca/ca-key.vault", cfg);
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);

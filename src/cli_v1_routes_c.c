@@ -2200,11 +2200,10 @@ void pt_print_identity_diff(const char *method, cJSON *resp)
       printf("  HIGH CONFIDENCE FLIPS: %d (investigate before continuing)\n", nflips);
 }
 
-/* delegate.roundtable: print the consolidated artifact in human mode (without
- * this, a non-JSON `aimee delegate roundtable` printed nothing — the result was
+/* roundtable.review: print the consolidated artifact in human mode (without
+ * this, a non-JSON `aimee roundtable review` printed nothing — the result was
  * only reachable via --json or the run API). */
-#if AIMEE_WITH_ROUNDTABLE
-void pt_print_delegate_roundtable(const char *method, cJSON *resp)
+void pt_print_roundtable_review(const char *method, cJSON *resp)
 {
    (void)method;
    cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
@@ -2216,4 +2215,3 @@ void pt_print_delegate_roundtable(const char *method, cJSON *resp)
       fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
               cJSON_IsTrue(converged) ? ", converged" : "");
 }
-#endif

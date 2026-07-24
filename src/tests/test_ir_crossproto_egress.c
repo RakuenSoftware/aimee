@@ -166,10 +166,9 @@ int main(void)
       free(e);
    }
 
-   /* economizer=off: the caching gate is disabled -> the Anthropic egress carries NO
-    * cache_control at all, yet is STILL byte-identical across source protocols (the
-    * verbatim, uncached, deterministic passthrough). Restore caching afterwards. */
-   aimee_backend_anthropic_set_cache_enabled(0);
+   /* Backend cache decoration is transport policy, not economizer policy. Translated
+    * requests remain byte-identical across source protocols and retain the stable
+    * backend marker regardless of economizer mode. */
    {
       char *a = egress("{\"model\":\"m\",\"max_tokens\":8,"
                        "\"system\":[{\"type\":\"text\",\"text\":\"sys\"}],"
@@ -180,13 +179,12 @@ int main(void)
                        "\"messages\":[{\"role\":\"system\",\"content\":\"sys\"},"
                        "{\"role\":\"user\",\"content\":\"hi\"}]}",
                        1);
-      assert(a && o && strcmp(a, o) == 0);        /* still cross-source identical */
-      assert(strstr(a, "cache_control") == NULL); /* no markers when economizer=off */
+      assert(a && o && strcmp(a, o) == 0);
+      assert(strstr(a, "cache_control") != NULL);
       free(a);
       free(o);
-      printf("  economizer-off-disables-cache OK\n");
+      printf("  backend-cache-policy-independent OK\n");
    }
-   aimee_backend_anthropic_set_cache_enabled(1); /* restore default (caching on) */
 
    printf("all cross-protocol egress byte-identity checks passed\n");
    return 0;

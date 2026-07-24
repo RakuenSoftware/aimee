@@ -5,14 +5,17 @@
 aimee-forwarder
 /aimee-mcp
 /aimee-kb
+/aimee-witness-verify
+/aimee-kb-resolver
 /aimee-negation-eval
 /aimee-blast-radius-eval
-/aimee-webchat
+/aimee-runtime-web
 /aimee-gateway
 src/build/
 src/*.a
 src/server.log
 src/tests/unit-test-*
+src/tests/fuzz_server_mgmt_read_config
 /build/
 /build-*/
 
@@ -147,3 +150,11 @@ src/vendor/tree-sitter-powershell/
 .wfe-scope.json
 intent_record_*.json
 .rt-tmp/
+
+# Local default output from `go build ./cmd/aimee-server` in the Go rewrite.
+/server-go/aimee-server
+
+# Session scratch working files (throwaway diffs, drivers, design drafts).
+# The durable record lives in docs/proposals/ — 24 of these were committed to a
+# branch by accident because nothing ignored them.
+scratchpad/

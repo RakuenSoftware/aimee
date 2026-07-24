@@ -93,10 +93,29 @@ typedef struct
    int (*is_sealed)(void *ctx);
    int (*unseal)(void *ctx, const void *params, size_t len);
    int (*seal)(void *ctx);
-   int (*hwm_read)(void *ctx, const char *key_id, uint64_t *version, uint8_t *att,
-                   size_t att_cap, size_t *att_len);
-   int (*hwm_cas)(void *ctx, const char *key_id, uint64_t expected, uint64_t next,
-                  uint8_t *att, size_t att_cap, size_t *att_len);
+   int (*hwm_read)(void *ctx, const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
+                   size_t *att_len);
+   int (*hwm_cas)(void *ctx, const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                  size_t att_cap, size_t *att_len);
+   int (*hwm_verify)(void *ctx, const char *key_id, uint64_t version, const uint8_t *att,
+                     size_t att_len);
+   /* Async-signal-safe child-side invalidation. After fork the child must not
+    * reuse inherited provider locks, sessions, handles, or plaintext caches;
+    * the process must exec before using custody again. */
+   void (*after_fork_child)(void *ctx);
+   /* Read only process-local provider state.  This callback must not perform
+    * backend I/O and must honor timeout_ms while acquiring its own state lock.
+    * Kept last so legacy positional provider initializers remain compatible. */
+   int (*local_status)(void *ctx, unsigned timeout_ms);
+   /* Closed D3b authorization results (vault_custody_auth_result_t).  The
+    * preflight is read-only and generation-bound; typed_unseal publishes a KEK
+    * only on VAULT_CUSTODY_AUTHORIZED.  Kept last for source compatibility with
+    * legacy positional test providers. */
+   int (*authorization_preflight)(void *ctx, const void *secret, size_t secret_len,
+                                  uint64_t expected_generation);
+   int (*typed_unseal)(void *ctx, const void *secret, size_t secret_len);
+   int (*authorization_preflight_current)(void *ctx, const void *secret, size_t secret_len,
+                                          uint64_t *generation);
 } vault_custody_provider_t;
 
 /* ── Backend binders ──────────────────────────────────────────────────────────

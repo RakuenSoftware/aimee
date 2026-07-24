@@ -55,6 +55,10 @@ static void delegate_status_populate_job(cJSON *resp, int job_id)
       if (job.current_tool[0])
          cJSON_AddStringToObject(resp, "current_tool", job.current_tool);
       cJSON_AddNumberToObject(resp, "api_call_count", job.api_call_count);
+      /* cost_known distinguishes an unmeasured job from a genuinely free one.
+       * A poller that commits cost_usd as measured spend must check it. */
+      cJSON_AddNumberToObject(resp, "cost_usd", job.cost_usd);
+      cJSON_AddBoolToObject(resp, "cost_known", job.cost_known != 0);
       int default_max_turns = delegate_default_max_turns_for_role(job.role);
       if (default_max_turns > 0)
          cJSON_AddNumberToObject(resp, "default_max_turns", default_max_turns);

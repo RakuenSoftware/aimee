@@ -417,6 +417,10 @@ static struct
    void *seen_ctx;
    int get_kek_calls;
    int rotate_calls;
+   int hwm_read_calls;
+   int hwm_cas_calls;
+   int hwm_verify_calls;
+   uint64_t hwm_version;
 } g_custody_mock;
 
 static int cm_get_kek(void *ctx, uint8_t kek[VAULT_KEK_LEN])
@@ -443,6 +447,44 @@ static int cm_rotate(void *ctx, const char *sp, int *op, int *oc, char *bp, size
    return 0;
 }
 
+static int cm_hwm_read(void *ctx, const char *key_id, uint64_t *version, uint8_t *att,
+                       size_t att_cap, size_t *att_len)
+{
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.hwm_read_calls++;
+   if (!key_id || strcmp(key_id, "team:7|bedrock|primary") != 0 || att_cap < 8)
+      return -1;
+   *version = g_custody_mock.hwm_version;
+   memset(att, 0xa5, 8);
+   *att_len = 8;
+   return 0;
+}
+
+static int cm_hwm_cas(void *ctx, const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                      size_t att_cap, size_t *att_len)
+{
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.hwm_cas_calls++;
+   if (!key_id || strcmp(key_id, "team:7|bedrock|primary") != 0 ||
+       expected != g_custody_mock.hwm_version || next != expected + 1 || att_cap < 8)
+      return -1;
+   g_custody_mock.hwm_version = next;
+   memset(att, 0x5a, 8);
+   *att_len = 8;
+   return 0;
+}
+
+static int cm_hwm_verify(void *ctx, const char *key_id, uint64_t version, const uint8_t *att,
+                         size_t att_len)
+{
+   g_custody_mock.seen_ctx = ctx;
+   g_custody_mock.hwm_verify_calls++;
+   return key_id && strcmp(key_id, "team:7|bedrock|primary") == 0 &&
+                  version == g_custody_mock.hwm_version && att && att_len == 8
+              ? 0
+              : -1;
+}
+
 static void test_custody_facade_dispatches_through_provider(void)
 {
    memset(&g_custody_mock, 0, sizeof(g_custody_mock));
@@ -452,6 +494,9 @@ static void test_custody_facade_dispatches_through_provider(void)
        .ctx = &custody_marker,
        .get_kek = cm_get_kek,
        .rotate = cm_rotate,
+       .hwm_read = cm_hwm_read,
+       .hwm_cas = cm_hwm_cas,
+       .hwm_verify = cm_hwm_verify,
    };
    vault_custody_set_provider(&mock);
 
@@ -467,6 +512,31 @@ static void test_custody_facade_dispatches_through_provider(void)
           0);
    assert(g_custody_mock.rotate_calls == 1);
    assert(g_custody_mock.seen_ctx == &custody_marker);
+
+   g_custody_mock.hwm_version = 4;
+   uint8_t att[16];
+   size_t att_len = 0;
+   uint64_t version = 0;
+   assert(vault_hwm_read("team:7|bedrock|primary", &version, att, sizeof(att), &att_len) == 0);
+   assert(version == 4 && att_len == 8 && att[0] == 0xa5);
+   assert(vault_hwm_cas("team:7|bedrock|primary", 4, 5, att, sizeof(att), &att_len) == 0);
+   assert(g_custody_mock.hwm_version == 5 && att_len == 8 && att[0] == 0x5a);
+   assert(vault_hwm_verify("team:7|bedrock|primary", 5, att, att_len) == 0);
+   assert(g_custody_mock.hwm_verify_calls == 1);
+   assert(vault_hwm_verify("team:7|bedrock|primary", 4, att, att_len) == -1);
+   memset(att, 0xcc, sizeof(att));
+   att_len = 9;
+   assert(vault_hwm_cas("team:7|bedrock|primary", UINT64_MAX, 0, att, sizeof(att), &att_len) == -1);
+   assert(att_len == 0 && att[0] == 0);
+
+   const vault_custody_provider_t incomplete = {
+       .name = "incomplete", .ctx = &custody_marker, .get_kek = cm_get_kek, .rotate = cm_rotate};
+   vault_custody_set_provider(&incomplete);
+   memset(att, 0xcc, sizeof(att));
+   version = 99;
+   att_len = 9;
+   assert(vault_hwm_read("team:7|bedrock|primary", &version, att, sizeof(att), &att_len) == -1);
+   assert(version == 0 && att_len == 0 && att[0] == 0);
 
    vault_custody_set_provider(NULL); /* restore the file provider */
    printf("  PASS: test_custody_facade_dispatches_through_provider\n");

@@ -145,11 +145,11 @@
   `Authorization` header; `agent_runtime.c:978` calls it, `:1014` fires the POST.
   Token buffers are **not** `OPENSSL_cleanse`d today.
 - **Webchat is a keyless-browser, app-authenticated, shared-UDS path.** The
-  browser talks to `aimee-webchat` (Go), which authenticates the user with
+  browser talks to `aimee-runtime-web` (Go), which authenticates the user with
   username+password → session cookie (`webchat/chat.go:343` `requireAuth`,
   `webchat/pages.go:78`) and exposes the authenticated `username` via
   `currentUser` (`webchat/chat_sessions.go:28`) with real per-user isolation
-  (`chat_sessions_test.go:216`: bob cannot touch alice's data). `aimee-webchat`
+  (`chat_sessions_test.go:216`: bob cannot touch alice's data). `aimee-runtime-web`
   reaches `aimee-server` over **UDS as a single service account** with a shared
   `server.token` bearer (`webchat/socket.go`, `webchat/openai.go:18`). So (a) all
   webchat users share one OS `peer_uid` — useless for distinguishing them; (b) the
@@ -333,7 +333,7 @@
     attested by SO_PEERCRED at UDS accept (WP-C.0, D10). KEK source: a client-held
     high-entropy random root key → HKDF (D12).
   - **`webuser:<username>`** — an authenticated **webchat** user. Webchat is a
-    browser→`aimee-webchat`(Go)→`aimee-server` path where the *webchat backend*
+    browser→`aimee-runtime-web`(Go)→`aimee-server` path where the *webchat backend*
     connects over UDS as a **single service account** (all webchat users share one
     `peer_uid`). Webchat authenticates the user itself (`webchat/chat.go:343`
     `requireAuth`) and **asserts** the authenticated `username` to aimee-server.

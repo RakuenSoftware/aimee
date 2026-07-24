@@ -145,6 +145,24 @@ static void test_all_columns_substituted(void)
    assert(count >= 5);
 }
 
+/* Optional runtime roles must never make owner-schema upgrades fail on the
+ * single-user/dev tier. Pin the guard around the obsolete function's REVOKE;
+ * PostgreSQL errors on REVOKE ... FROM a role that does not exist. */
+static void test_optional_runtime_role_is_guarded(void)
+{
+   const char *sql = apply_with_dim(1024);
+   const char *block = strstr(sql, "DO $drop_obsolete_bedrock_upsert$");
+   assert(block != NULL);
+   const char *guard = strstr(
+       block,
+       "IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'aimee_kb_runtime') THEN");
+   const char *revoke =
+       strstr(block, "REVOKE ALL ON FUNCTION "
+                     "public.org_catalog_bedrock_upsert(text,text,text,text,text,text,text,text[],"
+                     "text[],text,boolean) FROM aimee_kb_runtime");
+   assert(guard != NULL && revoke != NULL && guard < revoke);
+}
+
 int main(void)
 {
    test_substitutes_explicit_dim();
@@ -152,6 +170,7 @@ int main(void)
    test_unset_falls_back_to_default();
    test_out_of_range_falls_back_to_default();
    test_all_columns_substituted();
+   test_optional_runtime_role_is_guarded();
    free(g_captured_sql);
    printf("schema_subst: all tests passed\n");
    return 0;

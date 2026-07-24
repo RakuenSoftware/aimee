@@ -8,6 +8,7 @@
  * (delegate_ensemble.c) is untouched and keeps reading config_t. */
 #include "roundtable_preset.h"
 #include "config.h" /* config_default_dir, config_t, config_load_file, config_save, config_reload */
+#include "log.h"
 #include "platform_path.h" /* platform_mkdir_p */
 #include <ctype.h>
 #include <dirent.h>
@@ -168,13 +169,19 @@ static void preset_fill_from_object(const cJSON *root, roundtable_preset_t *out)
       }
    }
 
-   snprintf(out->aggregator, sizeof(out->aggregator), "%s", json_str(root, "aggregator", ""));
+   if (cJSON_GetObjectItemCaseSensitive(root, "aggregator"))
+      aimee_log(LOG_WARN, "roundtable.preset",
+                "ignoring removed 'aggregator' field in roundtable preset; synthesis is "
+                "deterministic and chairman is the only optional final agent");
+   snprintf(out->chairman, sizeof(out->chairman), "%s", json_str(root, "chairman", ""));
+   out->chairman_enabled = json_bool(root, "chairman_enabled", 0);
    out->min_successful = (int)json_num(root, "min_successful", 2);
    out->max_cost_usd = json_num(root, "max_cost_usd", 0.0);
 
    out->max_rounds = (int)json_num(root, "max_rounds", 0);
    out->converge_threshold = (int)json_num(root, "converge_threshold", 0);
    out->deadline_ms = (int)json_num(root, "deadline_ms", 0);
+   out->discussion = json_bool(root, "discussion", 0);
    snprintf(out->turns, sizeof(out->turns), "%s", json_str(root, "turns", "parallel"));
 
    const cJSON *pl = cJSON_GetObjectItemCaseSensitive(root, "pipeline");
@@ -214,12 +221,14 @@ cJSON *roundtable_preset_to_json(const roundtable_preset_t *p)
       cJSON_AddItemToArray(seats, s);
    }
 
-   cJSON_AddStringToObject(root, "aggregator", p->aggregator);
+   cJSON_AddStringToObject(root, "chairman", p->chairman);
+   cJSON_AddBoolToObject(root, "chairman_enabled", p->chairman_enabled ? 1 : 0);
    cJSON_AddNumberToObject(root, "min_successful", p->min_successful);
    cJSON_AddNumberToObject(root, "max_cost_usd", p->max_cost_usd);
    cJSON_AddNumberToObject(root, "max_rounds", p->max_rounds);
    cJSON_AddNumberToObject(root, "converge_threshold", p->converge_threshold);
    cJSON_AddNumberToObject(root, "deadline_ms", p->deadline_ms);
+   cJSON_AddBoolToObject(root, "discussion", p->discussion ? 1 : 0);
    cJSON_AddStringToObject(root, "turns", p->turns);
 
    cJSON *pl = cJSON_AddObjectToObject(root, "pipeline");
@@ -259,6 +268,12 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
    }
    snprintf(out->name, sizeof(out->name), "%s", name);
    preset_fill_from_object(req, out);
+   if (out->chairman_enabled && !out->chairman[0])
+   {
+      cJSON_Delete(req);
+      *errmsg = "chairman_enabled requires a chairman";
+      return -1;
+   }
    cJSON_Delete(req);
    return 0;
 }
@@ -347,7 +362,6 @@ void roundtable_preset_from_current_config(const char *name, roundtable_preset_t
                   cfg.ensemble_reference_personas[i]);
    }
    out->seat_count = n;
-   snprintf(out->aggregator, sizeof(out->aggregator), "%s", cfg.ensemble_aggregator);
    out->min_successful = cfg.ensemble_min_successful;
    out->max_cost_usd = cfg.ensemble_max_cost_usd;
    out->max_rounds = cfg.roundtable_max_rounds;
@@ -381,7 +395,8 @@ static void preset_overlay_config(const roundtable_preset_t *p, config_t *cfg)
    }
    cfg->ensemble_reference_count = n;
    cfg->ensemble_reference_persona_count = n;
-   snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s", p->aggregator);
+   /* A roundtable preset no longer owns the separate C compatibility route's
+    * aggregator setting. Do not change that setting while applying this preset. */
    cfg->ensemble_min_successful = p->min_successful;
    cfg->ensemble_max_cost_usd = p->max_cost_usd;
    cfg->roundtable_max_rounds = p->max_rounds;
@@ -400,6 +415,38 @@ static void preset_overlay_config(const roundtable_preset_t *p, config_t *cfg)
    cfg->roundtable_pipeline_parked_releases_slot = p->pipeline_parked_releases_slot;
    cfg->roundtable_pipeline_unknown_context_tokens = p->pipeline_unknown_context_tokens;
    snprintf(cfg->roundtable_default, sizeof(cfg->roundtable_default), "%s", p->name);
+}
+
+int roundtable_preset_resolve_runtime(const char *requested, config_t *cfg, char *resolved,
+                                      size_t resolved_n, char *err, size_t err_n)
+{
+   if (resolved && resolved_n)
+      resolved[0] = '\0';
+   if (err && err_n)
+      err[0] = '\0';
+   if (!cfg)
+      return -1;
+
+   const int explicit_request = requested && requested[0];
+   const int configured_default = !explicit_request && cfg->roundtable_default[0];
+   const char *name =
+       explicit_request ? requested : (configured_default ? cfg->roundtable_default : "default");
+   roundtable_preset_t p;
+   if (roundtable_preset_load(name, &p) != 0)
+   {
+      if (explicit_request || configured_default)
+      {
+         if (err && err_n)
+            snprintf(err, err_n, "roundtable preset '%s' does not exist", name);
+         return -1;
+      }
+      return 0;
+   }
+
+   preset_overlay_config(&p, cfg);
+   if (resolved && resolved_n)
+      snprintf(resolved, resolved_n, "%s", p.name);
+   return 1;
 }
 
 int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn)

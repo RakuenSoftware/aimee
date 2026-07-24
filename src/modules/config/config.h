@@ -287,11 +287,11 @@ typedef struct config
    char workspace_sandbox_image[64][256];
    int workspace_count;
    char guardrail_mode[16];
-   int subagent_ban_enabled;        /* default ON: when set AND usable delegates are configured,
-                                       block the primary agent's own sub-agent tools (Task/Agent/
-                                       spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
-                                       Explicit `subagent_ban_enabled: false` allows provider-native
-                                       sub-agents. */
+   int subagent_ban_enabled; /* default ON: when set AND usable delegates are configured,
+                                block the primary agent's own sub-agent tools (Task/Agent/
+                                spawn_agent/RemoteTrigger) and redirect to `aimee delegate`.
+                                Explicit `subagent_ban_enabled: false` allows provider-native
+                                sub-agents. */
    char provider[16];
    /* Durable default persona: the persona a fresh primary session starts as, and
     * the persona draft roundtable panelists author with when none is set. Width =
@@ -336,6 +336,13 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
+   /* code_cochange_git_enabled: gate (default 1, on) for mining git history at
+    * `index scan` time to accumulate co_edited edges (files that change
+    * together in a commit) into the entity graph that index_blast_radius
+    * already reads. Incremental and idempotent via a per-project HEAD marker in
+    * kb_runtime_state; bulk commits (> 25 code files) are skipped. Set false to
+    * keep co_edited edges session-derived only. */
+   int code_cochange_git_enabled;
    /* wfe_live_forge_enabled: gate (default 0, OFF — 2026-07-17: opt-in while the
     * autonomous pipeline is under test) for the autonomous live forge
     * (full-autonomous-development F4). When OFF the wfe forge provider is not
@@ -1052,11 +1059,27 @@ typedef struct config
     * search_max_results: default result count (0 = use WEB_SEARCH_DEFAULT_MAX_RESULTS = 5)
     * search_searxng_url: required when backend = "searxng", e.g. "https://searxng.example.com"
     * search_tavily_api_key: required when backend = "tavily"
+    * search_backends: optional comma-separated list enabling multi-engine fanout
+    * search_fetch_pages: -1 unset (default on), 0 off, 1 on
     */
    char search_backend[32];
    int search_max_results;
    char search_searxng_url[512];
    char search_tavily_api_key[256];
+   /* search_backends: optional comma-separated engine list for multi-engine
+    * fanout, e.g. "duckduckgo,searxng". When empty, search_backend is used
+    * alone. Engines missing their required credential are skipped rather than
+    * failing the search, so listing an engine you have not configured yet
+    * degrades to the ones you have.
+    *
+    * Fanout is OFF unless this is set: it multiplies latency and outbound
+    * requests, and a default install has exactly one usable engine
+    * (duckduckgo) so it would buy nothing. */
+   char search_backends[256];
+   /* search_fetch_pages: fetch the top results and return extracted page text
+    * instead of only engine snippets. 0 = off, 1 = on, -1/unset = built-in
+    * default (on). See WEB_SEARCH_FETCH_PAGES_DEFAULT. */
+   int search_fetch_pages;
 
    /* Tool result compaction settings.
     * compact_enabled: 0 = off, 1 = on (default when unset).
@@ -1106,16 +1129,10 @@ typedef struct config
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
 
-   /* The SINGLE economizer control (src/modules/economizer/). One of ECON_TIER_*.
-    * Selects a provider-aware strategy: OFF = verbatim passthrough (no reduction,
-    * no Anthropic cache breakpoint); SAFE = Anthropic prompt caching + deterministic
-    * freeze-on-first-send tool condensation + recall-restorable history fold on
-    * OpenAI; AGGRESSIVE = + lossy tool-body compress and live inbound /v1 mutation
-    * (OpenAI-family egress only — Anthropic context is NEVER mutated at any tier).
-    * The concrete per-tier lever values are resolved by econ_preset() (an internal
-    * preset, never a user-facing config surface). See docs/features/economizer.md.
-    * Default ECON_TIER_SAFE. */
-   int economizer_tier;
+   /* The single economizer mode. OFF is the pristine baseline. PROOF_GATED
+    * verifies the signed empty registry and freezes the completed provider body;
+    * it cannot select a transform in this release. Default OFF. */
+   int economizer_mode;
 
    /* Pluggable-module enablement (`modules:` block). The canonical, user-facing surface for
     * enabling/disabling modules — memory (request stage), governance (response stage), delegates +
@@ -1141,8 +1158,8 @@ typedef struct config
    /* Optional multi-agent panel deliberation. Unspecified (-1) falls back to the
     * roundtable-owned AIMEE_MODULE_ROUNDTABLE resolver, whose descriptor default is OFF. */
    int module_roundtable;
-   /* The economizer module toggle. econ_tier() returns ECON_TIER_OFF whenever this is
-    * user-disabled (0), so the `modules:` off-switch overrides the economizer tier. */
+   /* The economizer module toggle. econ_mode() returns ECON_MODE_OFF whenever this is
+    * user-disabled (0), so the `modules:` off-switch overrides the economizer mode. */
    int module_economizer;
 
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
@@ -1161,6 +1178,23 @@ typedef struct config
    int autonomy_unit_retry;
    int autonomy_unit_max;
    int autonomy_ci_retry_max;
+   /* Run safety caps + auto-resume policy — historically env-only (AIMEE_AUTONOMY_*);
+    * now config-backed + live via config_autonomy_lookup so they are tunable from the web
+    * Settings GUI (an exported env var still overrides). Defaults match the historical env
+    * defaults, so behavior is unchanged until an operator changes them.
+    * autonomy_max_turns: cumulative persisted-turn cap per run (runaway backstop).
+    * autonomy_max_wall_secs: per-resume wall-clock cap in seconds.
+    * autonomy_stale_abandon_secs: grace before a cap/stuck park is reaped -> abandoned (0
+    * disables). autonomy_concurrency: max concurrently-driven autonomous runs.
+    * autonomy_auto_resume_cap_parks: 1 = scheduler auto-resumes a wall-cap park (giving it a
+    *   fresh wall window) instead of leaving it to be reaped; bounded by autonomy_max_resumes.
+    * autonomy_max_resumes: max auto-resumes per run before the reaper is allowed to win. */
+   int autonomy_max_turns;
+   int autonomy_max_wall_secs;
+   int autonomy_stale_abandon_secs;
+   int autonomy_concurrency;
+   int autonomy_auto_resume_cap_parks;
+   int autonomy_max_resumes;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
@@ -1285,6 +1319,15 @@ typedef struct config
    double cache_aware_rewrite_hard_context_threshold;
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
+
+   /* Live transport controls (transport.*). The measured defaults enable KB
+    * pooling and resident-client keep-alive; either can be set false for the
+    * one-shot rollback path. gzip stays default-off until a link profile meets
+    * both the wire-reduction and latency promotion gates. */
+   int transport_kb_pool_enabled;
+   int transport_server_keepalive_enabled;
+   int transport_thinclient_gzip_enabled;
+   int transport_kb_gzip_enabled;
 
    /* Cost-shaped delegate-routing bandit reward (cost_reward.*).
     * cost_reward_enabled: 0 = off (default; the bandit learns from the binary
@@ -1922,8 +1965,23 @@ typedef struct config
 
    /* Model metadata refresh (model_meta.*).
     * model_meta_refresh_minutes: interval for background models.dev cache refresh; default 60.
-    * model_meta_capability_routing: 0 = cost-tier only (default), 1 = filter by capability flags.
+    * model_meta_capability_routing: 1 = filter by capability flags (default),
+    *   0 = cost-tier only. When on, a candidate must satisfy the packet's
+    *   required capabilities and minimum context window; when nothing does,
+    *   routing escalates to the most capable seat rather than failing.
     */
+   /* routing.prefer_local: try FREE local delegates first whenever one is
+    * eligible, before falling back to paid remote seats. Off by default.
+    *
+    * This is an ORDERING preference among agents that already satisfy the packet
+    * - never a relaxation of eligibility. A local agent still cannot exceed its
+    * declared max_scope: local tokens are free, which removes the COST argument
+    * for over-selecting, but not the wall-clock one. A local model failing
+    * whole-task work still burns a session, a review and an escalation, and still
+    * produces a bad diff. So "free" changes which seat is preferred, not which
+    * seats are eligible. */
+   int prefer_local_agents;
+
    int model_meta_refresh_minutes;
    int model_meta_capability_routing;
 
@@ -1932,8 +1990,10 @@ typedef struct config
     * corpus_diskann_threshold: row count per corpus table where auto picks diskann (default 1M). */
    char db2_vector_corpus_index[16];
    int64_t db2_vector_corpus_diskann_threshold;
-   /* Mixture-of-Agents ensemble (ensemble.*).
-    * ensemble_reference_models: diverse model/agent names for the fan-out.
+   /* Mixture-of-Agents ensemble compatibility representation (ensemble.*).
+    * ensemble_reference_models: exact seats overlaid from the acquired saved
+    * roundtable. When no preset is acquired, runtime discards this legacy list
+    * and constructs a provider-diverse panel of at most two agents.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means
@@ -2039,7 +2099,8 @@ int config_load(config_t *cfg);
  * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
  * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
  *   config_snapshot_init  — seed the snapshot from a loaded config (once, at startup).
- *   config_snapshot_get   — copy the live snapshot into `out` (seqlock read). -1 if uninit.
+ *   config_snapshot_get   — copy the live snapshot into `out` under a reader pin. -1 if uninit
+ *                           or the bounded reader counter is saturated.
  *   config_reload         — re-read the file, VALIDATE-or-keep, and publish only if the
  *                           content-hash token changed (self-reload no-op guard).
  *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
@@ -2071,19 +2132,19 @@ int config_autonomy_lookup(const char *env_name, long *out);
  * and internally by config_reload. Ordinary readers should use config_load. */
 int config_load_file(config_t *cfg);
 
-/* The economizer tier — the single user control. See docs/features/economizer.md. */
-enum
+/* Economizer policy. SAFE permits only deterministic, mechanically lossless
+ * transforms of fresh local content. AGGRESSIVE additionally permits the
+ * existing lossy history/tool-result reducers. */
+typedef enum
 {
-   ECON_TIER_OFF = 0,  /* verbatim passthrough: no caching, no reduction */
-   ECON_TIER_SAFE = 1, /* lossless: Anthropic caching + frozen tool condensation; OpenAI recall */
-   ECON_TIER_AGGRESSIVE = 2 /* + lossy fold/compress; OpenAI live mutation */
-};
+   ECON_MODE_OFF = 0,
+   ECON_MODE_SAFE = 1,
+   ECON_MODE_AGGRESSIVE = 2
+} econ_mode_t;
 
-/* Resolve the economizer tier (ECON_TIER_*). The single point that decides
- * off/safe/aggressive; every economizer predicate routes through it. */
-int econ_tier(const config_t *cfg);
-const char *econ_tier_name(int tier); /* "off"/"safe"/"aggressive" */
-int econ_tier_parse(const char *s);   /* string -> ECON_TIER_* (default SAFE on unknown) */
+int econ_mode(const config_t *cfg);
+const char *econ_mode_name(int mode); /* "off"/"safe"/"aggressive" */
+int econ_mode_parse(const char *s);   /* mode, or -1 for unknown */
 
 /* Semantic-guardrails escalation mode — the single control that replaced the
  * enabled/dry_run/advisory_only/allow_ml_only_block quad. */
@@ -2097,10 +2158,9 @@ enum
 const char *guardrails_semantic_mode_name(int mode); /* "off"/"dry_run"/"advisory"/"enforce" */
 int guardrails_semantic_mode_parse(const char *s);   /* string -> GSEM_MODE_* (OFF on unknown) */
 
-/* Economizer resolution — compute EFFECTIVE gates from the tier without mutating config_t
- * (so config_save round-trips the raw user value). */
-int econ_reduction_master_on(const config_t *cfg); /* tier != off */
-int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-only at call site) */
+/* Reduction gates used by the existing context economizer. */
+int econ_reduction_master_on(const config_t *cfg);
+int econ_gateway_mutate_on(const config_t *cfg);
 
 /* Resolve whether a pluggable module is enabled, from the layered enablement surface. This is
  * the ONE place module enablement is decided; every wire site calls it with the module's tristate
@@ -2112,24 +2172,17 @@ int econ_gateway_mutate_on(const config_t *cfg); /* tier == aggressive (OpenAI-o
  * `config_tristate` is one of cfg->module_* (-1 = unspecified). Pure: reads its args only. */
 int config_module_enabled(int config_tristate, int env_default);
 
-/* The concrete economizer lever values for a config's tier. These are INTERNAL
- * presets (never a user-facing config surface): econ_preset() maps econ_tier(cfg)
- * to the levers the reduction subsystem consumes at each seam.
- *   OFF        -> everything 0 (verbatim passthrough).
- *   SAFE       -> history_fold + command_filter (recall-restorable / deterministic,
- *                 cache-safe on Anthropic); compress off; no live gateway mutation.
- *   AGGRESSIVE -> + compress (lossy tool-body shrink) + gateway_seam (live inbound
- *                 /v1 mutation, OpenAI-family egress only).
- * gateway_session_disable_ttl_ms is the per-session circuit-breaker TTL for the
- * aggressive live-mutation path. Pure: reads cfg only. */
+/* Internal policy levers. SAFE enables only json_compact. AGGRESSIVE enables
+ * the legacy lossy reducers as well. */
 typedef struct
 {
-   int history_fold;         /* fold old history (SAFE + AGGRESSIVE) */
-   int compress;             /* lossy tool-result body shrink (AGGRESSIVE) */
-   int command_filter;       /* deterministic tool-output condensation (SAFE + AGGRESSIVE) */
+   int json_compact;
+   int history_fold;
+   int compress;
+   int command_filter;
    int freeze_guard_horizon; /* break-even reuse horizon for the fold freeze guard */
-   int gateway_seam;         /* live inbound /v1 mutation seam active (AGGRESSIVE) */
-   int gateway_session_disable_ttl_ms; /* circuit-breaker TTL (ms) for the live mutator */
+   int gateway_seam;
+   int gateway_session_disable_ttl_ms;
 } econ_preset_t;
 
 void econ_preset(const config_t *cfg, econ_preset_t *out);

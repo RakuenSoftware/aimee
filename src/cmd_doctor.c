@@ -17,6 +17,7 @@
 #include "cJSON.h"
 #include <unistd.h>
 #include <sys/stat.h>
+#include "agent_tier_lint.h"
 #include <dirent.h>
 #include <time.h>
 
@@ -322,6 +323,44 @@ static void check_agents(check_result_t *r)
       snprintf(r->message, sizeof(r->message), "%d configured, %d enabled", acfg.agent_count,
                enabled);
    }
+}
+
+/* cost_tier IS the ordering agent_route() minimises, so a tier that disagrees
+ * with published price means cheapest-first routing is not minimising cost. */
+static void check_agent_tier_prices(check_result_t *r)
+{
+   r->name = "Agent tiers";
+
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+   {
+      r->status = CHECK_OK;
+      snprintf(r->message, sizeof(r->message), "no agents configured");
+      return;
+   }
+
+   agent_tier_conflict_t conflicts[AGENT_TIER_LINT_MAX];
+   int n = agent_tier_price_conflicts(&acfg, conflicts, AGENT_TIER_LINT_MAX);
+   if (n <= 0)
+   {
+      r->status = CHECK_OK;
+      snprintf(r->message, sizeof(r->message), "cost_tier ordering agrees with catalog price");
+      return;
+   }
+
+   const agent_tier_conflict_t *c = &conflicts[0];
+   r->status = CHECK_WARN;
+   snprintf(r->message, sizeof(r->message),
+            "%d tier/price contradiction%s: '%s' is tier %d ($%.2f/$%.2f per Mtok) but '%s' is "
+            "tier %d ($%.2f/$%.2f)",
+            n, n == 1 ? "" : "s", c->cheaper_tier_agent, c->cheaper_tier, c->cheaper_tier_in,
+            c->cheaper_tier_out, c->costlier_tier_agent, c->costlier_tier, c->costlier_tier_in,
+            c->costlier_tier_out);
+   snprintf(r->remediation, sizeof(r->remediation),
+            "Routing minimises cost_tier, so it currently prefers the more expensive model. Set "
+            "'%s' to a higher cost_tier than '%s', or set tier_price_exempt with a reason if its "
+            "billing is not per-token.",
+            c->cheaper_tier_agent, c->costlier_tier_agent);
 }
 
 static void check_hardware(check_result_t *r)
@@ -938,6 +977,7 @@ char *doctor_checks_json(void)
    check_server(&checks[n++]);
    check_config(&checks[n++], &cfg);
    check_agents(&checks[n++]);
+   check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);
@@ -1069,6 +1109,7 @@ void cmd_doctor(app_ctx_t *ctx, int argc, char **argv)
    check_server(&checks[n++]);
    check_config(&checks[n++], &cfg);
    check_agents(&checks[n++]);
+   check_agent_tier_prices(&checks[n++]);
    check_hardware(&checks[n++]);
    check_provider_catalog(&checks[n++]);
    check_hooks(&checks[n++]);

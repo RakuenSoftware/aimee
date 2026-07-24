@@ -6,7 +6,21 @@
   configuration behavior
 - **Implementation dependencies:** module descriptors, core config/module-runtime contracts, and
   suite compatibility records
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
+
+> **2026-07-23 amendment reconciliation.** The product boundary (Runtime/Control), web-module
+> optionality, and truthful-config ownership this proposal defines are unchanged, but the suite
+> amendment
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+> makes them concrete in three ways to re-check on re-review: (1) `runtime-web` and `control-web` are
+> **separate programs on the shared-memory event bus**, admitted and routed like any module, not
+> in-process handlers; (2) each product — Runtime and Control — **hosts its own bus** (the single
+> in-source C bus host), and cross-product paths use the existing network transport, so this
+> proposal's admission/topology wording should reference the bus host explicitly; (3) the advertised
+> **effective configuration** surface and the runtime **capability advertisement** to clients are the
+> same capability data observed at two ends — modules publish capabilities to core over the bus, and
+> [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) projects them,
+> so this proposal's config-surface ownership and that advertisement must not diverge.
 
 ## Decision
 

@@ -14,6 +14,7 @@
 #include "config.h"
 #include "db1.h"
 #include "log.h"
+#include "platform_random.h"
 #include "cJSON.h"
 
 #include <pthread.h>
@@ -29,6 +30,7 @@ typedef struct
 {
    server_ctx_t *server;
    int task_id;
+   const char *claim_owner;
    const char *persona;
    const char *files_json;
    const char *cwd;
@@ -87,6 +89,8 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
    cctx->conn_fd = -1;
    cctx->async_slot = -1;
    cctx->coord_task_id = b->task_id;
+   snprintf(cctx->coord_claim_owner, sizeof(cctx->coord_claim_owner), "%s",
+            b->claim_owner ? b->claim_owner : "");
    cctx->req = req;
    /* Coord-task delegates are I/O-bound; run on-demand, not the CPU compute
     * pool (see delegate_spawn_ondemand). */
@@ -117,11 +121,13 @@ static int coord_delegates_enabled(void)
  * caller) rather than in server_compute.c. */
 int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const char *role,
                                        const char *prompt, const char *files_json, const char *cwd,
-                                       const char *persona, int require_handoff)
+                                       const char *persona, const char *claim_owner,
+                                       int require_handoff)
 {
    if (!ctx || task_id <= 0 || !prompt || !prompt[0])
       return -1;
-   coord_spawn_backing_t backing = {ctx, task_id, persona, files_json, cwd, require_handoff, -1};
+   coord_spawn_backing_t backing = {ctx,        task_id, claim_owner,     persona,
+                                    files_json, cwd,     require_handoff, -1};
    gw_turn_capabilities_t caps = {&backing, coord_spawn_delegate, NULL};
    char turn_id[48];
    snprintf(turn_id, sizeof(turn_id), "coord-task-%d", task_id);
@@ -143,6 +149,54 @@ static volatile int g_stop;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_cond = PTHREAD_COND_INITIALIZER;
 static server_ctx_t *g_ctx;
+static char g_claim_owner[DB1_COORD_DELEGATE_LEN];
+
+#define COORD_BOOT_OWNER_KEY    "coord_dispatcher_boot_owner"
+#define COORD_CRASH_REQUEUE_MAX 3
+
+/* Claims belong to a server incarnation, not the generic dispatcher name. The
+ * previous incarnation's worker threads cannot survive process exit, so its
+ * remaining claims are provably orphaned and safe to retry before this boot
+ * starts dispatching. Persist the new owner only after recovery: if recovery is
+ * interrupted, the next boot retries the same previous owner. */
+static int dispatcher_recover_previous_boot(void)
+{
+   char previous[DB1_COORD_DELEGATE_LEN] = "";
+   if (db1_runtime_state_get(COORD_BOOT_OWNER_KEY, previous, sizeof(previous)) == 0 && previous[0])
+   {
+      int requeued = 0, failed = 0;
+      if (db1_coord_job_recover_owner(previous, COORD_CRASH_REQUEUE_MAX, &requeued, &failed) != 0)
+      {
+         LOG_ERROR("coord_dispatcher", "failed to recover claims from previous boot owner %s",
+                   previous);
+         return -1;
+      }
+      if (requeued || failed)
+         LOG_WARN("coord_dispatcher",
+                  "recovered previous-boot claims owner=%s: requeued=%d failed_at_cap=%d", previous,
+                  requeued, failed);
+   }
+
+   unsigned char rnd[8];
+   if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
+   {
+      struct timespec ts;
+      clock_gettime(CLOCK_REALTIME, &ts);
+      memcpy(rnd, &ts, sizeof(rnd));
+   }
+   snprintf(g_claim_owner, sizeof(g_claim_owner), "coord-%ld-", (long)getpid());
+   size_t used = strlen(g_claim_owner);
+   for (size_t i = 0; i < sizeof(rnd) && used + 2 < sizeof(g_claim_owner); i++)
+      used += (size_t)snprintf(g_claim_owner + used, sizeof(g_claim_owner) - used, "%02x", rnd[i]);
+
+   if (db1_runtime_state_set(COORD_BOOT_OWNER_KEY, g_claim_owner) != 0)
+   {
+      LOG_ERROR("coord_dispatcher", "failed to persist boot claim owner; dispatcher not started");
+      g_claim_owner[0] = '\0';
+      return -1;
+   }
+   return 0;
+}
 
 /* Sweep all coord jobs that have pending tasks and dispatch up to max_concurrent. */
 static int dispatcher_sweep(void)
@@ -177,7 +231,7 @@ static int dispatcher_sweep(void)
       {
          db1_coord_task_t task;
          memset(&task, 0, sizeof(task));
-         int task_id = db1_coord_job_claim_next(job_id, "coord-dispatcher", &task);
+         int task_id = db1_coord_job_claim_next(job_id, g_claim_owner, &task);
          if (task_id < 0)
             break; /* no more claimable tasks for this job */
 
@@ -190,13 +244,15 @@ static int dispatcher_sweep(void)
                                          sizeof(files), cwd, sizeof(cwd), persona,
                                          sizeof(persona)) != 0)
          {
-            db1_coord_job_fail_task(task_id, "dispatcher could not read task dispatch fields");
+            db1_coord_job_fail_task_owned(task_id, g_claim_owner,
+                                          "dispatcher could not read task dispatch fields");
             continue;
          }
 
          if (!prompt[0])
          {
-            db1_coord_job_fail_task(task_id, "task has no stored prompt; cannot dispatch");
+            db1_coord_job_fail_task_owned(task_id, g_claim_owner,
+                                          "task has no stored prompt; cannot dispatch");
             LOG_WARN("coord_dispatcher", "coord task #%d (job #%d) has empty prompt — failing task",
                      task_id, job_id);
             continue;
@@ -207,7 +263,7 @@ static int dispatcher_sweep(void)
           * output that the workflow engine reads raw. */
          int require_handoff = (job.plan_id != WFE_COORD_PLAN_ID);
          if (server_compute_dispatch_coord_task(g_ctx, task_id, role, prompt, files, cwd, persona,
-                                                require_handoff) != 0)
+                                                g_claim_owner, require_handoff) != 0)
          {
             /* Pool full — release the claim and retry next sweep. */
             db1_coord_job_release_task(task_id);
@@ -247,6 +303,8 @@ static void *dispatcher_thread(void *arg)
 void server_coord_dispatcher_init(server_ctx_t *ctx)
 {
    if (g_running)
+      return;
+   if (dispatcher_recover_previous_boot() != 0)
       return;
    g_ctx = ctx;
    g_stop = 0;

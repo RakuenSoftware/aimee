@@ -5,6 +5,10 @@
 #ifndef DEC_KB_CLIENT_MTLS_H
 #define DEC_KB_CLIENT_MTLS_H 1
 
+#include <stddef.h>
+
+#define KB_CLIENT_ERR_POOL_EXHAUSTED (-2)
+
 /* 1 when AIMEE_KB_CONN holds an aimee:// connection string (a remote kb), else 0. */
 int kb_client_mtls_configured(void);
 
@@ -14,5 +18,26 @@ int kb_client_mtls_configured(void);
  * method is "GET"/"POST"; body is NULL for GET. */
 char *kb_client_mtls_request(const char *method, const char *path, const char *body,
                              int *status_out);
+
+/* Fetch the exact bounded P5-C2c signed envelope.  Only an authenticated 200
+ * response on the fixed route is accepted; output is cleared on every error. */
+int kb_client_mtls_management_jwks(char *envelope_out, size_t envelope_cap, size_t *envelope_len);
+int kb_client_mtls_management_jwks_fetch(void *ctx, char *envelope_out, size_t envelope_cap,
+                                         size_t *envelope_len);
+
+/* Publish this server's bounded health record over its enrolled mTLS identity.
+ * The kb authorizes immutable issuer/serial/fingerprint metadata from TLS; the
+ * caller-supplied server_id is only a selector and cannot refresh another row. */
+int kb_client_mtls_heartbeat(const char *server_id, const char *health, const char *version);
+
+/* Pool observability and lifecycle. reset closes idle entries immediately and
+ * makes borrowed entries drain on return. Output pointers may be NULL. */
+void kb_client_mtls_pool_stats(int *total_out, int *idle_out, int *busy_out, int *waiters_out,
+                               unsigned long *borrow_exhausted_total_out);
+void kb_client_mtls_pool_reset(void);
+/* Bind transport.kb_pool_enabled to the server's live config snapshot. */
+void kb_client_mtls_pool_register_reload(void);
+void kb_client_mtls_tls_stats(unsigned long *handshakes_total_out,
+                              unsigned long *resumed_total_out);
 
 #endif /* DEC_KB_CLIENT_MTLS_H */

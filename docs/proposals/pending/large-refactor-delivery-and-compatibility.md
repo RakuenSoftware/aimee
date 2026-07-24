@@ -5,7 +5,34 @@
 - **Owns:** implementation sequence, public-surface baselines, cleanup ledgers, compatibility,
   migrations, recovery, and suite-completion profiles
 - **Implementation dependencies:** all architectural child proposals
-- **Date:** 2026-07-20
+- **Date:** 2026-07-20 (reconciliation note added 2026-07-23)
+
+> **2026-07-23 amendment reconciliation.** The suite amendment
+> ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md))
+> changed the architecture this proposal sequences: core is C and modules are separate programs in
+> any language over a shared-memory event bus, not in-process C-linked modules. The delivery sequence
+> must therefore add and order these slices, which this proposal does not yet detail and which reopen
+> it for re-review: (1) the descriptor/build machinery and canonical inventory; (2) the **bus wire
+> spec**, the single in-source **C bus host**, the **C and Go reference clients**, and the
+> cross-language conformance vectors — the foundation everything else attaches to; (3) migrating
+> modules onto the bus, **`memory` first** as the hub, gated by the committed performance-budget
+> baseline before that slice may land; (4) the optional **`module-loader`** (OS-sandbox and WASM
+> hosts, artifact verification); (5) **`event-bus-governance-and-capture`**, after the bus and the
+> in-flight attestable-enforcement A1–A5; (6) cross-service (Runtime↔Control) paths over the existing
+> network transport. Compatibility, cleanup-ledger, recovery, and suite-completion profiles this
+> proposal owns must be extended to cover the bus, the host/client split, and the
+> `plugin-loader`→`module-loader` rename. Until re-reviewed, treat this proposal's sequence as
+> pre-amendment.
+>
+> **2026-07-24 update.** Step (2) — the bus wire spec, the single in-source C host, the C and Go
+> reference clients, and the cross-language conformance vectors — is **implemented and merged** on
+> `feat/event-bus` as its own twelve-slice tree
+> ([`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md);
+> [`event-bus-wire-spec.md`](event-bus-wire-spec.md) Implementation status). It also delivered the
+> committed performance-budget baseline that gates step (3), and the governance/audit **tap** the
+> child in step (5) consumes. The bus is deliberately linked into **no** shipping binary — the D7
+> blast-radius gate holds that until step (3), the `memory`-first migration, is the tree that links
+> it onto the hot path. Steps (3)–(6) remain open.
 
 ## Decision
 

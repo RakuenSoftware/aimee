@@ -5,12 +5,6 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
-#if AIMEE_WITH_ROUNDTABLE
-#include "roundtable_activation.h"
-#endif
-#include "server_mgmt_endpoint.h"
-#include "server_http_identity.h"
-#include <openssl/sha.h>
 #include "server_http.h"
 #include "shadow_mirror.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
@@ -21,24 +15,31 @@
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
-#include "util.h" /* safe_strdup, aimee_base64_* */
+#include "agent_config.h" /* clear request-local agent credentials between pooled op runs */
+#include "util.h"         /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
-#include <aimee/delegates/delegate_role.h>
+#include "delegate_role.h"
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
-#if AIMEE_WITH_ROUNDTABLE
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
-#endif
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
-#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "server_mgmt_status.h"
+#include "server_mgmt_endpoint.h"
+#include "server_mgmt_read_endpoint.h"
+#include "server_http_mgmt_read_routes.h"
+#include "server_mgmt_jwks_cache.h"
+#include "server_management_jti.h"
+#include "server_mgmt_audit.h"
+#include "kb_client_mtls.h"
+#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -54,6 +55,15 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
+
+/* Narrow-link route tests intentionally omit server_agent.c.  The shipped
+ * server provides the strong, commit-aware implementation. */
+__attribute__((weak)) int server_agent_management_set_enabled(const char *name, int enabled)
+{
+   (void)name;
+   (void)enabled;
+   return -1;
+}
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
 #include "git_forge_vault.h" /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
@@ -74,12 +84,15 @@
 #include "wfe_engine.h"      /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "json_fluent.h"     /* jo_cstr — parse the CI-event webhook body */
 #include <openssl/hmac.h>    /* HMAC-SHA256 for the CI-event webhook (server links -lcrypto) */
-#include "router_advise.h"   /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"   /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"    /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"       /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>        /* mkdir for the proposal artifact dir */
-#include <time.h>            /* unique proposal artifact filename */
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <openssl/rand.h>
+#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
+#include <time.h>          /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
@@ -89,6 +102,8 @@ typedef enum
    RM_EXACT,  /* path == entry->path */
    RM_PREFIX, /* path == entry->path + <id> ( + entry->suffix ), <id> one segment */
 } route_match_kind_t;
+
+static int mgmt_hex_key(const char *hex, unsigned char key[32]);
 
 /* One row of the /v1 route registry. `op`, when non-NULL, derives the required
  * capability from the NDJSON method twin (server_capability_for_method) so the
@@ -115,33 +130,339 @@ static int rh_health(const route_req_t *rq, char *resp, int cap)
    return route_health(resp, cap);
 }
 
-static int management_action(void *ctx)
+static int rh_ready(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_ready(resp, cap);
+}
+
+static int management_token_verify(void *ctx, const server_mgmt_endpoint_request_t *rq,
+                                   const char *digest, server_mgmt_token_claims_t *claims)
 {
    (void)ctx;
+   const char *path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   char trust[SERVER_MGMT_JWKS_BUNDLE_MAX];
+   size_t trust_len = 0;
+   if (!path || server_mgmt_jwks_trust_bundle_load(path, trust, sizeof(trust), &trust_len) != 0)
+      return -1;
+   return server_mgmt_token_verify_cached(
+              rq->jwt, rq->jwt_len, trust, trust_len, rq->expected_issuer, rq->server_id,
+              rq->peer->issuer, rq->peer->serial_norm, rq->peer->fingerprint, digest, rq->now,
+              kb_client_mtls_management_jwks_fetch, NULL, claims) == SERVER_MGMT_TOKEN_OK
+              ? 0
+              : -1;
+}
+
+static int management_staple_verify(void *ctx, const server_mgmt_endpoint_request_t *rq,
+                                    uint64_t *generation, char staple_digest[65])
+{
+   (void)ctx;
+   const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
+   const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
+   unsigned char pub[32], digest[SHA256_DIGEST_LENGTH];
+   kb_mgmt_status_t st;
+   if (!key_id || !rq->staple || rq->staple_len > KB_MGMT_STATUS_JSON_MAX ||
+       mgmt_hex_key(key_hex, pub) != 0)
+      return -1;
+   if (kb_mgmt_status_from_json(rq->staple, &st) != 0)
+   {
+      memset(&st, 0, sizeof(st));
+      if (kb_mgmt_status_nonce_from_json(rq->staple, st.nonce) == 0)
+         (void)server_mgmt_nonce_consume_purpose(&st, rq->peer, rq->server_id,
+                                                 "management.action.v1", (uint64_t)rq->now, 0);
+      return -1;
+   }
+   uint64_t hwm = 0;
+   int shape = server_mgmt_status_hwm(&hwm) == 0 &&
+               kb_mgmt_status_validate(&st, (uint64_t)rq->now, hwm) == 0 &&
+               kb_mgmt_status_verify_signature(&st, pub) == 0 && !strcmp(st.key_id, key_id) &&
+               !strcmp(st.caller_issuer, rq->peer->issuer) &&
+               !strcmp(st.caller_serial_norm, rq->peer->serial_norm) &&
+               !strcmp(st.caller_fingerprint, rq->peer->fingerprint) &&
+               !strcmp(st.target_server_id, rq->server_id) &&
+               !strcmp(st.target_mgmt_fingerprint, rq->local_fingerprint) &&
+               !strcmp(st.purpose, "management.action.v1");
+   server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume_purpose(
+       &st, rq->peer, rq->server_id, "management.action.v1", (uint64_t)rq->now, shape);
+   if (rc != SERVER_MGMT_NONCE_OK ||
+       !SHA256((const unsigned char *)rq->staple, rq->staple_len, digest))
+      return -1;
+   for (size_t i = 0; i < sizeof(digest); i++)
+      snprintf(staple_digest + i * 2, 3, "%02x", digest[i]);
+   *generation = st.revocation_generation;
    return 0;
 }
+
+static server_mgmt_checkpoint_result_t
+management_checkpoint(void *ctx, const server_mgmt_endpoint_request_t *rq,
+                      const server_mgmt_token_claims_t *claims, uint64_t generation,
+                      const char *digest)
+{
+   (void)ctx;
+   return server_mgmt_checkpoint_client_verify(rq, claims, generation, digest);
+}
+
+static server_mgmt_endpoint_jti_result_t management_jti(void *ctx,
+                                                        const server_mgmt_endpoint_request_t *rq,
+                                                        const server_mgmt_token_claims_t *c)
+{
+   (void)ctx;
+   server_management_jti_t token = {
+       c->jti,
+       c->issuer,
+       c->kid,
+       c->audience,
+       c->subject,
+       c->team_id,
+       c->capability,
+       c->peer_issuer,
+       c->peer_serial,
+       c->peer_fingerprint,
+       c->request_sha256,
+       c->correlation_id,
+       c->issued_at,
+       c->expires_at,
+   };
+   server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
+   return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
+          : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
+                                               : SERVER_MGMT_JTI_FAILED;
+}
+
+static int management_remote_writes(void *ctx)
+{
+   (void)ctx;
+   return server_http_management_action_allowed() ? server_http_remote_writes() : 0;
+}
+
+static int management_audit(void *ctx, const server_mgmt_token_claims_t *c,
+                            const server_mgmt_action_t *a, int outcome, int status)
+{
+   (void)ctx;
+   return outcome
+              ? server_mgmt_audit_outcome(c->subject, a->agent, c->capability, c->jti, a->digest,
+                                          status)
+              : server_mgmt_audit_intent(c->subject, a->agent, c->capability, c->jti, a->digest);
+}
+
+static int management_apply(void *ctx, const server_mgmt_action_t *a)
+{
+   (void)ctx;
+   uint32_t required = server_capability_for_method(a->action);
+   if (!required)
+      return 1;
+   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "agent.enable")) == 0
+              ? 0
+              : 1;
+}
+
 static int rh_management_action(const route_req_t *rq, char *resp, int cap)
 {
-   const char *jwks = getenv("AIMEE_MGMT_JWKS"), *iss = getenv("AIMEE_MGMT_ISSUER");
-   const char *aud = getenv("AIMEE_MGMT_AUDIENCE"), *bearer = server_http_identity_bearer();
-   const char *peer = server_http_identity_principal();
-   if (!jwks || !iss || !aud || !bearer || !*bearer || !peer || !*peer)
-      return err_json(resp, cap, 503, "management control plane is not configured");
-   unsigned char d[SHA256_DIGEST_LENGTH];
-   SHA256((const unsigned char *)(rq->body ? rq->body : ""), rq->body ? (size_t)rq->body_len : 0,
-          d);
-   char hex[65];
+   if (server_http_management_action_begin() != 0)
+   {
+      snprintf(resp, (size_t)cap, "{\"result\":\"failed\",\"effect\":\"none\"}");
+      return 500;
+   }
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   const char *issuer = getenv("AIMEE_SERVER_MGMT_ISSUER");
+   const char *local_fp = server_http_identity_local_fingerprint();
+   const char *jwt = server_http_identity_bearer();
+   const char *staple = server_http_identity_status_staple();
+   server_mgmt_endpoint_request_t request = {
+       rq->body,
+       (size_t)rq->body_len,
+       jwt,
+       strlen(jwt),
+       staple,
+       strlen(staple),
+       issuer,
+       target,
+       peer,
+       local_fp,
+       (int64_t)time(NULL),
+   };
+   server_mgmt_endpoint_deps_t deps = {
+       management_token_verify,  management_staple_verify, management_checkpoint, management_jti,
+       management_remote_writes, management_audit,         management_apply,      NULL,
+   };
+   server_mgmt_endpoint_result_t result;
+   int status = server_mgmt_endpoint_dispatch(&request, &deps, &result);
+   if (server_mgmt_endpoint_render(&result, resp, (size_t)cap) < 0)
+   {
+      server_http_management_action_end();
+      return err_json(resp, cap, 500, "management response unavailable");
+   }
+   server_http_management_action_end();
+   return status;
+}
+
+static int mgmt_b64url(const unsigned char *in, size_t n, char *out, size_t cap)
+{
+   unsigned char encoded[65];
+   size_t padded = 4 * ((n + 2) / 3);
+   size_t padding = n % 3 ? 3 - (n % 3) : 0;
+   size_t need = padded - padding;
+   if (!in || !out || padded + 1 > sizeof(encoded) || cap <= need)
+      return -1;
+   int got = EVP_EncodeBlock(encoded, in, (int)n);
+   if (got <= 0)
+      return -1;
+   while (got > 0 && encoded[got - 1] == '=')
+      got--;
+   if ((size_t)got != need)
+      return -1;
+   for (int i = 0; i < got; i++)
+      out[i] = encoded[i] == '+' ? '-' : (encoded[i] == '/' ? '_' : (char)encoded[i]);
+   out[got] = '\0';
+   OPENSSL_cleanse(encoded, sizeof(encoded));
+   return 0;
+}
+
+static int mgmt_hex_key(const char *hex, unsigned char key[32])
+{
+   if (!hex || strlen(hex) != 64)
+      return -1;
    for (int i = 0; i < 32; i++)
-      snprintf(hex + i * 2, 3, "%02x", d[i]);
-   hex[64] = 0;
-   char actor[256], jti[256];
-   int rc = server_mgmt_endpoint_dispatch(
-       bearer, jwks, iss, aud, peer,
-       getenv("AIMEE_MGMT_CAP") ? getenv("AIMEE_MGMT_CAP") : "server.manage", "management-action",
-       hex, management_action, NULL, actor, sizeof(actor), jti, sizeof(jti));
-   if (rc != 0)
-      return err_json(resp, cap, 403, "management action denied");
-   snprintf(resp, (size_t)cap, "{\"ok\":true,\"actor\":\"%s\",\"jti\":\"%s\"}", actor, jti);
+   {
+      unsigned a = (unsigned char)hex[i * 2], b = (unsigned char)hex[i * 2 + 1];
+      a = a >= '0' && a <= '9' ? a - '0' : (a >= 'a' && a <= 'f' ? a - 'a' + 10 : 99);
+      b = b >= '0' && b <= '9' ? b - '0' : (b >= 'a' && b <= 'f' ? b - 'a' + 10 : 99);
+      if (a > 15 || b > 15)
+         return -1;
+      key[i] = (unsigned char)((a << 4) | b);
+   }
+   return 0;
+}
+
+static int rh_management_read_agents(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return server_http_mgmt_read_agents(resp, cap);
+}
+
+static int rh_management_read_config(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return server_http_mgmt_read_config(resp, cap);
+}
+
+static int rh_management_challenge_purpose(const route_req_t *rq, char *resp, int cap,
+                                           const char *purpose)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   unsigned char nonce[32];
+   uint64_t expiry = 0, now = (uint64_t)time(NULL);
+   int rc = server_mgmt_nonce_issue_purpose(peer, target, purpose, now, nonce, &expiry);
+   if (rc != SERVER_MGMT_NONCE_OK)
+      return err_json(resp, cap, rc == SERVER_MGMT_NONCE_SATURATED ? 429 : 503,
+                      rc == SERVER_MGMT_NONCE_SATURATED ? "management challenge capacity reached"
+                                                        : "management challenge unavailable");
+   char enc[48];
+   if (mgmt_b64url(nonce, sizeof(nonce), enc, sizeof(enc)) != 0)
+      return err_json(resp, cap, 503, "management challenge unavailable");
+   if (!strcmp(purpose, "management.read.v1") || !strcmp(purpose, "management.read.config.v1"))
+      snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"purpose\":\"%s\",\"expires_at\":%llu}", enc,
+               purpose, (unsigned long long)expiry);
+   else
+      snprintf(resp, (size_t)cap, "{\"nonce\":\"%s\",\"expires_at\":\"%llu\"}", enc,
+               (unsigned long long)expiry);
+   if (!strcmp(purpose, "management.health.v1"))
+      server_http_keepalive_set(1);
+   return 200;
+}
+
+static int rh_management_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   return rh_management_challenge_purpose(rq, resp, cap, "management.health.v1");
+}
+
+static int rh_management_action_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.action.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   return status;
+}
+
+static int rh_management_read_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   else
+      status = server_http_mgmt_read_error(
+          status == 401 ? SERVER_MGMT_READ_FORBIDDEN : SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
+   return status;
+}
+
+static int rh_management_read_config_challenge(const route_req_t *rq, char *resp, int cap)
+{
+   int status = rh_management_challenge_purpose(rq, resp, cap, "management.read.config.v1");
+   if (status == 200)
+      server_http_keepalive_set(1);
+   else
+      status = server_http_mgmt_read_error(
+          status == 401 ? SERVER_MGMT_READ_FORBIDDEN : SERVER_MGMT_READ_UNAVAILABLE, resp, cap);
+   return status;
+}
+
+static int rh_management_health(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const server_tls_peer_cert_t *peer = server_http_identity_peer_cert();
+   const char *target = getenv("AIMEE_SERVER_ID");
+   const char *key_id = getenv("AIMEE_MGMT_STATUS_KEY_ID");
+   const char *key_hex = getenv("AIMEE_MGMT_STATUS_PUBLIC_KEY");
+   const char *local_fp = server_http_identity_local_fingerprint();
+   const char *wire = server_http_identity_status_staple();
+   unsigned char pub[32];
+   kb_mgmt_status_t st;
+   if (!peer || !peer->management_profile || strcmp(peer->cn, "p5-kb-management") != 0)
+      return err_json(resp, cap, 401, "management client certificate required");
+   if (!target || !target[0] || !key_id || !key_id[0] || mgmt_hex_key(key_hex, pub) != 0 ||
+       !local_fp[0])
+      return err_json(resp, cap, 503, "management status is not configured");
+   if (!wire[0] || kb_mgmt_status_from_json(wire, &st) != 0)
+   {
+      memset(&st, 0, sizeof(st));
+      if (wire[0] && kb_mgmt_status_nonce_from_json(wire, st.nonce) == 0)
+      {
+         server_mgmt_nonce_result_t consumed =
+             server_mgmt_nonce_consume(&st, peer, target, (uint64_t)time(NULL), 0);
+         if (consumed == SERVER_MGMT_NONCE_STORAGE)
+            return err_json(resp, cap, 503, "management status unavailable");
+      }
+      return err_json(resp, cap, 401, "invalid management status staple");
+   }
+   uint64_t hwm = 0, now = (uint64_t)time(NULL);
+   int shape =
+       server_mgmt_status_hwm(&hwm) == 0 && kb_mgmt_status_validate(&st, now, hwm) == 0 &&
+       kb_mgmt_status_verify_signature(&st, pub) == 0 && strcmp(st.key_id, key_id) == 0 &&
+       memcmp(st.caller_issuer, peer->issuer, sizeof(st.caller_issuer)) == 0 &&
+       memcmp(st.caller_serial_norm, peer->serial_norm, sizeof(st.caller_serial_norm)) == 0 &&
+       memcmp(st.caller_fingerprint, peer->fingerprint, sizeof(st.caller_fingerprint)) == 0 &&
+       strcmp(st.target_server_id, target) == 0 &&
+       strcmp(st.target_mgmt_fingerprint, local_fp) == 0 &&
+       strcmp(st.purpose, "management.health.v1") == 0;
+   server_mgmt_nonce_result_t rc = server_mgmt_nonce_consume(&st, peer, target, now, shape);
+   if (rc != SERVER_MGMT_NONCE_OK)
+   {
+      int status = rc == SERVER_MGMT_NONCE_STORAGE    ? 503
+                   : rc == SERVER_MGMT_NONCE_MISMATCH ? 403
+                   : rc == SERVER_MGMT_NONCE_NOT_FOUND || rc == SERVER_MGMT_NONCE_EXPIRED ||
+                           rc == SERVER_MGMT_NONCE_ROLLBACK
+                       ? 409
+                       : 401;
+      return err_json(resp, cap, status, "management status denied");
+   }
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\",\"server_id\":\"%s\"}", target);
    return 200;
 }
 static int rh_version(const route_req_t *rq, char *resp, int cap)
@@ -721,7 +1042,6 @@ static int rh_role_template_delete(const route_req_t *rq, char *resp, int cap)
    return route_role_template_remove(rq->id, resp, cap);
 }
 
-#if AIMEE_WITH_ROUNDTABLE
 static int rh_roundtables_list(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -747,7 +1067,6 @@ static int rh_roundtable_delete(const route_req_t *rq, char *resp, int cap)
 {
    return route_roundtable_remove(rq->id, resp, cap);
 }
-#endif
 
 static int rh_sessions_list(const route_req_t *rq, char *resp, int cap)
 {
@@ -877,6 +1196,22 @@ static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "invalid JSON body");
    }
+   /* config.set is normally a generic dispatch-backed route, but roundtable
+    * policy needs an HTTP-level 403 before entering the legacy NDJSON bridge.
+    * Keep the matching guard in handle_config_set as defense in depth for
+    * direct RPC callers, whose transport cannot express an HTTP status. */
+   if (strcmp(rq->op, "config.set") == 0)
+   {
+      cJSON *jkey = cJSON_GetObjectItemCaseSensitive(req, "key");
+      const char *key = cJSON_IsString(jkey) ? jkey->valuestring : NULL;
+      if (roundtable_policy_config_key(key) &&
+          !route_roundtable_mutation_authorized(server_http_identity_principal()))
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403,
+                         "roundtable changes require the authenticated appliance administrator");
+      }
+   }
    /* method is server-set from the matched row, never the client body. */
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
    cJSON_AddStringToObject(req, "method", rq->op);
@@ -930,9 +1265,26 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
    return s;
 }
 
+/* Orchestration workers are pooled. Every field below is thread-local, but that
+ * only prevents cross-thread races: without an explicit turn boundary, the next
+ * op scheduled on the same worker inherits the previous op's checkout and
+ * credential context. In particular, an interactive roundtable could make a
+ * server-hosted Codex seat `cd` into another client's nonexistent checkout and
+ * return no content. Clear on both sides of every op dispatch so request-local
+ * panel/preset/artifact state cannot bleed through worker reuse. */
+static void op_run_clear_thread_context(void)
+{
+   run_cmd_set_cwd(NULL);
+   agent_set_request_session(NULL);
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_set_request_vault_principal(NULL);
+   agent_set_request_cancel(NULL);
+}
+
 static void op_run_worker_run(void *arg)
 {
    op_run_job_t *j = (op_run_job_t *)arg;
+   op_run_clear_thread_context();
    compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
    char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
@@ -956,6 +1308,7 @@ static void op_run_worker_run(void *arg)
    }
 
    int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
+   op_run_clear_thread_context();
    /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
     * failed run; anything else is the completed result payload. */
    int ok = (rc >= 200 && rc < 300);
@@ -981,20 +1334,12 @@ static void op_run_worker_run(void *arg)
    /* Pipeline-owned result capture (#18): persist the terminal attempt into the
     * durable DB1 ledger before the bounded /v1/runs record can be evicted. This
     * no-ops for ordinary (non-pipeline) op-runs. */
-#if AIMEE_WITH_ROUNDTABLE
    rtp_seam_finalize(j->run_id, ok, terminal_status == OPENAI_RUN_CANCELLED, buf);
-#endif
    free(snap);
    free(buf);
    free(j->line);
    free(j);
    compute_pool_clear_job();
-}
-
-static void *op_run_worker_thread(void *arg)
-{
-   op_run_worker_run(arg);
-   return NULL;
 }
 
 static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
@@ -1029,7 +1374,6 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
     * is never honored. An unknown / non-owned pass id is rejected. */
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__pipeline_pass_id");
    cJSON *ppid = cJSON_GetObjectItemCaseSensitive(req, "pipeline_pass_id");
-#if AIMEE_WITH_ROUNDTABLE
    if (ppid && cJSON_IsNumber(ppid))
    {
       int pass_id = (int)ppid->valuedouble;
@@ -1041,13 +1385,6 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
       }
       cJSON_AddNumberToObject(req, "__pipeline_pass_id", pass_id);
    }
-#else
-   if (ppid)
-   {
-      cJSON_Delete(req);
-      return err_json(resp, cap, 404, "not found");
-   }
-#endif
 
    char *line = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
@@ -1076,35 +1413,37 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    j->created = created;
 
    server_ctx_t *ctx = server_active_ctx();
-   if (ctx)
+   /* Every async operation has the same server-owned lifecycle. Keeping them in
+    * one dedicated pool prevents a newly registered coordinator from silently
+    * falling back to the generic compute lane, and makes shutdown authoritative. */
+   if (ctx && ctx->orchestration_pool_initialized)
    {
-      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
+      int submit_rc = compute_pool_submit(&ctx->orchestration_pool, op_run_worker_run, j);
+      if (submit_rc != COMPUTE_POOL_SUBMIT_OK)
       {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"compute queue full\"}");
+         const char *message = submit_rc == COMPUTE_POOL_SUBMIT_CLOSED ? "orchestration unavailable"
+                                                                       : "orchestration queue full";
+         char detail[96];
+         snprintf(detail, sizeof(detail), "{\"error\":\"%s\"}", message);
+         char *failed = op_run_snapshot(id, op_method, "failed", created, detail);
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
          free(j);
          free(queued);
-         return err_json(resp, cap, 503, "compute queue full");
+         return err_json(resp, cap, 503, message);
       }
    }
    else
    {
-      pthread_t th;
-      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
-      {
-         char *failed = op_run_snapshot(id, op_method, "failed", created,
-                                        "{\"error\":\"could not start run\"}");
-         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
-         free(failed);
-         free(j->line);
-         free(j);
-         free(queued);
-         return err_json(resp, cap, 500, "could not start run");
-      }
-      pthread_detach(th);
+      char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                     "{\"error\":\"orchestration unavailable\"}");
+      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+      free(failed);
+      free(j->line);
+      free(j);
+      free(queued);
+      return err_json(resp, cap, 503, "orchestration unavailable");
    }
 
    int n = snprintf(resp, (size_t)cap, "%s", queued);
@@ -1112,17 +1451,11 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    return (n > 0 && n < cap) ? 200 : 200;
 }
 
-#if AIMEE_WITH_ROUNDTABLE
 int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
                               char *resp, int cap)
 {
-   /* Internal callers (MCP ensemble_review and authoring pipelines) bypass
-    * route_match(), so reject before submit_op_run_internal allocates a run. */
-   if (!roundtable_operation_available(op_method))
-      return err_json(resp, cap, 404, "not found");
    return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
 }
-#endif
 
 static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
 {
@@ -1407,7 +1740,18 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 static const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
+    {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},
+    {"POST", "/v1/management/challenge", NULL, RM_EXACT, NULL, 0, rh_management_challenge},
+    {"POST", "/v1/management/action/challenge", NULL, RM_EXACT, NULL, 0,
+     rh_management_action_challenge},
+    {"POST", "/v1/management/read/challenge", NULL, RM_EXACT, NULL, 0,
+     rh_management_read_challenge},
+    {"POST", "/v1/management/read/config/challenge", NULL, RM_EXACT, NULL, 0,
+     rh_management_read_config_challenge},
+    {"GET", "/v1/management/health", NULL, RM_EXACT, NULL, 0, rh_management_health},
     {"POST", "/v1/management/action", NULL, RM_EXACT, NULL, 0, rh_management_action},
+    {"GET", "/v1/management/read/agents", NULL, RM_EXACT, NULL, 0, rh_management_read_agents},
+    {"GET", "/v1/management/read/config", NULL, RM_EXACT, NULL, 0, rh_management_read_config},
     {"GET", "/v1/version", NULL, RM_EXACT, NULL, 0, rh_version},
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},
@@ -1609,6 +1953,8 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/audit", NULL, RM_EXACT, "dashboard.audit", 0, rh_dispatch_op},
     {"GET", "/v1/audit/verify", NULL, RM_EXACT, "audit.verify", 0, rh_dispatch_op},
+    {"GET", "/v1/audit/captures", NULL, RM_EXACT, "audit.captures", 0, rh_dispatch_op},
+    {"POST", "/v1/audit/replay", NULL, RM_EXACT, "audit.replay", 0, rh_dispatch_op},
     {"POST", "/v1/audit/checkpoint", NULL, RM_EXACT, "audit.checkpoint", 0, rh_dispatch_op},
     {"POST", "/v1/audit/seal", NULL, RM_EXACT, "audit.seal", 0, rh_dispatch_op},
     {"POST", "/v1/audit/snapshot", NULL, RM_EXACT, "audit.snapshot", 0, rh_dispatch_op},
@@ -1621,15 +1967,11 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/economizer/stats", NULL, RM_EXACT, "economizer.stats", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/onboard", NULL, RM_EXACT, "dashboard.onboard", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/plans", NULL, RM_EXACT, "dashboard.plans", 0, rh_dispatch_op},
-#if AIMEE_WITH_PLUGIN_LOADER
     {"GET", "/v1/dashboard/plugins", NULL, RM_EXACT, "dashboard.plugins", 0, rh_dispatch_op},
-#endif
     {"GET", "/v1/dashboard/traces", NULL, RM_EXACT, "dashboard.traces", 0, rh_dispatch_op},
-#if AIMEE_WITH_PLUGIN_LOADER
     {"GET", "/v1/plugins", NULL, RM_EXACT, "plugin.list", 0, rh_dispatch_op},
     {"POST", "/v1/plugins/enable", NULL, RM_EXACT, "plugin.enable", 0, rh_dispatch_op},
     {"POST", "/v1/plugins/disable", NULL, RM_EXACT, "plugin.disable", 0, rh_dispatch_op},
-#endif
     {"GET", "/v1/insights/overview", NULL, RM_EXACT, "insights.overview", 0, rh_dispatch_op},
     {"GET", "/v1/optimize/export", NULL, RM_EXACT, "optimize.export", 0, rh_dispatch_op},
     {"POST", "/v1/optimize/promote", NULL, RM_EXACT, "optimize.promote", 0, rh_dispatch_op},
@@ -1725,12 +2067,9 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op_async},
     {"POST", "/v1/rules/generate", NULL, RM_EXACT, "rules.generate", 0, rh_dispatch_op_async},
     {"POST", "/v1/eval/run", NULL, RM_EXACT, "eval.run", 0, rh_dispatch_op_async},
-#if AIMEE_WITH_ROUNDTABLE
     {"POST", "/v1/delegate/aggregate", NULL, RM_EXACT, "delegate.aggregate", 0,
      rh_dispatch_op_async},
-    {"POST", "/v1/delegate/roundtable", NULL, RM_EXACT, "delegate.roundtable", 0,
-     rh_dispatch_op_async},
-#endif
+    {"POST", "/v1/roundtable/review", NULL, RM_EXACT, "roundtable.review", 0, rh_dispatch_op_async},
     {"POST", "/v1/dev/sweep", NULL, RM_EXACT, "dev.sweep", 0, rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */
@@ -1801,7 +2140,6 @@ static const http_route_t g_v1_routes[] = {
     {"DELETE", "/v1/role_templates/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
      rh_role_template_delete},
 
-#if AIMEE_WITH_ROUNDTABLE
     /* Named roundtable presets: read like personas, mutate as admin. The exact
      * POST /v1/roundtables/active (set active preset) precedes the prefix routes
      * so it is not captured as a preset name. */
@@ -1812,7 +2150,6 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_roundtable_show},
     {"PUT", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_put},
     {"DELETE", "/v1/roundtables/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_roundtable_delete},
-#endif
 
     /* Unified presence: list / attach / detach / persona / events are
      * session-scoped on the owner's own presence. */
@@ -1885,6 +2222,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
+     * requires a kernel-attested uid: principal, making this route UDS-only. */
+    {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_internal_forge_execute},
     {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
      rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
@@ -1953,13 +2294,7 @@ static const http_route_t *route_match(const char *method, const char *path, cha
       if (e->kind == RM_EXACT)
       {
          if (strcmp(path, e->path) == 0)
-         {
-#if AIMEE_WITH_ROUNDTABLE
-            if (e->op && !roundtable_operation_available(e->op))
-               continue;
-#endif
             return e;
-         }
          continue;
       }
       size_t plen = strlen(e->path);
@@ -1988,18 +2323,9 @@ static const http_route_t *route_match(const char *method, const char *path, cha
          memcpy(id_out, rest, idlen);
          id_out[idlen] = '\0';
       }
-#if AIMEE_WITH_ROUNDTABLE
-      if (e->op && !roundtable_operation_available(e->op))
-         continue;
-#endif
       return e;
    }
    return NULL;
-}
-
-int v1_route_available(const char *method, const char *path)
-{
-   return method && path && route_match(method, path, NULL, 0) != NULL;
 }
 
 /* Backing implementation for server_http_route_caps (declared earlier). */
@@ -2060,6 +2386,9 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
 {
    if (!method || !path || !resp || resp_cap <= 0)
       return err_json(resp, resp_cap, 400, "bad request");
+   if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
+       strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
+      return err_json(resp, resp_cap, 410, "Go WFE control plane owns this endpoint");
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)

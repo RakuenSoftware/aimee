@@ -6,8 +6,7 @@
  * because the find_tools/describe_tool discovery meta-tools (also defined here)
  * surface the full catalog on demand. Set it to "full" to present everything. */
 #include "cJSON.h"
-#include "aimee/protocols/mcp/mcp_tools.h"
-#include "aimee_features.h"
+#include "mcp_tools.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -30,9 +29,7 @@ static const char *const MCP_CORE_TOOLS[] = {
     "ast_grep_search", /* code intel */
     "git",             /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
-#if AIMEE_WITH_ROUNDTABLE
-    "ensemble_review", /* multi-agent */
-#endif
+    "roundtable_review", /* multi-agent */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */

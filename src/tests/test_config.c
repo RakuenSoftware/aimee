@@ -115,6 +115,13 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       assert(strcmp(cfg.provider, "claude") == 0);
+      /* Capability routing defaults ON: routing enforces the packet's required
+       * capabilities and minimum context window. Pinned explicitly so flipping
+       * it is a deliberate, reviewed change rather than an accident — with it
+       * off, agent_route_with_caps() degrades to cost-tier-only and capability
+       * is never consulted. */
+      assert(cfg.model_meta_capability_routing == 1);
+      assert(cfg.model_meta_refresh_minutes == 60);
       /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
       assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
       assert(cfg.kb_typed_facts_promote_threshold == 3);
@@ -165,6 +172,21 @@ int main(void)
       /* CSS style graph now defaults on so the read-only css signals/report work
        * out of the box (the indexer populates css_rules/css_declarations). */
       assert(cfg.css_style_graph_enabled == 1);
+      /* git co-change backfill defaults on: index scan seeds co_edited edges that
+       * blast radius already reads (incremental/idempotent). */
+      assert(cfg.code_cochange_git_enabled == 1);
+      assert(cfg.transport_kb_pool_enabled == 1);
+      assert(cfg.transport_server_keepalive_enabled == 1);
+      assert(cfg.transport_thinclient_gzip_enabled == 0);
+      assert(cfg.transport_kb_gzip_enabled == 0);
+      cJSON *rollback_root = cJSON_CreateObject();
+      cJSON *rollback_transport = cJSON_AddObjectToObject(rollback_root, "transport");
+      cJSON_AddBoolToObject(rollback_transport, "kb_pool_enabled", 0);
+      cJSON_AddBoolToObject(rollback_transport, "server_keepalive_enabled", 0);
+      config_parse_transport_section(&cfg, rollback_root);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      cJSON_Delete(rollback_root);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -209,6 +231,10 @@ int main(void)
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
       cfg.server_api_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      cfg.transport_kb_pool_enabled = 1;
+      cfg.transport_server_keepalive_enabled = 1;
+      cfg.transport_thinclient_gzip_enabled = 1;
+      cfg.transport_kb_gzip_enabled = 1;
       cfg.ingress_preinject_assembly_budget = 8192;
       cfg.ingress_max_raw_scans = 2;
       /* Per-workspace provider: a detached entry round-trips as {path,provider};
@@ -325,6 +351,9 @@ int main(void)
       /* css_style_graph now defaults on; set off to prove the opt-out round-trips
        * (default-on save-guard regression class). */
       cfg.css_style_graph_enabled = 0;
+      /* code_cochange_git defaults on; set off to prove the opt-out round-trips
+       * (default-on save-guard regression class). */
+      cfg.code_cochange_git_enabled = 0;
       /* audit_worm_enabled defaults off; set on to prove the opt-in persists
        * (regression: it was allowlist-settable but had no config_save/load path,
        * so an enabled deployment silently reverted to off on restart). */
@@ -406,7 +435,9 @@ int main(void)
       snprintf(cfg.proxy_token, sizeof(cfg.proxy_token), "ptok");
       cfg.max_background_processes = 9;
       cfg.model_meta_refresh_minutes = 15;
-      cfg.model_meta_capability_routing = 1;
+      /* Non-default value, so the round trip proves persistence rather than
+       * agreeing with the default by accident (capability_routing defaults ON). */
+      cfg.model_meta_capability_routing = 0;
       snprintf(cfg.search_backend, sizeof(cfg.search_backend), "searxng");
       cfg.search_max_results = 7;
       snprintf(cfg.search_searxng_url, sizeof(cfg.search_searxng_url), "http://sx:8888");
@@ -458,6 +489,10 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
+      assert(cfg2.transport_kb_pool_enabled == 1);
+      assert(cfg2.transport_server_keepalive_enabled == 1);
+      assert(cfg2.transport_thinclient_gzip_enabled == 1);
+      assert(cfg2.transport_kb_gzip_enabled == 1);
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
@@ -556,9 +591,10 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
-      assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
-      assert(cfg2.audit_worm_enabled == 1);       /* opt-in survives save/reload */
-      assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
+      assert(cfg2.css_style_graph_enabled == 0);   /* opt-out survives save/reload */
+      assert(cfg2.code_cochange_git_enabled == 0); /* opt-out survives save/reload */
+      assert(cfg2.audit_worm_enabled == 1);        /* opt-in survives save/reload */
+      assert(cfg2.css_render_command[0] == '\0');  /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
@@ -613,7 +649,7 @@ int main(void)
       assert(strcmp(cfg2.proxy_url, "http://proxy:3128") == 0);
       assert(strcmp(cfg2.proxy_token, "ptok") == 0);
       assert(cfg2.max_background_processes == 9);
-      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 1);
+      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 0);
       assert(strcmp(cfg2.search_backend, "searxng") == 0 && cfg2.search_max_results == 7);
       assert(strcmp(cfg2.search_searxng_url, "http://sx:8888") == 0);
       assert(cfg2.aux_enabled == 1 && strcmp(cfg2.aux_default_provider, "openai") == 0);

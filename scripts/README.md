@@ -41,7 +41,7 @@ The `lint` CI job also runs this check.
 Binary ownership is checked by `cd src && make check-linking`; that target
 verifies the process boundary:
 
-- `aimee-client` and `aimee-webchat` stay DB-free (`libsqlite3` and `libpq` absent).
+- `aimee-client` and `aimee-runtime-web` stay DB-free (`libsqlite3` and `libpq` absent).
 - `aimee-server` stays DB1-only (`libsqlite3` present, `libpq` absent, no
   DB2 symbols).
 - `aimee-kb` stays DB2-only (`libpq` present, `libsqlite3` absent, no

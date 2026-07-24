@@ -69,6 +69,10 @@ extern "C"
     * 0 if not running. */
    int kb_mtls_bound_port(void);
 
+   /* Snapshot bounded-listener occupancy for transport observability. Any
+    * output pointer may be NULL. */
+   void kb_mtls_connection_stats(int *limit_out, int *live_out, int *queued_out);
+
    /* Stop the mTLS listener and free its context. Safe when not running. */
    void kb_mtls_stop(void);
 
@@ -92,11 +96,25 @@ extern "C"
                                   const char *authorization, char *resp_out, size_t resp_cap,
                                   int *status_out);
 
-   int kb_tls_client_request_auth(const char *host, int port, const char *ca_cert_pem,
-                                  const char *client_cert_pem, const char *client_key_pem,
-                                  const char *method, const char *path, const char *body,
-                                  const char *authorization, char *resp_out, size_t resp_cap,
-                                  int *status_out);
+   typedef struct kb_tls_client_conn kb_tls_client_conn_t;
+
+   /* Reusable one-in-flight HTTP/1.1 client primitive. request() reads one
+    * strict Content-Length-framed response exactly and reports whether the
+    * connection remains reusable. */
+   kb_tls_client_conn_t *kb_tls_client_conn_open(const char *host, int port,
+                                                 const char *ca_cert_pem,
+                                                 const char *client_cert_pem,
+                                                 const char *client_key_pem);
+   kb_tls_client_conn_t *kb_tls_client_conn_open_ctx(const char *host, int port, SSL_CTX *ctx);
+   kb_tls_client_conn_t *kb_tls_client_conn_open_session(const char *host, int port, SSL_CTX *ctx,
+                                                         SSL_SESSION *session);
+   int kb_tls_client_conn_session_reused(const kb_tls_client_conn_t *conn);
+   SSL_SESSION *kb_tls_client_conn_get1_session(const kb_tls_client_conn_t *conn);
+   int kb_tls_client_conn_request(kb_tls_client_conn_t *conn, const char *method, const char *path,
+                                  const char *body, const char *authorization, int close_after,
+                                  char *resp_out, size_t resp_cap, int *status_out,
+                                  int *reusable_out);
+   void kb_tls_client_conn_close(kb_tls_client_conn_t *conn);
 
    /* TOFU bootstrap: fetch the kb's CA certificate from GET /v1/enroll/ca and
     * trust it ONLY if its sha256 fingerprint equals `expected_fp_hex` (the value

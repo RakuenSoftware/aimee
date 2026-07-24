@@ -2402,6 +2402,10 @@ int handle_audit_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* handle_audit_captures / handle_audit_replay (the /v1/audit capture-replay
+ * routes) live in server/server_audit_replay_routes.c — split out to keep this
+ * file under the line cap. */
+
 /* POST /v1/audit/checkpoint: append a checkpoint committing the current chain head
  * under the chain-key MAC, bounding the unattested tail. */
 int handle_audit_checkpoint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

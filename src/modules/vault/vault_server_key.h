@@ -1,6 +1,7 @@
 #ifndef DEC_VAULT_SERVER_KEY_H
 #define DEC_VAULT_SERVER_KEY_H 1
 
+#include <stddef.h>
 #include <stdint.h>
 #include "vault_crypto.h" /* VAULT_KEK_LEN */
 
@@ -41,7 +42,8 @@ int vault_server_kek(uint8_t kek[VAULT_KEK_LEN]);
 
 /* Test seam: drop the cached server KEK so a test that re-points
  * config_default_dir at a fresh temp dir re-derives from that dir's master key.
- * Not for production callers. */
+ * Not for production callers. This is also a local seal transition: it advances
+ * the use generation and invalidates durable-epoch synchronization. */
 void vault_server_key_reset_for_test(void);
 
 /* Rotate the `.server-master.key` (D13). Mint a fresh master key, derive the new
@@ -89,5 +91,115 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
 int vault_is_sealed(void);
 int vault_unseal(const void *params, size_t len);
 int vault_seal(void);
+
+/* Secret-free status of the selected custody provider's process-local state.
+ * The query performs no provider/backend I/O and spends at most 50ms acquiring
+ * provider-local locks.  UNAVAILABLE means the selected provider has no status
+ * seam, its context cannot be read in time, or the process is fork-invalid.
+ * MALFORMED is reserved for internally contradictory local state. */
+typedef enum
+{
+   VAULT_CUSTODY_LOCAL_AVAILABLE_SEALED = 0,
+   VAULT_CUSTODY_LOCAL_AVAILABLE_UNSEALED = 1,
+   VAULT_CUSTODY_LOCAL_UNAVAILABLE = 2,
+   VAULT_CUSTODY_LOCAL_MALFORMED = 3,
+} vault_custody_local_status_t;
+
+vault_custody_local_status_t vault_custody_selected_local_status(void);
+
+/* Closed result of a root-local custody authorization operation.  These values
+ * are deliberately not provider return codes: callers must never infer a bad
+ * credential by parsing ESYS/KMS/PKCS#11 prose. */
+typedef enum
+{
+   VAULT_CUSTODY_AUTHORIZED = 0,
+   VAULT_CUSTODY_AUTH_WRONG_SECRET = 1,
+   VAULT_CUSTODY_AUTH_BACKEND_UNAVAILABLE = 2,
+   VAULT_CUSTODY_AUTH_INTEGRITY_FAILURE = 3,
+   VAULT_CUSTODY_AUTH_UNSUPPORTED = 4,
+} vault_custody_auth_result_t;
+
+#define VAULT_CUSTODY_AUTH_SECRET_MAX 4096U
+
+/* Read-only live authorization preflight for the selected provider.  The TPM2
+ * implementation authenticates the configured NV counter, verifies its public
+ * identity/attributes and current value, and proves that the active blob is
+ * PolicyNV-bound to expected_generation.  It never unseals or mutates NV.
+ * expected_generation must be positive. */
+vault_custody_auth_result_t
+vault_custody_selected_authorization_preflight(const void *secret, size_t secret_len,
+                                               uint64_t expected_generation);
+
+/* Authenticate and discover the active TPM PolicyNV generation in one live,
+ * read-only proof.  *generation is zeroed on every non-authorized result and is
+ * positive only when the canonical NV counter and active blob agree exactly. */
+vault_custody_auth_result_t
+vault_custody_selected_authorization_preflight_current(const void *secret, size_t secret_len,
+                                                       uint64_t *generation);
+
+/* Anchor-authoritative per-key high-water operations (P7 §8). Providers that
+ * do not supply the complete signed-HWM seam fail closed; there is deliberately
+ * no database or process-local fallback. Returned attestations have already
+ * been cryptographically verified by the provider. */
+int vault_hwm_read(const char *key_id, uint64_t *version, uint8_t *att, size_t att_cap,
+                   size_t *att_len);
+int vault_hwm_cas(const char *key_id, uint64_t expected, uint64_t next, uint8_t *att,
+                  size_t att_cap, size_t *att_len);
+int vault_hwm_verify(const char *key_id, uint64_t version, const uint8_t *att, size_t att_len);
+
+/* Local seal-generation guard for synchronous use-in-place. Snapshot before durable
+ * admission, then begin immediately before KEK access. A successful begin holds a
+ * shared guard until vault_use_end; seal takes the exclusive side and advances the
+ * generation, so an admission cannot cross a seal/unseal cycle. */
+uint64_t vault_use_epoch_snapshot(void);
+int vault_use_begin(uint64_t expected_epoch, uint64_t admitted_primary_epoch,
+                    uint8_t kek[VAULT_KEK_LEN]);
+void vault_use_end(void);
+
+/* Exclusive maintenance guard used by crash recovery and DEK re-wrap. The
+ * handle is opaque and is validated against an internal registry before any
+ * state is accessed. A successful begin disables cancellation for the owning
+ * thread and drains all operational readers. */
+typedef struct vault_maintenance_guard vault_maintenance_guard_t;
+typedef int (*vault_maintenance_kek_fn)(const uint8_t kek[VAULT_KEK_LEN], void *ctx);
+
+enum
+{
+   VAULT_MAINTENANCE_OK = 0,
+   VAULT_MAINTENANCE_ERROR = -1,
+   VAULT_MAINTENANCE_INVALID = -2,
+   VAULT_MAINTENANCE_BUSY = -3,
+   VAULT_MAINTENANCE_WRONG_OWNER = -4,
+   VAULT_MAINTENANCE_EPOCH = -5,
+   VAULT_MAINTENANCE_SEALED = -6,
+};
+
+int vault_maintenance_guard_begin(vault_maintenance_guard_t **guard);
+int vault_maintenance_guard_sync_primary_epoch(vault_maintenance_guard_t *guard,
+                                               uint64_t primary_epoch);
+int vault_maintenance_guard_with_active_kek(vault_maintenance_guard_t *guard,
+                                            vault_maintenance_kek_fn callback, void *ctx);
+int vault_maintenance_guard_unseal(vault_maintenance_guard_t *guard, const void *params,
+                                   size_t len);
+vault_custody_auth_result_t vault_maintenance_guard_unseal_typed(vault_maintenance_guard_t *guard,
+                                                                 const void *params, size_t len);
+int vault_maintenance_guard_seal(vault_maintenance_guard_t *guard);
+int vault_maintenance_guard_end(vault_maintenance_guard_t **guard);
+
+/* Release an exact live guard while retaining an authenticated provider KEK.
+ * This is intentionally separate from the ordinary seal-on-end primitive.  It
+ * succeeds only for an unsealed provider whose KEK can be fetched, after the
+ * primary epoch has been synchronized to the exact committed open epoch.  Any
+ * failed precondition for an otherwise valid owned guard takes the ordinary
+ * fail-closed sealing path and consumes the guard. */
+int vault_maintenance_guard_end_operational(vault_maintenance_guard_t **guard,
+                                            uint64_t committed_primary_epoch);
+
+/* Startup-only synchronization with the durable kb_control.seal_epoch. No
+ * maintenance guard or key use may be active. The selected provider may already
+ * be unsealed by its startup login (PKCS#11/KMS); the caller is responsible for
+ * first forcing a seal when durable control says sealed. Exact replay is
+ * idempotent; a differing second initialization fails. */
+int vault_primary_epoch_initialize(uint64_t primary_epoch);
 
 #endif /* DEC_VAULT_SERVER_KEY_H */

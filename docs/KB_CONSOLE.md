@@ -2,7 +2,7 @@
 
 `kb-console` is a standalone Go thin-client that fronts a shared **aimee-kb**'s
 `/v1` surface directly, so a company-wide KB is administrable from a browser with
-**no colocated `aimee-server`**. It mirrors `aimee-webchat`'s shape (auto-TLS
+**no colocated `aimee-server`**. It mirrors `aimee-runtime-web`'s shape (auto-TLS
 HTTPS, SQLite sessions, an `/api/*` proxy, a vendored-SmoothGUI single-file SPA)
 but uses **no PAM**: login is OIDC, and it holds a scoped credential the kb
 enforces server-side.

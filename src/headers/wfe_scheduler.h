@@ -19,9 +19,9 @@ void wfe_scheduler_notify(void);
 /* Stop the scheduler thread. Idempotent; safe at server_shutdown. */
 void wfe_scheduler_shutdown(void);
 
-/* Drive every active autonomous work item one autonomy pass, synchronously, on
- * the calling thread. The background loop calls this; exposed for deterministic
- * testing (and a synchronous-drive option). */
+/* Drive every active autonomous work item from one snapshot, synchronously, on
+ * the calling thread. Exposed for deterministic tests; the production background
+ * loop uses a live capacity-aware dispatcher so new arrivals can fill spare slots. */
 void wfe_scheduler_run_once(void);
 
 #endif /* DEC_WFE_SCHEDULER_H */

@@ -24,13 +24,23 @@
  * outputs are OPENSSL_cleanse'd. Callers MUST treat -1 as fatal for the op and
  * never use a partially-written output. */
 
-#define VAULT_ROOT_KEY_LEN    32 /* client-held high-entropy root key */
-#define VAULT_KEK_LEN         32 /* HKDF-derived key-encryption key */
-#define VAULT_DEK_LEN         32 /* per-credential data-encryption key */
-#define VAULT_GCM_NONCE_LEN   12 /* 96-bit AES-GCM nonce */
-#define VAULT_GCM_TAG_LEN     16 /* AES-GCM authentication tag */
-#define VAULT_WRAPPED_DEK_LEN 40 /* RFC 3394 wrap of a 32-byte key = 40 bytes */
-#define VAULT_SALT_LEN        16 /* per-principal HKDF salt */
+#define VAULT_ROOT_KEY_LEN     32   /* client-held high-entropy root key */
+#define VAULT_KEK_LEN          32   /* HKDF-derived key-encryption key */
+#define VAULT_DEK_LEN          32   /* per-credential data-encryption key */
+#define VAULT_GCM_NONCE_LEN    12   /* 96-bit AES-GCM nonce */
+#define VAULT_GCM_TAG_LEN      16   /* AES-GCM authentication tag */
+#define VAULT_WRAPPED_DEK_LEN  40   /* RFC 3394 wrap of a 32-byte key = 40 bytes */
+#define VAULT_SALT_LEN         16   /* per-principal HKDF salt */
+#define VAULT_ENVELOPE_AAD_MAX 1200 /* v2 domain + lengths + max kb slot */
+
+/* Canonical kb-envelope AAD. v2 is injective for all permitted identifiers:
+ * domain || NUL || format || u32be(len)+bytes for principal/agent/cred ||
+ * u64be(version). The legacy builder is decrypt-only and refuses delimiter-
+ * bearing fields, for which the old text encoding was ambiguous. */
+int vault_aad_build_v2(const char *principal, const char *agent, const char *cred, int64_t version,
+                       uint8_t *out, size_t cap, size_t *out_len);
+int vault_aad_build_v1_safe(const char *principal, const char *agent, const char *cred,
+                            int64_t version, uint8_t *out, size_t cap, size_t *out_len);
 
 /* The HKDF `info` label + recorded version tags for the vault-file header so the
  * derivation can evolve without ambiguity. uid: principals use HKDF over a

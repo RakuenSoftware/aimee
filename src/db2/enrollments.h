@@ -18,13 +18,23 @@ typedef struct
    char last_seen_at[32];
    char expires_at[32];
    char revoked_at[32];
+   char authority_id[33]; /* renewal-stable random 128-bit lowercase hex */
    int legacy;
 } db2_enrollment_row_t;
 
 /* Insert (or upsert on fingerprint) a redeemed-cert record. legacy!=0 marks a
  * cert backfilled at first use rather than at redeem time. Returns 0, else -1. */
-int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
-                          const char *expires_at, int legacy, int64_t *out_id);
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *cert_issuer,
+                          const char *cert_serial_norm, const char *expires_at, int legacy,
+                          int64_t *out_id);
+
+/* Atomically add a renewed certificate to the old certificate's stable
+ * authority lineage, clone all canonical-principal grants, and append WORM
+ * evidence. Returns 0, or -1 with no partial state. */
+int db2_enrollment_renew(const char *old_fingerprint, const char *old_issuer,
+                         const char *old_serial_norm, const char *scope,
+                         const char *new_fingerprint, const char *new_issuer,
+                         const char *new_serial_norm, int64_t *out_id);
 
 /* List up to `max` rows, most-recent-first. Returns the count written, or -1. */
 int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max);
@@ -42,6 +52,17 @@ int db2_enrollment_is_revoked(const char *fingerprint);
  * stops authorizing on the next request even over a keep-alive connection.
  * Returns 1 revoked, 0 active/unknown. */
 int db2_enrollment_is_revoked_by_key(const char *cert_issuer, const char *cert_serial_norm);
+
+/* Primary-authoritative per-request status by immutable certificate key.
+ * Returns 1 only for an enrolled active identity, 0 for revoked or unknown,
+ * and -1 when the authority cannot be queried or returns an invalid state.
+ * Keep-alive/pooled request paths must require a return value of exactly 1. */
+int db2_enrollment_is_active_by_key(const char *cert_issuer, const char *cert_serial_norm);
+
+/* Resolve the stable egress authority for one exact active certificate instance.
+ * Returns 0 and writes 32 hex chars, 1 when not active/enrolled, or -1 on error. */
+int db2_enrollment_authority_resolve(const char *fingerprint, const char *cert_issuer,
+                                     const char *cert_serial_norm, char out_authority[33]);
 
 /* Eager one-time backfill of cert_issuer/cert_serial_norm on legacy enrollments
  * (P1 I5), so revocation-by-key has no key-less window. Returns rows updated or -1. */

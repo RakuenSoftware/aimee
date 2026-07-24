@@ -1,4 +1,10 @@
-FROM debian:bookworm-slim AS build
+# Debian 13 (trixie) for libpq 17. The kb links db2/vault_operator_status_runtime.c,
+# which uses the PostgreSQL 17 async-cancel API (PQcancelCreate / PGcancelConn /
+# PQcancelPoll). Bookworm ships libpq 15, where those symbols do not exist, so the
+# kb build failed here with -Werror=implicit-function-declaration while the native
+# CI build stayed green -- `make all server` does not compile KB_SRCS, so this
+# image was the only place that file was ever built.
+FROM debian:trixie-slim AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -25,7 +31,9 @@ ARG AIMEE_VERSION=""
 RUN sh scripts/fetch-treesitter.sh \
     && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-FROM debian:bookworm-slim
+# Runtime must match the build stage: libpq5 here has to provide the same
+# PostgreSQL 17 symbols the kb was linked against.
+FROM debian:trixie-slim
 
 # python3 (stdlib only) runs the sidecar clients the kb popens: embed-remote.py
 # (-> embedder service), llm-chat.py + learning-synthesize.py + curator-extract.py
@@ -60,6 +68,7 @@ ENV AIMEE_KB_HTTP_BIND=1
 
 RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 
 # Sidecar clients (the LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \

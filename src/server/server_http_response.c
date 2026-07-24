@@ -31,7 +31,8 @@
 #include "presence.h"
 #include "request_context.h"
 #include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
-#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "http_content_encoding.h"
+#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -44,6 +45,36 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+#define SHTTP_RATE_WINDOW_SECS 60
+
+int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
+{
+   if (!st || limit_per_min <= 0)
+      return 0;
+   if (now - st->window_start >= SHTTP_RATE_WINDOW_SECS || now < st->window_start)
+   {
+      st->window_start = now;
+      st->count = 0;
+   }
+   if (st->count < limit_per_min)
+   {
+      st->count++;
+      return 0;
+   }
+   int retry = (int)(SHTTP_RATE_WINDOW_SECS - (now - st->window_start));
+   return retry > 0 ? retry : 1;
+}
+
+void server_http_request_id(const char *provided, int pid, unsigned long seq, char *buf, size_t n)
+{
+   if (!buf || n == 0)
+      return;
+   if (provided && provided[0])
+      snprintf(buf, n, "%s", provided);
+   else
+      snprintf(buf, n, "%d-%lu", pid, seq);
+}
 #include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
@@ -92,6 +123,8 @@ void send_response(int fd, int status, const char *body, const char *request_id)
                         : status == 403 ? "Forbidden"
                         : status == 404 ? "Not Found"
                         : status == 410 ? "Gone"
+                        : status == 413 ? "Payload Too Large"
+                        : status == 415 ? "Unsupported Media Type"
                         : status == 429 ? "Too Many Requests"
                         : status == 500 ? "Internal Server Error"
                         : status == 503 ? "Service Unavailable"
@@ -102,15 +135,33 @@ void send_response(int fd, int status, const char *body, const char *request_id)
    retrieval_event_header(reh, sizeof(reh));
    char rah[48];
    retry_after_header(rah, sizeof(rah));
-   char head[480];
-   int blen = body ? (int)strlen(body) : 0;
+   char head[560];
+   size_t blen = body ? strlen(body) : 0;
+   unsigned char *compressed = NULL;
+   size_t wire_len = blen;
+   const void *wire_body = body;
+   if (server_http_gzip_peek() && blen >= 4096 &&
+       http_gzip_compress(body, blen, &compressed, &wire_len) == 0 && wire_len < blen &&
+       (blen <= 1024 || (blen - 1024 + 49) / 50 <= wire_len))
+      wire_body = compressed;
+   else
+   {
+      free(compressed);
+      compressed = NULL;
+      wire_len = blen;
+   }
+   const char *encoding = compressed ? "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n" : "";
+   const char *request_encoding =
+       server_http_gzip_peek() ? "Accept-Request-Encoding: gzip\r\n" : "";
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\n%s%s%sConnection: close\r\n\r\n",
-                       status, reason, blen, rid, reh, rah);
+                       "Content-Length: %zu\r\n%s%s%s%s%sConnection: %s\r\n\r\n",
+                       status, reason, wire_len, rid, reh, rah, encoding, request_encoding,
+                       server_http_keepalive_peek() ? "keep-alive" : "close");
    write_all_fd(fd, head, hlen);
-   if (blen > 0)
-      write_all_fd(fd, body, blen);
+   if (wire_len > 0)
+      write_all_fd(fd, wire_body, (int)wire_len);
+   free(compressed);
 }
 
 /* 429 Too Many Requests with a Retry-After header (seconds until the rate
@@ -129,4 +180,33 @@ void send_rate_limited(int fd, int retry_after, const char *request_id)
                        retry_after, blen, rid);
    write_all_fd(fd, head, hlen);
    write_all_fd(fd, body, blen);
+}
+static _Thread_local int tl_keepalive = 0;
+static _Thread_local int tl_gzip = 0;
+
+void server_http_keepalive_set(int enabled)
+{
+   tl_keepalive = enabled ? 1 : 0;
+}
+
+int server_http_keepalive_peek(void)
+{
+   return tl_keepalive;
+}
+
+int server_http_keepalive_take(void)
+{
+   int v = tl_keepalive;
+   tl_keepalive = 0;
+   return v;
+}
+
+void server_http_gzip_set(int enabled)
+{
+   tl_gzip = enabled ? 1 : 0;
+}
+
+int server_http_gzip_peek(void)
+{
+   return tl_gzip;
 }

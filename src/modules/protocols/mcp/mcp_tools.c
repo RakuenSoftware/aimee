@@ -1,13 +1,10 @@
 /* mcp_tools.c: shared MCP tool definitions */
 #include "cJSON.h"
-#include "aimee/protocols/mcp/mcp_client_registry.h"
+#include "mcp_client_registry.h"
 #include "mcp_skill_tools.h"
-#include "aimee/protocols/mcp/mcp_tools.h"
+#include "mcp_tools.h"
 #include "mcp_tools_gateway.h"
-#include "aimee_features.h"
-#if AIMEE_WITH_PLUGIN_LOADER
-#include "aimee/plugin-loader/plugin.h"
-#endif
+#include "plugin.h"
 #include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>
@@ -626,20 +623,24 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                           "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
-#if AIMEE_WITH_ROUNDTABLE
-   /* ensemble_review */
+   /* roundtable_review */
    {
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new(
-              "ensemble_review",
-              "Run the multi-agent roundtable in review mode against caller-provided diff "
-              "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
-              "describe items_round while artifact is artifact_round (the best round); "
-              "compare those fields before assuming the findings match the artifact.",
+              "roundtable_review",
+              "Review a supplied artifact with the configured Go roundtable. Every seat is an "
+              "ordinary delegate request; the result is returned after synthesis.",
               cJSON_Parse("{\"type\":\"object\",\"properties\":{"
                           "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
                           "under review.\",\"minLength\":20},"
+                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
+                          "original request used to detect goal drift.\"},"
+                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                          "artifact; defaults to frozen_diff.\"},"
+                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                          "available to delegate tools.\"},"
                           "\"brief\":{\"description\":\"Optional directed review brief as a string "
                           "or object with focus/fixes/invariants/questions string arrays.\","
                           "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
@@ -648,10 +649,8 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                           "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
                           "\"string\"}}}}]},"
-                          "\"rounds\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":16,"
-                          "\"description\":\"Max review rounds.\"},"
-                          "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
-                          "\"description\":\"Round execution mode.\"}},"
+                          "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
+                          "roundtable preset to use. Omit to use the configured default.\"}},"
                           "\"required\":[\"diff\"]}")));
    }
 
@@ -763,8 +762,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                                  "\"pipeline_id\":{\"type\":\"integer\",\"description\":\"Pipeline "
                                  "id.\"}},\"required\":[\"pipeline_id\"]}")));
    }
-
-#endif
 
    /* preview_blast_radius */
    {
@@ -1044,7 +1041,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       } git_params[] = {
           {"action", "string",
            "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/watch/merge_status/wait), stash "
+           "(create/view/list/edit/checks/merge_status/merge), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
            "(run/check/conflicts/env/prepare-pr/status)."},
           {"message", "string",
@@ -1065,7 +1062,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"title", "string", "pr: title (create/edit)."},
           {"body", "string", "pr: body (create/edit)."},
           {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
-          {"wait", "boolean", "pr checks: poll until checks settle."},
+          {"wait", "boolean",
+           "Deprecated for pr checks: blocking waits are rejected; poll snapshots instead."},
+          {"auto", "boolean",
+           "pr merge: enable GitHub auto-merge so protected moving branches merge when ready."},
+          {"merge_method", "string", "pr merge: merge / squash / rebase (default merge)."},
+          {"expected_head_sha", "string", "pr merge: refuse if the head SHA has moved."},
           {"state", "string", "issue: filter open/closed/all (default open)."},
           {"url", "string", "clone: repository URL."},
           {"path", "string", "clone: local path; verify: repo path."},
@@ -1726,7 +1728,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
    if (collapse)
       mcp_collapse_families(tools);
 
-#if AIMEE_WITH_PLUGIN_LOADER
    /* Plugin tools: load registry + project-local, add enabled tools */
    {
       plugin_t plugins[PLUGIN_MAX_PLUGINS];
@@ -1768,7 +1769,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
          cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
       }
    }
-#endif
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))

@@ -37,9 +37,10 @@ CREATE TABLE IF NOT EXISTS kb_audit_event (  seq INTEGER PRIMARY KEY,  ts TEXT N
 CREATE TRIGGER IF NOT EXISTS kb_audit_no_update BEFORE UPDATE ON kb_audit_event BEGIN SELECT RAISE(ABORT, 'WORM: kb_audit_event is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS kb_audit_no_delete BEFORE DELETE ON kb_audit_event BEGIN SELECT RAISE(ABORT, 'WORM: kb_audit_event is append-only'); END;
 CREATE TABLE IF NOT EXISTS anti_patterns (  id INTEGER PRIMARY KEY AUTOINCREMENT,  pattern TEXT NOT NULL,  description TEXT NOT NULL DEFAULT '',  source TEXT NOT NULL DEFAULT '',  source_ref TEXT NOT NULL DEFAULT '',  hit_count INTEGER NOT NULL DEFAULT 0,  confidence REAL NOT NULL DEFAULT 1.0);
-CREATE TABLE IF NOT EXISTS kb_enrollments (  id INTEGER PRIMARY KEY AUTOINCREMENT,  scope TEXT NOT NULL DEFAULT '',  fingerprint TEXT NOT NULL,  serial TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'active',  issued_at TEXT NOT NULL DEFAULT '',  last_seen_at TEXT NOT NULL DEFAULT '',  expires_at TEXT NOT NULL DEFAULT '',  revoked_at TEXT NOT NULL DEFAULT '',  legacy INTEGER NOT NULL DEFAULT 0,  cert_issuer TEXT NOT NULL DEFAULT '',  cert_serial_norm TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_enrollments (  id INTEGER PRIMARY KEY AUTOINCREMENT,  scope TEXT NOT NULL DEFAULT '',  fingerprint TEXT NOT NULL,  serial TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'active',  issued_at TEXT NOT NULL DEFAULT '',  last_seen_at TEXT NOT NULL DEFAULT '',  expires_at TEXT NOT NULL DEFAULT '',  revoked_at TEXT NOT NULL DEFAULT '',  legacy INTEGER NOT NULL DEFAULT 0,  cert_issuer TEXT NOT NULL DEFAULT '',  cert_serial_norm TEXT NOT NULL DEFAULT '', authority_id TEXT NOT NULL DEFAULT '');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kbenroll_fp ON kb_enrollments(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_kbenroll_scope ON kb_enrollments(scope);
+CREATE INDEX IF NOT EXISTS idx_kbenroll_authority ON kb_enrollments(authority_id);
 -- P1 tenancy tables — SQLite shim mirror (plain tables only; RLS/roles/functions
 -- are Postgres-only. Tenant-scoped db2 entrypoints hard-fail on the shim via the
 -- C guard db2_tenant_require_pg(), so the shim never enforces tenancy — these
@@ -414,10 +415,49 @@ CREATE INDEX IF NOT EXISTS idx_typed_facts_relation ON typed_facts(relation, act
 -- and SECURITY DEFINER envelope machinery is Postgres-only, so the shim carries no
 -- vault definer functions — the pg backend requires a real Postgres to operate).
 CREATE TABLE IF NOT EXISTS org_vault_salt (  principal TEXT PRIMARY KEY,  salt BLOB NOT NULL,  kek_check BLOB NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS kb_vault_control (  singleton INTEGER PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),  sealed INTEGER NOT NULL DEFAULT 0,  seal_epoch INTEGER NOT NULL DEFAULT 1 CHECK (seal_epoch > 0),  maintenance_kind TEXT NOT NULL DEFAULT '',  maintenance_id TEXT NOT NULL DEFAULT '',  fencing_token INTEGER NOT NULL DEFAULT 1 CHECK (fencing_token > 0),  last_opened_rewrap_fence INTEGER NOT NULL DEFAULT 0 CHECK (last_opened_rewrap_fence >= 0 AND last_opened_rewrap_fence <= fencing_token),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  CHECK ((maintenance_kind = '') = (maintenance_id = '')),  CHECK (sealed = 1 OR (maintenance_kind = '' AND maintenance_id = '')));
+INSERT OR IGNORE INTO kb_vault_control(singleton) VALUES (1);
 CREATE TABLE IF NOT EXISTS org_vault_secret (  id INTEGER PRIMARY KEY AUTOINCREMENT,  principal TEXT NOT NULL,  team_id INTEGER,  agent TEXT NOT NULL DEFAULT '',  cred TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL,  wrapped_dek BLOB NOT NULL,  nonce BLOB NOT NULL,  ciphertext BLOB NOT NULL,  tag BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(principal, agent, cred, version));
 CREATE INDEX IF NOT EXISTS idx_org_vault_secret_team ON org_vault_secret(team_id);
 CREATE INDEX IF NOT EXISTS idx_org_vault_secret_slot ON org_vault_secret(principal, agent, cred);
+CREATE TABLE IF NOT EXISTS org_vault_key_use_intent (team_id INTEGER NOT NULL, authenticated_origin TEXT NOT NULL, use_id TEXT NOT NULL, key_id TEXT NOT NULL, principal TEXT NOT NULL, agent TEXT NOT NULL DEFAULT '', cred TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL, request_digest TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, operation TEXT NOT NULL, seal_epoch INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(team_id, authenticated_origin, use_id));
+-- P5-B1 status authority persistence shape only. All fixed-slot admission,
+-- WORM, seal and role enforcement remains PostgreSQL-only and fails closed on
+-- the SQLite shim.
+CREATE TABLE IF NOT EXISTS kb_management_status_key (singleton INTEGER PRIMARY KEY, bootstrap_id TEXT NOT NULL UNIQUE, custody_key_id TEXT NOT NULL UNIQUE, wire_key_id TEXT NOT NULL UNIQUE, public_key BLOB NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS kb_management_status_key_use_intent (use_id TEXT PRIMARY KEY, custody_key_id TEXT NOT NULL, wire_key_id TEXT NOT NULL, version INTEGER NOT NULL, request_digest TEXT NOT NULL, hwm_attestation_digest TEXT NOT NULL, caller_issuer TEXT NOT NULL, caller_serial_norm TEXT NOT NULL, caller_fingerprint TEXT NOT NULL, target_server_id TEXT NOT NULL, target_mgmt_fingerprint TEXT NOT NULL, revocation_generation INTEGER NOT NULL, seal_epoch INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- P5-C2a management-token trust-root persistence shape only. All fixed-slot
+-- transitions, custody and WORM enforcement are PostgreSQL-only.
+CREATE TABLE IF NOT EXISTS kb_management_token_root (root_kind TEXT PRIMARY KEY, bootstrap_id TEXT NOT NULL UNIQUE, custody_key_id TEXT NOT NULL UNIQUE, wire_id TEXT NOT NULL UNIQUE, public_key BLOB NOT NULL, public_exponent BLOB NOT NULL, public_digest BLOB NOT NULL, jwk_digest BLOB NOT NULL, current_version INTEGER NOT NULL DEFAULT 1, initial_seal_epoch INTEGER NOT NULL, v1_envelope_digest BLOB NOT NULL, v2_envelope_digest BLOB NOT NULL, hwm2_attestation_digest BLOB, enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_root (singleton INTEGER PRIMARY KEY, custody_key_id TEXT NOT NULL UNIQUE, helper TEXT NOT NULL, verifier_domain TEXT NOT NULL, identity_digest BLOB NOT NULL, hwm1_attestation BLOB NOT NULL, hwm1_attestation_digest BLOB NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS kb_management_token_root_vault_permit (backend_pid INTEGER NOT NULL, transaction_id INTEGER NOT NULL, root_kind TEXT NOT NULL, PRIMARY KEY(backend_pid,transaction_id,root_kind));
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_candidate (generation INTEGER PRIMARY KEY, candidate_id TEXT NOT NULL UNIQUE, phase TEXT NOT NULL, valid_from INTEGER NOT NULL, valid_until INTEGER NOT NULL, previous_manifest_sha256 BLOB NOT NULL, jwks_bytes BLOB NOT NULL, jwks_sha256 BLOB NOT NULL, payload_bytes BLOB NOT NULL, payload_sha256 BLOB NOT NULL, envelope_bytes BLOB NOT NULL, envelope_sha256 BLOB NOT NULL, manifest_sha256 BLOB NOT NULL, signature BLOB NOT NULL, token_wire_id TEXT NOT NULL, token_public_digest BLOB NOT NULL, token_jwk_digest BLOB NOT NULL, manifest_wire_id TEXT NOT NULL, manifest_public_digest BLOB NOT NULL, publication_identity_digest BLOB NOT NULL, hwm1_attestation_digest BLOB NOT NULL, hwm2_attestation_digest BLOB, seal_epoch INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), finalized_at TEXT);
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_generation (generation INTEGER PRIMARY KEY, candidate_id TEXT NOT NULL UNIQUE, valid_from INTEGER NOT NULL, valid_until INTEGER NOT NULL, previous_manifest_sha256 BLOB NOT NULL, jwks_bytes BLOB NOT NULL, payload_bytes BLOB NOT NULL, envelope_bytes BLOB NOT NULL, envelope_sha256 BLOB NOT NULL, manifest_sha256 BLOB NOT NULL, jwks_sha256 BLOB NOT NULL, payload_sha256 BLOB NOT NULL, signature BLOB NOT NULL, manifest_wire_id TEXT NOT NULL, manifest_public_digest BLOB NOT NULL, token_wire_id TEXT NOT NULL, token_public_digest BLOB NOT NULL, token_jwk_digest BLOB NOT NULL, publication_identity_digest BLOB NOT NULL, hwm1_attestation_digest BLOB NOT NULL, hwm2_attestation_digest BLOB NOT NULL, seal_epoch INTEGER NOT NULL, finalized_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_registry (singleton INTEGER PRIMARY KEY, current_generation INTEGER NOT NULL, candidate_id TEXT NOT NULL UNIQUE, manifest_sha256 BLOB NOT NULL, envelope_sha256 BLOB NOT NULL, hwm2_attestation_digest BLOB NOT NULL, finalized_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS kb_management_jwks_manifest_key_use_intent (use_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, candidate_id TEXT NOT NULL, custody_key_id TEXT NOT NULL, manifest_wire_id TEXT NOT NULL, version INTEGER NOT NULL, payload_sha256 BLOB NOT NULL, hwm_attestation_digest BLOB NOT NULL, seal_epoch INTEGER NOT NULL, purpose TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(generation,candidate_id,seal_epoch));
+CREATE TABLE IF NOT EXISTS kb_management_jwks_publication_permit (backend_pid INTEGER NOT NULL, transaction_id INTEGER NOT NULL, operation TEXT NOT NULL, PRIMARY KEY(backend_pid,transaction_id,operation));
 CREATE TABLE IF NOT EXISTS org_vault_current (  principal TEXT NOT NULL,  agent TEXT NOT NULL DEFAULT '',  cred TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (principal, agent, cred));
+CREATE TABLE IF NOT EXISTS org_vault_rotation (  id INTEGER PRIMARY KEY AUTOINCREMENT,  key_id TEXT NOT NULL,  principal TEXT NOT NULL,  team_id INTEGER,  agent TEXT NOT NULL DEFAULT '',  cred TEXT NOT NULL DEFAULT '',  from_version INTEGER NOT NULL,  to_version INTEGER NOT NULL,  state TEXT NOT NULL,  compromise INTEGER NOT NULL DEFAULT 0,  hwm_attestation BLOB,  old_vendor_ref TEXT NOT NULL DEFAULT '',  new_vendor_ref TEXT NOT NULL DEFAULT '',  revoke_receipt TEXT NOT NULL DEFAULT '',  failure_phase TEXT NOT NULL DEFAULT '',  claim_owner TEXT NOT NULL DEFAULT '',  claim_token INTEGER NOT NULL DEFAULT 0,  claim_until TEXT,  last_error TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(principal, agent, cred, to_version));
+
+-- P7-reseal-d1 whole-vault re-wrap persistence (sqlite shim: columns only).
+-- The fenced transaction API, RLS, WORM triggers, and promotion machinery are
+-- PostgreSQL-only; production callers must fail closed on this shim.
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_operation (  operation_id TEXT PRIMARY KEY,  request_id TEXT NOT NULL UNIQUE,  actor TEXT NOT NULL,  state TEXT NOT NULL,  seal_epoch INTEGER NOT NULL,  fencing_token INTEGER NOT NULL,  old_generation INTEGER NOT NULL,  new_generation INTEGER NOT NULL,  receipt BLOB,  receipt_digest BLOB,  secret_count INTEGER NOT NULL DEFAULT 0,  check_count INTEGER NOT NULL DEFAULT 0,  inventory_digest BLOB,  stage_digest BLOB,  failure_class TEXT NOT NULL DEFAULT '',  failure_from_state TEXT,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+DROP INDEX IF EXISTS idx_kb_vault_rewrap_one_active;
+CREATE UNIQUE INDEX idx_kb_vault_rewrap_one_active ON kb_vault_rewrap_operation((1)) WHERE state NOT IN ('aborted','recovery_required','completed');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_vault_rewrap_fencing_token ON kb_vault_rewrap_operation(fencing_token);
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_dek_stage (  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,  source_id INTEGER NOT NULL,  principal TEXT NOT NULL,  agent TEXT NOT NULL,  cred TEXT NOT NULL,  version INTEGER NOT NULL,  source_digest BLOB NOT NULL,  new_wrapped_dek BLOB NOT NULL,  PRIMARY KEY(operation_id,source_id),  UNIQUE(operation_id,principal,agent,cred,version));
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_check_stage (  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id) ON DELETE CASCADE,  principal TEXT NOT NULL,  source_digest BLOB NOT NULL,  new_kek_check BLOB NOT NULL,  PRIMARY KEY(operation_id,principal));
+CREATE TABLE IF NOT EXISTS kb_vault_rewrap_worm (  operation_id TEXT NOT NULL REFERENCES kb_vault_rewrap_operation(operation_id),  event_kind TEXT NOT NULL,  event_id TEXT NOT NULL UNIQUE,  state TEXT NOT NULL,  seal_epoch INTEGER NOT NULL,  fencing_token INTEGER NOT NULL,  receipt_digest BLOB,  inventory_digest BLOB,  stage_digest BLOB,  actor TEXT NOT NULL,  detail TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(operation_id,event_kind));
+-- D3b sealed-to-open acknowledgement (sqlite shim: columns only).  The WORM
+-- triggers and authoritative mutation functions remain PostgreSQL-only.
+CREATE TABLE IF NOT EXISTS kb_vault_open_event (  event_id TEXT PRIMARY KEY,  event_kind TEXT NOT NULL,  operation_id TEXT REFERENCES kb_vault_rewrap_operation(operation_id),  request_id TEXT NOT NULL UNIQUE,  actor TEXT NOT NULL,  operation_fence INTEGER,  opened_epoch INTEGER NOT NULL UNIQUE,  opened_fence INTEGER NOT NULL UNIQUE,  row_hash BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE(event_kind,operation_id));
+-- P7-witness-e1 evidence store (sqlite shim: columns only; WORM triggers, digest
+-- and append functions remain PostgreSQL-only).
+CREATE TABLE IF NOT EXISTS kb_vault_witness_shard (  tenant TEXT NOT NULL,  provider TEXT NOT NULL,  seq INTEGER NOT NULL DEFAULT 0,  head_hash BLOB NOT NULL,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(tenant,provider));
+CREATE TABLE IF NOT EXISTS kb_vault_witness_log (  tenant TEXT NOT NULL,  provider TEXT NOT NULL,  shard_seq INTEGER NOT NULL,  source_kind INTEGER NOT NULL,  source_id TEXT NOT NULL,  source_hash BLOB NOT NULL,  has_source_pred INTEGER NOT NULL,  source_pred_hash BLOB NOT NULL,  witness_pred_hash BLOB NOT NULL,  record_hash BLOB NOT NULL,  request_id TEXT NOT NULL DEFAULT '',  principal TEXT NOT NULL DEFAULT '',  provider_cred TEXT NOT NULL DEFAULT '',  group_id TEXT NOT NULL DEFAULT '',  event_ts TEXT NOT NULL,  seal_epoch INTEGER NOT NULL,  fencing_token INTEGER NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(tenant,provider,shard_seq));
+CREATE TABLE IF NOT EXISTS kb_vault_witness_checkpoint (  seq INTEGER PRIMARY KEY,  root BLOB NOT NULL,  has_predecessor INTEGER NOT NULL,  predecessor_digest BLOB NOT NULL,  shard_count INTEGER NOT NULL,  leaf_snapshot BLOB NOT NULL,  leaf_snapshot_digest BLOB NOT NULL,  signer_key_id BLOB NOT NULL,  sig_alg INTEGER NOT NULL,  sig_version INTEGER NOT NULL,  signature BLOB NOT NULL,  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS kb_vault_witness_emit_cursor (  kind INTEGER NOT NULL,  tenant TEXT NOT NULL,  provider TEXT NOT NULL,  last_emitted INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY(kind,tenant,provider));
 
 -- P2a org model catalog + entitlement (sqlite shim mirror of schema.sql: columns
 -- only; RLS, the SECURITY DEFINER catalog CRUD + org_catalog_entitled(), and the WORM
@@ -455,5 +495,83 @@ CREATE TABLE IF NOT EXISTS org_telemetry (  id INTEGER PRIMARY KEY AUTOINCREMENT
 CREATE UNIQUE INDEX IF NOT EXISTS idx_org_telemetry_source ON org_telemetry(source_event_id);
 CREATE INDEX IF NOT EXISTS idx_org_telemetry_team_created ON org_telemetry(team_id, created_at);
 CREATE TABLE IF NOT EXISTS org_telemetry_allowlist (  event_schema TEXT PRIMARY KEY,  metric_names TEXT NOT NULL,  enabled INTEGER NOT NULL DEFAULT 1,  updated_at TEXT NOT NULL DEFAULT '');
-CREATE TABLE IF NOT EXISTS kb_server_registry (  server_id TEXT PRIMARY KEY, cert_cn TEXT NOT NULL UNIQUE, mgmt_cert_cn TEXT NOT NULL UNIQUE, owner_issuer TEXT NOT NULL DEFAULT '', owner_subject TEXT NOT NULL DEFAULT '', team_id INTEGER NOT NULL, endpoint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', health TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', last_seen TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_cert_revocation_generation (singleton INTEGER PRIMARY KEY CHECK(singleton=1), generation INTEGER NOT NULL CHECK(generation>=1), updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+INSERT OR IGNORE INTO kb_cert_revocation_generation(singleton,generation) VALUES(1,1);
+CREATE TABLE IF NOT EXISTS kb_server_registry (  server_id TEXT PRIMARY KEY, cert_cn TEXT NOT NULL UNIQUE, mgmt_cert_cn TEXT NOT NULL UNIQUE, owner_issuer TEXT NOT NULL DEFAULT '', owner_subject TEXT NOT NULL DEFAULT '', team_id INTEGER NOT NULL, endpoint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', health TEXT NOT NULL DEFAULT '', version TEXT NOT NULL DEFAULT '', last_seen TEXT, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', client_issuer TEXT NOT NULL DEFAULT '', client_serial_norm TEXT NOT NULL DEFAULT '', client_fingerprint TEXT NOT NULL DEFAULT '', mgmt_issuer TEXT NOT NULL DEFAULT '', mgmt_serial_norm TEXT NOT NULL DEFAULT '', mgmt_fingerprint TEXT NOT NULL DEFAULT '', enrollment_op TEXT NOT NULL DEFAULT '', client_csr_digest TEXT NOT NULL DEFAULT '', mgmt_csr_digest TEXT NOT NULL DEFAULT '', activation_expires_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_kb_server_registry_team ON kb_server_registry(team_id);
+-- P5-B2b shape mirrors only.  RLS, transition functions, audit and primary
+-- authority are PostgreSQL-only and callers fail closed on this shim.
+CREATE TABLE IF NOT EXISTS kb_management_instance_grant (installation_id TEXT PRIMARY KEY, replacement_operation_id TEXT UNIQUE, replacement_lineage_id TEXT NOT NULL, replaces_installation_id TEXT, team_id INTEGER NOT NULL, workload_issuer TEXT NOT NULL, workload_subject TEXT NOT NULL, proof_anchor TEXT NOT NULL, custody_anchor TEXT NOT NULL, binding_digest TEXT NOT NULL, expected_ca_issuer TEXT NOT NULL, expected_ca_fingerprint TEXT NOT NULL, creator_identity TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL, consumed_at TEXT, revoked_at TEXT);
+CREATE TABLE IF NOT EXISTS kb_management_instance (installation_id TEXT PRIMARY KEY, replacement_lineage_id TEXT NOT NULL, authority_id TEXT NOT NULL UNIQUE, team_id INTEGER NOT NULL, workload_issuer TEXT NOT NULL, workload_subject TEXT NOT NULL, proof_anchor TEXT NOT NULL, custody_anchor TEXT NOT NULL, binding_digest TEXT NOT NULL, expected_ca_issuer TEXT NOT NULL, expected_ca_fingerprint TEXT NOT NULL, current_generation INTEGER NOT NULL DEFAULT 0, current_enrollment_id INTEGER, state TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', revoked_at TEXT, replaced_at TEXT);
+CREATE TABLE IF NOT EXISTS kb_management_instance_issue (operation_id TEXT PRIMARY KEY, installation_id TEXT NOT NULL, issue_kind TEXT NOT NULL, generation INTEGER NOT NULL, previous_enrollment_id INTEGER, previous_cert_issuer TEXT, previous_cert_serial_norm TEXT, previous_cert_fingerprint TEXT, csr_digest TEXT NOT NULL, csr_spki_digest TEXT NOT NULL, public_bundle_digest TEXT, cert_issuer TEXT, cert_serial_norm TEXT, cert_fingerprint TEXT, cert_spki_digest TEXT, cert_not_before TEXT, cert_not_after TEXT, enrollment_id INTEGER, state TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL DEFAULT '', pending_expires_at TEXT NOT NULL, activated_at TEXT, terminal_at TEXT, UNIQUE(installation_id,generation));
+-- P5-C1c shape-only compatibility.  SQLite has no authoritative admission or
+-- outcome functions: production management action journaling requires PostgreSQL.
+CREATE TABLE IF NOT EXISTS kb_management_token_intent_namespace (correlation_id TEXT NOT NULL UNIQUE, jti TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '', UNIQUE(correlation_id,jti,kind));
+CREATE TABLE IF NOT EXISTS kb_management_action_intent (correlation_id TEXT PRIMARY KEY, jti TEXT NOT NULL UNIQUE, team_id INTEGER NOT NULL, actor_identity TEXT NOT NULL, capability TEXT NOT NULL, target_server_id TEXT NOT NULL, request_sha256 TEXT NOT NULL, token_issuer TEXT NOT NULL, audience TEXT NOT NULL, kid TEXT NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, installation_id TEXT NOT NULL, installation_generation INTEGER NOT NULL, installation_enrollment_id INTEGER NOT NULL, local_cert_issuer TEXT NOT NULL, local_cert_serial_norm TEXT NOT NULL, local_cert_fingerprint TEXT NOT NULL, target_enrollment_id INTEGER NOT NULL, target_mgmt_issuer TEXT NOT NULL, target_mgmt_serial_norm TEXT NOT NULL, target_mgmt_fingerprint TEXT NOT NULL, revocation_generation INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS kb_management_action_outcome (correlation_id TEXT PRIMARY KEY, team_id INTEGER NOT NULL, result TEXT NOT NULL, result_class TEXT NOT NULL, status_code INTEGER, response_sha256 TEXT, completed_at TEXT NOT NULL DEFAULT '', FOREIGN KEY(correlation_id) REFERENCES kb_management_action_intent(correlation_id));
+-- P5-D2a shape-only compatibility.  SQLite exposes no read-token authority,
+-- retained bearer, RLS, WORM key-use, or management-read admission path.
+CREATE TABLE IF NOT EXISTS kb_management_read_intent (correlation_id TEXT PRIMARY KEY, jti TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, team_id INTEGER NOT NULL, actor_identity TEXT NOT NULL, selector TEXT NOT NULL CHECK(selector IN ('agents','config')), capability TEXT NOT NULL, external_method TEXT NOT NULL, external_path TEXT NOT NULL, challenge_nonce BLOB NOT NULL, target_server_id TEXT NOT NULL, request_sha256 TEXT NOT NULL, token_version INTEGER NOT NULL, token_issuer TEXT NOT NULL, audience TEXT NOT NULL, kid TEXT NOT NULL, key_generation INTEGER NOT NULL, publication_generation INTEGER NOT NULL, issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, issuance_deadline TEXT NOT NULL, installation_id TEXT NOT NULL, installation_generation INTEGER NOT NULL, installation_enrollment_id INTEGER NOT NULL, local_cert_issuer TEXT NOT NULL, local_cert_serial_norm TEXT NOT NULL, local_cert_fingerprint TEXT NOT NULL, target_enrollment_id INTEGER NOT NULL, target_mgmt_issuer TEXT NOT NULL, target_mgmt_serial_norm TEXT NOT NULL, target_mgmt_fingerprint TEXT NOT NULL, revocation_generation INTEGER NOT NULL, state TEXT NOT NULL, lease_owner TEXT, lease_until TEXT, jwt TEXT, jwt_sha256 BLOB, created_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '', UNIQUE(correlation_id,jti), UNIQUE(correlation_id,jti,kind), CHECK(external_path='/v1/servers/'||target_server_id||'/'||selector), FOREIGN KEY(correlation_id,jti,kind) REFERENCES kb_management_token_intent_namespace(correlation_id,jti,kind));
+CREATE TABLE IF NOT EXISTS kb_management_read_key_use (correlation_id TEXT PRIMARY KEY, jti TEXT NOT NULL UNIQUE, team_id INTEGER NOT NULL, actor_identity TEXT NOT NULL, target_server_id TEXT NOT NULL, selector TEXT NOT NULL CHECK(selector IN ('agents','config')), request_sha256 TEXT NOT NULL, kid TEXT NOT NULL, key_generation INTEGER NOT NULL, publication_generation INTEGER NOT NULL, jwt_sha256 BLOB NOT NULL, result_status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '', FOREIGN KEY(correlation_id,jti) REFERENCES kb_management_read_intent(correlation_id,jti));
+-- P5-C2d shape-only compatibility.  SQLite exposes no token-authority facade,
+-- locking, role split, WORM admission, vault opening, or signing path.
+CREATE TABLE IF NOT EXISTS kb_management_token_key_use_intent (correlation_id TEXT PRIMARY KEY, jti TEXT NOT NULL UNIQUE, team_id INTEGER NOT NULL, actor_identity TEXT NOT NULL, target_server_id TEXT NOT NULL, request_sha256 TEXT NOT NULL, kid TEXT NOT NULL, token_custody_key_id TEXT NOT NULL, token_version INTEGER NOT NULL, publication_generation INTEGER NOT NULL, publication_candidate_id TEXT NOT NULL, publication_manifest_sha256 BLOB NOT NULL, publication_envelope_sha256 BLOB NOT NULL, vault_seal_epoch INTEGER NOT NULL, hwm_attestation_digest BLOB NOT NULL, purpose TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS org_egress_binding (
+  team_id INTEGER NOT NULL,
+  model_id TEXT NOT NULL,
+  billable_model TEXT NOT NULL,
+  pricing_version INTEGER NOT NULL,
+  key_id TEXT NOT NULL,
+  vault_principal TEXT NOT NULL,
+  vault_agent TEXT NOT NULL DEFAULT '',
+  vault_cred TEXT NOT NULL DEFAULT '',
+  max_input_tokens INTEGER NOT NULL,
+  max_output_tokens INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  overage_fenced INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(team_id,model_id)
+);
+CREATE TABLE IF NOT EXISTS org_egress_dispatch (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  authority_id TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  origin_identity TEXT NOT NULL,
+  origin_fingerprint TEXT NOT NULL,
+  request_digest TEXT NOT NULL,
+  team_id INTEGER NOT NULL,
+  project_id INTEGER,
+  model_id TEXT NOT NULL,
+  billable_model TEXT NOT NULL,
+  pricing_version INTEGER NOT NULL,
+  reserved_max_usd NUMERIC NOT NULL,
+  key_id TEXT NOT NULL,
+  vault_principal TEXT NOT NULL,
+  vault_agent TEXT NOT NULL DEFAULT '',
+  vault_cred TEXT NOT NULL DEFAULT '',
+  max_input_tokens INTEGER NOT NULL,
+  max_output_tokens INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  owner_token TEXT NOT NULL DEFAULT '',
+  owner_generation INTEGER NOT NULL DEFAULT 0,
+  owner_instance TEXT NOT NULL DEFAULT '',
+  lease_expires_at TEXT,
+  http_status INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  raw_prompt_tokens TEXT NOT NULL DEFAULT '0',
+  raw_completion_tokens TEXT NOT NULL DEFAULT '0',
+  raw_cache_read_tokens TEXT NOT NULL DEFAULT '0',
+  raw_cache_write_tokens TEXT NOT NULL DEFAULT '0',
+  realized_usd NUMERIC,
+  overage_usd NUMERIC NOT NULL DEFAULT 0,
+  liability_overflow INTEGER NOT NULL DEFAULT 0,
+  outcome_class TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
+  UNIQUE(authority_id,request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_egress_recover
+  ON org_egress_dispatch(state,lease_expires_at,id);

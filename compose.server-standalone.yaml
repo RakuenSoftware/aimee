@@ -23,9 +23,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-      # The browser UI (aimee-webchat) is built and bundled by default. Its npm
+      # The browser UI (aimee-runtime-web) is built and bundled by default. Its npm
       # dependency (@rakuensoftware/smoothgui) is vendored under frontend/vendor/,
-      # so the build needs NO credentials. Build --build-arg WITH_WEBCHAT=0 to
+      # so the build needs NO credentials. Build --build-arg WITH_RUNTIME_WEB=0 to
       # ship the server-only image.
     # Published image (built + pushed to ghcr on every merge to main): `docker
     # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.

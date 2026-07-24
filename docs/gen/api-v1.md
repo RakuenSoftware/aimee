@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 79
+Total endpoints: 84
 
 ## Endpoints
 
@@ -753,7 +753,7 @@ Request body (`application/json`).
 Responses:
 
 - `200` — Catalog entry upserted
-- `400` — Invalid model_id
+- `400` — Invalid model_id, provider, or wire
 - `401` — Authentication required
 - `403` — Not authorized (not an org-admin)
 
@@ -767,7 +767,7 @@ Responses:
 
 - `200` — Entitlement granted
 - `401` — Authentication required
-- `403` — Not authorized (not an org-admin)
+- `403` — Not authorized (not an org-admin), or unknown model/team
 
 ### `POST /v1/models/org/remove`
 
@@ -790,7 +790,7 @@ Request body (`application/json`).
 Responses:
 
 - `200` — Catalog entry upserted
-- `400` — Invalid model_id
+- `400` — Invalid model_id, provider, or wire
 - `401` — Authentication required
 - `403` — Not authorized (not an org-admin)
 
@@ -997,6 +997,112 @@ Responses:
 - `200` — Search results
 - `400` — Bad request (missing query)
 - `401` — Unauthorized
+
+### `GET /v1/servers`
+
+List registered servers for one team
+
+Returns the primary-backed, tenant-scoped server registry view.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Bounded server registry list
+- `400` — Invalid or missing team
+- `401` — Authentication required
+- `403` — Actor is not authorized for the requested team
+- `503` — Registry unavailable
+
+### `POST /v1/servers/{server_id}/actions`
+
+Enable or disable one agent on one registered server
+
+Executes one identity-propagating, journaled management action. The server's remote_writes policy remains authoritative and the request is never safely retryable after an ambiguous dispatch.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Action succeeded
+- `400` — Invalid team or action envelope
+- `401` — Authentication required
+- `403` — Actor, team, capability, or server policy denied the action
+- `404` — Server not found
+- `409` — Replay, registry conflict, or unresolved prior intent
+- `502` — Action result is indeterminate
+- `503` — Management runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/agents`
+
+Read the bounded public agent projection from one registered server
+
+Performs the nonce-bound management-read exchange over the server's pinned mTLS session. The response contains only the seven frozen public agent fields and is authorized independently from remote_writes.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer | Positive signed-64-bit team id serialized as canonical decimal without a sign or leading zero. |
+
+Responses:
+
+- `200` — Complete bounded agent projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/config`
+
+Read the bounded safe configuration projection from one registered server
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200` — Complete five-field safe configuration projection
+- `400` — Invalid path or team query
+- `401` — Authentication required
+- `403` — Management read denied
+- `404` — Server not found
+- `409` — Read intent or target state conflict
+- `502` — Authenticated management response failed integrity validation
+- `503` — Management read runtime or dependency unavailable
+
+### `GET /v1/servers/{server_id}/health`
+
+Verify a registered server through the management health exchange
+
+Performs the live, nonce-bound management challenge and signed-status exchange. It does not return the registry's cached heartbeat row.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `server_id` | path | yes | string |  |
+| `team` | query | yes | integer |  |
+
+Responses:
+
+- `200` — Live management health verification succeeded
+- `400` — Invalid team or management health request
+- `401` — Authentication required
+- `403` — Server health request denied
+- `404` — Server not found
+- `409` — Registry state changed during the exchange
+- `502` — Management health integrity verification failed
+- `503` — Management health runtime or dependency unavailable
 
 ### `GET /v1/team`
 

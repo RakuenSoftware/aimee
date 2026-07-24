@@ -1,7 +1,7 @@
 #!/bin/sh
 # Entrypoint for the aimee-server image with the co-located webchat browser UI.
 #
-# Runs as root so it can bootstrap the PAM login user and run aimee-webchat
+# Runs as root so it can bootstrap the PAM login user and run aimee-runtime-web
 # (which needs /etc/shadow access for pam_unix). aimee-server itself is dropped
 # to the unprivileged "aimee" user. Lifecycle follows the SERVER: when it exits,
 # webchat is torn down and the container exits with the server's status;
@@ -10,14 +10,37 @@
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
+# Preserve the container runtime's command-override contract.  The image has no
+# default CMD, so arguments here are an operator-supplied command (for example,
+# `aimee-server --version`) and must replace the managed server lifecycle below.
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
+
 AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
+wfe_pid=""
+export AIMEE_WFE_ENGINE="${AIMEE_WFE_ENGINE:-go}"
+case "$AIMEE_WFE_ENGINE" in
+    go) ;;
+    *) printf '[server-entrypoint] fatal: WFE is Go-only; AIMEE_WFE_ENGINE must be go\n' >&2; exit 2 ;;
+esac
+export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
+WFE_SOCKET_WAIT_TENTHS="${AIMEE_WFE_SOCKET_WAIT_TENTHS:-150}"
 
 # The server's worker threads need a 64 MB stack; the 8 MB container default
 # overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
 # by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
 ulimit -s 65536 2>/dev/null || true
+
+# Preserve post-mortem evidence when the temporary C resource plane crashes.
+# Required appliance profiles fail closed if either the resource limit or the
+# storage policy cannot guarantee it; other runtimes stay warning-compatible.
+. /usr/local/bin/core-storage.sh
+if ! aimee_enable_core_dumps || ! aimee_prepare_core_storage; then
+    exit 1
+fi
 
 # Seed the baked default config into AIMEE_HOME if absent. The server reads its
 # /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
@@ -88,12 +111,21 @@ for cli_dir in .codex .claude .config .npm-global; do
     [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
 done
 
-. /usr/local/bin/webchat-lib.sh
+. /usr/local/bin/runtime-web-lib.sh
+. /usr/local/bin/plane-supervisor.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
 
 shutdown() {
     [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+    [ -n "$wfe_pid" ] && kill "$wfe_pid" 2>/dev/null || true
+	_wait=0
+	while { [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; } || { [ -n "$wfe_pid" ] && kill -0 "$wfe_pid" 2>/dev/null; }; do
+		[ "$_wait" -ge 50 ] && break
+		_wait=$((_wait + 1)); sleep 0.1
+	done
+	[ -n "$server_pid" ] && kill -KILL "$server_pid" 2>/dev/null || true
+	[ -n "$wfe_pid" ] && kill -KILL "$wfe_pid" 2>/dev/null || true
     webchat_stop
 }
 trap 'shutdown' TERM INT
@@ -147,11 +179,48 @@ log "pre-warming server-hosted OAuth CLIs (background)"
 runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
 
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
-runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
+rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
+# runuser/PAM resets selected resource limits, including RLIMIT_CORE, after the
+# parent entrypoint configured them. Raise the soft limit again as the final
+# unprivileged child operation so the actual server process inherits it.
+runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; aimee_verify_core_dump; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
 
-wait "$server_pid"
-status=$?
+if [ "$AIMEE_WFE_ENGINE" = go ]; then
+    if [ ! -x /usr/local/bin/aimee-wfe ]; then
+        log "fatal: AIMEE_WFE_ENGINE=go but /usr/local/bin/aimee-wfe is unavailable"
+        shutdown
+        exit 1
+    fi
+    # The C process is a temporary stateless agent resource plane. Wait for its
+    # HTTP socket, then put all WFE state/admission/execution on the Go socket.
+    _wait=0
+    while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
+        kill -0 "$server_pid" 2>/dev/null || break
+        _wait=$((_wait + 1))
+        sleep 0.1
+    done
+    if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
+        log "fatal: C agent resource plane did not become ready"
+        shutdown
+        exit 1
+    fi
+    log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
+    runuser -u aimee -- sh -c 'set -eu; . /usr/local/bin/core-storage.sh; aimee_enable_core_dumps; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
+        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
+    wfe_pid=$!
+fi
+
+if [ -n "$wfe_pid" ]; then
+    status=0
+    aimee_supervise_plane_unit "$server_pid" "$wfe_pid" || status=$?
+    first=$AIMEE_FIRST_EXIT
+    log "$first plane exited; terminating its peer so the container restarts as one unit"
+    shutdown
+else
+    if wait "$server_pid"; then status=0; else status=$?; fi
+fi
 log "aimee-server exited (status $status); shutting down webchat"
 shutdown
 exit "$status"

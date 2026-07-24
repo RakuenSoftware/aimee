@@ -265,6 +265,38 @@ static int task_update_and_refresh(int task_id, const char *sql, const char *val
    return 0;
 }
 
+static int task_update_and_refresh_owned(int task_id, const char *claimed_by, const char *sql,
+                                         const char *value)
+{
+   if (task_id <= 0 || !claimed_by || !claimed_by[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, value ? value : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 2, task_id);
+   sqlite3_bind_text(stmt, 3, claimed_by, -1, SQLITE_TRANSIENT);
+   if (sqlite3_step(stmt) != SQLITE_DONE || sqlite3_changes(db) == 0)
+   {
+      sqlite3_finalize(stmt);
+      return -1;
+   }
+   sqlite3_finalize(stmt);
+
+   static const char *jid_sql = "SELECT job_id FROM coord_job_tasks WHERE id = ?";
+   if (sqlite3_prepare_v2(db, jid_sql, -1, &stmt, NULL) != SQLITE_OK)
+      return 0;
+   sqlite3_bind_int(stmt, 1, task_id);
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      (void)db1_coord_job_refresh_status(sqlite3_column_int(stmt, 0));
+   sqlite3_finalize(stmt);
+   return 0;
+}
+
 int db1_coord_job_complete_task(int task_id, const char *result)
 {
    static const char *sql = "UPDATE coord_job_tasks SET status = 'done',"
@@ -277,6 +309,22 @@ int db1_coord_job_fail_task(int task_id, const char *error)
    static const char *sql = "UPDATE coord_job_tasks SET status = 'failed',"
                             " error = ? WHERE id = ? AND status IN ('claimed', 'running')";
    return task_update_and_refresh(task_id, sql, error);
+}
+
+int db1_coord_job_complete_task_owned(int task_id, const char *claimed_by, const char *result)
+{
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'done',"
+                            " result = ? WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')";
+   return task_update_and_refresh_owned(task_id, claimed_by, sql, result);
+}
+
+int db1_coord_job_fail_task_owned(int task_id, const char *claimed_by, const char *error)
+{
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'failed',"
+                            " error = ? WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')";
+   return task_update_and_refresh_owned(task_id, claimed_by, sql, error);
 }
 
 int db1_coord_job_release_task(int task_id)
@@ -322,6 +370,94 @@ int db1_coord_job_release_task_bounded(int task_id, int max_requeues)
    int ok = (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
    sqlite3_finalize(stmt);
    return ok;
+}
+
+int db1_coord_job_release_task_bounded_owned(int task_id, const char *claimed_by, int max_requeues)
+{
+   if (task_id <= 0 || !claimed_by || !claimed_by[0] || max_requeues <= 0)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql = "UPDATE coord_job_tasks SET status = 'pending',"
+                            " claimed_by = '', claimed_at = '', result = '', error = '',"
+                            " preempt_requeues = preempt_requeues + 1"
+                            " WHERE id = ? AND claimed_by = ?"
+                            " AND status IN ('claimed', 'running')"
+                            " AND preempt_requeues < ?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int(stmt, 1, task_id);
+   sqlite3_bind_text(stmt, 2, claimed_by, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 3, max_requeues);
+   int rc = sqlite3_step(stmt);
+   int ok = (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
+   sqlite3_finalize(stmt);
+   return ok;
+}
+
+int db1_coord_job_recover_owner(const char *claimed_by, int max_requeues, int *requeued_out,
+                                int *failed_out)
+{
+   if (!claimed_by || !claimed_by[0] || max_requeues <= 0)
+      return -1;
+   if (requeued_out)
+      *requeued_out = 0;
+   if (failed_out)
+      *failed_out = 0;
+
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   int requeued = 0, failed = 0;
+   for (;;)
+   {
+      sqlite3_stmt *stmt = NULL;
+      static const char *sql = "SELECT t.id, t.preempt_requeues FROM coord_job_tasks t"
+                               " JOIN coord_jobs j ON j.id = t.job_id"
+                               " WHERE t.claimed_by = ? AND t.status IN ('claimed', 'running')"
+                               " AND j.status NOT IN ('cancelled', 'complete', 'failed') LIMIT 1";
+      if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+         return -1;
+      sqlite3_bind_text(stmt, 1, claimed_by, -1, SQLITE_TRANSIENT);
+      int step = sqlite3_step(stmt);
+      if (step == SQLITE_DONE)
+      {
+         sqlite3_finalize(stmt);
+         break;
+      }
+      if (step != SQLITE_ROW)
+      {
+         sqlite3_finalize(stmt);
+         return -1;
+      }
+      int task_id = sqlite3_column_int(stmt, 0);
+      int attempts = sqlite3_column_int(stmt, 1);
+      sqlite3_finalize(stmt);
+
+      if (attempts < max_requeues)
+      {
+         if (db1_coord_job_release_task_bounded_owned(task_id, claimed_by, max_requeues) != 0)
+            return -1;
+         requeued++;
+      }
+      else
+      {
+         if (db1_coord_job_fail_task_owned(
+                 task_id, claimed_by, "previous server exited; crash retry cap exhausted") != 0)
+            return -1;
+         failed++;
+      }
+   }
+
+   if (requeued_out)
+      *requeued_out = requeued;
+   if (failed_out)
+      *failed_out = failed;
+   return 0;
 }
 
 int db1_coord_job_get(int job_id, db1_coord_job_t *out)

@@ -59,7 +59,7 @@ REQUIRED_DOCKERIGNORE_ENTRIES = {
     "/aimee",
     "/aimee-server",
     "/aimee-kb",
-    "/aimee-webchat",
+    "/aimee-runtime-web",
     "/aimee-gateway",
 }
 

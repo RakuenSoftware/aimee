@@ -14,7 +14,7 @@ extern "C"
 #endif
 
    /* Parse a roundtable child-run result payload (the object produced by
-    * handle_delegate_roundtable: artifact/converged/items[]/... ) into a
+    * Go roundtable transport: artifact/converged/items[]/... ) into a
     * captured envelope. is_draft selects draft vs review interpretation.
     * Returns 0 always; the envelope's present/parse_ok/has_error fields record
     * what happened (an empty payload -> present=0). */
@@ -29,7 +29,7 @@ extern "C"
 
    /* Finalize seam (#18/#30): called from the op-run worker at terminal. No-ops
     * (returns 0) when run_id has no pipeline attempt row, so ordinary
-    * ensemble_review/roundtable calls are untouched. Otherwise it records the
+    * roundtable_review calls are untouched. Otherwise it records the
     * terminal envelope durably and, for the current non-superseded attempt,
     * updates the pass aggregate. Returns 1 if a pipeline attempt was finalized. */
    int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char *result_json);
