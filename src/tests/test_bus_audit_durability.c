@@ -143,8 +143,8 @@ int main(void)
       if (!tool || strcmp(tool, etool) != 0 || !hash || strcmp(hash, ehash) != 0 || !verdict ||
           strcmp(verdict, "block") != 0)
       {
-         fprintf(stderr, "FAIL: id=%d columns did not round-trip (tool=%s hash=%s verdict=%s)\n", id,
-                 tool ? tool : "(null)", hash ? hash : "(null)", verdict ? verdict : "(null)");
+         fprintf(stderr, "FAIL: id=%d columns did not round-trip (tool=%s hash=%s verdict=%s)\n",
+                 id, tool ? tool : "(null)", hash ? hash : "(null)", verdict ? verdict : "(null)");
          return 1;
       }
    }

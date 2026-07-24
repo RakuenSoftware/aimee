@@ -82,7 +82,8 @@ int main(void)
        !strstr(obuf, "task_id=49 ") || !strstr(obuf, "verdict=block") ||
        !strstr(obuf, "verdict=allow"))
    {
-      fprintf(stderr, "FAIL: replay rendered %d task_id lines (expected %d) / missing summary:\n%s\n",
+      fprintf(stderr,
+              "FAIL: replay rendered %d task_id lines (expected %d) / missing summary:\n%s\n",
               rendered, ROWS, obuf);
       return 1;
    }
@@ -138,7 +139,7 @@ int main(void)
 
    /* Byte budget (regression for the /v1 256 KB overflow): a large capture must
     * be PAGED even with a big row limit, never materialized past the budget. */
-   const int BIG = 2500; /* ~150 B/row >> the 200 KB budget */
+   const int BIG = 2500;           /* ~150 B/row >> the 200 KB budget */
    assert(audit_bus_start() == 0); /* fresh session (clears the terminated guard) */
    for (int i = 0; i < BIG; i++)
    {

@@ -123,8 +123,8 @@ static void check_agrees(bus_host_t *h, bus_client_t *req, bus_client_t *server,
    struct lookup_reply b = bus_lookup(h, req, server, corr, name);
    must(b.found == dfound, "bus and direct agree on found");
    must(!dfound || b.value == (int64_t)dv, "bus and direct agree on value");
-   printf("  %-34s direct{found=%d,val=%ld} == bus{found=%d,val=%lld}\n", name, dfound, dv,
-          b.found, (long long)b.value);
+   printf("  %-34s direct{found=%d,val=%ld} == bus{found=%d,val=%lld}\n", name, dfound, dv, b.found,
+          (long long)b.value);
 }
 
 int main(void)

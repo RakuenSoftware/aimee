@@ -110,8 +110,9 @@ int main(void)
           strcmp(rows[r].labels, elab) != 0 || strcmp(rows[r].explanation, eexpl) != 0 ||
           rows[r].dry_run != (id % 2) || rows[r].overall_risk != (double)id)
       {
-         fprintf(stderr, "FAIL: id=%d fields did not round-trip: tool=%s fa=%s lab=%s expl=%s "
-                         "dry=%d risk=%g\n",
+         fprintf(stderr,
+                 "FAIL: id=%d fields did not round-trip: tool=%s fa=%s lab=%s expl=%s "
+                 "dry=%d risk=%g\n",
                  id, rows[r].tool_name, rows[r].final_action, rows[r].labels, rows[r].explanation,
                  rows[r].dry_run, rows[r].overall_risk);
          return 1;

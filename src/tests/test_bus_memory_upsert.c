@@ -48,20 +48,20 @@ static uint32_t serialize_upsert(const char *kind, const char *tier, const char 
                                  uint8_t *buf, uint32_t cap)
 {
    uint32_t off = 0;
-#define PUT(p, len)                                                                               \
-   do                                                                                             \
-   {                                                                                              \
-      if (off + (len) > cap)                                                                      \
-         return 0;                                                                                \
-      memcpy(buf + off, (p), (len));                                                              \
-      off += (len);                                                                               \
+#define PUT(p, len)                                                                                \
+   do                                                                                              \
+   {                                                                                               \
+      if (off + (len) > cap)                                                                       \
+         return 0;                                                                                 \
+      memcpy(buf + off, (p), (len));                                                               \
+      off += (len);                                                                                \
    } while (0)
-#define PUTS(s)                                                                                   \
-   do                                                                                             \
-   {                                                                                              \
-      uint32_t l = (uint32_t)strlen(s);                                                           \
-      PUT(&l, 4);                                                                                 \
-      PUT((s), l);                                                                                \
+#define PUTS(s)                                                                                    \
+   do                                                                                              \
+   {                                                                                               \
+      uint32_t l = (uint32_t)strlen(s);                                                            \
+      PUT(&l, 4);                                                                                  \
+      PUT((s), l);                                                                                 \
    } while (0)
    PUTS(kind);
    PUTS(tier);
@@ -227,7 +227,8 @@ int main(void)
                    "The user is called Jordan Bailes.", 0.95, "sess-2");
    must(rc == 0, "bus upsert (update) succeeded");
    must(find_content("name:full", got, sizeof got) == 1, "key still present after update");
-   must(strcmp(got, "The user is called Jordan Bailes.") == 0, "update over the bus changed the store");
+   must(strcmp(got, "The user is called Jordan Bailes.") == 0,
+        "update over the bus changed the store");
    printf("  update over the bus: same key, content changed in the real store\n");
 
    bus_client_detach(&req);

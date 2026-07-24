@@ -363,8 +363,8 @@ static void capture_open(void)
     * needs no atomic. */
    static unsigned session_seq = 0;
    char path[4096];
-   snprintf(path, sizeof path, "%s/%s%010lld-%d-%03u%s", dir, AB_CAP_PREFIX,
-            (long long)time(NULL), (int)getpid(), session_seq++, AB_CAP_SUFFIX);
+   snprintf(path, sizeof path, "%s/%s%010lld-%d-%03u%s", dir, AB_CAP_PREFIX, (long long)time(NULL),
+            (int)getpid(), session_seq++, AB_CAP_SUFFIX);
    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
    if (fd < 0)
    {
@@ -644,7 +644,7 @@ void audit_bus_stop(void)
     * inside publish(). The consumer is still running, so any producer mid-publish
     * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
     * backoffs. */
-   atomic_store(&g.emitting, 0); /* seq_cst */
+   atomic_store(&g.emitting, 0);                                    /* seq_cst */
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
    while (atomic_load(&g.publishers) > 0)
       nanosleep(&nap, NULL);

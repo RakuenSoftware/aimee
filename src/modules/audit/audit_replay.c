@@ -164,12 +164,12 @@ int audit_bus_replay_print(const char *path, FILE *out)
 struct json_sink
 {
    cJSON *rows;
-   uint64_t total;    /* all audit rows in the stream (not just the returned window) */
+   uint64_t total; /* all audit rows in the stream (not just the returned window) */
    uint64_t malformed;
-   long offset;       /* first row index to include */
-   long limit;        /* max rows to include (<=0 = all) */
-   size_t bytes;      /* accumulated estimated JSON size of materialized rows */
-   int truncated;     /* set when the byte budget stopped materialization early */
+   long offset;   /* first row index to include */
+   long limit;    /* max rows to include (<=0 = all) */
+   size_t bytes;  /* accumulated estimated JSON size of materialized rows */
+   int truncated; /* set when the byte budget stopped materialization early */
 };
 
 static void on_record_json(void *ctx, const bus_capture_event_t *ev)
@@ -197,8 +197,8 @@ static void on_record_json(void *ctx, const bus_capture_event_t *ev)
     * budget, stop materializing and report truncated (the client pages onward).
     * Estimate = per-row JSON overhead + the field value lengths (an upper-ish
     * bound; cJSON escaping can add a little, which the budget's headroom covers). */
-   size_t est = 120 + strlen(actor) + strlen(tool) + strlen(hash) + strlen(command) +
-                strlen(mode) + strlen(reason) + strlen(verdict);
+   size_t est = 120 + strlen(actor) + strlen(tool) + strlen(hash) + strlen(command) + strlen(mode) +
+                strlen(reason) + strlen(verdict);
    if (cJSON_GetArraySize(s->rows) > 0 && s->bytes + est > AB_REPLAY_JSON_BUDGET)
    {
       s->truncated = 1;
@@ -229,8 +229,13 @@ cJSON *audit_replay_to_json(const char *path, long offset, long limit)
       return NULL;
    if (offset < 0)
       offset = 0;
-   struct json_sink s = {.rows = cJSON_CreateArray(), .total = 0, .malformed = 0,
-                         .offset = offset, .limit = limit, .bytes = 0, .truncated = 0};
+   struct json_sink s = {.rows = cJSON_CreateArray(),
+                         .total = 0,
+                         .malformed = 0,
+                         .offset = offset,
+                         .limit = limit,
+                         .bytes = 0,
+                         .truncated = 0};
    bus_capture_report_t rep = bus_capture_read(buf, size, on_record_json, &s);
    free(buf);
 
@@ -268,8 +273,7 @@ int audit_replay_valid_basename(const char *name)
    size_t nlen = strlen(name), plen = strlen(AB_CAP_PREFIX), slen = strlen(AB_CAP_SUFFIX);
    if (nlen <= plen + slen)
       return 0; /* must have content between prefix and suffix */
-   return strncmp(name, AB_CAP_PREFIX, plen) == 0 &&
-          strcmp(name + nlen - slen, AB_CAP_SUFFIX) == 0;
+   return strncmp(name, AB_CAP_PREFIX, plen) == 0 && strcmp(name + nlen - slen, AB_CAP_SUFFIX) == 0;
 }
 
 cJSON *audit_replay_capture_list(const char *dir)

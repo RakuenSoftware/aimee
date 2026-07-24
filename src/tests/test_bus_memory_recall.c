@@ -64,17 +64,16 @@ static uint64_t pctl(uint64_t *v, int n, int p)
 
 /* ---- wire form of a recall reply: the real rows, serialized compactly ---- */
 
-static uint32_t serialize_rows(const db1_user_memory_row_t *rows, int n, uint8_t *buf,
-                               uint32_t cap)
+static uint32_t serialize_rows(const db1_user_memory_row_t *rows, int n, uint8_t *buf, uint32_t cap)
 {
    uint32_t off = 0;
-#define PUT(p, len)                                                                               \
-   do                                                                                             \
-   {                                                                                              \
-      if (off + (len) > cap)                                                                      \
-         return 0;                                                                                \
-      memcpy(buf + off, (p), (len));                                                              \
-      off += (len);                                                                               \
+#define PUT(p, len)                                                                                \
+   do                                                                                              \
+   {                                                                                               \
+      if (off + (len) > cap)                                                                       \
+         return 0;                                                                                 \
+      memcpy(buf + off, (p), (len));                                                               \
+      off += (len);                                                                                \
    } while (0)
    uint32_t count = (uint32_t)n;
    PUT(&count, 4);
@@ -95,17 +94,16 @@ static uint32_t serialize_rows(const db1_user_memory_row_t *rows, int n, uint8_t
    return off;
 }
 
-static int deserialize_rows(const uint8_t *buf, uint32_t len, db1_user_memory_row_t *rows,
-                            int cap)
+static int deserialize_rows(const uint8_t *buf, uint32_t len, db1_user_memory_row_t *rows, int cap)
 {
    uint32_t off = 0;
-#define GET(p, l)                                                                                 \
-   do                                                                                             \
-   {                                                                                              \
-      if (off + (l) > len)                                                                        \
-         return -1;                                                                               \
-      memcpy((p), buf + off, (l));                                                                \
-      off += (l);                                                                                 \
+#define GET(p, l)                                                                                  \
+   do                                                                                              \
+   {                                                                                               \
+      if (off + (l) > len)                                                                         \
+         return -1;                                                                                \
+      memcpy((p), buf + off, (l));                                                                 \
+      off += (l);                                                                                  \
    } while (0)
    uint32_t count = 0;
    GET(&count, 4);
@@ -189,9 +187,9 @@ static int bus_recall(bus_host_t *h, bus_client_t *req, bus_client_t *server, ui
 {
    int32_t section = DB1_USER_RECALL_IDENTITY;
    must(bus_client_request(req, KIND_MEM_RECALL, corr, &section, 4) == BUS_CLIENT_OK, "request");
-   bus_host_pump(h);       /* route the request to the server */
+   bus_host_pump(h);           /* route the request to the server */
    memory_server_step(server); /* server runs the real recall and replies */
-   bus_host_pump(h);       /* route the reply back to the requester */
+   bus_host_pump(h);           /* route the reply back to the requester */
 
    bus_event_t ev;
    must(bus_client_poll(req, &ev) == BUS_CLIENT_OK, "reply arrived");

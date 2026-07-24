@@ -78,6 +78,19 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(OBJDIR)/server/aimee_ir.o \
                              $(PLATFORM_AGENT_OBJS)
 
+# This bundle carries guardrails_action_audit.o and guardrails_semantic.o, which
+# now reference audit_bus_emit / audit_bus_emit_guardrail — so every test linking
+# it also needs the bus objects. Listed individually (NOT $(BUS_SHIP_OBJS)) so the
+# D7 "only aimee-server links BUS_SHIP_OBJS" invariant is untouched; these are
+# TEST binaries, which are allowed to link the bus. guardrail_events.o /
+# aimee_home.o / log.o are already in TEST_DATA_OBJS.
+BUS_TEST_OBJS = $(OBJDIR)/modules/audit/audit_bus.o \
+                $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
+                $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
+                $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
+                $(OBJDIR)/modules/bus/bus_wire.o $(OBJDIR)/modules/bus/bus_capture.o
+TEST_WORKSPACE_OBJS_EXTRA += $(BUS_TEST_OBJS)
+
 TEST_MCP_CLIENT_OBJS = $(OBJDIR)/modules/protocols/mcp/mcp_client.o \
                        $(OBJDIR)/sse_parser.o \
                        $(OBJDIR)/tests/support/mock_agent_http.o \

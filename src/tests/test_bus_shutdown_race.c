@@ -82,8 +82,9 @@ int main(void)
           (unsigned long long)written, (unsigned long long)dropped, in_db);
    if ((uint64_t)in_db != written)
    {
-      fprintf(stderr, "FAIL: db1 has %d rows but %llu were counted written — a row was lost or "
-                      "double-counted across the shutdown race\n",
+      fprintf(stderr,
+              "FAIL: db1 has %d rows but %llu were counted written — a row was lost or "
+              "double-counted across the shutdown race\n",
               in_db, (unsigned long long)written);
       return 1;
    }

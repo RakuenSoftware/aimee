@@ -24,7 +24,7 @@
 #include "bus_capture.h"
 #include "log.h"
 
-#define N               3000
+#define N                 3000
 #define KIND_AUDIT_ACTION 3000 /* must match audit_bus.c */
 
 /* Read a length-prefixed string from the audit-row payload (audit_bus.c's wire
