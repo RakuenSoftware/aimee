@@ -2,6 +2,10 @@
 
 This document defines the byte-stable fixture grammar and oracle for the repetition-collapse detector. Inputs are UTF-8 bytes; offsets are an absolute byte offset from the start of the fixture file (byte zero of the file, including the header line). Offsets and spans are measured in UTF-8 bytes.
 
+## Scope of "start of generation"
+
+For the fixture corpus, "start of generation" means byte 0 of the fixture file. The fixture file is the canonical, self-contained input: it always begins with the single-line header described in *Canonical fixture envelope and oracle* and the body bytes that follow are what the detector is expected to classify. There is no separate prefix prompt; the header line is part of the file and counts toward every offset. This definition is what the oracle tests assert and what `expected_loop_start_offset` measures in every fixture header.
+
 ## Accepted JSON shapes
 
 A fragment is a complete RFC 8259 JSON value. Markdown fencing is a wrapper: when the info string is exactly `json`, its inner content must independently satisfy one of the accepted shapes below. The accepted shapes are:

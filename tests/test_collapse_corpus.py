@@ -21,13 +21,57 @@ VALID_CATEGORIES = {
 PRIMITIVE_TYPES = (str, int, float, bool, type(None))
 
 
+_COMMENT_LINE_RE = re.compile(r"<!--\s*(.*?)\s*-->")
+_HEADER_FIELD_RE = re.compile(r"([a-z_]+):\s*([^;]+?)\s*(?=;|-->|$)")
+
+
+def _strip_comment_wrapper(line):
+    match = _COMMENT_LINE_RE.search(line)
+    if match:
+        return match.group(1)
+    return line
+
+
+_SEGMENT_RE = re.compile(r"([a-z_]+):\s*(.*?)\s*$")
+
+
+def _parse_header_line(line):
+    """Parse a header line by stripping an optional <!-- ... --> wrapper (and any
+    leading `#` shell-comment marker) and extracting `key:value;` segments.
+
+    The reserved separator is `;`. To prevent silent truncation of values (e.g. a
+    shape description written as ``ramp; then loop`` would otherwise be parsed as
+    ``shape:ramp`` followed by an orphan fragment `` then loop``), the parser
+    verifies that every `;`-separated segment matches ``key: value``. A segment
+    that does not match that shape indicates a stray `;` inside a value and is
+    rejected as a malformed header. Authors must NOT include `;` inside any field
+    value; this invariant is enforced here and documented in the grammar.
+    """
+    body = _strip_comment_wrapper(line).lstrip()
+    if body.startswith("#"):
+        body = body[1:].lstrip()
+    segments = body.split(";")
+    values = {}
+    for segment in segments:
+        segment = segment.strip()
+        if not segment:
+            # Trailing/empty segment is allowed (e.g. line ends with `;`).
+            continue
+        match = _SEGMENT_RE.match(segment)
+        assert match, (
+            f"malformed header segment {segment!r} (likely a stray ';' inside a "
+            f"value, e.g. 'ramp; then loop'); full line: {line!r}"
+        )
+        key, value = match.group(1), match.group(2)
+        assert key not in values, f"duplicate header field {key!r}: {line!r}"
+        values[key] = value
+    return values
+
+
 def metadata(path):
     source = Path(f"{path}.meta") if path.suffix == ".json" else path
     first_line = source.read_text(encoding="utf-8").splitlines()[0]
-    values = dict(re.findall(
-        r"([a-z_]+):\s*([^;]+?)(?=;|\s*-->|$)",
-        first_line,
-    ))
+    values = _parse_header_line(first_line)
     missing = set(REQUIRED_FIELDS) - set(values)
     assert not missing, f"incomplete fixture header (missing {missing}): {source}"
     return values
@@ -227,11 +271,31 @@ def _extract_fenced_json(md_text):
     return [match.strip() for match in _FENCE_RE.findall(md_text)]
 
 
+INNER_JSON_SHAPE_VALIDATORS = (
+    _validate_primitives_array,
+    _validate_discriminator_array,
+    _validate_stable_keys_array,
+)
+
+
+def _validate_json_fenced(payload):
+    """Shape 4: the fenced payload is a markdown wrapper; each inner array value must
+    independently satisfy one of shapes 1, 2, or 3."""
+    if not isinstance(payload, list) or not payload:
+        return False
+    for inner in _walk_arrays(payload):
+        if not inner or not isinstance(inner, list):
+            continue
+        if any(_validator(inner) for _validator in INNER_JSON_SHAPE_VALIDATORS):
+            return True
+    return False
+
+
 _VALIDATORS = {
     "top_level_or_nested_arrays_of_primitives": _validate_primitives_array,
     "uniform_object_array_with_discriminator": _validate_discriminator_array,
     "objects_with_stable_keys_and_compatible_primitive_leaves": _validate_stable_keys_array,
-    "json_fenced_inside_markdown": lambda payload: isinstance(payload, list) and bool(payload),
+    "json_fenced_inside_markdown": _validate_json_fenced,
 }
 
 
