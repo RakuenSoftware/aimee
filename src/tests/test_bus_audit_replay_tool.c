@@ -14,6 +14,7 @@
 
 #include "audit_bus.h"
 #include "audit_replay.h"
+#include "cJSON.h"
 #include "log.h"
 
 #define ROWS 50
@@ -94,6 +95,38 @@ int main(void)
       fprintf(stderr, "FAIL: a missing capture file should return -1\n");
       return 1;
    }
+
+   /* JSON producers used by the /v1/audit endpoints. */
+   cJSON *j = audit_replay_to_json(path, 0, 1000);
+   assert(j);
+   assert((int)cJSON_GetObjectItem(j, "total")->valuedouble == ROWS);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(j, "rows")) == ROWS);
+   cJSON *r0 = cJSON_GetArrayItem(cJSON_GetObjectItem(j, "rows"), 0);
+   assert(cJSON_GetObjectItem(r0, "verdict") && cJSON_GetObjectItem(r0, "task_id"));
+   cJSON_Delete(j);
+
+   /* Pagination: total counts every row, only the window is materialized, and the
+    * window starts at the requested offset (rows are in emit/seq order). */
+   cJSON *jp = audit_replay_to_json(path, 10, 5);
+   assert((int)cJSON_GetObjectItem(jp, "total")->valuedouble == ROWS);
+   assert(cJSON_GetArraySize(cJSON_GetObjectItem(jp, "rows")) == 5);
+   assert((int)cJSON_GetObjectItem(jp, "offset")->valuedouble == 10);
+   cJSON *w0 = cJSON_GetArrayItem(cJSON_GetObjectItem(jp, "rows"), 0);
+   assert((int)cJSON_GetObjectItem(w0, "task_id")->valuedouble == 10);
+   cJSON_Delete(jp);
+
+   /* Path-traversal guard: only a bare capture basename is accepted. */
+   assert(audit_replay_valid_basename("audit-bus-capture-1-2-3.aimeecap"));
+   assert(!audit_replay_valid_basename("../etc/passwd"));
+   assert(!audit_replay_valid_basename("audit-bus-capture-/x.aimeecap"));
+   assert(!audit_replay_valid_basename("foo.txt"));
+   assert(!audit_replay_valid_basename(".aimeecap"));
+
+   /* The capture list names our session's file. */
+   cJSON *list = audit_replay_capture_list(home);
+   assert(cJSON_GetArraySize(list) >= 1);
+   cJSON_Delete(list);
+   printf("  JSON replay + pagination + basename guard + capture list verified\n");
 
    printf("test_bus_audit_replay_tool: OK (the operator replay tool renders the recorded rows)\n");
    return 0;

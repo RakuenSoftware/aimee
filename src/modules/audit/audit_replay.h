@@ -17,6 +17,8 @@
 
 #include <stdio.h>
 
+struct cJSON;
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -31,6 +33,23 @@ extern "C"
     * the file could not be read, and -2 if the stream is TRUNCATED or CORRUPT
     * (still prints what was recoverable before the break). */
    int audit_bus_replay_print(const char *path, FILE *out);
+
+   /* JSON forms for the /v1/audit endpoints (both return caller-owned cJSON).
+    * audit_replay_to_json returns {status, total, count, offset, rows:[{seq,
+    * verdict,actor,tool,mode,reason,task_id,args_hash,command}...]} for the
+    * capture file at `path`, or NULL if the file could not be read. Only the
+    * [offset, offset+limit) slice is materialized (limit<=0 = all) so a caller can
+    * keep the response bounded; `total` still reports every row in the stream.
+    * audit_replay_capture_list returns an array of {name, bytes} for the capture
+    * files in `dir` (empty array, never NULL). Declared with `struct cJSON *` so
+    * this header pulls in no cJSON (nor bus) dependency on its includers. */
+   struct cJSON *audit_replay_to_json(const char *path, long offset, long limit);
+   struct cJSON *audit_replay_capture_list(const char *dir);
+
+   /* 1 iff `name` is a safe capture-file basename: no path separator (no
+    * traversal) and the audit-capture naming convention. A client-supplied file
+    * name MUST pass this before it is joined to the capture directory. */
+   int audit_replay_valid_basename(const char *name);
 
 #ifdef __cplusplus
 }

@@ -66,6 +66,8 @@ const method_policy_t method_registry[] = {
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
     {"economizer.*", CAP_DASHBOARD_READ, "economizer telemetry"},
     {"audit.verify", CAP_DASHBOARD_READ, "WORM audit chain verify"},
+    {"audit.captures", CAP_DASHBOARD_READ, "list audit-on-bus capture streams"},
+    {"audit.replay", CAP_DASHBOARD_READ, "replay an audit-on-bus capture stream"},
     {"audit.checkpoint", CAP_TOOL_EXECUTE, "WORM audit checkpoint"},
     {"audit.seal", CAP_TOOL_EXECUTE, "WORM audit seal snapshot"},
     {"audit.snapshot", CAP_TOOL_EXECUTE, "WORM audit metric snapshot"},
