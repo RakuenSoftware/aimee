@@ -282,6 +282,8 @@ class DescriptorTests(unittest.TestCase):
             ("plugin-loader", "sources", "src/modules/plugin-loader/plugin.c"),
             ("plugin-loader", "sources", "src/modules/plugin-loader/plugin_loader.c"),
             ("plugin-loader", "private_headers", "src/modules/plugin-loader/plugin_internal.h"),
+            ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
+            ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
@@ -320,10 +322,10 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("roundtable", "protocols", "ir", "translation", "skills", "audit",
-                           "module-runtime", "plugin-loader", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git", "delegates", "workflows",
-                           "memory"):
+        for identifier in ("benchmarks", "roundtable", "protocols", "ir", "translation", "skills",
+                           "audit", "module-runtime", "plugin-loader", "gateway", "governance",
+                           "learning", "workspace", "vault", "config", "git", "delegates",
+                           "workflows", "memory"):
             for name in ("undeclared.c", "undeclared.h"):
                 tmp = self.production_repo()
                 try:
@@ -363,7 +365,7 @@ class DescriptorTests(unittest.TestCase):
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
         empty = (
-            "benchmarks", "control-web", "execution-policy", "kb-synthesis",
+            "control-web", "execution-policy", "kb-synthesis",
             "response-composition", "routing", "runtime-web", "tools",
         )
         for identifier in empty:
@@ -425,7 +427,7 @@ class DescriptorTests(unittest.TestCase):
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("roundtable", "ir", "translation", "skills", "audit",
+        for identifier in ("benchmarks", "roundtable", "ir", "translation", "skills", "audit",
                            "module-runtime", "plugin-loader", "gateway", "governance", "learning",
                            "workspace", "vault", "config", "git", "delegates", "workflows",
                            "memory"):
