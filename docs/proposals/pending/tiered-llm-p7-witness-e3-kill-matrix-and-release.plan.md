@@ -43,15 +43,23 @@ The `witness_concurrency_exhausted` boundary (5) is the bounded-SERIALIZABLE-ret
 wrapper carried forward from the E1 review (see the E2 plan §8); the two-producer
 race is proven in the E2 plan's validation section.
 
-**Remaining, validation-pending:** the boot **refusal** path
-(`kb_witness_boot_check` returning −1) fires only when `kb_vault_live_keys_allowed()`
-— i.e. under a real custody anchor (TPM/HSM/KMS). Its *logic* is proven
-deterministically on real PG (`test_witness_tamper_pg` scenario 3: the coverage
-check detects a foreign `signer_key_id`), and the daemon gate proves
-`kb_witness_boot_check` runs at startup and returns 0 under file custody. What is
-not yet exercised is the ~6-line wrapper actually refusing startup under a live
-anchor. This needs a KMS/TPM custody harness and is the one item still owed before
-the release-gate flip.
+**Boot refusal under a real anchor — now PROVEN** (`run-p7-witness-boot-tpm.sh` +
+`aimee-witness-boot-tpm-harness`, built `WITH_TPM2=1`, validated on CT260 swtpm +
+PG17). `kb_witness_boot_check` returning −1 fires only when
+`kb_vault_live_keys_allowed()` — i.e. under a real, unsealed custody anchor. The
+harness provisions a TPM-sealed KEK, unseals it (so `live_keys_allowed()` is TRUE),
+and drives the full composition against a real Postgres:
+
+- while SEALED: no live keys, the boot check is a no-op (returns 0);
+- unsealed + evidence signed by the current TPM-derived key: returns 0 (does not
+  refuse spuriously);
+- unsealed + a retained checkpoint signed by an underivable key: returns −1 with
+  the operator-actionable message.
+
+The two halves were already proven separately (`test_witness_tamper_pg` scenario 3
+for foreign-key coverage detection; the swtpm seal barrier for live-keys-under-TPM);
+this exercises the glue end to end under a real anchor. No validation-pending items
+remain in the kill matrix.
 
 The reference kill points enumerated below are retained as the specification the
 gates above discharge:

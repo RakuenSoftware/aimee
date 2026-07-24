@@ -133,10 +133,16 @@ int main(int argc, char **argv)
    CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
                         "SET signer_key_id = decode(repeat('be',16),'hex')") == 0,
          "foreign signer_key_id UPDATE failed");
+   err[0] = '\0';
    int refused = kb_witness_boot_check(err, sizeof err);
    CHECK(refused != 0,
          "boot check PASSED with a checkpoint signed by an underivable key (the refusal path is "
          "broken under live keys)");
+   /* Refuse for the RIGHT reason. boot_check also returns -1 when the coverage check
+    * could not run ("could not be checked"); that would pass this assertion for the
+    * wrong reason. Require the foreign-key message specifically. */
+   CHECK(strstr(err, "cannot derive") != NULL,
+         "boot check refused, but not via the foreign-key path (message: %s)", err);
    printf("witness_boot_tpm: negative OK (live keys + unverifiable checkpoint -> boot REFUSES: %s)\n",
           err);
 
