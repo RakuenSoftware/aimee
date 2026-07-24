@@ -876,12 +876,15 @@ def test_gate_anchor_document_exempt_from_phase_one_rejection(fake_worktree):
         "gate must accept a PR whose only change is the anchor document; "
         "stdout=" + repr(result.stdout) + " stderr=" + repr(result.stderr)
     )
-    # Either "present with all six decisions" (when the gate reaches the
-    # final contract_present check) or "no Phase 1+ paths changed"
-    # (when the anchor-only diff is correctly exempted from the
-    # Phase 1+ surface check) is acceptable.  Both indicate the gate
-    # accepted the PR; the important assertion is returncode == 0 and
-    # that the gate did NOT print a "required" / "missing" error.
+    # The anchor-only diff is exempted from the Phase 1+ surface check
+    # because ``collapse_anchors.md`` itself is in ``_PHASE_ONE_EXEMPT``.
+    # Therefore the gate must take the no-Phase-1-touch path and print
+    # the strict exempt-path message.  Reaching the final
+    # contract_present check would mean the exemption was not applied.
+    assert "no Phase 1+ paths changed" in result.stdout, (
+        "gate must exempt an anchor-only PR from the Phase 1+ surface "
+        "check; stdout=" + repr(result.stdout)
+    )
     assert "required" not in result.stderr, (
         "gate must not print a required-error for an anchor-only PR; "
         "stderr=" + repr(result.stderr)

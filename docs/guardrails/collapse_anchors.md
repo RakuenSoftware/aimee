@@ -26,7 +26,7 @@ Phase 4 is constrained to the nine requested controls and continuation/prefix pr
 
 ## Decision 5 -- Promotion substrate
 
-Existing promotion is manual: `handle_optimize_promote` is at `src/server/server_state.c:931`, backed by `db2_bandit_promotion_set` at `src/db2/bandit.c:341`; verified arm-stat updates are `db2_bandit_arm_stats_update` at `src/db2/bandit.c:180`. No shadow->canary->default bucketed calibration transition is present. **Phase 5.0 deliverable:** `docs/guardrails/collapse_promotion_bucketing.md` specifies shadowed, canary, and default bucket states, calibration queries, and introduces bucketing in `src/server/server_state.c` around `handle_optimize_promote`; persistence extends `db2_bandit_promotion_set` (`src/db2/bandit.c:341`) before Phase 5 wires collapse promotion.
+Existing promotion is manual: `handle_optimize_promote` is at `src/server/server_state.c:931`, backed by `db2_bandit_promotion_set` at `src/db2/bandit.c:341`; verified arm-stat updates are `db2_bandit_arm_stats_update` at `src/db2/bandit.c:180`. No shadow->canary->default bucketed calibration transition is present. **Phase 5.0 deliverable:** `docs/guardrails/collapse_promotion_bucketing.md` is the authoritative source-of-truth that specifies shadowed, canary, and default bucket states and calibration queries; the same Phase 5.0 also introduces the bucketing code changes in `src/server/server_state.c` around `handle_optimize_promote` and extends persistence in `db2_bandit_promotion_set` (`src/db2/bandit.c:341`) before Phase 5 wires collapse promotion.
 
 ## Decision 6 -- Audit-store schema
 

@@ -138,8 +138,8 @@ PHASE_ONE_PREFIXES = (
     # Config source of truth (Decision 2).
     "src/modules/config/",
     # Catch-all for the rest of src/server/ (e.g. openai_chat.c subdir
-    # helpers, server_state.c helpers).  Listed last so the specific
-    # names above are matched first and produce clearer error context.
+    # helpers, server_state.c helpers).  Prefix ordering is irrelevant
+    # for correctness; the matched prefix is reported in failure messages.
     "src/server/",
 )
 
@@ -397,12 +397,23 @@ def phase_one_touched(paths: list[str]) -> bool:
     already being merged (otherwise the contract would be impossible
     to bootstrap).
     """
+    return _phase_one_match(paths) is not None
+
+
+def _phase_one_match(paths: list[str]) -> str | None:
+    """Return the first Phase 1+ prefix matched by ``paths``, or None.
+
+    Exempt paths are skipped.  The matched prefix is surfaced in error
+    messages so a failure points to the decision/surface family that
+    tripped the gate.
+    """
     for path in paths:
         if path in _PHASE_ONE_EXEMPT:
             continue
-        if any(_matches_prefix(path, prefix) for prefix in PHASE_ONE_PREFIXES):
-            return True
-    return False
+        for prefix in PHASE_ONE_PREFIXES:
+            if _matches_prefix(path, prefix):
+                return prefix
+    return None
 
 
 def phase_one_prefixes() -> tuple[str, ...]:
@@ -522,7 +533,8 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    if not phase_one_touched(paths):
+    match = _phase_one_match(paths)
+    if match is None:
         print("collapse anchor gate: OK (no Phase 1+ paths changed)")
         return 0
 
@@ -540,8 +552,9 @@ def main() -> int:
         for path in working_tree_paths
     ):
         print(
-            "error: Phase 1+ paths are present in the working tree "
-            "(staged, unstaged, or untracked) without being committed. "
+            f"error: Phase 1+ paths are present in the working tree "
+            f"(staged, unstaged, or untracked) without being committed; "
+            f"matched prefix: {match}. "
             f"{ANCHORS} is required to be merged on the target branch "
             "before Phase 1+ implementation begins; run with the working tree clean "
             "(e.g. git stash) to validate committed work only; commit the Phase 0 "
@@ -572,13 +585,14 @@ def main() -> int:
                 )
             else:
                 print(
-                    "error: Phase 1+ paths changed against a target branch "
+                    f"error: Phase 1+ paths changed against a target branch "
                     f"({base_sha}) that does not yet contain the merged "
                     f"anchor document ({ANCHORS}). The Phase 0 anchor "
                     "contract requires collapse_anchors.md to be merged "
                     "on the target branch before Phase 1+ implementation "
                     "begins; "
-                    f"{ANCHORS} is required when Phase 1+ paths change.",
+                    f"{ANCHORS} is required when Phase 1+ paths change "
+                    f"(matched prefix: {match}).",
                     file=sys.stderr,
                 )
         else:
