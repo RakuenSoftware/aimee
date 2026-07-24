@@ -11,7 +11,7 @@ pre-LLM hook contract; those remain required in
 ## Public contracts
 
 `src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h` exports
-`plugin_loader_set_install_prefix`, `plugin_loader_scan_dir`, and `plugin_loader_discover_all`.
+`plugin_loader_scan_dir` and `plugin_loader_discover_all`.
 `src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h` exports manifest parsing,
 installed-registry operations,
 install/enable/remove, hook/tool aggregation, conflict checks, `plugin_manifest_parse`, and
@@ -24,14 +24,16 @@ Five exports have no tracked production caller outside the module: `plugin_regis
 `plugin_registry_save`, and `plugin_load_and_register` are called only from `plugin.c` and
 `plugin_loader.c`; `plugin_tool_conflicts_with_builtin` is called from `plugin.c` plus the focused
 test, its only external caller; and `plugin_registry_get` has no module-local caller and only the
-focused test as a tracked caller. Two more have no caller in the tracked tree at all:
+focused test as a tracked caller. These remain exported ahead of a later internalization pass; each is
+still reachable from `plugin.c`, `plugin_loader.c`, or the focused test, so none is dead.
+
+Two former exports had no caller anywhere in the tracked tree and were removed:
 `plugin_load_all_registered`, a second registration entry point superseded by
 `plugin_loader_discover_all`, and `plugin_loader_set_install_prefix`, whose documented `main()`
-call is absent — so in the tracked startup path bundled discovery takes the
-`$AIMEE_INSTALL_PREFIX`-then-`./plugins/` fallback. Both remain declared in public headers and
-shipped as external symbols, so a downstream host can link and call them — including calling the
-setter before discovery; their removal is an API and ABI compatibility decision, not a dead-code
-cleanup.
+call never existed — so bundled discovery has always taken the
+`$AIMEE_INSTALL_PREFIX`-then-`./plugins/` fallback, which removing the unused setter preserves
+exactly. The build ships static binaries with no external ABI consumer of these headers, so the
+removal broke nothing.
 
 ## Dependencies and consumers
 

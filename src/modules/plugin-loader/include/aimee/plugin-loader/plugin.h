@@ -83,11 +83,6 @@ int plugin_manifest_parse(const char *dir, plugin_t *out, char *err_buf, size_t 
  * The plugin's on_init is called after registration succeeds. */
 int plugin_load_and_register(const plugin_t *plugin, char *err_buf, size_t err_len);
 
-/* Load all enabled plugins from the registry and call their register(ctx).
- * Returns 0 on success (even if no plugins are enabled), -1 if any enabled
- * plugin failed to load. */
-int plugin_load_all_registered(char *err_buf, size_t err_len);
-
 /* --- Install / enable / disable / remove --- */
 
 /* Install a plugin from source_dir.

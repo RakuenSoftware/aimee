@@ -21,11 +21,6 @@ extern "C"
 {
 #endif
 
-   /* Set the install prefix used for bundled plugin discovery.
-    * Call once at startup from main() before plugin_loader_discover_all().
-    * If not called, falls back to $AIMEE_INSTALL_PREFIX, then ./plugins/ (cwd). */
-   void plugin_loader_set_install_prefix(const char *prefix);
-
    /* Discover and register plugins from all sources (bundled, user, project).
     * Returns 0 on success.  Individual plugin failures are non-fatal; the
     * function continues and returns -1 only if a critical setup error occurs. */

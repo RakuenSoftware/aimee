@@ -15,26 +15,10 @@
 #include <unistd.h>
 #include <errno.h>
 
-/* --- Install prefix state --- */
-
-static char g_install_prefix[MAX_PATH_LEN] = {0};
-
-void plugin_loader_set_install_prefix(const char *prefix)
-{
-   if (!prefix || !prefix[0])
-      return;
-   snprintf(g_install_prefix, sizeof(g_install_prefix), "%s", prefix);
-}
-
 /* Resolve the bundled plugins directory.
- * Priority: explicit set > $AIMEE_INSTALL_PREFIX/plugins > ./plugins */
+ * Priority: $AIMEE_INSTALL_PREFIX/plugins > ./plugins */
 static void bundled_plugins_dir(char *out, size_t cap)
 {
-   if (g_install_prefix[0])
-   {
-      snprintf(out, cap, "%s/plugins", g_install_prefix);
-      return;
-   }
    const char *env = getenv("AIMEE_INSTALL_PREFIX");
    if (env && env[0])
    {
