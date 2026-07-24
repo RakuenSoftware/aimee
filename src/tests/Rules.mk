@@ -220,6 +220,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-host \
                $(TESTPREFIX)/unit-test-bus-route \
                $(TESTPREFIX)/unit-test-bus-flow \
+               $(TESTPREFIX)/unit-test-bus-client \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2598,6 +2599,22 @@ $(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
                                   $(OBJDIR)/modules/bus/bus_arena.o \
                                   $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Event-bus C reference client (feature tree slice 8).
+$(OBJDIR)/tests/test_bus_client.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-client: $(OBJDIR)/tests/test_bus_client.o \
+                                    $(OBJDIR)/modules/bus/bus_client.o \
+                                    $(OBJDIR)/modules/bus/bus_host.o \
+                                    $(OBJDIR)/modules/bus/bus_route.o \
+                                    $(OBJDIR)/modules/bus/bus_region.o \
+                                    $(OBJDIR)/modules/bus/bus_ring.o \
+                                    $(OBJDIR)/modules/bus/bus_arena.o \
+                                    $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-client
+unit-test-bus-client: $(TESTPREFIX)/unit-test-bus-client
+	$<
 
 .PHONY: unit-test-bus-flow
 unit-test-bus-flow: $(TESTPREFIX)/unit-test-bus-flow
