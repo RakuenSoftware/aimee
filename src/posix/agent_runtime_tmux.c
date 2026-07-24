@@ -6,6 +6,7 @@
 #include "cli_session.h"
 #include "log.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,6 +118,26 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
     * other CLIs. */
    if (is_claude)
       cli_session_prepare_claude(cwd, autonomous);
+
+   /* Concurrency isolation for claude DELEGATE seats: several roundtable/impl
+    * seats run at once, and they otherwise share one $HOME -> one ~/.claude.json
+    * and ~/.claude runtime tree, which claude-code writes non-atomically the whole
+    * turn. Concurrent seats then corrupt/block each other and wedge to the CLI
+    * timeout. Give each delegate seat its own HOME (OAuth token + settings shared
+    * by symlink; the rest per-turn) by prefixing the launched command. The primary
+    * interactive session is single, so it keeps the shared HOME. Best-effort: a
+    * failed mint leaves cli_cmd untouched (shared HOME, prior behavior). */
+   char cli_cmd_home[CLI_SESSION_CMD_MAX];
+   if (is_claude && deleg)
+   {
+      char iso_home[PATH_MAX];
+      if (cli_session_isolated_claude_home(cwd, iso_home, sizeof(iso_home)) == 0)
+      {
+         int n = snprintf(cli_cmd_home, sizeof(cli_cmd_home), "HOME='%s' %s", iso_home, cli_cmd);
+         if (n > 0 && n < (int)sizeof(cli_cmd_home))
+            cli_cmd = cli_cmd_home;
+      }
+   }
 
    /* Prefix the launched CLI command with a per-session AIMEE_SESSION_ID assignment
     * (`AIMEE_SESSION_ID=<sid> <cli_cmd>` run by `/bin/sh -c`) so the PreToolUse hook
