@@ -536,6 +536,14 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	if err != nil {
 		return StepResult{}, err
 	}
+	if strings.TrimSpace(diff) == "" {
+		// The slice produced no net change vs its base — its work is already present
+		// (e.g. a sibling merged it and base-integration pulled it in) or the task was
+		// a no-op. Freezing an empty diff sends an empty artifact through review, which
+		// rejects it, looping the slice to convergence_no_progress. There is nothing to
+		// review, PR, or merge, so complete the slice as an accepted no-op.
+		return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
+	}
 	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
 }
 
