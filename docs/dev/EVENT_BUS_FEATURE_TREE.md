@@ -205,10 +205,11 @@ a no-op D7 gate among them.
       safe by the refcount. Proven by a ThreadSanitizer lane (scripts/run-bus-arena-tsan.sh) that runs
       all three roles concurrently over a small (recycling) arena — clean with the lock, and a verified
       data race the moment it is removed.
-    - *Arena bytes in the capture stream (D10).* The tap is offered the arena frame header (seq, kind,
-      lease reference) but not the bytes — the host never dereferences the arena. Capturing arena
-      payloads means reading the span through the lease before it drains; it lands with the same slice
-      that adds an arena producer worth replaying.
+    - *Arena bytes in the capture stream (D10) — DONE.* The pump resolves a producer-held lease once,
+      pre-routing (bus_arena_producer_bytes), and hands the span to the capture tap, which materializes
+      it into the record exactly like an inline payload. Replay reads the bytes from the record blob, so
+      a captured arena event replays byte-exact without the (long-gone) lease. This is the single place
+      the host reads arena bytes it did not write — bounded by the span, for the governance tap only.
 - **Module replay.** Slice 11 delivers observational replay; re-driving a module against recorded
   inbound events is a later tree (D10).
 - **`shm_open` portability fallback.** v0 is Linux-only by D1; a fallback carries its own threat-model

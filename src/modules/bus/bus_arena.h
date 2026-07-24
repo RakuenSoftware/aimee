@@ -156,6 +156,16 @@ bus_arena_result_t bus_arena_publish(bus_arena_t *a, uint32_t lease_id,
 bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id, uint32_t generation,
                                       uint32_t consumer_slot, const uint8_t **ptr);
 
+/* Read pointer + length of a still-producer-held lease's span, for the HOST's own
+ * governance tap (capture/replay) to record the payload before routing publishes
+ * the lease. This is the one place the host reads arena bytes it did not write;
+ * it is not consumer-ref-gated because there is no consumer yet — the producer
+ * has filled the span and relinquished it by sending the frame, and the pump has
+ * not published it. ERR_STATE once the lease is published (use bus_arena_read_ptr
+ * then). *len is the span length; a caller records min(frame.payload_len, *len). */
+bus_arena_result_t bus_arena_producer_bytes(const bus_arena_t *a, uint32_t lease_id,
+                                            const uint8_t **ptr, uint32_t *len);
+
 /* A consumer releases its ref. Generation-checked. Reclaims at refcount zero. */
 bus_arena_result_t bus_arena_release(bus_arena_t *a, uint32_t lease_id, uint32_t generation,
                                      uint32_t consumer_slot);

@@ -649,7 +649,28 @@ uint32_t bus_host_pump(bus_host_t *h)
             f.seq = ++h->seq;
             f.src_handle = s;
             if (h->tap)
-               h->tap(h->tap_ctx, &f, inl, (f.hdr_flags & BUS_F_INLINE) ? f.payload_len : 0);
+            {
+               const uint8_t *tap_payload = inl;
+               uint32_t tap_len = (f.hdr_flags & BUS_F_INLINE) ? f.payload_len : 0;
+               /* Arena payloads are recorded too. Here, pre-routing, the producer
+                * still holds the lease and has filled the span (its fill
+                * happened-before the ring commit this pump observed), so the host
+                * reads it ONCE to hand the bytes to the capture tap — the single
+                * place the host reads arena bytes. Bounded by the span; validation
+                * in route_arena_* then decides whether to route. */
+               if (f.hdr_flags & BUS_F_ARENA)
+               {
+                  const uint8_t *ap = NULL;
+                  uint32_t alen = 0;
+                  if (bus_arena_producer_bytes(&h->arena, (uint32_t)f.payload_ref, &ap, &alen) ==
+                      BUS_ARENA_OK)
+                  {
+                     tap_payload = ap;
+                     tap_len = f.payload_len <= alen ? f.payload_len : alen;
+                  }
+               }
+               h->tap(h->tap_ctx, &f, tap_payload, tap_len);
+            }
             /* seq-stamped, pre-routing, once */
             memset(slot->blocked_delivered, 0, sizeof slot->blocked_delivered);
             done = route_fresh(h, s, &f, inl, slot->blocked_delivered, 1);

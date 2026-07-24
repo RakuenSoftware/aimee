@@ -387,6 +387,33 @@ bus_arena_result_t bus_arena_read_ptr(const bus_arena_t *a, uint32_t lease_id, u
    return r;
 }
 
+static bus_arena_result_t bus_arena_producer_bytes_locked(const bus_arena_t *a, uint32_t lease_id,
+                                                          const uint8_t **ptr, uint32_t *len)
+{
+   if (!a || !ptr || !len)
+      return BUS_ARENA_ERR_ARG;
+   const bus_lease_t *l =
+       (lease_id < a->lease_count && a->leases[lease_id].active) ? &a->leases[lease_id] : NULL;
+   if (!l)
+      return BUS_ARENA_ERR_ARG;
+   if (!l->producer_ref)
+      return BUS_ARENA_ERR_STATE; /* published already: the tap ran before routing */
+   *ptr = a->base + l->offset;
+   *len = l->len;
+   return BUS_ARENA_OK;
+}
+
+bus_arena_result_t bus_arena_producer_bytes(const bus_arena_t *a, uint32_t lease_id,
+                                            const uint8_t **ptr, uint32_t *len)
+{
+   if (!a)
+      return BUS_ARENA_ERR_ARG;
+   arena_lock(a);
+   bus_arena_result_t r = bus_arena_producer_bytes_locked(a, lease_id, ptr, len);
+   arena_unlock(a);
+   return r;
+}
+
 static bus_arena_result_t bus_arena_release_locked(bus_arena_t *a, uint32_t lease_id,
                                                    uint32_t generation, uint32_t consumer_slot)
 {
