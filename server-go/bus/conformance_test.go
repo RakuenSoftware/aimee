@@ -64,9 +64,14 @@ func TestCrossLanguageConformance(t *testing.T) {
 		unix.Close(fd)
 		t.Fatalf("connect: %v", err)
 	}
-	// Keep the connection open for the client's lifetime — the harness treats a
-	// closed peer as a shutdown signal.
-	defer unix.Close(fd)
+	// Closed explicitly at step 5 (reaped-recovery); guard the defer against a
+	// double close.
+	fdClosed := false
+	defer func() {
+		if !fdClosed {
+			unix.Close(fd)
+		}
+	}()
 
 	c, err := Attach(fd)
 	if err != nil {
@@ -131,6 +136,77 @@ func TestCrossLanguageConformance(t *testing.T) {
 			ca.Frame.CorrelationID, ca.Frame.HdrFlags)
 	}
 	t.Log("capability_absent ok")
+
+	// 4. Cancel: the request reaches the C server, which acks the cancel back so
+	// its delivery is observable across the boundary.
+	if err := c.Request(KIND_ECHO, 0x5151, []byte("to-cancel")); err != nil {
+		t.Fatalf("request to cancel: %v", err)
+	}
+	// The reply for this request may arrive; drain whatever comes, then cancel.
+	if err := c.Cancel(KIND_ECHO, 0x5151); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	pollFor(func(ev Event) bool { return ev.Frame.EventKind == KIND_CANCEL_ACK }, "cancel ack")
+	t.Log("cancel delivered to the server ok")
+
+	// 5. Reaped-client recovery: this Go client detaches; the host reaps it and
+	// frees its slot. A fresh Go client then attaches into that slot and works —
+	// proving recovery across the language boundary.
+	c.Detach()
+	unix.Close(fd)
+	fdClosed = true
+
+	fd2, err := unix.Socket(unix.AF_UNIX, unix.SOCK_SEQPACKET, 0)
+	if err != nil {
+		t.Fatalf("socket 2: %v", err)
+	}
+	defer unix.Close(fd2)
+	// The harness reaps on disconnect then re-accepts; retry connect briefly.
+	connected := false
+	for i := 0; i < 200; i++ {
+		if err := unix.Connect(fd2, &unix.SockaddrUnix{Name: sock}); err == nil {
+			connected = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !connected {
+		t.Fatal("second client could not connect after recovery")
+	}
+	c2, err := Attach(fd2)
+	if err != nil {
+		t.Fatalf("second attach (recovery): %v", err)
+	}
+	defer c2.Detach()
+
+	poll2 := func(pred func(Event) bool, what string) Event {
+		t.Helper()
+		dl := time.Now().Add(5 * time.Second)
+		for time.Now().Before(dl) {
+			ev, ok, err := c2.Poll()
+			if err != nil {
+				t.Fatalf("poll2 (%s): %v", what, err)
+			}
+			if ok && pred(ev) {
+				return ev
+			}
+			if !ok {
+				time.Sleep(2 * time.Millisecond)
+			}
+		}
+		t.Fatalf("recovered client timed out waiting for %s", what)
+		return Event{}
+	}
+	if err := c2.Request(KIND_ECHO, 0x7777, []byte("after-recovery")); err != nil {
+		t.Fatalf("recovered request: %v", err)
+	}
+	r2 := poll2(func(ev Event) bool {
+		return ev.Frame.EventKind == KIND_ECHO && ev.Frame.HdrFlags&FReply != 0
+	}, "recovered echo reply")
+	if r2.Frame.CorrelationID != 0x7777 || !bytes.Equal(r2.Payload, []byte("after-recovery")) {
+		t.Fatalf("recovered reply mismatch")
+	}
+	t.Log("reaped-client recovery ok: a fresh client works after the first was reaped")
 }
 
 const (
@@ -138,5 +214,6 @@ const (
 	KIND_NOTIFY   uint32 = 1000
 	KIND_ACK      uint32 = 1001
 	KIND_ECHO     uint32 = 1002
-	KIND_NOSERVER uint32 = 1003
+	KIND_NOSERVER   uint32 = 1003
+	KIND_CANCEL_ACK uint32 = 1004
 )
