@@ -26,19 +26,36 @@ matrix). It is the only file that Phase 1+ is allowed to read first.
 > handler/relay. Missing decoder/renderer/route-trace substrate is the Phase
 > 2.0–2.4 prerequisite surface.
 
-The verified type remains `aimee_delta_t` at `src/headers/aimee_ir.h:209`,
-with `aimee_delta_type_t` at `:194`; it is not treated as evidence of
+The verified type remains `aimee_delta_t` (typedef-open at `src/headers/aimee_ir.h:196`;
+struct member `text_delta` at `:204`; struct closes at `:209`), with
+`aimee_delta_type_t` (typedef-open at `src/headers/aimee_ir.h:186`;
+enum members at `:188-193`; enum closes at `:194`); it is not treated as evidence of
 reachability on divergent paths.
 
 ## Decision 2 — Config source of truth and namespace
 
 > **CONFIG SOURCE OF TRUTH = `config_t` struct in `src/modules/config/config.h`.**
 >
-> - Struct: `config_t` lives in `src/modules/config/config.h` (verified for
->   `guardrails_*` fields at `src/modules/config/config.h:1400-1408`).
-> - Config-load entry: `config_load` at `src/modules/config/config.c:1109`.
-> - Section parser: `config_parse_guardrails_section` at
->   `src/modules/config/config_sections.c:1264`.
+> - Struct: `config_t` is defined as `typedef struct config { ... }` opening at
+>   `src/modules/config/config.h:265` (F-CITE-002 closure: this is the primary
+>   definition; a forward-declaration `typedef struct config config_t;` also
+>   exists at `src/headers/aimee.h:140` — Phase 1+ extends the `config.h:265`
+>   struct, not the forward decl; the doc's prior claim that the struct
+>   'lives in config.h' was correct in spirit but cited the `guardrails_*`
+>   field row rather than the struct opening line). The `guardrails_*` field
+>   cluster verified at `src/modules/config/config.h:1395-1408` (one field
+>   per line, the last row is `guardrails_blast_radius_advisory_enabled` at
+>   `:1408`).
+> - Config-load entry: `config_load(config_t *cfg)` at
+>   `src/modules/config/config.c:1109` (F-CITE-002 closure: the symbol-index
+>   `find_symbol` returns `:1069` here, which is `config_module_enabled` — a
+>   different function on the same struct; the live-source line `:1109` is
+>   the authoritative `config_load` def per 'code outranks your repro').
+> - Section parser: `config_parse_guardrails_section(config_t *cfg, cJSON
+>   *root)` at `src/modules/config/config_sections.c:1264` (F-CITE-002
+>   closure: the symbol-index reports `:1258`, which is the comment/header
+>   line preceding the function def; the live-source line `:1264` is
+>   authoritative).
 > - Doc-generator: `scripts/gen-reference-docs.py` (the section-parser entry
 >   lives at `scripts/gen-reference-docs.py:417` — `parse_config_sections`;
 >   it scans `src/modules/config/config*.c` for `cJSON_GetObjectItemCaseSensitive`
@@ -117,51 +134,56 @@ extension to `scripts/gen-reference-docs.py:417`).
 
 ## Decision 3 — Relay choke point with verified symbols
 
-> **RELAY CHOKE POINT = `aimee_delta_t` at `src/headers/aimee_ir.h:209`.**
+> **RELAY CHOKE POINT = `aimee_delta_t` (typedef-open at `src/headers/aimee_ir.h:196`;
+> struct member `text_delta` at `:204`; struct closes at `:209`).**
 >
 > - **Producer (backend → IR):** `openai_chunk_to_deltas` at
 >   `src/server/aimee_ir_stream.c:42`; `bedrock_converse_stream_to_deltas`
 >   at `src/server/aimee_ir_stream.c:220`. State types:
->   `openai_stream_state_t` (`src/headers/aimee_ir_stream.h:30`) and
->   `converse_stream_state_t` (`src/headers/aimee_ir_stream.h:54`).
+>   `openai_stream_state_t` (typedef-open at `src/headers/aimee_ir_stream.h:18`;
+>   decoder declared at `:31`) and `converse_stream_state_t`
+>   (typedef-open at `src/headers/aimee_ir_stream.h:41`; decoder declared at
+>   `:64`) (F-CITE-003 closure: the prior cites of `:30` and `:54` were
+>   off-by-one / off-by-ten; the live-source lines are authoritative).
 > - **Field on the struct carrying the bytes:** `aimee_delta_t.text_delta`
->   at `src/headers/aimee_ir.h:204` (typed `const char *`; BORROW lifetime).
+>   at `src/headers/aimee_ir.h:204` (typed `const char *`; BORROW lifetime
+>   per the comment header at `:204-205`).
 > - **Consumer (IR → frontend):** `anthropic_delta_emit` at
 >   `src/server/aimee_ir_stream.c:539` (this is the Anthropic-shape
 >   renderer — `delta_build_events` writes
 >   `delta.type = "text_delta"`, `delta.text = d->text_delta` at
->   `src/server/aimee_ir_stream.c:445`).
+>   `src/server/aimee_ir_stream.c:445`). State type
+>   `anthropic_stream_state_t` typedef-open at
+>   `src/headers/aimee_ir_stream.h:68`; emitter declared at `:90`
+>   (F-CITE-003 closure: prior cite `:85` for the typedef was off; the
+>   typedef sits at `:82` for `aimee_sse_emit_fn` and at `:90` for
+>   `anthropic_delta_emit`).
 > - **Live wire-up today:** `messages_stream_ir_relay` at
->   `src/server/anthropic_http.c:973` (dispatcher); gate at
->   `src/server/anthropic_http.c:1251` (`aimee_ir_stream_relay_enabled()`,
->   default-OFF). The same env (`AIMEE_IR_STREAM_RELAY`) is referenced via
->   `aimee_ir_stream_relay_enabled()` at `src/server/aimee_ir_serve.c:30`.
+>   `src/server/anthropic_http.c:973` (dispatcher; F-CITE-003 closure:
+>   function-definition line is `:973`; preceding docstring at `:971-972`;
+>   the symbol-index `find_symbol` returns `:957` for this identifier,
+>   which is a call-site reference inside `messages_stream`, not the def);
+>   gate at `src/server/anthropic_http.c:1251`
+>   (`aimee_ir_stream_relay_enabled()`, default-OFF). The same env
+>   (`AIMEE_IR_STREAM_RELAY`) is referenced via `aimee_ir_stream_relay_enabled()`
+>   at `src/server/aimee_ir_serve.c:30`.
 > - **Verified enum members observed on the live path:**
->   `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`
->   (carries `text_delta`), `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`,
->   `AIMEE_DELTA_ERROR` (one per `src/headers/aimee_ir.h:188-193`).
+>   `AIMEE_DELTA_TURN_START` (`:188`), `AIMEE_DELTA_BLOCK_START` (`:189`),
+>   `AIMEE_DELTA_BLOCK_DELTA` (`:190`, carries `text_delta`),
+>   `AIMEE_DELTA_BLOCK_STOP` (`:191`), `AIMEE_DELTA_TURN_STOP` (`:192`),
+>   `AIMEE_DELTA_ERROR` (`:193`) — enum open at
+>   `src/headers/aimee_ir.h:186`, enum close at `:194`.
 > - **Reachable on which path today:** only `/v1/messages` (verified
 >   `messages_stream_ir_relay` gated by `aimee_ir_stream_relay_enabled()` at
 >   `src/server/anthropic_http.c:1251`). Responses, Chat, Webchat, Delegate,
 >   Roundtable are NOT reliable on this choke point without per-path
 >   substrate (see Decision 1 and `collapse_recon.md` §2.2–§2.6).
-> - **Phase 2 missing substrate (per path):**
->   - `openai_responses_chunk_to_deltas` (mirror of `openai_chunk_to_deltas`)
->     for `/v1/responses` — Phase 2.0.
->   - OpenAI-Chat-shape frontend emitter (parallel to `anthropic_delta_emit`)
->     for `/v1/chat/completions` — Phase 2.1.
->   - Webchat mirror observability (no SSE on the surface; tap upstream) —
->     Phase 2.2.
->   - Delegate provider observer (inside `agent_dispatch_one` or equivalent)
->     — Phase 2.3.
->   - Roundtable panel-verdict hook — Phase 2.4.
-
-**Pairing:** each path's missing substrate is paired with its prerequisite
-slice (Phase 2.0, 2.1, 2.2, 2.3, 2.4). Verified file:line for the work is
-`src/server/aimee_ir_stream.c` (new header add to
-`src/headers/aimee_ir_stream.h` alongside `anthropic_delta_emit` at :85,
-new emitter function at the bottom of `src/server/aimee_ir_stream.c` after
-`:539`).
+> **Pairing:** each path's missing substrate is paired with its prerequisite
+> slice (Phase 2.0, 2.1, 2.2, 2.3, 2.4). Verified file:line for the work is
+> `src/server/aimee_ir_stream.c` (new header add to
+> `src/headers/aimee_ir_stream.h` alongside `anthropic_delta_emit` at :90,
+> new emitter function at the bottom of `src/server/aimee_ir_stream.c` after
+> `:539`).
 
 ---
 
@@ -171,9 +193,14 @@ new emitter function at the bottom of `src/server/aimee_ir_stream.c` after
 >
 > Phase 4 collapses per-backend sampling knob duplication by moving knobs
 > onto the canonical typed-sampling surface at
-> `src/headers/aimee_ir.h:115-129` (`max_tokens`, `has_max_tokens`, `temperature`, `has_temperature`, `top_p`,
-> `has_top_p`, `top_k`, `has_top_k`,
-> `stop_sequences[]`, `n_stop`).
+> `src/headers/aimee_ir.h:115-132` (the `aimee_request_t` struct opens at
+> `:105` and closes at `:151`; the sampling-field cluster is
+> `max_tokens` (`:115`), `has_max_tokens` (`:116`), `temperature` (`:117`),
+> `has_temperature` (`:118`), `top_p` (`:125`), `has_top_p` (`:126`),
+> `top_k` (`:127`), `has_top_k` (`:128`), `stop_sequences[]` (`:131`),
+> `n_stop` (`:132`) — F-CITE-005 closure: the prior cite `:115-129` was
+> an approximate range; the precise field-line list above is the
+> authoritative pinning).
 >
 > Per-backend honours are enumerated in `sampling_capability_matrix.md` §1
 > matrix. Knobs already modelled on the IR (✅/⚠ rows) need no Phase 4.0
@@ -181,16 +208,28 @@ new emitter function at the bottom of `src/server/aimee_ir_stream.c` after
 > `frequency_penalty`, single-string `stop: "."` normalization,
 > `previous_response_id`) are the Phase 4.0 prerequisite substrate.
 
-**Pairing (each ❌ row → Phase 4.0 slice):**
+**Pairing (each ❌ row → Phase 4.0 slice, F-CITE-005 closure):**
 - ❌ `presence_penalty`/`frequency_penalty` on the IR → Phase 4.0 type-add
   (extend `aimee_request_t` in `src/headers/aimee_ir.h`; mirror
-  `has_temperature` precedent at `:119`).
+  `has_temperature` precedent at `:118` — F-CITE-005 closure: prior
+  cite `:119` was off by one; the `has_*` companion pattern sits at
+  `:116` for `has_max_tokens` and at `:118` for `has_temperature`, so
+  new `has_presence_penalty` and `has_frequency_penalty` companions go
+  at lines >118 to keep the parallel).
 - ❌ `stop` string-or-array normalization → Phase 4.0 normalizer slice
-  (extends `aimee_request_t.stop_sequences[]` consumer at `:131`).
+  (extends `aimee_request_t.stop_sequences[]` consumer at `:131`;
+  F-CITE-005 closure: the prior cite `:131` was correct in spirit;
+  the precise field declaration is at `:131` for the array, with the
+  `n_stop` companion at `:132`).
 - ❌ `previous_response_id` thread key for Responses → Phase 4.0
   continuation-reference slice (extends `aimee_request_t.metadata` at
-  `:134-138` or adds a new typed field; storage substrate already exists at
-  `src/server/openai_responses_store.c`).
+  `:139-145` — F-CITE-005 closure: prior cite `:134-138` was off; the
+  metadata-related cluster actually lives at `metadata` (`:139`),
+  `service_tier` (`:144`), and `thinking` (`:147-148`); the annotation
+  block above the metadata field is at `:133-138`); a new typed
+  `previous_response_id` field goes after `:148`, parallel to the
+  `service_tier` precedent. The storage substrate already exists at
+  `src/server/openai_responses_store.c`.
 
 ---
 

@@ -80,15 +80,15 @@ the `raw` sidecar), per `src/headers/aimee_ir.h`:
 
 | IR field | Verified at | Notes |
 | --- | --- | --- |
-| `temperature`, `has_temperature` | `src/headers/aimee_ir.h:118-119` | `has_*` int companion is set when the client supplied it |
-| `top_p`, `has_top_p` | `src/headers/aimee_ir.h:127-128` | "valid on both Anthropic and OpenAI" (header comment :122-126) |
-| `top_k`, `has_top_k` | `src/headers/aimee_ir.h:129-130` | same comment |
-| `max_tokens`, `has_max_tokens` | `src/headers/aimee_ir.h:116-117` | |
+| `temperature`, `has_temperature` | `src/headers/aimee_ir.h:117-118` (struct opens at `:105`, closes at `:151`); F-CITE-005 closure: prior cite `:118-119` was off by one | `has_*` int companion is set when the client supplied it |
+| `top_p`, `has_top_p` | `src/headers/aimee_ir.h:125-126` (F-CITE-005 closure: prior cite `:127-128` was off by one -- those lines are `top_k`/`has_top_k`); header comment at `:122-126` | "valid on both Anthropic and OpenAI" (header comment :122-126) |
+| `top_k`, `has_top_k` | `src/headers/aimee_ir.h:127-128` (F-CITE-005 closure: prior cite `:129-130` was off -- those lines are `stream` and the start of the `stop_sequences` comment block) | same comment |
+| `max_tokens`, `has_max_tokens` | `src/headers/aimee_ir.h:115-116` (F-CITE-005 closure: prior cite `:116-117` was off by one -- `:116-117` are `has_max_tokens` and `temperature`) | |
 | `stop_sequences[]`, `n_stop` | `src/headers/aimee_ir.h:131-132` | carries as opaque string array, NOT `presence_penalty`/`frequency_penalty`/`repetition_penalty`/`min_p` |
-| `stream` (int) | `src/headers/aimee_ir.h:131` | transport flag, not a sampling param |
-| `metadata` (opaque cJSON) | `src/headers/aimee_ir.h:134-138` | captures vendor-specific top-level keys (Anthropic `metadata.user_id`) |
-| `thinking` (opaque cJSON) | `src/headers/aimee_ir.h:139` | Anthropic extended-thinking CONFIG object |
-| `service_tier` (string) | `src/headers/aimee_ir.h:135` | Anthropic-specific |
+| `stream` (int) | `src/headers/aimee_ir.h:130` (F-CITE-005 closure: prior cite `:131` was off by one -- `:131` is `stop_sequences`, `:130` is the `stream` declaration line) | transport flag, not a sampling param |
+| `metadata` (opaque cJSON) | `src/headers/aimee_ir.h:139` (F-CITE-005 closure: prior cite `:134-138` was off; the metadata-annotation comment block is at `:133-138`, the actual `metadata` field declaration is at `:139`) | captures vendor-specific top-level keys (Anthropic `metadata.user_id`) |
+| `thinking` (opaque cJSON) | `src/headers/aimee_ir.h:147-148` (F-CITE-005 closure: prior cite `:139` was off; `:139` is `metadata`, `:147-148` is the `thinking` field with its annotation comment at `:146`) | Anthropic extended-thinking CONFIG object |
+| `service_tier` (string) | `src/headers/aimee_ir.h:144` (F-CITE-005 closure: prior cite `:135` was off; `:144` is the `service_tier` field declaration, `:143` is its annotation comment) | Anthropic-specific |
 
 **Not modeled on the IR** (because they are delegate-local, not a wire-level
 sampling contract): `repetition_penalty`, `presence_penalty`,
@@ -113,7 +113,7 @@ the wire OR (b) explicitly drops it after a typed read (deliberate rejection).
 | `max_tokens` | ✅ Anthropic-native field on the request; `model_sampling_apply_anthropic` preserves caller-sent value (no override) per `src/server/model_sampling.c:93-105` | ✅ IR typed `max_tokens` at `src/headers/aimee_ir.h:116`; IR build sets `max_tokens_override` for the agent shaping; `model_sampling_apply_openai` does not override caller value (`:71-89`) | ✅ read via `openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768)` at `src/server/openai_chat.c:748` | ✅ via IR path through `aimee_ir_responses_to_chat` (`src/server/openai_chat.c:1098`) and `openai_request_int` at `src/server/openai_chat.c:1133` | ✅ same as col 3 | ✅ Anthropic-shape request carries `max_tokens`; IR-typed at `src/headers/aimee_ir.h:116` |
 | `stop` / `stop_sequences` | ✅ verbatim (Anthropic-native `stop_sequences` array is re-emitted) via `model_sampling_apply_anthropic` (no override; `src/server/model_sampling.c:93-105`) | ✅ IR typed `stop_sequences[]` at `src/headers/aimee_ir.h:131`; IR-typed pass-through to OpenAI request build | ⚠ OpenAI `stop` (string-or-array) is forwarded by `agent_dispatch_one`-side request build, but the IR has typed `stop_sequences` only — a single-string `stop: "."` is dropped during IR parse (see Phase 4.0 prereq §3) | ✅ via IR path | ⚠ same gap as col 3 (string-or-array normalization) | ✅ via Anthropic-shape request build (`model_sampling_apply_anthropic` carries `stop_sequences` from `aimee_request_t.stop_sequences[]` at `:131`); stream-side `bedrock_converse_stream_to_deltas` maps `stop_reason` to canonical stop enum at `src/server/aimee_ir_stream.c:343` |
 | `repetition_penalty` | n/a (Anthropic has no `repetition_penalty`) | n/a | ⚠ delegate-only via `model_sampling_apply_openai` (`src/server/model_sampling.c:71`) — `add_number_if_missing(req, "repeat_penalty", row.repeat_penalty)` at `:88`; gated by `model_sampling_row_t.repeat_penalty` per-delegate preset (the `g_sampling_rows` table at `src/server/model_sampling.c:9` lists `repeat_penalty` per row) | ⚠ delegate-only — same `add_number_if_missing` at `:88` | n/a (OpenAI Chat has no `repetition_penalty`) | n/a (Bedrock/Anthropic-shape has no `repetition_penalty`) |
-| `presence_penalty` | n/a (Anthropic has no `presence_penalty`) | n/a | ❌ **no plumbing** — not modeled on the IR (`src/headers/aimee_ir.h:115-129` lists `temperature`/`top_p`/`top_k`/`max_tokens`/`stop_sequences` only); not applied by `model_sampling_apply_openai` (`src/server/model_sampling.c:71-89` lists only `temperature`/`top_p`/`min_p`/`repeat_penalty`). Pass-through via the `raw` sidecar at `src/headers/aimee_ir.h:150` is the only extant route | ❌ same — no plumbing on IR, no `add_number_if_missing` call for `presence_penalty` in `model_sampling_apply_openai` | ❌ same — no IR field, no `add_number_if_missing` call | n/a (Bedrock/Anthropic-shape has no `presence_penalty`) |
+| `presence_penalty` | n/a (Anthropic has no `presence_penalty`) | n/a | ❌ **no plumbing** — not modeled on the IR (`src/headers/aimee_ir.h:115-132` lists `max_tokens`/`temperature`/`top_p`/`top_k`/`stop_sequences` only (F-CITE-005 closure: prior cite `:115-129` was off by 3 lines; `stop_sequences`/`n_stop` are at `:131-132`)); not applied by `model_sampling_apply_openai` (`src/server/model_sampling.c:71-89` lists only `temperature`/`top_p`/`min_p`/`repeat_penalty`). Pass-through via the `raw` sidecar at `src/headers/aimee_ir.h:180` is the only extant route (F-CITE-005 closure: prior cite `:150` was off; the `raw` sidecar field is the last member of `aimee_response_t`, which opens at `:166` and closes at `:181`; the verified `raw` declaration is at `:180`) | ❌ same — no plumbing on IR, no `add_number_if_missing` call for `presence_penalty` in `model_sampling_apply_openai` | ❌ same — no IR field, no `add_number_if_missing` call | n/a (Bedrock/Anthropic-shape has no `presence_penalty`) |
 | `frequency_penalty` | n/a (Anthropic has no `frequency_penalty`) | n/a | ❌ **no plumbing** — same as `presence_penalty`; not modeled on IR, not applied by `model_sampling_apply_openai` | ❌ same | ❌ same | n/a (Bedrock/Anthropic-shape has no `frequency_penalty`) |
 | `min_p` | n/a (Anthropic has no `min_p`) | n/a | ⚠ delegate-only via `model_sampling_apply_openai` (`src/server/model_sampling.c:71`) — `add_number_if_missing(req, "min_p", row.min_p)` at `:87`; gated by `model_sampling_row_t.min_p` per-delegate preset | ⚠ delegate-only — same `add_number_if_missing` at `:87` | n/a | n/a |
 | (continuation) `previous_response_id` | n/a | n/a | n/a | ❌ **no IR plumbing** — `src/headers/aimee_ir.h:115-151` has no `previous_response_id` field. Storage substrate exists at `src/server/openai_responses_store.c`. **unverified:** the prior claim that "each Codex turn is stateless full-history per the `responses_stream_handler` heal logic comment at `src/server/openai_chat.c:1145`" reads as an inferred behaviour from a heuristic comment, not a verified semantic guarantee; Phase 4.0 prerequisite to either confirm or refute | ❌ mirror of Responses; same gap — no IR field for `previous_response_id`; same unverified-heuristic caveat applies | n/a |
@@ -175,7 +175,7 @@ acceptance criterion ("any missing plumbing as Phase 4.0 prerequisites"):
    **F3 caveat:** the "stateless full-history" characterisation is an
    inferred behaviour from a heuristic comment, not a verified semantic
    guarantee; Phase 4.0 must verify it before collapsing the knob.
-5. **(F3 closure) **unverified** cells — wire behaviour validation.** The
+5. **(F3 closure) **unverified** cells — wire behaviour validation (F-COMPLETE-001 closure: per-cell pointers below).** The
    `top_k` cloud-vs-local distinction, the `previous_response_id`
    stateless-full-history characterisation, the OpenAI Chat cache-key
    primitive question, the assistant-prefill primitive question, and the
@@ -183,6 +183,42 @@ acceptance criterion ("any missing plumbing as Phase 4.0 prerequisites"):
    §1. Phase 4.0 must either confirm each via a fixture (test under
    `tests/`) or refute the claim by finding the missing call site in
    `src/server/`; the result feeds back into the matrix at §1.
+
+   **Per-cell bounded verification tasks (F-COMPLETE-001):**
+   - **Cloud OpenAI Chat `top_k` drop vs. local pass-through.**
+     Verification target: `tests/test_model_sampling_openai.c`
+     (if absent, scaffolding task `src/server/model_sampling.c:71-89` +
+     a recorded fixture of an OpenAI-Chat cloud response). Look for
+     `add_int_if_missing(req, "top_k", row.top_k)` at
+     `src/server/model_sampling.c:86` and assert via the live request
+     recorder that the wire-shape contains or omits `top_k`.
+   - **`previous_response_id` stateless-full-history.** Verification
+     target: read the comment at `src/server/openai_chat.c:1145` (the
+     "heal logic" reference); confirm or refute by walking the call
+     site `responses_stream_handler` at `src/server/openai_chat.c:1081`
+     and verifying whether `previous_response_id` is consumed or
+     ignored. Cross-check the storage substrate at
+     `src/server/openai_responses_store.c` for a read API.
+   - **OpenAI Chat cache-key primitive.** Verification target: search
+     `src/server/openai_frontend*.c` (or analogous: `src/server/`
+     openai-frontend files) for any `cJSON_AddStringToObject(req,
+     "cache_key", ...)` or `cJSON_AddObjectKey(req, "prompt_cache_key", ...)`
+     pattern. The only verified cache reference today is the response
+     usage at `src/server/anthropic_ingress.c:680`.
+   - **Native assistant-prefill on OpenAI Chat / Responses.**
+     Verification target: search `src/server/aimee_ir.c` and
+     `src/server/aimee_frontend_openai.c` for any
+     `assistant_prefill` or `assistant_role_prefix` handling. The
+     IR has no `assistant_prefill` field; if the cloud wire accepts
+     a literal assistant role prefill message, that path needs a
+     Phase 4.0 type-add to `aimee_request_t`.
+   - **Bedrock cache-key primitive beyond `cachePoint`.** Verification
+     target: search `src/server/aimee_backend_bedrock.c`
+     (or analogous: `src/server/bedrock_*.c`) for any
+     `cache_key`, `prompt_cache_key`, or analogous
+     `cJSON_Add*` pattern beyond `cachePoint`. The IR models
+     `cache_control` per-block at `src/headers/aimee_ir.h` and
+     per-tool but does not carry a Bedrock-specific cache-key field.
 
 The ⚠ rows (`temperature`/cache-control on Bedrock, delegate-only
 `repetition_penalty`/`min_p`) are **partial or provider-specific** for the
