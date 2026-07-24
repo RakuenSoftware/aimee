@@ -2643,6 +2643,22 @@ $(TESTPREFIX)/unit-test-bus-capture: $(OBJDIR)/tests/test_bus_capture.o \
                                      $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+# Event-bus dispatch benchmark (feature tree slice 12). Built -O2 for a realistic
+# measurement; a test binary, never linked into a shipping target.
+$(OBJDIR)/tests/bus_bench.o: C_FLAGS += -Imodules/bus -O2
+$(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
+                        $(OBJDIR)/modules/bus/bus_client.o \
+                        $(OBJDIR)/modules/bus/bus_host.o \
+                        $(OBJDIR)/modules/bus/bus_route.o \
+                        $(OBJDIR)/modules/bus/bus_region.o \
+                        $(OBJDIR)/modules/bus/bus_ring.o \
+                        $(OBJDIR)/modules/bus/bus_arena.o \
+                        $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: bus-bench
+bus-bench: $(TESTPREFIX)/bus-bench
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<
