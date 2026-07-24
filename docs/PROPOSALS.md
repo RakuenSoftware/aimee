@@ -110,11 +110,11 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
   optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
   **Gate-Promote / Enforce.**
-- [Aimee shared-memory event bus — wire and segment spec (v0, **IMPLEMENTED**)](proposals/pending/event-bus-wire-spec.md)
+- [Aimee shared-memory event bus — wire and segment spec (v0, implemented on `feat/event-bus`)](proposals/pending/event-bus-wire-spec.md)
   — the normative spec the single in-source C bus host and the C/Go reference clients implement:
   segment layout, SPSC rings, event encoding, attach/admission handshake, observer routing, the
   governance/audit tap, credit-based backpressure, ordering, versioning, and capture/replay format.
-  **Built and merged on `feat/event-bus` as of 2026-07-24** — twelve slices, one PR each, C host +
+  **Written and merged onto the `feat/event-bus` integration branch as of 2026-07-24** (not yet promoted to the mainline) — twelve slices, one PR each, C host +
   C/Go reference clients proven to interoperate across a process boundary and agree on the wire
   byte-for-byte, with capture/observational replay and a committed dispatch-overhead budget. Not
   linked into any shipping binary; the memory-migration tree that will link it is separate. Owned by
