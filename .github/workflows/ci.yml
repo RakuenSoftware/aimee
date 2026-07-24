@@ -97,6 +97,12 @@ jobs:
         run: cd src && make lint
       - name: Check 3db tier dependencies
         run: ./scripts/check_tier_deps.sh
+      - name: Enforce guardrail-collapse Phase 0 anchor contract
+        # F-001 closure: required by collapse_anchors.md §"Merge gate".
+        # Fails any PR whose diff does not include docs/guardrails/collapse_anchors.md
+        # when the PR also touches any Phase 1+ surface (src/server/, src/modules/guardrails/,
+        # src/headers/aimee_ir.h, src/modules/config/, src/modules/audit/, scripts/check-collapse-anchor-gate.py).
+        run: python3 scripts/check-collapse-anchor-gate.py
 
   build:
     runs-on: ubuntu-latest
