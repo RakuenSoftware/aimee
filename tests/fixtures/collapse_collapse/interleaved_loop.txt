@@ -1,10 +1,8 @@
-# shape: loop with connective tissue inside each repeated iteration; expected: fire; expected_loop_start_offset: 178; expected_loop_span_bytes: 22; expected_repetitions: 4
-start
-item: same
-glue: same
-item: same
-glue: same
-item: same
-glue: same
-item: same
-glue: same
+# shape: loop with non-repeating connective tissue between iterations; expected: fire; expected_loop_start_offset: 248; expected_loop_span_bytes: 13; expected_repetitions: 4; connective_tissue: yes; expected_loop_iteration_offsets: 248,274,300,326
+payload-loop
+connector-aa
+payload-loop
+connector-bb
+payload-loop
+connector-cc
+payload-loop
