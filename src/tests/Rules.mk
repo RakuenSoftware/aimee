@@ -3382,6 +3382,13 @@ $(TESTPREFIX)/unit-test-delegate-role: $(OBJDIR)/tests/test_delegate_role.o \
                              $(OBJDIR)/modules/delegates/delegate_role.o $(OBJDIR)/role_templates.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
+# Core panel-provider boundary (#1845). Part of the roundtable-profiles CI gate's
+# "required core without roundtable" set; rule restored after the module
+# restructuring dropped it.
+$(TESTPREFIX)/unit-test-panel-provider: $(OBJDIR)/tests/test_panel_provider.o \
+                                       $(OBJDIR)/modules/delegates/panel_provider.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 # Trigger end-to-end: the REAL scan_proposals (textually included, real git
 # subprocesses + real DB1) files a work item from a committed pending proposal
 # and the real autonomy scheduler drives it to terminal (stub executors only).
