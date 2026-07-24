@@ -1,8 +1,25 @@
-# shape: outer loop containing an inner repeated loop; expected: fire; expected_loop_start_offset: 104; expected_loop_span_bytes: 64; expected_repetitions: 4
-outer: begin
-inner-a
+# shape: outer loop containing an inner repeated loop; expected: fire; expected_loop_start_offset: 158; expected_loop_span_bytes: 54; expected_repetitions: 4
+outer-start
 inner-a
 inner-b
+inner-a
 inner-b
-outer: end
-outer: begin
+outer-end
+outer-start
+inner-a
+inner-b
+inner-a
+inner-b
+outer-end
+outer-start
+inner-a
+inner-b
+inner-a
+inner-b
+outer-end
+outer-start
+inner-a
+inner-b
+inner-a
+inner-b
+outer-end

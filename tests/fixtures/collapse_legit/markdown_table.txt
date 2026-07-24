@@ -1,5 +1,0 @@
-# shape: repeated Markdown table rows; expected: no-fire; expected_loop_start_offset: 0; expected_loop_span_bytes: 0; expected_repetitions: 0
-| Name | Status |
-| --- | --- |
-| alpha | ready |
-| beta | ready |

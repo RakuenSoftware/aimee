@@ -1,1 +1,1 @@
-[[{"kind":"x","ok":true},{"kind":"y","ok":false}],[{"kind":"x","ok":true},{"kind":"y","ok":false}]]; expected_repetitions:0
+[[{"kind":"x","ok":true},{"kind":"y","ok":false}],[{"kind":"x","ok":true},{"kind":"y","ok":false}]]

@@ -4,15 +4,17 @@ This document defines the byte-stable fixture grammar and oracle for the repetit
 
 ## Accepted JSON shapes
 
-A fragment is a complete RFC 8259 JSON value, or a complete JSON value inside a Markdown fenced code block whose info string is exactly `json`. Accepted shapes are:
+A fragment is a complete RFC 8259 JSON value. Markdown fencing is a wrapper: when the info string is exactly `json`, its inner content must independently satisfy one of the accepted shapes below. Accepted shapes are:
 
 * top-level or nested arrays of primitives (`string`, `number`, `boolean`, or `null`);
 * arrays of uniform-shape objects, each with the same required string discriminator key and primitive leaves; and
 * objects with stable keys and compatible primitive leaf types repeated across array elements.
 
+For every uniform object array, the discriminator is deterministically the lexicographically first key common to every element whose value is a string in every element. If no such key exists, the shape is excluded.
+
 Shape identity is `(container path, kind, sorted keys, discriminator key, primitive types)`. Key order is insignificant; equal shape does not require equal serialized text.
 
-The grammar excludes arbitrary heterogeneous objects, missing or extra keys, non-primitive leaves in uniform records, deeply nested comment-bearing fragments, and streaming partial tokens. JSON comments are not JSON. No JSONC dialect is enumerated as a sibling section; `//` and `/* ... */` comments, truncated strings/numbers/containers, and incomplete fences are out of scope.
+The grammar excludes arbitrary heterogeneous objects, missing or extra keys, non-primitive leaves in uniform records, deeply nested comment-bearing fragments, and streaming partial tokens. JSON comments are not JSON. JSONC is excluded from this corpus and no JSONC dialect is enumerated as a sibling section; `//` and `/* ... */` comments, truncated strings/numbers/containers, and incomplete fences are out of scope.
 
 ## Canonical fixture envelope and oracle
 
@@ -22,7 +24,7 @@ The canonical fields and spellings are:
 
 `shape:<description>; expected:<fire|no-fire>; expected_loop_start_offset:<integer>; expected_loop_span_bytes:<integer>; expected_repetitions:<integer>`
 
-For `fire`, the offset identifies the first iteration boundary and the span is the byte length of one verbatim iteration; `expected_repetitions` records the number of iterations. The iteration boundary is derived from the first verbatim body occurrence and must be checked against the declared span. Detector threshold N has **default 4** repetitions. The long-span threshold M has default 60 bytes. Fire fixtures contain at least N verbatim iterations of a qualifying loop. A no-fire fixture uses `-1`, `-1`, and `0` for offset, span, and expected_repetitions respectively.
+For `fire`, the offset identifies the first iteration boundary and the span is the byte length of one verbatim iteration; `expected_repetitions` records the number of iterations. The loop period begins at that iteration boundary. The iteration boundary is derived from the first verbatim body occurrence and must be checked against the declared span. Detector threshold N has **default 4** repetitions. The long-span threshold M has default 60 bytes. Fire fixtures contain at least N verbatim iterations of a qualifying loop. A no-fire fixture uses `-1`, `-1`, and `0` for offset, span, and expected_repetitions respectively.
 
 ## Metrics
 
