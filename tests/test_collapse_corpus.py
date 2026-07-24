@@ -546,10 +546,10 @@ class TestCollapseLegit(unittest.TestCase):
         set below; the remaining fixtures must exhibit at least one
         boundary-aligned repeat of period length in [2, 20)."""
         expected_no_repeat = {
-            ("LEGIT", "json", "fenced.md"),
-            ("LEGIT_JSON", "primitives.json"),
-            ("LEGIT_JSON", "nested.json"),
-            ("LEGIT_JSON", "objects.json"),
+            ("collapse_legit", "json", "fenced.md"),
+            ("json", "primitives.json"),
+            ("json", "nested.json"),
+            ("json", "objects.json"),
         }
         for sub in (LEGIT, LEGIT_JSON):
             for p in sorted(sub.rglob("*")):

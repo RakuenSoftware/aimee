@@ -12,9 +12,13 @@ truth.
   `lf_offset + 1` bytes (one line terminated by LF), and the loop
   period is found below that. For sibling `.meta` files the payload
   file is offset 0 and the `.meta` file holds the header separately.
-* `expected_loop_start_offset` is the byte offset of the first byte of
-  the first loop period in the file body (i.e. below the header for
-  inline envelopes, or the start of the payload file for `.meta`).
+* `expected_loop_start_offset` is the absolute byte offset of the first
+  byte of the first loop period measured from byte 0 of the fixture file,
+  including any header bytes. For inline envelopes the header occupies
+  bytes `[0, first_lf_offset + 1)` and the body begins at that boundary;
+  when the body begins with the loop period, the offset equals the header
+  length including its trailing LF. For `.meta` envelopes the payload file
+  starts at offset 0.
 * `expected_loop_span_bytes` is the length, in bytes, of **one loop
   period** (the unit that repeats verbatim). It is NOT the length of
   the entire repeated region.
