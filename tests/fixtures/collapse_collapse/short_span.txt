@@ -1,4 +1,4 @@
-# shape: short span x4; expected: fire; expected_loop_start_offset: 102; expected_loop_span_bytes: 11
+# shape: short span x4; expected: fire; expected_loop_start_offset: 127; expected_loop_span_bytes: 11; expected_repetitions: 4
 alpha
 beta
 alpha

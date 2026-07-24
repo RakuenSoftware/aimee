@@ -3,7 +3,8 @@
 Verifies that the checked-in fixtures under tests/fixtures/ match the byte
 oracle promised by their headers, that JSON payloads in the json/ subdir
 parse as standard JSON, that no .json file contains an inline // comment
-header (an excluded fragment form), and and that fire-fixture offsets and spans identify repeated byte periods. Detector
+header (an excluded fragment form), and that fire-fixture offsets, spans,
+and declared repetition counts identify repeated byte periods. Detector
 integration is intentionally deferred until detector code exists.
 
 Run:  python3 -m unittest tests/test_collapse_corpus.py  -v
@@ -37,12 +38,17 @@ def _parse_header_fields(header_text):
     m_exp = re.search(r"expected:\s*(fire|no-fire)\b", s)
     m_off = re.search(r"expected_loop_start_offset:\s*(-?\d+)\b", s)
     m_span = re.search(r"expected_loop_span_bytes:\s*(-?\d+)\b", s)
+    m_reps = re.search(r"expected_repetitions:\s*(-?\d+)\b", s)
     assert m_shape and m_exp and m_off and m_span, f"malformed header: {s!r}"
+    assert m_reps, (
+        f"malformed header: missing expected_repetitions: field in {s!r}"
+    )
     return {
         "shape": m_shape.group(1).strip().rstrip(";").strip(),
         "expected": m_exp.group(1).strip(),
         "offset": int(m_off.group(1)),
         "span": int(m_span.group(1)),
+        "repetitions": int(m_reps.group(1)),
     }
 
 
@@ -96,6 +102,13 @@ class TestGrammarDoc(unittest.TestCase):
         text = _read_bytes(GRAMMAR).decode()
         self.assertIn(".meta", text)
         self.assertIn("# shape:", text)
+        self.assertIn("<!-- shape:", text,
+                      "grammar must enumerate <!-- shape: --> form for .md")
+
+    def test_grammar_documents_repetition_field(self):
+        text = _read_bytes(GRAMMAR).decode()
+        self.assertIn("expected_repetitions", text,
+                      "grammar must document the expected_repetitions field")
 
 
 class TestCollapseCollapse(unittest.TestCase):
@@ -119,11 +132,16 @@ class TestCollapseCollapse(unittest.TestCase):
         self.assertEqual(fields["expected"], "fire", f"{p}: must be fire")
         off = fields["offset"]
         sp = fields["span"]
+        reps = fields["repetitions"]
         lf = data.find(b"\n")
         self.assertGreater(off, lf, f"{p}: offset {off} must be past header LF {lf}")
         self.assertGreaterEqual(sp, 2, f"{p}: span {sp} too small")
         self.assertLessEqual(off + sp, len(data),
                              f"{p}: offset+span exceeds file length")
+        self.assertGreaterEqual(
+            reps, 2,
+            f"{p}: expected_repetitions {reps} must be >= 2 for fire fixtures",
+        )
         period = data[off:off + sp]
         self.assertEqual(len(period), sp, f"{p}: period slice wrong length")
         self.assertEqual(data[off:off + sp], period,
@@ -134,7 +152,8 @@ class TestCollapseCollapse(unittest.TestCase):
                 n += 1
                 pos += sp
             self.assertGreaterEqual(
-                n, 2, f"{p}: expected at least 2 contiguous repetitions, got {n}",
+                n, reps,
+                f"{p}: expected at least {reps} contiguous repetitions, got {n}",
             )
         else:
             body = data[off:]
@@ -146,7 +165,8 @@ class TestCollapseCollapse(unittest.TestCase):
                 n += 1
                 pos = idx + sp
             self.assertGreaterEqual(
-                n, 2, f"{p}: expected at least 2 verbatim occurrences, got {n}",
+                n, reps,
+                f"{p}: expected at least {reps} verbatim occurrences, got {n}",
             )
 
     def test_short_span(self):
@@ -265,6 +285,8 @@ class TestCollapseLegit(unittest.TestCase):
             self.assertEqual(fields["expected"], "no-fire", f"{fn}: not no-fire")
             self.assertEqual(fields["offset"], -1)
             self.assertEqual(fields["span"], -1)
+            self.assertEqual(fields["repetitions"], 0,
+                             f"{fn}: no-fire must declare expected_repetitions: 0")
             self.assertTrue(fields["shape"], f"{fn}: shape empty")
 
     def test_json_no_fire_headers(self):
@@ -273,6 +295,8 @@ class TestCollapseLegit(unittest.TestCase):
             self.assertEqual(fields["expected"], "no-fire")
             self.assertEqual(fields["offset"], -1)
             self.assertEqual(fields["span"], -1)
+            self.assertEqual(fields["repetitions"], 0,
+                             f"{fn}: no-fire must declare expected_repetitions: 0")
             self.assertTrue(fields["shape"], f"{fn}: shape empty")
 
     def test_json_payloads_are_valid_json(self):
@@ -283,11 +307,32 @@ class TestCollapseLegit(unittest.TestCase):
                                  f"{fn}: top-level must be array per accepted grammar")
 
     def test_nested_json_is_genuinely_nested(self):
+        """Structural: nested.json must contain sub-arrays whose elements
+        are themselves arrays (a nested-array shape), not just a flat
+        homogeneous array whose shape description happens to mention
+        'nested'."""
         with open(LEGIT_JSON / "nested.json") as f:
             value = json.load(f)
-        self.assertIsInstance(value, list)
-        fields = _parse_header_for(LEGIT_JSON / "nested.json")
-        self.assertIn("nested", fields["shape"].lower())
+        self.assertIsInstance(value, list, "top-level must be list")
+        self.assertTrue(
+            any(isinstance(el, list) for el in value),
+            "nested.json must contain at least one sub-array (nested structure)",
+        )
+        sub_array = next(el for el in value if isinstance(el, list))
+        self.assertTrue(
+            len(sub_array) >= 1,
+            "nested.json sub-array must contain elements per grammar",
+        )
+        for item in sub_array:
+            self.assertIsInstance(
+                item, dict,
+                "nested.json sub-array elements must be objects",
+            )
+            self.assertTrue(
+                all(isinstance(v, (str, int, float, bool, type(None)))
+                    for v in item.values()),
+                "nested.json object leaves must be primitive",
+            )
 
     def test_json_payloads_have_sibling_meta(self):
         for fn in ["primitives.json", "nested.json", "objects.json"]:
@@ -301,16 +346,21 @@ class TestCollapseLegit(unittest.TestCase):
                              f"{fn}: contains // (excluded comment-bearing fragment)")
 
     def test_fenced_md_uses_documented_envelope(self):
-        """Fenced.md must use the documented inline '# shape:' envelope form
-        per the grammar doc; the fenced payload must be intact after the header."""
+        """Fenced.md must use the documented '<!-- shape: ... -->' HTML-comment
+        envelope form for .md payloads per the grammar doc; the fenced JSON
+        payload must be intact after the header and conform to the accepted
+        object-array grammar (uniform keys, string discriminator, primitive
+        leaves)."""
         data = _read_bytes(LEGIT_JSON / "fenced.md")
         lf = data.find(b"\n")
         self.assertGreaterEqual(lf, 0, "fenced.md: missing header newline")
-        header_line = data[:lf].decode("utf-8", errors="replace")
+        header_line = data[:lf].decode("utf-8", errors="replace").strip()
         self.assertTrue(
-            header_line.startswith("# shape:"),
-            f"fenced.md header must start with '# shape:', got: {header_line!r}",
+            header_line.startswith("<!-- shape:") and header_line.endswith("-->"),
+            f"fenced.md header must use '<!-- shape: ... -->' form, got: {header_line!r}",
         )
+        fields = _parse_header_for(LEGIT_JSON / "fenced.md")
+        self.assertEqual(fields["expected"], "no-fire")
         body = data[lf + 1:].decode("utf-8", errors="strict")
         match = re.fullmatch(r"```json\n(.*?)\n```\n?", body, re.DOTALL)
         self.assertIsNotNone(match, "fenced.md: expected one paired json fence")
@@ -326,6 +376,31 @@ class TestCollapseLegit(unittest.TestCase):
         self.assertTrue(all(isinstance(leaf, primitive_types)
                             for item in value for leaf in item.values()),
                         "fenced object leaves must be primitive")
+
+    def test_md_fixtures_use_html_comment_envelope(self):
+        """The .md legit fixtures (fenced_python.md, markdown_table.md,
+        ordered_list.md, json/fenced.md) must use the <!-- shape: -->
+        HTML-comment form documented in the grammar, not a # shape: line,
+        so that the surrounding Markdown is not misinterpreted as an ATX
+        heading."""
+        md_fixtures = [
+            "fenced_python.md",
+            "markdown_table.md",
+            "ordered_list.md",
+            "json/fenced.md",
+        ]
+        for fn in md_fixtures:
+            p = LEGIT / fn
+            data = _read_bytes(p)
+            lf = data.find(b"\n")
+            self.assertGreaterEqual(lf, 0, f"{fn}: missing header newline")
+            header_line = data[:lf].decode("utf-8", errors="replace").strip()
+            self.assertTrue(
+                header_line.startswith("<!-- shape:") and header_line.endswith("-->"),
+                f"{fn}: .md header must use '<!-- shape: ... -->' form, got: {header_line!r}",
+            )
+            fields = _parse_header_for(p)
+            self.assertEqual(fields["expected"], "no-fire")
 
 
 class TestAcceptedGrammarShapes(unittest.TestCase):

@@ -1,4 +1,4 @@
-# shape: nested loop x3 (outer block contains inner x2); expected: fire; expected_loop_start_offset: 135; expected_loop_span_bytes: 54
+# shape: nested loop x3 (outer block contains inner x2); expected: fire; expected_loop_start_offset: 160; expected_loop_span_bytes: 54; expected_repetitions: 3
 outer-start
 inner-a
 inner-b

@@ -15,30 +15,54 @@ truth.
   iteration in the file.
 * `expected_loop_span_bytes` is the length, in bytes, of **one loop
   period** (the unit that repeats verbatim). It is NOT the length of the
-  entire repeated region. The number of repetitions is declared in the
-  fixture header.
-* For `no-fire` fixtures both fields are `-1`.
+  entire repeated region.
+* `expected_repetitions` is the count of verbatim repetitions of the
+  declared loop period in the fixture's payload, counting contiguous
+  repetitions for ordinary `fire` shapes and verbatim occurrences for
+  interleaved / nested shapes. For `no-fire` fixtures it is `0`.
+* For `no-fire` fixtures both `expected_loop_start_offset` and
+  `expected_loop_span_bytes` are `-1`.
 
 ## Metadata envelope
 
 Every fixture has a metadata header that declares its shape, expected
-detector outcome, and oracle bytes. Two envelope forms are accepted, both
-deterministic and machine-parseable:
+detector outcome, and oracle bytes. Three envelope forms are accepted,
+all deterministic and machine-parseable:
 
 1. **Sibling `.meta` file.** A file with the same stem plus `.meta`
    extension holds the header. Used when the payload must remain a
    standalone parseable value (e.g. `.json`). The payload file contains
    no header bytes.
-2. **Inline header line.** For non-parseable text payloads (`.txt`,
-   `.md`, `.py`), the header is the first line of the file, beginning
-   with `# shape:`, terminated by a single LF (byte `0x0A`). The payload
-   begins at the byte immediately after that LF.
+2. **Inline `# shape:` header line** for `.txt` and `.py` payloads. The
+   header is the first line of the file, beginning with `# shape:` and
+   terminated by a single LF (byte `0x0A`). The payload begins at the
+   byte immediately after that LF.
+3. **Inline `<!-- shape: ... -->` HTML comment header** for `.md`
+   payloads. The header is an HTML comment in a Markdown comment block
+   (`<!-- ... -->`) that occupies the first line of the file. The
+   comment must start with `<!-- shape:` and end with `-->`, separated
+   by a single LF (byte `0x0A`) from the start of the Markdown body.
+   Using `<!-- shape: ... -->` rather than `# shape:` keeps the
+   surrounding Markdown parseable by tools that would otherwise treat a
+   leading `# shape:` line as a Markdown ATX heading.
 
 The envelope extraction step is deterministic: given a fixture path the
 loader first looks for `<path>.meta`; if present it parses that file as
 the header and treats the entire payload file as the body. Otherwise it
 reads the first line of the payload file up to (and including) the first
 LF as the header, and the payload begins at `first_lf_offset + 1`.
+
+The recognized header fields are:
+
+* `shape:` -- human-readable description of the fixture's structural
+  shape.
+* `expected:` -- `fire` or `no-fire`.
+* `expected_loop_start_offset:` -- absolute byte offset of the first
+  byte of the loop period in the payload, or `-1` for no-fire.
+* `expected_loop_span_bytes:` -- length in bytes of one loop period, or
+  `-1` for no-fire.
+* `expected_repetitions:` -- integer repetition count, or `0` for
+  no-fire.
 
 ## Accepted grammar (JSON)
 
@@ -71,16 +95,22 @@ trigger.
 * `.json` fixtures in this corpus must contain only standard JSON once
   the envelope is stripped; metadata lives in a sibling `.meta` file.
   Inline `//` comments inside `.json` fixtures are rejected.
+* Markdown-fenced payloads must use the `json` info string; non-`json`
+  fences are out of grammar (legitimate repeats of non-JSON code live
+  under `tests/fixtures/collapse_legit/`, not under the accepted-grammar
+  JSON shapes).
 
 ## Detector oracle and metrics
 
 Each fixture header declares `fire` or `no-fire`, an absolute
-`expected_loop_start_offset`, and `expected_loop_span_bytes`. As above,
-the span is the length of one loop period, not the full repeated region.
+`expected_loop_start_offset`, `expected_loop_span_bytes`, and an
+`expected_repetitions` count. The span is the length of one loop
+period, not the full repeated region.
 
 A `fire` fixture is correct when the detector reports the declared loop
-period starting at the declared offset (within byte tolerance). A
-`no-fire` fixture is correct when the detector reports no loop.
+period starting at the declared offset (within byte tolerance) for at
+least `expected_repetitions` repetitions. A `no-fire` fixture is correct
+when the detector reports no loop.
 
 Let `fire` mean "the fixture contains a genuine collapse pattern" and
 `no-fire` mean "the fixture contains only legitimate structural repeats
