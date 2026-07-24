@@ -650,6 +650,91 @@ func (r *artifactRoutingRunner) Run(_ context.Context, req StepRequest) (StepRes
 	}
 }
 
+type ciPassRunner struct{}
+
+func (ciPassRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "ci_passed"}, nil
+}
+
+// A gate.ci that passes must advance to its on_pass stage (merge), exactly like
+// gate.roundtable — not fall through to next=="" and finish the slice terminal.
+// The latter left every green slice PR unmerged at "ci accepted".
+func TestGateCIAdvancesToMergeOnPass(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: freeze
+nodes:
+  - id: source
+    block: understand
+  - id: impl
+    block: implement
+    in: {plan: source.out}
+  - id: freeze
+    block: freeze
+    in: {branch: impl.out}
+    next: pr
+  - id: pr
+    block: pr.open
+    in: {src: freeze.out}
+    next: ci
+    on_fail: pr
+  - id: ci
+    block: gate.ci
+    in: {pr: pr.out}
+    on_pass: merge
+    on_fail: impl
+  - id: merge
+    block: merge
+    in: {pr: pr.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal("wi_ci", []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_ci", "impl", "branch", []byte("head")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_ci", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(store, artifacts, workflowDir, ciPassRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// freeze -> pr, then pr -> ci; the third advance runs gate.ci.
+	var out AdvanceResult
+	for i := 0; i < 3; i++ {
+		out, err = eng.Advance(context.Background(), "wi_ci")
+		if err != nil {
+			t.Fatalf("advance %d: %v", i, err)
+		}
+	}
+	// gate.ci passed: it must advance to merge (its on_pass), not finish the slice
+	// terminal at ci with the PR left unmerged.
+	if out.Terminal || out.NextStage != "merge" {
+		t.Fatalf("gate.ci pass should advance to merge, got %+v", out)
+	}
+}
+
 func TestGateReviewsItsBoundArtifactNotThePlanShortcut(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, "workflows")
