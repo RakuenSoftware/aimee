@@ -1083,6 +1083,12 @@ $(OBJDIR)/kb/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) $(KB_TPM2_CFLAGS) $(KB_PKCS11_CFLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 
+# vault_custody_pkcs11.c has no non-PKCS11 build, so its non-kb object (linked by the
+# vault-policy provider tests) needs the p11-kit headers too, not only the kb/ object.
+$(OBJDIR)/modules/vault/vault_custody_pkcs11.o: modules/vault/vault_custody_pkcs11.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) $(KB_PKCS11_CFLAGS) -o $@ $<
+
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
