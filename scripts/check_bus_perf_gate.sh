@@ -59,4 +59,41 @@ if [ "$measured" -gt "$ceiling" ]; then
    exit 1
 fi
 
-echo "check_bus_perf_gate: ok — dispatch overhead within budget; memory rows pending"
+# 3. The audit migration (delivery step 3, the first module on the bus): enforce
+#    the committed enqueue-overhead ceiling AND the exactly-once durability
+#    invariant. Both are measured by the real durability test, which emits rows
+#    through the real producer/consumer and reads the real ledger back.
+audit_ceiling=$(python3 -c "import json;print(json.load(open('$baseline'))['metrics']['audit_enqueue_overhead_ns']['ceiling_ns'])")
+max_dropped=$(python3 -c "import json;print(json.load(open('$baseline'))['metrics']['audit_durability']['max_dropped'])")
+
+echo "measuring audit-on-bus (durability + enqueue overhead)..."
+audit_out=$(make -C src --no-print-directory unit-test-bus-audit-durability 2>&1 || true)
+dropped=$(printf '%s\n' "$audit_out" | sed -n 's/.*dropped \([0-9][0-9]*\).*/\1/p' | tail -1)
+p50=$(printf '%s\n' "$audit_out" | sed -n 's/.*enqueue.*p50=\([0-9][0-9]*\) ns.*/\1/p' | tail -1)
+
+if ! printf '%s\n' "$audit_out" | grep -q "test_bus_audit_durability: OK"; then
+   echo "" >&2
+   echo "FAIL: the audit-on-bus durability test did not pass — the exactly-once" >&2
+   echo "      invariant the migration depends on is not holding." >&2
+   printf '%s\n' "$audit_out" | tail -5 >&2
+   exit 1
+fi
+if [ -z "$dropped" ] || [ "$dropped" -gt "$max_dropped" ]; then
+   echo "FAIL: audit rows dropped ('${dropped:-?}' > max ${max_dropped}) — durability violated." >&2
+   exit 1
+fi
+if [ -z "$p50" ]; then
+   echo "FAIL: could not read audit enqueue overhead from the durability test." >&2
+   exit 1
+fi
+echo "audit enqueue overhead: ${p50} ns (ceiling ${audit_ceiling} ns); dropped ${dropped}"
+if [ "$p50" -gt "$audit_ceiling" ]; then
+   echo "" >&2
+   echo "FAIL: audit enqueue overhead ${p50} ns exceeds the committed ceiling" >&2
+   echo "      ${audit_ceiling} ns. Either a real regression landed (e.g. the async" >&2
+   echo "      publish became synchronous), or the ceiling needs a reviewed change" >&2
+   echo "      in ${baseline}." >&2
+   exit 1
+fi
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; memory rows pending"
