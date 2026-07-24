@@ -1674,7 +1674,6 @@ platform support in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 | `AIMEE_WORKTREE_GC` / `AIMEE_WORKTREE_GC_DAYS` | Worktree GC policy. |
 | `AIMEE_FORENSICS_DIR` | Shutdown-forensics output directory. |
 | `AIMEE_BUNDLED_SKILLS_DIR` | Override bundled-skills location. |
-| `AIMEE_ENABLE_PROJECT_PLUGINS` | Allow project-local plugins. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` / `AIMEE_MODEL_CAPABILITY_OVERRIDES` | Model metadata overrides. |
 | `AIMEE_INSTALL_PREFIX` | Install prefix used by scripts. |
 
