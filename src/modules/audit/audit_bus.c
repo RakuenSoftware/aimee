@@ -58,6 +58,7 @@ static struct
    pthread_mutex_t pub_lock; /* serializes the single producer ring */
    atomic_int emitting;      /* 1 while accepting emits */
    atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
+   atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
    /* Record+replay: the reason the audit row is on the bus at all. The host's
@@ -212,7 +213,15 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    int32_t dry;
    memcpy(&dry, p + off, 4);
    e.dry_run = dry;
-   db1_guardrail_event_insert(&e); /* db1 is SQLITE_OPEN_FULLMUTEX — safe off-thread */
+   /* db1_guardrail_event_insert wraps the write in db1's transaction gate, so it
+    * is safe to call from this consumer thread and isolated from other threads'
+    * transactions on the shared connection. A failed insert is a visible drop,
+    * not a silent success. */
+   if (db1_guardrail_event_insert(&e) != 0)
+   {
+      atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      return 0;
+   }
    return 1;
 }
 
@@ -508,6 +517,35 @@ static void ensure_started(void)
    pthread_mutex_unlock(&start_lock);
 }
 
+/* Enter the emit window. Returns 1 if the caller may publish (and MUST call
+ * leave_emit afterwards), 0 if the bus is not accepting emits.
+ *
+ * The refcount + re-check is what makes shutdown safe: audit_bus_stop sets
+ * emitting=0 and then waits for `publishers` to reach 0 before tearing down the
+ * producer/host/pub_lock. A producer increments `publishers` BEFORE re-reading
+ * emitting, so once stop observes publishers==0 (after storing emitting=0), no
+ * producer is — or can newly get — inside publish(): the emitting store and the
+ * publishers add are seq_cst, so stop cannot miss an in-flight producer, and no
+ * new producer passes the re-check. Without this, emitting=0 gated only NEW
+ * emits, leaving in-flight publish() calls racing teardown (use-after-free on the
+ * detached producer / destroyed pub_lock, and silently lost rows). */
+static int enter_emit(void)
+{
+   ensure_started();
+   atomic_fetch_add(&g.publishers, 1); /* seq_cst */
+   if (!atomic_load(&g.emitting))      /* seq_cst re-check after registering */
+   {
+      atomic_fetch_sub(&g.publishers, 1);
+      return 0;
+   }
+   return 1;
+}
+
+static void leave_emit(void)
+{
+   atomic_fetch_sub(&g.publishers, 1);
+}
+
 /* Publish one already-serialized event of `kind` on the producer ring, under the
  * producer lock (single logical writer). Backpressure (WOULD_BLOCK) is transient:
  * the consumer drains aggressively, so a short backoff sleep lets it free the ring
@@ -547,8 +585,7 @@ void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, 
                     const char *mode, const char *reason_code, const char *verdict,
                     long long task_id)
 {
-   ensure_started();
-   if (!atomic_load_explicit(&g.emitting, memory_order_acquire))
+   if (!enter_emit())
    {
       aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; row not recorded");
       return;
@@ -561,17 +598,17 @@ void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, 
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
       aimee_log(LOG_WARN, "audit_bus", "audit row too large to serialize; not recorded");
-      return;
    }
-   publish(KIND_AUDIT_ACTION, buf, len);
+   else
+      publish(KIND_AUDIT_ACTION, buf, len);
+   leave_emit();
 }
 
 void audit_bus_emit_guardrail(const guardrail_event_t *e)
 {
    if (!e)
       return;
-   ensure_started();
-   if (!atomic_load_explicit(&g.emitting, memory_order_acquire))
+   if (!enter_emit())
    {
       aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; guardrail event not recorded");
       return;
@@ -583,9 +620,10 @@ void audit_bus_emit_guardrail(const guardrail_event_t *e)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
       aimee_log(LOG_WARN, "audit_bus", "guardrail event too large to serialize; not recorded");
-      return;
    }
-   publish(KIND_GUARDRAIL_EVENT, buf, len);
+   else
+      publish(KIND_GUARDRAIL_EVENT, buf, len);
+   leave_emit();
 }
 
 void audit_bus_stop(void)
@@ -596,8 +634,22 @@ void audit_bus_stop(void)
       pthread_mutex_unlock(&start_lock);
       return;
    }
-   /* Reject new emits, then tell the consumer to final-drain and exit. */
-   atomic_store_explicit(&g.emitting, 0, memory_order_release);
+   /* Reject new emits, then WAIT for every in-flight producer to leave the emit
+    * window before signalling the consumer or touching the producer/host. A
+    * producer that already passed enter_emit()'s re-check is mid-publish and still
+    * using g.pub_lock and g.producer; tearing those down under it is a
+    * use-after-free (and its row would be lost). enter_emit registers in
+    * `publishers` before re-reading emitting, and both are seq_cst, so once we
+    * observe publishers==0 after storing emitting=0, no producer is or can get
+    * inside publish(). The consumer is still running, so any producer mid-publish
+    * still drains and completes. Bounded: a producer waits at most AB_PUB_MAX
+    * backoffs. */
+   atomic_store(&g.emitting, 0); /* seq_cst */
+   const struct timespec nap = {.tv_sec = 0, .tv_nsec = 50 * 1000}; /* 50 us */
+   while (atomic_load(&g.publishers) > 0)
+      nanosleep(&nap, NULL);
+
+   /* Now no producer will touch the ring again — final-drain and exit. */
    atomic_store_explicit(&g.stop, 1, memory_order_release);
    pthread_join(g.thread, NULL); /* the consumer does its final capture_flush here */
 

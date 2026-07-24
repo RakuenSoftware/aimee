@@ -2852,6 +2852,28 @@ $(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guard
 unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durability
 	$<
 
+# Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
+# in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
+$(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_race.o \
+                                           $(OBJDIR)/modules/audit/audit_bus.o \
+                                           $(OBJDIR)/modules/audit/audit_ledger.o \
+                                           $(OBJDIR)/aimee_home.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(OBJDIR)/modules/bus/bus_capture.o \
+                                           $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-shutdown-race
+unit-test-bus-shutdown-race: $(TESTPREFIX)/unit-test-bus-shutdown-race
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<

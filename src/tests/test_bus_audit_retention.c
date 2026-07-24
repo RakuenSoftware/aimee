@@ -109,7 +109,27 @@ int main(void)
       fprintf(stderr, "FAIL: the live session's own capture file was pruned (no non-stub file)\n");
       return 1;
    }
-   printf("  the live session's file survived; older sessions pruned to the bound\n");
+
+   /* Ordering: the pruned files must be the OLDEST, not an arbitrary set. Seeded
+    * files sort (by their tiny timestamps) before the live file, so with
+    * seeded+1=KEEP+6 files pruned to KEEP, exactly the (seeded-KEEP+1) lowest
+    * seed indices are removed and the higher ones survive. */
+   const int pruned = (seeded + 1) - KEEP; /* live file + seeded, minus the kept bound */
+   for (int i = 0; i < seeded; i++)
+   {
+      char p[4096];
+      snprintf(p, sizeof p, "%s/audit-bus-capture-%010d-0-%03d.aimeecap", home, i, i);
+      int exists = (access(p, F_OK) == 0);
+      int should_exist = (i >= pruned); /* the `pruned` oldest are gone */
+      if (exists != should_exist)
+      {
+         fprintf(stderr, "FAIL: seed %d %s but should %s (retention pruned the wrong files)\n", i,
+                 exists ? "survived" : "was pruned", should_exist ? "survive" : "be pruned");
+         return 1;
+      }
+   }
+   printf("  the live session's file survived; the %d OLDEST seeds pruned, newer ones kept\n",
+          pruned);
 
    printf("test_bus_audit_retention: OK (capture streams retained across restarts, bounded)\n");
    return 0;

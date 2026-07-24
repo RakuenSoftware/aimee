@@ -83,24 +83,37 @@ strip_comments() {
 
 # ------------------------------------------------------- 1. make build graph
 # src/Makefile builds every shipping binary. Post step-3 the bus IS named here,
-# but only to carry the audit migration into aimee-server. Two textual invariants
-# keep "only via audit, only aimee-server" complete by construction:
-#   (a) modules/bus may be NAMED only in the BUS_SHIP source list and the two
-#       compile rules that add -Imodules/bus per bus/audit_bus object. Anything
-#       else naming modules/bus is a new, unaudited bus reference in the shipping
-#       build.
-#   (b) the bus objects (BUS_SHIP_OBJS) may be CONSUMED only by their own
-#       definition and the aimee-server link line ($(SERVER):). A second binary
-#       linking them would widen the blast radius past audit-in-the-server.
-hits=$({ grep -n 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments |
-   { grep -vE 'BUS_SHIP_SRCS|C_FLAGS \+= -Imodules/bus' || true; })
+# but only to carry the audit migration into aimee-server. Three textual
+# invariants keep "only via audit, only aimee-server" complete by construction —
+# each exemption is ANCHORED to a specific line form so a bus reference cannot
+# ride in on a line that merely mentions an allowed token:
+#   (a) modules/bus may be NAMED only on the BUS_SHIP_SRCS definition and the
+#       per-object -Imodules/bus compile rules for the bus + audit_bus/audit_replay
+#       objects. A -Imodules/bus on ANY other object rule, or modules/bus anywhere
+#       else, trips the gate.
+#   (b) BUS_SHIP_SRCS may be CONSUMED only by its own definition and the
+#       BUS_SHIP_OBJS derivation — so no other target can re-expand the source list
+#       into its own link line (a second binary re-deriving the bus objects).
+#   (c) BUS_SHIP_OBJS may be CONSUMED only by its own definition and the
+#       aimee-server link line ($(SERVER):).
+hits=$({ grep -nE 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments |
+   { grep -vE '^[0-9]+:BUS_SHIP_SRCS[[:space:]]*[+:]?=' || true; } |
+   { grep -vE '^[0-9]+:\$\(OBJDIR\)/modules/bus/%\.o:[[:space:]]*C_FLAGS[[:space:]]*\+=[[:space:]]*-Imodules/bus$' || true; } |
+   { grep -vE '^[0-9]+:\$\(OBJDIR\)/modules/audit/audit_(bus|replay)\.o:[[:space:]]*C_FLAGS[[:space:]]*\+=[[:space:]]*-Imodules/bus$' || true; })
 if [ -n "$hits" ]; then
    note "FAIL: src/Makefile names modules/bus outside the BUS_SHIP definition/compile rules"
    printf '%s\n' "$hits" >&2
    fail=1
 fi
-hits=$({ grep -n 'BUS_SHIP_OBJS' src/Makefile 2>/dev/null || true; } | strip_comments |
-   { grep -vE 'BUS_SHIP_OBJS =|\$\(SERVER\):' || true; })
+hits=$({ grep -nE 'BUS_SHIP_SRCS' src/Makefile 2>/dev/null || true; } | strip_comments |
+   { grep -vE '^[0-9]+:(BUS_SHIP_SRCS|BUS_SHIP_OBJS)[[:space:]]*[+:]?=' || true; })
+if [ -n "$hits" ]; then
+   note "FAIL: BUS_SHIP_SRCS is consumed outside its definition / the BUS_SHIP_OBJS derivation"
+   printf '%s\n' "$hits" >&2
+   fail=1
+fi
+hits=$({ grep -nE 'BUS_SHIP_OBJS' src/Makefile 2>/dev/null || true; } | strip_comments |
+   { grep -vE '^[0-9]+:BUS_SHIP_OBJS[[:space:]]*[+:]?=|\$\(SERVER\):' || true; })
 if [ -n "$hits" ]; then
    note "FAIL: BUS_SHIP_OBJS is linked by a target other than aimee-server (\$(SERVER))"
    printf '%s\n' "$hits" >&2
@@ -313,7 +326,13 @@ fi
 # hide. --allow-unbuilt exists for "I have not built anything yet", not for
 # "I built most of it".
 if [ "$missing" -eq 0 ]; then
-   echo "check_bus_blast_radius: ok — build graph clean; all $expected shipping binary(s) carry no bus symbol"
+   # HONESTY: the shipping link flags strip (-s), so on a normal build nm sees no
+   # static symbols for ANY of these binaries — layer 4 confirms it found no bus
+   # symbol, but it cannot see a static bus symbol that is present. The
+   # load-bearing guarantee is layers 1-3 (source + build text, complete by
+   # construction); layer 4 is a backstop that only bites on an UNSTRIPPED/debug
+   # build. Do not read "carry no bus symbol" as proof on a stripped build.
+   echo "check_bus_blast_radius: ok — build graph clean (layers 1-3 authoritative); artefact layer inspected all $expected shipping binary(s), no bus symbol seen (blind to statics on a stripped build)"
    exit 0
 fi
 

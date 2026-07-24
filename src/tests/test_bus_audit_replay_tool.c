@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "audit_bus.h"
 #include "audit_replay.h"
@@ -72,10 +73,17 @@ int main(void)
    }
    char needle[64];
    snprintf(needle, sizeof needle, "%d governed-action row(s) replayed", ROWS);
-   if (!strstr(obuf, needle) || !strstr(obuf, "task_id=0 ") || !strstr(obuf, "task_id=49 ") ||
-       !strstr(obuf, "verdict=block") || !strstr(obuf, "verdict=allow"))
+   /* Count every rendered row, not just spot-check endpoints: a printer that
+    * dropped middle rows would pass a first/last check but fail this. */
+   int rendered = 0;
+   for (const char *p = obuf; (p = strstr(p, "task_id=")) != NULL; p += 8)
+      rendered++;
+   if (!strstr(obuf, needle) || rendered != ROWS || !strstr(obuf, "task_id=0 ") ||
+       !strstr(obuf, "task_id=49 ") || !strstr(obuf, "verdict=block") ||
+       !strstr(obuf, "verdict=allow"))
    {
-      fprintf(stderr, "FAIL: replay output did not render the expected rows/summary:\n%s\n", obuf);
+      fprintf(stderr, "FAIL: replay rendered %d task_id lines (expected %d) / missing summary:\n%s\n",
+              rendered, ROWS, obuf);
       return 1;
    }
    printf("  rendered %d rows + status trailer; first/last task ids and both verdicts present\n",
@@ -127,6 +135,61 @@ int main(void)
    assert(cJSON_GetArraySize(list) >= 1);
    cJSON_Delete(list);
    printf("  JSON replay + pagination + basename guard + capture list verified\n");
+
+   /* Byte budget (regression for the /v1 256 KB overflow): a large capture must
+    * be PAGED even with a big row limit, never materialized past the budget. */
+   const int BIG = 2500; /* ~150 B/row >> the 200 KB budget */
+   assert(audit_bus_start() == 0); /* fresh session (clears the terminated guard) */
+   for (int i = 0; i < BIG; i++)
+   {
+      char t[32], h[32];
+      snprintf(t, sizeof t, "Tool_%d", i % 7);
+      snprintf(h, sizeof h, "v1-%d", i);
+      audit_bus_emit("primary", t, h, "cd ; rm", "approve", "read_before_write", "block", i);
+   }
+   audit_bus_stop();
+   /* Pick the largest capture file (the BIG session's). */
+   char big[4096];
+   big[0] = '\0';
+   long best = -1;
+   DIR *bd = opendir(home);
+   assert(bd);
+   while ((e = readdir(bd)) != NULL)
+   {
+      if (strncmp(e->d_name, "audit-bus-capture-", 18) != 0 || !strstr(e->d_name, ".aimeecap"))
+         continue;
+      char p[4096];
+      snprintf(p, sizeof p, "%s/%s", home, e->d_name);
+      struct stat st;
+      if (stat(p, &st) == 0 && (long)st.st_size > best)
+      {
+         best = st.st_size;
+         snprintf(big, sizeof big, "%s", p);
+      }
+   }
+   closedir(bd);
+   assert(big[0]);
+   cJSON *jb = audit_replay_to_json(big, 0, 100000); /* huge limit — budget must still bound it */
+   assert(jb);
+   assert((int)cJSON_GetObjectItem(jb, "total")->valuedouble == BIG);
+   int cnt = (int)cJSON_GetObjectItem(jb, "count")->valuedouble;
+   if (cnt >= BIG || cnt <= 0 || !cJSON_IsTrue(cJSON_GetObjectItem(jb, "truncated")))
+   {
+      fprintf(stderr, "FAIL: byte budget did not page a large capture (count=%d total=%d)\n", cnt,
+              BIG);
+      return 1;
+   }
+   char *js = cJSON_PrintUnformatted(jb);
+   assert(js);
+   if (strlen(js) >= 256 * 1024)
+   {
+      fprintf(stderr, "FAIL: paged replay JSON is %zu bytes — would overflow the /v1 buffer\n",
+              strlen(js));
+      return 1;
+   }
+   free(js);
+   cJSON_Delete(jb);
+   printf("  byte budget: %d-row capture paged to %d rows (truncated), JSON < 256 KB\n", BIG, cnt);
 
    printf("test_bus_audit_replay_tool: OK (the operator replay tool renders the recorded rows)\n");
    return 0;

@@ -212,6 +212,11 @@ aimee_add_test(test_bus_guardrail_durability test_bus_guardrail_durability.c ../
 target_include_directories(test_bus_guardrail_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_guardrail_durability PRIVATE Threads::Threads)
 
+# Shutdown race: concurrent producers vs audit_bus_stop() (UAF regression).
+aimee_add_test(test_bus_shutdown_race test_bus_shutdown_race.c ../modules/audit/audit_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_shutdown_race PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_shutdown_race PRIVATE Threads::Threads)
+
 
 
 

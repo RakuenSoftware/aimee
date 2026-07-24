@@ -36,22 +36,25 @@ int main(void)
       return 1;
    }
 
+   /* Each event carries a UNIQUE identity (session_id "s<i>") and per-i field
+    * values, so the read-back can prove exactly-once (a loss+dup that nets to N
+    * would fail the seen[] check) AND that every field round-tripped the wire. */
    assert(audit_bus_start() == 0);
    for (int i = 0; i < N; i++)
    {
       guardrail_event_t e;
       memset(&e, 0, sizeof e);
-      snprintf(e.session_id, sizeof e.session_id, "sess-g");
+      snprintf(e.session_id, sizeof e.session_id, "s%d", i);
       snprintf(e.tool_name, sizeof e.tool_name, "Tool_%d", i % 5);
-      e.overall_risk = (double)(i % 100) / 100.0;
+      e.overall_risk = (double)i; /* exact for a double; verified back precisely */
       e.action_risk = 0.1;
       e.diff_risk = 0.2;
       e.drift_risk = 0.3;
       e.antipattern_similarity = 0.4;
       snprintf(e.recommendation, sizeof e.recommendation, "warn");
-      snprintf(e.labels, sizeof e.labels, "label-%d", i % 5);
+      snprintf(e.labels, sizeof e.labels, "lab-%d", i % 5);
       snprintf(e.final_action, sizeof e.final_action, (i % 2) ? "block" : "allow");
-      snprintf(e.explanation, sizeof e.explanation, "explanation body %d", i);
+      snprintf(e.explanation, sizeof e.explanation, "expl %d", i);
       e.dry_run = i % 2;
       audit_bus_emit_guardrail(&e);
    }
@@ -68,9 +71,11 @@ int main(void)
       return 1;
    }
 
-   /* The real db1 sink must hold exactly N rows. */
+   /* The real db1 sink must hold exactly N rows — each identity once, every field
+    * matching what that identity emitted. */
    guardrail_event_row_t *rows = calloc(N, sizeof *rows);
-   assert(rows);
+   char *seen = calloc(N, 1);
+   assert(rows && seen);
    int count = 0;
    if (db1_guardrail_event_list(N, 0, rows, &count) != 0)
    {
@@ -82,20 +87,51 @@ int main(void)
       fprintf(stderr, "FAIL: db1 holds %d guardrail events, expected %d\n", count, N);
       return 1;
    }
-   /* Spot-check a row round-tripped through the bus wire form intact. */
-   int ok_shape = 0;
-   for (int i = 0; i < count; i++)
-      if (strcmp(rows[i].session_id, "sess-g") == 0 && strncmp(rows[i].tool_name, "Tool_", 5) == 0 &&
-          (strcmp(rows[i].final_action, "block") == 0 || strcmp(rows[i].final_action, "allow") == 0))
-         ok_shape++;
-   if (ok_shape != N)
+   for (int r = 0; r < count; r++)
    {
-      fprintf(stderr, "FAIL: %d/%d rows had the expected round-tripped shape\n", ok_shape, N);
+      if (rows[r].session_id[0] != 's')
+      {
+         fprintf(stderr, "FAIL: row %d has unexpected session_id '%s'\n", r, rows[r].session_id);
+         return 1;
+      }
+      int id = atoi(rows[r].session_id + 1);
+      if (id < 0 || id >= N || seen[id])
+      {
+         fprintf(stderr, "FAIL: exactly-once violated at id=%d (out-of-range or duplicate)\n", id);
+         return 1;
+      }
+      seen[id] = 1;
+      char etool[32], elab[32], eexpl[32];
+      snprintf(etool, sizeof etool, "Tool_%d", id % 5);
+      snprintf(elab, sizeof elab, "lab-%d", id % 5);
+      snprintf(eexpl, sizeof eexpl, "expl %d", id);
+      const char *efa = (id % 2) ? "block" : "allow";
+      if (strcmp(rows[r].tool_name, etool) != 0 || strcmp(rows[r].final_action, efa) != 0 ||
+          strcmp(rows[r].labels, elab) != 0 || strcmp(rows[r].explanation, eexpl) != 0 ||
+          rows[r].dry_run != (id % 2) || rows[r].overall_risk != (double)id)
+      {
+         fprintf(stderr, "FAIL: id=%d fields did not round-trip: tool=%s fa=%s lab=%s expl=%s "
+                         "dry=%d risk=%g\n",
+                 id, rows[r].tool_name, rows[r].final_action, rows[r].labels, rows[r].explanation,
+                 rows[r].dry_run, rows[r].overall_risk);
+         return 1;
+      }
+   }
+   int missing = 0;
+   for (int i = 0; i < N; i++)
+      if (!seen[i])
+         missing++;
+   if (missing)
+   {
+      fprintf(stderr, "FAIL: %d of %d identities missing from db1\n", missing, N);
       return 1;
    }
-   printf("  db1 guardrail_events: %d rows, each round-tripped through the bus intact\n", count);
+   printf("  db1 guardrail_events: %d rows, each identity present exactly once with all fields "
+          "round-tripped\n",
+          count);
 
    free(rows);
+   free(seen);
    db1_shutdown();
    printf("test_bus_guardrail_durability: OK (a second module rides the bus, exactly once)\n");
    return 0;

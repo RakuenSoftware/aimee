@@ -21,6 +21,14 @@
 #define AB_CAP_PREFIX "audit-bus-capture-"
 #define AB_CAP_SUFFIX ".aimeecap"
 
+/* Byte budget for a JSON replay page. The /v1 reply shares a 256 KB buffer
+ * (SHTTP_RESP_MAX); a row-count limit alone cannot bound the payload because rows
+ * carry variable-length fields, so audit_replay_to_json also stops materializing
+ * once the accumulated size approaches this budget and reports truncated=true so
+ * the client pages via offset. Kept well under 256 KB to leave room for the
+ * envelope and cJSON's escaping expansion. */
+#define AB_REPLAY_JSON_BUDGET (200 * 1024)
+
 /* Read a length-prefixed string from the audit-row payload (audit_bus.c's wire
  * form: 7 length-prefixed strings then an int64 task id). Returns new offset, or
  * 0 on malformed input. */
@@ -160,6 +168,8 @@ struct json_sink
    uint64_t malformed;
    long offset;       /* first row index to include */
    long limit;        /* max rows to include (<=0 = all) */
+   size_t bytes;      /* accumulated estimated JSON size of materialized rows */
+   int truncated;     /* set when the byte budget stopped materialization early */
 };
 
 static void on_record_json(void *ctx, const bus_capture_event_t *ev)
@@ -181,6 +191,20 @@ static void on_record_json(void *ctx, const bus_capture_event_t *ev)
     * [offset, offset+limit) slice so the response stays bounded. */
    if (idx < s->offset || (s->limit > 0 && idx >= s->offset + s->limit))
       return;
+
+   /* Byte budget: a row's fields are variable length, so a row-count window can
+    * still overflow the /v1 buffer. Once the estimated size would exceed the
+    * budget, stop materializing and report truncated (the client pages onward).
+    * Estimate = per-row JSON overhead + the field value lengths (an upper-ish
+    * bound; cJSON escaping can add a little, which the budget's headroom covers). */
+   size_t est = 120 + strlen(actor) + strlen(tool) + strlen(hash) + strlen(command) +
+                strlen(mode) + strlen(reason) + strlen(verdict);
+   if (cJSON_GetArraySize(s->rows) > 0 && s->bytes + est > AB_REPLAY_JSON_BUDGET)
+   {
+      s->truncated = 1;
+      return;
+   }
+   s->bytes += est;
 
    cJSON *o = cJSON_CreateObject();
    if (!o)
@@ -205,18 +229,25 @@ cJSON *audit_replay_to_json(const char *path, long offset, long limit)
       return NULL;
    if (offset < 0)
       offset = 0;
-   struct json_sink s = {
-       .rows = cJSON_CreateArray(), .total = 0, .malformed = 0, .offset = offset, .limit = limit};
+   struct json_sink s = {.rows = cJSON_CreateArray(), .total = 0, .malformed = 0,
+                         .offset = offset, .limit = limit, .bytes = 0, .truncated = 0};
    bus_capture_report_t rep = bus_capture_read(buf, size, on_record_json, &s);
    free(buf);
 
+   int returned = cJSON_GetArraySize(s.rows);
    cJSON *o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "status", bus_capture_status_name(rep.status));
-   cJSON_AddNumberToObject(o, "total", (double)s.total);           /* all rows in the stream */
-   cJSON_AddNumberToObject(o, "count", (double)cJSON_GetArraySize(s.rows)); /* returned window */
+   cJSON_AddNumberToObject(o, "total", (double)s.total);  /* all rows in the stream */
+   cJSON_AddNumberToObject(o, "count", (double)returned); /* returned window */
    cJSON_AddNumberToObject(o, "offset", (double)offset);
    if (limit > 0)
       cJSON_AddNumberToObject(o, "limit", (double)limit);
+   if (s.truncated)
+   {
+      /* the byte budget cut the page short; tell the client where to resume */
+      cJSON_AddBoolToObject(o, "truncated", 1);
+      cJSON_AddNumberToObject(o, "next_offset", (double)(offset + returned));
+   }
    if (s.malformed)
       cJSON_AddNumberToObject(o, "malformed", (double)s.malformed);
    if (rep.status == BUS_CAPTURE_TRUNCATED || rep.status == BUS_CAPTURE_CORRUPT)

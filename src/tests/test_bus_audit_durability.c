@@ -132,6 +132,21 @@ int main(void)
       if (seen[id])
          dupes++;
       seen[id] = 1;
+      /* Verify the per-row columns round-tripped, not just task_id: tool and
+       * args_hash vary per id, so a wrong/scrambled payload would be caught. */
+      char etool[32], ehash[32];
+      snprintf(etool, sizeof etool, "Tool_%d", id % 7);
+      snprintf(ehash, sizeof ehash, "v1-%d", id);
+      const char *tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "tool"));
+      const char *hash = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "args_hash"));
+      const char *verdict = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "verdict"));
+      if (!tool || strcmp(tool, etool) != 0 || !hash || strcmp(hash, ehash) != 0 || !verdict ||
+          strcmp(verdict, "block") != 0)
+      {
+         fprintf(stderr, "FAIL: id=%d columns did not round-trip (tool=%s hash=%s verdict=%s)\n", id,
+                 tool ? tool : "(null)", hash ? hash : "(null)", verdict ? verdict : "(null)");
+         return 1;
+      }
    }
    int missing = 0;
    for (int i = 0; i < N; i++)
