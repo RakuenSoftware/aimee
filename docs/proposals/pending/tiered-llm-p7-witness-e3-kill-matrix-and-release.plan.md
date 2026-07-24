@@ -1,6 +1,13 @@
 # P7-witness-e3 full kill matrix and the release gate
 
-- **State:** planned; depends on E1 and E2 merging first.
+- **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
+  `ecbfbc35`); awaiting merge to `testing`. The kill matrix (daemon hard-kill,
+  boot-tpm under swtpm, hardened boot over verify-full TLS both directions), the
+  tamper scenarios (incl. comparison catching a coherent rewrite against a retained
+  copy), and the raw-key canary scans are delivered. The release-gate flip is live:
+  `kb_egress_release_allowed()` returns `witness_release_gate_open()` (five
+  fail-closed terms). §4b/§4c document the runtime-role grant and hardened-bootstrap
+  fixes found in self-review. Moves to `docs/proposals/done/` when the branch merges.
 - **Depends on:** E1, E2, and every merged P7 reseal slice through D3b.
 - **Enables:** the P2b production release gate — the last open P7 line item.
 - **Umbrella:** `tiered-llm-p7-external-worm-witness.plan.md`.

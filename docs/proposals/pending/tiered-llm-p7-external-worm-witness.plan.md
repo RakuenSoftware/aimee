@@ -1,7 +1,14 @@
 # P7 external WORM witness and full kill matrix
 
-- **State:** staged umbrella plan; the P2b production release gate stays closed
-  until every slice merges.
+- **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
+  `ecbfbc35`); awaiting merge to `testing`. E1, E2, and E3 are all delivered — the
+  P2b release gate flip is live (`kb_egress_release_allowed()` returns
+  `witness_release_gate_open()`). Validated end-to-end on a fresh CT103 env: witness
+  unit suite, integration gate (producer/emit/tamper/recovery/canary), the E3 kill
+  matrix, hardened boot over verify-full TLS (both directions), runtime-role least
+  privilege, and a ThreadSanitizer lane for the release-gate cross-thread cell. A
+  clean roundtable review approved the core diff. This doc moves to
+  `docs/proposals/done/` when the branch merges.
 - **Depends on:** P7-reseal D1, D2a, D2b, D3a, D3b (merged), P3a WORM ledger, and
   the existing kb audit chain.
 - **Enables:** the last open P7 line item — `external WORM delivery + full kill
