@@ -15,6 +15,8 @@ This document is the contract — companion to `collapse_recon.md` (path-by-path
 dispatch recon) and `sampling_capability_matrix.md` (per-backend sampling
 matrix). It is the only file that Phase 1+ is allowed to read first.
 
+**Open dependency:** Phase 1, Phase 2, and Phase 5 may not land until Phase 2.3.0 introduces the `collapse_event` writer and query helper.
+
 ---
 
 ## Decision 1 — Path-divergence verdict (relay convergence)
@@ -253,7 +255,7 @@ extension to `scripts/gen-reference-docs.py:417`).
 > `aimee_ir_stream_relay_enabled()` at `src/server/aimee_ir_serve.c:30`)
 > are NOT a promotion controller — they are binary feature flags.
 >
-> **Phase 5.0 prerequisite (F-003):**
+> **Phase 5.0 prerequisite (before declaring absence confirmed, run `git log --all -S shadow_canary --pickaxe-regex` and `git grep -P "bucket_(label|assignment)"` across the full repository) (F-003):**
 >
 > 1. **Re-run the bounded search with the Phase 5 feature set in scope**
 >    (search for `shadow_rollout_*`, `bucket_*`, `*_transition_state`,
