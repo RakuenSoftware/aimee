@@ -88,7 +88,7 @@ def test_every_fixture_has_a_meta_sidecar():
 
 
 def test_fire_oracles_are_absolute_byte_exact_verbatim_periods():
-    for path in (ROOT / "collapse_collapse").glob("*"):
+    for path in (ROOT / "collapse_collapse").rglob("*"):
         if not path.is_file() or path.suffix == ".meta":
             continue
         values = metadata(path)
@@ -106,7 +106,7 @@ def test_fire_oracles_are_absolute_byte_exact_verbatim_periods():
 
 
 def test_interleaved_oracles_have_non_repeating_connective_tissue():
-    for path in (ROOT / "collapse_collapse").glob("*"):
+    for path in (ROOT / "collapse_collapse").rglob("*"):
         if not path.is_file() or path.suffix == ".meta":
             continue
         values = metadata(path)
