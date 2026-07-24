@@ -3507,6 +3507,16 @@ $(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_TPM2_LDLIBS)
 
+# P7 pkcs11 custody integration harness: the PKCS#11 provider is the only build,
+# but exercising get_kek/unseal needs a real token, so this is a standalone gate
+# (scripts/p7_pkcs11_softhsm_test.sh), not a default unit test. Build with
+#   make $(OBJDIR)/tests/p7-pkcs11-harness
+$(TESTPREFIX)/p7-pkcs11-harness: $(OBJDIR)/tests/test_vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_PKCS11_LDLIBS)
+
 $(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.o \
                               $(OBJDIR)/cli_agent_keys.o \
                               $(TEST_CORE_OBJS)

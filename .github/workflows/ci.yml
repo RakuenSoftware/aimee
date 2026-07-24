@@ -294,7 +294,7 @@ jobs:
           done
           echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
-        run: cd src && make -j$(nproc) unit-tests
+        run: cd src && make -j$(nproc) unit-tests build/obj/tests/p7-pkcs11-harness
 
   init-migrate-service-test:
     runs-on: ubuntu-latest
@@ -694,3 +694,22 @@ jobs:
           cd src
           make AIMEE_TREESITTER=1 build/obj/tests/unit-test-code-treesitter
           ./build/obj/tests/unit-test-code-treesitter
+
+  vault-pkcs11-token:
+    name: vault-pkcs11-token
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev softhsm2 opensc
+      - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)
+        env:
+          AIMEE_PKCS11_GATE_REQUIRE: "1"
+        run: bash scripts/p7_pkcs11_softhsm_test.sh
