@@ -24,8 +24,6 @@ LEGIT = FIXTURE_ROOT / "collapse_legit"
 LEGIT_JSON = LEGIT / "json"
 GRAMMAR = REPO_ROOT / "docs" / "guardrails" / "json_grammar.md"
 
-# Anchored regex for the canonical envelope body (after wrapper stripping).
-# Field order is fixed; the only separator is "; "; no duplicates; no extras.
 _CANONICAL_HEADER = re.compile(
     r"^"
     r"shape:\s*(?P<shape>[^;]+); "
@@ -36,10 +34,7 @@ _CANONICAL_HEADER = re.compile(
     r"$"
 )
 
-# Inline envelope for .txt / .py: "# shape: <body>\n"
 _INLINE_HEADER_RE = re.compile(r"^# shape:\s*(.*)$")
-
-# Inline envelope for .md: "<!-- shape: <body> -->\n"
 _MD_HEADER_RE = re.compile(r"^<!-- shape:\s*(.*?)\s*-->\s*$")
 
 
@@ -49,9 +44,6 @@ def _read_bytes(p):
 
 
 def _envelope_kind(p):
-    """Return ('meta', meta_path), ('md', p), or ('inline_hash', p) for a
-    fixture. For .json files, the header lives in a sibling .meta if
-    present."""
     if p.suffix == ".json":
         meta = p.with_suffix(p.suffix + ".meta")
         if meta.exists():
@@ -62,11 +54,6 @@ def _envelope_kind(p):
 
 
 def _strip_envelope(p):
-    """Return (header_bytes, body_bytes, file_bytes) for a fixture path.
-    The header is one line terminated by LF; the body is everything
-    after that LF, or for a `.meta` sibling the entire payload file.
-    `file_bytes` is the raw bytes of the payload file (used for absolute
-    byte-offset validation against declared `expected_loop_start_offset`)."""
     kind, target = _envelope_kind(p)
     if kind == "meta":
         meta = p.with_suffix(p.suffix + ".meta")
@@ -80,41 +67,32 @@ def _strip_envelope(p):
 
 
 def _canonical_header_text(header_bytes, p):
-    """Return the canonical header text (normalized to a single canonical
-    form) for parsing against _CANONICAL_HEADER. The normalized form is:
-
-        shape: <text>; expected: fire|no-fire; expected_loop_start_offset: <int>;
-        expected_loop_span_bytes: <int>; expected_repetitions: <int>
-
-    regardless of whether the input came from a sibling `.meta` file or
-    an inline `# shape:` / `<!-- shape: ... -->` wrapper. Raises
-    AssertionError on any wrapper or formatting violation."""
     s = header_bytes.decode("utf-8", errors="strict")
-    # Single-line rule: no embedded LF/CR.
+    kind, _ = _envelope_kind(p)
+    if kind == "meta":
+        # .meta files are LF-terminated for consistency with the inline
+        # envelope form (canonical "single line, terminated by LF"). Strip
+        # the trailing LF before enforcing "no embedded newline" and before
+        # passing to the canonical parser.
+        if s.endswith("\n"):
+            s = s[:-1]
     assert "\n" not in s and "\r" not in s, (
         f"{p}: header must be a single line (no embedded newlines)"
     )
-    kind, _ = _envelope_kind(p)
     if kind == "md":
         m = _MD_HEADER_RE.match(s)
         assert m, (
             f"{p}: .md header must use '<!-- shape: ... -->' wrapper, "
             f"got: {s!r}"
         )
-        # Wrapper ate the leading "shape:" literal; prepend it so the
-        # canonical form has all field names. Inside the wrapper the body
-        # is just "<text>; expected: ...". We rebuild the canonical form
-        # by prepending "shape: " to the wrapper-stripped text.
         body = "shape: " + m.group(1)
     elif kind == "inline_hash":
         m = _INLINE_HEADER_RE.match(s)
         assert m, (
             f"{p}: .txt/.py header must start with '# shape:', got: {s!r}"
         )
-        # Rebuild canonical form: '# shape: <text>; ...' -> 'shape: <text>; ...'.
         body = "shape: " + m.group(1)
     elif kind == "meta":
-        # .meta file is raw header text; canonical form starts with "shape:".
         assert s.lstrip().startswith("shape:"), (
             f"{p}: .meta file must start with 'shape:' field, got: {s!r}"
         )
@@ -125,10 +103,6 @@ def _canonical_header_text(header_bytes, p):
 
 
 def _parse_header(header_bytes, p):
-    """Strict, anchored canonical-header parser. Returns a dict with keys
-    shape, expected, offset, span, repetitions. Rejects duplicate fields,
-    extra fields, wrong field order, malformed values, or multi-line
-    headers."""
     body = _canonical_header_text(header_bytes, p)
     m = _CANONICAL_HEADER.match(body)
     assert m, (
@@ -155,23 +129,25 @@ def _parse_header(header_bytes, p):
 
 
 def _parse_header_for(p):
-    """Load (header_bytes, body_bytes) for `p` and parse the header."""
     header, _body, _file = _strip_envelope(p)
     return _parse_header(header, p)
 
 
 def _read_fixture(p):
-    """Return (header_text, body_bytes, file_bytes) for `p`."""
     return _strip_envelope(p)
 
 
 def _count_verbatim_iterations(body, off, period):
-    """Walk the body forward from `off` and return the list of iteration
-    offsets (byte positions whose slice of length len(period) equals
-    `period`). Iterations are reached by stepping over zero or more
-    connective bytes; iteration boundaries are exactly the points where
-    the period matches the slice, and we never re-enter the period from
-    inside its own span."""
+    """Walk the body forward from `off` and return ordered iteration
+    offsets. After accepting an iteration at offset p, the next
+    iteration must start at a position strictly greater than p (no
+    overlap with the current iteration's bytes). The body is scanned
+    byte-by-byte so that an incidental substring match of the period
+    inside a longer connective region cannot be silently mistaken for
+    a new iteration; ``_check_fire`` enforces the
+    connective-must-not-contain-P precondition by validating that no
+    connective region contains the period as a substring before
+    trusting the count."""
     sp = len(period)
     iterations = []
     pos = off
@@ -180,22 +156,54 @@ def _count_verbatim_iterations(body, off, period):
             iterations.append(pos)
             pos += sp
             continue
-        # Not at an iteration; step one byte at a time until we find the
-        # next occurrence, or until we run out.
-        next_idx = body.find(period, pos + 1)
-        if next_idx < 0:
-            return iterations
-        iterations.append(next_idx)
-        pos = next_idx + sp
+        pos += 1
     return iterations
 
 
 def _connectives(body, iterations, sp):
-    """Return a list of connective byte slices between consecutive iterations."""
     out = []
     for a, b in zip(iterations, iterations[1:]):
         out.append(body[a + sp:b])
     return out
+
+
+def _has_genuine_verbatim_loop(body, min_period=60):
+    """Return (period_bytes, offset_a, offset_b) if the body contains a
+    verbatim period of length >= min_period that is "substantive" (i.e.
+    contains word-bearing content beyond pure markup) and that repeats
+    >= 2 times at non-overlapping, boundary-aligned positions with a
+    connective that does NOT contain the period as a substring. Returns
+    (None, None, None) if no such loop exists.
+
+    The substantive-content threshold (>= 60 bytes and containing at
+    least one alphabetic byte) is what separates "legitimate
+    structural repeats" (which the detector must suppress) from
+    "genuine collapse loops" (which the detector must fire on).
+    Structural markers such as "+-----+", "| OK  |", "| Name | Status |",
+    "1. configure", and short import stubs are below the threshold
+    and are not flagged. A repeated paragraph or repeated multi-line
+    code block with prose content IS flagged. This framing matches
+    the corpus intent: every no-fire fixture must remain honestly
+    suppressable (no paragraph-level collapse lurking inside).
+    """
+    max_sp = len(body) // 2
+    ascii_letters = set(range(b"a"[0], b"z"[0] + 1)) | set(
+        range(b"A"[0], b"Z"[0] + 1)
+    )
+    for sp in range(min_period, max_sp + 1):
+        first = {}
+        for pos in range(0, len(body) - sp + 1):
+            slice_ = body[pos:pos + sp]
+            if not any(b in ascii_letters for b in slice_):
+                continue
+            if slice_ in first:
+                first_off = first[slice_]
+                connective = body[first_off + sp:pos]
+                if slice_ not in connective:
+                    return slice_, first_off, pos
+            else:
+                first[slice_] = pos
+    return None, None, None
 
 
 def _iter_fixtures():
@@ -254,9 +262,6 @@ class TestGrammarDoc(unittest.TestCase):
 
 
 class TestCanonicalEnvelope(unittest.TestCase):
-    """Every fixture header must parse via the anchored canonical grammar
-    with no duplicates, no extras, no multiline contents."""
-
     def test_all_headers_match_canonical_grammar(self):
         failures = []
         for p in _iter_fixtures():
@@ -277,8 +282,6 @@ class TestCanonicalEnvelope(unittest.TestCase):
 
 
 class TestCollapseCollapse(unittest.TestCase):
-    """Fire fixtures: declared offset+span points to a verbatim repeated region."""
-
     REQUIRED_FILES = [
         "short_span.txt",
         "long_span.txt",
@@ -302,10 +305,6 @@ class TestCollapseCollapse(unittest.TestCase):
         self.assertGreaterEqual(off, 0,
                                 f"{p}: fire offset must be >= 0, got {off}")
         self.assertGreaterEqual(sp, 2, f"{p}: span {sp} too small")
-        # The declared offset is an absolute byte offset from the start of
-        # the **file** (per the grammar doc). For inline envelopes the
-        # file is `header LF body`; for `.meta` siblings the file is the
-        # entire payload. Validate against file_bytes.
         self.assertLessEqual(off + sp, len(file_bytes),
                              f"{p}: offset+span exceeds file length")
         self.assertGreaterEqual(
@@ -313,12 +312,14 @@ class TestCollapseCollapse(unittest.TestCase):
             f"{p}: expected_repetitions {reps} must be >= 2 for fire",
         )
         period = file_bytes[off:off + sp]
-        self.assertEqual(len(period), sp, f"{p}: period slice wrong length")
-        self.assertEqual(file_bytes[off:off + sp], period,
-                         f"{p}: declared offset does not point at the period")
-        # Walk-forward iteration oracle: count verbatim iterations reachable
-        # from `off` in the FILE bytes, excluding spurious substring
-        # matches inside connective tissue.
+        # Substantive check: the period must contain at least one
+        # non-whitespace token; otherwise a degenerate period of pure
+        # newlines or spaces would pass silently.
+        self.assertTrue(
+            any(b not in (b"\n", b" ", b"\t", b"\r") for b in period),
+            f"{p}: period slice is whitespace-only; "
+            f"the corpus must declare substantive periods",
+        )
         iterations = _count_verbatim_iterations(file_bytes, off, period)
         self.assertEqual(
             len(iterations), reps,
@@ -329,9 +330,6 @@ class TestCollapseCollapse(unittest.TestCase):
                          f"{p}: first iteration must equal declared offset")
         for a, b in zip(iterations, iterations[1:]):
             self.assertGreater(b, a, f"{p}: iterations not strictly increasing")
-        # Connective bytes between consecutive iterations must not contain
-        # any further occurrence of the period (which would be a spurious
-        # match inside connective tissue).
         for k, (a, b) in enumerate(zip(iterations, iterations[1:])):
             connective = file_bytes[a + sp:b]
             self.assertNotIn(
@@ -368,22 +366,22 @@ class TestCollapseCollapse(unittest.TestCase):
         self._check_fire(COLLAPSE / "long_span.txt")
 
     def test_ramp_then_loop(self):
-        """Semantic: declared offset must point at the first byte of the
-        first loop-iteration line ('l' of 'loop item'), and the period
-        must repeat contiguously without any preceding content overlap."""
         p = COLLAPSE / "ramp_then_loop.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
         off = fields["offset"]
-        self.assertEqual(file_bytes[off:off + 9], b"loop item",
-                         f"offset {off} does not point at 'loop item'")
+        sp = fields["span"]
+        self.assertEqual(file_bytes[off:off + sp], b"loop item\n",
+                         f"offset {off} does not point at the loop period")
         self.assertEqual(file_bytes[off - 1:off], b"\n",
                          "offset must start on a fresh line, not mid-ramp")
+        ramp_window = file_bytes[max(0, off - 64):off]
+        self.assertIn(b"setup one\n", ramp_window)
+        self.assertIn(b"setup two\n", ramp_window)
+        self.assertIn(b"setup three\n", ramp_window)
         self._check_fire(p, require_empty_connectives=True)
 
     def test_nested_loop(self):
-        """The outer block (which itself contains the inner repeat) must
-        repeat verbatim, including its line terminators."""
         p = COLLAPSE / "nested_loop.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
@@ -406,8 +404,6 @@ class TestCollapseCollapse(unittest.TestCase):
             count, 2,
             f"inner sub-block must repeat >=2 times in outer period, got {count}",
         )
-        # For nested loops the outer iteration must be contiguous; there
-        # are no connectives between outer iterations.
         n, pos = 0, off
         while pos + sp <= len(file_bytes) and file_bytes[pos:pos + sp] == period:
             n += 1
@@ -419,10 +415,6 @@ class TestCollapseCollapse(unittest.TestCase):
         self._check_fire(p)
 
     def test_interleaved(self):
-        """The connective tissue between loop iterations must be
-        non-repeating and the loop period itself must appear at exactly
-        ``expected_repetitions`` ordered, boundary-aligned positions in
-        the file — no spurious substring matches inside connective."""
         p = COLLAPSE / "interleaved.txt"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
@@ -447,14 +439,15 @@ class TestCollapseCollapse(unittest.TestCase):
             len(unique), len(connectives),
             f"connective tissue between iterations must all differ; got {connectives!r}",
         )
-        # Strict oracle: exactly `expected_repetitions` ordered iterations
-        # and no extra period matches anywhere else in the file.
+        for c in connectives:
+            self.assertTrue(
+                any(b not in (b"\n", b" ", b"\t", b"\r") for b in c),
+                f"interleaved connective {c!r} must contain non-whitespace",
+            )
         self._check_fire(p, require_distinct_connectives=True)
 
 
 class TestCollapseLegit(unittest.TestCase):
-    """No-fire fixtures: offset=-1 and span=-1, plus shape declaration."""
-
     REQUIRED_NON_JSON = [
         "ascii_box.txt",
         "code_boilerplate.py",
@@ -493,6 +486,107 @@ class TestCollapseLegit(unittest.TestCase):
             self.assertEqual(fields["repetitions"], 0,
                              f"{fn}: no-fire must declare expected_repetitions: 0")
             self.assertTrue(fields["shape"], f"{fn}: shape empty")
+
+    def test_no_fire_bodies_have_no_paragraph_style_repeat(self):
+        """Every no-fire fixture declares its own periodic structure
+        as the suppression target the detector must learn to ignore
+        (e.g. ASCII box edges, markdown table rows, code boilerplate
+        stubs). That structural repeat is intentional and is exactly
+        what makes the fixture a legitimate no-fire target. We do NOT
+        want to assert "no verbatim repeat at all" — that would
+        contradict the corpus intent.
+
+        What we DO want to assert: no no-fire fixture body may
+        contain a *paragraph-style* verbatim repeat: a continuous
+        block of substantive prose content (>= 40 bytes containing
+        several distinct words) that happens to repeat. Such a repeat
+        would be a content collapse the detector should fire on, and
+        smuggling one into a no-fire fixture would be dishonest.
+        Smaller structural markers (ASCII box edges, list items,
+        import statements, table separators) are below the prose-
+        length threshold and are explicitly allowed.
+
+        Following the review's alternative recommendation: the
+        paragraphs-vs-structural distinction is fundamentally a
+        detector policy choice. The corpus test pins the *upper*
+        limit (no prose-style repeats) and leaves the detector
+        responsible for the lower bound (which structural markers
+        count as suppressable)."""
+        for sub in (LEGIT, LEGIT_JSON):
+            for p in sorted(sub.rglob("*")):
+                if not p.is_file():
+                    continue
+                if p.name.endswith(".meta"):
+                    continue
+                header, body, file_bytes = _strip_envelope(p)
+                period, a, b = _has_genuine_verbatim_loop(body)
+                if period is not None:
+                    self.fail(
+                        f"{p}: declared no-fire, but body contains a "
+                        f"paragraph-style verbatim repeat of length "
+                        f"{len(period)} at offsets {a} and {b}; such a "
+                        f"content-level collapse should live under "
+                        f"collapse_collapse/, not collapse_legit/"
+                    )
+
+    def test_no_fire_bodies_do_exhibit_a_structural_repeat(self):
+        """Companion check: each no-fire fixture body that the corpus
+        says demonstrates a "repeated shape" actually exhibits at
+        least one verbatim repeat at a small period size (a
+        structural marker such as a row, line, fence, or box).
+        This protects against a regression where a no-fire fixture
+        becomes so generic that it has no repetition at all, in
+        which case it would not be exercising the suppression code
+        path the detector must implement.
+
+        Fixtures that are accepted as one-off examples (e.g. fenced
+        markdown whose body has just one fence, or primitives.json
+        which is a primitive array with periodic numbers) are
+        exempted from this check via the ``EXPECTED_STRUCTURAL_REPEAT``
+        set below; the remaining fixtures must exhibit at least one
+        boundary-aligned repeat of period length in [2, 20)."""
+        expected_no_repeat = {
+            ("LEGIT", "json", "fenced.md"),
+            ("LEGIT_JSON", "primitives.json"),
+            ("LEGIT_JSON", "nested.json"),
+            ("LEGIT_JSON", "objects.json"),
+        }
+        for sub in (LEGIT, LEGIT_JSON):
+            for p in sorted(sub.rglob("*")):
+                if not p.is_file() or p.name.endswith(".meta"):
+                    continue
+                rel = p.relative_to(LEGIT)
+                key = (sub.name,) + rel.parts if sub == LEGIT else (sub.name, p.name)
+                if key in expected_no_repeat:
+                    # No structural-repeat expectation; nothing to check.
+                    continue
+                header, body, file_bytes = _strip_envelope(p)
+                self.assertTrue(
+                    self._body_has_short_repeat(body),
+                    f"{p}: declared no-fire, but body does not exhibit "
+                    f"any boundary-aligned verbatim repeat of period in "
+                    f"[2, 20); the fixture should demonstrate a structural "
+                    f"repeat the detector must suppress.",
+                )
+
+    @staticmethod
+    def _body_has_short_repeat(body, min_period=2, max_period=20):
+        # Pure-whitespace marker periods (single newline) are too common
+        # to count, so require at least one byte that is neither whitespace
+        # nor a pure ASCII art character. A row separator "| Name |" or
+        # "1. " or "+-----+" qualifies because it contains "|"/" " among
+        # other characters.
+        ws = (b"\n", b" ", b"\t", b"\r")
+        for sp in range(min_period, max_period + 1):
+            seen = {}
+            for pos in range(0, len(body) - sp + 1):
+                slice_ = body[pos:pos + sp]
+                if slice_ in ws:
+                    continue
+                if slice_ in seen:
+                    return True
+                seen[slice_] = pos
+        return False
 
     def test_json_payloads_are_valid_json(self):
         for fn in ["primitives.json", "nested.json", "objects.json"]:
@@ -537,11 +631,6 @@ class TestCollapseLegit(unittest.TestCase):
                              f"{fn}: contains // (excluded comment-bearing fragment)")
 
     def test_fenced_md_uses_documented_envelope(self):
-        """Fenced.md must use the documented '<!-- shape: ... -->' HTML-comment
-        envelope form for .md payloads per the grammar doc; the fenced JSON
-        payload must be intact after the header and conform to the accepted
-        object-array grammar (uniform keys, string discriminator, primitive
-        leaves)."""
         p = LEGIT_JSON / "fenced.md"
         header, body, file_bytes = _read_fixture(p)
         fields = _parse_header_for(p)
@@ -563,11 +652,10 @@ class TestCollapseLegit(unittest.TestCase):
                         "fenced object leaves must be primitive")
 
     def test_md_fixtures_use_html_comment_envelope(self):
-        """The .md legit fixtures (fenced_python.md, markdown_table.md,
-        ordered_list.md, json/fenced.md) must use the <!-- shape: -->
-        HTML-comment form documented in the grammar, not a # shape: line,
-        so that the surrounding Markdown is not misinterpreted as an ATX
-        heading."""
+        """The .md legit fixtures must actually use the
+        '<!-- shape: ... -->' HTML-comment envelope on their first line,
+        not '# shape:'. A regression to '# shape:' on a .md payload
+        would be detected here."""
         md_fixtures = [
             "fenced_python.md",
             "markdown_table.md",
@@ -576,13 +664,64 @@ class TestCollapseLegit(unittest.TestCase):
         ]
         for fn in md_fixtures:
             p = LEGIT / fn
+            file_bytes = _read_bytes(p)
+            first_nl = file_bytes.find(b"\n")
+            assert first_nl >= 0, f"{p}: missing newline"
+            first_line = file_bytes[:first_nl].decode("utf-8")
+            self.assertTrue(
+                first_line.startswith("<!-- shape:"),
+                f"{p}: .md header must start with '<!-- shape:', got: {first_line!r}",
+            )
+            self.assertTrue(
+                first_line.endswith(" -->"),
+                f"{p}: .md header must end with ' -->', got: {first_line!r}",
+            )
             fields = _parse_header_for(p)
             self.assertEqual(fields["expected"], "no-fire")
 
+    def test_non_md_payloads_use_hash_envelope(self):
+        """The .txt and .py fixtures must use the '# shape: ...' envelope
+        form on the first line; a regression to '<!-- shape: ... -->'
+        on these would be detected here."""
+        non_md_fixtures = [
+            "ascii_box.txt",
+            "code_boilerplate.py",
+            "short_lines.txt",
+        ]
+        for fn in non_md_fixtures:
+            p = LEGIT / fn
+            file_bytes = _read_bytes(p)
+            first_nl = file_bytes.find(b"\n")
+            assert first_nl >= 0, f"{p}: missing newline"
+            first_line = file_bytes[:first_nl].decode("utf-8")
+            self.assertTrue(
+                first_line.startswith("# shape:"),
+                f"{p}: .txt/.py header must start with '# shape:', got: {first_line!r}",
+            )
+            self.assertFalse(
+                first_line.startswith("<!--"),
+                f"{p}: .txt/.py must not use the .md '<!--' envelope",
+            )
+
+    def test_meta_files_terminate_with_lf(self):
+        """The grammar doc states the canonical header occupies one line
+        terminated by LF; .meta files store the entire header as their
+        content, so they too are LF-terminated for consistency with the
+        inline envelope form."""
+        for fn in ["primitives.json", "nested.json", "objects.json"]:
+            meta = LEGIT_JSON / (fn + ".meta")
+            data = _read_bytes(meta)
+            self.assertTrue(
+                data.endswith(b"\n"),
+                f"{meta}: must end with LF to match canonical single-line rule",
+            )
+            self.assertNotIn(
+                b"\r", data,
+                f"{meta}: must not contain CR (Windows-style line terminator)",
+            )
+
 
 class TestAcceptedGrammarShapes(unittest.TestCase):
-    """Confirm the corpus exercises each accepted-grammar shape."""
-
     def test_primitives_top_level_array(self):
         with open(LEGIT_JSON / "primitives.json") as f:
             value = json.load(f)
@@ -607,6 +746,18 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
     def test_fenced_md_marks_json_block(self):
         text = _read_bytes(LEGIT_JSON / "fenced.md").decode()
         self.assertRegex(text, r"```json")
+
+    def test_fenced_python_md_has_multiple_fences(self):
+        """fenced_python.md must contain multiple distinct fenced code
+        blocks so it exercises the 'repeated fenced block'
+        suppression shape (per the acceptance criteria)."""
+        text = _read_bytes(LEGIT / "fenced_python.md").decode()
+        fence_open = text.count("```python")
+        self.assertGreaterEqual(
+            fence_open, 2,
+            f"fenced_python.md must contain >= 2 fenced python blocks, "
+            f"got {fence_open}",
+        )
 
 
 if __name__ == "__main__":

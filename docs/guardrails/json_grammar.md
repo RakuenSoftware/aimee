@@ -38,7 +38,12 @@ Envelope forms:
 1. **Sibling `.meta` file.** A file with the same stem plus `.meta`
    extension holds the header. Used when the payload must remain a
    standalone parseable value (e.g. `.json`). The header text is the
-   raw bytes of the `.meta` file.
+   raw bytes of the `.meta` file. The `.meta` file is itself a
+   single-line LF-terminated record for consistency with the inline
+   envelope forms (one canonical header line, terminated by a single
+   LF, byte `0x0A`); the loader strips the trailing LF before parsing
+   so a `.meta` file with or without a trailing newline parses
+   identically.
 2. **Inline `# shape:` header line** for `.txt` and `.py` payloads. The
    header is the first line of the file, beginning with `# shape:` and
    terminated by a single LF (byte `0x0A`).
