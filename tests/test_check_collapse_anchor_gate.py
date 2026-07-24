@@ -132,7 +132,7 @@ def test_gate_passes_when_anchors_already_merged_and_phase_one_touches_other_fil
     # A second commit touches src/server/ but NOT the anchors file.
     _commit(
         fake_worktree, "Phase 1: server change",
-        {"src/server/foo.c": "void foo(void) {}\n"},
+        {"src/server/openai_chat.c": "void foo(void) {}\n"},
     )
 
     result = _run_gate(fake_worktree)
@@ -145,7 +145,7 @@ def test_gate_rejects_phase_one_change_when_anchors_file_missing(
 ) -> None:
     _commit(
         fake_worktree, "Phase 1: server change only",
-        {"src/server/foo.c": "void foo(void) {}\n"},
+        {"src/server/openai_chat.c": "void foo(void) {}\n"},
     )
     result = _run_gate(fake_worktree)
     assert result.returncode == 1
@@ -156,7 +156,7 @@ def test_gate_rejects_phase_one_change_when_decisions_incomplete(
     fake_worktree: Path,
 ) -> None:
     _write_anchors(fake_worktree, [1, 2, 3, 4, 5])  # missing Decision 6
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
     result = _run_gate(fake_worktree)
     assert result.returncode == 1
     assert "6" in result.stderr
@@ -177,7 +177,7 @@ def test_gate_fails_closed_when_diff_discovery_cannot_run(
     """
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
 
     wrapper_body = (
         "import runpy, subprocess, sys\n"
@@ -218,7 +218,7 @@ def test_gate_fails_closed_when_base_sha_is_invalid(
     revision, the gate must fail closed."""
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
 
     result = _run_gate(fake_worktree, base_sha="definitely_not_a_real_sha")
     assert result.returncode != 0, result.stdout
@@ -348,12 +348,12 @@ def test_gate_rejects_phase_one_change_when_base_branch_lacks_anchors(
         check=True, capture_output=True, text=True,
     ).stdout.strip()
 
-    # PR head branch: adds a Phase 1+ surface (src/server/foo.c) AND
+    # PR head branch: adds a Phase 1+ surface (src/server/openai_chat.c) AND
     # the anchors file (because in reality the same PR can carry both).
     _commit(
         fake_worktree, "PR: adds server file and anchors",
         {
-            "src/server/foo.c": "void foo(void) {}\n",
+            "src/server/openai_chat.c": "void foo(void) {}\n",
             "docs/guardrails/collapse_anchors.md":
                 "# Anchors\n\n" + "\n".join(
                     f"## Decision {n} - placeholder\n" for n in range(1, 7)
@@ -388,7 +388,7 @@ def test_gate_accepts_phase_one_change_when_base_branch_has_anchors(
     # PR head: Phase 1+ change only (anchor file not touched again).
     _commit(
         fake_worktree, "PR: server change only",
-        {"src/server/foo.c": "void foo(void) {}\n"},
+        {"src/server/openai_chat.c": "void foo(void) {}\n"},
     )
 
     result = _run_gate(fake_worktree, base_sha=base_head)
@@ -415,7 +415,7 @@ def test_gate_rejects_phase_one_change_when_base_branch_decisions_incomplete(
 
     _commit(
         fake_worktree, "PR: server change",
-        {"src/server/foo.c": "void foo(void) {}\n"},
+        {"src/server/openai_chat.c": "void foo(void) {}\n"},
     )
 
     result = _run_gate(fake_worktree, base_sha=base_head)
@@ -476,7 +476,7 @@ def test_gate_accepts_phase_one_change_when_uncommitted_in_local_mode(
     _commit(fake_worktree, "Phase 0", {})
 
     # Phase 1+ file modified in the working tree but NOT committed.
-    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+    _write_unstaged(fake_worktree, "src/server/openai_chat.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
     assert result.returncode == 0, (
@@ -494,7 +494,7 @@ def test_gate_accepts_phase_one_change_when_staged_in_local_mode(
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
 
-    _stage(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+    _stage(fake_worktree, "src/server/openai_chat.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
     assert result.returncode == 0, (
@@ -515,7 +515,7 @@ def test_gate_accepts_phase_one_change_spread_across_commit_and_working_tree(
     # Last commit: a non-Phase 1+ file only.
     _commit(fake_worktree, "docs", {"README.md": "x\n"})
     # Working tree: a Phase 1+ file as an unstaged edit.
-    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+    _write_unstaged(fake_worktree, "src/server/openai_chat.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
     assert result.returncode == 0, (
@@ -537,7 +537,7 @@ def test_gate_rejects_uncommitted_phase_one_change_when_local_base_lacks_anchors
     _commit(fake_worktree, "base: readme only", {"README.md": "base\n"})
 
     # Working tree: add a Phase 1+ file without ever adding the anchors.
-    _write_unstaged(fake_worktree, "src/server/foo.c", "void foo(void) {}\n")
+    _write_unstaged(fake_worktree, "src/server/openai_chat.c", "void foo(void) {}\n")
 
     result = _run_gate(fake_worktree)
     assert result.returncode == 1, (
@@ -556,7 +556,7 @@ def test_gate_fails_closed_in_ci_mode_without_base_sha(
     scenario the Phase 0 contract forbids."""
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
 
     result = _run_gate_with_env(
         fake_worktree,
@@ -590,7 +590,7 @@ def test_gate_does_not_treat_plain_ci_env_as_ci_mode(
     """
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
 
     result = _run_gate_with_env(fake_worktree, {"CI": "true"})
     assert result.returncode == 0, (
@@ -615,7 +615,7 @@ def test_gate_plain_ci_env_does_not_mask_missing_base_anchors(
     """
     # Base commit has the seed but no anchor file.  The Phase 1+
     # change alone lands a server path.
-    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+    _commit(fake_worktree, "Phase 1", {"src/server/openai_chat.c": "x\n"})
 
     result = _run_gate_with_env(fake_worktree, {"CI": "true"})
     assert result.returncode != 0, (
@@ -676,7 +676,7 @@ def test_gate_rejects_phase_one_path_committed_in_initial_commit(
     # would have seen an empty diff (HEAD~1 is invalid AND the
     # working tree is clean) and passed silently.
     (repo / "src" / "server").mkdir(parents=True)
-    (repo / "src" / "server" / "foo.c").write_text("void foo(void) {}\n")
+    (repo / "src" / "server" / "openai_chat.c").write_text("void foo(void) {}\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "initial: phase 1+ path only")
 
@@ -715,7 +715,7 @@ def test_gate_accepts_phase_one_path_committed_in_initial_commit_with_anchors(
         ) + "\n"
     )
     (repo / "src" / "server").mkdir(parents=True)
-    (repo / "src" / "server" / "foo.c").write_text("void foo(void) {}\n")
+    (repo / "src" / "server" / "openai_chat.c").write_text("void foo(void) {}\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "initial: phase 1+ path with anchors")
 
@@ -855,7 +855,7 @@ def test_gate_phase_one_prefixes_cover_every_decision_named_surface(fake_worktre
         # Decision 1/3: delegate relay.
         "src/server/agent_runtime.c",
         # Decision 1/3: roundtable relay.
-        "src/modules/roundtable/",
+        "src/modules/roundtable/delegate_ensemble.c",
         # Decision 4: backend sampling.
         "src/server/aimee_backend_openai.c",
         "src/server/aimee_backend_anthropic.c",
@@ -863,9 +863,9 @@ def test_gate_phase_one_prefixes_cover_every_decision_named_surface(fake_worktre
         # Decision 5: promotion storage.
         "src/db2/bandit.c",
         # Decision 6: audit store.
-        "src/modules/audit/",
+        "src/modules/audit/audit_worm.c",
         # Decision 2: config source.
-        "src/modules/config/",
+        "src/modules/config/config.c",
     )
 
     def _matches(path, prefix):

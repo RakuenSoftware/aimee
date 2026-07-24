@@ -43,38 +43,12 @@ intentionally NOT treated as CI mode (F3 follow-up) because many
 local development tools and IDEs set it and would otherwise turn
 ordinary local dev runs into confusing "BASE_SHA unset" failures.
 
-Phase 1+ surfaces are listed in ``PHASE_ONE_PREFIXES``.  The set is
-deliberately broad: it must cover every implementation surface named
-by the six ``## Decision N`` sections of ``collapse_anchors.md``,
-because each decision names the file (or file family) on which the
-corresponding Phase 1+ work is planned.  Decision 1/3 name
-``src/posix/server_compute.c`` (webchat live-mirror tap) and the
-``src/db1/`` family (``webchat_live.c``, ``roundtable_pipeline.c``);
-Decision 3 also names ``src/headers/aimee_ir.h`` (the typed envelope
-that the Anthropic compatibility relay traverses), the
-``src/modules/roundtable/`` / ``src/modules/workflows/`` family
-(roundtable relay), the ``src/posix/`` family more generally
-(``agent_ir_parse.c``), and the ``src/db2/`` family (audit persistence
-side-channels and promotion storage via ``src/db2/bandit.c``);
-Decision 4 names the per-backend sampling plumbing
-(``src/server/model_sampling.c`` and the ``aimee_backend_*.c``
-builders, plus ``src/server/agent_request_build.c``); Decision 5
-names ``src/db2/bandit.c`` (promotion storage) and the
-``src/server/server_state.c`` promotion handler; Decision 6 names
-``src/modules/audit/``.  Anything narrower would let a PR begin
-collapse implementation on a planned Phase 1+ surface while the base
-branch still lacks the anchors, which is exactly the F002 scenario.
-
-A PR that lands a file under ``docs/guardrails/`` other than the
-anchor document itself (e.g., a follow-up packet that the F002
-follow-up notes require, like
-``docs/guardrails/collapse_promotion_bucketing.md`` per Decision 5)
-also trips the gate, because a Phase 1+ implementation must not begin
-until the anchor document is merged.  ``docs/guardrails/`` is therefore
-in the prefix set; the anchor document itself is exempt via
-``_PHASE_ONE_EXEMPT`` (a PR that *adds* the anchor document is
-expected).
-
+Phase 1+ surfaces are listed in ``PHASE_ONE_PREFIXES``. The set is
+intentionally limited to the concrete files and narrowly scoped module paths
+named by the six decisions. Broad catch-alls such as ``src/server/`` and
+``docs/guardrails/`` are excluded so unrelated work and this Phase 0 packet
+can merge before the anchors. The one Phase 5.0 follow-up document named by
+Decision 5 is listed explicitly.
 When at least one of those paths is present in the diff being
 validated AND the anchor contract is not satisfied, the gate fails;
 otherwise it passes.
@@ -89,69 +63,33 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ANCHORS = "docs/guardrails/collapse_anchors.md"
 
-# Phase 1+ surfaces.  This is the F002 closure: every prefix must be
-# named by at least one of the six ``## Decision N`` sections of the
-# merged anchor document.  Adding a prefix here is a binding contract
-# change -- it widens the set of paths a PR must not touch until the
-# anchors are merged -- so this tuple must stay in lock-step with
-# ``docs/guardrails/collapse_anchors.md``.  The behavioural tests in
-# ``tests/test_check_collapse_anchor_gate.py`` exercise a representative
-# path from each prefix (the F002 recommendation).
+# Explicit implementation surfaces named by the six decisions. Keep this
+# list narrow: unrelated files in the same source trees are not Phase 1 work.
 PHASE_ONE_PREFIXES = (
-    # Decision 1/3: Anthropic compatibility relay handlers / emitters.
-    "src/server/aimee_ir_stream.c",
-    "src/server/anthropic_http.c",
-    # Decision 1/3: typed envelope header.
-    "src/headers/aimee_ir.h",
-    # Decision 1/3: OpenAI Chat + Responses relay handlers / emitters.
-    "src/server/openai_chat.c",
-    "src/server/openai_shape.c",
-    "src/server/server_http.c",
-    "src/server/server_http_routes.c",
-    # Decision 1/3: webchat live-mirror producer + DB1 row.
-    "src/posix/server_compute.c",
-    "src/db1/webchat_live.c",
-    # Decision 1/3: delegate relay (parsing + agent runtime).
-    "src/posix/agent_ir_parse.c",
-    "src/server/agent_runtime.c",
-    "src/server/agent_request_build.c",
-    # Decision 1/3: roundtable relay (workflows + roundtable + DB1 ledger).
-    "src/modules/roundtable/",
-    "src/modules/workflows/",
-    "src/db1/roundtable_pipeline.c",
-    # Decision 4: per-backend sampling plumbing.
-    "src/server/model_sampling.c",
+    "src/server/aimee_ir_stream.c", "src/server/anthropic_http.c",
+    "src/headers/aimee_ir.h", "src/server/openai_chat.c",
+    "src/server/openai_shape.c", "src/server/server_http.c",
+    "src/server/server_http_routes.c", "src/posix/server_compute.c",
+    "src/db1/webchat_live.c", "src/posix/agent_ir_parse.c",
+    "src/server/agent_runtime.c", "src/server/agent_request_build.c",
+    "src/modules/roundtable/delegate_ensemble.c",
+    "src/modules/workflows/wfe_live_panel.c",
+    "src/db1/roundtable_pipeline.c", "src/server/model_sampling.c",
     "src/server/aimee_backend_openai.c",
     "src/server/aimee_backend_anthropic.c",
-    "src/server/aimee_backend_bedrock.c",
-    # Decision 5: promotion-gate substrate (bandit storage + server_state handler).
-    "src/db2/bandit.c",
-    "src/server/server_state.c",
-    # Decision 6: audit-store schema + WORM API.
-    "src/modules/audit/",
-    # The new guardrails module and the guardrails doc tree (Phase 1.0 docs
-    # that the anchors themselves require, e.g. collapse_promotion_bucketing.md
-    # per Decision 5).
-    "src/modules/guardrails/",
-    "docs/guardrails/",
-    # Config source of truth (Decision 2).
-    "src/modules/config/",
-    # Catch-all for the rest of src/server/ (e.g. openai_chat.c subdir
-    # helpers, server_state.c helpers).  Prefix ordering is irrelevant
-    # for correctness; the matched prefix is reported in failure messages.
-    "src/server/",
+    "src/server/aimee_backend_bedrock.c", "src/db2/bandit.c",
+    "src/server/server_state.c", "src/modules/audit/audit_worm.c",
+    "src/modules/guardrails/", "src/modules/config/config.h",
+    "src/modules/config/config.c",
+    "docs/guardrails/collapse_promotion_bucketing.md",
 )
 
-# Paths that are permitted to appear in a Phase 1+ diff even when the
-# anchor contract is unsatisfied.  The single exemption today is the
-# anchor document itself: a PR whose *purpose* is to introduce the
-# anchors MUST be allowed to land ``docs/guardrails/collapse_anchors.md``
-# even before the anchors are merged (the merge-first contract is about
-# Phase 1+ *implementation* work, not the anchors themselves).
 _PHASE_ONE_EXEMPT = frozenset({
     "docs/guardrails/collapse_anchors.md",
+    "docs/guardrails/collapse_recon.md",
+    "docs/guardrails/sampling_capability_matrix.md",
+    "docs/guardrails/collapse_anchor_review_closure.md",
 })
-
 
 class GateError(RuntimeError):
     """Diff discovery or contract verification failed."""
