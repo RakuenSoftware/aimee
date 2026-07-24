@@ -55,18 +55,15 @@ int agent_supports_persona(const agent_t *agent, const char *persona)
    return 0;
 }
 
+/* Selection eligibility is exactly role membership: an agent serves `role` iff
+ * it declares the `all` wildcard or the role itself (agent_has_role). There is
+ * deliberately NO exec-role fallback here — a role an agent did not declare is a
+ * role it is not selected for. This is the single rule every routing, fallback,
+ * and panel-seating path uses; agent_is_exec_role governs only tool exposure at
+ * execution time, not who is picked. */
 static int agent_supports_role(const agent_t *agent, const char *role)
 {
-   if (agent_has_role(agent, role))
-      return 1;
-
-   /* Execution roles can be handled by any enabled agent.  The tools_enabled
-    * flag controls whether tool use is offered during execution, not whether
-    * the agent is eligible for selection. */
-   if (agent_is_exec_role(agent, role))
-      return 1;
-
-   return 0;
+   return agent_has_role(agent, role);
 }
 
 static int agent_command_on_path(const char *cmd)

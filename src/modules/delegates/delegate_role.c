@@ -25,18 +25,9 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role || !role[0])
       return 0;
-   for (int i = 0; i < agent->role_count; i++)
-   {
-      /* "all" is a wildcard: the agent serves every role. */
-      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
-         return 1;
-   }
-   for (int i = 0; i < agent->exec_role_count; i++)
-   {
-      if (strcmp(agent->exec_roles[i], role) == 0)
-         return 1;
-   }
-   return 0;
+   /* Single source of truth for role eligibility: has the `all` wildcard or the
+    * role itself. No exec-role fallback (see agent_has_role / agent_supports_role). */
+   return agent_has_role(agent, role);
 }
 
 /* Roles deleted in the persona-vs-role cull. They are named here so an operator

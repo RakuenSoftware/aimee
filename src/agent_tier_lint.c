@@ -195,12 +195,14 @@ static int price_dominates_across_reachable_bands(const agent_t *a, const agent_
 /* Could these two agents ever be candidates for the SAME route? Comparing tiers
  * across agents that never compete is a false positive: routing never chooses
  * between them, so "routing prefers the more expensive model" would be untrue
- * and the advice to re-tier them misleading. Substitutability here means sharing
- * at least one role — including the default exec roles, which agent_supports_role
- * grants to every agent regardless of its declared list. */
+ * and the advice to re-tier them misleading.
+ *
+ * Selection is declared-role membership only (agent_has_role: the role itself or
+ * the `all` wildcard) — there is no exec-role fallback, so two agents compete iff
+ * they share a declared role. exec_roles[] governs tool exposure at execution
+ * time, not who is picked, so it no longer creates route competition. */
 static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
 {
-   /* Declared roles, either direction, plus the "all" wildcard. */
    for (int i = 0; i < a->role_count; i++)
    {
       const char *role = a->roles[i];
@@ -211,46 +213,6 @@ static int agents_compete_for_a_role(const agent_t *a, const agent_t *b)
    {
       const char *role = b->roles[i];
       if (role[0] && (strcmp(role, "all") == 0 || agent_has_role(a, role)))
-         return 1;
-   }
-
-   /* IMPLICIT overlap. agent_supports_role() also admits any agent for an exec
-    * role, so two agents with entirely disjoint declared roles still compete for
-    * every exec role both accept. Iterating only declared roles missed this and
-    * suppressed real conflicts: an agent declaring "explain" and one declaring
-    * "summarize" are both routable for review/code/test.
-    *
-    * The default exec set is internal to agent_config.c, so probe through the
-    * public predicate with the roles actually in use rather than duplicating the
-    * table here — a copy would silently drift. */
-   static const char *const probe_roles[] = {
-       /* Canonical roles only — `test`/`implement` are aliases and were removed
-        * from default_exec_roles, so probing them here would never match. */
-       "deploy", "validate", "diagnose",   "execute",    "review",
-       "code",   "refactor", "draft",      "explain",    "summarize",
-       "format", "search",   "continuity", "beat-check", NULL,
-   };
-   for (int i = 0; probe_roles[i]; i++)
-   {
-      if ((agent_has_role(a, probe_roles[i]) || agent_is_exec_role(a, probe_roles[i])) &&
-          (agent_has_role(b, probe_roles[i]) || agent_is_exec_role(b, probe_roles[i])))
-         return 1;
-   }
-
-   /* CUSTOM exec roles. The probe list above covers the built-in universe, but
-    * exec_roles[] is operator-configurable, so a shared "custom-migration" would
-    * otherwise be missed entirely — both agents are routable for it while this
-    * returned false. Compare the configured lists directly, in both directions. */
-   for (int i = 0; i < a->exec_role_count; i++)
-   {
-      if (a->exec_roles[i][0] &&
-          (agent_has_role(b, a->exec_roles[i]) || agent_is_exec_role(b, a->exec_roles[i])))
-         return 1;
-   }
-   for (int i = 0; i < b->exec_role_count; i++)
-   {
-      if (b->exec_roles[i][0] &&
-          (agent_has_role(a, b->exec_roles[i]) || agent_is_exec_role(a, b->exec_roles[i])))
          return 1;
    }
    return 0;

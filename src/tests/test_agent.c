@@ -391,8 +391,13 @@ static void test_agent_route(void)
    cfg.agents[1].cost_tier = 1;
    cfg.agents[1].enabled = 1;
    cfg.agents[1].tools_enabled = 1;
-   strcpy(cfg.agents[1].exec_roles[0], "custom_exec");
-   cfg.agents[1].exec_role_count = 1;
+   /* Selection is declared-role only: a role must appear in `roles` (or `all`).
+    * exec_roles govern tool exposure, not who is routed, so a role-less agent is
+    * routable for nothing and a role reaches only the agents that declare it. */
+   strcpy(cfg.agents[0].roles[0], "execute");
+   cfg.agents[0].role_count = 1;
+   strcpy(cfg.agents[1].roles[0], "custom_exec");
+   cfg.agents[1].role_count = 1;
    assert(agent_route(&cfg, "execute") == &cfg.agents[0]);
    assert(agent_route(&cfg, "custom_exec") == &cfg.agents[1]);
    assert(agent_route(&cfg, "no_role") == NULL);

@@ -7,6 +7,19 @@
 #include <stdlib.h>   /* mkdtemp */
 #include <sys/stat.h> /* mkdir */
 
+/* delegate_agent_supports_role() now defers to the canonical agent_has_role()
+ * (declared-role membership, `all` wildcard included). Stub it here — the real
+ * definition lives in agent_route.o, which this unit test does not link. */
+int agent_has_role(const agent_t *agent, const char *role)
+{
+   if (!agent || !role || !role[0])
+      return 0;
+   for (int i = 0; i < agent->role_count; i++)
+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
+         return 1;
+   return 0;
+}
+
 /* role_template_max_turns() (reached via delegate_default_max_turns_for_role) reads
  * <config_default_dir()>/role_templates/<canonical-role>.md and parses `max_turns:`
  * from its frontmatter, returning -1 when the file is absent. Stub config_default_dir

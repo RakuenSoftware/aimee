@@ -605,21 +605,19 @@ void test_primary_turn_reaches_default_above_min_tier(void)
    assert(agent_route(&cfg, "review") == &cfg.agents[1]);
    cfg.agents[0].enabled = 1;
 
-   /* A default that does not serve the role is not a usable seat either. This
-    * must be checked with a NON-exec role: agent_supports_role() waves any agent
-    * through for the 18 default exec roles (deploy/validate/test/diagnose/
-    * execute/review/code/refactor/draft/implement/...), so a `roles` list is not
-    * consulted at all for those. "explain" is not among them. */
+   /* A default that does not serve the role is not a usable seat either.
+    * Selection is declared-role only: an agent is routable for a role solely
+    * when its `roles` list names that role (or `all`). */
    strcpy(cfg.agents[0].roles[0], "review");
    strcpy(cfg.agents[1].roles[0], "explain");
    assert(agent_route(&cfg, "explain") == &cfg.agents[1]);
 
-   /* Guard rail for the above: for an EXEC role the default is reachable even
-    * though its roles list names something else, because the exec-role fallback
-    * bypasses role filtering entirely. Documented so a future role split does
-    * not assume `roles` gates these. */
+   /* No exec-role fallback: with the default's roles naming something other than
+    * `review`, and no peer declaring `review`, the role is unroutable — the
+    * default is NOT waved through just because `review` was once a default exec
+    * role. This is the behaviour the $random/gemma4 fix depends on. */
    strcpy(cfg.agents[0].roles[0], "explain");
-   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   assert(agent_route(&cfg, "review") == NULL);
 
    /* Session affinity outranks the default: a tmux agent holds a STATEFUL
     * session, so a primary turn must not be yanked to an HTTP default and
@@ -1519,17 +1517,17 @@ void test_declared_roles_route_precisely(void)
    assert(agent_route_with_caps(&cfg, "code_simple", &sys_cfg, 0, 0) == &cfg.agents[0]);
    assert(agent_route_with_caps(&cfg, "code_complex", &sys_cfg, 0, 0) == &cfg.agents[1]);
 
-   /* A built-in exec role neither declares is served by NEITHER: an explicit
-    * exec_roles list replaces the permissive default set rather than adding to
-    * it. This is the half an earlier claim got wrong. */
-   assert(agent_is_exec_role(&cfg.agents[0], "review") == 0);
+   /* A role neither agent declares is served by NEITHER. Routing is declared-role
+    * only, so a built-in exec role is no more privileged than any other name. */
    assert(agent_route(&cfg, "review") == NULL);
 
-   /* Clearing the explicit list restores the permissive DEFAULT, which is what
-    * the earlier claim actually described — a default, not a broken gate. */
+   /* Exec-role membership does NOT grant routing. `review` remains a default exec
+    * role (it still governs tool exposure), so agent_is_exec_role reports it once
+    * the explicit exec list is cleared — but that never makes the agent a review
+    * SEAT. Selection needs the `review` role (or `all`) in `roles`. */
    cfg.agents[0].exec_role_count = 0;
    assert(agent_is_exec_role(&cfg.agents[0], "review") == 1);
-   assert(agent_route(&cfg, "review") == &cfg.agents[0]);
+   assert(agent_route(&cfg, "review") == NULL);
 
    /* And the "all" wildcard in `roles` re-opens everything, so a fine-grained
     * deployment must avoid it. */
