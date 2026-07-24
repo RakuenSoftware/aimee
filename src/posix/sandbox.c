@@ -60,6 +60,45 @@ void sandbox_set_available_override_for_test(int (*fn)(const char **reason))
    g_sbx_avail_override = fn;
 }
 
+/* Characters allowed in a bare program path we are willing to surface verbatim.
+ * A real program token is a plain path; anything else is refused (see below). */
+static int sbx_prog_char(char c)
+{
+   return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' ||
+          c == '/' || c == '.' || c == '-' || c == '+';
+}
+
+/* True if the whitespace-delimited token [tok, end) is a SIMPLE `NAME=value`
+ * environment assignment whose whole token is safe to skip: the value must
+ * contain no shell byte that could span the whitespace boundary or start a
+ * construct (quote, '$', backtick, backslash) or otherwise smuggle secret bytes
+ * into the next token. Anything fancier and we refuse to keep parsing. */
+static int sbx_is_simple_assignment(const char *tok, const char *end)
+{
+   const char *p = tok;
+   if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_'))
+      return 0;
+   while (p < end && ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+                      (*p >= '0' && *p <= '9') || *p == '_'))
+      p++;
+   if (p >= end || *p != '=')
+      return 0; /* not NAME= */
+   for (const char *v = p + 1; v < end; v++)
+   {
+      char c = *v;
+      if (c == '\'' || c == '"' || c == '$' || c == '`' || c == '\\' || c == '(' || c == ')' ||
+          c == ';' || c == '&' || c == '|' || c == '<' || c == '>' || c == '{' || c == '}')
+         return 0;
+   }
+   return 1;
+}
+
+/* Safe-by-construction: emit the program basename ONLY when the command is a run
+ * of simple `NAME=value` assignments followed by a bare program path. Any shell
+ * construct in the way — a leading subshell '(', a quote, '$', a value that spans
+ * whitespace, an assignment we can't cleanly skip — could carry secret bytes, so
+ * we emit the fixed marker "unparsed" instead of raw command text. Emitting NO
+ * program bytes is strictly safer than risking a secret in the audit trail. */
 void sandbox_command_program(const char *cmd, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
@@ -73,27 +112,28 @@ void sandbox_command_program(const char *cmd, char *out, size_t out_len)
       while (*p == ' ' || *p == '\t')
          p++;
       if (!*p)
-         return;
-      /* Skip a leading `NAME=value` environment assignment (its value may be a
-       * secret) and continue to the real program token. */
-      if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_')
+         return; /* only assignments / blank — no program to name */
+      const char *end = p;
+      while (*end && *end != ' ' && *end != '\t')
+         end++;
+      if (sbx_is_simple_assignment(p, end))
       {
-         const char *r = p;
-         while ((*r >= 'A' && *r <= 'Z') || (*r >= 'a' && *r <= 'z') || (*r >= '0' && *r <= '9') ||
-                *r == '_')
-            r++;
-         if (*r == '=')
-         {
-            while (*p && *p != ' ' && *p != '\t')
-               p++;
-            continue;
-         }
+         p = end; /* skip the whole assignment token, value included */
+         continue;
       }
-      break;
+      break; /* p..end is the program-token candidate */
    }
    const char *end = p;
    while (*end && *end != ' ' && *end != '\t')
       end++;
+   for (const char *s = p; s < end; s++)
+   {
+      if (!sbx_prog_char(*s))
+      {
+         snprintf(out, out_len, "unparsed");
+         return;
+      }
+   }
    const char *base = p;
    for (const char *s = p; s < end; s++)
       if (*s == '/')
@@ -798,6 +838,10 @@ static pid_t sandbox_exec_internal(const sandbox_config_t *cfg, const char *cmd,
       close(setup_pipe[0]);
       if (n != 1 || setup_status != '1')
       {
+         /* Child reported that in-namespace setup (unshare / mount ns) failed;
+          * a require-isolation exec is refused rather than downgraded. This is a
+          * child-side degradation the parent CAN observe, so it is audited. */
+         sbx_audit_degraded(cmd, cfg, "refused", "namespace setup failed in child");
          waitpid(pid, NULL, 0);
          return -1;
       }

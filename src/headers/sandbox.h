@@ -81,6 +81,16 @@ void sandbox_command_program(const char *cmd, char *out, size_t out_len);
  * Installed once at startup by a server-only bridge that forwards to the audit
  * event bus; sandbox.c itself has NO event-bus dependency (stays linkable into
  * every binary). NULL by default. Set once before serving.
+ *
+ * Coverage note (deliberate limitation): the hook fires for degradations the
+ * PARENT observes — the sandbox being unavailable before the fork, and a
+ * require-isolation child reporting failed in-namespace setup. A NON-require-
+ * isolation exec whose child fails unshare()/mount-ns setup AFTER the fork execs
+ * unsandboxed without a parent-visible signal, so that case is NOT audited. It is
+ * rare (availability was already confirmed) and closing it would require the
+ * parent to block on a child status byte on every exec; the trail therefore
+ * records "requested-but-unavailable" and "refused" degradations, not every
+ * possible post-fork downgrade.
  */
 typedef void (*sandbox_audit_hook_fn)(const char *program, sandbox_mode_t mode,
                                       int network_isolated, const char *verdict,
