@@ -34,7 +34,8 @@
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
-#include "vault_service.h" /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "vault_service.h"    /* VAULT_SERVER_PRINCIPAL (rotation target) */
+#include "audit_replay.h" /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -423,6 +424,23 @@ int main(int argc, char **argv)
       return 0;
    }
 
+   /* Operator record+replay: re-present the governed-action rows recorded to an
+    * audit-on-bus capture file, in order, with the stream's terminal status. This
+    * is the auditability payoff of putting audit on the bus — an offline,
+    * observational replay (nothing re-executed). Lives here because the capture
+    * reader is bus code and aimee-server is the only shipping binary that links the
+    * bus; it runs and exits without starting the server. */
+   if (argc >= 2 && strcmp(argv[1], "--audit-replay") == 0)
+   {
+      if (argc < 3)
+      {
+         fprintf(stderr, "usage: aimee-server --audit-replay <capture-file>\n");
+         return 2;
+      }
+      int rc = audit_bus_replay_print(argv[2], stdout);
+      return rc == 0 ? 0 : 1;
+   }
+
    const char *socket_path = NULL;
    log_level_t log_level = LOG_INFO;
    int service_mode = 0;
@@ -468,6 +486,8 @@ int main(int argc, char **argv)
              "  --service            Run under the Windows Service Control Manager\n"
              "  --rotate-master-key  Re-wrap the vault under a fresh .server-master.key and exit\n"
              "                       (run with the server STOPPED; backs up .vault first)\n"
+             "  --audit-replay FILE  Replay a governed-action audit capture file (the recorded\n"
+             "                       bus event stream) to stdout, in order, and exit\n"
              "  --version            Print version\n"
              "  --help               Show this help\n");
          return 0;

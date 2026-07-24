@@ -2799,6 +2799,30 @@ $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_rete
 unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
 	$<
 
+# The operator replay TOOL (audit_replay.c, behind aimee-server --audit-replay):
+# render a capture file's governed-action rows. Adds audit_replay.o to the set.
+$(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/tests/test_bus_audit_replay_tool.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_replay_tool.o \
+                                               $(OBJDIR)/modules/audit/audit_bus.o \
+                                               $(OBJDIR)/modules/audit/audit_replay.o \
+                                               $(OBJDIR)/modules/audit/audit_ledger.o \
+                                               $(OBJDIR)/aimee_home.o \
+                                               $(OBJDIR)/modules/bus/bus_client.o \
+                                               $(OBJDIR)/modules/bus/bus_host.o \
+                                               $(OBJDIR)/modules/bus/bus_route.o \
+                                               $(OBJDIR)/modules/bus/bus_region.o \
+                                               $(OBJDIR)/modules/bus/bus_ring.o \
+                                               $(OBJDIR)/modules/bus/bus_arena.o \
+                                               $(OBJDIR)/modules/bus/bus_wire.o \
+                                               $(OBJDIR)/modules/bus/bus_capture.o \
+                                               $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-audit-replay-tool
+unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<

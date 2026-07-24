@@ -387,10 +387,11 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # binary that links it (the sole shipping consumer of guardrails_action_audit).
 # The D7 blast-radius gate enforces exactly this: bus symbols may appear in
 # aimee-server and nowhere else. See docs/dev/EVENT_BUS_DECISIONS.md (D7).
-BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/audit_bus.c
+BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/audit_bus.c modules/audit/audit_replay.c
 BUS_SHIP_OBJS = $(BUS_SHIP_SRCS:%.c=$(OBJDIR)/%.o)
 $(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
 AGENT_SRCS = server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/agent_policy_intercept.c modules/agent_eval/agent_eval.c modules/agent_eval/agent_eval_memory_support.c modules/agent_eval/agent_eval_baseline.c modules/agent_eval/agent_eval_benchmarks.c server/agent_coord.c \

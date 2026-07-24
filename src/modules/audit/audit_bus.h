@@ -31,6 +31,10 @@ extern "C"
 {
 #endif
 
+/* The bus event kind carrying a governed-action audit row. Shared so the writer
+ * (audit_bus.c) and the replay reader (audit_replay.c) agree on it. */
+#define AUDIT_BUS_KIND_ACTION 3000
+
    /* Bring the audit bus up: create the in-process host, attach the producer and
     * the consumer, subscribe the consumer to the audit-row kind, and spawn the
     * consumer thread. Idempotent: a second call while running is a no-op that

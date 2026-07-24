@@ -30,7 +30,7 @@
 #include "config.h"     /* config_default_dir */
 #include "log.h"
 
-#define KIND_AUDIT_ACTION 3000
+#define KIND_AUDIT_ACTION AUDIT_BUS_KIND_ACTION
 
 /* Per-field caps for the wire form. Generous vs the emitter's inputs (args_hash
  * 68, command preview 288, the rest short) so nothing a caller passes is clipped

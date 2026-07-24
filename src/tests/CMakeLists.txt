@@ -202,6 +202,11 @@ aimee_add_test(test_bus_audit_retention test_bus_audit_retention.c ../modules/au
 target_include_directories(test_bus_audit_retention PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_retention PRIVATE Threads::Threads)
 
+# The operator replay tool (aimee-server --audit-replay): render a capture file.
+aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../modules/audit/audit_bus.c ../modules/audit/audit_replay.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_audit_replay_tool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_replay_tool PRIVATE Threads::Threads)
+
 
 
 
