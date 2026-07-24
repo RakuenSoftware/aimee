@@ -214,6 +214,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-graph-analytics $(TESTPREFIX)/unit-test-lessons-cite-tracker $(TESTPREFIX)/unit-test-lessons-reflect $(TESTPREFIX)/unit-test-lessons-actuate $(TESTPREFIX)/unit-test-lessons-session-capture $(TESTPREFIX)/unit-test-kb-doc-hash \
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
                $(TESTPREFIX)/unit-test-bus-wire \
+               $(TESTPREFIX)/unit-test-bus-ring \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2535,6 +2536,18 @@ $(OBJDIR)/tests/test_bus_wire.o: C_FLAGS += -Imodules/bus -DBUS_VECTOR_DIR=\"$(C
 $(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
                                   $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Event-bus SPSC ring (feature tree slice 2). Pure: no DB, no shared memory —
+# the ring lives in caller-supplied memory, which is what lets it land before
+# the region layout is settled.
+$(OBJDIR)/tests/test_bus_ring.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-ring: $(OBJDIR)/tests/test_bus_ring.o \
+                                  $(OBJDIR)/modules/bus/bus_ring.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-ring
+unit-test-bus-ring: $(TESTPREFIX)/unit-test-bus-ring
+	$<
 
 .PHONY: unit-test-bus-wire
 unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
