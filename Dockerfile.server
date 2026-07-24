@@ -191,6 +191,16 @@ ENV AIMEE_HOME=/var/lib/aimee
 # (their OAuth tokens live under $AIMEE_HOME too: ~/.claude, ~/.codex).
 ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
 ENV PATH=/var/lib/aimee/.npm-global/bin:$PATH
+# claude-code self-updates on launch by default. In this npm-global-prefix layout
+# its updater reinstalls the package WITHOUT re-running the install.cjs postinstall
+# that fetches the platform-native binary, leaving an empty package dir and a
+# dangling bin/claude symlink -> the launcher becomes "claude: not found" and every
+# tmux-cli seat that runs it dies with "failed to send prompt to tmux session".
+# aimee owns the pinned install + postinstall (server_cli_oauth.c); disable the
+# vendor auto-updater so it cannot brick that install. aimee-server (the tmux
+# server) exports this to every pane it spawns. Bind-mounted $AIMEE_HOME means the
+# broken state would otherwise persist across container recreate.
+ENV DISABLE_AUTOUPDATER=1
 # Serve the /v1 HTTP API on 0.0.0.0 (the binary defaults to loopback) so the
 # published container port reaches it. The bearer token in the baked aimee.yaml
 # is still required on every request.
