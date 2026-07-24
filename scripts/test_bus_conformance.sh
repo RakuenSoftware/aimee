@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# test_bus_conformance.sh — the event-bus conformance suite (slice 10).
+#
+# Runs the three legs that keep the wire spec honest:
+#   1. Vectors: the C codec and the Go codec both produce and accept the exact
+#      committed bytes (each in its own unit test).
+#   2. Interop: the single in-source C host, exposed on a Unix socket, driven by
+#      a real Go client across a process boundary — both directions, plus
+#      capability_absent.
+#   3. Single-host: the mechanical D8 check (one host, Go is client-only).
+#
+# Everything is bounded by timeouts so the suite cannot hang.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+echo "== 1. wire vectors: C codec =="
+make -C src --no-print-directory unit-test-bus-wire
+
+echo "== 1. wire vectors: Go codec =="
+( cd server-go && CGO_ENABLED=0 go test ./bus/... -run 'TestWireVectors|TestValidationAxes|TestRing|TestControl' )
+
+echo "== 2. cross-language interop: C host <-> Go client =="
+make -C src --no-print-directory bus-conformance-host
+harness="$repo_root/src/build/obj/tests/bus-conformance-host"
+if [ ! -x "$harness" ]; then
+   # honour a non-default TESTPREFIX/OBJDIR if the caller set one
+   harness=$(find "$repo_root/src" -name bus-conformance-host -type f -perm -u+x 2>/dev/null | head -1)
+fi
+[ -x "$harness" ] || { echo "FAIL: conformance host harness not built" >&2; exit 1; }
+( cd server-go && BUS_CONFORMANCE_HOST="$harness" \
+   CGO_ENABLED=0 go test ./bus/... -run TestCrossLanguageConformance -v -timeout 60s )
+
+echo "== 3. single-host (D8) =="
+"$repo_root/scripts/check_bus_single_host.sh"
+
+echo "test_bus_conformance: ok"

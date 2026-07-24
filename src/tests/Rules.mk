@@ -2612,6 +2612,23 @@ $(TESTPREFIX)/unit-test-bus-client: $(OBJDIR)/tests/test_bus_client.o \
                                     $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
+# Event-bus conformance host harness (feature tree slice 10). A test binary that
+# exposes the C host on a Unix socket so the Go reference client can interoperate
+# with it across a process boundary. Never linked into a shipping target.
+$(OBJDIR)/tests/bus_conformance_host.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/bus-conformance-host: $(OBJDIR)/tests/bus_conformance_host.o \
+                                    $(OBJDIR)/modules/bus/bus_client.o \
+                                    $(OBJDIR)/modules/bus/bus_host.o \
+                                    $(OBJDIR)/modules/bus/bus_route.o \
+                                    $(OBJDIR)/modules/bus/bus_region.o \
+                                    $(OBJDIR)/modules/bus/bus_ring.o \
+                                    $(OBJDIR)/modules/bus/bus_arena.o \
+                                    $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: bus-conformance-host
+bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
+
 .PHONY: unit-test-bus-client
 unit-test-bus-client: $(TESTPREFIX)/unit-test-bus-client
 	$<
