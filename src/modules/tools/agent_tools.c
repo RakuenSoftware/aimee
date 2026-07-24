@@ -711,6 +711,10 @@ int64_t auto_snapshot_record(const char *path)
    return snap_id;
 }
 
+/* Provided by server_compute (weak NULL fallback elsewhere): the id of the
+ * delegation running on this thread, or NULL for the trusted primary session. */
+const char *delegation_active_id(void);
+
 char *tool_bash(const char *command, int timeout_ms)
 {
    /* Detached workspace (turn bound to a serving client): marshal the shell
@@ -804,6 +808,33 @@ char *tool_bash(const char *command, int timeout_ms)
    int guarded_parent = guard_ro && guard_ro[0];
    char guarded_fallback_err[256] = "";
    pid_t pid;
+
+   /* Fail-closed containment: a DELEGATE (untrusted model) must never run a shell
+    * UNSANDBOXED on the aimee-server host. That host process is uid 0 with the
+    * docker socket mounted, so an unsandboxed command (e.g. `docker run --privileged
+    * -v /:/host ...`) is a host-root escalation that bypasses every aimee control.
+    * The detached/container-sandboxed delegate paths returned above; reaching here is
+    * co-located execution. On Linux that is isolated by sandbox_exec unless the
+    * sandbox is OFF (or a guarded_parent LXC plain-fork fallback fires); off-Linux
+    * there is no namespace sandbox at all. Refuse those unsandboxed cases for a
+    * delegate — the trusted primary (operator) session, which has no active
+    * delegation, is unaffected and still runs on the host. */
+#ifdef __linux__
+   const int host_unsandboxed = (sbox_cfg.mode == SANDBOX_MODE_OFF);
+#else
+   const int host_unsandboxed = !guarded_parent; /* guarded_parent already refused below */
+#endif
+   if (host_unsandboxed && delegation_active_id())
+   {
+      close(stdout_pipe[0]);
+      close(stdout_pipe[1]);
+      close(stderr_pipe[0]);
+      close(stderr_pipe[1]);
+      return safe_strdup(
+          "{\"stdout\":\"\",\"stderr\":\"refused: a delegated shell requires sandbox isolation, "
+          "but the sandbox is off/unavailable; running unsandboxed on the aimee-server host is "
+          "not permitted\",\"exit_code\":-1}");
+   }
 #ifndef __linux__
    if (guarded_parent)
    {
