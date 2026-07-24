@@ -1,10 +1,9 @@
 # P7-witness-e1 witness record, checkpoint, export form, and evidence log
 
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
-  `ecbfbc35`); awaiting merge to `testing`. Record/checkpoint/inclusion-proof
+  `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). Record/checkpoint/inclusion-proof
   encodings, deterministic export form, evidence log, and per-`(tenant, provider)`
   shard counters are delivered with exact stable vectors and offline verification.
-  Moves to `docs/proposals/done/` when the branch merges.
 - **Depends on:** P7-reseal D3b, the kb audit chain
   (`src/db2/kb_audit_worm.c`), and the reseal outbox
   (`kb_vault_rewrap_worm`).

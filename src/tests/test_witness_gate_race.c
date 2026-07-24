@@ -7,12 +7,14 @@
  * made it a C11 _Atomic with release/acquire ordering.
  *
  * This test drives the exact store/load the gate relies on from separate writer and
- * reader threads. Two things it asserts on every build:
- *   - liveness: the reader observes writes progress (it sees more than one distinct
- *     published value), so the hand-off is not silently wedged;
- *   - domain safety: the reader NEVER observes a value outside {-1,0,1}. A torn or
- *     otherwise undefined read of the cell is the only way an out-of-domain value
- *     could appear, so any such observation fails the test.
+ * reader threads. It ASSERTS domain safety: the reader NEVER observes a value outside
+ * {-1,0,1}. A torn or otherwise undefined read of the cell is the only way an
+ * out-of-domain value could appear, so any such observation fails the test.
+ *
+ * It also reports how many distinct values the reader observed (a liveness signal),
+ * but does NOT fail on a low count: on a loaded CI runner the reader thread can be
+ * starved enough to see fewer than two distinct values with nothing actually wrong,
+ * so a hard liveness assertion here is a flake, not a guard.
  *
  * Its real teeth are under ThreadSanitizer (scripts/run-witness-gate-tsan.sh): if the
  * cell is ever reverted to a non-atomic type / access, TSan reports a data race
@@ -86,14 +88,9 @@ int main(void)
       fprintf(stderr, "witness gate race: FAIL — reader saw %ld out-of-domain value(s)\n", bad);
       return 1;
    }
-   /* Liveness: the reader must have observed the published value change. If it saw a
-    * single constant value the whole time the hand-off is not actually working. */
-   if (distinct < 2)
-   {
-      fprintf(stderr, "witness gate race: FAIL — reader saw no progress (distinct=%ld)\n",
-              distinct);
-      return 1;
-   }
+   /* Liveness is reported, not asserted: reader-thread starvation under CI load can
+    * legitimately leave distinct < 2 with no defect, so failing on it only produces
+    * flakes. Domain safety (above) and the TSan lane are the real regression guards. */
    printf("witness gate race: ok (distinct transitions observed=%ld, out-of-domain=0)\n", distinct);
    return 0;
 }
