@@ -4,6 +4,7 @@
  * docs/proposals/pending/plugin-extension-surface-and-context-engine.md.
  */
 #include "aimee/plugin-loader/plugin_loader.h"
+#include "plugin_internal.h"
 #include "headers/log.h"
 #include "config.h"
 #include "headers/aimee_home.h"

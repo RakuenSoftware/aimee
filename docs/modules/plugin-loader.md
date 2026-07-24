@@ -12,20 +12,19 @@ pre-LLM hook contract; those remain required in
 
 `src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h` exports
 `plugin_loader_scan_dir` and `plugin_loader_discover_all`.
-`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h` exports manifest parsing,
-installed-registry operations,
-install/enable/remove, hook/tool aggregation, conflict checks, `plugin_manifest_parse`, and
-`plugin_load_and_register`. It consumes the required `plugin_permission_name` and
-`plugin_permission_from_str` vocabulary.
+`src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h` exports `plugin_manifest_parse`,
+`plugin_registry_load`/`plugin_registry_json`, install/enable/remove, and hook/tool aggregation. It
+consumes the required `plugin_permission_name` and `plugin_permission_from_str` vocabulary.
 Loader types consume `aimee/module-runtime/extension.h` one way; module-runtime never includes this
 module.
 
-Five exports have no tracked production caller outside the module: `plugin_registry_path`,
-`plugin_registry_save`, and `plugin_load_and_register` are called only from `plugin.c` and
-`plugin_loader.c`; `plugin_tool_conflicts_with_builtin` is called from `plugin.c` plus the focused
-test, its only external caller; and `plugin_registry_get` has no module-local caller and only the
-focused test as a tracked caller. These remain exported ahead of a later internalization pass; each is
-still reachable from `plugin.c`, `plugin_loader.c`, or the focused test, so none is dead.
+Five symbols have no caller outside the module and are declared in the module-private
+`src/modules/plugin-loader/plugin_internal.h`, not the public headers. `plugin_registry_path` and
+`plugin_registry_save` are used only inside `plugin.c` and are `static` there — the internal header
+does not carry them. `plugin_load_and_register` (called by `plugin_loader.c`), `plugin_registry_get`
+(the focused test only), and `plugin_tool_conflicts_with_builtin` (`plugin.c` plus the focused test)
+need cross-translation-unit visibility, so they are declared in `plugin_internal.h`, which
+`plugin.c` and `plugin_loader.c` include as a sibling and the test reaches through the source root.
 
 Two former exports had no caller anywhere in the tracked tree and were removed:
 `plugin_load_all_registered`, a second registration entry point superseded by

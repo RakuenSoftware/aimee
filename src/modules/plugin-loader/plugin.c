@@ -1,6 +1,7 @@
 /* plugin.c: optional plugin manifests, persistence, and dynamic loading */
 #include "aimee.h"
 #include "aimee/plugin-loader/plugin.h"
+#include "plugin_internal.h"
 #include "memory_provider.h"
 #include "headers/context_engine.h"
 #include "cJSON.h"
@@ -8,16 +9,13 @@
 #include "platform_path.h"
 #include <dlfcn.h>
 #include <dirent.h>
-
-/* Forward declarations */
-int plugin_tool_conflicts_with_builtin(const char *tool_name);
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 /* --- Registry path --- */
 
-const char *plugin_registry_path(void)
+static const char *plugin_registry_path(void)
 {
    static char path[MAX_PATH_LEN];
    if (path[0])
@@ -202,7 +200,7 @@ int plugin_registry_load(plugin_t *plugins, int max)
    return count;
 }
 
-int plugin_registry_save(const plugin_t *plugins, int count)
+static int plugin_registry_save(const plugin_t *plugins, int count)
 {
    ensure_plugins_dir();
    cJSON *arr = cJSON_CreateArray();
