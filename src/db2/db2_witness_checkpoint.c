@@ -2,6 +2,7 @@
 
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,11 +49,27 @@ static void bb_append(bytebuf_t *b, const void *p, size_t n)
 {
    if (b->oom)
       return;
+   /* Size arithmetic is overflow-checked so a hostile or corrupt length can never
+    * under-allocate and then memcpy out of bounds. Callers bound n well below this
+    * (a leaf's tenant/provider are capped at VAULT_WITNESS_*_MAX), but the buffer is
+    * a generic helper and defends itself regardless of caller. */
+   if (n > SIZE_MAX - b->len)
+   {
+      b->oom = 1;
+      return;
+   }
    if (b->len + n > b->cap)
    {
       size_t ncap = b->cap ? b->cap * 2 : 4096;
       while (ncap < b->len + n)
+      {
+         if (ncap > SIZE_MAX / 2)
+         {
+            b->oom = 1;
+            return;
+         }
          ncap *= 2;
+      }
       uint8_t *nb = realloc(b->buf, ncap);
       if (!nb)
       {
@@ -234,6 +251,16 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
          /* Snapshot: u16 tlen, tenant, u16 plen, provider, u64 seq, head[32]. */
          uint8_t hdr[2];
          size_t tl = strlen(tenant), pl = strlen(provider);
+         /* Refuse at the source rather than serialise a snapshot the offline verifier
+          * would reject. tenant/provider are capped at VAULT_WITNESS_*_MAX when a record
+          * is appended, so this only fires if that invariant was violated upstream — in
+          * which case emitting evidence the verifier cannot rebuild (and a u16 length that
+          * would truncate) is worse than failing the checkpoint loudly here. */
+         if (tl > VAULT_WITNESS_TENANT_MAX || pl > VAULT_WITNESS_PROVIDER_MAX)
+         {
+            aimee_pg_finalize(st);
+            goto rollback;
+         }
          put_u16(hdr, (uint16_t)tl);
          bb_append(&snap, hdr, 2);
          bb_append(&snap, tenant, tl);
