@@ -23,18 +23,24 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdio.h>
 
 #include "kb/kb_witness_gate_state.h"
 
-/* Enough iterations to give TSan a wide window to catch an unsynchronised access and
- * to make a wedged hand-off statistically certain to be caught. */
-#define ITERS 2000000
+/* A wide window so TSan can catch an unsynchronised access. */
+#define MIN_ITERS 2000000
+/* Transitions the reader must observe before the writer is allowed to stop —
+ * the liveness guarantee that removes the scheduling flake below. */
+#define NEED_DISTINCT 8
+/* Safety cap far above MIN_ITERS: a genuinely wedged hand-off (reader never sees
+ * the value change) fails as a bounded error instead of hanging. */
+#define HARD_CAP 200000000L
 
 static _Atomic int stop;
 static _Atomic long domain_violations;
-static _Atomic long distinct_seen; /* count of reads that differed from the prior read */
+static _Atomic long distinct_seen; /* reads that differed from the prior read (published live) */
 
 static void *writer(void *unused)
 {
@@ -43,8 +49,23 @@ static void *writer(void *unused)
     * observe, in a non-trivial order (mirrors the cadence: unknown at boot, then
     * flips between clean and not-clean). */
    static const int seq[] = {-1, 1, 0, 1, 0, 0, 1, -1};
-   for (long i = 0; i < ITERS; i++)
+   /* Do not stop after a fixed count: on a loaded runner (unit-tests runs the
+    * suite with xargs -P) the reader can be starved for the whole loop and see a
+    * single constant value — the old "no progress" flake. Yield periodically so
+    * the reader is scheduled, and keep publishing until it has actually observed
+    * NEED_DISTINCT transitions AND the TSan window is wide enough. HARD_CAP bounds
+    * a truly broken hand-off. */
+   for (long i = 0;; i++)
+   {
       kb_witness_gate_state_set(seq[i & 7]);
+      if ((i & 0x3FF) == 0)
+         sched_yield();
+      if (i >= MIN_ITERS &&
+          atomic_load_explicit(&distinct_seen, memory_order_relaxed) >= NEED_DISTINCT)
+         break;
+      if (i >= HARD_CAP)
+         break;
+   }
    atomic_store_explicit(&stop, 1, memory_order_release);
    return NULL;
 }
@@ -53,7 +74,7 @@ static void *reader(void *unused)
 {
    (void)unused;
    int prev = kb_witness_gate_state_get();
-   long local_distinct = 0, local_bad = 0;
+   long local_bad = 0;
    while (!atomic_load_explicit(&stop, memory_order_acquire))
    {
       int v = kb_witness_gate_state_get();
@@ -61,12 +82,13 @@ static void *reader(void *unused)
          local_bad++;
       if (v != prev)
       {
-         local_distinct++;
+         /* Publish each transition live so the writer can see the reader is making
+          * progress and stop only then. */
+         atomic_fetch_add_explicit(&distinct_seen, 1, memory_order_relaxed);
          prev = v;
       }
    }
    atomic_fetch_add_explicit(&domain_violations, local_bad, memory_order_relaxed);
-   atomic_fetch_add_explicit(&distinct_seen, local_distinct, memory_order_relaxed);
    return NULL;
 }
 
