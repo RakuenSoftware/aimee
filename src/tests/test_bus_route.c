@@ -133,8 +133,9 @@ static uint64_t g_tap_seq[256];
 static uint32_t g_tap_kind[256];
 static uint32_t g_tap_n;
 
-static void recording_tap(void *ctx, const bus_frame_t *f)
+static void recording_tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
 {
+   (void)pl; (void)pn;
    (void)ctx;
    must(g_tap_n < 256, "tap buffer");
    g_tap_seq[g_tap_n] = f->seq;

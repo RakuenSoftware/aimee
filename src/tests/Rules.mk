@@ -221,6 +221,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-route \
                $(TESTPREFIX)/unit-test-bus-flow \
                $(TESTPREFIX)/unit-test-bus-client \
+               $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2628,6 +2629,23 @@ $(TESTPREFIX)/bus-conformance-host: $(OBJDIR)/tests/bus_conformance_host.o \
 
 .PHONY: bus-conformance-host
 bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
+
+# Event-bus capture + observational replay (feature tree slice 11).
+$(OBJDIR)/tests/test_bus_capture.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-capture: $(OBJDIR)/tests/test_bus_capture.o \
+                                     $(OBJDIR)/modules/bus/bus_capture.o \
+                                     $(OBJDIR)/modules/bus/bus_client.o \
+                                     $(OBJDIR)/modules/bus/bus_host.o \
+                                     $(OBJDIR)/modules/bus/bus_route.o \
+                                     $(OBJDIR)/modules/bus/bus_region.o \
+                                     $(OBJDIR)/modules/bus/bus_ring.o \
+                                     $(OBJDIR)/modules/bus/bus_arena.o \
+                                     $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-capture
+unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
+	$<
 
 .PHONY: unit-test-bus-client
 unit-test-bus-client: $(TESTPREFIX)/unit-test-bus-client
