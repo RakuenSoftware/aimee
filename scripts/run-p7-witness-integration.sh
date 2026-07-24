@@ -52,5 +52,7 @@ run_case "tamper detection"    aimee_p7_witness_tamper_gate \
          "$BIN/unit-test-witness-tamper-pg"
 run_case "restart recovery"    aimee_p7_witness_recovery_gate \
          "$BIN/unit-test-witness-recovery-pg"
+run_case "canary scan"         aimee_p7_witness_canary_gate \
+         "$BIN/unit-test-witness-canary-pg"
 
 echo "== P7-witness integration gate: PASSED =="
