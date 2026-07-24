@@ -81,7 +81,9 @@ int agent_rc_should_try_another(int rc, const char *error)
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)
 {
-   return ag && role && (agent_has_role(ag, role) || agent_is_exec_role(ag, role));
+   /* Role eligibility is declaration-only: `all` or the role itself. No exec-role
+    * fallback (see agent_has_role). */
+   return ag && role && agent_has_role(ag, role);
 }
 
 static int agent_is_named_in_fallback_chain(const agent_config_t *cfg, const char *name)

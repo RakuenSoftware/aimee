@@ -157,7 +157,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
    for (int i = 0; i < cfg->agent_count; i++)
    {
       agent_t *ag = &cfg->agents[i];
-      if (ag->enabled && (agent_has_role(ag, role) || agent_is_exec_role(ag, role)))
+      if (ag->enabled && agent_has_role(ag, role))
          role_candidates++;
    }
    if (role_candidates == 0)
@@ -176,7 +176,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       for (int i = 0; i < cfg->agent_count; i++)
       {
          agent_t *ag = &cfg->agents[i];
-         if (!ag->enabled || (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role)))
+         if (!ag->enabled || !agent_has_role(ag, role))
             continue;
          if (agent_meets_filter(ag, required_caps, min_context, drop_deprecated))
             kept_full++;
@@ -201,7 +201,7 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled)
          continue;
-      if (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (!agent_has_role(ag, role))
          continue;
       if (!agent_meets_filter(ag, eff, min_context, drop_deprecated))
       {
@@ -241,7 +241,7 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
       if (!ag->enabled || strcmp(ag->provider, provider) != 0 ||
           !agent_is_available_for_routing(ag))
          continue;
-      if (role && !agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (role && !agent_has_role(ag, role))
          continue;
       if (!best || ag->cost_tier < best->cost_tier)
       {
@@ -267,7 +267,7 @@ int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
       agent_t *ag = &cfg->agents[i];
       if (!ag->enabled || !agent_is_available_for_routing(ag))
          continue;
-      if (role && !agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+      if (role && !agent_has_role(ag, role))
          continue;
       if (ag->cost_tier > max_tier)
          max_tier = ag->cost_tier;
@@ -403,7 +403,7 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
          route_err(errbuf, errbuf_sz, "%s", emsg, NULL);
          return -1;
       }
-      if (role && role[0] && !agent_has_role(selected, role) && !agent_is_exec_role(selected, role))
+      if (role && role[0] && !agent_has_role(selected, role))
       {
          route_err(errbuf, errbuf_sz, "agent '%s' cannot handle role '%s'", via_name, role);
          return -1;

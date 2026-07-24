@@ -1327,7 +1327,10 @@ int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
    (void)cfg;
    if (!ag || !ag->enabled || !ag->name[0])
       return 0;
-   if (!agent_has_role(ag, "review") && !agent_is_exec_role(ag, "review"))
+   /* A review seat requires the agent to DECLARE the review role (or `all`); an
+    * implementation-only delegate is never seated on a review panel by exec-role
+    * default. Single rule, shared with routing. */
+   if (!agent_has_role(ag, "review"))
       return 0;
    if (ag->primary_only)
       return 0;
