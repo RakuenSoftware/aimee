@@ -99,7 +99,9 @@ typedef enum
 /* Encode into out. Returns BUS_WIRE_HDR_LEN on success, 0 if outsz is too
  * small or the frame would not survive a decode — the encoder validates the
  * same rules the decoder enforces, so a round trip cannot produce a frame this
- * process would then reject. */
+ * process would then reject. On failure the output buffer is left untouched;
+ * the contract is by return value, not by inspecting the buffer, so a caller
+ * must check the return before reading out. */
 size_t bus_wire_encode(const bus_frame_t *f, uint8_t *out, size_t outsz);
 
 /* Decode framing only. On BUS_WIRE_OK, *out holds a structurally valid frame;

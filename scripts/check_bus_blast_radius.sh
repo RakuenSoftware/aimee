@@ -167,7 +167,7 @@ shipping_bins=""
 for v in $shipping_var_names; do
    if ! val=$(make -C src --no-print-directory \
       --eval "bus-print-var:; @echo \$($v)" bus-print-var 2>/dev/null); then
-      note "FAIL: cannot ask make to resolve \$$v — the artefact layer cannot run,"
+      note "FAIL: cannot ask make to resolve \$$v ($v) — the artefact layer cannot run,"
       note "      and a gate that cannot run must not report clean."
       exit 1
    fi
@@ -195,9 +195,12 @@ fi
 
 # Any symbol the bus actually exports, read from the bus sources rather than a
 # hand-kept prefix list, so a new bus_* entry point is covered the day it is
-# written. Falls back to the module prefix if the headers cannot be read.
-bus_syms=$({ grep -hoE 'bus_[a-z_]+[[:space:]]*\(' src/modules/bus/*.h 2>/dev/null || true; } |
-   grep -oE 'bus_[a-z_]+' | sort -u || true)
+# written. Both .c and .h are scanned: a bus entry point defined in a .c file
+# but not declared in a header would otherwise be outside the pattern, and a
+# stray linked symbol of that form would slip through. Falls back to the module
+# prefix if the sources cannot be read.
+bus_syms=$({ grep -hoE 'bus_[a-z_]+[[:space:]]*\(' src/modules/bus/*.c src/modules/bus/*.h \
+   2>/dev/null || true; } | grep -oE 'bus_[a-z_]+' | sort -u || true)
 [ -n "$bus_syms" ] || bus_syms='bus_'
 sym_pattern=$(printf '%s|' $bus_syms | sed 's/|$//')
 
@@ -213,6 +216,11 @@ for bin in "$@"; do
    # Defined symbols catch a linked bus object; undefined ones catch a shipping
    # object that references the bus and is only waiting for someone to satisfy
    # it. Both tables are queried, and an unreadable binary fails closed.
+   #
+   # nm -A / nm -D -A are GNU binutils. This gate assumes the project's Linux/GNU
+   # toolchain, in line with the rest of the build. On a non-GNU nm the reads
+   # fail and the binary is reported unreadable — which is the safe direction
+   # (fail closed), though it would mask a toolchain problem as a D7 violation.
    if ! syms=$(nm -A "$path" 2>/dev/null) && ! syms=$(nm -D -A "$path" 2>/dev/null); then
       note "FAIL: cannot read symbols from '$path' — the artefact check cannot"
       note "      clear a binary it is unable to inspect."
