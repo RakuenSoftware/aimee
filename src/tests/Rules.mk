@@ -219,6 +219,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-arena \
                $(TESTPREFIX)/unit-test-bus-host \
                $(TESTPREFIX)/unit-test-bus-route \
+               $(TESTPREFIX)/unit-test-bus-flow \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2586,6 +2587,21 @@ $(TESTPREFIX)/unit-test-bus-route: $(OBJDIR)/tests/test_bus_route.o \
                                    $(OBJDIR)/modules/bus/bus_arena.o \
                                    $(OBJDIR)/modules/bus/bus_wire.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Event-bus flow control (feature tree slice 7).
+$(OBJDIR)/tests/test_bus_flow.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-flow: $(OBJDIR)/tests/test_bus_flow.o \
+                                  $(OBJDIR)/modules/bus/bus_host.o \
+                                  $(OBJDIR)/modules/bus/bus_route.o \
+                                  $(OBJDIR)/modules/bus/bus_region.o \
+                                  $(OBJDIR)/modules/bus/bus_ring.o \
+                                  $(OBJDIR)/modules/bus/bus_arena.o \
+                                  $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-bus-flow
+unit-test-bus-flow: $(TESTPREFIX)/unit-test-bus-flow
+	$<
 
 .PHONY: unit-test-bus-route
 unit-test-bus-route: $(TESTPREFIX)/unit-test-bus-route
