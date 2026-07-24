@@ -365,7 +365,8 @@ def main() -> int:
             "error: Phase 1+ paths are present in the working tree "
             "(staged, unstaged, or untracked) without being committed. "
             f"{ANCHORS} is required to be merged on the target branch "
-            "before Phase 1+ implementation begins; commit the Phase 0 "
+            "before Phase 1+ implementation begins; run with the working tree clean "
+            "(e.g. git stash) to validate committed work only; commit the Phase 0 "
             "anchors on the target branch first, then re-stage your "
             "Phase 1+ change on top of that merge.",
             file=sys.stderr,

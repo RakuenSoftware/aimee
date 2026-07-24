@@ -163,25 +163,50 @@ def test_gate_rejects_phase_one_change_when_decisions_incomplete(
 
 
 def test_gate_fails_closed_when_diff_discovery_cannot_run(
-    fake_worktree: Path, monkeypatch: pytest.MonkeyPatch,
+    fake_worktree: Path,
 ) -> None:
     """Regression for F1: if ``git diff`` itself cannot run, the gate must
-    fail with a nonzero exit code rather than silently reporting success."""
+    fail with a nonzero exit code rather than silently reporting success.
+
+    Uses a wrapper that monkeypatches ``subprocess.run`` / ``subprocess.check_output``
+    in the gate process so any attempt to invoke ``git`` raises
+    ``FileNotFoundError``. This is more reliable than a PATH shim because
+    subprocess PATH resolution is process-local and can be defeated by
+    absolute paths or PATH ordering quirks; a monkeypatch on the gate's
+    own subprocess calls removes the ambiguity.
+    """
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
     _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
 
-    # Strip git out of PATH so subprocess cannot find it.
-    fake_path = fake_worktree / "no_git_bin"
-    fake_path.mkdir()
-    for tool in ("python3",):
-        target = shutil.which(tool)
-        if target:
-            (fake_path / tool).symlink_to(target)
-    monkeypatch.setenv("PATH", str(fake_path))
-    monkeypatch.delenv("BASE_SHA", raising=False)
-
-    result = _run_gate(fake_worktree)
+    wrapper_body = (
+        "import runpy, subprocess, sys\n"
+        "_orig_run = subprocess.run\n"
+        "_orig_co = subprocess.check_output\n"
+        "def _reject_git(*args, **kwargs):\n"
+        "    argv = kwargs.get('args') or (args[0] if args else None)\n"
+        "    if isinstance(argv, (list, tuple)) and argv and argv[0] == 'git':\n"
+        "        raise FileNotFoundError(2, 'No such file or directory', 'git')\n"
+        "    return _orig_run(*args, **kwargs)\n"
+        "def _reject_git_co(*args, **kwargs):\n"
+        "    argv = kwargs.get('args') or (args[0] if args else None)\n"
+        "    if isinstance(argv, (list, tuple)) and argv and argv[0] == 'git':\n"
+        "        raise FileNotFoundError(2, 'No such file or directory', 'git')\n"
+        "    return _orig_co(*args, **kwargs)\n"
+        "subprocess.run = _reject_git\n"
+        "subprocess.check_output = _reject_git_co\n"
+        "sys.argv = ['check-collapse-anchor-gate.py']\n"
+        "runpy.run_path('scripts/check-collapse-anchor-gate.py', run_name='__main__')\n"
+    )
+    wrapper = fake_worktree / "_no_git_wrapper.py"
+    wrapper.write_text(wrapper_body)
+    env = os.environ.copy()
+    env["HOME"] = "/tmp"
+    env.pop("BASE_SHA", None)
+    result = subprocess.run(
+        ["python3", str(wrapper)],
+        cwd=fake_worktree, env=env, capture_output=True, text=True,
+    )
     assert result.returncode != 0, result.stdout
     assert "git" in result.stderr.lower()
 

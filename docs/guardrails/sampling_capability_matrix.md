@@ -14,7 +14,7 @@ Citations: OpenAI fields and stop translation are `src/server/aimee_backend_open
 
 ## Phase 4.0 missing plumbing
 
-Before Phase 4 can vary an unsupported control, Phase 4.0 must add and test:
+Before Phase 4 can vary an unsupported control, Phase 4.0 must add and test (starting test sites: `src/tests/test_aimee_backend.c` for OpenAI + Anthropic backend builders, and `src/tests/test_aimee_backend_bedrock.c` for the Bedrock Converse builder; per-backend split files do not exist today and Phase 4.0 introduces them if coverage gaps warrant):
 
 - OpenAI Chat/Responses and Ollama: canonical `repetition_penalty` mapping; only provider-specific `repeat_penalty` exists at `src/server/model_sampling.c:88`.
 - All backends: `presence_penalty` and `frequency_penalty`; no backend builder emits either in the cited builder ranges.
