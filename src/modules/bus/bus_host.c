@@ -222,6 +222,7 @@ void bus_host_destroy(bus_host_t *h)
       free(h->slots);
       h->slots = NULL;
    }
+   bus_arena_fini(&h->arena);
    bus_region_unmap(&h->arena_region);
    if (h->arena_fd >= 0)
       close(h->arena_fd);

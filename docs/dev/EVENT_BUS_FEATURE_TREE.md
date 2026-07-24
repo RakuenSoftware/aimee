@@ -194,12 +194,13 @@ a no-op D7 gate among them.
     - *Correlated arena patterns* (arena request/reply/cancel). Their lease is reclaimed so it cannot
       leak, and the frame is dropped-with-count, until the memory recall round-trip that needs a large
       request/reply payload lands.
-    - *Cross-thread producer allocation.* Routing, consume, and reap all run on the host's pump thread,
-      so the host-private lease table is accessed single-threaded and needs no lock. A producer that
-      allocates a lease from a thread other than the pump would race that table; obs_bus's current
-      producers all fit the inline budget, so no such producer exists yet. When one does, the lease
-      table gains synchronisation (a lock, or a pump-thread alloc queue) — validated against that
-      producer, not ahead of it.
+    - *Cross-thread producer allocation — DONE.* The host-private lease table is now guarded by an
+      in-process mutex (bus_arena.c), so a co-located producer may allocate and fill a lease from its
+      own thread while the pump thread publishes/releases/reaps and a consumer thread reads/releases in
+      place. The lock covers only the table transitions; the payload byte-copy stays outside it, kept
+      safe by the refcount. Proven by a ThreadSanitizer lane (scripts/run-bus-arena-tsan.sh) that runs
+      all three roles concurrently over a small (recycling) arena — clean with the lock, and a verified
+      data race the moment it is removed.
     - *Arena bytes in the capture stream (D10).* The tap is offered the arena frame header (seq, kind,
       lease reference) but not the bytes — the host never dereferences the arena. Capturing arena
       payloads means reading the span through the lease before it drains; it lands with the same slice
@@ -218,3 +219,5 @@ a no-op D7 gate among them.
 - `scripts/check_bus_d1_gate.sh` — the D1 amendment status (now ACCEPTED).
 - `scripts/test_bus_conformance.sh` — C vectors, Go vectors, cross-language interop, single-host (D8).
 - `scripts/check_bus_perf_gate.sh` (D4 / invariant 15) — dispatch-overhead ceiling; memory rows pending.
+- `scripts/run-bus-arena-tsan.sh` — ThreadSanitizer lane for the arena lease table: producer/pump/
+  consumer threads race the table through the arena API; a data race aborts non-zero.
