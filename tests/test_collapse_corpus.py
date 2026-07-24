@@ -146,6 +146,12 @@ class TestCollapseCollapse(unittest.TestCase):
         self.assertEqual(len(period), sp, f"{p}: period slice wrong length")
         self.assertEqual(data[off:off + sp], period,
                          f"{p}: declared offset does not point at the period")
+        first_occurrence = data.find(period, lf + 1)
+        self.assertEqual(
+            first_occurrence, off,
+            f"{p}: declared offset must identify the first period occurrence; "
+            f"found first occurrence at {first_occurrence}",
+        )
         if not allow_non_contiguous:
             n, pos = 0, off
             while pos + sp <= len(data) and data[pos:pos + sp] == period:
@@ -420,6 +426,12 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
         discriminators = {o.get("kind") for o in value}
         self.assertTrue(all(isinstance(d, str) for d in discriminators),
                         "kind values must be strings (discriminator)")
+        primitive_types = (str, int, float, bool, type(None))
+        self.assertTrue(
+            all(isinstance(leaf, primitive_types)
+                for item in value for leaf in item.values()),
+            "objects.json values must all be primitive leaves",
+        )
 
     def test_fenced_md_marks_json_block(self):
         text = _read_bytes(LEGIT_JSON / "fenced.md").decode()
