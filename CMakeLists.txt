@@ -513,8 +513,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
     ${AIMEE_SRC_DIR}/kb/kb_identity.c
-    /audit_action.c
-    /audit_ledger.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_action.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_ledger.c
     ${AIMEE_SRC_DIR}/report_enrichment.c
     ${AIMEE_SRC_DIR}/delivery_target.c
     ${AIMEE_SRC_DIR}/text.c
@@ -537,11 +537,11 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/slop_detect.c
     ${AIMEE_SRC_DIR}/proxy_bootstrap.c
     ${AIMEE_SRC_DIR}/client_integrations.c
-    /mcp_tools.c
-    /mcp_skill_tools.c
-    /mcp_tools_gateway.c
-    /mcp_client.c
-    /mcp_client_registry.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tools.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_skill_tools.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tools_gateway.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client.c
+    ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client_registry.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_provider.c
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
@@ -705,14 +705,14 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/session_compact.c
     ${AIMEE_SRC_DIR}/server/compact_prune.c
     ${AIMEE_SRC_DIR}/server/context_engine.c
-    /delegate_backend.c
-    /delegate_backend_local.c
-    /delegate_backend_ssh.c
-    /delegate_backend_docker.c
-    /delegate_driver.c
-    /delegate_openai.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_local.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_ssh.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_backend_docker.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_driver.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_openai.c
 
-    /delegate_xml_fallback.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_xml_fallback.c
     ${AIMEE_SRC_DIR}/server/model_provider.c
     ${AIMEE_SRC_DIR}/server/openrouter_profile.c
     ${AIMEE_SRC_DIR}/server/openai_profile.c
@@ -778,14 +778,14 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_agent_trace.c
     ${AIMEE_SRC_DIR}/cmd_agent_delegate.c
     ${AIMEE_SRC_DIR}/cmd_agent_delegate_toolset.c
-    /delegate_prompt_stdin.c
-    /delegate_depth.c
-    /delegate_plan.c
-    /delegate_prompt.c
-    /delegate_run_phases.c
-    /delegate_routing.c
-    /delegate_role.c
-    /delegate_economics.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt_stdin.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_depth.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_run_phases.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_role.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_economics.c
     ${AIMEE_SRC_DIR}/cmd_wm.c
     ${AIMEE_SRC_DIR}/cmd_cancel.c
     ${AIMEE_SRC_DIR}/cmd_rewind.c
@@ -858,8 +858,8 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/modules/workspace/cli_workspace_serve.c
     ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
-    /delegate_plan.c
-    /acp_server.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_plan.c
+    ${AIMEE_SRC_DIR}/modules/protocols/acp/acp_server.c
     ${AIMEE_SRC_DIR}/cmd_workflow.c
 )
 # `workspace serve` + the reverse-channel host the detached-workspace runner so
@@ -952,18 +952,18 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cmd_identity.c
     ${AIMEE_SRC_DIR}/prompts.c
     ${AIMEE_SRC_DIR}/working_profile.c
-    /delegate_role.c
-    /delegate_depth.c
-    /delegate_prompt.c
-    /delegate_run_phases.c
-    /delegate_routing.c
-    /delegate_launch.c
-    /delegate_source_authority.c
-    /delegate_economics.c
-    /delegate_credentials.c
-    /delegate_credential_retry.c
-    /delegate_patch_coordinator.c
-    /delegate_checkout.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_role.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_depth.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_prompt.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_run_phases.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_routing.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_launch.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_source_authority.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_economics.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_credentials.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_credential_retry.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_patch_coordinator.c
+    ${AIMEE_SRC_DIR}/modules/delegates/delegate_checkout.c
     ${AIMEE_SRC_DIR}/cmd_init.c
     ${AIMEE_SRC_DIR}/server/trigger_scheduler.c
     ${AIMEE_SRC_DIR}/server/server_trigger.c
