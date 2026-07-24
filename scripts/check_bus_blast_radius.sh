@@ -237,22 +237,42 @@ fi
 # Report what actually ran. A skipped layer must never read as coverage, so the
 # artefact count is stated rather than implied — but its absence is not itself a
 # failure, because a fresh checkout has no build and lint must still run there.
-# Strict means the artefact layer covered the whole shipping set. Partial
-# coverage is not coverage: the one binary that was not built is exactly where a
-# link edge the textual layers cannot see would hide.
-if [ "$missing" -gt 0 ]; then
-   if [ "$allow_unbuilt" -eq 0 ]; then
-      note "FAIL: the artefact layer inspected $checked of $expected shipping binaries"
-      note "      ($missing not built)."
-      note ""
-      note "Layers 1-3 reason about the build text; only this one reasons about the"
-      note "compiled result, and it is the only layer that can catch a link edge the"
-      note "text hides. A run in which it inspected nothing has not established D7."
-      note "Build first, or pass --allow-unbuilt for local iteration."
-      exit 1
-   fi
-   echo "check_bus_blast_radius: build graph clean; artefact layer PARTIAL ($checked of $expected inspected, --allow-unbuilt)"
+# The artefact layer must cover the WHOLE shipping set to establish D7. There
+# are exactly three states:
+#
+#   full     (missing == 0)                 -> clean, unconditionally.
+#   unbuilt  (checked == 0, all missing)     -> nothing to inspect. --allow-unbuilt
+#                                               permits it for local iteration; the
+#                                               strict default (lint/CI) fails.
+#   partial  (checked > 0, some missing)     -> ALWAYS a failure, flag or not.
+#
+# Partial is the trap the escape hatch must never cover: the binaries that were
+# built came back clean, which reads like reassurance, while the one that was
+# not built is exactly where a link edge the textual layers cannot see would
+# hide. --allow-unbuilt exists for "I have not built anything yet", not for
+# "I built most of it".
+if [ "$missing" -eq 0 ]; then
+   echo "check_bus_blast_radius: ok — build graph clean; all $expected shipping binary(s) carry no bus symbol"
    exit 0
 fi
 
-echo "check_bus_blast_radius: ok — build graph clean; all $expected shipping binary(s) carry no bus symbol"
+if [ "$checked" -eq 0 ] && [ "$allow_unbuilt" -eq 1 ]; then
+   echo "check_bus_blast_radius: build graph clean; artefact layer SKIPPED (nothing built, --allow-unbuilt)"
+   exit 0
+fi
+
+if [ "$checked" -gt 0 ]; then
+   note "FAIL: partial artefact coverage — inspected $checked of $expected shipping"
+   note "      binaries, $missing not built. --allow-unbuilt does not cover this:"
+   note "      the built binaries came back clean, but the unbuilt one is exactly"
+   note "      where a link edge the textual layers cannot see would hide."
+   note "      Build the whole shipping set, or none of it."
+else
+   note "FAIL: the artefact layer inspected no shipping binaries ($missing not built)."
+   note ""
+   note "Layers 1-3 reason about the build text; only this one reasons about the"
+   note "compiled result, and it is the only layer that can catch a link edge the"
+   note "text hides. A run in which it inspected nothing has not established D7."
+   note "Build first, or pass --allow-unbuilt for local iteration."
+fi
+exit 1
