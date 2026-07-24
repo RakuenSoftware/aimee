@@ -2659,6 +2659,38 @@ $(TESTPREFIX)/bus-bench: $(OBJDIR)/tests/bus_bench.o \
 .PHONY: bus-bench
 bus-bench: $(TESTPREFIX)/bus-bench
 
+# First real module-on-bus integration (memory recall over the bus). Links the
+# real DB1 user-memory path (against the pg/sqlite test shim, like the memory
+# harness) plus the bus. A test/integration binary; not a shipping target.
+BUS_MEM_OBJS = $(OBJDIR)/db1/user_memory.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o \
+               $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o \
+               $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o \
+               $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o \
+               $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
+               $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o \
+               $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o \
+               $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o \
+               $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o \
+               $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o \
+               $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
+               $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
+               $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/log.o $(OBJDIR)/cJSON.o
+$(OBJDIR)/tests/test_bus_memory_recall.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-memory-recall: $(OBJDIR)/tests/test_bus_memory_recall.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-memory-recall
+unit-test-bus-memory-recall: $(TESTPREFIX)/unit-test-bus-memory-recall
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<
