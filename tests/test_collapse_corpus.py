@@ -18,8 +18,6 @@ VALID_CATEGORIES = {
     "json_fenced_inside_markdown",
 }
 
-PRIMITIVE_TYPES = (str, int, float, bool, type(None))
-
 
 _COMMENT_LINE_RE = re.compile(r"<!--\s*(.*?)\s*-->")
 
@@ -153,10 +151,6 @@ def test_no_fire_oracles_use_sentinel_values():
         assert int(values["expected_repetitions"]) == 0
 
 
-def _is_primitive(value):
-    return isinstance(value, PRIMITIVE_TYPES)
-
-
 def _primitive_type_label(value):
     """Return a canonical primitive type label for a JSON leaf value.
 
@@ -176,6 +170,15 @@ def _primitive_type_label(value):
     if isinstance(value, str):
         return "str"
     return None
+
+
+def _is_primitive(value):
+    """True iff value is one of the JSON primitive leaves: string, number, boolean, or null.
+
+    The check uses the canonical type label so that bool is not treated as int
+    (Python's bool is a subclass of int).
+    """
+    return _primitive_type_label(value) is not None
 
 
 def _common_string_keys(records):
@@ -311,16 +314,10 @@ INNER_JSON_SHAPE_VALIDATORS = (
 
 
 def _validate_json_fenced(payload):
-    """Shape 4: the fenced payload is a markdown wrapper; each inner array value must
-    independently satisfy one of shapes 1, 2, or 3."""
-    if not isinstance(payload, list) or not payload:
-        return False
-    for inner in _walk_arrays(payload):
-        if not inner or not isinstance(inner, list):
-            continue
-        if any(_validator(inner) for _validator in INNER_JSON_SHAPE_VALIDATORS):
-            return True
-    return False
+    """Shape 4: the fenced payload is a markdown wrapper; the parsed inner content must
+    independently satisfy one of shapes 1, 2, or 3.
+    """
+    return any(_validator(payload) for _validator in INNER_JSON_SHAPE_VALIDATORS)
 
 
 _VALIDATORS = {
@@ -464,3 +461,46 @@ def test_shape3_rejects_per_key_type_changes():
         assert _validate_stable_keys_array(payload), (
             f"expected shape-3 acceptance for uniform per-key types: {payload!r}"
         )
+
+
+def test_booleans_are_distinct_primitive_type_from_int_and_string():
+    """Python's bool is a subclass of int, so naive isinstance checks can accept a boolean
+    where the grammar requires a string or integer. The canonical type-label logic must
+    keep bool distinct from int and str in every structural position.
+    """
+    # bool is a primitive on its own.
+    assert _is_primitive(True)
+    assert _is_primitive(False)
+    assert _primitive_type_label(True) == "bool"
+    assert _primitive_type_label(False) == "bool"
+    assert _primitive_type_label(1) == "int"
+    assert _primitive_type_label(1.5) == "float"
+    assert _primitive_type_label("x") == "str"
+
+    # A boolean discriminator must not satisfy the string-discriminator requirement.
+    assert not _validate_discriminator_array([{"kind": True}, {"kind": False}])
+
+    # A boolean leaf must not be treated as the same primitive type as an integer leaf.
+    assert not _validate_stable_keys_array([{"x": 1}, {"x": True}])
+    assert not _validate_stable_keys_array([{"x": True}, {"x": 1}])
+
+    # A uniform boolean column is still a valid primitive column.
+    assert _validate_stable_keys_array([{"x": True}, {"x": False}])
+
+
+def test_fenced_json_validates_complete_payload_not_any_inner_array():
+    """Shape 4 requires the fenced inner content to independently satisfy one of shapes
+    1-3. A heterogeneous payload that contains one valid nested array but also invalid
+    siblings must not be accepted as shape 4 just because a reachable inner array matches.
+    """
+    payload = [
+        [1, 2, 3],  # valid shape-1 on its own
+        {"a": "x"},  # an object is not a primitive; whole payload is not shape-1
+    ]
+    assert not _validate_json_fenced(payload)
+    # Sanity: the inner array alone is valid shape-1.
+    assert _validate_primitives_array([1, 2, 3])
+
+    # A list of valid shape-1 arrays is itself shape-1 (nested arrays of primitives).
+    valid_nested = [[1, 2, 3], [4, 5, 6]]
+    assert _validate_json_fenced(valid_nested)
