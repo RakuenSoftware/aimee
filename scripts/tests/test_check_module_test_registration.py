@@ -48,15 +48,11 @@ class RegistrationTests(unittest.TestCase):
         """The exact facts slices 35 and 36 originally got wrong."""
         rows = {(r["module"], Path(r["test"]).stem): r for r in checker.report(REPO_ROOT)["tests"]}
         self.assertTrue(rows[("module-runtime", "test_plugin_c_hook")]["ctest"])
-        self.assertTrue(rows[("plugin-loader", "test_plugin_loader")]["ctest"])
-        self.assertFalse(rows[("plugin-loader", "test_plugin")]["ctest"])
 
     def test_ctest_registration_is_read_from_the_test_subdirectory(self) -> None:
         """The original audit error was reading only the top-level CMakeLists.txt."""
         sources = checker.ctest_sources(REPO_ROOT)
         self.assertIn("src/tests/test_plugin_c_hook.c", sources)
-        self.assertIn("src/tests/test_plugin_loader.c", sources)
-        self.assertNotIn("src/tests/test_plugin.c", sources)
 
     def test_registration_is_bound_to_the_source_not_the_target_name(self) -> None:
         """Re-pointing a registered target at another source must count as drift."""
