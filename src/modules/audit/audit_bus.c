@@ -61,6 +61,8 @@ static struct
    atomic_int publishers;    /* # producers inside the emit window (see enter_emit) */
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
+   atomic_uint_least64_t enqueued;  /* events successfully placed on the ring */
+   atomic_uint_least64_t processed; /* events the consumer has polled + dispatched */
    /* Record+replay: the reason the audit row is on the bus at all. The host's
     * capture tap records every event, in seq order, into this sink; the consumer
     * thread flushes it to a per-session capture file. Owned by the consumer thread
@@ -233,6 +235,7 @@ static uint32_t drain(void)
    bus_event_t ev;
    while (bus_client_poll(&g.consumer, &ev) == BUS_CLIENT_OK)
    {
+      atomic_fetch_add_explicit(&g.processed, 1, memory_order_relaxed); /* this event is handled */
       int wrote = 0;
       if (ev.frame.event_kind == KIND_AUDIT_ACTION)
          wrote = write_row(ev.payload, ev.payload_len);
@@ -565,6 +568,7 @@ static void publish(uint32_t kind, const uint8_t *buf, uint32_t len)
       if (rc == BUS_CLIENT_OK)
       {
          ok = 1;
+         atomic_fetch_add_explicit(&g.enqueued, 1, memory_order_relaxed);
          break;
       }
       if (rc != BUS_CLIENT_WOULD_BLOCK)
@@ -666,6 +670,25 @@ void audit_bus_stop(void)
    g.started = 0;
    g.terminated = 1; /* a lazy emit must not resurrect the bus after shutdown */
    pthread_mutex_unlock(&start_lock);
+}
+
+void audit_bus_flush(void)
+{
+   if (!g.started)
+      return;
+   /* Wait until the consumer has processed every event enqueued as of now, so a
+    * caller that just emitted can read the sink (the ledger / db1) and see them —
+    * the write is asynchronous, so a synchronous read-after-emit would otherwise
+    * race. The consumer drains aggressively, so this returns quickly; bounded so a
+    * stuck consumer cannot hang the caller forever. Does NOT stop the bus. */
+   uint64_t target = atomic_load_explicit(&g.enqueued, memory_order_acquire);
+   const struct timespec nap = {.tv_sec = 0, .tv_nsec = 100 * 1000}; /* 100 us */
+   for (int i = 0; i < 50000; i++)                                    /* ~5 s cap */
+   {
+      if (atomic_load_explicit(&g.processed, memory_order_acquire) >= target)
+         return;
+      nanosleep(&nap, NULL);
+   }
 }
 
 uint64_t audit_bus_dropped(void)

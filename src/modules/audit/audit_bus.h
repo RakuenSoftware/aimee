@@ -65,6 +65,12 @@ extern "C"
     * bus is not running. */
    void audit_bus_emit_guardrail(const guardrail_event_t *e);
 
+   /* Block until the consumer has written every event emitted so far to its sink
+    * (the ledger / db1), WITHOUT stopping the bus. For a caller that emits and then
+    * reads the sink synchronously (mainly tests: the write is otherwise async).
+    * Bounded (~5s); a no-op if the bus is not running. */
+   void audit_bus_flush(void);
+
    /* Stop emitting, drain every already-published row to the writer, join the
     * consumer thread, and tear the bus down. Lossless: rows published before the
     * call are written before it returns. Idempotent. */
