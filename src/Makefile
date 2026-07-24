@@ -1531,6 +1531,15 @@ clean:
 # you genuinely need a different binary.
 CLANG_FORMAT ?= clang-format-19
 
+# The lint job runs `make lint` WITHOUT building the shipping binaries, so the D7
+# artefact layer (layer 4) has nothing to inspect and would fail strict ("nothing
+# built"). Run it with --allow-unbuilt in the lint context: layers 1-3 (source +
+# build text) are the authoritative, complete-by-construction guarantee and run
+# regardless; layer 4 is a best-effort backstop that only bites where binaries are
+# actually built (a dedicated build+check context, or a local `make all` first).
+# Target-specific, so a standalone `make bus-blast-radius-check` stays strict.
+lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
+
 lint: native-tool-parity-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check bus-blast-radius-check
 
 # P1 (N1): every tenant-scoped db2 entrypoint must call db2_tenant_require_pg(),
