@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "aimee/plugin-loader/plugin.h"
+#include "modules/plugin-loader/plugin_internal.h"
 #include "aimee/module-runtime/extension.h"
 #include "cJSON.h"
 #include "platform_test_util.h"

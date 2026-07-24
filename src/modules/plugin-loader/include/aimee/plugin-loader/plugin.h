@@ -51,18 +51,9 @@ typedef struct
 
 /* --- Plugin registry API --- */
 
-/* Registry path: ~/.config/aimee/plugins/installed.json */
-const char *plugin_registry_path(void);
-
 /* Load all plugins from the registry into plugins[].
  * Returns count (0 means empty registry; not an error). */
 int plugin_registry_load(plugin_t *plugins, int max);
-
-/* Save plugins[] to the registry. Returns 0 on success. */
-int plugin_registry_save(const plugin_t *plugins, int count);
-
-/* Find a plugin by name in the registry. Returns 0 on success, -1 if absent. */
-int plugin_registry_get(const char *name, plugin_t *out);
 
 /* Return a malloc'd JSON array describing installed plugins. Caller frees. */
 char *plugin_registry_json(void);
@@ -74,14 +65,6 @@ char *plugin_registry_json(void);
  * Also supports plugin.yaml (YAML format) if available.
  * Returns 0 on success, -1 on error (sets err_buf). */
 int plugin_manifest_parse(const char *dir, plugin_t *out, char *err_buf, size_t err_len);
-
-/* --- Load and register ---
- *
- * Load a plugin from its source_path, create a plugin_ctx_t,
- * and call the plugin's register(ctx) entry point.
- * Returns 0 on success, -1 on error (sets err_buf).
- * The plugin's on_init is called after registration succeeds. */
-int plugin_load_and_register(const plugin_t *plugin, char *err_buf, size_t err_len);
 
 /* --- Install / enable / disable / remove --- */
 
@@ -115,8 +98,5 @@ int plugin_collect_hooks(const plugin_t *plugins, int count, const char *event, 
 
 /* Collect all tools from enabled plugins into out[]. Returns count. */
 int plugin_collect_tools(const plugin_t *plugins, int count, plugin_tool_t *out, int max_tools);
-
-/* Check if a tool name conflicts with a built-in. Returns 1 if conflict, 0 otherwise. */
-int plugin_tool_conflicts_with_builtin(const char *tool_name);
 
 #endif /* AIMEE_PLUGIN_LOADER_PLUGIN_H */

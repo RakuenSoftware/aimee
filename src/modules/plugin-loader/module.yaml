@@ -22,6 +22,9 @@
     "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
     "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h"
   ],
+  "private_headers": [
+    "src/modules/plugin-loader/plugin_internal.h"
+  ],
   "tests": [
     "src/tests/test_plugin.c",
     "src/tests/test_plugin_loader.c"

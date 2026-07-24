@@ -281,6 +281,7 @@ class DescriptorTests(unittest.TestCase):
             ("module-runtime", "sources", "src/modules/module-runtime/pre_llm_hook.c"),
             ("plugin-loader", "sources", "src/modules/plugin-loader/plugin.c"),
             ("plugin-loader", "sources", "src/modules/plugin-loader/plugin_loader.c"),
+            ("plugin-loader", "private_headers", "src/modules/plugin-loader/plugin_internal.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_pipeline.c"),
             ("gateway", "sources", "src/modules/gateway/gateway_policy.c"),
