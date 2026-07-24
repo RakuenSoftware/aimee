@@ -1,0 +1,431 @@
+{
+  "schema_version": "1",
+  "kind": "repetition_collapse_allowlist_corpus",
+  "description": "Legitimate-repeat fixtures and a heterogeneous-object fixture for repetition_collapse. Each fixture carries an explicit expected_label: 'loop' means the buffer is a degenerate repetition collapse the detector MUST flag; 'allow' means the buffer is a legitimate repeating structure the detector MUST NOT flag. The detector output is compared byte-for-byte across runs. Every 'allow' fixture's repeating unit is intentionally longer than RC_DEFAULT_MIN_SPAN_BYTES=60 so the corpus exercises region/JSON suppression, not just the min_span pre-filter. The heterogeneous-object fixture is locked against the in-module JSON grammar (see src/detect/repetition_collapse.c).",
+  "fixtures": [
+    {
+      "id": "legit_fenced_ascii_art_5x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "ASCII art inside a fenced block repeats a long line verbatim 5 times - structural fence region MUST suppress the loop.",
+      "body": "Example:\n\n```\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n\n```\n"
+    },
+    {
+      "id": "legit_fenced_ascii_art_7x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "ASCII art inside a fenced block repeats a long line verbatim 7 times - structural fence region MUST suppress the loop.",
+      "body": "Example:\n\n```\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n\n```\n"
+    },
+    {
+      "id": "legit_fenced_ascii_art_12x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "ASCII art inside a fenced block repeats a long line verbatim 12 times - structural fence region MUST suppress the loop.",
+      "body": "Example:\n\n```\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n\n```\n"
+    },
+    {
+      "id": "legit_fenced_ascii_art_20x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "ASCII art inside a fenced block repeats a long line verbatim 20 times - structural fence region MUST suppress the loop.",
+      "body": "Example:\n\n```\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n\n```\n"
+    },
+    {
+      "id": "legit_fenced_tilde_art",
+      "label": "allow",
+      "kind": "fence_tilde",
+      "expected_loop_hit": false,
+      "comment": "Tilde-fenced block with repeated banner art - fence region MUST suppress the loop.",
+      "body": "Banner:\n\n~~~ sh\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n~~~\n"
+    },
+    {
+      "id": "legit_fenced_info_string_c",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (c) - fence region MUST suppress the loop.",
+      "body": "Code (c):\n\n```c\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_sh",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (sh) - fence region MUST suppress the loop.",
+      "body": "Code (sh):\n\n```sh\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_diff",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (diff) - fence region MUST suppress the loop.",
+      "body": "Code (diff):\n\n```diff\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_yaml",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (yaml) - fence region MUST suppress the loop.",
+      "body": "Code (yaml):\n\n```yaml\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_json",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (json) - fence region MUST suppress the loop.",
+      "body": "Code (json):\n\n```json\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_python",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (python) - fence region MUST suppress the loop.",
+      "body": "Code (python):\n\n```python\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_info_string_rs",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced block with an info string (rs) - fence region MUST suppress the loop.",
+      "body": "Code (rs):\n\n```rs\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_list_bodies_5x",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items echo a repeated bullet body longer than min_span 5 times - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n"
+    },
+    {
+      "id": "legit_list_bodies_8x",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items echo a repeated bullet body longer than min_span 8 times - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n"
+    },
+    {
+      "id": "legit_list_bodies_15x",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items echo a repeated bullet body longer than min_span 15 times - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n"
+    },
+    {
+      "id": "legit_list_bodies_30x",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items echo a repeated bullet body longer than min_span 30 times - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n"
+    },
+    {
+      "id": "legit_list_bodies_ordered",
+      "label": "allow",
+      "kind": "list_body_ordered",
+      "expected_loop_hit": false,
+      "comment": "Ordered list items echo a repeated bullet body - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n1. numbered step one runs first, please be patient and observe carefully\n"
+    },
+    {
+      "id": "legit_list_bodies_bullet_*",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items with bullet '*' - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n* item body that is intentionally long enough to exceed min span bytes padding\n"
+    },
+    {
+      "id": "legit_list_bodies_bullet_+",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items with bullet '+' - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n+ item body that is intentionally long enough to exceed min span bytes padding\n"
+    },
+    {
+      "id": "legit_list_bodies_bullet_-",
+      "label": "allow",
+      "kind": "list_body",
+      "expected_loop_hit": false,
+      "comment": "List items with bullet '-' - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n- item body that is intentionally long enough to exceed min span bytes padding\n"
+    },
+    {
+      "id": "legit_indented_code_block_4x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 4 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_block_5x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 5 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_block_9x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 9 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_block_11x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 11 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_block_14x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 14 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_block_17x",
+      "label": "allow",
+      "kind": "code_block",
+      "expected_loop_hit": false,
+      "comment": "Indented code block with 4-space-indented repeated printf() lines 17 times - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_tab_indented_code_block",
+      "label": "allow",
+      "kind": "code_block_tab",
+      "expected_loop_hit": false,
+      "comment": "Tab-indented code block with repeated lines - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n\tfprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
+    },
+    {
+      "id": "legit_indented_code_does_not_collide_with_list",
+      "label": "allow",
+      "kind": "code_block_high_indent",
+      "expected_loop_hit": false,
+      "comment": "Indented (>=4 spaces) lines that begin with '-' verbatim - the indent guard MUST classify them as CODE_BLOCK, not LIST_BODY.",
+      "body": "Code:\n\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n    - dashed-bullet-like-thing-but-indented-a-lot-for-padding-padding-padding\n"
+    },
+    {
+      "id": "legit_pipe_table_4x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 4 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_6x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 6 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_10x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 10 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_14x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 14 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_18x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 18 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_22x",
+      "label": "allow",
+      "kind": "table",
+      "expected_loop_hit": false,
+      "comment": "Markdown pipe table with repeated body rows 22 times - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
+    },
+    {
+      "id": "legit_pipe_table_code_span",
+      "label": "allow",
+      "kind": "table_code_span",
+      "expected_loop_hit": false,
+      "comment": "Pipe table whose header contains a pipe inside a code span (`a|b`) - the state-machine table-row scanner must NOT match the code-span pipe.",
+      "body": "Results:\n\n| desc                 | val alpha bravo charlie delta echo       |\n|----------------------|------------------------------------------|\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n| a `x|y` happens     | one-of-the-larger-string-for-coverage   |\n"
+    },
+    {
+      "id": "legit_json_fragments_5x",
+      "label": "allow",
+      "kind": "json_fragment",
+      "expected_loop_hit": false,
+      "comment": "Well-formed JSON fragments whose internal keys repeat verbatim 5 times - JSON grammar MUST suppress the loop.",
+      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n"
+    },
+    {
+      "id": "legit_json_fragments_8x",
+      "label": "allow",
+      "kind": "json_fragment",
+      "expected_loop_hit": false,
+      "comment": "Well-formed JSON fragments whose internal keys repeat verbatim 8 times - JSON grammar MUST suppress the loop.",
+      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n"
+    },
+    {
+      "id": "legit_json_fragments_12x",
+      "label": "allow",
+      "kind": "json_fragment",
+      "expected_loop_hit": false,
+      "comment": "Well-formed JSON fragments whose internal keys repeat verbatim 12 times - JSON grammar MUST suppress the loop.",
+      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n"
+    },
+    {
+      "id": "legit_json_nested",
+      "label": "allow",
+      "kind": "json_fragment_nested",
+      "expected_loop_hit": false,
+      "comment": "Deeply nested JSON fragments - JSON grammar MUST suppress the loop.",
+      "body": "Deep:\n\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n{\"a\":{\"b\":{\"c\":{\"d\":\"e\",\"f\":\"g\"}}},\"h\":[\"i\",\"j\",\"k\",\"l\",\"m\"]}\n"
+    },
+    {
+      "id": "legit_multiline_list_item",
+      "label": "allow",
+      "kind": "list_body_multiline",
+      "expected_loop_hit": false,
+      "comment": "Multi-line list items: the marker line is part of LIST_BODY, so the start of any verbatim repeat that aligns at the marker line is suppressed. The repeat is checked as a single period whose first copy starts at the first marker line; the LIST_BODY region covers the marker line, so the detector abstains. This locks the documented behavior described in the structural-parser comment.",
+      "body": "Notes:\n\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n"
+    },
+    {
+      "id": "legit_mid_stream_fence_then_tail",
+      "label": "allow",
+      "kind": "fence_mid_stream",
+      "expected_loop_hit": false,
+      "comment": "Verbatim tail (>=60 bytes per line, repeated 5 times) preceded by a fenced block in the middle. The full-buffer scanner finds the longest repeat; the fence region suppresses it. Detector abstains. The trailing tail is intentionally long enough and frequent enough that suppression MUST come from active fence-region matching, not the min_span threshold.",
+      "body": "Preceding prose explaining something fairly long.\n```\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\nTrailing prose that does not repeat the fenced block but is at least sixty bytes long now.\nTrailing prose that does not repeat the fenced block but is at least sixty bytes long now.\nTrailing prose that does not repeat the fenced block but is at least sixty bytes long now.\nTrailing prose that does not repeat the fenced block but is at least sixty bytes long now.\nTrailing prose that does not repeat the fenced block but is at least sixty bytes long now.\n"
+    },
+    {
+      "id": "heterogeneous_object_curls",
+      "label": "loop",
+      "kind": "heterogeneous",
+      "expected_loop_hit": true,
+      "comment": "Heterogeneous object: looks JSON-ish (it has braces and keys) but is NOT valid JSON - the JSON allowlist MUST NOT match it, so the periodicity check fires. The fixture is robust against grammar widening: the parser does not accept single quotes, unquoted keys, or shell-style 'declare' wrappers, so any widening that would match this input would also be a clear grammar change rather than a quiet bug. This fixture is the explicit heterogeneous-object lock required by the acceptance criteria.",
+      "body": "declare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\ndeclare -a items=('qux' 'quux' 'corge' 'grault' 'garply' 'waldo' 'fred')\n"
+    },
+    {
+      "id": "real_collapse_after_intro",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Real collapse: short intro then a trailing line repeated verbatim >=4 times.",
+      "body": "The result is computed as follows.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\n"
+    },
+    {
+      "id": "mid_stream_collapse_no_lock",
+      "label": "loop",
+      "kind": "collapse_mid_stream",
+      "expected_loop_hit": true,
+      "comment": "Mid-stream collapse: the verbatim repeat sits in the middle of the buffer with non-repeating prose on both sides. The full-buffer scan MUST find this candidate (the tail-only restriction is documented as removed). The per-candidate repeat count is exact.",
+      "body": "Completely unrelated prose line one with no repetition at all.\nCompletely unrelated prose line two with no repetition at all.\nCompletely unrelated prose line three with no repetition at all.\nRepeated verbatim payload line alpha bravo charlie delta echo foxtrot.\nRepeated verbatim payload line alpha bravo charlie delta echo foxtrot.\nRepeated verbatim payload line alpha bravo charlie delta echo foxtrot.\nRepeated verbatim payload line alpha bravo charlie delta echo foxtrot.\nTail prose that is also unrelated to the repeated payload.\n"
+    },
+    {
+      "id": "collapse_short_period_with_tail",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Short-period collapse at the tail (>=4 repeats of a >=60-byte line). Detector MUST flag.",
+      "body": "Some intro prose that is not part of the repeat at all.\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding here\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding here\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding here\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding here\nsed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding here\n"
+    },
+    {
+      "id": "legit_fenced_diff_4x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced diff block with repeated content 4 times - fence region MUST suppress the loop.",
+      "body": "Diff:\n\n```diff\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_fenced_diff_11x",
+      "label": "allow",
+      "kind": "fence",
+      "expected_loop_hit": false,
+      "comment": "Fenced diff block with repeated content 11 times - fence region MUST suppress the loop.",
+      "body": "Diff:\n\n```diff\n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n   /\\_/\\           _____          /\\_/\\            /\\_/\\                                \n  ( o.o )    -->   |     |  -->   ( o.o )    -->   ( o.o )                               \n   > ^ <          /_____\\         > ^ <          /_____\\                                \n```\n"
+    },
+    {
+      "id": "legit_json_with_prose_between",
+      "label": "allow",
+      "kind": "json_fragment",
+      "expected_loop_hit": false,
+      "comment": "JSON fragments (>=60 bytes each) separated by prose lines. JSON grammar MUST suppress the loop. The fragment is intentionally longer than RC_DEFAULT_MIN_SPAN_BYTES=60 so the fixture exercises JSON-fragment suppression, not just the min_span pre-filter.",
+      "body": "{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nSome intervening prose line.\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nMore intervening prose line.\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nEven more intervening prose line.\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nSome intervening prose line.\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nMore intervening prose line.\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"tag\":\"alpha-pad\",\"epoch\":1700000000,\"region\":\"us-west-2\",\"shard\":\"primary\",\"v\":3}\nEven more intervening prose line.\n"
+    },
+    {
+      "id": "real_collapse_long_period",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Real collapse with a longer period (>=60 bytes per copy): a full sentence repeated. Detector MUST flag.",
+      "body": "Some intro prose that is not part of the repeat at all.\nThe quick brown fox jumps over the lazy dog and then proceeds onwards regardless of consequence\nThe quick brown fox jumps over the lazy dog and then proceeds onwards regardless of consequence\nThe quick brown fox jumps over the lazy dog and then proceeds onwards regardless of consequence\nThe quick brown fox jumps over the lazy dog and then proceeds onwards regardless of consequence\nThe quick brown fox jumps over the lazy dog and then proceeds onwards regardless of consequence\n"
+    },
+    {
+      "id": "legit_single_long_paragraph",
+      "label": "allow",
+      "kind": "paragraph",
+      "expected_loop_hit": false,
+      "comment": "Single unique long paragraph (>60 bytes, no repeats). Detector MUST NOT flag.",
+      "body": "Some long, unique paragraph that does not repeat any line or phrase in a way that would trigger the periodicity check, with enough internal variability to defeat verbatim detection. The text is intentionally long and varied to ensure no sub span of at least 60 bytes repeats with at least one matching copy elsewhere in the buffer.\n"
+    },
+    {
+      "id": "legit_below_threshold_repeats",
+      "label": "allow",
+      "kind": "below_threshold",
+      "expected_loop_hit": false,
+      "comment": "Long line repeated only 3 times - below the min_repeats=4 threshold. Detector MUST NOT flag.",
+      "body": "An intro line that does not repeat at all.\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding padding padding\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding padding padding\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua padding padding padding\n"
+    },
+    {
+      "id": "real_collapse_long_intro",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Real collapse with a long intro and a trailing repeat. Detector MUST flag.",
+      "body": "A really long intro paragraph that does not repeat at all and is intended to look like normal prose, with maybe more than a hundred bytes of varied content. This paragraph is fully unique and the test expects the detector to find the trailing collapse anyway.\nAnd now the trailing collapse line that is repeated verbatim over and over and over and over and over again.\nAnd now the trailing collapse line that is repeated verbatim over and over and over and over and over again.\nAnd now the trailing collapse line that is repeated verbatim over and over and over and over and over again.\nAnd now the trailing collapse line that is repeated verbatim over and over and over and over and over again.\n"
+    },
+    {
+      "id": "FP_GATE_TEST",
+      "label": "loop",
+      "kind": "collapse",
+      "expected_loop_hit": true,
+      "comment": "Real collapse used to lock the FP gate: detector MUST flag. The fixture was previously mis-labelled as allow, which made the precision/FP gate deterministically fail. Relabelled to lock that any false negative in this case trips the FN-side path, not the FP gate.",
+      "body": "Wait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\nWait, let me reconsider the whole algorithm carefully, just to be sure.\n"
+    }
+  ]
+}

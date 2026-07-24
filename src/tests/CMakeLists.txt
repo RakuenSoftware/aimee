@@ -382,3 +382,9 @@ endif()
 add_test(NAME test_conversation_context COMMAND test_conversation_context)
 set_tests_properties(test_conversation_context PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Portable allow-list unit test for src/repetition_collapse.c. Pure functions
+# over a byte stream - no DB / network / aimee-state needed, so it links with
+# just aimee-core when available and otherwise stands alone.
+aimee_add_test(test_repetition_collapse test_repetition_collapse.c
+  ${CMAKE_SOURCE_DIR}/src/detect/repetition_collapse.c)
