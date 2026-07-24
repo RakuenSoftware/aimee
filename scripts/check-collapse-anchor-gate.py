@@ -96,6 +96,29 @@ def _git_text_ok(*args: str, cwd: Path) -> str:
         raise GateError(f"could not invoke git: {exc}") from exc
 
 
+def _local_base_ref(cwd: Path) -> str | None:
+    """Return the local-mode base ref (``HEAD~1``) when it exists.
+
+    In CI mode the runner supplies ``BASE_SHA`` and we must use that
+    exact revision; in local mode (no ``BASE_SHA``, not CI) the natural
+    base for the ``HEAD~1..HEAD`` diff is ``HEAD~1`` -- the merge-base
+    of the current commit and its parent.  Returning ``None`` when
+    ``HEAD~1`` is unavailable (initial commit / shallow clone) lets the
+    caller fall back to the working-tree diff only, which is the
+    behaviour described in the docstring for that case.
+    """
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--verify", "HEAD~1"],
+            cwd=cwd, text=True,
+        ).strip()
+    except subprocess.CalledProcessError:
+        return None
+    except OSError as exc:
+        raise GateError(f"could not invoke git: {exc}") from exc
+    return sha or None
+
+
 def _ci_mode() -> bool:
     """True iff the surrounding environment looks like a CI runner.
 
@@ -191,14 +214,24 @@ def diff_against_base(cwd: Path) -> list[str]:
     except OSError as exc:
         raise GateError(f"could not invoke git: {exc}") from exc
     if has_parent:
-        # F002: combine committed diff with working-tree diff so
-        # staged/unstaged/untracked Phase 1+ edits are caught before
-        # commit.  ``_working_tree_names`` folds the staged+unstaged
-        # tracked diff together with ``git ls-files --others`` so the
-        # pure-untracked case is also visible to the gate.
+        # The local-mode diff is the union of two sources so the gate
+        # catches both flavours of Phase 1+ work before it lands on
+        # the target branch:
+        #
+        # * ``HEAD~1..HEAD`` -- Phase 1+ changes already committed
+        #   but not yet on the target branch.  When these exist the
+        #   gate must verify the anchor document is already merged at
+        #   ``HEAD~1`` (the local approximation of the target branch
+        #   head); otherwise the Phase 1+ commit sneaks ahead of the
+        #   Phase 0 anchors.
+        # * working tree vs ``HEAD`` -- Phase 1+ changes staged or
+        #   edited but not yet committed.  The F002 closure requires
+        #   these to trip the gate even when ``HEAD`` itself already
+        #   carries the anchors, because in-flight Phase 1+ work
+        #   before the anchors are merged on the target branch is
+        #   exactly the scenario the contract forbids.
         committed = _diff_names("HEAD~1", "HEAD", cwd=cwd)
         working_tree = _working_tree_names(cwd)
-        # Stable order, dedup.
         seen: set[str] = set()
         combined: list[str] = []
         for path in [*committed, *working_tree]:
@@ -273,7 +306,18 @@ def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
         # satisfied contract.
         if _ci_mode():
             return False, [str(n) for n in range(1, 7)]
-        return True, []
+        # F002: in local mode the natural base is ``HEAD~1`` -- the
+        # local approximation of the target branch head.  ``HEAD~1``
+        # is the last commit before HEAD, so verifying the anchors
+        # are merged there is what "anchors are merged on the target
+        # branch before Phase 1+ starts" reduces to in a single-
+        # clone local workflow.  When ``HEAD~1`` is unavailable
+        # (initial commit), the gate defers to the working-tree
+        # contract check only.
+        local_base = _local_base_ref(cwd)
+        if local_base is None:
+            return True, []
+        base_sha = local_base
 
     if not _anchor_path_exists_at(base_sha, cwd):
         return False, [str(n) for n in range(1, 7)]
@@ -296,6 +340,26 @@ def main() -> int:
     if not phase_one_touched(paths):
         print("collapse anchor gate: OK (no Phase 1+ paths changed)")
         return 0
+
+    # F002: in-flight (working-tree) Phase 1+ changes are forbidden
+    # outright, regardless of HEAD's merge state.  Only Phase 1+
+    # changes that are already committed at HEAD are eligible for the
+    # base-reference contract check.  ``_working_tree_names`` returns
+    # the union of staged, unstaged, and pure-untracked paths, so a
+    # single Phase 1+ path present there is sufficient to trip the
+    # gate.
+    working_tree_paths = _working_tree_names(ROOT)
+    if any(path.startswith(PHASE_ONE_PREFIXES) for path in working_tree_paths):
+        print(
+            "error: Phase 1+ paths are present in the working tree "
+            "(staged, unstaged, or untracked) without being committed. "
+            f"{ANCHORS} is required to be merged on the target branch "
+            "before Phase 1+ implementation begins; commit the Phase 0 "
+            "anchors on the target branch first, then re-stage your "
+            "Phase 1+ change on top of that merge.",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         base_ok, base_missing = contract_present_at_base(ROOT)
@@ -323,7 +387,8 @@ def main() -> int:
                     f"anchor document ({ANCHORS}). The Phase 0 anchor "
                     "contract requires collapse_anchors.md to be merged "
                     "on the target branch before Phase 1+ implementation "
-                    "begins.",
+                    "begins; "
+                    f"{ANCHORS} is required when Phase 1+ paths change.",
                     file=sys.stderr,
                 )
         else:
