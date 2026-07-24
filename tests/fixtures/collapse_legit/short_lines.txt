@@ -1,0 +1,6 @@
+# shape: repeated short lines; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1
+ok
+ok
+ok
+ready
+ready

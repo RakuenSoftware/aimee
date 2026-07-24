@@ -1,0 +1,3 @@
+# shape: long paragraph span repeated verbatim twice; expected: fire; expected_loop_start_offset: 98; expected_loop_span_bytes: 202
+A long generated explanation contains enough distinct words to exceed the short-span threshold and establish a repeated block.
+A long generated explanation contains enough distinct words to exceed the short-span threshold and establish a repeated block.

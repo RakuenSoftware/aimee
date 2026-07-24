@@ -1,0 +1,2 @@
+// shape: uniform object array with required string discriminator "kind" and primitive leaves; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1
+[{"kind":"a","value":1},{"kind":"b","value":2},{"kind":"a","value":1}]
