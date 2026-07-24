@@ -4758,12 +4758,19 @@ $(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
 # PKCS#11 (SoftHSM2) vault-custody harness (#1905). Built + driven on demand by
 # scripts/p7_pkcs11_softhsm_test.sh (the vault-pkcs11-token CI gate) and by the
 # unit-tests job. Rule restored after the core-modularization restructuring
-# dropped it; mirrors p7-tpm2-harness with the PKCS#11 provider + -ldl.
+# dropped it. The generic $(OBJDIR)/modules/vault/vault_custody_pkcs11.o is
+# compiled WITHOUT -DWITH_PKCS11, so it is the stub provider whose unseal fails;
+# the harness must link the real provider, so it uses a dedicated object built
+# with -DWITH_PKCS11 + the p11-kit headers and links -ldl for dlopen().
+P11KIT_HARNESS_CFLAGS := -DWITH_PKCS11 $(shell pkg-config --cflags p11-kit-1 2>/dev/null || echo -I/usr/include/p11-kit-1)
+$(OBJDIR)/tests/vault_custody_pkcs11_hsm.o: modules/vault/vault_custody_pkcs11.c
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) $(P11KIT_HARNESS_CFLAGS) -o $@ $<
 $(TESTPREFIX)/p7-pkcs11-harness: $(OBJDIR)/tests/test_vault_custody_pkcs11.o \
-                              $(OBJDIR)/modules/vault/vault_custody_pkcs11.o \
+                              $(OBJDIR)/tests/vault_custody_pkcs11_hsm.o \
                               $(OBJDIR)/modules/vault/vault_crypto.o \
                               $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_PKCS11_LDLIBS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -ldl
 
 # P7-reseal-d2b real PostgreSQL + swtpm integration harness.  On demand only:
 # the default unit suite must remain independent of libtss2 and a scratch PG DB.
