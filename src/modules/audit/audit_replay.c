@@ -1,7 +1,7 @@
 /* audit_replay.c: read an audit-on-bus capture file and re-present the
  * governed-action rows. See audit_replay.h.
  *
- * Two consumers: the aimee-server --audit-replay CLI (text, audit_bus_replay_print)
+ * Two consumers: the aimee-server --audit-replay CLI (text, obs_bus_replay_print)
  * and the /v1/audit endpoints (JSON, audit_replay_to_json / audit_replay_capture_list).
  */
 #include "audit_replay.h"
@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audit_bus.h" /* AUDIT_BUS_KIND_ACTION */
+#include "obs_bus.h" /* OBS_BUS_KIND_ACTION */
 #include "bus_capture.h"
 #include "cJSON.h"
 
@@ -29,7 +29,7 @@
  * envelope and cJSON's escaping expansion. */
 #define AB_REPLAY_JSON_BUDGET (200 * 1024)
 
-/* Read a length-prefixed string from the audit-row payload (audit_bus.c's wire
+/* Read a length-prefixed string from the audit-row payload (obs_bus.c's wire
  * form: 7 length-prefixed strings then an int64 task id). Returns new offset, or
  * 0 on malformed input. */
 static uint32_t get_str(const uint8_t *b, uint32_t off, uint32_t len, char *out, uint32_t cap)
@@ -109,7 +109,7 @@ struct text_sink
 static void on_record_text(void *ctx, const bus_capture_event_t *ev)
 {
    struct text_sink *s = ctx;
-   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != AUDIT_BUS_KIND_ACTION)
+   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
       return;
    char actor[128], tool[256], hash[96], command[512], mode[64], reason[128], verdict[32];
    int64_t task_id;
@@ -128,7 +128,7 @@ static void on_record_text(void *ctx, const bus_capture_event_t *ev)
    s->rows++;
 }
 
-int audit_bus_replay_print(const char *path, FILE *out)
+int obs_bus_replay_print(const char *path, FILE *out)
 {
    size_t size = 0;
    uint8_t *buf = read_all(path, &size);
@@ -175,7 +175,7 @@ struct json_sink
 static void on_record_json(void *ctx, const bus_capture_event_t *ev)
 {
    struct json_sink *s = ctx;
-   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != AUDIT_BUS_KIND_ACTION)
+   if (ev->type != BUS_CAP_EVENT || ev->frame.event_kind != OBS_BUS_KIND_ACTION)
       return;
    char actor[128], tool[256], hash[96], command[512], mode[64], reason[128], verdict[32];
    int64_t task_id;

@@ -98,7 +98,7 @@ fi
 
 # 4. The vault credential-access audit trail (delivery step 3, another module on
 #    the bus): a functional check that vault access flows through the REAL server
-#    bridge -> audit_bus -> ledger with the fields mapped and NO secret leaked.
+#    bridge -> obs_bus -> ledger with the fields mapped and NO secret leaked.
 #    Run here (like the durability test) because it needs the same special bus
 #    link set the standard unit-tests build does not assemble.
 echo "checking vault-access-on-bus audit trail..."
@@ -114,7 +114,7 @@ echo "vault-access audit: ok (access -> bridge -> bus -> ledger; no secret leak)
 
 # 5. The sandbox degraded-isolation audit trail: a guarded exec that ran
 #    unsandboxed (or was refused) because the sandbox was unavailable flows
-#    through the REAL server bridge -> audit_bus -> ledger, fields mapped, no
+#    through the REAL server bridge -> obs_bus -> ledger, fields mapped, no
 #    secret leaked. Same special-link reason as the vault test.
 echo "checking sandbox degraded-isolation audit trail..."
 sbx_out=$(make -C src --no-print-directory unit-test-bus-sandbox-audit 2>&1 || true)

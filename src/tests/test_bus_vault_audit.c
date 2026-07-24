@@ -17,7 +17,7 @@
 #include <string.h>
 
 #include "audit_action.h" /* audit_ensure_key */
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "audit_ledger.h"
 #include "cJSON.h"
 #include "log.h" /* audit_log_open */
@@ -79,7 +79,7 @@ int main(void)
    audit_ensure_key(); /* so args_hash is a real keyed digest, not the sentinel */
    vault_kek_cache_clear();
 
-   /* Install the REAL bridge: vault access -> hook -> audit_bus -> ledger. */
+   /* Install the REAL bridge: vault access -> hook -> obs_bus -> ledger. */
    vault_audit_bridge_install();
 
    const char *p = "uid:7000";
@@ -97,7 +97,7 @@ int main(void)
    assert(vault_service_delete(p, "claude", "api_key") == VAULT_OK);
    assert(vault_service_unlock(p, ATTEST_TCP_BEARER, rk, sizeof rk, T0) == VAULT_ERR_TRANSPORT);
 
-   audit_bus_stop(); /* drains every in-flight row into the ledger */
+   obs_bus_stop(); /* drains every in-flight row into the ledger */
 
    cJSON *rows = audit_ledger_read(NULL, NULL);
    assert(rows);

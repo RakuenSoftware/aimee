@@ -5,9 +5,9 @@
 # binary linked the bus. Delivery step 3 — the first real module migration —
 # links it into EXACTLY ONE shipping binary, aimee-server, and ONLY to carry the
 # per-action governed-action audit row: guardrails_action_audit.c publishes the
-# row via modules/audit/audit_bus.c, which a consumer thread drains to the ledger.
+# row via modules/audit/obs_bus.c, which a consumer thread drains to the ledger.
 # So the blast radius is now precisely:
-#   - bus SOURCE:  only src/modules/bus/* and src/modules/audit/audit_bus.c may
+#   - bus SOURCE:  only src/modules/bus/* and src/modules/audit/obs_bus.c may
 #                  include a bus header (layer 3).
 #   - bus OBJECTS: only the aimee-server link line may name the bus objects
 #                  (BUS_SHIP_OBJS), and only the BUS_SHIP definition + its compile
@@ -88,7 +88,7 @@ strip_comments() {
 # each exemption is ANCHORED to a specific line form so a bus reference cannot
 # ride in on a line that merely mentions an allowed token:
 #   (a) modules/bus may be NAMED only on the BUS_SHIP_SRCS definition and the
-#       per-object -Imodules/bus compile rules for the bus + audit_bus/audit_replay
+#       per-object -Imodules/bus compile rules for the bus + obs_bus/audit_replay
 #       objects. A -Imodules/bus on ANY other object rule, or modules/bus anywhere
 #       else, trips the gate.
 #   (b) BUS_SHIP_SRCS may be CONSUMED only by its own definition and the
@@ -99,7 +99,7 @@ strip_comments() {
 hits=$({ grep -nE 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments |
    { grep -vE '^[0-9]+:BUS_SHIP_SRCS[[:space:]]*[+:]?=' || true; } |
    { grep -vE '^[0-9]+:\$\(OBJDIR\)/modules/bus/%\.o:[[:space:]]*C_FLAGS[[:space:]]*\+=[[:space:]]*-Imodules/bus$' || true; } |
-   { grep -vE '^[0-9]+:\$\(OBJDIR\)/modules/audit/audit_(bus|replay)\.o:[[:space:]]*C_FLAGS[[:space:]]*\+=[[:space:]]*-Imodules/bus$' || true; })
+   { grep -vE '^[0-9]+:\$\(OBJDIR\)/modules/audit/(obs_bus|audit_replay)\.o:[[:space:]]*C_FLAGS[[:space:]]*\+=[[:space:]]*-Imodules/bus$' || true; })
 if [ -n "$hits" ]; then
    note "FAIL: src/Makefile names modules/bus outside the BUS_SHIP definition/compile rules"
    printf '%s\n' "$hits" >&2
@@ -155,7 +155,7 @@ done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
    hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
-      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|audit_bus|audit_replay|guardrails_semantic|OBJDIR\)/modules/bus' || true; })
+      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|obs_bus|audit_replay|guardrails_semantic|OBJDIR\)/modules/bus' || true; })
    if [ -n "$hits" ]; then
       note "FAIL: $f uses modules/bus outside a bus test target"
       printf '%s\n' "$hits" >&2
@@ -174,11 +174,11 @@ while IFS= read -r hit; do
    src/tests/bus_conformance_host.c) continue ;; # slice-10 test harness
    src/tests/bus_bench.c) continue ;;             # slice-12 benchmark
    # The first real module migration onto the bus (delivery step 3): the audit
-   # module is a bus consumer, so it includes bus headers. audit_bus.c publishes
+   # module is a bus consumer, so it includes bus headers. obs_bus.c publishes
    # /drains the governed-action row; audit_replay.c reads a capture file back for
    # the aimee-server --audit-replay operator tool. Both are linked into
    # aimee-server only (BUS_SHIP_OBJS); layer 1 proves no other target links them.
-   src/modules/audit/audit_bus.c) continue ;;
+   src/modules/audit/obs_bus.c) continue ;;
    src/modules/audit/audit_replay.c) continue ;;
    esac
    note "FAIL: $hit"
@@ -303,7 +303,7 @@ if [ "$fail" -ne 0 ]; then
    note ""
    note "The event bus may be linked only into aimee-server, and only to carry the"
    note "audit migration (D7 step 3). A bus symbol in any other shipping binary, or"
-   note "a bus reference outside modules/bus + audit_bus, is a blast-radius"
+   note "a bus reference outside modules/bus + obs_bus, is a blast-radius"
    note "regression. See docs/dev/EVENT_BUS_DECISIONS.md."
    exit 1
 fi

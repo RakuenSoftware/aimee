@@ -441,7 +441,7 @@ int main(int argc, char **argv)
          fprintf(stderr, "usage: aimee-server --audit-replay <capture-file>\n");
          return 2;
       }
-      int rc = audit_bus_replay_print(argv[2], stdout);
+      int rc = obs_bus_replay_print(argv[2], stdout);
       return rc == 0 ? 0 : 1;
    }
 

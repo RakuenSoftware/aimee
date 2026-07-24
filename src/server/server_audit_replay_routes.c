@@ -1,7 +1,7 @@
 /* server_audit_replay_routes.c: the /v1/audit capture-replay HTTP handlers.
  *
  * Split out of server_state.c (which was at the 2500-line cap). These expose the
- * audit-on-bus capture streams — recorded by modules/audit/audit_bus.c — over the
+ * audit-on-bus capture streams — recorded by modules/audit/obs_bus.c — over the
  * /v1 surface as a dashboard read: list the capture files, and replay one file's
  * governed-action rows as JSON. The heavy lifting (reading + decoding a capture,
  * the byte-budget paging, the path-traversal-safe basename check) lives in

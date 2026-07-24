@@ -8,7 +8,7 @@
 #include <stdio.h>
 
 #include "audit_action.h" /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
-#include "audit_bus.h"    /* audit_bus_emit */
+#include "obs_bus.h"      /* obs_bus_emit */
 #include "sandbox.h"      /* sandbox_audit_hook_fn, sandbox_mode_to_string */
 
 /* sandbox_audit_hook_fn: publish one degraded-isolation audit row over the bus
@@ -31,8 +31,8 @@ static void on_sandbox_degraded(const char *program, sandbox_mode_t mode, int ne
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash("sandbox.exec", NULL, args_hash, sizeof args_hash);
 
-   audit_bus_emit("sandbox", "sandbox.exec", args_hash, program ? program : "", modestr,
-                  reason ? reason : "", verdict, /*task_id=*/0);
+   obs_bus_emit("sandbox", "sandbox.exec", args_hash, program ? program : "", modestr,
+                reason ? reason : "", verdict, /*task_id=*/0);
 }
 
 void sandbox_audit_bridge_install(void)

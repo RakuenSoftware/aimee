@@ -1,6 +1,6 @@
-/* test_bus_shutdown_race.c: concurrent producers racing audit_bus_stop().
+/* test_bus_shutdown_race.c: concurrent producers racing obs_bus_stop().
  *
- * Regression test for the shutdown race: audit_bus_stop() used to tear down the
+ * Regression test for the shutdown race: obs_bus_stop() used to tear down the
  * producer / host / pub_lock while in-flight emit() calls were still using them —
  * a use-after-free, and silently lost rows. The fix makes emit register in a
  * publisher refcount before re-checking `emitting`, and stop wait for that count
@@ -18,7 +18,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "db1/db1.h"
 
 #define NTHREADS 4
@@ -37,7 +37,7 @@ static void *producer(void *arg)
     * every row unambiguously (see the categorization in guardrail_events.c). */
    snprintf(e.final_action, sizeof e.final_action, "block");
    while (atomic_load(&g_keep_going))
-      audit_bus_emit_guardrail(&e); /* emits before, during, and after stop() */
+      obs_bus_emit_guardrail(&e); /* emits before, during, and after stop() */
    return NULL;
 }
 
@@ -53,7 +53,7 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    assert(db1_init(":memory:") == 0);
-   assert(audit_bus_start() == 0);
+   assert(obs_bus_start() == 0);
 
    pthread_t th[NTHREADS];
    for (long i = 0; i < NTHREADS; i++)
@@ -63,15 +63,15 @@ int main(void)
     * this is the window the fix protects. */
    struct timespec warmup = {.tv_sec = 0, .tv_nsec = 20 * 1000 * 1000}; /* 20 ms */
    nanosleep(&warmup, NULL);
-   audit_bus_stop(); /* must quiesce in-flight producers before teardown */
+   obs_bus_stop(); /* must quiesce in-flight producers before teardown */
 
    /* Producers keep calling after stop; those are rejected no-ops. Now wind down. */
    atomic_store(&g_keep_going, 0);
    for (int i = 0; i < NTHREADS; i++)
       pthread_join(th[i], NULL);
 
-   uint64_t written = audit_bus_written();
-   uint64_t dropped = audit_bus_dropped();
+   uint64_t written = obs_bus_written();
+   uint64_t dropped = obs_bus_dropped();
 
    /* Consistency: every guardrail event counted as WRITTEN must actually be in
     * db1 — no silent loss, no double count. */

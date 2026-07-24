@@ -20,14 +20,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audit_bus.h"
+#include "obs_bus.h"
 #include "bus_capture.h"
 #include "log.h"
 
 #define N                 3000
-#define KIND_AUDIT_ACTION 3000 /* must match audit_bus.c */
+#define KIND_AUDIT_ACTION 3000 /* must match obs_bus.c */
 
-/* Read a length-prefixed string from the audit-row payload (audit_bus.c's wire
+/* Read a length-prefixed string from the audit-row payload (obs_bus.c's wire
  * form: 7 length-prefixed strings then an int64 task_id). Returns new offset or
  * 0 on malformed input. */
 static uint32_t get_str(const uint8_t *b, uint32_t off, uint32_t len, char *out, uint32_t cap)
@@ -99,9 +99,9 @@ int main(void)
    setenv("AIMEE_HOME", home, 1);
    audit_log_open();
 
-   if (audit_bus_start() != 0)
+   if (obs_bus_start() != 0)
    {
-      fprintf(stderr, "FAIL: audit_bus_start\n");
+      fprintf(stderr, "FAIL: obs_bus_start\n");
       return 1;
    }
 
@@ -113,9 +113,9 @@ int main(void)
       snprintf(tool, sizeof tool, "Tool_%d", i % 7);
       snprintf(hash, sizeof hash, "v1-%d", i);
       const char *verdict = (i % 2) ? "block" : "allow";
-      audit_bus_emit("primary", tool, hash, "cd ; rm", "approve", "read_before_write", verdict, i);
+      obs_bus_emit("primary", tool, hash, "cd ; rm", "approve", "read_before_write", verdict, i);
    }
-   audit_bus_stop(); /* final flush persists the capture stream */
+   obs_bus_stop(); /* final flush persists the capture stream */
 
    /* Find this session's capture file (named audit-bus-capture-<time>-<pid>.aimeecap). */
    char path[4096];
