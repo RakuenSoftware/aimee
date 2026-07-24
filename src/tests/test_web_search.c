@@ -154,6 +154,9 @@ static void test_format_results_basic(void)
    assert(strstr(out, "First snippet.") != NULL);
    assert(strstr(out, "[2]") != NULL);
    assert(strstr(out, "Second Result") != NULL);
+   /* Titles and snippets are attacker-influenceable page content and must be
+    * fenced as untrusted, matching how web_read fences its spans. */
+   assert(strstr(out, "untrusted retrieved content") != NULL);
    free(out);
 
    web_search_free_results(results, 2);

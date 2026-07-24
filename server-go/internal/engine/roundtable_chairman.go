@@ -24,10 +24,10 @@ type chairmanPacket struct {
 // chairman receives the original request, artifact, independent reports, and
 // deterministic feedback, then submits the final structured verdict. Failure is
 // visible to the workflow; there is no roster-wide fallback or fabricated vote.
-func (r *NativeRunner) runPanelChairman(ctx context.Context, req StepRequest, panel roundtablecfg.Panel, analysis panelAnalysis, feedback wfe.ReviewFeedback, cost float64, artifactStage string) (wfe.ReviewFeedback, int, float64, string) {
+func (r *NativeRunner) runPanelChairman(ctx context.Context, req StepRequest, panel roundtablecfg.Panel, analysis panelAnalysis, feedback wfe.ReviewFeedback, cost float64, costUnknown bool, artifactStage string) (wfe.ReviewFeedback, int, float64, bool, string) {
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
-		return feedback, analysis.Approvals, cost, "chairman cannot load the reviewed artifact"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman cannot load the reviewed artifact"
 	}
 	reports := make([]discussionTranscriptReport, 0, len(analysis.Reports))
 	for _, report := range analysis.Reports {
@@ -40,40 +40,41 @@ func (r *NativeRunner) runPanelChairman(ctx context.Context, req StepRequest, pa
 	request := DelegateRequest{Role: roundtableDelegateRole, Persona: "chairman", Delegate: panel.Chairman, Prompt: prompt, Workdir: req.WorkItem.Worktree, Tools: true, DurableSlot: panelChairmanDurableSlot(req), ArtifactStage: artifactStage, ArtifactHash: reviewed.Hash, ProvidedTarget: true}
 	result, err := r.delegate(ctx, req, request)
 	cost += result.CostUSD
+	costUnknown = costUnknown || result.CostUnknown
 	if err != nil {
-		return feedback, analysis.Approvals, cost, "chairman failed: " + err.Error()
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman failed: " + err.Error()
 	}
 	doc, err := extractJSONObject(result.Response)
 	if err != nil {
-		return feedback, analysis.Approvals, cost, "chairman returned no structured verdict"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman returned no structured verdict"
 	}
 	var final panelResponse
 	if err := json.Unmarshal(doc, &final); err != nil {
-		return feedback, analysis.Approvals, cost, "chairman returned malformed JSON"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman returned malformed JSON"
 	}
 	if final.RunID != req.WorkItem.ID || final.ArtifactHash != reviewed.Hash {
-		return feedback, analysis.Approvals, cost, "chairman returned mismatched run or artifact identity"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman returned mismatched run or artifact identity"
 	}
 	stage, stageOK := normalizeRoundtableStage(final.ArtifactStage)
 	if !stageOK || stage != artifactStage {
-		return feedback, analysis.Approvals, cost, "chairman did not evaluate the declared artifact stage"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman did not evaluate the declared artifact stage"
 	}
 	alignment := strings.ToLower(strings.TrimSpace(final.OriginalRequestAlignment.Status))
 	if alignment != "aligned" && alignment != "drifted" && alignment != "unclear" {
-		return feedback, analysis.Approvals, cost, "chairman did not provide a valid original-request alignment"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman did not provide a valid original-request alignment"
 	}
 	switch strings.ToLower(strings.TrimSpace(final.Verdict)) {
 	case "approve":
 		if len(final.Findings) != 0 {
-			return feedback, analysis.Approvals, cost, "chairman returned approve with findings"
+			return feedback, analysis.Approvals, cost, costUnknown, "chairman returned approve with findings"
 		}
 		if alignment != "aligned" {
-			return feedback, analysis.Approvals, cost, "chairman returned approve without confirming original-request alignment"
+			return feedback, analysis.Approvals, cost, costUnknown, "chairman returned approve without confirming original-request alignment"
 		}
-		return wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: feedback.ArtifactHash}, len(analysis.Reports), cost, ""
+		return wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: feedback.ArtifactHash}, len(analysis.Reports), cost, costUnknown, ""
 	case "changes":
 		if len(final.Findings) == 0 {
-			return feedback, analysis.Approvals, cost, "chairman returned changes without findings"
+			return feedback, analysis.Approvals, cost, costUnknown, "chairman returned changes without findings"
 		}
 		capacity := len(final.Findings)
 		if alignment != "aligned" {
@@ -97,9 +98,9 @@ func (r *NativeRunner) runPanelChairman(ctx context.Context, req StepRequest, pa
 			out.Findings = append(out.Findings, wfe.Finding{ID: firstNonempty(finding.ID, fmt.Sprintf("chairman-%d", i+1)), Persona: "chairman", Severity: firstNonempty(finding.Severity, "blocking"), Location: finding.Location, Summary: finding.Summary, Recommendation: finding.Recommendation})
 		}
 		stabilizeFeedbackIDs(&out)
-		return out, 0, cost, ""
+		return out, 0, cost, costUnknown, ""
 	default:
-		return feedback, analysis.Approvals, cost, "chairman returned an invalid verdict"
+		return feedback, analysis.Approvals, cost, costUnknown, "chairman returned an invalid verdict"
 	}
 }
 

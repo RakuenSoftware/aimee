@@ -153,3 +153,8 @@ intent_record_*.json
 
 # Local default output from `go build ./cmd/aimee-server` in the Go rewrite.
 /server-go/aimee-server
+
+# Session scratch working files (throwaway diffs, drivers, design drafts).
+# The durable record lives in docs/proposals/ — 24 of these were committed to a
+# branch by accident because nothing ignored them.
+scratchpad/

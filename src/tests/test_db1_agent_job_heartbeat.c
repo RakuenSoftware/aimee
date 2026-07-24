@@ -160,6 +160,33 @@ static void test_uncapped_prompt_result_round_trip(void)
    printf("  PASS: test_uncapped_prompt_result_round_trip\n");
 }
 
+static void test_completed_cost_round_trip(void)
+{
+   setup_db();
+   int job = db1_agent_job_create("review", "cost accounting test", "agent", "owner");
+   assert(job > 0);
+   /* Terminal status and cost land together: a poller can never observe 'done'
+    * with the default zero cost. */
+   assert(db1_agent_job_complete(job, "done", 3, "final result", 1, 0.125) == 0);
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(row.cost_usd == 0.125);
+   assert(strcmp(row.status, "done") == 0);
+   db1_agent_job_free(&row);
+   /* A later progress update without cost must not erase the recorded spend. */
+   db1_agent_job_update(job, "done", 4, "final result");
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(row.cost_usd == 0.125);
+   db1_agent_job_free(&row);
+   assert(db1_agent_job_complete(job, "done", 4, "final result", 1, -1.0) != 0);
+   db1_agent_job_t recent[1];
+   assert(db1_agent_job_list_recent(recent, 1, 0) == 1);
+   assert(recent[0].cost_usd == 0.125);
+   db1_agent_job_free(&recent[0]);
+   teardown_db();
+   printf("  PASS: test_completed_cost_round_trip\n");
+}
+
 static void test_classify_stale_fresh(void)
 {
    setup_db();
@@ -569,6 +596,7 @@ int main(void)
    printf("db1_agent_job_heartbeat:\n");
    test_heartbeat_ext_writes_fields();
    test_uncapped_prompt_result_round_trip();
+   test_completed_cost_round_trip();
    test_classify_stale_fresh();
    test_classify_stale_in_tool();
    test_classify_stale_idle();

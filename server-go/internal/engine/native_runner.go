@@ -64,14 +64,25 @@ func (r *NativeRunner) delegate(ctx context.Context, step StepRequest, request D
 	request.WorkItemID = step.WorkItem.ID
 	request.Stage = step.Node.ID
 	request.ExecutionVersion = step.WorkItem.UpdatedAt
+	request.MaxCostUSD = step.CostLimitUSD
+	request.ReplayOnly = step.ReplayOnly
 	return r.agents.Delegate(ctx, request)
 }
 
 func (r *NativeRunner) delegateGroup(ctx context.Context, step StepRequest, requests []DelegateRequest) []DelegateGroupResult {
+	if len(requests) == 0 {
+		return nil
+	}
 	for i := range requests {
 		requests[i].WorkItemID = step.WorkItem.ID
 		requests[i].Stage = step.Node.ID
 		requests[i].ExecutionVersion = step.WorkItem.UpdatedAt
+		requests[i].ReplayOnly = step.ReplayOnly
+		if step.CostLimitUSD > 0 {
+			// Group calls execute concurrently, so their individual ceilings must
+			// sum to no more than the step reservation.
+			requests[i].MaxCostUSD = step.CostLimitUSD / float64(len(requests))
+		}
 	}
 	if group, ok := r.agents.(DelegateGroupClient); ok {
 		return group.DelegateGroup(ctx, requests)
@@ -210,9 +221,9 @@ func (r *NativeRunner) custom(ctx context.Context, req StepRequest, block wfe.Bl
 		if err != nil {
 			return StepResult{}, err
 		}
-		return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: result.CostUSD}, nil
+		return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: result.Response, CostUSD: result.CostUSD}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: block.Produces, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
@@ -231,9 +242,9 @@ func (r *NativeRunner) author(ctx context.Context, req StepRequest, kind string)
 		return StepResult{}, err
 	}
 	if strings.TrimSpace(result.Response) == "" {
-		return StepResult{Status: StepChanges, Detail: "planner returned an empty artifact", CostUSD: result.CostUSD}, nil
+		return StepResult{Status: StepChanges, Detail: "planner returned an empty artifact", CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: result.Response, CostUSD: result.CostUSD}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: kind, Artifact: result.Response, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind string) (StepResult, error) {
@@ -252,6 +263,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		}
 	}
 	var cost float64
+	costUnknown := false
 	var result DelegateResult
 	var content []byte
 	var validationErr error
@@ -261,6 +273,7 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 			return StepResult{}, validationErr
 		}
 		cost += result.CostUSD
+		costUnknown = costUnknown || result.CostUnknown
 		content, validationErr = extractJSONObject(result.Response)
 		if validationErr == nil {
 			validationErr = validateStructured(kind, content)
@@ -277,13 +290,13 @@ func (r *NativeRunner) structured(ctx context.Context, req StepRequest, kind str
 		prompt += "\n\nYOUR PREVIOUS RESPONSE WAS INVALID (" + validationErr.Error() + "). Repair it and return one complete JSON object only. Do not truncate or omit any field.\n\nCOMPLETE INVALID RESPONSE:\n" + result.Response
 	}
 	if validationErr != nil {
-		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost}, nil
+		return StepResult{Status: StepChanges, Detail: "structured response remained invalid after corrective synthesis: " + validationErr.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
 	}
 	typeName := "intent"
 	if kind == "packets" {
 		typeName = "plan"
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: typeName, Artifact: string(content), CostUSD: cost}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: typeName, Artifact: string(content), CostUSD: cost, CostUnknown: costUnknown}, nil
 }
 
 func (r *NativeRunner) branchOpen(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -320,6 +333,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		prompt += "\n\nREVIEW FEEDBACK TO RESOLVE:\n" + string(encoded)
 	}
 	var cost float64
+	costUnknown := false
 	if !docs && paramBool(req.Node, "tdd") {
 		testPrompt := "Write the failing tests required by this task before implementation. Run them to confirm they fail for the intended reason, and leave the tests in the worktree.\n\n" + prompt
 		// implement/document are native branch-producing blocks regardless of the
@@ -330,6 +344,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 			return StepResult{}, testErr
 		}
 		cost += testResult.CostUSD
+		costUnknown = costUnknown || testResult.CostUnknown
 		if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 			return StepResult{}, err
 		}
@@ -343,6 +358,7 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		return StepResult{}, err
 	}
 	cost += result.CostUSD
+	costUnknown = costUnknown || result.CostUnknown
 	if err := r.ensureRunnable(ctx, req.WorkItem.ID); err != nil {
 		return StepResult{}, err
 	}
@@ -351,14 +367,14 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 	}
 	if !docs {
 		if err := r.verifier.Verify(ctx, workdir); err != nil {
-			return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: cost}, nil
+			return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
 		}
 	}
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
 	if err != nil {
 		return StepResult{}, err
 	}
-	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: cost}, nil
+	return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch, ContentHash: head, CostUSD: cost, CostUnknown: costUnknown}, nil
 }
 
 func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -389,7 +405,7 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 		return malformedReview(reviewed.Hash, persona, err, result.CostUSD), nil
 	}
 	if parsed.Verdict == "approve" && len(parsed.Findings) == 0 {
-		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: result.CostUSD}, nil
+		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 	}
 	feedback := wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: reviewed.Hash}
 	for i, finding := range parsed.Findings {
@@ -398,7 +414,7 @@ func (r *NativeRunner) review(ctx context.Context, req StepRequest) (StepResult,
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "review-invalid", Persona: persona, Severity: "blocking", Summary: "review did not approve and supplied no finding", Recommendation: "review the artifact and provide an actionable finding"})
 	}
-	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: result.CostUSD}, nil
+	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: result.CostUSD, CostUnknown: result.CostUnknown}, nil
 }
 
 func (r *NativeRunner) checkMergeable(ctx context.Context, req StepRequest) (StepResult, error) {
@@ -503,11 +519,13 @@ type panelAnalysis struct {
 	Approvals   int
 	Voters      int
 	CostUSD     float64
+	CostUnknown bool
 	Unreachable string
 	Reports     []panelSeatReport
 }
 
 func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepResult, error) {
+	stepCostLimit := req.CostLimitUSD
 	lenses := panelSeats(req.Node)
 	if len(lenses) == 0 {
 		// A saved roundtable owns its exact seats and personas. Workflow-local panel
@@ -542,6 +560,14 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	reviewed, ok := req.Inputs["src"]
 	if !ok {
 		return StepResult{}, errors.New("roundtable missing src input")
+	}
+	// The author looped back without changing the artifact, so a fresh panel
+	// would reach the same verdict at full cost. Re-serve the existing findings
+	// instead of paying for a re-review of identical bytes.
+	if req.Feedback != nil && req.Feedback.ArtifactHash == reviewed.Hash && len(req.Feedback.Findings) > 0 {
+		unchanged := *req.Feedback
+		return StepResult{Status: StepChanges, Feedback: &unchanged,
+			Detail: "artifact unchanged since the previous review; prior findings still apply"}, nil
 	}
 	workdir := req.WorkItem.Worktree
 	if workdir == "" && req.WorkItem.Repo != "" {
@@ -580,24 +606,32 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	if analysis.Unreachable != "" && len(analysis.Reports) < panel.MinSuccessful {
 		rt := roundtableResult(&analysis.Feedback, false, false, analysis, len(seats), analysis.CostUSD)
 		rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
-		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, Roundtable: rt}, nil
+		return StepResult{Status: StepPending, PauseReason: "panel_unreachable", Detail: analysis.Unreachable, CostUSD: analysis.CostUSD, CostUnknown: analysis.CostUnknown, Roundtable: rt}, nil
 	}
 	feedback, approvals, totalCost := analysis.Feedback, analysis.Approvals, analysis.CostUSD
+	totalCostUnknown := analysis.CostUnknown
 	discussionFailed := 0
 	if panel.Discussion {
+		req.CostLimitUSD = remainingCostLimit(stepCostLimit, totalCost)
 		var discussionErr string
-		feedback, approvals, totalCost, discussionFailed, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
+		feedback, approvals, totalCost, totalCostUnknown, discussionFailed, discussionErr = r.runPanelDiscussion(roundtableCtx, req, panel, analysis, stage)
 		deadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 		if discussionErr != "" {
 			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
 			rt.Degraded = rt.Degraded || discussionFailed > 0
 			rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
-			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, Roundtable: rt}, nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_discussion", Detail: discussionErr, CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
 		}
 	}
 	if panel.ChairmanEnabled {
+		req.CostLimitUSD = remainingCostLimit(stepCostLimit, totalCost)
+		if stepCostLimit > 0 && req.CostLimitUSD <= 0 {
+			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
+			rt.Degraded = true
+			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: "chairman cannot start after the workflow cost reservation is exhausted", CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
+		}
 		var chairmanErr string
-		feedback, approvals, totalCost, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, stage)
+		feedback, approvals, totalCost, totalCostUnknown, chairmanErr = r.runPanelChairman(roundtableCtx, req, panel, analysis, feedback, totalCost, totalCostUnknown, stage)
 		deadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
 		if chairmanErr != "" {
 			rt := roundtableResult(&feedback, false, false, analysis, len(seats), totalCost)
@@ -606,15 +640,21 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 			// parked result just like an unusable analysis or discussion response.
 			rt.Degraded = true
 			rt.DeadlineHit = deadlineHit || errors.Is(roundtableCtx.Err(), context.DeadlineExceeded)
-			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost, Roundtable: rt}, nil
+			return StepResult{Status: StepPending, PauseReason: "roundtable_chairman", Detail: chairmanErr, CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
 		}
 	}
 	quorum := panel.MinSuccessful
-	if approvals >= quorum && len(feedback.Findings) == 0 {
+	// Only foundational/blocking findings gate the artifact. Suggestions and nits
+	// are recorded on the feedback (and still reach the author) but must not hold
+	// the gate: the panel prompt defines the severity taxonomy precisely so that
+	// "ordinary defects, suggestions, and nits" are distinguishable from work that
+	// cannot ship. Gating on every finding made any multi-seat gate unpassable --
+	// one nit from one seat looped the stage until its iteration cap.
+	if approvals >= quorum && blockingFindingCount(feedback.Findings) == 0 {
 		rt := roundtableResult(&feedback, true, true, analysis, len(seats), totalCost)
 		rt.Degraded = rt.Degraded || discussionFailed > 0
 		rt.DeadlineHit = deadlineHit
-		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, Roundtable: rt}, nil
+		return StepResult{Status: StepAdvanced, ArtifactType: "verdict", Artifact: "approved", ContentHash: reviewed.Hash, CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
 	}
 	if len(feedback.Findings) == 0 {
 		feedback.Findings = append(feedback.Findings, wfe.Finding{ID: "quorum", Persona: "panel", Severity: "blocking", Summary: "required approval quorum was not reached", Recommendation: "revise the artifact and reconvene the configured roundtable"})
@@ -622,7 +662,7 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	rt := roundtableResult(&feedback, false, true, analysis, len(seats), totalCost)
 	rt.Degraded = rt.Degraded || discussionFailed > 0
 	rt.DeadlineHit = deadlineHit
-	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, Roundtable: rt}, nil
+	return StepResult{Status: StepChanges, Feedback: &feedback, CostUSD: totalCost, CostUnknown: totalCostUnknown, Roundtable: rt}, nil
 }
 
 func roundtableStageGuidance(stage string) string {
@@ -649,11 +689,12 @@ func normalizeRoundtableStage(raw string) (string, bool) {
 
 func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, seats []panelSeat, prompt, artifactHash, artifactStage string, panelRound int) panelAnalysis {
 	type outcome struct {
-		seat   panelSeat
-		result panelResponse
-		raw    string
-		cost   float64
-		err    error
+		seat        panelSeat
+		result      panelResponse
+		raw         string
+		cost        float64
+		costUnknown bool
+		err         error
 	}
 	requests := make([]DelegateRequest, len(seats))
 	for i, seat := range seats {
@@ -669,9 +710,21 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 		parsed, err := parsePanelResponse(call.Response, call.Err)
 		seat := seats[i]
 		seat.participant = call.Participant
-		outcomes[i] = outcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD, err: err}
+		outcomes[i] = outcome{seat: seat, result: parsed, raw: call.Response, cost: call.CostUSD, costUnknown: call.CostUnknown, err: err}
 		if err != nil && call.Err == nil && strings.TrimSpace(call.Participant) != "" {
 			repairIndexes = append(repairIndexes, i)
+		}
+	}
+	if len(repairIndexes) > 0 {
+		if req.CostLimitUSD > 0 {
+			var spent float64
+			for _, outcome := range outcomes {
+				spent += outcome.cost
+			}
+			req.CostLimitUSD = remainingCostLimit(req.CostLimitUSD, spent)
+			if req.CostLimitUSD <= 0 {
+				repairIndexes = nil
+			}
 		}
 	}
 	if len(repairIndexes) > 0 {
@@ -698,6 +751,7 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			outcomeIndex := repairIndexes[i]
 			parsed, err := parsePanelResponse(call.Response, call.Err)
 			outcomes[outcomeIndex].cost += call.CostUSD
+			outcomes[outcomeIndex].costUnknown = outcomes[outcomeIndex].costUnknown || call.CostUnknown
 			outcomes[outcomeIndex].result = parsed
 			outcomes[outcomeIndex].err = err
 		}
@@ -706,9 +760,11 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 	reports := make([]panelSeatReport, 0, len(seats))
 	approvals, voters := 0, len(seats)
 	var cost float64
+	costUnknown := false
 	var seatFailures []string
 	for _, o := range outcomes {
 		cost += o.cost
+		costUnknown = costUnknown || o.costUnknown
 		if o.err != nil {
 			seatFailures = append(seatFailures, o.seat.persona+": "+o.err.Error())
 			voters--
@@ -759,7 +815,33 @@ func (r *NativeRunner) runPanelAnalysis(ctx context.Context, req StepRequest, se
 			feedback.Findings = append(feedback.Findings, wfe.Finding{ID: firstNonempty(f.ID, fmt.Sprintf("%s-%d", o.seat.persona, i+1)), Persona: o.seat.persona, Severity: firstNonempty(f.Severity, "blocking"), Location: f.Location, Summary: f.Summary, Recommendation: f.Recommendation})
 		}
 	}
-	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
+	return panelAnalysis{Feedback: feedback, Approvals: approvals, Voters: voters, CostUSD: cost, CostUnknown: costUnknown, Unreachable: strings.Join(seatFailures, "; "), Reports: reports}
+}
+
+// blockingFindingCount counts only the severities that must stop an artifact.
+// An unrecognised or empty severity is treated as blocking: a reviewer that
+// cannot classify its own finding gets the safe interpretation.
+func blockingFindingCount(findings []wfe.Finding) int {
+	blocking := 0
+	for _, finding := range findings {
+		switch strings.ToLower(strings.TrimSpace(finding.Severity)) {
+		case "suggestion", "nit":
+		default:
+			blocking++
+		}
+	}
+	return blocking
+}
+
+func remainingCostLimit(limit, spent float64) float64 {
+	if limit <= 0 {
+		return 0
+	}
+	remaining := limit - spent
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func parsePanelResponse(response string, delegateErr error) (panelResponse, error) {

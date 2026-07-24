@@ -623,6 +623,39 @@ func TestConfiguredRoundtableChairmanFailureIsVisiblyDegraded(t *testing.T) {
 	}
 }
 
+type budgetExhaustionAgents struct{ chairmanCalls int }
+
+func (a *budgetExhaustionAgents) Delegate(_ context.Context, request DelegateRequest) (DelegateResult, error) {
+	if request.Persona == "chairman" {
+		a.chairmanCalls++
+	}
+	return DelegateResult{Response: `{"artifact_stage":"` + request.ArtifactStage + `","original_request_alignment":{"status":"aligned","summary":"implements the request"},"verdict":"approve","findings":[]}`, CostUSD: request.MaxCostUSD}, nil
+}
+
+func (a *budgetExhaustionAgents) DelegateGroup(ctx context.Context, requests []DelegateRequest) []DelegateGroupResult {
+	return testDelegateGroup(ctx, requests, a.Delegate)
+}
+
+func TestRoundtableDoesNotLaunchChairmanAfterCostExhaustion(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"name":"default","seats":[{"model":"codex","persona":"security"}],"min_successful":1,"chairman":"codex","chairman_enabled":true}`
+	if err := os.WriteFile(filepath.Join(dir, "default.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := roundtablecfg.NewStore(dir, func() (string, error) { return "default", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := &budgetExhaustionAgents{}
+	runner := &NativeRunner{agents: agents, roundtables: store}
+	reviewed := wfe.Artifact{Type: "plan", Content: []byte("complete plan")}
+	reviewed.Hash = wfe.Hash(reviewed.Content)
+	result, err := runner.roundtable(t.Context(), StepRequest{WorkItem: db1.WorkItem{ID: "wi", Worktree: "/worktree"}, Node: wfe.Node{ID: "gate", Block: "gate.roundtable"}, Proposal: "implement it", Inputs: map[string]wfe.Artifact{"src": reviewed}, CostLimitUSD: 1})
+	if err != nil || result.Status != StepPending || result.PauseReason != "roundtable_chairman" || agents.chairmanCalls != 0 {
+		t.Fatalf("result=%+v chairman_calls=%d err=%v", result, agents.chairmanCalls, err)
+	}
+}
+
 func TestRoundtableStageGuidanceCoversEverySupportedStage(t *testing.T) {
 	tests := map[string]string{
 		"intent":      "acceptance criteria faithfully capture",
@@ -1136,5 +1169,65 @@ func TestExtractJSONObjectFailsClosedAfterMismatchedCandidate(t *testing.T) {
 		if doc, err := extractJSONObject(response); err == nil {
 			t.Fatalf("accepted object after ambiguous framing %q as %s", response, doc)
 		}
+	}
+}
+
+// Suggestions and nits must not gate an artifact: the panel's severity taxonomy
+// exists to separate work that cannot ship from advisory polish. Gating on every
+// finding made any multi-seat gate unpassable.
+func TestBlockingFindingCountIgnoresAdvisorySeverities(t *testing.T) {
+	cases := []struct {
+		name     string
+		findings []wfe.Finding
+		want     int
+	}{
+		{"empty", nil, 0},
+		{"only advisory", []wfe.Finding{{Severity: "suggestion"}, {Severity: "nit"}, {Severity: "NIT"}, {Severity: " Suggestion "}}, 0},
+		{"blocking and foundational", []wfe.Finding{{Severity: "blocking"}, {Severity: "foundational"}}, 2},
+		{"mixed", []wfe.Finding{{Severity: "nit"}, {Severity: "blocking"}, {Severity: "suggestion"}}, 1},
+		{"unclassified is blocking", []wfe.Finding{{Severity: ""}, {Severity: "weird"}}, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := blockingFindingCount(tc.findings); got != tc.want {
+				t.Fatalf("blockingFindingCount=%d want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// Looping back to the gate without changing the artifact must not pay for a
+// fresh panel: identical bytes yield an identical verdict, so the prior findings
+// are re-served. A live run burned three roundtable rounds re-reviewing one
+// unchanged artifact hash before this.
+func TestRoundtableSkipsReviewWhenArtifactIsUnchanged(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"ok"},"verdict":"approve","findings":[]}`}
+	runner := &NativeRunner{agents: agents}
+	artifact := wfe.Artifact{Type: "plan", Content: []byte("unchanged plan")}
+	artifact.Hash = wfe.Hash(artifact.Content)
+	prior := &wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifact.Hash, Findings: []wfe.Finding{{
+		ID: "f1", Persona: "qa", Severity: "blocking", Summary: "still broken", Recommendation: "fix it",
+	}}}
+	result, err := runner.roundtable(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi_unchanged", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+		Proposal: "fix the scheduler",
+		Inputs:   map[string]wfe.Artifact{"src": artifact},
+		Feedback: prior,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.requests) != 0 {
+		t.Fatalf("panel was re-invoked on an unchanged artifact: %d delegate requests", len(agents.requests))
+	}
+	if result.Status != StepChanges {
+		t.Fatalf("status=%q, want changes", result.Status)
+	}
+	if result.CostUSD != 0 {
+		t.Fatalf("unchanged re-review cost %v, want 0", result.CostUSD)
+	}
+	if result.Feedback == nil || len(result.Feedback.Findings) != 1 || result.Feedback.Findings[0].ID != "f1" {
+		t.Fatalf("prior findings not re-served: %+v", result.Feedback)
 	}
 }

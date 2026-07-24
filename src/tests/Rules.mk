@@ -43,7 +43,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
 TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_turn.o $(DB1_OBJS) \
-                             $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
+                             $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/modules/skill/skill_review.o $(OBJDIR)/modules/skill/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/agent_eval/agent_eval.o $(OBJDIR)/modules/agent_eval/agent_eval_memory_support.o $(OBJDIR)/modules/agent_eval/agent_eval_baseline.o \
@@ -58,6 +58,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(OBJDIR)/code_outline.o $(OBJDIR)/posix/agent_tools_anchored.o \
                              $(OBJDIR)/posix/web_read.o \
                              $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                              $(OBJDIR)/server/token_tracker.o \
                              $(OBJDIR)/server/process_mgr.o \
                              $(OBJDIR)/modules/lsp/lsp_manager.o $(OBJDIR)/modules/lsp/lsp_client.o \
@@ -157,6 +158,15 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-manager-blocks \
                $(TESTPREFIX)/unit-test-wfe-manager-artifacts \
                $(TESTPREFIX)/unit-test-wfe-externalization \
+               $(TESTPREFIX)/unit-test-tool-egress \
+               $(TESTPREFIX)/unit-test-cli-claude-allowlist \
+               $(TESTPREFIX)/unit-test-web-read-spans \
+               $(TESTPREFIX)/unit-test-web-egress \
+               $(TESTPREFIX)/unit-test-web-page-cache \
+               $(TESTPREFIX)/unit-test-web-search-fusion \
+               $(TESTPREFIX)/unit-test-web-search-fuse \
+               $(TESTPREFIX)/unit-test-web-search-breaker \
+               $(TESTPREFIX)/unit-test-kb-rrf-purity \
                $(TESTPREFIX)/unit-test-wfe-deliver \
                $(TESTPREFIX)/unit-test-wfe-manager-flow \
                $(TESTPREFIX)/unit-test-wfe-router \
@@ -396,7 +406,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
-               $(TESTPREFIX)/unit-test-models-dev \
+               $(TESTPREFIX)/unit-test-models-dev $(TESTPREFIX)/unit-test-agent-tier-lint \
+               $(TESTPREFIX)/unit-test-delegate-verify \
                $(TESTPREFIX)/unit-test-p3b-spend \
                $(TESTPREFIX)/unit-test-model-provider \
                $(TESTPREFIX)/unit-test-delegate-driver \
@@ -1065,6 +1076,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
+                      $(OBJDIR)/modules/workflows/tool_egress.o \
                       $(OBJDIR)/tests/test_agent_responses.o \
                       $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/server/aimee_backend_responses.o \
                       $(OBJDIR)/server/aimee_backend_anthropic.o $(OBJDIR)/server/aimee_backend_openai.o \
@@ -1080,6 +1092,10 @@ $(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test
                       $(OBJDIR)/server/middleware.o $(OBJDIR)/server/liveness.o \
                       $(OBJDIR)/server/cli_session.o $(OBJDIR)/server/agent_policy_intercept.o \
                       $(OBJDIR)/modules/economizer/economizer_json.o \
+                      $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
+                      $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
+                      $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
+                      $(OBJDIR)/server/ollama_profile.o $(OBJDIR)/server/llama_native_profile.o \
                       $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1254,7 +1270,7 @@ $(TESTPREFIX)/unit-test-roundtable-preset: $(OBJDIR)/tests/test_roundtable_prese
 
 $(TESTPREFIX)/unit-test-roundtable-seat-resolve: $(OBJDIR)/tests/test_roundtable_seat_resolve.o \
                       $(OBJDIR)/modules/roundtable/roundtable_seat_resolve.o \
-                      $(OBJDIR)/server/agent_config.o \
+                      $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o \
                       $(OBJDIR)/tests/support/vault_service_stub.o \
                       $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                       $(OBJDIR)/tests/support/provider_cli_adapter_stub.o \
@@ -1501,7 +1517,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o $(OBJDIR)/server/server_seed_config.o $(OBJDIR)/server/server_api_status.o $(OBJDIR)/server_provider.o $(OBJDIR)/server_insights.o $(OBJDIR)/server_eval.o \
-	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
+	$(OBJDIR)/server/s2_native_gate_hook.o $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
 	$(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
                       $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o \
                       $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
@@ -1594,11 +1610,17 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/workspace/workspace_provider_container.o $(OBJDIR)/modules/delegates/delegate_backend.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/workspace/workspace_provider_detached.o \
                                $(OBJDIR)/modules/workspace/workspace_runner_registry.o $(OBJDIR)/modules/workspace/workspace_runner_queue.o \
                                $(OBJDIR)/modules/workspace/workspace_mirror.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o \
-                               $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o
+	                               $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/json_fluent.o \
+	                               $(OBJDIR)/server/token_tracker.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-list-handler: $(OBJDIR)/tests/test_agent_list_handler.o \
-                               $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o \
+                               $(OBJDIR)/server/server_agent.o $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o \
+                               $(OBJDIR)/agent_tier_lint.o \
+                               $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
+                               $(OBJDIR)/server/anthropic_profile.o $(OBJDIR)/server/minimax_profile.o \
+                               $(OBJDIR)/server/mistral_profile.o $(OBJDIR)/server/openrouter_profile.o \
+                               $(OBJDIR)/server/ollama_profile.o $(OBJDIR)/server/llama_native_profile.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev_cache.o $(OBJDIR)/models_dev.o \
                                $(OBJDIR)/tests/support/vault_service_stub.o \
                                $(OBJDIR)/tests/support/oauth_tokens_stub.o \
@@ -1662,8 +1684,63 @@ $(TESTPREFIX)/unit-test-wfe-manager-artifacts: $(OBJDIR)/tests/test_wfe_manager_
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-rrf-purity: $(OBJDIR)/tests/test_kb_rrf_purity.o $(OBJDIR)/rrf.o
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+
+$(TESTPREFIX)/unit-test-web-search-fusion: $(OBJDIR)/tests/test_web_search_fusion.o \
+                                    $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
+                                    $(OBJDIR)/posix/web_read.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-search-fuse: $(OBJDIR)/tests/test_web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search_fuse.o \
+                                    $(OBJDIR)/server/web_search.o \
+                                    $(OBJDIR)/posix/web_read.o \
+                                    $(OBJDIR)/rrf.o \
+                                    $(OBJDIR)/db1/web_page_cache.o $(OBJDIR)/db1/db1_init.o \
+                                    $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/db1_write.o \
+                                    $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
+
+$(TESTPREFIX)/unit-test-web-search-breaker: $(OBJDIR)/tests/test_web_search_breaker.o \
+                                    $(OBJDIR)/server/web_search_breaker.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-page-cache: $(OBJDIR)/tests/test_web_page_cache.o \
+                                    $(OBJDIR)/db1/web_page_cache.o $(OBJDIR)/db1/db1_init.o \
+                                    $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/db1_write.o \
+                                    $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-egress: $(OBJDIR)/tests/test_web_egress.o \
+                                    $(OBJDIR)/posix/web_egress.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
+	$(CC) $(L_FLAGS) -o $@ $^
+
+$(TESTPREFIX)/unit-test-cli-claude-allowlist: $(OBJDIR)/tests/test_cli_claude_allowlist.o \
+                                    $(OBJDIR)/server/cli_claude.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o \
+                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o \
+                                    $(OBJDIR)/modules/workflows/tool_egress.o
+	$(TESTLINK) -o $@ $^ $(L_CORE)
+
+$(TESTPREFIX)/unit-test-tool-egress: $(OBJDIR)/tests/test_tool_egress.o \
+                                    $(OBJDIR)/modules/workflows/tool_egress.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o \
+                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o
+	$(CC) $(L_FLAGS) -o $@ $^
+
 $(TESTPREFIX)/unit-test-wfe-externalization: $(OBJDIR)/tests/test_wfe_externalization.o \
-                                    $(OBJDIR)/modules/workflows/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-deliver: $(OBJDIR)/tests/test_wfe_deliver.o \
@@ -1687,11 +1764,11 @@ $(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomou
 
 # S2 enforcement pure cores (no engine/DB deps).
 $(TESTPREFIX)/unit-test-wfe-native-gate: $(OBJDIR)/tests/test_wfe_native_gate.o \
-                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_native_gate.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-enforce: $(OBJDIR)/tests/test_wfe_enforce.o \
-                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o
+                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 sub-slice 3: advance_request pure core (parser + CAS/replay decision; cJSON only).
@@ -1702,7 +1779,7 @@ $(TESTPREFIX)/unit-test-wfe-advance: $(OBJDIR)/tests/test_wfe_advance.o \
 # S2 binding seam: auth-token->sid parser + idempotent interactive bind.
 $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.o \
                                     $(OBJDIR)/modules/workflows/wfe_bind_ingress.o $(OBJDIR)/log.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
-                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/modules/workflows/wfe_router.o $(OBJDIR)/modules/workflows/wfe_router_catalog.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
@@ -1720,7 +1797,7 @@ $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.
 $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_ingestor.o \
                                     $(OBJDIR)/server/primary_cli_ingestor.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/modules/workflows/wfe_bind_ingress.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
-                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/modules/workflows/wfe_router.o $(OBJDIR)/modules/workflows/wfe_router_catalog.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
@@ -1735,7 +1812,7 @@ $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_i
 # S2 sub-slice 4: per-block resolver + dispatch-time externalization guard.
 $(TESTPREFIX)/unit-test-wfe-block-resolve: $(OBJDIR)/tests/test_wfe_block_resolve.o \
                                     $(OBJDIR)/modules/workflows/wfe_block_resolve.o $(OBJDIR)/modules/workflows/wfe_enforce.o \
-                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
@@ -1749,7 +1826,7 @@ $(TESTPREFIX)/unit-test-wfe-block-resolve: $(OBJDIR)/tests/test_wfe_block_resolv
 # S2 sub-slice 3: interactive-driver executor (binding + engine + audit).
 $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.o \
                                     $(OBJDIR)/modules/workflows/wfe_advance_exec.o $(OBJDIR)/modules/workflows/wfe_advance.o \
-                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o \
+                                    $(OBJDIR)/modules/workflows/wfe_enforce.o $(OBJDIR)/modules/workflows/wfe_externalization.o $(OBJDIR)/modules/workflows/tool_egress.o \
                                     $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/modules/workflows/wfe_blocks.o $(OBJDIR)/modules/workflows/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/modules/workflows/wfe_manager_artifacts.o $(OBJDIR)/modules/workflows/wfe_deliver.o \
@@ -2414,7 +2491,6 @@ $(TESTPREFIX)/unit-test-dstr: $(OBJDIR)/tests/test_dstr.o $(OBJDIR)/dstr.o
 # The aimee-client test compiles its in-process TLS mock only in WITH_TLS builds.
 $(OBJDIR)/tests/test_aimee_client.o: C_FLAGS += $(TLS_FLAGS)
 $(OBJDIR)/tests/test_kb_graph.o: C_FLAGS += -Ikb
-$(OBJDIR)/tests/test_kb_rrf.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_kb_graph_analytics.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_cite_tracker.o: C_FLAGS += -Ikb
 $(OBJDIR)/tests/test_lessons_reflect.o: C_FLAGS += -Ikb
@@ -2428,7 +2504,7 @@ $(TESTPREFIX)/unit-test-kb-graph: $(OBJDIR)/tests/test_kb_graph.o \
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
 # Reciprocal Rank Fusion core (§5 hybrid retrieval scoring model). Pure: no DB.
-$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/kb/kb_rrf.o
+$(TESTPREFIX)/unit-test-kb-rrf: $(OBJDIR)/tests/test_kb_rrf.o $(OBJDIR)/rrf.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lm
 
 # Graph analytics: degree-centrality hub ranking (§4). Pure: no DB.
@@ -2678,7 +2754,7 @@ $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/
                             $(OBJDIR)/posix/agent_bridge.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/cmd_doctor.o \
+$(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/cmd_doctor.o $(OBJDIR)/agent_tier_lint.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                             $(OBJDIR)/hardware_probe.o \
                             $(DB2_OBJS) \
@@ -2692,7 +2768,7 @@ $(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-cmd-onboard: $(OBJDIR)/tests/test_cmd_onboard.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                             $(OBJDIR)/cmd_onboard.o $(OBJDIR)/cmd_core.o $(OBJDIR)/cmd_init.o \
-                            $(OBJDIR)/cmd_doctor.o $(OBJDIR)/hardware_probe.o $(OBJDIR)/cmd_util.o \
+                            $(OBJDIR)/cmd_doctor.o $(OBJDIR)/agent_tier_lint.o $(OBJDIR)/hardware_probe.o $(OBJDIR)/cmd_util.o \
                             $(DB2_OBJS) \
                             $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
@@ -3010,6 +3086,7 @@ $(TESTPREFIX)/unit-test-skill-review: $(OBJDIR)/tests/test_skill_review.o \
 
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/web_search.o $(TEST_CORE_OBJS) \
+                                    $(OBJDIR)/server/web_search_fuse.o $(OBJDIR)/server/web_search_breaker.o $(OBJDIR)/rrf.o \
                             $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o
@@ -4273,7 +4350,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
                            $(OBJDIR)/server/compute_pool.o \
-                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
+                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_route.o $(OBJDIR)/tests/support/provider_cli_adapter_stub.o $(OBJDIR)/tests/support/model_provider_stub.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/modules/roundtable/roundtable_preset.o \
                            $(OBJDIR)/role_templates.o \
@@ -4306,6 +4383,17 @@ $(TESTPREFIX)/unit-test-model-registry: $(OBJDIR)/tests/test_model_registry.o \
                                 $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                                 $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
                                 $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-agent-tier-lint: $(OBJDIR)/tests/test_agent_tier_lint.o \
+                                $(OBJDIR)/agent_tier_lint.o \
+                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
+                                $(OBJDIR)/models_dev_cache.o $(OBJDIR)/aimee_home.o \
+                                $(OBJDIR)/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-delegate-verify: $(OBJDIR)/tests/test_delegate_verify.o \
+                                $(OBJDIR)/modules/delegates/delegate_verify.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-models-dev: $(OBJDIR)/tests/test_models_dev.o \
@@ -4928,7 +5016,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
                      $(OBJDIR)/kb/http/kb_http_code_graphfb.o $(OBJDIR)/kb/lessons_reflect.o \
                                     $(OBJDIR)/kb/lessons_session_capture.o $(OBJDIR)/kb/lessons_cite_tracker.o \
-                     $(OBJDIR)/kb/kb_rrf.o \
+                     $(OBJDIR)/rrf.o \
                      $(OBJDIR)/kb/kb_graph_analytics.o \
                      $(OBJDIR)/kb/prompt_sanitizer.o \
                      $(OBJDIR)/kb/http/kb_http_pdf.o \

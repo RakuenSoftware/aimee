@@ -59,7 +59,7 @@ func TestDiscussionNitsHaveExactlyOneCycle(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 {
 		t.Fatalf("discussion failed: err=%q feedback=%+v", errText, feedback)
 	}
@@ -83,7 +83,7 @@ func TestDiscussionAbstentionAloneDoesNotExtend(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"abstain"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 2 {
 		t.Fatalf("abstention extended or erased issue: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -97,7 +97,7 @@ func TestDiscussionRejectsIncompleteBallots(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if !strings.Contains(errText, "discussion quorum 0/2") {
 		t.Fatalf("incomplete ballots counted as successful: %q", errText)
 	}
@@ -110,7 +110,7 @@ func TestDiscussionRejectsStaleRunAndArtifactIdentity(t *testing.T) {
 		return fmt.Sprintf(`{"run_id":"another-run","artifact_hash":"stale","positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if !strings.Contains(errText, "discussion quorum 0/2") {
 		t.Fatalf("stale discussion ballots counted as successful: %q", errText)
 	}
@@ -127,7 +127,7 @@ func TestDiscussionOrdinaryDisagreementDoesNotExtend(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 2 {
 		t.Fatalf("ordinary disagreement extended: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -144,7 +144,7 @@ func TestDiscussionFoundationalTieExtendsOnlyUntilMajority(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 4 {
 		t.Fatalf("foundational consensus: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -168,7 +168,7 @@ func TestDiscussionFailureRemainsDegradedAfterSeatRecovers(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":%q}]}`, issueID, position), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, _, _, failed, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, _, _, _, failed, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 1 || len(agents.requests) != 6 {
 		t.Fatalf("seat recovery did not complete consensus: calls=%d err=%q feedback=%+v", len(agents.requests), errText, feedback)
 	}
@@ -184,7 +184,7 @@ func TestDiscussionFoundationalAgreementHasOneCycle(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"agree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	_, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	_, _, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(agents.requests) != 2 {
 		t.Fatalf("unanimous foundational issue extended: calls=%d err=%q", len(agents.requests), errText)
 	}
@@ -197,7 +197,7 @@ func TestDiscussionRejectMajorityDropsIssueDeterministically(t *testing.T) {
 		return fmt.Sprintf(`{"positions":[{"id":%q,"position":"disagree"}]}`, issueID), nil
 	}}
 	runner := &NativeRunner{agents: agents}
-	feedback, approvals, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
+	feedback, approvals, _, _, _, errText := runner.runPanelDiscussion(context.Background(), StepRequest{WorkItem: db1.WorkItem{ID: "wi"}, Node: wfe.Node{ID: "gate"}}, roundtablecfg.Panel{Discussion: true, MinSuccessful: 2}, analysis, "plan")
 	if errText != "" || len(feedback.Findings) != 0 || approvals != 2 {
 		t.Fatalf("deterministic rejection failed: approvals=%d err=%q feedback=%+v", approvals, errText, feedback)
 	}

@@ -38,6 +38,9 @@ type transientPause struct {
 // attempt. Work-item cost and turn caps remain the bounded safety backstops.
 var schedulerTransientPauses = []transientPause{
 	{reason: "runner_unavailable", backoff: 5 * time.Second},
+	// Provider throttles advertise retry-after windows in the tens of seconds;
+	// re-dispatching on the runner_unavailable backoff just re-trips the limit.
+	{reason: "capacity_backpressure", backoff: 30 * time.Second},
 	{reason: "ci_pending", backoff: 15 * time.Second},
 	{reason: "merge_pending", backoff: 15 * time.Second},
 	{reason: "panel_unreachable", backoff: 60 * time.Second},

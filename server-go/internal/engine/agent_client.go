@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +32,12 @@ type DelegateRequest struct {
 	Stage            string
 	ExecutionVersion string
 	RetryTag         string
+	// MaxCostUSD is a positive per-call hard safety bound assigned by the
+	// workflow runner. The resource plane rejects or stops work that cannot fit.
+	MaxCostUSD float64
+	// ReplayOnly forbids launching a replacement job when a lifecycle retry is
+	// consuming an already-billed durable result.
+	ReplayOnly bool
 	// DurableSlot distinguishes parallel logical consumers of an otherwise
 	// identical request. It participates in the local job key only and is never
 	// sent to the resource plane as routing configuration.
@@ -67,6 +72,10 @@ type DelegateResult struct {
 	// may return it to the delegate service but must not interpret it.
 	Participant string
 	CostUSD     float64
+	// CostUnknown means the resource plane recorded no measurement for this
+	// call. CostUSD is then not a measured zero and must not be committed as
+	// actual spend.
+	CostUnknown bool
 	Partial     bool
 }
 
@@ -81,6 +90,9 @@ type DelegateGroupResult struct {
 	Participant string
 	Response    string
 	CostUSD     float64
+	// CostUnknown mirrors DelegateResult.CostUnknown: no measurement was
+	// recorded, so CostUSD is a lower bound rather than actual spend.
+	CostUnknown bool
 	Err         error
 }
 
@@ -112,6 +124,43 @@ var ErrDelegateUnassignedExpired = errors.New("unassigned delegate lease expired
 var ErrDelegateCancelUnacknowledged = errors.New("delegate cancellation was not acknowledged")
 var ErrDelegateNoJobID = errors.New("agent service returned no job id")
 var ErrDelegateTerminal = errors.New("delegate job reached a failed terminal state")
+
+// ErrDelegateReplayUnavailable is returned when a replay-only invocation cannot
+// find the durable delegate result it is required to reuse (e.g. the in-flight
+// job was killed by a restart and its mapping was lost). Replay can never
+// succeed, so the engine must recover — re-dispatch a recoverable interruption
+// or park a lost reconciled result for a human — instead of retrying forever.
+var ErrDelegateReplayUnavailable = errors.New("replay-only delegate result is unavailable")
+
+// DelegateExecutionError carries the billing boundary across transport and
+// runner layers. A caller must not infer provider dispatch merely because the
+// delegate API was called: validation and admission failures are pre-dispatch,
+// while a known job can have either measured or unresolved spend.
+type DelegateExecutionError struct {
+	Err        error
+	Dispatched bool
+	CostKnown  bool
+	CostUSD    float64
+}
+
+func (e *DelegateExecutionError) Error() string { return e.Err.Error() }
+func (e *DelegateExecutionError) Unwrap() error { return e.Err }
+
+func delegateExecutionError(err error, dispatched, costKnown bool, costUSD float64) error {
+	if err == nil || !dispatched {
+		return err
+	}
+	return &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: costKnown, CostUSD: costUSD}
+}
+
+type agentHTTPStatusError struct {
+	status int
+	detail string
+}
+
+func (e *agentHTTPStatusError) Error() string {
+	return fmt.Sprintf("agent service %d: %s", e.status, e.detail)
+}
 
 // HTTPAgentClient talks to the agent service as a resource plane. It owns no
 // workflow state or transitions; losing it parks the Go-owned run and a later
@@ -182,11 +231,36 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		request.Delegate = ""
 	}
 	const maxRouteAttempts = 3
+	totalCost := 0.0
+	costUnknown := false
+	originalCostLimit := request.MaxCostUSD
 	for attempt := 0; ; attempt++ {
 		result, err := c.delegateOnce(ctx, request)
-		if err == nil || (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
+		var execution *DelegateExecutionError
+		if errors.As(err, &execution) {
+			// CostUSD is the measured prefix even when the current attempt has
+			// unresolved spend. Preserve both facts independently.
+			totalCost += execution.CostUSD
+			if !execution.CostKnown {
+				costUnknown = true
+			}
+		}
+		if err == nil {
+			result.CostUSD += totalCost
+			// An earlier attempt with unmeasured spend makes the accumulated
+			// total a lower bound, not a measurement.
+			result.CostUnknown = result.CostUnknown || costUnknown
+			return result, nil
+		}
+		if (request.Delegate != "" && !request.routeSelected) || request.Participant != "" ||
 			!errors.Is(err, ErrDelegateTerminal) ||
 			attempt+1 >= maxRouteAttempts || ctx.Err() != nil {
+			if execution != nil && execution.Dispatched && !execution.CostKnown {
+				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: false, CostUSD: totalCost}
+			}
+			if totalCost > 0 {
+				return result, &DelegateExecutionError{Err: err, Dispatched: true, CostKnown: true, CostUSD: totalCost}
+			}
 			return result, err
 		}
 		// The request remains unpinned. A distinct durable key forces a fresh
@@ -195,6 +269,12 @@ func (c *HTTPAgentClient) Delegate(ctx context.Context, request DelegateRequest)
 		request.RetryTag = fmt.Sprintf("route-retry:%d", attempt+1)
 		request.Delegate = ""
 		request.routeSelected = false
+		if originalCostLimit > 0 {
+			request.MaxCostUSD = originalCostLimit - totalCost
+			if request.MaxCostUSD <= 0 {
+				return DelegateResult{}, &DelegateExecutionError{Err: errors.New("delegate route retry exhausted its cost limit"), Dispatched: true, CostKnown: true, CostUSD: totalCost}
+			}
+		}
 	}
 }
 
@@ -203,6 +283,9 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		return DelegateResult{}, errors.New("delegate role, persona, and prompt are required")
 	}
 	payload := map[string]any{"role": request.Role, "persona": request.Persona, "prompt": request.Prompt, "cwd": request.Workdir, "tools": request.Tools}
+	if request.MaxCostUSD > 0 {
+		payload["max_cost_usd"] = request.MaxCostUSD
+	}
 	if request.ProvidedTarget {
 		payload["provided_target"] = true
 	}
@@ -226,9 +309,16 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			launched.Participant = participant
 		}
 	}
+	if launched.JobID <= 0 && request.ReplayOnly {
+		return DelegateResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
+	}
 	if launched.JobID == 0 {
 		if err := c.doJSONKey(ctx, http.MethodPost, "/v1/delegate/run", payload, &launched, key); err != nil {
-			return DelegateResult{}, err
+			// A non-2xx response is an authoritative admission rejection. A
+			// transport/decode failure after sending the idempotent request is
+			// ambiguous and must retain the reservation for durable replay.
+			var rejected *agentHTTPStatusError
+			return DelegateResult{}, delegateExecutionError(err, !errors.As(err, &rejected), false, 0)
 		}
 		// Validate before SaveDelegateJob: a phantom mapping would make every
 		// retry replay an invalid launch instead of recovering when capacity returns.
@@ -251,7 +341,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		if c.store != nil && request.WorkItemID != "" {
 			if err := c.store.SaveWorkflowDelegateJob(ctx, key, request.WorkItemID, launched.JobID, launched.Participant); err != nil {
-				return DelegateResult{}, err
+				return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 			}
 		}
 	}
@@ -263,19 +353,20 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 	for {
 		if err := ctx.Err(); err != nil {
 			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
-			return DelegateResult{}, err
+			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
 		var status struct {
 			JobStatus string  `json:"job_status"`
 			Result    string  `json:"result"`
 			Agent     string  `json:"agent_name"`
 			CostUSD   float64 `json:"cost_usd"`
+			CostKnown bool    `json:"cost_known"`
 			Error     string  `json:"error"`
 		}
 		if err := c.doJSON(ctx, http.MethodPost, "/v1/delegate/status", map[string]any{"job_id": launched.JobID, "full_result": true, "result_limit": -1}, &status); err != nil {
 			if ctx.Err() != nil {
 				_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
-				return DelegateResult{}, ctx.Err()
+				return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 			}
 			// Once the resource plane has acknowledged that a job is waiting
 			// unassigned, transient status failures cannot extend its lease.
@@ -293,7 +384,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			}
 			// An assigned observation clears the lease. Preserve its durable mapping
 			// when the status plane later fails so a retry cannot overlap the job.
-			return DelegateResult{}, err
+			return DelegateResult{}, delegateExecutionError(err, true, false, 0)
 		}
 		// Any nonterminal status without an assigned agent is not progress. The
 		// resource plane can mark a job running before admission assigns an agent,
@@ -311,19 +402,19 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 		}
 		switch status.JobStatus {
 		case "done":
-			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: launched.Participant, CostUSD: status.CostUSD}, nil
+			return DelegateResult{Response: status.Result, Agent: status.Agent, Participant: launched.Participant, CostUSD: status.CostUSD, CostUnknown: !status.CostKnown}, nil
 		case "partial":
 			if strings.TrimSpace(status.Result) == "" {
 				if c.store != nil {
 					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
 				}
-				return DelegateResult{}, fmt.Errorf("delegate job %d returned an empty partial result", launched.JobID)
+				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned an empty partial result", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
 			if !request.acceptPartial {
 				if c.store != nil {
 					_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
 				}
-				return DelegateResult{}, fmt.Errorf("delegate job %d returned a partial result for a block that requires completion", launched.JobID)
+				return DelegateResult{}, delegateExecutionError(fmt.Errorf("delegate job %d returned a partial result for a block that requires completion", launched.JobID), true, status.CostKnown, status.CostUSD)
 			}
 			// A delegate can leave a complete, independently verifiable artifact and
 			// still be labelled partial when its final synthesis fails. Preserve that
@@ -331,16 +422,16 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// the same artifact idempotently, not launch overlapping work. Callers that
 			// need corrective synthesis change the prompt, which changes the job key.
 			// The native branch-producing block validates its own output contract.
-			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD, Partial: true}, nil
+			return DelegateResult{Response: status.Result, Agent: status.Agent, CostUSD: status.CostUSD, CostUnknown: !status.CostKnown, Partial: true}, nil
 		case "failed", "cancelled", "stopped", "invalid", "not_found":
 			if c.store != nil {
 				_ = c.store.ForgetDelegateJob(context.WithoutCancel(ctx), key)
 			}
 			detail := firstNonempty(strings.TrimSpace(status.Error), strings.TrimSpace(status.Result))
 			if detail != "" {
-				return DelegateResult{}, fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail)
+				return DelegateResult{}, delegateExecutionError(fmt.Errorf("%w: job %d %s: %s", ErrDelegateTerminal, launched.JobID, status.JobStatus, detail), true, status.CostKnown, status.CostUSD)
 			}
-			return DelegateResult{}, fmt.Errorf("%w: job %d %s", ErrDelegateTerminal, launched.JobID, status.JobStatus)
+			return DelegateResult{}, delegateExecutionError(fmt.Errorf("%w: job %d %s", ErrDelegateTerminal, launched.JobID, status.JobStatus), true, status.CostKnown, status.CostUSD)
 		}
 		select {
 		case <-ctx.Done():
@@ -348,7 +439,7 @@ func (c *HTTPAgentClient) delegateOnce(ctx context.Context, request DelegateRequ
 			// explicitly cancelled. Wait for the cancellation acknowledgement so
 			// a wall-cap resume cannot overlap the old job in the same worktree.
 			_ = c.cancelRemoteAndForget(launched.JobID, key, ctx)
-			return DelegateResult{}, ctx.Err()
+			return DelegateResult{}, delegateExecutionError(ctx.Err(), true, false, 0)
 		case <-ticker.C:
 		}
 	}
@@ -393,7 +484,7 @@ func (c *HTTPAgentClient) DelegateGroup(ctx context.Context, requests []Delegate
 		go func(i int) {
 			defer wg.Done()
 			result, err := c.Delegate(ctx, planned[i])
-			out[i].Response, out[i].CostUSD, out[i].Participant, out[i].Err = result.Response, result.CostUSD, result.Participant, err
+			out[i].Response, out[i].CostUSD, out[i].CostUnknown, out[i].Participant, out[i].Err = result.Response, result.CostUSD, result.CostUnknown, result.Participant, err
 			if out[i].Err == nil && strings.TrimSpace(out[i].Participant) == "" {
 				out[i].Err = errors.New("delegate service returned no participant handle")
 			}
@@ -635,7 +726,7 @@ func (c *HTTPAgentClient) doJSONKey(ctx context.Context, method, path string, in
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("agent service %s: %s", strconv.Itoa(resp.StatusCode), strings.TrimSpace(string(data)))
+		return &agentHTTPStatusError{status: resp.StatusCode, detail: strings.TrimSpace(string(data))}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(output); err != nil {
 		return fmt.Errorf("decode agent response: %w", err)

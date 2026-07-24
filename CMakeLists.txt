@@ -118,6 +118,7 @@ if(WIN32)
     set(PLATFORM_AGENT_SRCS
         ${AIMEE_SRC_DIR}/windows/agent_runtime.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
+        ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
     set(PLATFORM_CMD_SRCS
         ${AIMEE_SRC_DIR}/windows/cmd_infra.c
@@ -169,6 +170,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
+        ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
@@ -228,6 +230,7 @@ else()
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_dispatch.c
         ${AIMEE_SRC_DIR}/posix/agent_tools_anchored.c
+        ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
         ${AIMEE_SRC_DIR}/posix/sandbox.c
     )
@@ -282,6 +285,7 @@ if(WIN32)
         ${AIMEE_SRC_DIR}/windows/cli_client.c
         ${AIMEE_SRC_DIR}/windows/memory.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
+        ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
 elseif(APPLE)
     set(CLIENT_SUPPORT_SRCS
@@ -337,6 +341,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/diagnose.c
     ${AIMEE_SRC_DIR}/db1/ensemble.c
     ${AIMEE_SRC_DIR}/db1/caches.c
+    ${AIMEE_SRC_DIR}/db1/web_page_cache.c
     ${AIMEE_SRC_DIR}/db1/primary_sessions.c
     ${AIMEE_SRC_DIR}/db1/webchat_claude_sessions.c
     ${AIMEE_SRC_DIR}/db1/env.c
@@ -548,6 +553,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/tool_egress.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c
@@ -607,6 +613,8 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
+    ${AIMEE_SRC_DIR}/server/agent_route.c
+    ${AIMEE_SRC_DIR}/agent_tier_lint.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
@@ -1302,6 +1310,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_custom.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_manager_artifacts.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_externalization.c
+    ${AIMEE_SRC_DIR}/modules/workflows/tool_egress.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_native_gate.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_enforce.c
     ${AIMEE_SRC_DIR}/modules/workflows/wfe_deliver.c

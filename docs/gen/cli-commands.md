@@ -35,8 +35,10 @@ Subcommands:
                    research -> execute. REQUIRES --persona NAME (e.g.
                    engineer, qa, security, reviewer, architect). --tools
                    enables tool use for roles that do not enable it by
-                   default. See `aimee delegate <role> --help` for the full
-                   flag set (--persona, --context-file, --via, etc.).
+                   default. --scope bounded|whole_task caps how open-ended
+                   the task may be (enforced against each agent's max_scope).
+                   See `aimee delegate <role> --help` for the full flag set
+                   (--persona, --context-file, --via, --scope, etc.).
   plan             Generate read-only work packets from a proposal
   launch <plan>    Queue a reviewed packet plan into a coord job
   status <job_id> [job_id...]  Check background delegate status

@@ -142,13 +142,21 @@ static void test_max_output(void)
    assert(model_max_output("openai", "gpt-4o") == 16384);
    assert(model_max_output("anthropic", "claude-sonnet-4-6") == 8192);
 
-   /* Inferred (heuristic) models: reasoning families get a higher ceiling than
-    * plain chat, both well above the old hardcoded 4096 default. */
-   assert(model_max_output("minimax", "MiniMax-M3") == 32768);      /* reasoning */
-   assert(model_max_output(NULL, "mistral-medium-latest") == 8192); /* non-reasoning */
+   /* A CATALOGUED model returns the ceiling the catalog publishes, not an
+    * inferred one. MiniMax-M3 and mistral-medium-latest used to sit here as
+    * heuristic examples, which only held while the bundled snapshot was
+    * unreachable; both are in the catalog, so they now answer from it. */
+   assert(model_max_output("minimax", "MiniMax-M3") == 128000);
+
+   /* Inferred (heuristic) models - names the catalog does NOT carry: reasoning
+    * families get a higher ceiling than plain chat, both well above the old
+    * hardcoded 4096 default. */
+   assert(model_max_output("minimax", "MiniMax-R9-thinking-qqq") > 8192); /* reasoning */
+   assert(model_max_output(NULL, "some-plain-chat-model-qqq") == 8192);   /* non-reasoning */
 
    /* Never starves a reasoning model at 4096 (the bug this replaced). */
    assert(model_max_output("minimax", "MiniMax-M3") > 4096);
+   assert(model_max_output("minimax", "MiniMax-R9-thinking-qqq") > 4096);
 
    /* Inferred ceiling is clamped to the model's context window. */
    assert(model_max_output("openai", "gpt-3.5-turbo") <= model_context_window("gpt-3.5-turbo"));
@@ -219,10 +227,17 @@ static void test_model_capability_get(void)
    assert(model_capability_get("openai", "gpt-old-deprecated", &cap) == 1);
    assert(cap.deprecated == 1);
 
+   /* An openrouter "vendor/model" id resolves through the catalog. The window is
+    * asserted as a LOWER BOUND, not pinned: it comes from the bundled snapshot,
+    * so pinning the exact number would fail the suite every time the snapshot is
+    * regenerated and a vendor has moved it - the same trap
+    * check-models-dev-snapshot.py deliberately avoids. (It pinned 200000, which
+    * was the heuristic's answer back when the snapshot was unreachable.) */
    assert(model_capability_get("openrouter", "anthropic/claude-opus-4.6", &cap) == 1);
-   assert(cap.context_window == 200000);
+   assert(cap.context_window >= 200000);
    assert(cap.flags & MODEL_CAP_REASONING);
    assert(cap.flags & MODEL_CAP_VISION);
+   assert(cap.flags & MODEL_CAP_PDF);
 
    assert(model_capability_get("openai", "", &cap) == 0);
    assert(model_capability_get("openai", "gpt-4o", NULL) == 0);
@@ -243,7 +258,8 @@ static void test_model_capability_helpers(void)
                                        sizeof(provider), model_id, sizeof(model_id), &cap) == 1);
    assert(strcmp(provider, "openrouter") == 0);
    assert(strcmp(model_id, "anthropic/claude-opus-4.6") == 0);
-   assert(cap.context_window == 200000);
+   /* Lower bound, not a pin - the window comes from the bundled snapshot. */
+   assert(cap.context_window >= 200000);
    assert(cap.flags & MODEL_CAP_PDF);
 
    assert(model_capability_resolve_ref(NULL, provider, sizeof(provider), model_id, sizeof(model_id),

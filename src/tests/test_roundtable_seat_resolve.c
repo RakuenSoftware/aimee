@@ -43,13 +43,11 @@ int main(void)
    mk_agent(&cfg.agents[1], "agentB", "review", 1);
    mk_agent(&cfg.agents[2], "agentC", "review", 1);
    mk_agent(&cfg.agents[3], "agentD", "review", 0); /* disabled */
-   /* agentE serves only "code": an EXPLICIT exec_roles list omitting "review" is
-    * what actually makes an agent non-review-capable (an empty exec list falls back
-    * to the default roles, which include "review"). This mirrors a specialized
-    * agent like gpu-mid that must never be seated on a review panel. */
+   /* agentE declares only the "code" role and NO explicit exec_roles. Because
+    * `review` is not a default exec role, that alone makes it non-review-capable:
+    * an implementation-only delegate (e.g. a local synth model) is never seated on
+    * a review panel just for leaving exec_roles empty. */
    mk_agent(&cfg.agents[4], "agentE", "code", 1);
-   snprintf(cfg.agents[4].exec_roles[0], sizeof cfg.agents[4].exec_roles[0], "code");
-   cfg.agents[4].exec_role_count = 1;
    cfg.agent_count = 5;
 
    int idx = -1;

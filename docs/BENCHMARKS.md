@@ -183,7 +183,7 @@ enabling TLS session resumption after a socket ages out without sharing sessions
 across certificate rotation. `kb_client_mtls_tls_stats()` exposes aggregate full
 handshake and resumed-session totals.
 
-Thin-client HTTP gzip is an opt-in, bounded transport optimization controlled by
+Thin-client HTTP gzip remains an opt-in, bounded transport optimization controlled by
 `transport.thinclient_gzip_enabled` on the server and
 `AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED=1` on the client. Eligible buffered
 responses and, after the server advertises `Accept-Request-Encoding: gzip`,
@@ -194,13 +194,15 @@ management, secret, event, and streaming traffic, remains identity encoded.
 Inflated bodies are capped at
 1 MiB for responses, 64 KiB including request headers, and 50 times the wire
 size; malformed, unsupported, and over-limit encodings fail closed. The flag
-remains off until workload captures demonstrate a latency win rather than merely
-a byte-count reduction. A build without zlib (including the current Windows
+remains off: the 2026-07-22 LAN capture reduced a 49,210-byte JSON request from
+51,592 to 18,110 TCP payload bytes (64.9%) but increased end-to-end latency from
+2.849 ms to 4.766 ms. That passes the wire gate but fails the required latency
+gate. A build without zlib (including the current Windows
 thin-client job) advertises no gzip capability and stays identity encoded.
 
-Thin-client HTTPS keep-alive is independently opt-in with
-`transport.server_keepalive_enabled` on the server and
-`AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED=1` in a resident client. Each client
+Thin-client HTTPS keep-alive now defaults on through
+`transport.server_keepalive_enabled` on the server and in resident clients.
+`AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED=0` is the client-side rollback. Each client
 thread owns at most one TLS connection with one in-flight request, a 30-second
 idle lifetime, 10-minute maximum age, and 1,000-request ceiling. Responses are
 read to their exact bounded `Content-Length`; close requests are honored and
@@ -208,6 +210,15 @@ streaming/event routes remain one-shot. The server accepts reuse only after
 strict HTTP/1.1 framing validation and repeats certificate, revocation, bearer,
 and route-capability checks on every request. Short-lived CLI invocations still
 perform one handshake because process-local sockets do not survive process exit.
+
+The 2026-07-22 three-node Optane/LXC validation promoted connection reuse to the
+default. Server→KB pooling completed 500 valid requests at p50 1.589 ms and p95
+1.913 ms using two TCP connections, versus p50 4.762 ms and p95 5.308 ms with
+approximately 491 new connections. Resident thin-client keep-alive completed 300
+requests at p50 0.109 ms and p95 0.116 ms using one TCP connection, versus p50
+4.900 ms and p95 5.255 ms with approximately 295 new connections. Accordingly,
+`transport.kb_pool_enabled` and `transport.server_keepalive_enabled` default on;
+both gzip settings remain off.
 
 ### Overview
 

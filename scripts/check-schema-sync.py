@@ -59,6 +59,9 @@ DB1_ONLY_TABLES = {
     "coord_job_tasks",
     "coord_jobs",
     "context_cache",
+    # fetched web pages, stripped to text, keyed by canonical URL. Purely a
+    # local runtime cache: never replicated, never shared, safe to drop.
+    "web_page_cache",
     "context_snapshots",
     "cost_fold_log",
     "cron_job_runs",

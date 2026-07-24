@@ -2,15 +2,47 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
+
+func execOnDB(t *testing.T, path, query string, args ...any) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// expireBudgetLease simulates a crashed owner whose reservation lease has run
+// out. Replay ownership is only transferable once the lease lapses.
+func expireBudgetLease(t *testing.T, path, workItemID string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, workItemID); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type scriptedRunner struct {
 	t          *testing.T
@@ -66,12 +98,444 @@ type artifactRoutingRunner struct {
 
 type recoveringRunner struct{ calls int }
 
+type blockingSiblingRunner struct {
+	started chan StepRequest
+	release chan struct{}
+	costUSD float64
+}
+
+func (r *blockingSiblingRunner) Run(ctx context.Context, req StepRequest) (StepResult, error) {
+	select {
+	case r.started <- req:
+	case <-ctx.Done():
+		return StepResult{}, ctx.Err()
+	}
+	select {
+	case <-r.release:
+		return StepResult{Status: StepAdvanced, CostUSD: r.costUSD}, nil
+	case <-ctx.Done():
+		return StepResult{}, ctx.Err()
+	}
+}
+
 func (r *recoveringRunner) Run(_ context.Context, _ StepRequest) (StepResult, error) {
 	r.calls++
 	if r.calls == 1 {
 		return StepResult{}, errors.New("temporary runner outage")
 	}
 	return StepResult{Status: StepAdvanced}, nil
+}
+
+func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := []db1.CreateWorkItem{
+		{ID: "wi_parallel", Repo: "repo", ProposalPath: "root", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: maxUSD},
+		{ID: "wi_parallel.a", Repo: "repo", ProposalPath: "a", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", ParentID: "wi_parallel"},
+		{ID: "wi_parallel.b", Repo: "repo", ProposalPath: "b", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", ParentID: "wi_parallel"},
+	}
+	for _, item := range items {
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+		if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &blockingSiblingRunner{started: make(chan StepRequest, 2), release: make(chan struct{}), costUSD: stepCostUSD}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, id := range []string{"wi_parallel.a", "wi_parallel.b"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := workflowEngine.Advance(t.Context(), id)
+			errs <- err
+		}()
+	}
+	var admitted []StepRequest
+	for range 2 {
+		select {
+		case req := <-runner.started:
+			admitted = append(admitted, req)
+		case <-time.After(2 * time.Second):
+			close(runner.release)
+			t.Fatal("uncapped sibling was serialized behind another runner call")
+		}
+	}
+	if maxUSD > 0 {
+		var limits float64
+		for _, req := range admitted {
+			if req.CostLimitUSD <= 0 {
+				close(runner.release)
+				t.Fatalf("capped runner received no enforceable limit: %+v", req)
+			}
+			limits += req.CostLimitUSD
+		}
+		if limits > maxUSD {
+			close(runner.release)
+			t.Fatalf("runner limits=%v exceed max=%v", limits, maxUSD)
+		}
+		var reserved float64
+		for _, id := range []string{"wi_parallel.a", "wi_parallel.b"} {
+			item, err := store.WorkItem(t.Context(), id)
+			if err != nil || item.ReservedCostUSD <= 0 {
+				close(runner.release)
+				t.Fatalf("item=%+v err=%v", item, err)
+			}
+			reserved += item.ReservedCostUSD
+		}
+		if reserved > maxUSD {
+			close(runner.release)
+			t.Fatalf("reserved=%v exceeds max=%v", reserved, maxUSD)
+		}
+	}
+	close(runner.release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if maxUSD > 0 {
+		_, spent, budgetMax, err := store.WorkflowBudget(t.Context(), "wi_parallel")
+		if err != nil || spent != 2*stepCostUSD || budgetMax != maxUSD || spent > budgetMax {
+			t.Fatalf("spent=%v max=%v err=%v", spent, budgetMax, err)
+		}
+		for _, id := range []string{"wi_parallel.a", "wi_parallel.b"} {
+			item, err := store.WorkItem(t.Context(), id)
+			if err != nil || item.ReservedCostUSD != 0 {
+				t.Fatalf("item=%+v err=%v", item, err)
+			}
+		}
+	}
+}
+
+func TestSiblingStepsRunConcurrentlyWithAndWithoutBudgetCap(t *testing.T) {
+	t.Run("uncapped", func(t *testing.T) { testSiblingStepsRunConcurrently(t, 0, 0) })
+	t.Run("capped", func(t *testing.T) { testSiblingStepsRunConcurrently(t, 1, .1) })
+}
+
+type breakArtifactStoreAfterSpendRunner struct {
+	artifactRoot string
+	cost         float64
+}
+
+func (r breakArtifactStoreAfterSpendRunner) Run(_ context.Context, _ StepRequest) (StepResult, error) {
+	if err := os.RemoveAll(r.artifactRoot); err != nil {
+		return StepResult{}, err
+	}
+	if err := os.WriteFile(r.artifactRoot, []byte("not a directory"), 0o600); err != nil {
+		return StepResult{}, err
+	}
+	return StepResult{Status: StepAdvanced, Artifact: "completed", CostUSD: r.cost}, nil
+}
+
+func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n    next: done\n  - id: done\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifactRoot := filepath.Join(root, "artifacts")
+	artifacts, err := wfe.NewArtifactStore(artifactRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_commit_failure", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err := New(store, artifacts, workflowDir, breakArtifactStoreAfterSpendRunner{artifactRoot: artifactRoot, cost: .25})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advance, advanceErr := workflowEngine.Advance(t.Context(), item.ID)
+	if advanceErr != nil || !advance.Ran {
+		t.Fatalf("advance=%+v err=%v", advance, advanceErr)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReservedCostUSD != 0 || got.ReservationState != "" || got.CumulativeCostUSD != .25 || got.Stage != "work" || got.PauseReason != "artifact_write_failed" {
+		t.Fatalf("actual spend was not retained across commit failure: %+v", got)
+	}
+}
+
+func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aimee.db")
+	store, err := db1.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_replay", Repo: "repo", ProposalPath: "replay", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "first")
+	if err != nil || reservation.Amount <= 0 {
+		t.Fatalf("reservation=%+v err=%v", reservation, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(t.Context(), item.ID, "first", .25); err != nil || !allowed {
+		t.Fatalf("allowed=%v err=%v", allowed, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = db1.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	// While the reconciling owner's lease is live, replay is refused outright:
+	// two invocations must never replay the same reservation concurrently.
+	if busy, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second"); err != nil || !busy.Busy || busy.ReplayOnly {
+		t.Fatalf("busy=%+v err=%v", busy, err)
+	}
+	expireBudgetLease(t, path, item.ID)
+	replay, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second")
+	if err != nil || !replay.ReplayOnly || replay.Amount != .25 {
+		t.Fatalf("replay=%+v err=%v", replay, err)
+	}
+	if allowed, err := store.ReconcileWorkflowBudget(t.Context(), item.ID, "second", .25); err != nil || !allowed {
+		t.Fatalf("replay reconcile allowed=%v err=%v", allowed, err)
+	}
+	if err := store.Move(t.Context(), item.ID, "work", "done", "advance", "replayed result", "", .25); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.CumulativeCostUSD != .25 || got.ReservedCostUSD != 0 {
+		t.Fatalf("item=%+v err=%v", got, err)
+	}
+}
+
+func TestUncappedDuplicateAdvanceCannotShareOneInvocation(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_duplicate", Repo: "repo", ProposalPath: "duplicate", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &blockingSiblingRunner{started: make(chan StepRequest, 2), release: make(chan struct{}), costUSD: .1}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := workflowEngine.Advance(t.Context(), item.ID)
+		firstDone <- err
+	}()
+	select {
+	case <-runner.started:
+	case <-time.After(time.Second):
+		t.Fatal("first invocation did not enter runner")
+	}
+	second, err := workflowEngine.Advance(t.Context(), item.ID)
+	if err != nil || second.Ran || second.Parked {
+		t.Fatalf("duplicate advance was not deferred: result=%+v err=%v", second, err)
+	}
+	select {
+	case duplicate := <-runner.started:
+		t.Fatalf("duplicate invocation entered runner: %+v", duplicate)
+	default:
+	}
+	close(runner.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type postDispatchFailureRunner struct{}
+
+func (postDispatchFailureRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	return StepResult{}, &DelegateExecutionError{Err: errors.New("status polling failed after provider dispatch"), Dispatched: true}
+}
+
+type replayMeasuredRunner struct{ t *testing.T }
+
+func (r replayMeasuredRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	if !req.ReplayOnly {
+		r.t.Fatal("restart launched replacement provider work instead of durable replay")
+	}
+	return StepResult{Status: StepAdvanced, Artifact: "replayed", CostUSD: .1}, nil
+}
+
+func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "aimee.db")
+	store, err := db1.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_billed_error", Repo: "repo", ProposalPath: "failure", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err := New(store, artifacts, workflowDir, postDispatchFailureRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowEngine.Advance(t.Context(), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = db1.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.CumulativeCostUSD != 0 || got.ReservedCostUSD != .4 || got.ReservationState != "unresolved" || got.PauseReason != "runner_unavailable" {
+		t.Fatalf("item=%+v err=%v", got, err)
+	}
+	if resumed, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil || resumed != 1 {
+		t.Fatalf("resume count=%d err=%v", resumed, err)
+	}
+	artifacts, err = wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err = New(store, artifacts, workflowDir, replayMeasuredRunner{t: t})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || !result.Terminal {
+		t.Fatalf("replay result=%+v err=%v", result, err)
+	}
+	got, err = store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.CumulativeCostUSD != .1 || got.ReservedCostUSD != 0 || got.ReservationState != "" {
+		t.Fatalf("reconciled item=%+v err=%v", got, err)
+	}
+}
+
+func TestPreDispatchRunnerFailureDoesNotConsumeBudget(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_predispatch", Repo: "repo", ProposalPath: "predispatch", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err := New(store, artifacts, workflowDir, &recoveringRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || !result.Parked {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.CumulativeCostUSD != 0 || got.ReservedCostUSD != 0 || got.ReservationState != "" {
+		t.Fatalf("item=%+v err=%v", got, err)
+	}
 }
 
 func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
@@ -340,5 +804,356 @@ nodes:
 	}
 	if item.State != "accepted" || runner.call != 5 {
 		t.Fatalf("item=%+v calls=%d", item, runner.call)
+	}
+}
+
+type unmeasuredSpendRunner struct{ reported float64 }
+
+func (r unmeasuredSpendRunner) Run(_ context.Context, _ StepRequest) (StepResult, error) {
+	return StepResult{Status: StepAdvanced, Artifact: "completed", CostUSD: r.reported, CostUnknown: true}, nil
+}
+
+// A delegate whose audit row is missing reports no measurement. Committing its
+// reported zero would let real provider spend look free and silently drain the
+// tree budget, so the engine charges the authorization it granted instead.
+func TestUnmeasuredSpendIsChargedAtTheReservation(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n    next: done\n  - id: done\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_unmeasured", Repo: "repo", ProposalPath: "unmeasured", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err := New(store, artifacts, workflowDir, unmeasuredSpendRunner{reported: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if advance, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || !advance.Ran {
+		t.Fatalf("advance=%+v err=%v", advance, err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The whole uncommitted root budget was this invocation's reservation.
+	if got.CumulativeCostUSD != 1 {
+		t.Fatalf("unmeasured spend committed as %v, want the full 1.00 reservation: %+v", got.CumulativeCostUSD, got)
+	}
+	if got.ReservationState != "" || got.ReservedCostUSD != 0 {
+		t.Fatalf("reservation was not consumed: %+v", got)
+	}
+}
+
+// A measured zero is genuinely free and must stay zero.
+func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n    next: done\n  - id: done\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_measured_zero", Repo: "repo", ProposalPath: "measured-zero", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	workflowEngine, err := New(store, artifacts, workflowDir, breakArtifactStoreAfterSpendRunner{artifactRoot: filepath.Join(root, "unused"), cost: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflowEngine.Advance(t.Context(), item.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CumulativeCostUSD != 0 {
+		t.Fatalf("measured zero was inflated to %v: %+v", got.CumulativeCostUSD, got)
+	}
+}
+
+type replayUnavailableRunner struct{ t *testing.T }
+
+func (r replayUnavailableRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	if !req.ReplayOnly {
+		r.t.Fatal("replay-unavailable runner invoked without ReplayOnly")
+	}
+	return StepResult{}, &DelegateExecutionError{Err: ErrDelegateReplayUnavailable, Dispatched: true, CostKnown: false}
+}
+
+// A replay-only invocation whose durable result is gone must recover, not loop:
+// an interrupted (unresolved) reservation re-dispatches; a lost reconciled
+// (actual) one parks for a human.
+func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
+	setup := func(t *testing.T, id string) (*db1.Store, *Engine, string) {
+		root := t.TempDir()
+		workflowDir := filepath.Join(root, "workflows")
+		if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+		if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		def, err := wfe.ParseDefinition(definition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		store, err := db1.Open(filepath.Join(root, "aimee.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+		if err := store.CreateWorkItem(t.Context(), item); err != nil {
+			t.Fatal(err)
+		}
+		if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+			t.Fatal(err)
+		}
+		eng, err := New(store, artifacts, workflowDir, replayUnavailableRunner{t: t})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store, eng, filepath.Join(root, "aimee.db")
+	}
+
+	t.Run("unresolved_redispatches", func(t *testing.T) {
+		store, eng, dbPath := setup(t, "wi_replay_lost_unresolved")
+		if _, err := store.ReserveWorkflowBudget(t.Context(), "wi_replay_lost_unresolved", "o1"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ParkRunnerFailure(t.Context(), "wi_replay_lost_unresolved", "work", "o1", "runner_unavailable", "d", true, false, 0); err != nil {
+			t.Fatal(err)
+		}
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_unresolved")
+		out, err := eng.Advance(t.Context(), "wi_replay_lost_unresolved")
+		if err != nil || out.Parked || out.Ran {
+			t.Fatalf("expected a silent redispatch: out=%+v err=%v", out, err)
+		}
+		got, err := store.WorkItem(t.Context(), "wi_replay_lost_unresolved")
+		if err != nil || got.State != "active" || got.PauseReason != "" || got.ReservationState != "" {
+			t.Fatalf("item not left runnable: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("actual_parks_for_human", func(t *testing.T) {
+		store, eng, dbPath := setup(t, "wi_replay_lost_actual")
+		if _, err := store.ReserveWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1"); err != nil {
+			t.Fatal(err)
+		}
+		if allowed, err := store.ReconcileWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1", 0.3); err != nil || !allowed {
+			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
+		}
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_actual")
+		out, err := eng.Advance(t.Context(), "wi_replay_lost_actual")
+		if err != nil || !out.Parked || out.PauseReason != "replay_unrecoverable" {
+			t.Fatalf("expected park replay_unrecoverable: out=%+v err=%v", out, err)
+		}
+		got, err := store.WorkItem(t.Context(), "wi_replay_lost_actual")
+		if err != nil || got.PauseReason != "replay_unrecoverable" || got.CumulativeCostUSD != 0.3 || got.ReservationState != "" {
+			t.Fatalf("expected committed cost + human park: %+v err=%v", got, err)
+		}
+	})
+}
+
+type alwaysFailingRunner struct{ calls int }
+
+func (r *alwaysFailingRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	r.calls++
+	return StepResult{}, &DelegateExecutionError{Err: ErrDelegateTerminal, Dispatched: true, CostKnown: true}
+}
+
+// A stage that keeps failing without advancing must stop auto-resuming and park
+// for a human rather than retrying on the transient backoff forever.
+func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_persistent_fail", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &alwaysFailingRunner{}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last AdvanceResult
+	for attempt := 0; attempt < maxRunnerFailuresWithoutProgress+2; attempt++ {
+		out, err := eng.Advance(t.Context(), item.ID)
+		if err != nil {
+			t.Fatalf("advance %d: %v", attempt, err)
+		}
+		last = out
+		if out.PauseReason == "delegate_failed" {
+			break
+		}
+		// Simulate the scheduler's transient resume so the next attempt runs.
+		if _, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil {
+			t.Fatalf("resume %d: %v", attempt, err)
+		}
+	}
+	if last.PauseReason != "delegate_failed" {
+		t.Fatalf("persistent failure never parked for human: %+v after %d calls", last, runner.calls)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.PauseReason != "delegate_failed" {
+		t.Fatalf("item not parked delegate_failed: %+v err=%v", got, err)
+	}
+}
+
+type rateLimitedRunner struct{ calls int }
+
+func (r *rateLimitedRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	r.calls++
+	return StepResult{}, &DelegateExecutionError{
+		Err:        fmt.Errorf("vault credential for agent 'MiniMax-M3' is rate-limited; retry in 30s"),
+		Dispatched: false,
+	}
+}
+
+// Provider capacity refusals are self-clearing and advertise their own
+// retry-after, so waiting them out must not consume the runner-failure bound
+// that parks an item for a human. Before this was distinguished, a throttled
+// credential parked a live run permanently within a minute.
+func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_capacity", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &rateLimitedRunner{}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < maxRunnerFailuresWithoutProgress+4; attempt++ {
+		out, err := eng.Advance(t.Context(), item.ID)
+		if err != nil {
+			t.Fatalf("advance %d: %v", attempt, err)
+		}
+		if out.PauseReason != "capacity_backpressure" {
+			t.Fatalf("attempt %d: capacity refusal parked %q, want capacity_backpressure", attempt, out.PauseReason)
+		}
+		if _, err := store.ResumeTransient(t.Context(), "capacity_backpressure", 0); err != nil {
+			t.Fatalf("resume %d: %v", attempt, err)
+		}
+	}
+}
+
+// A stage parked for a human must be releasable by a human once the underlying
+// delegate problem is fixed.
+func TestDelegateFailedIsOperatorResumable(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	item := db1.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Park(t.Context(), item.ID, "work", "delegate_failed", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(t.Context(), item.ID); err != nil {
+		t.Fatalf("operator cannot release a park meant for a human: %v", err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.PauseReason != "" {
+		t.Fatalf("item still paused: %+v err=%v", got, err)
 	}
 }

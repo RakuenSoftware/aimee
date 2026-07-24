@@ -115,6 +115,13 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       config_load(&cfg);
       assert(strcmp(cfg.provider, "claude") == 0);
+      /* Capability routing defaults ON: routing enforces the packet's required
+       * capabilities and minimum context window. Pinned explicitly so flipping
+       * it is a deliberate, reviewed change rather than an accident — with it
+       * off, agent_route_with_caps() degrades to cost-tier-only and capability
+       * is never consulted. */
+      assert(cfg.model_meta_capability_routing == 1);
+      assert(cfg.model_meta_refresh_minutes == 60);
       /* kb.typed_facts.* autonomous reconciliation defaults (§7.2/§8). */
       assert(cfg.kb_typed_facts_auto_promote_enabled == 1);
       assert(cfg.kb_typed_facts_promote_threshold == 3);
@@ -169,10 +176,18 @@ int main(void)
       /* git co-change backfill defaults on: index scan seeds co_edited edges that
        * blast radius already reads (incremental/idempotent). */
       assert(cfg.code_cochange_git_enabled == 1);
-      assert(cfg.transport_kb_pool_enabled == 0);
-      assert(cfg.transport_server_keepalive_enabled == 0);
+      assert(cfg.transport_kb_pool_enabled == 1);
+      assert(cfg.transport_server_keepalive_enabled == 1);
       assert(cfg.transport_thinclient_gzip_enabled == 0);
       assert(cfg.transport_kb_gzip_enabled == 0);
+      cJSON *rollback_root = cJSON_CreateObject();
+      cJSON *rollback_transport = cJSON_AddObjectToObject(rollback_root, "transport");
+      cJSON_AddBoolToObject(rollback_transport, "kb_pool_enabled", 0);
+      cJSON_AddBoolToObject(rollback_transport, "server_keepalive_enabled", 0);
+      config_parse_transport_section(&cfg, rollback_root);
+      assert(cfg.transport_kb_pool_enabled == 0);
+      assert(cfg.transport_server_keepalive_enabled == 0);
+      cJSON_Delete(rollback_root);
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
@@ -422,7 +437,9 @@ int main(void)
       snprintf(cfg.proxy_token, sizeof(cfg.proxy_token), "ptok");
       cfg.max_background_processes = 9;
       cfg.model_meta_refresh_minutes = 15;
-      cfg.model_meta_capability_routing = 1;
+      /* Non-default value, so the round trip proves persistence rather than
+       * agreeing with the default by accident (capability_routing defaults ON). */
+      cfg.model_meta_capability_routing = 0;
       snprintf(cfg.search_backend, sizeof(cfg.search_backend), "searxng");
       cfg.search_max_results = 7;
       snprintf(cfg.search_searxng_url, sizeof(cfg.search_searxng_url), "http://sx:8888");
@@ -635,7 +652,7 @@ int main(void)
       assert(strcmp(cfg2.proxy_url, "http://proxy:3128") == 0);
       assert(strcmp(cfg2.proxy_token, "ptok") == 0);
       assert(cfg2.max_background_processes == 9);
-      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 1);
+      assert(cfg2.model_meta_refresh_minutes == 15 && cfg2.model_meta_capability_routing == 0);
       assert(strcmp(cfg2.search_backend, "searxng") == 0 && cfg2.search_max_results == 7);
       assert(strcmp(cfg2.search_searxng_url, "http://sx:8888") == 0);
       assert(cfg2.aux_enabled == 1 && strcmp(cfg2.aux_default_provider, "openai") == 0);

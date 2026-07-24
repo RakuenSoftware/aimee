@@ -220,6 +220,31 @@ typedef struct agent_ablation_flags
    int retry;             /* retry/repair paths */
 } agent_ablation_flags_t;
 
+/* How large a unit of work a packet is, and the hardest an agent may be given.
+ *
+ * Ordinal, so a ceiling comparison is a simple `>`. UNSET means "not declared":
+ * on an AGENT it means no ceiling; on a PACKET it resolves to WHOLE_TASK, because
+ * under uncertainty this design OVER-SELECTS toward capability.
+ *
+ * Why over-select rather than lean on escalation: one capable session plus a
+ * review is cheaper - and substantially faster - than a session, a review, an
+ * escalation, another session and another review. Escalation pays for the failed
+ * attempt AND everything after it, in tokens and in wall-clock. An escalation is
+ * therefore a MISPLACEMENT INCIDENT, not a routine safety net.
+ *
+ * Two values only, matching the distinction observed delegate prompts actually
+ * make: bounded SWE-bench style "fix this bug in this file" work versus
+ * "implement the complete approved task in this worktree and verify it". */
+typedef enum
+{
+   AGENT_SCOPE_UNSET = 0,
+   AGENT_SCOPE_BOUNDED = 1,    /* a specified, self-contained change */
+   AGENT_SCOPE_WHOLE_TASK = 2, /* the complete task, repo-wide verification */
+} agent_scope_t;
+
+const char *agent_scope_name(agent_scope_t s);
+agent_scope_t agent_scope_from_string(const char *s);
+
 typedef struct
 {
    char name[MAX_AGENT_NAME];
@@ -236,6 +261,60 @@ typedef struct
    char auth_cmd[MAX_AUTH_CMD_LEN];
    char auth_type[16];
    char provider[16];
+   /* Catalog (vendor) identity for model-capability lookup, distinct from
+    * `provider` above, which names the WIRE SHAPE aimee speaks to this endpoint.
+    * A third-party vendor served over another vendor's wire format (MiniMax and
+    * Moonshot/Kimi both expose Anthropic-compatible endpoints) has
+    * provider="anthropic" but catalog_provider="minimax"/"moonshotai". Only
+    * capability lookup (model_capability_get and callers) may read this; request
+    * building, auth, and headers must keep using `provider`, which selects the
+    * anthropic-version header (agent_config.c), the x-api-key auth coercion, and
+    * the credential env-var set. Empty means "same as provider". */
+   char catalog_provider[16];
+   /* 1 when catalog_provider came from agents.json rather than derivation. Only
+    * an explicit value is re-serialized, so a save never freezes a derived guess
+    * into config where it would outlive the derivation rules. */
+   int catalog_provider_explicit;
+   /* Operator reason this agent's cost_tier is exempt from the catalog-price
+    * consistency check (agent_tier_lint). A subscription or flat-rate plan can
+    * make per-token price the wrong basis for its tier — e.g. a ChatGPT/codex
+    * OAuth seat whose marginal cost is not the published API price. Empty means
+    * the check applies. A REASON is required rather than a bare boolean so an
+    * exemption cannot silently hide a genuinely mis-tiered agent. */
+   char tier_price_exempt[128];
+   /* Operator price override, US dollars per million tokens. 0 = unset, meaning
+    * "resolve from the model catalog". Set when the catalog price is not what
+    * this deployment actually pays: a flat-rate or subscription seat whose
+    * marginal token cost differs from the published API rate, negotiated or
+    * committed-use pricing, a self-hosted model whose real cost is compute, or a
+    * gateway that resells at its own margin. Both axes are independent, so a
+    * deployment may override only one.
+    *
+    * KNOWN LIMITS:
+    *  - 0 always means "unset, fall back to the catalog", so a genuinely FREE
+    *    model cannot be expressed as 0. Such an agent is simply skipped by the
+    *    price lint (no finding), which is the safe direction.
+    *  - These fields are NOT round-trip safe across binary versions: an older
+    *    binary loads agents.json, ignores these members, and drops them on its
+    *    next save. Mixed-version operation against one config will silently lose
+    *    pricing overrides. */
+   double price_in_per_mtok;
+   double price_out_per_mtok;
+   double price_cached_per_mtok;
+   /* Hardest work this agent may be given. UNSET (the default, so every existing
+    * config is unchanged) means no ceiling. Declared by the operator, who knows
+    * their local model's limits better than any benchmark would: a small local
+    * model can do bounded work but not whole-task work, and without this it would
+    * win EVERY packet under cheapest-first routing. */
+   agent_scope_t max_scope;
+   /* The provider-general registration that GENERATED this target, when it was
+    * generated. Empty for a legacy single-model agent, which is its own
+    * registration. Stored rather than inferred from the name: parsing "text
+    * before the first ':'" conflates a legacy agent coincidentally named
+    * "gw:backup" with targets of a registration "gw", and reduces a registration
+    * named "gw:east" to "gw" - grouping unrelated seats with different
+    * endpoints and credentials as fallback peers. */
+   char registration[MAX_AGENT_NAME];
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,

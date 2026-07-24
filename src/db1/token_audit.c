@@ -105,27 +105,49 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    return (rc == SQLITE_DONE) ? 0 : -1;
 }
 
-double db1_token_audit_cost_for_delegation(const char *delegation_id)
+int db1_token_audit_cost_for_delegation_ex(const char *delegation_id, double *out_cost)
 {
+   if (out_cost)
+      *out_cost = 0.0;
    if (!delegation_id || !delegation_id[0])
-      return 0.0;
+      return -1;
    sqlite3 *db = db1_conn();
    if (!db)
-      return 0.0;
+      return -1;
 
    /* Realized-only: the cost-fold + delegate-routing reward must see billable
-    * spend, not estimated/avoided/partial rows. */
+    * spend, not estimated/avoided/partial rows.
+    *
+    * The row count is returned alongside the sum so a caller can tell "no
+    * realized row was ever written" apart from "the work genuinely cost zero".
+    * Collapsing those two into 0.0 would let unmeasured provider spend be
+    * committed as measured zero. */
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "SELECT COALESCE(SUM(estimated_cost_usd), 0.0)"
+   static const char *sql = "SELECT COUNT(*), COALESCE(SUM(estimated_cost_usd), 0.0)"
                             " FROM token_audit WHERE delegation_id = ? AND " TA_REALIZED;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
-      return 0.0;
+      return -1;
    sqlite3_bind_text(stmt, 1, delegation_id, -1, SQLITE_TRANSIENT);
+   int rows = 0;
    double total = 0.0;
    if (sqlite3_step(stmt) == SQLITE_ROW)
-      total = sqlite3_column_double(stmt, 0);
+   {
+      rows = sqlite3_column_int(stmt, 0);
+      total = sqlite3_column_double(stmt, 1);
+   }
    sqlite3_finalize(stmt);
-   return total;
+   if (rows <= 0)
+      return -1;
+   if (out_cost)
+      *out_cost = total;
+   return 0;
+}
+
+double db1_token_audit_cost_for_delegation(const char *delegation_id)
+{
+   double cost = 0.0;
+   (void)db1_token_audit_cost_for_delegation_ex(delegation_id, &cost);
+   return cost;
 }
 
 int db1_token_audit_session_split(const char *session_id, db1_token_audit_session_split_t *out)

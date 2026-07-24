@@ -361,6 +361,8 @@ SECTION_DESC = {
     "retry": "Provider retry / backoff.",
     "rewind": "Auto-snapshot / rewind.",
     "roundtable": "Roundtable pipeline thresholds, caps, gates, and turns.",
+    "routing": "Capability-gated delegate routing: whether to gate seat choice on "
+               "capability before cost, and whether to prefer free local seats.",
     "sandbox": "Tool sandbox (paths, network, mode).",
     "script": "Script-tool allowlist.",
     "search": "Web-search backend (Tavily / SearXNG).",
@@ -579,6 +581,8 @@ ENV_DESC = {
     # Client & session
     "AIMEE_SERVER_URL": ("Client & session", "aimee-server endpoint the thin client connects to (UDS path or `tcp:host:port`)."),
     "AIMEE_SERVER_TOKEN": ("Client & session", "Bearer token presented to aimee-server over TCP."),
+    "AIMEE_TRANSPORT_SERVER_KEEPALIVE_ENABLED": ("Client & session", "Resident HTTPS connection reuse. Defaults on; set to 0 to restore one request per connection."),
+    "AIMEE_TRANSPORT_THINCLIENT_GZIP_ENABLED": ("Client & session", "Negotiated gzip for eligible buffered thin-client routes. Defaults off; set to 1 only for a measured remote link profile."),
     "AIMEE_API_ENDPOINT": ("Client & session", "Override the `/v1` API endpoint used by the client RPC layer."),
     "AIMEE_API_BEARER": ("Client & session", "Bearer token for the `/v1` API endpoint."),
     "AIMEE_SESSION_ID": ("Client & session", "Pre-set the session id (enables non-blocking session attach)."),
@@ -597,6 +601,17 @@ ENV_DESC = {
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
     "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Gate remote (TCP) write methods: `off` | `data` | `full`."),
+    "AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT": (
+        "Server runtime",
+        "Permit the operator-configured search backend (`search.searxng_url`) to resolve to a "
+        "private, loopback, or link-local address. Off by default: every outbound fetch is "
+        "validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this "
+        "is set. Deliberately an environment variable rather than a config key, because "
+        "`config.set` is reachable from inside the running system and pointing the search backend "
+        "at a cloud metadata address would exfiltrate instance credentials through a tool that "
+        "looks like search. Set to exactly `1`; any other value is off. Never widens fetches of "
+        "model-supplied or search-result URLs, which stay denied.",
+    ),
     "AIMEE_WEBCHAT_GIT": ("Server runtime", "Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and \"Sign in with GitHub\" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR."),
     "AIMEE_WEBCHAT_EDITOR": ("Server runtime", "Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images)."),
     "AIMEE_WEBCHAT_EDITOR_BIN": ("Server runtime", "Override path to the code-server binary used for the in-browser editor."),
@@ -624,6 +639,7 @@ ENV_DESC = {
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
     "AIMEE_KB_CONN": ("Knowledge base (aimee-kb)", "KB connection string (mTLS transport)."),
+    "AIMEE_TRANSPORT_KB_POOL_ENABLED": ("Knowledge base (aimee-kb)", "Override server-to-KB mTLS connection pooling. The config default is on; set to 0 for one-shot connections."),
     "AIMEE_SERVER_ID": ("Knowledge base (aimee-kb)", "Registry identity used by the server mTLS heartbeat."),
     "AIMEE_KB_HTTP_BIND": ("Knowledge base (aimee-kb)", "aimee-kb HTTP listener bind address."),
     "AIMEE_KB_MTLS_HOST": ("Knowledge base (aimee-kb)", "aimee-kb mTLS listener host."),
@@ -1013,6 +1029,14 @@ AGENT_FIELD_DESC = {
     "timeout_ms": "Per-call timeout (ms).",
     "cost_limit": "Per-agent cost cap (USD).",
     "cost_tier": "Cost-tier label for routing.",
+    "price_in_per_mtok": "Input price, USD per million tokens. Overrides the catalog price.",
+    "price_out_per_mtok": "Output price, USD per million tokens. Overrides the catalog price.",
+    "price_cached_per_mtok": "Cached-input price, USD per million tokens. Overrides the catalog price.",
+    "tier_price_exempt": "Reason this agent is exempt from the `cost_tier`-vs-price lint (e.g. a flat-rate seat whose per-token price is not meaningful).",
+    "catalog_provider": "Catalog vendor key used for model lookups (`anthropic`, `openai`, …), when it differs from the wire `provider`.",
+    "registration": "Name of the provider registration this agent was expanded from. Set automatically; used to prefer same-provider peers during fallback.",
+    "models": "Provider-general registration: the models to expand into individual routable agents. Omit to expand every routable model the catalog lists.",
+    "max_scope": "Largest task scope this agent may be given (`bounded` or `whole_task`). Routing never relaxes this.",
     "auto_compact_pct": "Context % at which to auto-compact.",
     "context_warn_pct": "Context % at which to warn.",
     "stall_threshold": "Stall-detection threshold.",

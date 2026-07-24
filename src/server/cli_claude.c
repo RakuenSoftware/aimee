@@ -1,6 +1,8 @@
 /* cli_claude.c: legacy Claude provider-CLI adapter. */
 #include "provider_cli_adapter.h"
 
+#include <stddef.h>
+
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -12,6 +14,35 @@
  * parsed cli_cmd, default "claude") are heap-allocated; the rest are borrowed.
  * The prompt is NOT in argv — it is fed on stdin by the caller. Returns argc or
  * -1. Shared by the local spawn and the detached (thin-client) exec_stream path. */
+/* Tools the provider CLI is allowed to run.
+ *
+ * DATA, not a sequence of calls, so a test can enumerate it. Every entry has to
+ * be accounted for by the workflow egress gate: either recognised as
+ * externalization, recognised as a shell tool (and therefore gated by command
+ * inspection), or on the reviewed local-only list in
+ * test_cli_claude_allowlist.c. Adding a tool here without doing that fails the
+ * build's test suite, which is the point -- a name-matched gate is fail-open for
+ * anything added after the list was written, and this list is exactly where
+ * "added after" happens.
+ *
+ * `Bash(*)` carries a Claude Code argument pattern; the gate sees the bare tool
+ * name, so the accounting test strips the suffix. */
+static const char *const CLAUDE_ALLOWED_TOOLS[] = {
+    "Bash(*)",  "Edit",      "Read",         "Write",      "Glob", "Grep",
+    "WebFetch", "WebSearch", "NotebookEdit", "mcp__aimee", /* the aimee MCP server's tools (same
+                                                              trust domain) */
+};
+
+const char *const *cli_claude_allowed_tools(void)
+{
+   return CLAUDE_ALLOWED_TOOLS;
+}
+
+size_t cli_claude_allowed_tools_count(void)
+{
+   return sizeof(CLAUDE_ALLOWED_TOOLS) / sizeof(CLAUDE_ALLOWED_TOOLS[0]);
+}
+
 static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int cap,
                              int *split_count)
 {
@@ -25,6 +56,7 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
       *split_count = count;
 
    int argc = count;
+
 #define CLAUDE_ADD_ARG(s)                                                                          \
    do                                                                                              \
    {                                                                                               \
@@ -56,16 +88,8 @@ static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int c
    CLAUDE_ADD_ARG(
        "{\"mcpServers\":{\"aimee\":{\"command\":\"aimee\",\"args\":[\"mcp\",\"serve\"]}}}");
    CLAUDE_ADD_ARG("--allowedTools");
-   CLAUDE_ADD_ARG("Bash(*)");
-   CLAUDE_ADD_ARG("Edit");
-   CLAUDE_ADD_ARG("Read");
-   CLAUDE_ADD_ARG("Write");
-   CLAUDE_ADD_ARG("Glob");
-   CLAUDE_ADD_ARG("Grep");
-   CLAUDE_ADD_ARG("WebFetch");
-   CLAUDE_ADD_ARG("WebSearch");
-   CLAUDE_ADD_ARG("NotebookEdit");
-   CLAUDE_ADD_ARG("mcp__aimee"); /* the aimee MCP server's tools */
+   for (size_t ti = 0; ti < cli_claude_allowed_tools_count(); ti++)
+      CLAUDE_ADD_ARG(cli_claude_allowed_tools()[ti]);
    CLAUDE_ADD_ARG("--disallowedTools");
    /* Enforce delegate-only: block Claude Code's CLIENT-SIDE subagent tools so the
     * primary must use aimee delegates. `Task` is Claude Code's real sub-agent

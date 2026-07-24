@@ -8,7 +8,7 @@ section does not imply global priority.
 | State | Folder | Count |
 | --- | --- | --- |
 | Shipped | [`proposals/done/`](proposals/done/) | 65 |
-| Pending | [`proposals/pending/`](proposals/pending/) | 19 |
+| Pending | [`proposals/pending/`](proposals/pending/) | 23 |
 | Accepted (locked, unimplemented) | `proposals/accepted/` | 0 |
 | Deferred | `proposals/deferred/` | 0 |
 | Rejected | `proposals/rejected/` | 0 |
@@ -50,7 +50,7 @@ realized in code and enforced in review; their standalone proposal documents are
 
 ## Pending
 
-The genuinely open work — nineteen proposals (all but one not yet implemented).
+The genuinely open work — twenty-three proposals (all but one not yet implemented).
 
 - **The governance arc** (three linked proposals, 2026-07-13 deep-dive): the
   question they jointly answer is not "do we enforce policy" but "where does the
@@ -91,6 +91,31 @@ The genuinely open work — nineteen proposals (all but one not yet implemented)
   feature implementations from global source buckets into documented, dependency-enforced
   modules; and uses the migration as a deletion-first, DRY refactor rather than a directory
   shuffle. **Recall / Rerank / Route / Translate / Constrain-Verify.**
+- [The registration chain and the static thin client](proposals/pending/thin-client-capability-advertisement.md)
+  — consuming child of the core-substrate suite. Replaces the static `/v1/capabilities` list with a
+  truthful, generation-stamped projection of the module-runtime capability closure and state;
+  delivers it to the thin client on connect and on server/Control-Plane change; and defines how the
+  client merges both services under the dependency law and re-advertises the effective set to its
+  consumer (MCP/ACP handshake, CLI/web). Drafted 2026-07-23; awaits its own review.
+  **Route / Translate / Constrain-Verify / Gate-Promote.**
+- [Govern and capture the module event bus as one uniform seam](proposals/pending/event-bus-governance-and-capture.md)
+  — consuming child of the core-substrate suite. The core-owned governance/audit tap on the module
+  event bus becomes the single capture and enforcement seam: every inter-module event is recorded,
+  action-class events are authorized before delivery, and the stream feeds the durable ledger and
+  `aimee audit attest`. Consumes the in-flight `governance-attestable-enforcement` (mid-implementation)
+  without modifying it. Drafted 2026-07-23; awaits its own review. **Enforce / Gate-Promote / Constrain-Verify.**
+- [`module-loader` — load and host external and user-authored modules](proposals/pending/module-loader.md)
+  — consuming child of the core-substrate suite; the optional module (renamed from `plugin-loader`)
+  that owns the module package format, fail-closed artifact verification, the OS-sandbox and
+  WebAssembly host runtimes, and the loaded-module lifecycle. Consumes core admission/bus/policy and
+  optional `governance` artifact trust without owning them. Drafted 2026-07-23; awaits its own review.
+  **Gate-Promote / Enforce.**
+- [Aimee shared-memory event bus — wire and segment spec (v0 DRAFT)](proposals/pending/event-bus-wire-spec.md)
+  — the normative spec the single in-source C bus host and the C/Go reference clients implement:
+  segment layout, SPSC rings, event encoding, attach/admission handshake, observer routing, the
+  governance/audit tap, credit-based backpressure, ordering, versioning, and capture/replay format.
+  Owned by `module-runtime`; validated by two independent client implementations + conformance
+  vectors. Drafted 2026-07-23. **Translate / Constrain-Verify.**
 - [Memory auto-population — feedback→rules, promotion, gated extraction](proposals/pending/memory-auto-population-phase4.md)
   — Proposal 2 Phase 4 (deferred §4): gated, default-off auto-population into a review quarantine;
   feedback→durable org rules with decay; promotion behind a strict operator gate.
@@ -149,7 +174,7 @@ The genuinely open work — nineteen proposals (all but one not yet implemented)
   silently trusted. Adds write-time classification, a category→tier map, and the
   gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
   human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
-- [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
+- Streaming repetition-collapse guardrail + per-backend temperature calibration **(accepted — queued for autonomous implementation)**
   — small reasoning models served through the gateway fall into degenerate
   repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
   Adds a deterministic streaming detector on the provider-neutral IR-delta relay,

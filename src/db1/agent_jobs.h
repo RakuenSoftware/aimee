@@ -55,6 +55,9 @@ extern "C"
        * with the same (current_tool, api_call_count) across polls means
        * forward progress has stalled. */
       int api_call_count;
+      double cost_usd;
+      /* 0 means no measurement is available, never "the job was free". */
+      int cost_known;
       char created_at[DB1_AJ_TS_LEN];
       char updated_at[DB1_AJ_TS_LEN];
    } db1_agent_job_t;
@@ -67,6 +70,14 @@ extern "C"
 
    /* UPDATE status/cursor_turn/result + updated_at=now. */
    void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const char *result);
+
+   /* Publish a terminal status, result and the realized cost copied from the
+    * completed delegate response in one checked write, so a status poll can
+    * never observe a terminal job whose cost is still the default zero.
+    * has_cost==0 leaves the stored cost and its known flag untouched, so an
+    * unmeasured terminal write stays explicitly unknown. Returns 0 on success. */
+   int db1_agent_job_complete(int job_id, const char *status, int cursor_turn, const char *result,
+                              int has_cost, double cost_usd);
 
    /* UPDATE agent_name + updated_at=now once routing has selected an agent. */
    void db1_agent_job_set_agent(int job_id, const char *agent_name);
