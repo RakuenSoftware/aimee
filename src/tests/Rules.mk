@@ -2908,9 +2908,9 @@ $(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o 
 unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
 	$<
 
-# Run in the standard unit-tests sweep (a fast functional test, unlike the
-# perf/durability-gated bus tests that the bench gate drives).
-TEST_TARGETS += $(TESTPREFIX)/unit-test-bus-vault-audit
+# NOT in TEST_TARGETS: like the other bus tests it needs a special bus link set
+# the standard unit-tests build does not assemble, so the bench gate
+# (check_bus_perf_gate.sh) force-builds + runs it via this .PHONY target instead.
 
 # Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
