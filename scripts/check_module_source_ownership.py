@@ -33,26 +33,6 @@ class Contract:
 
 CONTRACTS = (
     Contract(
-        module="plugin-loader",
-        legacy_source="src/plugin_loader.c",
-        legacy_header="src/headers/plugin_loader.h",
-        canonical_source="src/modules/plugin-loader/plugin_loader.c",
-        canonical_header="src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
-        canonical_include="aimee/plugin-loader/plugin_loader.h",
-        make_source="modules/plugin-loader/plugin_loader.c",
-        cmake_source="${AIMEE_SRC_DIR}/modules/plugin-loader/plugin_loader.c",
-        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin_loader.c",
-        test_object="$(OBJDIR)/modules/plugin-loader/plugin_loader.o",
-        legacy_test_object="$(OBJDIR)/plugin_loader.o",
-        consumers=(
-            "src/modules/plugin-loader/plugin_loader.c",
-            "src/server/server_main.c",
-            "src/tests/test_plugin_loader.c",
-        ),
-        document="docs/modules/plugin-loader.md",
-        document_markers=("AIMEE_WITH_PLUGIN_LOADER", "disabled profile"),
-    ),
-    Contract(
         module="module-runtime-pre-llm-hook",
         legacy_source="src/plugin_c_hook.c",
         legacy_header="src/headers/plugin_c_hook.h",
@@ -71,47 +51,6 @@ CONTRACTS = (
         ),
         document="docs/modules/module-runtime.md",
         document_markers=("system prompt", "plugin_chook_apply_pre_llm"),
-    ),
-    Contract(
-        module="plugin-loader-contract",
-        legacy_source="src/plugin.c",
-        legacy_header="src/headers/plugin.h",
-        canonical_source="src/modules/plugin-loader/plugin.c",
-        canonical_header="src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-        canonical_include="aimee/plugin-loader/plugin.h",
-        make_source="modules/plugin-loader/plugin.c",
-        cmake_source="${AIMEE_SRC_DIR}/modules/plugin-loader/plugin.c",
-        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin.c",
-        test_object="$(OBJDIR)/modules/plugin-loader/plugin.o",
-        legacy_test_object="$(OBJDIR)/plugin.o",
-        consumers=(
-            "src/modules/plugin-loader/plugin.c",
-            "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
-            "src/tests/test_plugin.c",
-        ),
-        document="docs/modules/plugin-loader.md",
-        document_markers=("plugin_manifest_parse", "plugin_load_and_register",
-                          "plugin_permission_name", "plugin_permission_from_str"),
-    ),
-    Contract(
-        module="module-runtime-extension",
-        legacy_source="src/plugin_ctx.c",
-        legacy_header="src/headers/plugin_ctx.h",
-        canonical_source="src/modules/module-runtime/extension.c",
-        canonical_header="src/modules/module-runtime/include/aimee/module-runtime/extension.h",
-        canonical_include="aimee/module-runtime/extension.h",
-        make_source="modules/module-runtime/extension.c",
-        cmake_source="${AIMEE_SRC_DIR}/modules/module-runtime/extension.c",
-        legacy_cmake_source="${AIMEE_SRC_DIR}/plugin_ctx.c",
-        test_object="$(OBJDIR)/modules/module-runtime/extension.o",
-        legacy_test_object="$(OBJDIR)/plugin_ctx.o",
-        consumers=(
-            "src/modules/module-runtime/extension.c",
-            "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-            "src/tests/test_plugin.c",
-        ),
-        document="docs/modules/module-runtime.md",
-        document_markers=("plugin_ctx_create", "plugin_ctx_destroy"),
     ),
     Contract(
         module="gateway-pipeline",
@@ -571,16 +510,12 @@ def validate(root: Path) -> None:
         require('#include "headers/plugin_ctx.h"' not in content,
                 "legacy-include-removed", relative)
 
-    require(makefile.count("-Imodules/plugin-loader/include") == 1,
-            "module-include-root", "Make plugin-loader include root")
     require(makefile.count("-Imodules/module-runtime/include") == 1,
             "module-include-root", "Make module-runtime include root")
     require(makefile.count("-Imodules/ir/include") == 1,
             "module-include-root", "Make IR include root")
     require(makefile.count("-Imodules/translation/include") == 1,
             "module-include-root", "Make translation include root")
-    require(cmake.count("set(AIMEE_PLUGIN_LOADER_INCLUDE_DIR") == 1,
-            "module-include-root", "CMake plugin-loader include root")
     require(cmake.count("set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR") == 1,
             "module-include-root", "CMake module-runtime include root")
     require(cmake.count("set(AIMEE_IR_INCLUDE_DIR") == 1,
@@ -588,16 +523,6 @@ def validate(root: Path) -> None:
     require(cmake.count("set(AIMEE_TRANSLATION_INCLUDE_DIR") == 1,
             "module-include-root", "CMake translation include root")
 
-    descriptor = json.loads(read(root, "src/modules/plugin-loader/module.yaml"))
-    features = read(root, "src/headers/aimee_features.h")
-    require(descriptor.get("enabled_by_default") is False,
-            "plugin-loader-profile-default", "descriptor must default disabled")
-    require(re.search(r"^AIMEE_WITH_PLUGIN_LOADER\s*\?=\s*0$", makefile, re.MULTILINE) is not None,
-            "plugin-loader-profile-default", "Make must default disabled")
-    require('option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)' in cmake,
-            "plugin-loader-profile-default", "CMake must default disabled")
-    require(re.search(r"^#define AIMEE_WITH_PLUGIN_LOADER 0$", features, re.MULTILINE) is not None,
-            "plugin-loader-profile-default", "header fallback must default disabled")
 
 
 def main() -> int:

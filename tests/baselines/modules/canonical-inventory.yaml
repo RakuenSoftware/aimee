@@ -21,7 +21,6 @@
     "audit"
   ],
   "optional": [
-    "plugin-loader",
     "governance",
     "workflows",
     "roundtable",

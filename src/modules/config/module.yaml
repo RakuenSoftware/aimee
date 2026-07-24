@@ -18,7 +18,6 @@
     "src/modules/config/config_learning.c",
     "src/modules/config/config_memory.c",
     "src/modules/config/config_mode.c",
-    "src/modules/config/config_plugin.c",
     "src/modules/config/config_save.c",
     "src/modules/config/config_sections.c",
     "src/modules/config/config_server_api.c",

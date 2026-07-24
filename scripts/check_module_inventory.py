@@ -22,7 +22,7 @@ MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
 ALLOWED_KEYS = {"schema_version", "required", "optional"}
 REQUIRED_COUNT = 18
-OPTIONAL_COUNT = 8
+OPTIONAL_COUNT = 7
 PINNED_REQUIRED = {"git"}
 
 

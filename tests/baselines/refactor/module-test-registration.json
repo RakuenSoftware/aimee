@@ -538,18 +538,6 @@
     {
       "ctest": false,
       "make": true,
-      "module": "plugin-loader",
-      "test": "src/tests/test_plugin.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "plugin-loader",
-      "test": "src/tests/test_plugin_loader.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
       "module": "protocols",
       "test": "src/tests/test_acp_server.c"
     },
