@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "bus_region.h"
@@ -67,6 +68,17 @@ bus_region_result_t bus_region_map(int fd, size_t size, int writable, bus_region
    if (!out || fd < 0 || size == 0)
       return BUS_REGION_ERR_ARG;
 
+   /* mmap will happily map past the end of the backing memfd; touching those
+    * pages then raises SIGBUS, and every later bounds check that trusts r->size
+    * would have approved a header whose backing object is shorter. So the
+    * mapping may not exceed the fd's actual length — verified before mmap, not
+    * discovered by a fault later. */
+   struct stat st;
+   if (fstat(fd, &st) != 0)
+      return BUS_REGION_ERR_OS;
+   if (st.st_size < 0 || size > (size_t)st.st_size)
+      return BUS_REGION_ERR_SIZE;
+
    int prot = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
    void *base = mmap(NULL, size, prot, MAP_SHARED, fd, 0);
    if (base == MAP_FAILED)
@@ -108,6 +120,12 @@ bus_region_result_t bus_control_init(bus_region_t *r, uint32_t slot_size, uint32
    if (slot_size == 0 || inline_budget > slot_size || arena_size == 0 ||
        arena_size > BUS_ARENA_MAX_SIZE)
       return BUS_REGION_ERR_GEOMETRY;
+   /* queue_capacity sizes a queue-pair region's rings, so it is held to the same
+    * geometry the ring accepts: bus_qpair_bytes returns 0 for any capacity the
+    * ring would reject. A control region that stored a bad capacity would let a
+    * later queue-pair mapping be sized on nonsense. */
+   if (bus_qpair_bytes(slot_size, queue_capacity) == 0)
+      return BUS_REGION_ERR_GEOMETRY;
 
    bus_control_t *c = (bus_control_t *)r->base;
    memset(c, 0, sizeof *c);
@@ -142,11 +160,17 @@ bus_region_result_t bus_control_attach(const bus_region_t *r, bus_control_t **ou
       return BUS_REGION_ERR_VERSION;
 
    /* The D4 parameters are a claim; a client will size mappings against them, so
-    * a header describing nonsense must be refused rather than propagated. */
+    * a header describing nonsense must be refused rather than propagated. Every
+    * value a mapping or a ring walk is later sized on is validated here,
+    * including queue_capacity (which sizes the queue-pair rings) — an omission
+    * the first review caught. */
    uint32_t slot = atomic_load_explicit(&c->slot_size, memory_order_acquire);
    uint32_t inl = atomic_load_explicit(&c->inline_budget, memory_order_acquire);
+   uint32_t qcap = atomic_load_explicit(&c->queue_capacity, memory_order_acquire);
    uint64_t arena = atomic_load_explicit(&c->arena_size, memory_order_acquire);
    if (slot == 0 || inl > slot || arena == 0 || arena > BUS_ARENA_MAX_SIZE)
+      return BUS_REGION_ERR_GEOMETRY;
+   if (bus_qpair_bytes(slot, qcap) == 0)
       return BUS_REGION_ERR_GEOMETRY;
 
    *out = c;

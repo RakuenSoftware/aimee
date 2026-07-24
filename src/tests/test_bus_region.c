@@ -201,6 +201,23 @@ static void test_control_corruption_refused(void)
                "zero arena_size refused");
    atomic_store_explicit(&c->arena_size, u64, memory_order_relaxed);
 
+   u32 = atomic_load_explicit(&c->spec_version, memory_order_relaxed);
+   atomic_store_explicit(&c->spec_version, u32 + 1, memory_order_relaxed);
+   must_result(bus_control_attach(&host, &dummy), BUS_REGION_ERR_VERSION,
+               "bad spec_version refused");
+   atomic_store_explicit(&c->spec_version, u32, memory_order_relaxed);
+
+   /* queue_capacity sizes the queue-pair rings; a non-power-of-two must be
+    * refused here rather than sizing a ring on it later. */
+   u32 = atomic_load_explicit(&c->queue_capacity, memory_order_relaxed);
+   atomic_store_explicit(&c->queue_capacity, 15, memory_order_relaxed);
+   must_result(bus_control_attach(&host, &dummy), BUS_REGION_ERR_GEOMETRY,
+               "bad queue_capacity refused");
+   atomic_store_explicit(&c->queue_capacity, 0, memory_order_relaxed);
+   must_result(bus_control_attach(&host, &dummy), BUS_REGION_ERR_GEOMETRY,
+               "zero queue_capacity refused");
+   atomic_store_explicit(&c->queue_capacity, u32, memory_order_relaxed);
+
    /* And a valid header still attaches after all that poking. */
    must_result(bus_control_attach(&host, &dummy), BUS_REGION_OK, "restored header attaches");
 
@@ -209,23 +226,35 @@ static void test_control_corruption_refused(void)
    printf("  control corruption: magic, version, and geometry all refused\n");
 }
 
-/* A short mapping must be refused rather than read past. */
-static void test_short_mapping(void)
+/* A short backing object must be refused before it can fault, not merely a
+ * short size claim. Two real cases:
+ *   1. Mapping MORE than the memfd holds — mmap would succeed and later touches
+ *      would SIGBUS. bus_region_map must refuse it up front.
+ *   2. A memfd large enough to map but too small for the claimed layout — attach
+ *      must refuse rather than walk past the backing. */
+static void test_short_backing(void)
 {
-   bus_region_t create;
-   must_result(bus_region_create("short", bus_control_bytes(), &create), BUS_REGION_OK,
-               "create");
-   /* Map only one page but claim the region is smaller than the header. */
-   bus_region_t tiny;
-   must_result(bus_region_map(create.fd, create.size, 0, &tiny), BUS_REGION_OK, "map");
-   tiny.size = sizeof(bus_control_t) - 1; /* pretend the mapping is too small */
-   bus_control_t *dummy;
-   must_result(bus_control_attach(&tiny, &dummy), BUS_REGION_ERR_SIZE,
-               "attach refuses a header that does not fit");
-   tiny.size = create.size;
-   bus_region_unmap(&tiny);
-   close(create.fd);
-   printf("  short mapping: a header that does not fit is refused\n");
+   /* Case 1: a genuinely short memfd, asked to map beyond its length. */
+   bus_region_t small;
+   must_result(bus_region_create("short-fd", 64, &small), BUS_REGION_OK, "create small");
+   /* small.size is one page (rounded). Ask to map two pages of a one-page fd. */
+   bus_region_t over;
+   must_result(bus_region_map(small.fd, small.size + small.size, 0, &over), BUS_REGION_ERR_SIZE,
+               "map beyond the backing fd is refused before it can SIGBUS");
+   close(small.fd);
+
+   /* Case 2: a one-page region is fine to map, but a queue-pair layout that
+    * needs more than a page must be refused at init/attach, not walked past. */
+   bus_region_t page;
+   must_result(bus_region_create("one-page", 64, &page), BUS_REGION_OK, "create page");
+   bus_region_t mapped;
+   must_result(bus_region_map(page.fd, page.size, 1, &mapped), BUS_REGION_OK, "map one page");
+   /* 4096-byte slots x 64 needs far more than a page. */
+   must_result(bus_qpair_init(&mapped, 4096, 64), BUS_REGION_ERR_SIZE,
+               "qpair layout larger than the mapping is refused");
+   bus_region_unmap(&mapped);
+   close(page.fd);
+   printf("  short backing: over-length map and over-large layout both refused\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -253,38 +282,61 @@ static void test_qpair_roundtrip(void)
            BUS_CONTROL_CREDITS_DEFAULT,
         "control-class reserve initialised");
 
-   for (uint32_t i = 0; i < cap; i++)
+   /* Both rings, driven independently with distinct payloads, so a defect in
+    * the inbound ring's placement or init cannot hide behind the outbound one.
+    * inbound is host->client (0x2000+), outbound is client->host (0x1000+). */
+   bus_ring_t *rings[2] = {&qp.inbound, &qp.outbound};
+   uint32_t bases[2] = {0x2000, 0x1000};
+   for (int r = 0; r < 2; r++)
    {
-      void *s = bus_ring_produce_begin(&qp.outbound);
-      must(s != NULL, "produce into outbound");
-      *(uint32_t *)s = 0x1000 + i;
-      bus_ring_produce_commit(&qp.outbound);
-   }
-   must(bus_ring_produce_begin(&qp.outbound) == NULL, "outbound full at capacity");
-   for (uint32_t i = 0; i < cap; i++)
-   {
-      const void *s = bus_ring_consume_begin(&qp.outbound);
-      must(s != NULL, "consume outbound");
-      must(*(const uint32_t *)s == 0x1000 + i, "outbound FIFO through the region");
-      bus_ring_consume_commit(&qp.outbound);
+      for (uint32_t i = 0; i < cap; i++)
+      {
+         void *s = bus_ring_produce_begin(rings[r]);
+         must(s != NULL, "produce into ring");
+         *(uint32_t *)s = bases[r] + i;
+         bus_ring_produce_commit(rings[r]);
+      }
+      must(bus_ring_produce_begin(rings[r]) == NULL, "ring full at capacity");
+      for (uint32_t i = 0; i < cap; i++)
+      {
+         const void *s = bus_ring_consume_begin(rings[r]);
+         must(s != NULL, "consume ring");
+         must(*(const uint32_t *)s == bases[r] + i, "ring FIFO through the region");
+         bus_ring_consume_commit(rings[r]);
+      }
+      must(bus_ring_count(rings[r]) == 0, "ring drained");
    }
 
-   /* Corruption: bad magic and moved offsets are refused. */
+   /* Corruption of the qpair header surface: magic, geometry, and offsets. */
    bus_qpair_t dummy;
-   uint32_t m = atomic_load_explicit(&qp.hdr->magic, memory_order_relaxed);
-   atomic_store_explicit(&qp.hdr->magic, 0, memory_order_relaxed);
-   must_result(bus_qpair_attach(&host, &dummy), BUS_REGION_ERR_MAGIC, "bad qpair magic refused");
-   atomic_store_explicit(&qp.hdr->magic, m, memory_order_relaxed);
-
-   uint32_t off = atomic_load_explicit(&qp.hdr->outbound_off, memory_order_relaxed);
-   atomic_store_explicit(&qp.hdr->outbound_off, off + 64, memory_order_relaxed);
-   must_result(bus_qpair_attach(&host, &dummy), BUS_REGION_ERR_GEOMETRY,
-               "moved outbound offset refused");
-   atomic_store_explicit(&qp.hdr->outbound_off, off, memory_order_relaxed);
+   struct
+   {
+      const char *what;
+      _Atomic uint32_t *field;
+      uint32_t bad;
+      bus_region_result_t want;
+   } lies[] = {
+      {"bad magic", &qp.hdr->magic, 0, BUS_REGION_ERR_MAGIC},
+      {"bad slot_size", &qp.hdr->slot_size, 0, BUS_REGION_ERR_GEOMETRY},
+      {"bad capacity", &qp.hdr->capacity, 15, BUS_REGION_ERR_GEOMETRY},
+      {"moved inbound offset", &qp.hdr->inbound_off, 8, BUS_REGION_ERR_GEOMETRY},
+      {"moved outbound offset",
+       &qp.hdr->outbound_off,
+       atomic_load_explicit(&qp.hdr->outbound_off, memory_order_relaxed) + 64,
+       BUS_REGION_ERR_GEOMETRY},
+   };
+   for (size_t i = 0; i < sizeof lies / sizeof lies[0]; i++)
+   {
+      uint32_t saved = atomic_load_explicit(lies[i].field, memory_order_relaxed);
+      atomic_store_explicit(lies[i].field, lies[i].bad, memory_order_relaxed);
+      must_result(bus_qpair_attach(&host, &dummy), lies[i].want, lies[i].what);
+      atomic_store_explicit(lies[i].field, saved, memory_order_relaxed);
+   }
+   must_result(bus_qpair_attach(&host, &dummy), BUS_REGION_OK, "restored qpair attaches");
 
    bus_region_unmap(&host);
    close(create.fd);
-   printf("  queue-pair: both rings round-trip through the mapped region\n");
+   printf("  queue-pair: both rings round-trip independently, header lies refused\n");
 }
 
 /* ------------------------------------------------------------------ */
@@ -302,6 +354,20 @@ static void arena_corruption_refused(bus_region_t *host)
    must_result(bus_arena_region_attach(host, &base, &size), BUS_REGION_ERR_MAGIC,
                "bad arena magic refused");
    *magic = saved;
+
+   /* A size the mapping cannot back must be refused, not walked past. The size
+    * field is the u64 at offset 8 of the arena header. */
+   uint64_t *szp = (uint64_t *)((uint8_t *)host->base + 8);
+   uint64_t saved_sz = *szp;
+   *szp = host->size + (1u << 20); /* claim far more than is mapped */
+   must_result(bus_arena_region_attach(host, &base, &size), BUS_REGION_ERR_SIZE,
+               "arena size larger than the mapping refused");
+   *szp = 0;
+   must_result(bus_arena_region_attach(host, &base, &size), BUS_REGION_ERR_GEOMETRY,
+               "zero arena size refused");
+   *szp = saved_sz;
+   must_result(bus_arena_region_attach(host, &base, &size), BUS_REGION_OK,
+               "restored arena attaches");
 }
 
 static void test_arena_region(void)
@@ -337,7 +403,7 @@ int main(void)
    test_control_roundtrip();
    test_control_readonly_faults();
    test_control_corruption_refused();
-   test_short_mapping();
+   test_short_backing();
    test_qpair_roundtrip();
    test_arena_region();
    printf("test_bus_region: OK\n");
