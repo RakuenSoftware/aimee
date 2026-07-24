@@ -1,14 +1,20 @@
-# Spec: Aimee shared-memory event bus — wire and segment specification (v0 DRAFT)
+# Spec: Aimee shared-memory event bus — wire and segment specification (v0)
 
-- **State:** DRAFT v0 — 2026-07-23. Normative for the bus host and every bus client; exact byte
-  offsets and sizes are frozen by the conformance vectors, not by prose, and may change until v1.
+- **State:** PENDING — the v0 substrate this spec describes is written and green on the
+  `feat/event-bus` integration branch (2026-07-24), awaiting parent-suite acceptance and promotion to
+  the mainline. It stays under `pending/` for that reason. The spec is normative; exact byte offsets
+  and sizes are frozen by the conformance vectors, and both reference clients are held to them. See
+  [Implementation status](#implementation-status) for the slice-by-slice map.
 - **Owner:** `module-runtime` (per
   [`module-runtime-source-ownership-and-build.md`](module-runtime-source-ownership-and-build.md)).
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries.md)
+- **Decisions and feature tree:** [`docs/dev/EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md)
+  (D1–D10) and [`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md) (the twelve
+  slices).
 - **Validated by:** the single in-source **C bus host**, the **C and Go reference clients**, and the
   cross-language conformance suite. Two independent client implementations, not one, keep this spec
   honest.
-- **Date:** 2026-07-23
+- **Date:** 2026-07-23 (implemented 2026-07-24)
 
 ## Scope
 
@@ -236,17 +242,24 @@ without a copy through the host, and how to bound arena fragmentation and huge/s
 
 ## Conformance
 
-The spec is validated, not defined, by its implementations:
+The spec is validated, not defined, by its implementations. All of the following are built and green
+(see [Implementation status](#implementation-status)):
 
 - **Wire vectors** — shared encode/decode fixtures for headers, each message pattern, version
-  negotiation, and error frames; the C and Go reference clients must both produce and accept the exact
-  bytes.
-- **Interop** — the single in-source C host driven with a C client and a Go client on one segment,
-  exchanging notifications and request/replies in both directions, including `capability_absent`,
-  cancel, backpressure/credit exhaustion, and reaped-client recovery.
-- **No-second-host** — there is exactly one host implementation; conformance forbids a second.
+  negotiation, and error frames; the C and Go reference clients both produce and accept the exact
+  bytes. Committed in `src/tests/fixtures/bus/wire_vectors.tsv`, generated independently of either
+  codec by `scripts/gen_bus_wire_vectors.py` (10 positive + 13 negative rows). ✔
+- **Interop** — the single in-source C host driven with a C client and a real Go client across a
+  process boundary, exchanging notifications and request/replies in both directions, including
+  `capability_absent`, cancel, and reaped-client recovery. Backpressure/credit exhaustion is a
+  language-independent host and client-ring property, proven in-process
+  (`test_bus_flow`, and the C/Go client `would_block` paths). ✔
+- **No-second-host** — exactly one host implementation; `scripts/check_bus_single_host.sh` fails a
+  second `bus_host_create` and confirms the Go side is client-only. ✔
 - **Third-language proof** — a client in a language other than C/Go, written only from this spec and
-  the vectors, attaches and interoperates — the credibility test for "any language."
+  the vectors, attaches and interoperates — the credibility test for "any language." *Not yet
+  written; the two-language agreement and the language-neutral vectors are what make it possible, and
+  a later contributor can add one without any change here.*
 
 ## Non-goals
 
@@ -257,8 +270,48 @@ The spec is validated, not defined, by its implementations:
 
 ## Open questions
 
-- Direct zero-copy vs host-mediated arena leases; arena allocation/fragmentation strategy.
-- Huge and streamed payloads (chunking over the ring vs a dedicated arena stream).
-- Final backpressure policy (credit-based confirmed for v0; shed-vs-block defaults per kind).
-- NUMA/placement of the segment and rings on multi-socket hosts.
-- Exact slot size and inline-payload budget (set with the performance-budget baseline).
+Answered in v0 (settled by the decisions in
+[`EVENT_BUS_DECISIONS.md`](../../dev/EVENT_BUS_DECISIONS.md) and the implementation):
+
+- ~~Direct zero-copy vs host-mediated arena leases; arena allocation/fragmentation strategy.~~
+  **Host-mediated leases** (D3): generation + consumer refcount, first-fit with coalescing, a
+  synchronous per-client cap. Direct producer→consumer allocation is overruled for v0.
+- ~~Final backpressure policy (credit-based confirmed for v0; shed-vs-block defaults per kind).~~
+  **Block by default, shed opt-in per kind** (D5/D7), with a control-class reserve and a sticky
+  `control_lost` backstop.
+- ~~Exact slot size and inline-payload budget.~~ **Control-region parameters** read at attach, not
+  wire fields (D4); provisional 256/192/1024 set in slice 3, the dispatch-overhead ceiling committed
+  in `bench/bus_baseline.json`.
+
+Still open for a later version (out of v0 scope):
+
+- **Huge and streamed payloads** (chunking over the ring vs a dedicated arena stream).
+- **Arena-payload routing** — the host publishing a lease to the resolved observer set before
+  forwarding the reference. The allocator exists (slice 4) and inline routing works; the composition
+  is a focused slice-4/6 follow-up. Arena-flagged frames are currently dropped-with-count, not
+  delivered to a consumer that could not read them.
+- **NUMA/placement** of the regions on multi-socket hosts.
+- **`shm_open` portability fallback** — v0 is Linux-only (`memfd_create`) by D1; a fallback carries
+  its own threat-model note.
+
+## Implementation status
+
+Written and merged onto the `feat/event-bus` integration branch (2026-07-24), one slice per PR, each
+green under the normal and sanitizer builds and self-reviewed. Not yet promoted to the mainline. The twelve slices map to this spec's sections:
+
+| Spec section | Slice(s) | Module |
+|---|---|---|
+| Event encoding, message patterns, versioning | 1, 9 | `bus_wire.{c,h}`, `server-go/bus/wire.go` |
+| Rings | 2, 9 | `bus_ring.{c,h}`, `server-go/bus/ring.go` |
+| Segment layout (multi-region, D1) | 3, 9 | `bus_region.{c,h}`, `server-go/bus/region.go` |
+| Payloads and arena leases | 4 | `bus_arena.{c,h}` |
+| Attach and admission, security | 5, 8, 9 | `bus_host.{c,h}`, `bus_client.{c,h}`, `server-go/bus/client.go` |
+| Routing and the tap | 6 | `bus_route.c` |
+| Flow control and backpressure | 7 | `bus_route.c` |
+| Conformance | 10 | `scripts/test_bus_conformance.sh`, harness + Go interop |
+| Capture / observational replay | 11 | `bus_capture.{c,h}` |
+| Performance budget | 12 | `bench/bus_baseline.json`, `scripts/check_bus_perf_gate.sh` |
+
+The bus is not linked into any shipping binary; the D7 gate
+(`scripts/check_bus_blast_radius.sh`, in `make lint`) enforces that until the separate
+memory-migration tree links it onto the hot path.
