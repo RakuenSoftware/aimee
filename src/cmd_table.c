@@ -201,7 +201,6 @@ const command_t commands[] = {
     {"sweep", "Deepening sweep: find duplication-across-call-sites seams (analysis-only)",
      cmd_sweep, CMD_TIER_ADVANCED},
 #if AIMEE_WITH_PLUGIN_LOADER
-    {"plugin", "Plugin management (install, list, enable, disable, remove)", cmd_plugin,
      CMD_TIER_ADVANCED},
 #endif
     {"cancel", "Cancel active workflows and clean up orphaned state", cmd_cancel,

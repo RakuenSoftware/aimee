@@ -492,9 +492,9 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-mcp-client-registry \
                $(TESTPREFIX)/unit-test-osv-check \
                $(TESTPREFIX)/unit-test-mcp-osv-cache \
-               $(TESTPREFIX)/unit-test-plugin \
-               $(TESTPREFIX)/unit-test-plugin-loader \
-               $(TESTPREFIX)/unit-test-plugin-c-hook \
+                \
+                \
+               -c-hook \
                $(TESTPREFIX)/unit-test-memory-provider \
                $(TESTPREFIX)/unit-test-context-engine \
                $(TESTPREFIX)/unit-test-dogfood \
@@ -1102,7 +1102,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
                        $(OBJDIR)/render.o $(OBJDIR)/cJSON.o $(DB1_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/plugin_stubs.o $(OBJDIR)/tests/test_agent_caps.o \
+$(TESTPREFIX)/unit-test-agent: $(OBJDIR)/tests/test_agent.o $(OBJDIR)/tests/test_agent_caps.o \
                       $(OBJDIR)/modules/workflows/tool_egress.o \
                       $(OBJDIR)/tests/test_agent_responses.o \
                       $(OBJDIR)/posix/agent_ir_parse.o $(OBJDIR)/modules/translation/aimee_backend_responses.o \
@@ -1144,7 +1144,7 @@ $(TESTPREFIX)/unit-test-agent-repair: $(OBJDIR)/tests/test_agent_repair.o \
 
 # agents.json secret-serialization test split out of test_agent.c (2000-line
 # limit). Mirrors unit-test-agent's link line.
-$(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o $(OBJDIR)/plugin_stubs.o \
+$(TESTPREFIX)/unit-test-agent-apikey: $(OBJDIR)/tests/test_agent_apikey.o \
                       $(OBJDIR)/server/agent_cli_shell.o \
                       $(OBJDIR)/modules/audit/audit_action.o $(OBJDIR)/modules/audit/audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                       $(OBJDIR)/server/tool_call_args.o \
@@ -1748,7 +1748,7 @@ $(TESTPREFIX)/unit-test-web-egress: $(OBJDIR)/tests/test_web_egress.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 
-$(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o $(OBJDIR)/plugin_stubs.o \
+$(TESTPREFIX)/unit-test-web-read-spans: $(OBJDIR)/tests/test_web_read_spans.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/vendor/cJSON.o
 	$(CC) $(L_FLAGS) -o $@ $^
@@ -5198,46 +5198,13 @@ $(TESTPREFIX)/unit-test-memory-provider: $(OBJDIR)/tests/test_memory_provider.o 
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
+-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
                      $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                      $(OBJDIR)/log.o \
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-plugin-loader: $(OBJDIR)/tests/test_plugin_loader.o \
-                     $(OBJDIR)/modules/plugin-loader/plugin_loader.o $(OBJDIR)/modules/plugin-loader/plugin.o $(OBJDIR)/modules/module-runtime/extension.o \
-                     $(OBJDIR)/modules/memory/memory_provider.o $(OBJDIR)/server/context_engine.o \
-                     $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/rounds_to_resume.o $(OBJDIR)/server/compact_prune.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
-                     $(OBJDIR)/server/agent_request_shaping.o \
-                     $(OBJDIR)/modules/delegates/delegate_driver.o \
-                     $(OBJDIR)/modules/delegates/delegate_openai.o \
-                     $(OBJDIR)/modules/delegates/delegate_xml_fallback.o \
-                     $(OBJDIR)/model_registry.o \
-                     $(OBJDIR)/server/agent_tools.o \
-                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
-                     $(OBJDIR)/aimee_home.o \
-                     $(OBJDIR)/yaml.o \
-                     $(OBJDIR)/db1/db.o \
-                     $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
-                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o \
-                     $(OBJDIR)/platform_random.o \
-                     $(OBJDIR)/log.o $(OBJDIR)/cJSON.o \
-                     $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-plugin: $(OBJDIR)/tests/test_plugin.o \
-                     $(OBJDIR)/modules/plugin-loader/plugin.o \
-                     $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
-                     $(OBJDIR)/aimee_home.o \
-                     $(OBJDIR)/yaml.o \
-                     $(OBJDIR)/db1/db.o \
-                     $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
-                     $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o \
-                     $(OBJDIR)/platform_random.o \
-                     $(OBJDIR)/log.o $(OBJDIR)/cJSON.o \
-                     $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
 $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
@@ -5725,7 +5692,7 @@ $(TESTPREFIX)/unit-test-mcp-osv-cache: $(OBJDIR)/tests/test_mcp_osv_cache.o \
                      $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o $(OBJDIR)/plugin_stubs.o \
+$(TESTPREFIX)/unit-test-mcp-client-registry: $(OBJDIR)/tests/test_mcp_client_registry.o \
                      $(OBJDIR)/modules/protocols/mcp/mcp_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tool_profile.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_extended.o $(OBJDIR)/modules/protocols/mcp/mcp_skill_tools.o $(OBJDIR)/modules/protocols/mcp/mcp_tools_gateway.o \
                      $(OBJDIR)/server/session_search_tool.o \
                      $(OBJDIR)/modules/plugin-loader/plugin.o \

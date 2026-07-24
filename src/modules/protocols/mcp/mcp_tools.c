@@ -4,7 +4,6 @@
 #include "mcp_skill_tools.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include "mcp_tools_gateway.h"
-#include <aimee/plugin-loader/plugin.h>
 #include "session_search_tool.h"
 #include "log.h"
 #include <stdio.h>
@@ -1727,48 +1726,6 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
     * separate, namespaced entries). */
    if (collapse)
       mcp_collapse_families(tools);
-
-   /* Plugin tools: load registry + project-local, add enabled tools */
-   {
-      plugin_t plugins[PLUGIN_MAX_PLUGINS];
-      int pcount = plugin_registry_load(plugins, PLUGIN_MAX_PLUGINS);
-      /* Also discover local plugins from configured workspaces */
-      config_t pcfg;
-      config_load(&pcfg);
-      const char *roots[64];
-      for (int ri = 0; ri < pcfg.workspace_count && ri < 64; ri++)
-         roots[ri] = pcfg.workspaces[ri];
-      plugin_discover_local(roots, pcfg.workspace_count, plugins, &pcount, PLUGIN_MAX_PLUGINS);
-
-      static plugin_tool_t ptool_buf[PLUGIN_MAX_PLUGINS * PLUGIN_MAX_TOOLS];
-      int ptool_count = plugin_collect_tools(plugins, pcount, ptool_buf,
-                                             (int)(sizeof(ptool_buf) / sizeof(ptool_buf[0])));
-      for (int pi = 0; pi < ptool_count; pi++)
-      {
-         const plugin_tool_t *pt = &ptool_buf[pi];
-         /* Namespace: "plugin:<name>" */
-         char namespaced[128];
-         snprintf(namespaced, sizeof(namespaced), "plugin:%s", pt->name);
-
-         if (tools_array_has_name(tools, pt->name) || tools_array_has_name(tools, namespaced))
-         {
-            LOG_WARN("mcp-tools", "plugin tool '%s' conflicts, skipped", pt->name);
-            continue;
-         }
-
-         cJSON *schema = cJSON_Parse(pt->input_schema_json);
-         if (!schema)
-            schema = cJSON_CreateObject();
-
-         /* Include permission level in the description */
-         char desc[640];
-         snprintf(desc, sizeof(desc), "%s [plugin, permission=%s]",
-                  pt->description[0] ? pt->description : pt->name,
-                  plugin_permission_name(pt->permission));
-
-         cJSON_AddItemToArray(tools, mcp_tool_new(namespaced, desc, schema));
-      }
-   }
 
    cJSON *remote_tools = mcp_client_registry_build_namespaced_tools(1000);
    if (cJSON_IsArray(remote_tools))
