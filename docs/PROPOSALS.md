@@ -174,7 +174,7 @@ The genuinely open work — twenty-three proposals (all but one not yet implemen
   silently trusted. Adds write-time classification, a category→tier map, and the
   gate that bars Tier-3 from being *main* evidence (anti-poisoning), plus
   human-only promotion. **Classify-Score / Enforce / Gate-Promote / Constrain-Verify.**
-- [Streaming repetition-collapse guardrail + per-backend temperature calibration](proposals/pending/repetition-collapse-guardrail.md)
+- Streaming repetition-collapse guardrail + per-backend temperature calibration **(accepted — queued for autonomous implementation)**
   — small reasoning models served through the gateway fall into degenerate
   repetition collapse (a short span re-emitted until `max_tokens` is exhausted).
   Adds a deterministic streaming detector on the provider-neutral IR-delta relay,
