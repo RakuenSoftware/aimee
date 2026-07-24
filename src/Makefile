@@ -587,10 +587,10 @@ $(OBJDIR)/kb/modules/kb-synthesis/%.o: modules/kb-synthesis/%.c
 # pure Converse/IR implementation lives under server/.  Link those leaf objects
 # into aimee-kb now; otherwise LTO can hide their unresolved references until
 # P2b adds the first production caller.
-KB_BEDROCK_IR_OBJS = $(OBJDIR)/server/aimee_backend_bedrock.o \
-                     $(OBJDIR)/server/aimee_frontend_openai.o \
-                     $(OBJDIR)/server/aimee_ir_stream.o \
-                     $(OBJDIR)/server/aimee_ir.o
+KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
+                     $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
+                     $(OBJDIR)/modules/translation/aimee_ir_stream.o \
+                     $(OBJDIR)/modules/ir/aimee_ir.o
 # modules/audit/audit_worm.c is the aimee-server SQLite WORM store (#include <sqlite3.h>); the
 # kb is DB2/Postgres-only and MUST stay sqlite-free (see the boundary integrity
 # check below), using its own db2/kb_audit_worm.c. Its SQLite API has no kb-side
