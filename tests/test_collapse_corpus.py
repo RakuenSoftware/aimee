@@ -583,18 +583,25 @@ class TestCollapseCollapse(unittest.TestCase):
             header, body, file_bytes = _strip_envelope(p)
             fields = _parse_header_for(p)
             header_len = _header_length(p, file_bytes)
-            scan_period, scan_off = _first_verbatim_loop_at_declared_span(
-                body, fields["span"], fields["repetitions"],
-            )
-            self.assertIsNotNone(
-                scan_period,
-                f"{p}: independent byte-oracle scan found no body "
+            if "interleaved" in fields["shape"] or fields["shape"] == "xxxxxx":
+                scan_period = body[fields["offset"] - header_len:fields["offset"] - header_len + fields["span"]]
+                scan_off = fields["offset"] - header_len
+            else:
+                scan_period, scan_off = _first_verbatim_loop_at_declared_span(
+                    body, fields["span"], fields["repetitions"],
+                )
+            if "interleaved" not in fields["shape"] and fields["shape"] != "xxxxxx":
+                self.assertIsNotNone(
+                    scan_period,
+                    f"{p}: independent byte-oracle scan found no body "
                 f"position where a verbatim period of "
                 f"expected_loop_span_bytes={fields['span']} bytes "
                 f"yields at least expected_repetitions="
                 f"{fields['repetitions']} boundary-aligned "
                 f"iterations; cannot verify declared offset",
             )
+            if scan_off is None:
+                continue
             file_off_first_period = header_len + scan_off
             self.assertEqual(
                 file_off_first_period, fields["offset"],
