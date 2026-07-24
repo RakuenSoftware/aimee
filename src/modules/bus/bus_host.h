@@ -90,18 +90,48 @@ typedef struct
    bus_qpair_t qpair;         /* host handles into it */
    uint64_t last_heartbeat;   /* last client_heartbeat value the host observed */
    uint64_t heartbeat_at;     /* host clock when it last advanced */
-   uint64_t dropped;          /* events the host could not deliver (full inbound) */
+   uint64_t dropped;          /* malformed/undeliverable events, counted not silent */
+
+   /* Block-policy backpressure: a destination-full event is left at this
+    * producer's outbound ring head (uncommitted) and retried next pump. It is
+    * seq-stamped and tapped exactly once, so those are remembered across
+    * retries, and the observers already delivered to are tracked so a fan-out is
+    * not double-delivered. */
+   int blocked;
+   uint64_t blocked_seq;
+   uint64_t blocked_delivered[BUS_ARENA_SLOT_WORDS];
 } bus_slot_t;
 
-/* A registered event kind: who observes its notifications, and who serves its
- * requests. Observers is a slot bitmap; server is a slot index or NONE. */
+/* Per-kind overflow policy (D5). Block is the safe default: a full destination
+ * holds the event at the producer's ring head rather than losing it. Shed is
+ * opt-in per kind: a full destination is told, via a typed overflow event, that
+ * it lost one — never a silent drop. */
+typedef enum
+{
+   BUS_KIND_BLOCK = 0,
+   BUS_KIND_SHED
+} bus_kind_policy_t;
+
+/* A registered event kind: who observes its notifications, who serves its
+ * requests, and its overflow policy. Observers is a slot bitmap; server is a
+ * slot index or NONE. */
 typedef struct
 {
    int in_use;
    uint32_t kind;
    uint64_t observers[BUS_ARENA_SLOT_WORDS];
    int32_t server; /* serving slot, or -1 */
+   bus_kind_policy_t policy;
 } bus_kind_t;
+
+/* The inline body of an overflow event: which event was shed, and to whom. A
+ * consumer can enumerate exactly the seq values it lost from these alone (D6). */
+typedef struct
+{
+   uint64_t shed_seq;
+   uint32_t shed_kind;
+   uint32_t dst_slot;
+} bus_overflow_t;
 
 /* An outstanding request, so a reply can be routed back to its requester. */
 typedef struct
@@ -196,6 +226,10 @@ bus_host_result_t bus_host_subscribe(bus_host_t *h, uint32_t slot, uint32_t even
 /* Register `slot` as the single server for `event_kind` (its requests). A second
  * server for the same kind is refused. */
 bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t event_kind);
+
+/* Set a kind's overflow policy. Default is BUS_KIND_BLOCK. */
+bus_host_result_t bus_host_set_kind_policy(bus_host_t *h, uint32_t event_kind,
+                                           bus_kind_policy_t policy);
 
 /* Drain every admitted client's outbound ring once, routing each event: stamp
  * seq, offer it to the tap, then deliver — notifications to the kind's authorized
