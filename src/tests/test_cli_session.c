@@ -1104,8 +1104,8 @@ static void test_isolated_home_reclaimed_on_destroy(void)
    assert(s.iso_home && strcmp(s.iso_home, home) == 0);
    cli_session_destroy(&s);
 
-   assert(stat(home, &st) != 0); /* the whole home tree is gone */
-   assert(s.iso_home == NULL);   /* handle freed + cleared */
+   assert(stat(home, &st) != 0);                    /* the whole home tree is gone */
+   assert(s.iso_home == NULL);                      /* handle freed + cleared */
    assert(stat(creds, &st) == 0 && st.st_size > 0); /* shared credential untouched */
 
    /* Idempotent / safe on a session with no isolated home. */
