@@ -26,6 +26,11 @@ unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-manage
 	$<
 
 P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
+    $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_replay.o \
+    $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
+    $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
+    $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
+    $(OBJDIR)/modules/bus/bus_wire.o $(OBJDIR)/modules/bus/bus_capture.o \
                            $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) \
                            $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) \
                            $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
