@@ -343,17 +343,19 @@ The blast-radius invariant therefore **narrows from "no shipping binary" to "exa
 audit":**
 
 - **Source.** Only `src/modules/bus/*` and `src/modules/audit/obs_bus.c` may include a bus header.
-- **Objects.** Only `aimee-server` links the bus, through a single `BUS_SHIP_OBJS` group named on its
-  link line; `src/Makefile` may name `modules/bus` only in the `BUS_SHIP` source list and the two
-  per-object `-Imodules/bus` compile rules. Audit is compiled into `aimee-server` (via
-  `guardrails_action_audit.c`, in `DATA_SRCS`) and nowhere else among shipping binaries, so that is
-  the whole footprint.
-- **Every other shipping binary stays bus-free.**
+- **Objects.** Only the trusted server daemons — `aimee-server` and `aimee-kb` — link the bus, each
+  through the single `BUS_SHIP_OBJS` group named on its link line; `src/Makefile` may name
+  `modules/bus` only in the `BUS_SHIP` source list and the two per-object `-Imodules/bus` compile
+  rules. `aimee-server` carries the audit / guardrail / vault / sandbox / server-side-memory events;
+  `aimee-kb` runs its own bus to record the authoritative memory-mutation events at the store
+  (`memory_core_crud`), which is why it links `BUS_SHIP_OBJS` plus a tiny stub for the guardrail sink
+  it never drives (`kb/kb_obs_bus_stub.c`).
+- **Every other shipping binary — the thin-client `aimee`, the gateway, runtime-web — stays bus-free.**
 
 `scripts/check_bus_blast_radius.sh` was revised to enforce exactly this: layer 1 permits the confined
-`src/Makefile` references and requires `BUS_SHIP_OBJS` to be consumed only by `$(SERVER)`; layer 3
-allowlists `obs_bus.c`; layer 4 exempts `aimee-server` (it carries the bus on purpose) and holds
-every other binary to zero bus symbols. **Honest limit:** shipping binaries are stripped (`-s`) with
+`src/Makefile` references and requires `BUS_SHIP_OBJS` to be consumed only by `$(SERVER)` or `$(KB)`;
+layer 3 allowlists `obs_bus.c`; layer 4 exempts `aimee-server` and `aimee-kb` (they carry the bus on
+purpose) and holds every other binary to zero bus symbols. **Honest limit:** shipping binaries are stripped (`-s`) with
 LTO, so `nm` sees no static symbols in them — layer 4 is a best-effort backstop for unstripped/CI
 builds, and the load-bearing guarantee is the source/build-text layers, which are complete by
 construction.

@@ -5347,6 +5347,12 @@ $(TESTPREFIX)/unit-test-working-profile: $(OBJDIR)/tests/test_working_profile.o 
 $(TESTPREFIX)/unit-test-curiosity: $(OBJDIR)/tests/test_curiosity.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# KB store-side memory-audit hook: memory_core_crud fires memory_set_audit_hook.
+# Uses the in-memory db2 shim (same set as unit-test-curiosity).
+$(TESTPREFIX)/unit-test-memory-audit-hook: $(OBJDIR)/tests/test_memory_audit_hook.o $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+TEST_TARGETS += $(TESTPREFIX)/unit-test-memory-audit-hook
+
 $(TESTPREFIX)/unit-test-cmd-identity: $(OBJDIR)/tests/test_cmd_identity.o \
                      $(OBJDIR)/cmd_identity.o $(OBJDIR)/working_profile.o \
                      $(DB1_OBJS) \

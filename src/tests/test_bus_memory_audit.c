@@ -62,6 +62,21 @@ int main(void)
    audit_log_open();
    audit_ensure_key();
 
+   /* Directly pin the shared PII fingerprint (used by BOTH the server and aimee-kb
+    * memory bridges): "mk:" prefix, never the raw PII identity, deterministic, and
+    * distinct for distinct identities. */
+   {
+      char fp1[32], fp2[32], fp3[32];
+      obs_bus_key_fingerprint("fact", "email:alice@example.com", fp1, sizeof fp1);
+      obs_bus_key_fingerprint("fact", "email:alice@example.com", fp2, sizeof fp2);
+      obs_bus_key_fingerprint("fact", "email:bob@example.com", fp3, sizeof fp3);
+      assert(strncmp(fp1, "mk:", 3) == 0);
+      assert(strstr(fp1, "alice") == NULL && strstr(fp1, "email") == NULL &&
+             strstr(fp1, "fact") == NULL);
+      assert(strcmp(fp1, fp2) == 0); /* deterministic — correlatable */
+      assert(strcmp(fp1, fp3) != 0); /* distinct identities distinguishable */
+   }
+
    /* Install the REAL bridge: kb_client memory note -> hook -> obs_bus -> ledger. */
    memory_audit_bridge_install();
 

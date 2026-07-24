@@ -29,6 +29,7 @@
 #ifndef AIMEE_OBS_BUS_H
 #define AIMEE_OBS_BUS_H 1
 
+#include <stddef.h> /* size_t */
 #include <stdint.h>
 
 #include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
@@ -89,6 +90,14 @@ extern "C"
    /* Number of rows the consumer has written to the ledger since start. Exposed
     * for the durability test (published == written + dropped once drained). */
    uint64_t obs_bus_written(void);
+
+   /* Write a PII-safe fingerprint of a (kind, key) identity into `out` (>= 16
+    * bytes): "mk:" + the first 6 bytes of SHA-256(kind\x1fkey) in hex. Used by the
+    * memory-audit bridges (server + aimee-kb) so an agent-supplied key/kind — which
+    * can embed PII, and which the KB's content gates do NOT cover — is NEVER written
+    * verbatim to the ledger, while still correlating (same identity -> same handle).
+    * One shared implementation so the two bridges cannot diverge. */
+   void obs_bus_key_fingerprint(const char *kind, const char *key, char *out, size_t out_len);
 
 #ifdef __cplusplus
 }
