@@ -561,6 +561,14 @@ func (r *NativeRunner) roundtable(ctx context.Context, req StepRequest) (StepRes
 	if !ok {
 		return StepResult{}, errors.New("roundtable missing src input")
 	}
+	// The author looped back without changing the artifact, so a fresh panel
+	// would reach the same verdict at full cost. Re-serve the existing findings
+	// instead of paying for a re-review of identical bytes.
+	if req.Feedback != nil && req.Feedback.ArtifactHash == reviewed.Hash && len(req.Feedback.Findings) > 0 {
+		unchanged := *req.Feedback
+		return StepResult{Status: StepChanges, Feedback: &unchanged,
+			Detail: "artifact unchanged since the previous review; prior findings still apply"}, nil
+	}
 	workdir := req.WorkItem.Worktree
 	if workdir == "" && req.WorkItem.Repo != "" {
 		var err error

@@ -1195,3 +1195,39 @@ func TestBlockingFindingCountIgnoresAdvisorySeverities(t *testing.T) {
 		})
 	}
 }
+
+// Looping back to the gate without changing the artifact must not pay for a
+// fresh panel: identical bytes yield an identical verdict, so the prior findings
+// are re-served. A live run burned three roundtable rounds re-reviewing one
+// unchanged artifact hash before this.
+func TestRoundtableSkipsReviewWhenArtifactIsUnchanged(t *testing.T) {
+	agents := &recordingAgents{reviewResponse: `{"artifact_stage":"plan","original_request_alignment":{"status":"aligned","summary":"ok"},"verdict":"approve","findings":[]}`}
+	runner := &NativeRunner{agents: agents}
+	artifact := wfe.Artifact{Type: "plan", Content: []byte("unchanged plan")}
+	artifact.Hash = wfe.Hash(artifact.Content)
+	prior := &wfe.ReviewFeedback{SchemaVersion: 1, ArtifactHash: artifact.Hash, Findings: []wfe.Finding{{
+		ID: "f1", Persona: "qa", Severity: "blocking", Summary: "still broken", Recommendation: "fix it",
+	}}}
+	result, err := runner.roundtable(context.Background(), StepRequest{
+		WorkItem: db1.WorkItem{ID: "wi_unchanged", Worktree: "/worktree"},
+		Node:     wfe.Node{ID: "gate", Block: "gate.roundtable"},
+		Proposal: "fix the scheduler",
+		Inputs:   map[string]wfe.Artifact{"src": artifact},
+		Feedback: prior,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents.requests) != 0 {
+		t.Fatalf("panel was re-invoked on an unchanged artifact: %d delegate requests", len(agents.requests))
+	}
+	if result.Status != StepChanges {
+		t.Fatalf("status=%q, want changes", result.Status)
+	}
+	if result.CostUSD != 0 {
+		t.Fatalf("unchanged re-review cost %v, want 0", result.CostUSD)
+	}
+	if result.Feedback == nil || len(result.Feedback.Findings) != 1 || result.Feedback.Findings[0].ID != "f1" {
+		t.Fatalf("prior findings not re-served: %+v", result.Feedback)
+	}
+}
