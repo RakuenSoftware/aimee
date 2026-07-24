@@ -2745,11 +2745,36 @@ $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_dur
                                               $(OBJDIR)/modules/bus/bus_ring.o \
                                               $(OBJDIR)/modules/bus/bus_arena.o \
                                               $(OBJDIR)/modules/bus/bus_wire.o \
+                                              $(OBJDIR)/modules/bus/bus_capture.o \
                                               $(BUS_MEM_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 .PHONY: unit-test-bus-audit-durability
 unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
+	$<
+
+# audit-on-bus RECORD+REPLAY: the reason audit is on the bus (auditability, not
+# speed). Emits N rows, then reads the real capture file back and requires every
+# governed-action row to replay in order, reconstructed field-for-field. Same
+# link set as durability plus bus_capture.o. Test binary only.
+$(OBJDIR)/tests/test_bus_audit_replay.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-audit-replay: $(OBJDIR)/tests/test_bus_audit_replay.o \
+                                          $(OBJDIR)/modules/audit/audit_bus.o \
+                                          $(OBJDIR)/modules/audit/audit_ledger.o \
+                                          $(OBJDIR)/aimee_home.o \
+                                          $(OBJDIR)/modules/bus/bus_client.o \
+                                          $(OBJDIR)/modules/bus/bus_host.o \
+                                          $(OBJDIR)/modules/bus/bus_route.o \
+                                          $(OBJDIR)/modules/bus/bus_region.o \
+                                          $(OBJDIR)/modules/bus/bus_ring.o \
+                                          $(OBJDIR)/modules/bus/bus_arena.o \
+                                          $(OBJDIR)/modules/bus/bus_wire.o \
+                                          $(OBJDIR)/modules/bus/bus_capture.o \
+                                          $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-audit-replay
+unit-test-bus-audit-replay: $(TESTPREFIX)/unit-test-bus-audit-replay
 	$<
 
 .PHONY: unit-test-bus-capture

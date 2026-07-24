@@ -11,17 +11,22 @@
 #define _GNU_SOURCE
 #include "audit_bus.h"
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "bus_capture.h"
 #include "bus_client.h"
 #include "bus_host.h"
+#include "bus_region.h" /* bus_control_epoch */
+#include "config.h"     /* config_default_dir */
 #include "log.h"
 
 #define KIND_AUDIT_ACTION 3000
@@ -53,6 +58,13 @@ static struct
    atomic_int stop;          /* 1 tells the consumer to final-drain and exit */
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
+   /* Record+replay: the reason the audit row is on the bus at all. The host's
+    * capture tap records every event, in seq order, into this sink; the consumer
+    * thread flushes it to a per-session capture file. Owned by the consumer thread
+    * (the tap fires inside bus_host_pump, which only the consumer calls), so no
+    * lock guards it. */
+   bus_capture_t capture;
+   int cap_fd; /* -1 when capture is off (no writable home / open failed) */
    int started;
    int terminated; /* set by stop; blocks lazy resurrection after shutdown */
 } g;
@@ -160,6 +172,76 @@ static uint32_t drain(void)
    return n;
 }
 
+/* ---------------------------------------------------- capture / replay --- */
+
+/* Threshold at which the in-memory capture sink is flushed to the file, so its
+ * memory stays bounded during a burst instead of growing with the whole stream. */
+#define AB_CAP_FLUSH_AT (32u * 1024u)
+
+/* Append the sink's bytes to the capture file and reset it to empty WITHOUT
+ * re-emitting the file header (header_written stays set), so the file remains one
+ * valid, seq-contiguous stream across many flushes. Runs only on the consumer
+ * thread. On a short/failed write the capture file is abandoned (closed) rather
+ * than left half-written — the audit LEDGER is the durable record; capture is the
+ * replay layer on top, so losing it degrades replay, never the audit itself. */
+static void capture_flush(void)
+{
+   if (g.cap_fd < 0 || g.capture.len == 0)
+      return;
+   if (g.capture.broken)
+   {
+      aimee_log(LOG_WARN, "audit_bus", "capture sink broke (alloc); replay stream abandoned");
+      close(g.cap_fd);
+      g.cap_fd = -1;
+      return;
+   }
+   size_t off = 0;
+   while (off < g.capture.len)
+   {
+      ssize_t w = write(g.cap_fd, g.capture.buf + off, g.capture.len - off);
+      if (w <= 0)
+      {
+         aimee_log(LOG_WARN, "audit_bus", "capture file write failed; replay stream abandoned");
+         close(g.cap_fd);
+         g.cap_fd = -1;
+         g.capture.broken = 1; /* stop the tap appending to a sink we can no longer drain */
+         return;
+      }
+      off += (size_t)w;
+   }
+   g.capture.len = 0; /* keep header_written/first_seq: the header is already on disk */
+}
+
+/* Open a per-session capture file under the home dir and register the tap that
+ * records every routed event into it. Best-effort: if there is no writable home
+ * the tap is NOT registered (capture off; the sink would otherwise grow unbounded
+ * with nowhere to flush), and audit still works — the ledger is the durable
+ * record. One file per host session; the reader requires seq-contiguity, which a
+ * new host (new epoch, seq from the start) would break, so each session truncates
+ * its own file. Cross-session retention/rotation is a later tree. */
+static void capture_open(void)
+{
+   g.cap_fd = -1;
+   bus_capture_init(&g.capture, 1, 1, bus_control_epoch(g.host.control));
+
+   const char *dir = config_default_dir();
+   if (!dir || !dir[0])
+   {
+      aimee_log(LOG_WARN, "audit_bus", "no home dir; audit capture/replay stream disabled");
+      return;
+   }
+   char path[4096];
+   snprintf(path, sizeof path, "%s/audit-bus-capture.aimeecap", dir);
+   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+   if (fd < 0)
+   {
+      aimee_log(LOG_WARN, "audit_bus", "cannot open audit capture file; replay stream disabled");
+      return;
+   }
+   g.cap_fd = fd;
+   bus_host_set_tap(&g.host, bus_capture_tap, &g.capture);
+}
+
 static void *consumer_main(void *arg)
 {
    (void)arg;
@@ -169,8 +251,14 @@ static void *consumer_main(void *arg)
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
    while (!atomic_load_explicit(&g.stop, memory_order_acquire))
    {
-      bus_host_pump(&g.host);
-      if (drain() == 0)
+      bus_host_pump(&g.host); /* the tap records each routed event into g.capture */
+      uint32_t n = drain();
+      /* Flush the capture stream on the threshold (bound memory during a burst)
+       * or when the flow goes idle (so a recorded row is not stranded in memory
+       * waiting for more traffic). */
+      if (g.capture.len >= AB_CAP_FLUSH_AT || (n == 0 && g.capture.len > 0))
+         capture_flush();
+      if (n == 0)
          nanosleep(&nap, NULL);
    }
    /* Final lossless drain: pump+drain until two consecutive empty rounds, so a
@@ -181,6 +269,7 @@ static void *consumer_main(void *arg)
       bus_host_pump(&g.host);
       empty = (drain() == 0) ? empty + 1 : 0;
    }
+   capture_flush(); /* persist whatever the final drain recorded */
    return NULL;
 }
 
@@ -249,9 +338,16 @@ static int start_locked(void)
    }
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
 
+   /* Register the capture tap BEFORE the consumer thread starts pumping, so the
+    * first routed event onward is recorded. */
+   capture_open();
+
    if (pthread_create(&g.thread, NULL, consumer_main, NULL) != 0)
    {
       aimee_log(LOG_ERROR, "audit_bus", "audit consumer thread spawn failed");
+      if (g.cap_fd >= 0)
+         close(g.cap_fd);
+      bus_capture_free(&g.capture);
       bus_client_detach(&g.producer);
       bus_client_detach(&g.consumer);
       bus_host_destroy(&g.host);
@@ -351,8 +447,14 @@ void audit_bus_stop(void)
    /* Reject new emits, then tell the consumer to final-drain and exit. */
    atomic_store_explicit(&g.emitting, 0, memory_order_release);
    atomic_store_explicit(&g.stop, 1, memory_order_release);
-   pthread_join(g.thread, NULL);
+   pthread_join(g.thread, NULL); /* the consumer does its final capture_flush here */
 
+   if (g.cap_fd >= 0)
+   {
+      close(g.cap_fd);
+      g.cap_fd = -1;
+   }
+   bus_capture_free(&g.capture);
    bus_client_detach(&g.producer);
    bus_client_detach(&g.consumer);
    bus_host_destroy(&g.host);

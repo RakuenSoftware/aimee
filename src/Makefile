@@ -387,7 +387,7 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 # binary that links it (the sole shipping consumer of guardrails_action_audit).
 # The D7 blast-radius gate enforces exactly this: bus symbols may appear in
 # aimee-server and nowhere else. See docs/dev/EVENT_BUS_DECISIONS.md (D7).
-BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/audit/audit_bus.c
+BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/audit_bus.c
 BUS_SHIP_OBJS = $(BUS_SHIP_SRCS:%.c=$(OBJDIR)/%.o)
 $(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
