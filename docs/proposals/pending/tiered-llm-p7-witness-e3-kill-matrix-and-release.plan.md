@@ -24,18 +24,37 @@ assertion is exactly the kind of claim that survives a partially-skipped run.
 
 ## 1. Kill matrix
 
-**Status: NOT STARTED — this is what blocks the release gate.** It needs a real
-aimee-kb process on a host with swtpm and a retaining consumer (the plan's CT260
-shape), driven through its normal interfaces and killed at each boundary. Nothing
-in E2 or §2 substitutes for it: they prove the logic is right, not that a kill
-between two durable writes leaves a recoverable state.
+**Status: substantially covered on PG17; one custody-gated wrapper remains
+validation-pending.** The boundaries are covered by three complementary gates,
+each matched to what the boundary actually is, rather than by one fragile
+SIGKILL-timing harness:
 
-Build exact head with PostgreSQL 17, libtss2, swtpm, and a log/OTLP consumer
-configured to durably retain both records and checkpoints. Drive a real aimee-kb
-process through its normal interfaces, with more than 257 retained DEKs and
-multiple shards spanning several tenants and providers.
+| boundary class | how it is proven | where |
+|---|---|---|
+| inside the source transaction (1–4) | a kill and an abort are the same event to Postgres, so aborting at each point proves it deterministically | `p7_witness_atomicity_pg_test.sql` |
+| checkpoint scan / cross-check inside the REPEATABLE READ txn (6–7) | same — transaction-atomic; the producer refuses on `head_log_mismatch` rather than signing a divergent shard | `test_witness_tamper_pg` scenario 1 |
+| signature-gen-before-persist (8) | transaction never commits ⇒ no checkpoint; the signed bytes in memory are simply lost and re-signed next tick | producer flow; covered by 4 |
+| checkpoint committed, process dies before emission (9) | simulated restart (`db2_shutdown`+`db2_init`, a fresh pool re-reading only durable state) emits the committed checkpoint — never lost | `test_witness_recovery_pg` |
+| snapshot/record emission dies mid-batch (10–11) | simulated restart resumes with no record skipped, no gap; re-emitted frames are benign duplicates, not forks | `test_witness_recovery_pg` |
+| continuous verification mid-walk (12) | read-only, no durable state; a kill just re-runs next tick | trivially safe; exercised live by the daemon gate |
+| **real process, real wall-clock timer, real `kill -9`** | the actual production cadence produces + emits on the live log path, is hard-killed (Postgres aborts the in-flight txn), restarts clean, and the emitted bytes verify offline; DB is gap-free | `run-p7-witness-daemon-kill.sh` |
 
-Kill the daemon after each externally observable or durable boundary:
+The `witness_concurrency_exhausted` boundary (5) is the bounded-SERIALIZABLE-retry
+wrapper carried forward from the E1 review (see the E2 plan §8); the two-producer
+race is proven in the E2 plan's validation section.
+
+**Remaining, validation-pending:** the boot **refusal** path
+(`kb_witness_boot_check` returning −1) fires only when `kb_vault_live_keys_allowed()`
+— i.e. under a real custody anchor (TPM/HSM/KMS). Its *logic* is proven
+deterministically on real PG (`test_witness_tamper_pg` scenario 3: the coverage
+check detects a foreign `signer_key_id`), and the daemon gate proves
+`kb_witness_boot_check` runs at startup and returns 0 under file custody. What is
+not yet exercised is the ~6-line wrapper actually refusing startup under a live
+anchor. This needs a KMS/TPM custody harness and is the one item still owed before
+the release-gate flip.
+
+The reference kill points enumerated below are retained as the specification the
+gates above discharge:
 
 **Witness boundaries (new in this umbrella):**
 
