@@ -9,18 +9,56 @@ DOCS = [
     ROOT / "docs/guardrails/collapse_anchors.md",
 ]
 CITATION = re.compile(r"(?P<path>(?:src|scripts)/[A-Za-z0-9_./-]+):(?P<line>[0-9]+)")
+# C block-comment continuation/closer lines: `* foo`, `*/`, `/* foo`.
+# A citation that lands on one of these is a documentation drift bug -- the
+# cited line is supposed to anchor a declaration, definition, or call-site
+# signature, not a comment.
+# Recognise a C/C++ comment line in any of the common shapes:
+# ``// ...``, ``/* ...``, ``* ...`` (block-comment continuation), ``*/``,
+# or a bare ``*`` (sometimes used mid-block).  A citation that lands on one
+# of these is a documentation drift bug -- the cited line is supposed to
+# anchor a declaration, definition, or call-site signature.
+_C_COMMENT_LINE = re.compile(
+    r"^\s*(?://|/\*|\*(?:[^/]|$)|\*/)"
+)
 
 
 def test_all_phase_zero_citations_resolve_to_current_source():
+    # F05 closure: a citation that points at a line which is entirely
+    # blank, whitespace-only, or sits inside an unrelated comment block
+    # with no nearby code is a documentation drift bug.  The previous
+    # implementation only checked that the cited line was within the file
+    # (and within EOF), which let the F01/F02/F03 citations drift past the
+    # actual symbol without failing.  This test extracts the cited line
+    # and the surrounding window (line-2 .. line+2) and requires at least
+    # one of those lines to be a non-blank, non-comment line.  A citation
+    # like ``src/db1/webchat_live.c:18-21`` is still accepted because the
+    # cited line 18 is a comment that documents the SQL block immediately
+    # following it (line 21 in the same window is the SQL declaration).
+    _window = 2
     for document in DOCS:
         citations = list(CITATION.finditer(document.read_text()))
         assert citations, f"no citations in {document}"
         for match in citations:
             source = ROOT / match.group("path")
             assert source.is_file(), f"{document}: missing {source}"
-            line = int(match.group("line"))
-            assert line <= len(source.read_text(errors="replace").splitlines()), (
+            line_no = int(match.group("line"))
+            lines = source.read_text(errors="replace").splitlines()
+            assert line_no <= len(lines), (
                 f"{document}: citation beyond EOF: {match.group(0)}"
+            )
+            window_start = max(0, line_no - 1 - _window)
+            window_end = min(len(lines), line_no - 1 + _window + 1)
+            window = lines[window_start:window_end]
+            has_code = any(
+                ln.strip() and not _C_COMMENT_LINE.match(ln)
+                for ln in window
+            )
+            assert has_code, (
+                f"{document}: citation {match.group(0)} lands in a window "
+                f"(lines {window_start + 1}-{window_end}) that has no "
+                f"non-comment code line; window:\n"
+                + "\n".join(window)
             )
 
 

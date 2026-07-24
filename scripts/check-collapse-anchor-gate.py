@@ -410,7 +410,7 @@ def contract_present(cwd: Path) -> tuple[bool, list[str]]:
     working-tree check is intentionally local-only.  CI mode skips
     it because the CI checkout represents the PR head, and the
     merge-first contract is enforced separately against ``BASE_SHA``
-    by :func:`contract_present_at_base`.  Re-verifying the working
+    by ``_contract_present_at_ref(base_sha, ...)`` with ``base_sha`` resolved from ``BASE_SHA`` (CI) or ``HEAD~1``/``HEAD`` (local).  Re-verifying the working
     tree in CI would be redundant: the PR head always carries the
     pending Phase 1+ diff that we are trying to gate, so the only
     authoritative question is whether ``BASE_SHA`` (the target
@@ -424,49 +424,7 @@ def contract_present(cwd: Path) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
-def contract_present_at_base(cwd: Path) -> tuple[bool, list[str]]:
-    """Verify the anchor contract at the base revision.
 
-    In CI mode the base revision is ``BASE_SHA`` (the target branch
-    head).  In local mode with a usable ``HEAD~1`` the base is
-    ``HEAD~1``.  In local mode without ``HEAD~1`` (initial commit or
-    shallow clone) the base is ``HEAD`` (F001 closure).  In all three
-    cases the base-reference contract is mandatory when a Phase 1+
-    path is present; the function only returns ``(True, [])`` when the
-    anchor file at the resolved base has every decision.
-
-    The caller in :func:`main` only invokes this function when
-    ``phase_one_touched(paths)`` is true, so the function is never
-    asked to "verify" in the no-Phase-1-changes case.
-    """
-    base_sha = os.environ.get("BASE_SHA", "").strip()
-    if not base_sha:
-        # F001: in CI mode the base-reference contract is mandatory;
-        # an unset BASE_SHA is a configuration failure rather than a
-        # satisfied contract.
-        if _ci_mode():
-            return False, [str(n) for n in range(1, 7)]
-        # F002: in local mode the natural base is ``HEAD~1`` -- the
-        # local approximation of the target branch head.  ``HEAD~1``
-        # is the last commit before HEAD, so verifying the anchors
-        # are merged there is what "anchors are merged on the target
-        # branch before Phase 1+ starts" reduces to in a single-
-        # clone local workflow.
-        #
-        # F001 closure: when ``HEAD~1`` is unavailable (initial commit
-        # or shallow clone), the only available base reference is
-        # ``HEAD``.  The gate is only asked to verify the base contract
-        # when a Phase 1+ path is present, so deferring to the working
-        # tree alone would let an initial commit that introduces a
-        # Phase 1+ path without anchors pass silently.  Verify the
-        # anchors at ``HEAD`` instead; if they are missing, fail closed.
-        local_base = _local_base_ref(cwd)
-        if local_base is None:
-            base_sha = "HEAD"
-        else:
-            base_sha = local_base
-
-    return _contract_present_at_ref(base_sha, cwd)
 
 
 def main() -> int:
