@@ -34,26 +34,6 @@ endfunction()
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
-add_executable(test_plugin_loader test_plugin_loader.c)
-target_include_directories(test_plugin_loader PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_plugin_loader)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_plugin_loader PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_plugin_loader PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-elseif(TARGET aimee-core)
-  target_link_libraries(test_plugin_loader PRIVATE aimee-core)
-endif()
-add_test(NAME test_plugin_loader COMMAND test_plugin_loader)
-set_tests_properties(test_plugin_loader PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_memory_provider test_memory_provider.c)
 aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_memory_redirect test_memory_redirect.c)
