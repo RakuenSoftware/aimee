@@ -158,14 +158,45 @@ rather than merely asserted.
 
 ## Progress
 
+All twelve slices are merged into `feat/event-bus`. The D1 amendment was accepted (2026-07-24), which
+unblocked slice 3 onward.
+
 | Slice | State |
 |---|---|
-| 1 — wire codec + vectors | implemented; green under normal + ASAN; in review |
-| 2 — SPSC ring | implemented; green under normal + ASAN + TSAN; in review |
-| 3–12 | blocked on the D1 amendment (`scripts/check_bus_d1_gate.sh`) |
+| 1 — wire codec + vectors | merged; normal + ASAN |
+| 2 — SPSC ring | merged; normal + ASAN + TSAN |
+| 3 — region layout | merged; normal + ASAN (fork+SIGSEGV read-only proof) |
+| 4 — arena leases | merged; normal + ASAN |
+| 5 — host admission | merged; normal + ASAN + TSAN |
+| 6 — routing + tap | merged; normal + ASAN + TSAN |
+| 7 — flow control | merged; normal + ASAN + TSAN |
+| 8 — C reference client | merged; normal + ASAN + TSAN |
+| 9 — Go reference client | merged; pure Go, vectors byte-exact |
+| 10 — conformance suite | merged; real Go client ↔ C host interop |
+| 11 — capture + replay | merged; normal + ASAN + TSAN |
+| 12 — perf baseline gate | merged; ~134 ns/event dispatch, 2000 ns ceiling |
 
-## Review status
+The suite ran under self-review from slice 4 onward (the shared roundtable panel was only partly
+working); every slice's adversarial self-review caught real defects before merge — a control fd
+passed read-write, reply/cancel spoofing, a null-deref, a slot overflow, encoder-derived vectors, and
+a no-op D7 gate among them.
 
-See the revision history in [`EVENT_BUS_DECISIONS.md`](EVENT_BUS_DECISIONS.md) for what each round of
-review found and how it was closed. Slices 1 and 2 are in flight; slice 3 onward is gated on the D1
-amendment, whose status line lives in the wire spec and is read by `scripts/check_bus_d1_gate.sh`.
+## What is deliberately deferred (later trees, not this one)
+
+- **Arena-payload routing.** The host publishes an arena lease (slice 4) to the resolved observer set
+  before forwarding the reference; slices 6/7 route inline payloads and drop arena-flagged frames
+  with a count. This is a focused slice-4/6 composition.
+- **Module replay.** Slice 11 delivers observational replay; re-driving a module against recorded
+  inbound events is a later tree (D10).
+- **`shm_open` portability fallback.** v0 is Linux-only by D1; a fallback carries its own threat-model
+  note.
+- **The memory round-trip perf rows.** Marked pending in `bench/bus_baseline.json`; measurable only
+  against a pre-migration baseline in the memory-migration slice (delivery step 3).
+
+## Gates in place
+
+- `scripts/check_bus_blast_radius.sh` (D7) — no shipping binary links the bus; wired into `make lint`,
+  runs on every slice PR.
+- `scripts/check_bus_d1_gate.sh` — the D1 amendment status (now ACCEPTED).
+- `scripts/test_bus_conformance.sh` — C vectors, Go vectors, cross-language interop, single-host (D8).
+- `scripts/check_bus_perf_gate.sh` (D4 / invariant 15) — dispatch-overhead ceiling; memory rows pending.
