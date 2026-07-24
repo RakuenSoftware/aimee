@@ -111,7 +111,7 @@ done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
    hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
-      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|OBJDIR\)/modules/bus' || true; })
+      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|OBJDIR\)/modules/bus' || true; })
    if [ -n "$hits" ]; then
       note "FAIL: $f uses modules/bus outside a bus test target"
       printf '%s\n' "$hits" >&2
@@ -128,6 +128,7 @@ while IFS= read -r hit; do
    src/modules/bus/*) continue ;;
    src/tests/test_bus_*) continue ;;
    src/tests/bus_conformance_host.c) continue ;; # slice-10 test harness
+   src/tests/bus_bench.c) continue ;;             # slice-12 benchmark
    esac
    note "FAIL: $hit"
    fail=1
