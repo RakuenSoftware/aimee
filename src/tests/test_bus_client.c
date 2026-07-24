@@ -114,6 +114,65 @@ static void test_publish_and_poll(void)
    printf("  publish/poll: a notification reaches the subscriber zero-copy\n");
 }
 
+/* The arena producer/consumer path through the client library: the producer
+ * allocates a lease on the (co-located) host arena, fills it, and emits the
+ * reference frame with bus_client_publish_arena — no bytes cross the ring. The
+ * host routes it by reference; the subscriber polls the frame and reads the
+ * payload in place via the lease table, then releases it. */
+static void test_publish_arena(void)
+{
+   bus_host_config_t cf = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &cf, NULL, NULL) == BUS_HOST_OK, "host");
+
+   bus_client_t pub, sub;
+   must_rc(attach_client(&h, &pub), BUS_CLIENT_OK, "publisher attaches");
+   must_rc(attach_client(&h, &sub), BUS_CLIENT_OK, "subscriber attaches");
+   must(bus_host_subscribe(&h, sub.reply.handle_id, KIND_A) == BUS_HOST_OK, "subscribe");
+
+   /* A zero-length arena payload is refused: there is nothing to lease. */
+   must_rc(bus_client_publish_arena(&pub, KIND_A, 0, 0, 0), BUS_CLIENT_ERR_PAYLOAD,
+           "empty refused");
+
+   const uint32_t len = cf.inline_budget + 500; /* too big for inline: genuinely arena */
+   uint32_t lease = 0;
+   must(bus_arena_alloc(&h.arena, pub.reply.handle_id, len, &lease) == BUS_ARENA_OK, "alloc lease");
+   uint8_t *p = NULL;
+   must(bus_arena_fill_ptr(&h.arena, lease, &p) == BUS_ARENA_OK, "fill ptr");
+   memset(p, 0xD9, len);
+   bus_arena_ref_t ref;
+   must(bus_arena_ref(&h.arena, lease, &ref) == BUS_ARENA_OK, "ref");
+
+   must_rc(bus_client_publish_arena(&pub, KIND_A, lease, ref.generation, len), BUS_CLIENT_OK,
+           "publish arena");
+
+   bus_event_t ev;
+   must_rc(bus_client_poll(&sub, &ev), BUS_CLIENT_EMPTY, "nothing before pump");
+   must(bus_host_pump(&h) == 1, "host routes the arena notification");
+
+   must_rc(bus_client_poll(&sub, &ev), BUS_CLIENT_OK, "subscriber polls the reference");
+   must(ev.frame.event_kind == KIND_A && (ev.frame.hdr_flags & BUS_F_ARENA), "arena frame");
+   must((uint32_t)ev.frame.payload_ref == lease && ev.frame.generation == ref.generation &&
+            ev.frame.payload_len == len,
+        "the lease reference travelled intact");
+   must(ev.payload == NULL, "poll does not auto-resolve arena bytes (the lease table does)");
+
+   const uint8_t *rp = NULL;
+   must(bus_arena_read_ptr(&h.arena, lease, ev.frame.generation, sub.reply.handle_id, &rp) ==
+            BUS_ARENA_OK,
+        "consumer reads the lease in place");
+   must(rp[0] == 0xD9 && rp[len - 1] == 0xD9, "arena payload matches");
+   must(bus_arena_release(&h.arena, lease, ev.frame.generation, sub.reply.handle_id) ==
+            BUS_ARENA_OK,
+        "release");
+   must(bus_arena_live_leases(&h.arena, pub.reply.handle_id) == 0, "lease drained after release");
+
+   bus_client_detach(&pub);
+   bus_client_detach(&sub);
+   bus_host_destroy(&h);
+   printf("  publish_arena: a large payload routes by lease reference, read in place\n");
+}
+
 static void test_request_reply(void)
 {
    bus_host_config_t cf = cfg();
@@ -241,6 +300,7 @@ static void test_heartbeat_and_epoch(void)
 int main(void)
 {
    printf("test_bus_client:\n");
+   test_publish_arena();
    test_publish_and_poll();
    test_request_reply();
    test_capability_absent();

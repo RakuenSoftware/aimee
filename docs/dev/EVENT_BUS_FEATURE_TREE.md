@@ -183,9 +183,27 @@ a no-op D7 gate among them.
 
 ## What is deliberately deferred (later trees, not this one)
 
-- **Arena-payload routing.** The host publishes an arena lease (slice 4) to the resolved observer set
-  before forwarding the reference; slices 6/7 route inline payloads and drop arena-flagged frames
-  with a count. This is a focused slice-4/6 composition.
+- **Arena-payload routing — DONE for notifications** (wire v2 + slice-4/6 composition). The host
+  publishes an arena lease (slice 4) to a snapshot of the kind's observers, drops the producer ref, and
+  forwards the reference frame under the same BLOCK/SHED discipline as an inline fan-out (a shed
+  observer's ref is released so the lease still drains; no observers reclaims immediately). The host
+  never dereferences an arena offset; a co-located consumer reads in place via the lease table
+  (generation + holder gated) and releases. `bus_client_publish_arena` is the producer emit. Two narrow
+  pieces remain deliberately deferred, each awaiting a real consumer to validate against rather than
+  built speculatively:
+    - *Correlated arena patterns* (arena request/reply/cancel). Their lease is reclaimed so it cannot
+      leak, and the frame is dropped-with-count, until the memory recall round-trip that needs a large
+      request/reply payload lands.
+    - *Cross-thread producer allocation.* Routing, consume, and reap all run on the host's pump thread,
+      so the host-private lease table is accessed single-threaded and needs no lock. A producer that
+      allocates a lease from a thread other than the pump would race that table; obs_bus's current
+      producers all fit the inline budget, so no such producer exists yet. When one does, the lease
+      table gains synchronisation (a lock, or a pump-thread alloc queue) — validated against that
+      producer, not ahead of it.
+    - *Arena bytes in the capture stream (D10).* The tap is offered the arena frame header (seq, kind,
+      lease reference) but not the bytes — the host never dereferences the arena. Capturing arena
+      payloads means reading the span through the lease before it drains; it lands with the same slice
+      that adds an arena producer worth replaying.
 - **Module replay.** Slice 11 delivers observational replay; re-driving a module against recorded
   inbound events is a later tree (D10).
 - **`shm_open` portability fallback.** v0 is Linux-only by D1; a fallback carries its own threat-model

@@ -22,8 +22,17 @@
  * control_lost flag is set — the degenerate-case backstop that keeps "never
  * silently" true.
  *
- * This slice routes inline-payload events; arena-payload delivery is a separate
- * slice-4/6 integration and arena-flagged frames are dropped-with-count here.
+ * Arena payloads (D3) are routed by reference, not by copy. The bytes live in the
+ * shared arena; the host only forwards the lease and manages its refcount. On an
+ * arena NOTIFICATION the host snapshots the kind's observers and publishes the
+ * lease to exactly them (bus_arena_publish: +1 consumer ref each, -1 producer
+ * ref), then forwards the reference frame under the same BLOCK/SHED discipline as
+ * an inline fan-out — a SHED-full observer that will never read has its ref
+ * released so the lease still drains. The host never dereferences an arena
+ * offset; only a (co-located, trusted) consumer does, gated by the lease table's
+ * generation + holder checks. A correlated arena pattern (request/reply/cancel)
+ * is not routed yet — its lease is reclaimed so it cannot leak — until the memory
+ * round-trip that needs it lands.
  */
 #include <string.h>
 
@@ -161,8 +170,8 @@ static int put(bus_host_t *h, bus_slot_t *d, const bus_frame_t *f, const uint8_t
  * capability_absent): stamp seq, tap, deliver from the reserve. If even the
  * reserve is full, set the destination's sticky control_lost. dst < 0 means
  * tap-only (producer_reaped names a client that no longer exists). */
-static void emit_control(bus_host_t *h, int dst, uint32_t kind, uint64_t corr,
-                         const void *payload, uint32_t plen)
+static void emit_control(bus_host_t *h, int dst, uint32_t kind, uint64_t corr, const void *payload,
+                         uint32_t plen)
 {
    bus_frame_t f;
    memset(&f, 0, sizeof f);
@@ -214,15 +223,13 @@ void bus_route_forget_slot(bus_host_t *h, uint32_t slot)
          h->kinds[i].server = KIND_SERVER_NONE;
    }
    for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
-      if (h->pending[i].in_use &&
-          (h->pending[i].requester == slot || h->pending[i].server == slot))
+      if (h->pending[i].in_use && (h->pending[i].requester == slot || h->pending[i].server == slot))
          h->pending[i].in_use = 0;
 }
 
 /* ---- pending request table ---- */
 
-static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester,
-                                  uint32_t server)
+static bus_pending_t *pending_add(bus_host_t *h, uint64_t corr, uint32_t requester, uint32_t server)
 {
    for (uint32_t i = 0; i < BUS_HOST_MAX_PENDING; i++)
    {
@@ -252,8 +259,8 @@ static bus_pending_t *pending_find(bus_host_t *h, uint64_t corr)
  * source), 0 if a BLOCK-policy destination was full and the event must stay at
  * the producer's ring head. `delivered` tracks observers already served across
  * retries. */
-static int route_notification(bus_host_t *h, uint32_t src, bus_frame_t *f,
-                              const uint8_t *inl, bus_kind_t *k, uint64_t *delivered)
+static int route_notification(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_t *inl,
+                              bus_kind_t *k, uint64_t *delivered)
 {
    int all_done = 1;
    for (uint32_t s = 0; s < h->cfg.max_slots; s++)
@@ -282,15 +289,117 @@ static int route_notification(bus_host_t *h, uint32_t src, bus_frame_t *f,
    return all_done;
 }
 
+/* Route an arena-payload notification by reference. At first sight it snapshots
+ * the kind's observers into *targets and publishes the lease to exactly them, so
+ * the refcount matches the set that will read; k==0 (no observers) reclaims the
+ * lease immediately. Delivery of the reference frame is then retryable under
+ * BLOCK exactly like an inline fan-out. A SHED-full observer will never read, so
+ * its published ref is released here — otherwise the lease could never drain to
+ * zero. The producer relinquishes the lease when it sends the frame; after
+ * publish the host owns its lifetime (D3), and the host never touches the bytes. */
+static int route_arena_notification(bus_host_t *h, uint32_t src, bus_frame_t *f, bus_kind_t *k,
+                                    uint64_t *targets, uint64_t *delivered, int first_seen)
+{
+   uint32_t lease = (uint32_t)f->payload_ref;
+   uint32_t generation = f->generation;
+
+   if (first_seen)
+   {
+      /* Validate the frame against the authoritative lease before routing. The
+       * host owns the lease table, so it can insist the frame's generation and
+       * length match the span it names — which is what lets a consumer read
+       * exactly payload_len bytes in place and trust that they lie within the
+       * lease (a producer-supplied length is not otherwise bounded by the span).
+       * A mismatch is a producer bug or a stale/reused id: drop it, and leave the
+       * lease for producer reap rather than reclaim one that may now be another's.
+       * payload_len may be smaller than the span (the allocator rounds up); it may
+       * not exceed it, which is the bound that keeps the consumer's read in place. */
+      bus_arena_ref_t ref;
+      if (bus_arena_ref(&h->arena, lease, &ref) != BUS_ARENA_OK || ref.generation != generation ||
+          f->payload_len > ref.len)
+      {
+         h->slots[src].dropped++;
+         return 1;
+      }
+      memset(targets, 0, BUS_ARENA_SLOT_WORDS * sizeof *targets);
+      uint8_t obs[BUS_ARENA_MAX_SLOTS];
+      uint32_t n = 0;
+      if (k)
+         for (uint32_t s = 0; s < h->cfg.max_slots; s++)
+            if (h->slots[s].in_use && obs_test(k->observers, s))
+            {
+               obs_set(targets, s);
+               obs[n++] = (uint8_t)s;
+            }
+      if (bus_arena_publish(&h->arena, lease, obs, n) != BUS_ARENA_OK)
+      {
+         /* A lease the table will not accept (bad id, or not producer-held):
+          * there is nothing to route and nothing that can leak. */
+         h->slots[src].dropped++;
+         return 1;
+      }
+      if (n == 0)
+         return 1; /* published to nobody: the lease reclaimed itself */
+   }
+
+   int all_done = 1;
+   for (uint32_t s = 0; s < h->cfg.max_slots; s++)
+   {
+      if (!obs_test(targets, s) || obs_test(delivered, s))
+         continue;
+      if (!h->slots[s].in_use)
+      {
+         /* The observer departed after publish; the reap already dropped the ref
+          * attributed to it. Nothing to deliver or release — treat as resolved. */
+         obs_set(delivered, s);
+         continue;
+      }
+      bus_slot_t *d = &h->slots[s];
+      if (has_room(d, 0) && put(h, d, f, NULL))
+      {
+         obs_set(delivered, s);
+         continue;
+      }
+      if (k->policy == BUS_KIND_SHED)
+      {
+         /* Never delivered, so never read: release the ref published to this
+          * slot so the lease can still reach zero, then name the lost seq. */
+         bus_arena_release(&h->arena, lease, generation, s);
+         shed(h, s, f);
+         obs_set(delivered, s);
+      }
+      else
+      {
+         all_done = 0; /* BLOCK: leave in flight for this destination */
+      }
+   }
+   return all_done;
+}
+
+/* A correlated pattern (request/reply/cancel) carrying an arena payload is not
+ * routed yet — the memory round-trip that needs it is a later slice. Reclaim the
+ * producer's lease (publish to zero observers) so it cannot leak, and count the
+ * drop so the loss is never silent. */
+static int arena_correlated_unsupported(bus_host_t *h, uint32_t src, const bus_frame_t *f)
+{
+   bus_arena_publish(&h->arena, (uint32_t)f->payload_ref, NULL, 0);
+   h->slots[src].dropped++;
+   return 1;
+}
+
 /* Route a fresh event (first time it is seen). Returns 1 if fully resolved. On a
- * BLOCK stall it returns 0 and sets *blocked_delivered so retries resume. */
+ * BLOCK stall it returns 0 and sets *blocked_delivered so retries resume.
+ * first_seen is 1 on the event's first pump, 0 on a block retry — an arena lease
+ * is published exactly once, at first sight. */
 static int route_fresh(bus_host_t *h, uint32_t src, bus_frame_t *f, const uint8_t *inl,
-                       uint64_t *delivered)
+                       uint64_t *delivered, int first_seen)
 {
    if (f->hdr_flags & BUS_F_ARENA)
    {
-      h->slots[src].dropped++;
-      return 1; /* out of scope this slice; resolved (dropped, counted) */
+      if (f->hdr_flags & BUS_F_NOTIFICATION)
+         return route_arena_notification(h, src, f, kind_find(h, f->event_kind),
+                                         h->slots[src].arena_targets, delivered, first_seen);
+      return arena_correlated_unsupported(h, src, f);
    }
 
    bus_kind_t *k = kind_find(h, f->event_kind);
@@ -395,7 +504,7 @@ uint32_t bus_host_pump(bus_host_t *h)
             /* Same head event as last pump: reuse its seq, do not re-tap. */
             f.seq = slot->blocked_seq;
             f.src_handle = s;
-            done = route_fresh(h, s, &f, inl, slot->blocked_delivered);
+            done = route_fresh(h, s, &f, inl, slot->blocked_delivered, 0);
          }
          else
          {
@@ -405,7 +514,7 @@ uint32_t bus_host_pump(bus_host_t *h)
                h->tap(h->tap_ctx, &f, inl, (f.hdr_flags & BUS_F_INLINE) ? f.payload_len : 0);
             /* seq-stamped, pre-routing, once */
             memset(slot->blocked_delivered, 0, sizeof slot->blocked_delivered);
-            done = route_fresh(h, s, &f, inl, slot->blocked_delivered);
+            done = route_fresh(h, s, &f, inl, slot->blocked_delivered, 1);
             routed++; /* count each accepted event once, at first sight */
          }
 
