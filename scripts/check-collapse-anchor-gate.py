@@ -118,6 +118,32 @@ def _diff_names(*args: str, cwd: Path) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def _working_tree_names(cwd: Path) -> list[str]:
+    """Return the names of files modified, staged, or untracked in the
+    working tree, so a Phase 1+ edit that the developer has not yet
+    committed is still visible to the gate (F002).
+
+    Combines ``git diff --name-only HEAD`` (tracked edits + staged
+    additions) with ``git ls-files --others --modified --exclude-standard``
+    (untracked files outside standard ignore lists).  ``git add -N``
+    would also fold untracked files into the diff output, but the
+    ``ls-files`` source is sufficient on its own and avoids mutating
+    the index.
+    """
+    diff_out = _git_text_ok("diff", "--name-only", "HEAD", cwd=cwd)
+    ls_out = _git_text_ok(
+        "ls-files", "--others", "--modified", "--exclude-standard", cwd=cwd,
+    )
+    names: list[str] = []
+    seen: set[str] = set()
+    for line in (*diff_out.splitlines(), *ls_out.splitlines()):
+        if not line or line in seen:
+            continue
+        seen.add(line)
+        names.append(line)
+    return names
+
+
 def diff_against_base(cwd: Path) -> list[str]:
     """Return the list of files changed in the diff being validated.
 
@@ -166,9 +192,12 @@ def diff_against_base(cwd: Path) -> list[str]:
         raise GateError(f"could not invoke git: {exc}") from exc
     if has_parent:
         # F002: combine committed diff with working-tree diff so
-        # staged/unstaged Phase 1+ edits are caught before commit.
+        # staged/unstaged/untracked Phase 1+ edits are caught before
+        # commit.  ``_working_tree_names`` folds the staged+unstaged
+        # tracked diff together with ``git ls-files --others`` so the
+        # pure-untracked case is also visible to the gate.
         committed = _diff_names("HEAD~1", "HEAD", cwd=cwd)
-        working_tree = _diff_names("HEAD", cwd=cwd)
+        working_tree = _working_tree_names(cwd)
         # Stable order, dedup.
         seen: set[str] = set()
         combined: list[str] = []
@@ -178,7 +207,7 @@ def diff_against_base(cwd: Path) -> list[str]:
                 combined.append(path)
         return combined
 
-    return _diff_names("HEAD", cwd=cwd)
+    return _working_tree_names(cwd)
 
 
 def phase_one_touched(paths: list[str]) -> bool:
