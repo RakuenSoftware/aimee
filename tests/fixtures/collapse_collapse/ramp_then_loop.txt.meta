@@ -1,0 +1,1 @@
+shape: non-repeating ramp followed by a repeated loop body; expected: fire; expected_loop_start_offset: 24; expected_loop_span_bytes: 10; expected_repetitions: 4

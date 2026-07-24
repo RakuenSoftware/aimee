@@ -1,0 +1,1 @@
+shape: uniform object array with required string discriminator "kind" and primitive leaves; category: uniform_object_array_with_discriminator; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1; expected_repetitions: 0

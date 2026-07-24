@@ -1,0 +1,1 @@
+shape: contiguous outer loop with embedded structural markers and period greater than M=60; expected: fire; expected_loop_start_offset: 0; expected_loop_span_bytes: 70; expected_repetitions: 4

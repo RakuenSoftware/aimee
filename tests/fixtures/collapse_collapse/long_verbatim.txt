@@ -1,0 +1,5 @@
+prefix: begin
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.

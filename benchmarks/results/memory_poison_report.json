@@ -4,7 +4,7 @@
   "benchmark": "memory_poison_resilience",
   "delta_clean_poison": 0.0,
   "delta_max": 0.1,
-  "fixture": "/home/virant/dev/aimee/.aimee/worktrees/6ab82f0e/main/benchmarks/memory/poison_fixtures.json",
+  "fixture": "benchmarks/memory/poison_fixtures.json",
   "gate": "pass",
   "metadata_boundary": {
     "errors": [],
