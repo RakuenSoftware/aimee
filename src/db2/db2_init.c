@@ -401,6 +401,98 @@ static int db2_query_flag(const char *sql, const char *param_name, const char *p
    return -1;
 }
 
+/* Hardened tier (P7): the kb connects as a non-owner runtime role that CANNOT apply
+ * owner-only DDL. The schema is applied by a separate migrate/owner step; here we
+ * VERIFY (read-only) that the migrated schema is present, current, and dim-
+ * compatible, and fail closed otherwise — never attempting the apply. Every query
+ * is a plain SELECT / catalog lookup a non-owner runtime role may run. Called only
+ * when db2_hardening_enabled(); the dev/owner path still auto-applies as before. */
+static int db2_verify_pre_provisioned(void *conn, int expected_dim, char *err, size_t errlen)
+{
+   /* 1. Embedding dim: recorded (proves the migrate ran) and equal to what this kb
+    *    will size its halfvec columns / readers to. */
+   int recorded_dim = 0;
+   db2_dim_read_t rd = db2_embedding_dim_read(conn, &recorded_dim);
+   if (rd == DB2_DIM_ERROR)
+   {
+      snprintf(err, errlen, "hardened tier: could not read the recorded embedding dim");
+      return -1;
+   }
+   if (rd != DB2_DIM_FOUND)
+   {
+      snprintf(err, errlen,
+               "hardened tier: schema is not migrated (no recorded embedding dim). A "
+               "runtime-role kb cannot apply the schema — run the owner/migrate step first.");
+      return -1;
+   }
+   if (recorded_dim != expected_dim)
+   {
+      snprintf(err, errlen,
+               "hardened tier: embedding dim mismatch (kb expects %d, schema built for %d)",
+               expected_dim, recorded_dim);
+      return -1;
+   }
+   /* 2. Schema version: recorded and not older than what this kb depends on. */
+   {
+      char e2[256] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "SELECT value FROM kb_meta WHERE key='schema_version'", e2,
+                           sizeof e2);
+      long ver = -1;
+      if (st && aimee_pg_step(st, e2, sizeof e2) == AIMEE_PG_ROW)
+      {
+         const char *v = aimee_pg_column_text(st, 0);
+         ver = v ? strtol(v, NULL, 10) : -1;
+      }
+      if (st)
+         aimee_pg_finalize(st);
+      if (ver < 0)
+      {
+         snprintf(err, errlen, "hardened tier: no recorded schema_version — schema not migrated");
+         return -1;
+      }
+      if (ver < AIMEE_DB2_SCHEMA_VERSION)
+      {
+         snprintf(err, errlen,
+                  "hardened tier: schema_version %ld is older than the required %d — run the "
+                  "migration before starting a runtime kb",
+                  ver, AIMEE_DB2_SCHEMA_VERSION);
+         return -1;
+      }
+   }
+   /* 3. Representative object presence: a core table, a recent table, and the newest
+    *    function. to_regclass/to_regprocedure are catalog lookups any role may run;
+    *    they return NULL for absent objects (never error). */
+   static const char *const present_checks[] = {
+       "SELECT (to_regclass('public.kb_documents') IS NOT NULL)::text",
+       "SELECT (to_regclass('public.kb_vault_witness_checkpoint') IS NOT NULL)::text",
+       "SELECT (to_regprocedure('public.org_vault_witness_control_fence()') IS NOT NULL)::text",
+   };
+   static const char *const present_names[] = {"kb_documents", "kb_vault_witness_checkpoint",
+                                               "org_vault_witness_control_fence"};
+   for (size_t i = 0; i < sizeof present_checks / sizeof present_checks[0]; i++)
+   {
+      char e2[256] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, present_checks[i], e2, sizeof e2);
+      int present = 0;
+      if (st && aimee_pg_step(st, e2, sizeof e2) == AIMEE_PG_ROW)
+      {
+         const char *v = aimee_pg_column_text(st, 0);
+         present = (v && v[0] == 't');
+      }
+      if (st)
+         aimee_pg_finalize(st);
+      if (!present)
+      {
+         snprintf(err, errlen,
+                  "hardened tier: required object %s is absent — schema not migrated or stale",
+                  present_names[i]);
+         return -1;
+      }
+   }
+   return 0;
+}
+
 /* Acquire this thread's connection: a pool lease, or — if the pool is
  * unavailable/exhausted — a private overflow connection. Stores it in the
  * thread key so the destructor returns/closes it on thread exit. Caller holds
@@ -641,11 +733,17 @@ int db2_init(const char *libpq_url)
    int effective_dim = db2_effective_dim(g_embed_dim_pinned, configured_dim,
                                          rd == DB2_DIM_FOUND ? recorded_dim : 0);
 
+   /* Hardened tier: the runtime role cannot apply owner-only DDL. The schema is
+    * applied by a separate migrate/owner step; here we VERIFY it (read-only) and
+    * skip both the probe leg (which would write a fresh dim) and the apply. The
+    * dev/owner path below is unchanged. */
+   int pre_provisioned = db2_hardening_enabled() && !aimee_pg_is_shim();
+
    /* §2b fresh-DB probe leg: unpinned + nothing recorded + a probe registered. The
     * advisory lock serialises racing kb starts; FAIL-FAST on any probe/lock/read
     * failure and record NOTHING (kb_main retries; never poison the recorded dim). */
    int dim_lock_held = 0, derived_via_probe = 0;
-   if (!g_embed_dim_pinned && rd == DB2_DIM_ABSENT && g_embedder_probe)
+   if (!pre_provisioned && !g_embed_dim_pinned && rd == DB2_DIM_ABSENT && g_embedder_probe)
    {
       /* Wait up to the FULL budget for the lock: a peer mid-bootstrap can take the
        * whole budget (cold embedder), so the waiter must be at least as patient —
@@ -728,7 +826,20 @@ int db2_init(const char *libpq_url)
                   effective_dim, configured_dim);
       db2_set_embedding_dim(effective_dim); /* halfvec columns + all readers agree */
    }
-   if (db_apply_schema_postgres(conn, effective_dim, errbuf, sizeof(errbuf)) != 0)
+   int apply_rc;
+   if (pre_provisioned)
+   {
+      /* Verify the owner-migrated schema is present + compatible; never apply DDL. */
+      char verr[256] = "";
+      apply_rc = db2_verify_pre_provisioned(conn, effective_dim, verr, sizeof(verr));
+      if (apply_rc != 0)
+         snprintf(errbuf, sizeof(errbuf), "%s", verr);
+   }
+   else
+   {
+      apply_rc = db_apply_schema_postgres(conn, effective_dim, errbuf, sizeof(errbuf));
+   }
+   if (apply_rc != 0)
    {
       /* Surface the postgres error so callers see WHICH statement failed.
        * Silently returning -1 hid bugs like a stale CREATE INDEX referencing

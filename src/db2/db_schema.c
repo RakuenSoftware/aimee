@@ -476,6 +476,11 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
     * The unified-llm-container §2 model-identity guards (embedder + reranker) run
     * in db2_init right after this, where the configured identity globals live —
     * keeping this lower schema layer free of an upward dependency on them. */
+   /* schema_version + schema_embedding_dim are recorded by schema.sql itself (so any
+    * applier — the C path here, or a plain `psql -f schema.sql` migrate — records
+    * them), which is what a hardened runtime kb reads to verify a complete, current
+    * migration. This C layer keeps the authoritative dim record-or-check (drift
+    * guard) above. */
    return db2_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
 }
 

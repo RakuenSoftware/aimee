@@ -12618,3 +12618,23 @@ REVOKE ALL ON FUNCTION kb_management_token_key_use_worm_guard(),
   kb_management_token_authority_use(TEXT,TEXT),
   kb_management_token_authority_readback(TEXT,TEXT),
   kb_management_token_authority_finalize(TEXT,TEXT) FROM PUBLIC;
+
+-- ============================================================================
+-- Schema build metadata (recorded LAST, after every object above, so its presence
+-- at the current values proves a complete, current migration). A HARDENED-tier
+-- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
+-- verify (read-only, db2_verify_pre_provisioned) that the schema it is serving
+-- against was fully migrated at a compatible embedding dimension and is not stale,
+-- and fails closed otherwise. Recorded here (not in C) so a plain
+-- `psql -f schema.sql` migrate records them too.
+--
+-- schema_embedding_dim: DO NOTHING keeps the authoritative C record-or-check drift
+-- guard in charge on the dev auto-apply path (it refuses a re-apply at a different
+-- dim); on a one-shot migrate this is simply the recorded build dim.
+INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '__EMBED_DIM__')
+  ON CONFLICT (key) DO NOTHING;
+-- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
+-- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
+-- kb started against an older schema fails closed.
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '1')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

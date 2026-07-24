@@ -154,6 +154,30 @@ BEGIN
   RAISE NOTICE 'RUNTIME OK: forge / control-row / internal-helper paths all denied';
 END $$;
 
+-- ============================ HARDENED PRE-PROVISIONED VERIFY ================
+-- On the hardened tier the kb connects as this runtime role and CANNOT apply DDL;
+-- db2_init runs db2_verify_pre_provisioned() instead — a read-only check that the
+-- schema was migrated (dim + version recorded) and its objects are present. Exercise
+-- exactly those read-only queries AS the runtime role so a regression that made any
+-- of them unreadable (or the metadata unrecorded) is caught here.
+DO $$
+DECLARE v_dim TEXT; v_ver TEXT; v_ok BOOLEAN;
+BEGIN
+  SELECT value INTO v_dim FROM public.kb_meta WHERE key='schema_embedding_dim';
+  SELECT value INTO v_ver FROM public.kb_meta WHERE key='schema_version';
+  IF v_dim IS NULL OR v_ver IS NULL THEN
+    RAISE EXCEPTION 'RUNTIME FAIL: schema build metadata not recorded (dim=% ver=%) — a hardened '
+      'runtime kb could not verify the migration', v_dim, v_ver;
+  END IF;
+  IF (public.to_regclass('public.kb_documents') IS NULL)
+     OR (public.to_regclass('public.kb_vault_witness_checkpoint') IS NULL)
+     OR (public.to_regprocedure('public.org_vault_witness_control_fence()') IS NULL) THEN
+    RAISE EXCEPTION 'RUNTIME FAIL: a required schema object is not visible to the runtime role';
+  END IF;
+  RAISE NOTICE 'RUNTIME OK: hardened pre-provisioned verify inputs readable as runtime '
+    '(dim=%, version=%, required objects present)', v_dim, v_ver;
+END $$;
+
 RESET ROLE;
 
 -- ============================ CATALOG: the grant model itself ================
