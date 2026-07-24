@@ -25,6 +25,7 @@
 
 #include "bus_arena.h"
 #include "bus_region.h"
+#include "bus_wire.h"
 
 #define BUS_ATTACH_REQ_MAGIC   0x51524241u /* "ABRQ" */
 #define BUS_ATTACH_REPLY_MAGIC 0x50524241u /* "ABRP" */
@@ -72,6 +73,14 @@ typedef struct
 typedef bus_attach_status_t (*bus_admit_fn)(void *ctx, const bus_attach_request_t *req);
 
 /* A directory slot — host-private. A client never sees this or any other slot. */
+#define BUS_HOST_MAX_KINDS   256
+#define BUS_HOST_MAX_PENDING  1024
+
+/* The governance/audit tap: invoked once per event, after seq stamping and
+ * before any routing decision (D6). It is the single full-stream observer; a
+ * would_block that the host never accepted is not an event and is not tapped. */
+typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame);
+
 typedef struct
 {
    int in_use;
@@ -81,7 +90,27 @@ typedef struct
    bus_qpair_t qpair;         /* host handles into it */
    uint64_t last_heartbeat;   /* last client_heartbeat value the host observed */
    uint64_t heartbeat_at;     /* host clock when it last advanced */
+   uint64_t dropped;          /* events the host could not deliver (full inbound) */
 } bus_slot_t;
+
+/* A registered event kind: who observes its notifications, and who serves its
+ * requests. Observers is a slot bitmap; server is a slot index or NONE. */
+typedef struct
+{
+   int in_use;
+   uint32_t kind;
+   uint64_t observers[BUS_ARENA_SLOT_WORDS];
+   int32_t server; /* serving slot, or -1 */
+} bus_kind_t;
+
+/* An outstanding request, so a reply can be routed back to its requester. */
+typedef struct
+{
+   int in_use;
+   uint64_t correlation_id;
+   uint32_t requester;
+   uint32_t server;
+} bus_pending_t;
 
 typedef struct
 {
@@ -108,6 +137,13 @@ typedef struct
 
    bus_slot_t *slots;
    uint32_t admitted;
+
+   bus_kind_t kinds[BUS_HOST_MAX_KINDS];
+   bus_pending_t pending[BUS_HOST_MAX_PENDING];
+   uint64_t seq; /* host-assigned monotonic dispatch order */
+
+   bus_tap_fn tap;
+   void *tap_ctx;
 } bus_host_t;
 
 typedef enum
@@ -148,6 +184,26 @@ uint32_t bus_host_admitted(const bus_host_t *h);
 
 const char *bus_host_result_name(bus_host_result_t r);
 const char *bus_attach_status_name(bus_attach_status_t s);
+
+/* Set the governance/audit tap. Pass NULL to clear. */
+void bus_host_set_tap(bus_host_t *h, bus_tap_fn fn, void *ctx);
+
+/* Register `slot` as an authorized observer of `event_kind` (its notifications).
+ * Subscription is the authorization: a client never receives a kind it did not
+ * subscribe to. */
+bus_host_result_t bus_host_subscribe(bus_host_t *h, uint32_t slot, uint32_t event_kind);
+
+/* Register `slot` as the single server for `event_kind` (its requests). A second
+ * server for the same kind is refused. */
+bus_host_result_t bus_host_serve_kind(bus_host_t *h, uint32_t slot, uint32_t event_kind);
+
+/* Drain every admitted client's outbound ring once, routing each event: stamp
+ * seq, offer it to the tap, then deliver — notifications to the kind's authorized
+ * observers, a request to the kind's server (or a synthesized capability_absent
+ * reply), a reply point-to-point to its requester, a cancel to the server.
+ * Returns the number of events processed. Inline payloads only in this slice;
+ * arena-payload delivery is a separate slice-4/6 integration. */
+uint32_t bus_host_pump(bus_host_t *h);
 
 /* ---- fd-passing helpers (shared with the C client, slice 8) ---- */
 
