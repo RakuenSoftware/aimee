@@ -40,6 +40,29 @@ const char *vault_status_str(vault_status_t s)
    return "error";
 }
 
+/* The credential-access audit sink, installed once at startup (NULL = no audit).
+ * A plain function pointer: set before serving begins, read on every access op;
+ * no concurrent install path exists. */
+static vault_audit_hook_fn g_audit_hook = NULL;
+
+void vault_service_set_audit_hook(vault_audit_hook_fn fn)
+{
+   g_audit_hook = fn;
+}
+
+/* Notify the audit hook (if installed) of an access op's outcome, then return
+ * `st` so a call site reads `return vaudit("vault.get", ..., st);` in one line.
+ * Only NON-SECRET identity + outcome cross this boundary — never the plaintext.
+ * agent/cred are "" for whole-vault ops (unlock). */
+static vault_status_t vaudit(const char *op, const char *principal, const char *agent,
+                             const char *cred, attested_transport_t transport, vault_status_t st)
+{
+   vault_audit_hook_fn h = g_audit_hook;
+   if (h)
+      h(op, principal ? principal : "", agent ? agent : "", cred ? cred : "", transport, st);
+   return st;
+}
+
 /* Add the server wrap to any user-only credentials for `principal` using the live
  * user KEK (WP-C.4 dual-access backfill). Best-effort; logs on failure. */
 static void vault_service_backfill_server_wraps(const char *principal,
@@ -158,7 +181,7 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
     * over TCP and refuse a webuser principal here (its KEK comes from scrypt at
     * login, WP-C.2). */
    if (transport != ATTEST_UDS_PEERCRED)
-      return VAULT_ERR_TRANSPORT;
+      return vaudit("vault.unlock", principal, "", "", transport, VAULT_ERR_TRANSPORT);
    if (!root_key || root_key_len != VAULT_ROOT_KEY_LEN)
       return VAULT_ERR_BADARG;
 
@@ -185,7 +208,7 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
    OPENSSL_cleanse(salt, sizeof(salt));
    if (st == VAULT_OK)
       LOG_INFO("vault", "unlocked principal (cred count managed per-op)");
-   return st;
+   return vaudit("vault.unlock", principal, "", "", transport, st);
 }
 
 vault_status_t vault_service_unlock_password(const char *principal, attested_transport_t transport,
@@ -198,7 +221,7 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
     * honored under the server.token trust boundary (ATTEST_WEBCHAT_TRUSTED). A
     * uid:/TCP conn must use the root-key unlock instead. */
    if (transport != ATTEST_WEBCHAT_TRUSTED)
-      return VAULT_ERR_TRANSPORT;
+      return vaudit("vault.unlock", principal, "", "", transport, VAULT_ERR_TRANSPORT);
    if (!password || password_len == 0)
       return VAULT_ERR_BADARG;
 
@@ -223,7 +246,7 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
    OPENSSL_cleanse(salt, sizeof(salt));
    if (st == VAULT_OK)
       LOG_INFO("vault", "webuser vault unlocked (scrypt)");
-   return st;
+   return vaudit("vault.unlock", principal, "", "", transport, st);
 }
 
 vault_status_t vault_service_rekey_password(const char *principal, attested_transport_t transport,
@@ -272,7 +295,8 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
 
    uint8_t kek[VAULT_KEK_LEN];
    if (vault_kek_cache_get(principal, now_epoch, kek) != 0)
-      return VAULT_ERR_LOCKED; /* must unlock first */
+      return vaudit("vault.set", principal, agent, cred, ATTEST_NONE,
+                    VAULT_ERR_LOCKED); /* must unlock first */
 
    /* WP-C.4 dual-access: wrap the DEK under BOTH the user KEK and the server KEK
     * so the server can decrypt this credential autonomously after a restart.
@@ -288,7 +312,7 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
                : VAULT_ERR_IO;
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(server_kek, sizeof(server_kek));
-   return st;
+   return vaudit("vault.set", principal, agent, cred, ATTEST_NONE, st);
 }
 
 vault_status_t vault_service_get(const char *principal, const char *agent, const char *cred,
@@ -313,16 +337,18 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
       /* The credential is vaulted but the KEK is gone (locked / TTL expired):
        * fail closed — never silently downgrade to an env credential. */
       LOG_WARN("vault", "credential present but vault locked for agent=%s cred=%s", agent, cred);
-      return VAULT_ERR_LOCKED;
+      return vaudit("vault.get", principal, agent, cred, ATTEST_NONE, VAULT_ERR_LOCKED);
    }
 
    int rc = vault_store_get(principal, kek, agent, cred, out, out_len);
    OPENSSL_cleanse(kek, sizeof(kek));
    if (rc == 0)
-      return VAULT_OK;
+      return vaudit("vault.get", principal, agent, cred, ATTEST_NONE, VAULT_OK);
    if (rc == VAULT_STORE_NO_ENTRY)
-      return VAULT_NO_ENTRY; /* raced with a delete */
-   return VAULT_ERR_CRYPTO;  /* decrypt/tamper — fail closed */
+      return vaudit("vault.get", principal, agent, cred, ATTEST_NONE,
+                    VAULT_NO_ENTRY); /* raced with a delete */
+   return vaudit("vault.get", principal, agent, cred, ATTEST_NONE,
+                 VAULT_ERR_CRYPTO); /* decrypt/tamper — fail closed */
 }
 
 vault_status_t vault_service_list(const char *principal, vault_store_entry_t *out, int max,
@@ -346,7 +372,8 @@ vault_status_t vault_service_delete(const char *principal, const char *agent, co
       return VAULT_ERR_UNATTESTED;
    if (!agent || !agent[0] || !cred || !cred[0])
       return VAULT_ERR_BADARG;
-   return vault_store_delete(principal, agent, cred) == 0 ? VAULT_OK : VAULT_ERR_IO;
+   vault_status_t st = vault_store_delete(principal, agent, cred) == 0 ? VAULT_OK : VAULT_ERR_IO;
+   return vaudit("vault.delete", principal, agent, cred, ATTEST_NONE, st);
 }
 
 vault_status_t vault_service_lock(const char *principal)

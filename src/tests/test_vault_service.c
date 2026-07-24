@@ -314,6 +314,116 @@ static void test_server_principal_vault(void)
    printf("  PASS: test_server_principal_vault\n");
 }
 
+/* --- the credential-access audit hook (the event-bus instrumentation) -------
+ * Every access op notifies the installed hook with NON-SECRET fields only —
+ * op, principal, (agent, cred) identity, transport, and outcome — successes AND
+ * denials. We capture them here and pin: (a) each op fires exactly one record
+ * with the right identity + status, (b) the secret plaintext NEVER crosses the
+ * boundary, (c) a NULL hook records nothing. */
+typedef struct
+{
+   char op[32];
+   char principal[64];
+   char agent[64];
+   char cred[64];
+   attested_transport_t transport;
+   vault_status_t status;
+} audit_rec_t;
+
+static audit_rec_t g_recs[32];
+static int g_nrecs = 0;
+
+static void capture_hook(const char *op, const char *principal, const char *agent, const char *cred,
+                         attested_transport_t transport, vault_status_t status)
+{
+   assert(g_nrecs < (int)(sizeof(g_recs) / sizeof(g_recs[0])));
+   audit_rec_t *r = &g_recs[g_nrecs++];
+   snprintf(r->op, sizeof r->op, "%s", op);
+   snprintf(r->principal, sizeof r->principal, "%s", principal);
+   snprintf(r->agent, sizeof r->agent, "%s", agent);
+   snprintf(r->cred, sizeof r->cred, "%s", cred);
+   r->transport = transport;
+   r->status = status;
+}
+
+static void expect_rec(int i, const char *op, const char *principal, const char *agent,
+                       const char *cred, attested_transport_t transport, vault_status_t status)
+{
+   assert(i < g_nrecs);
+   const audit_rec_t *r = &g_recs[i];
+   assert(strcmp(r->op, op) == 0);
+   assert(strcmp(r->principal, principal) == 0);
+   assert(strcmp(r->agent, agent) == 0);
+   assert(strcmp(r->cred, cred) == 0);
+   assert(r->transport == transport);
+   assert(r->status == status);
+}
+
+/* No captured field ever contains the secret plaintext (leak guard). */
+static void assert_no_secret_leak(const char *secret)
+{
+   for (int i = 0; i < g_nrecs; i++)
+   {
+      const audit_rec_t *r = &g_recs[i];
+      assert(!strstr(r->op, secret) && !strstr(r->principal, secret) && !strstr(r->agent, secret) &&
+             !strstr(r->cred, secret));
+   }
+}
+
+static void test_audit_hook(void)
+{
+   const char *p = "uid:5000";
+   const char *secret = "SUPERSECRET-DO-NOT-LOG-9f3a";
+   uint8_t rk[VAULT_ROOT_KEY_LEN];
+   root_key(rk, 5);
+   char out[128];
+
+   vault_kek_cache_clear();
+   g_nrecs = 0;
+   vault_service_set_audit_hook(capture_hook);
+
+   /* set before unlock -> LOCKED (a denial is still audited) */
+   assert(vault_service_set(p, "claude", "api_key", secret, T0) == VAULT_ERR_LOCKED);
+   /* unlock (whole-vault op: no agent/cred, transport carried) */
+   assert(vault_service_unlock(p, ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_OK);
+   /* set + get round-trip */
+   assert(vault_service_set(p, "claude", "api_key", secret, T0) == VAULT_OK);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, secret) == 0); /* the caller really got the plaintext... */
+   /* locked read (a denial) */
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_ERR_LOCKED);
+   /* delete */
+   assert(vault_service_unlock(p, ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_OK);
+   assert(vault_service_delete(p, "claude", "api_key") == VAULT_OK);
+   /* wrong-transport unlock (a denial, transport recorded) */
+   assert(vault_service_unlock(p, ATTEST_TCP_BEARER, rk, sizeof(rk), T0) == VAULT_ERR_TRANSPORT);
+
+   /* Every op above produced exactly one audit record, in order. */
+   int i = 0;
+   expect_rec(i++, "vault.set", p, "claude", "api_key", ATTEST_NONE, VAULT_ERR_LOCKED);
+   expect_rec(i++, "vault.unlock", p, "", "", ATTEST_UDS_PEERCRED, VAULT_OK);
+   expect_rec(i++, "vault.set", p, "claude", "api_key", ATTEST_NONE, VAULT_OK);
+   expect_rec(i++, "vault.get", p, "claude", "api_key", ATTEST_NONE, VAULT_OK);
+   expect_rec(i++, "vault.get", p, "claude", "api_key", ATTEST_NONE, VAULT_ERR_LOCKED);
+   expect_rec(i++, "vault.unlock", p, "", "", ATTEST_UDS_PEERCRED, VAULT_OK);
+   expect_rec(i++, "vault.delete", p, "claude", "api_key", ATTEST_NONE, VAULT_OK);
+   expect_rec(i++, "vault.unlock", p, "", "", ATTEST_TCP_BEARER, VAULT_ERR_TRANSPORT);
+   assert(g_nrecs == i); /* ...and no extras — the identity-less early returns are NOT audited */
+
+   /* ...yet the plaintext the caller received never reached the audit trail. */
+   assert_no_secret_leak(secret);
+
+   /* A NULL hook records nothing (no crash, no capture). */
+   vault_service_set_audit_hook(NULL);
+   int before = g_nrecs;
+   assert(vault_service_unlock(p, ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_OK);
+   assert(g_nrecs == before);
+
+   vault_kek_cache_clear();
+   printf("  PASS: test_audit_hook\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -334,6 +444,7 @@ int main(void)
    test_rekey_empty_and_missing_vault();
    test_server_inject_after_restart();
    test_server_principal_vault();
+   test_audit_hook();
 
    vault_kek_cache_clear();
    char rm[320];
