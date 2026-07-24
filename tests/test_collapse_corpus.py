@@ -180,6 +180,45 @@ def _connectives(body, iterations, sp):
     return out
 
 
+def _first_verbatim_loop_at_declared_span(body, span, reps, min_period=2):
+    """Find the first body position at which a verbatim period of
+    `span` bytes repeats `reps` times at non-overlapping,
+    boundary-aligned positions. The search scans from body start
+    and returns the offset of the first such period; the period
+    bytes are returned for caller-side validation.
+
+    Used by test_fire_declared_offsets_match_file_position to
+    cross-check the declared offset against an independent
+    byte-oracle scan that does not derive its comparison value
+    from the declared offset.
+
+    The function is intentionally narrower than
+    _has_genuine_verbatim_loop: it pins the period length to the
+    declared span so substring artifacts (e.g. "alph" inside
+    "alpha") cannot mask a real period of declared length.
+    """
+    if span < min_period:
+        return None, None
+    ascii_letters = set(range(b"a"[0], b"z"[0] + 1)) | set(
+        range(b"A"[0], b"Z"[0] + 1)
+    )
+    last_start = len(body) - span * reps + 1
+    for pos in range(0, max(last_start, 0)):
+        period = body[pos:pos + span]
+        if not any(b in ascii_letters for b in period):
+            continue
+        # Count boundary-aligned verbatim iterations of this
+        # period starting at pos.
+        iterations = []
+        i = pos
+        while i + span <= len(body) and body[i:i + span] == period:
+            iterations.append(i)
+            i += span
+        if len(iterations) >= reps:
+            return period, pos
+    return None, None
+
+
 def _has_genuine_verbatim_loop(body, min_period=60):
     """Return (period_bytes, offset_a, offset_b) if the body contains a
     verbatim period of length >= min_period that is "substantive" (i.e.
@@ -529,34 +568,44 @@ class TestCollapseCollapse(unittest.TestCase):
     def test_fire_declared_offsets_match_file_position(self):
         # File-level offset honesty: the declared
         # expected_loop_start_offset must equal the absolute byte
-        # offset of the first period byte in the file (not merely
-        # the body-relative offset, which the boundary-alignment
-        # check already verifies). A regression where the declared
-        # offset is a placeholder copy-pasted across fixtures would
-        # be caught here.
-        ascii_letters = set(range(b"a"[0], b"z"[0] + 1)) | set(
-            range(b"A"[0], b"Z"[0] + 1)
-        )
+        # offset of the first period byte in the file. The check
+        # uses an independent byte-oracle scan: it locates the
+        # first body position where a verbatim period of exactly
+        # the declared span yields at least the declared number of
+        # boundary-aligned iterations. The comparison value comes
+        # from the scan, not from arithmetic on the declared
+        # offset; a regression where the declared offset is a
+        # placeholder copy-pasted across fixtures fails because
+        # the scan lands at the period's true position, which
+        # will not match the placeholder.
         for fn in self.REQUIRED_FILES:
             p = COLLAPSE / fn
             header, body, file_bytes = _strip_envelope(p)
             fields = _parse_header_for(p)
             header_len = _header_length(p, file_bytes)
-            off_body = fields["offset"] - header_len
-            sp = fields["span"]
-            period = body[off_body:off_body + sp]
-            self.assertTrue(
-                any(b in ascii_letters for b in period),
-                f"{p}: period slice has no alphabetic byte; "
-                f"declared period is degenerate",
+            scan_period, scan_off = _first_verbatim_loop_at_declared_span(
+                body, fields["span"], fields["repetitions"],
             )
-            file_off_first_period = header_len + off_body
+            self.assertIsNotNone(
+                scan_period,
+                f"{p}: independent byte-oracle scan found no body "
+                f"position where a verbatim period of "
+                f"expected_loop_span_bytes={fields['span']} bytes "
+                f"yields at least expected_repetitions="
+                f"{fields['repetitions']} boundary-aligned "
+                f"iterations; cannot verify declared offset",
+            )
+            file_off_first_period = header_len + scan_off
             self.assertEqual(
                 file_off_first_period, fields["offset"],
                 f"{p}: declared offset {fields['offset']} does not "
-                f"equal header_len ({header_len}) + body_off "
-                f"({off_body}) = {file_off_first_period}; "
-                f"the declared offset must be the absolute byte "
+                f"match the independent byte-oracle scan; the scan "
+                f"finds the first body position where a "
+                f"{fields['span']}-byte verbatim period yields "
+                f"at least {fields['repetitions']} boundary-aligned "
+                f"iterations at file offset {file_off_first_period} "
+                f"(header_len {header_len} + body_off {scan_off}); "
+                f"the declared offset must equal the absolute byte "
                 f"position of the first period byte in the file",
             )
 
