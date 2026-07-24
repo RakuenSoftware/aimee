@@ -4748,6 +4748,16 @@ $(TESTPREFIX)/p7-tpm2-harness: $(OBJDIR)/tests/test_vault_tpm2.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_TPM2_LDLIBS)
 
+# PKCS#11 (SoftHSM2) vault-custody harness (#1905). Built + driven on demand by
+# scripts/p7_pkcs11_softhsm_test.sh (the vault-pkcs11-token CI gate) and by the
+# unit-tests job. Rule restored after the core-modularization restructuring
+# dropped it; mirrors p7-tpm2-harness with the PKCS#11 provider + -ldl.
+$(TESTPREFIX)/p7-pkcs11-harness: $(OBJDIR)/tests/test_vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_custody_pkcs11.o \
+                              $(OBJDIR)/modules/vault/vault_crypto.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(KB_PKCS11_LDLIBS)
+
 # P7-reseal-d2b real PostgreSQL + swtpm integration harness.  On demand only:
 # the default unit suite must remain independent of libtss2 and a scratch PG DB.
 # The full KB closure intentionally supplies the KB-prefixed WITH_TPM2 provider,
