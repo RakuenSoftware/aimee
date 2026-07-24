@@ -401,6 +401,13 @@ func (s *Server) fileProposal(ctx context.Context, request triggerFireRequest) (
 	if s.config != nil {
 		cap = s.config.Int("trigger.max_concurrent", cap)
 	}
+	// The store's cap sentinel is "<=0 means unlimited" (child slices rely on it),
+	// but an operator who sets trigger.max_concurrent to 0 means "admit nothing".
+	// Honour that here rather than silently removing the limit.
+	if cap == 0 {
+		_ = s.artifacts.DeleteWorkItem(workItemID)
+		return "", "", fmt.Errorf("%w (admission paused: trigger.max_concurrent is 0)", db1.ErrAdmissionFull)
+	}
 	if err := s.db.AdmitRoot(ctx, db1.CreateWorkItem{
 		ID: workItemID, Repo: workspace, ProposalPath: identity, WorkflowName: definition.Name,
 		WorkflowVersion: definition.Version, StartStage: start, Mode: request.Mode,

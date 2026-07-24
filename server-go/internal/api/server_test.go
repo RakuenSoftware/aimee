@@ -409,3 +409,30 @@ func runGit(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
 	}
 }
+
+// trigger.max_concurrent = 0 is an operator saying "admit nothing". The store's
+// cap sentinel treats <=0 as unlimited (child slices depend on that), so the
+// admission paths must refuse a configured 0 explicitly — otherwise "pause
+// admission" silently removes the limit instead of applying it.
+func TestConfiguredZeroConcurrencyPausesAdmission(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	configPath := filepath.Join(t.TempDir(), "aimee.yaml")
+	if err := os.WriteFile(configPath, []byte("trigger:\n  max_concurrent: 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appconfig.NewStore(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetConfigStore(store)
+	if got := store.Int("trigger.max_concurrent", 2); got != 0 {
+		t.Fatalf("config did not load max_concurrent=0, got %d", got)
+	}
+	body := strings.NewReader(`{"proposal_md":"## do a thing\n\nwhy: because","workflow":"build","repo":"/tmp"}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/dev/submit", body)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 paused-admission, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
