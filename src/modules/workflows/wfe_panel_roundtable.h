@@ -16,7 +16,7 @@
 
 #include "aimee.h" /* MAX_PATH_LEN etc., needed before the agent/config types */
 
-#include <aimee/ir/panel_result.h>
+#include "delegate_ensemble.h"
 #include "wfe_verdict.h"
 
 /* Fill out[0..nlens-1] — one verdict per lens, seat_agent[i] having served
@@ -33,7 +33,7 @@
  *   - a blocking item attributable to NO seat fails closed onto lens 0;
  *   - artifact_hash is stamped on every verdict for the gate integrity check.
  * Returns nlens, or -1 on NULL args. */
-int wfe_panel_verdicts_from_roundtable(const aimee_panel_result_t *rt, const char *const *lens,
+int wfe_panel_verdicts_from_roundtable(const roundtable_result_t *rt, const char *const *lens,
                                        const char *const *seat_agent, int nlens,
                                        const char *artifact_hash, const char *workdir,
                                        wfe_verdict_t *out);

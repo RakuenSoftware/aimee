@@ -1,7 +1,7 @@
 /* evidence_replay.h: deterministic replay of a review item's structured evidence
  * (Part A of the replayable-verification proposal).
  *
- * A panel provider attaches a STRUCTURED query (aimee_review_evidence_t) — never a
+ * A roundtable panelist attaches a STRUCTURED query (review_evidence_t) — never a
  * free-form command. This engine re-grounds that query against the read-only code
  * index (index_find / index_find_callers / index_code_search) and reduces the
  * result to a fixed-shape record { count, idkey } that a verifier reasons over.
@@ -15,8 +15,8 @@
 #ifndef DEC_EVIDENCE_REPLAY_H
 #define DEC_EVIDENCE_REPLAY_H 1
 
-#include "index.h" /* aimee.h (MAX_PATH_LEN), term_hit_t, caller_hit_t, ... */
-#include <aimee/ir/panel_result.h>
+#include "index.h"             /* aimee.h (MAX_PATH_LEN), term_hit_t, caller_hit_t, ... */
+#include "delegate_ensemble.h" /* review_evidence_t, ev_kind_t */
 
 #ifdef __cplusplus
 extern "C"
@@ -65,12 +65,12 @@ extern "C"
    const replay_backend_t *evidence_replay_active_backend(void);
 
    /* Replay `ev` against the registered backend (NULL backend => degrade). */
-   replay_status_t evidence_replay(const aimee_review_evidence_t *ev, reduced_record_t *out);
+   replay_status_t evidence_replay(const review_evidence_t *ev, reduced_record_t *out);
 
    /* Replay against an explicit backend (for tests). A NULL `be` degrades
     * (INDEX_UNAVAILABLE) — there is no index to ground against. */
-   replay_status_t evidence_replay_with(const replay_backend_t *be,
-                                        const aimee_review_evidence_t *ev, reduced_record_t *out);
+   replay_status_t evidence_replay_with(const replay_backend_t *be, const review_evidence_t *ev,
+                                        reduced_record_t *out);
 
    /* Stable lowercase token for a status (for audit logs / reason codes). */
    const char *replay_status_str(replay_status_t s);
