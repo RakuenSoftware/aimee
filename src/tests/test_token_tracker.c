@@ -80,6 +80,10 @@ static void test_cost_ceiling_boundaries(void)
    assert(token_cost_ceiling("some-unknown-model-xyz", 1.0, 0, 0, &cap, &total) == -1);
    assert(token_cost_ceiling("minimax-m2", 1.0, 100, 11, &cap, &total) == 0);
    assert(cap == 11);
+   /* aimee-synth is a known-free local model: a cap is trivially satisfiable,
+    * so the ceiling resolves to "free" (0), never "cannot enforce" (-1). */
+   assert(token_cost_ceiling("aimee-synth", 1.0, 100, 11, &cap, &total) == 0);
+   assert(cap == 11);
    assert(token_cost_ceiling("gpt-4o", -1.0, 0, 0, &cap, &total) == -1);
    assert(token_cost_ceiling("gpt-4o", 0.01, 10000000, 0, &cap, &total) == -1);
    assert(token_cost_ceiling("gpt-4o", 0.000000001, 0, 0, &cap, &total) == -1);

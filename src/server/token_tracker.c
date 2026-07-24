@@ -75,6 +75,12 @@ static const model_price_t pricing[] = {
     {"minimax", 0.0, 0.0, 0.0, 0.0},
     {"mistral", 0.0, 0.0, 0.0, 0.0},
     {"mimo", 0.0, 0.0, 0.0, 0.0},
+    /* aimee-synth: the on-box local synthesis model (local-gemma4, served at
+     * localhost:8742). Runs on hardware we already own, so its real price is
+     * zero — a KNOWN zero, not unknown. Without this entry a capped delegate run
+     * refuses it ("cannot enforce max_cost_usd for model 'aimee-synth'") even
+     * though a free model trivially satisfies any cap. */
+    {"aimee-synth", 0.0, 0.0, 0.0, 0.0},
 };
 
 #define PRICING_COUNT (int)(sizeof(pricing) / sizeof(pricing[0]))
