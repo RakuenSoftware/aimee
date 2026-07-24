@@ -232,6 +232,37 @@ history, or that the residual is zero. Operator documentation ships with the
 conditional-coverage statement the umbrella requires, including that with several
 consumers the property rests on the intersection of what each retained.
 
+## 4b. Hardened-tier runtime-role grants (found in self-review)
+
+A serious bug found during self-review and fixed: the witness cadence, boot check,
+and release gate run on the kb's RUNTIME connection (`aimee_kb_runtime` on the
+hardened tier — `db2_init` asserts the connected role is non-owner, non-super,
+no-CREATE, and does NOT own any tenant table), but that role had the witness tables
+and the cadence functions REVOKE'd, and the C producer read `kb_vault_control` and
+`kb_vault_witness_checkpoint` directly. So on a hardened production tier — the only
+tier where the gate's live-keys term is even true — the cadence would have failed
+with permission denied, the boot check could not run, and the gate would never open.
+
+Root cause of the miss: **every witness integration test ran as the DB owner**, so
+the runtime role's grants were never exercised. Reproduced as `aimee_kb_runtime`
+(every read/function call denied), then fixed:
+
+- runtime gets **read-only** SELECT on the evidence tables (non-secret — exported as
+  logs) plus a permissive read RLS policy; no INSERT (WORM blocks UPDATE/DELETE), so
+  forgery stays impossible;
+- runtime gets EXECUTE on the cadence/emit functions;
+- a new definer `org_vault_witness_control_fence()` exposes only the fence, so the
+  producer no longer reads the owner-only control row directly;
+- the internal/definer-nested helpers (`append`, `verify_shard`, digest/genesis)
+  stay runtime-invisible. The evidence **write** path is unaffected — it is nested in
+  the admission/rotation definers and runs as owner.
+
+Regression: `scripts/p7_witness_runtime_role_pg_test.sql` runs the full
+cadence/boot/gate surface AS `aimee_kb_runtime` (every op succeeds; every
+forge/control/internal path denied) plus structural `has_*_privilege` catalog
+assertions, wired into `run-p1-rls-gate.sh` (which provisions the three-role split).
+Negative-controlled: revoking any needed grant fails the gate.
+
 ## 5. Deferred beyond this umbrella
 
 - Automated cross-consumer comparison; it remains an operator procedure.
