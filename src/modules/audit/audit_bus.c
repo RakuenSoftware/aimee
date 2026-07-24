@@ -30,7 +30,8 @@
 #include "config.h"     /* config_default_dir */
 #include "log.h"
 
-#define KIND_AUDIT_ACTION AUDIT_BUS_KIND_ACTION
+#define KIND_AUDIT_ACTION    AUDIT_BUS_KIND_ACTION
+#define KIND_GUARDRAIL_EVENT AUDIT_BUS_KIND_GUARDRAIL
 
 /* Per-field caps for the wire form. Generous vs the emitter's inputs (args_hash
  * 68, command preview 288, the rest short) so nothing a caller passes is clipped
@@ -154,6 +155,67 @@ static int write_row(const uint8_t *buf, uint32_t len)
    return 1;
 }
 
+/* ---- guardrail-semantic event: wire form of guardrail_event_t ---- */
+
+static uint32_t serialize_guardrail(uint8_t *buf, uint32_t cap, const guardrail_event_t *e)
+{
+   uint32_t off = 0;
+   if (!(off = put_str(buf, off, cap, e->session_id, sizeof e->session_id)) ||
+       !(off = put_str(buf, off, cap, e->tool_name, sizeof e->tool_name)))
+      return 0;
+   const double d[5] = {e->overall_risk, e->action_risk, e->diff_risk, e->drift_risk,
+                        e->antipattern_similarity};
+   if (off + sizeof d > cap)
+      return 0;
+   memcpy(buf + off, d, sizeof d);
+   off += sizeof d;
+   if (!(off = put_str(buf, off, cap, e->recommendation, sizeof e->recommendation)) ||
+       !(off = put_str(buf, off, cap, e->labels, sizeof e->labels)) ||
+       !(off = put_str(buf, off, cap, e->final_action, sizeof e->final_action)) ||
+       !(off = put_str(buf, off, cap, e->explanation, sizeof e->explanation)))
+      return 0;
+   if (off + 4 > cap)
+      return 0;
+   int32_t dry = e->dry_run;
+   memcpy(buf + off, &dry, 4);
+   return off + 4;
+}
+
+/* Deserialize a guardrail event and write it to db1. Returns 1 if written. */
+static int write_guardrail(const uint8_t *p, uint32_t len)
+{
+   guardrail_event_t e;
+   memset(&e, 0, sizeof e);
+   uint32_t off = 0;
+   if (!(off = get_str(p, off, len, e.session_id, sizeof e.session_id)) ||
+       !(off = get_str(p, off, len, e.tool_name, sizeof e.tool_name)) || off + 5 * 8 > len)
+   {
+      aimee_log(LOG_WARN, "audit_bus", "dropping malformed guardrail event (len=%u)", len);
+      return 0;
+   }
+   double d[5];
+   memcpy(d, p + off, sizeof d);
+   off += sizeof d;
+   e.overall_risk = d[0];
+   e.action_risk = d[1];
+   e.diff_risk = d[2];
+   e.drift_risk = d[3];
+   e.antipattern_similarity = d[4];
+   if (!(off = get_str(p, off, len, e.recommendation, sizeof e.recommendation)) ||
+       !(off = get_str(p, off, len, e.labels, sizeof e.labels)) ||
+       !(off = get_str(p, off, len, e.final_action, sizeof e.final_action)) ||
+       !(off = get_str(p, off, len, e.explanation, sizeof e.explanation)) || off + 4 > len)
+   {
+      aimee_log(LOG_WARN, "audit_bus", "dropping malformed guardrail event (len=%u)", len);
+      return 0;
+   }
+   int32_t dry;
+   memcpy(&dry, p + off, 4);
+   e.dry_run = dry;
+   db1_guardrail_event_insert(&e); /* db1 is SQLITE_OPEN_FULLMUTEX — safe off-thread */
+   return 1;
+}
+
 /* ---------------------------------------------------------- consumer ----- */
 
 static uint32_t drain(void)
@@ -162,9 +224,14 @@ static uint32_t drain(void)
    bus_event_t ev;
    while (bus_client_poll(&g.consumer, &ev) == BUS_CLIENT_OK)
    {
-      if (ev.frame.event_kind != KIND_AUDIT_ACTION)
+      int wrote = 0;
+      if (ev.frame.event_kind == KIND_AUDIT_ACTION)
+         wrote = write_row(ev.payload, ev.payload_len);
+      else if (ev.frame.event_kind == KIND_GUARDRAIL_EVENT)
+         wrote = write_guardrail(ev.payload, ev.payload_len);
+      else
          continue;
-      if (write_row(ev.payload, ev.payload_len))
+      if (wrote)
       {
          atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
          n++;
@@ -395,6 +462,7 @@ static int start_locked(void)
       return -1;
    }
    bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_AUDIT_ACTION);
+   bus_host_subscribe(&g.host, g.consumer.reply.handle_id, KIND_GUARDRAIL_EVENT);
 
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
@@ -440,6 +508,41 @@ static void ensure_started(void)
    pthread_mutex_unlock(&start_lock);
 }
 
+/* Publish one already-serialized event of `kind` on the producer ring, under the
+ * producer lock (single logical writer). Backpressure (WOULD_BLOCK) is transient:
+ * the consumer drains aggressively, so a short backoff sleep lets it free the ring
+ * and the retry lands. The migration is lossless, so we retry WOULD_BLOCK until it
+ * clears — capped only high enough to detect a genuinely stuck/dead consumer
+ * (AB_PUB_MAX * backoff ~= seconds), at which point the event is a visible drop
+ * rather than blocking forever. A non-WOULD_BLOCK result is a real error: drop. */
+static void publish(uint32_t kind, const uint8_t *buf, uint32_t len)
+{
+   const struct timespec backoff = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
+   pthread_mutex_lock(&g.pub_lock);
+   bus_client_result_t rc = BUS_CLIENT_OK;
+   int ok = 0;
+   for (int attempt = 0; attempt < AB_PUB_MAX; attempt++)
+   {
+      rc = bus_client_publish(&g.producer, kind, buf, len);
+      if (rc == BUS_CLIENT_OK)
+      {
+         ok = 1;
+         break;
+      }
+      if (rc != BUS_CLIENT_WOULD_BLOCK)
+         break;
+      nanosleep(&backoff, NULL);
+   }
+   pthread_mutex_unlock(&g.pub_lock);
+
+   if (!ok)
+   {
+      atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
+      aimee_log(LOG_WARN, "audit_bus",
+                "event not recorded (kind=%u rc=%d) — consumer stuck or publish error", kind, rc);
+   }
+}
+
 void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, const char *command,
                     const char *mode, const char *reason_code, const char *verdict,
                     long long task_id)
@@ -460,38 +563,29 @@ void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, 
       aimee_log(LOG_WARN, "audit_bus", "audit row too large to serialize; not recorded");
       return;
    }
+   publish(KIND_AUDIT_ACTION, buf, len);
+}
 
-   /* Publish under the producer lock (single logical writer). Backpressure
-    * (WOULD_BLOCK) is transient: the consumer drains aggressively, so a short
-    * backoff sleep lets it free the ring and the retry lands. The migration is
-    * lossless, so we retry WOULD_BLOCK until it clears — capped only high enough
-    * to detect a genuinely stuck/dead consumer (AB_PUB_MAX * backoff ~= seconds),
-    * at which point the row is recorded as a visible drop rather than blocking
-    * forever. A non-WOULD_BLOCK result is a real error: drop immediately. */
-   const struct timespec backoff = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
-   pthread_mutex_lock(&g.pub_lock);
-   bus_client_result_t rc = BUS_CLIENT_OK;
-   int ok = 0;
-   for (int attempt = 0; attempt < AB_PUB_MAX; attempt++)
+void audit_bus_emit_guardrail(const guardrail_event_t *e)
+{
+   if (!e)
+      return;
+   ensure_started();
+   if (!atomic_load_explicit(&g.emitting, memory_order_acquire))
    {
-      rc = bus_client_publish(&g.producer, KIND_AUDIT_ACTION, buf, len);
-      if (rc == BUS_CLIENT_OK)
-      {
-         ok = 1;
-         break;
-      }
-      if (rc != BUS_CLIENT_WOULD_BLOCK)
-         break; /* a real publish error, not backpressure */
-      nanosleep(&backoff, NULL);
+      aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; guardrail event not recorded");
+      return;
    }
-   pthread_mutex_unlock(&g.pub_lock);
 
-   if (!ok)
+   uint8_t buf[2048];
+   uint32_t len = serialize_guardrail(buf, sizeof buf, e);
+   if (len == 0)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
-      aimee_log(LOG_WARN, "audit_bus",
-                "audit row not recorded (rc=%d) — consumer stuck or publish error", rc);
+      aimee_log(LOG_WARN, "audit_bus", "guardrail event too large to serialize; not recorded");
+      return;
    }
+   publish(KIND_GUARDRAIL_EVENT, buf, len);
 }
 
 void audit_bus_stop(void)

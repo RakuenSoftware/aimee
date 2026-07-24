@@ -2665,6 +2665,7 @@ bus-bench: $(TESTPREFIX)/bus-bench
 BUS_MEM_OBJS = $(OBJDIR)/db1/user_memory.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o \
                $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db1_write.o \
                $(OBJDIR)/db1/db1_trigger.o $(OBJDIR)/db1/db1_cron_jobs.o \
+               $(OBJDIR)/db1/guardrail_events.o \
                $(OBJDIR)/db1/model_catalog.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/eval.o \
                $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o \
@@ -2821,6 +2822,29 @@ $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_re
 
 .PHONY: unit-test-bus-audit-replay-tool
 unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
+	$<
+
+# Second module on the bus: the guardrail-semantic event. Emits N over the bus and
+# requires the real db1 guardrail_events table to hold exactly N. guardrail_events.o
+# is in BUS_MEM_OBJS; audit_bus dispatches this kind to db1.
+$(OBJDIR)/tests/test_bus_guardrail_durability.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guardrail_durability.o \
+                                                  $(OBJDIR)/modules/audit/audit_bus.o \
+                                                  $(OBJDIR)/modules/audit/audit_ledger.o \
+                                                  $(OBJDIR)/aimee_home.o \
+                                                  $(OBJDIR)/modules/bus/bus_client.o \
+                                                  $(OBJDIR)/modules/bus/bus_host.o \
+                                                  $(OBJDIR)/modules/bus/bus_route.o \
+                                                  $(OBJDIR)/modules/bus/bus_region.o \
+                                                  $(OBJDIR)/modules/bus/bus_ring.o \
+                                                  $(OBJDIR)/modules/bus/bus_arena.o \
+                                                  $(OBJDIR)/modules/bus/bus_wire.o \
+                                                  $(OBJDIR)/modules/bus/bus_capture.o \
+                                                  $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-guardrail-durability
+unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durability
 	$<
 
 .PHONY: unit-test-bus-capture
@@ -5498,11 +5522,20 @@ $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
+# guardrails_semantic.o -> audit_bus_emit_guardrail, so this test now links the
+# bus (gsem_record records over it) plus the bus's own deps.
+$(OBJDIR)/tests/test_guardrails_semantic.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-guardrails-semantic: $(OBJDIR)/tests/test_guardrails_semantic.o \
                      $(OBJDIR)/modules/guardrails/guardrails_semantic.o \
                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/guardrail_events.o \
+                     $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_ledger.o \
+                     $(OBJDIR)/aimee_home.o \
+                     $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
+                     $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
+                     $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
+                     $(OBJDIR)/modules/bus/bus_wire.o $(OBJDIR)/modules/bus/bus_capture.o \
                      $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
 
 $(TESTPREFIX)/unit-test-guardrails-computer-use: $(OBJDIR)/tests/test_guardrails_computer_use.o \
                      $(OBJDIR)/server/computer_use.o $(OBJDIR)/cJSON.o

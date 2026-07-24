@@ -26,14 +26,21 @@
 
 #include <stdint.h>
 
+#include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
+
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-/* The bus event kind carrying a governed-action audit row. Shared so the writer
- * (audit_bus.c) and the replay reader (audit_replay.c) agree on it. */
-#define AUDIT_BUS_KIND_ACTION 3000
+/* Bus event kinds carried by this in-process observability bus. The bus owns the
+ * transport (host, consumer thread, capture stream, retention) and dispatches
+ * each recorded off-critical-path event to its own sink:
+ *   KIND_ACTION    (3000) — the governed-action audit row  -> the audit ledger
+ *   KIND_GUARDRAIL (3001) — the guardrail-semantic risk event -> db1 guardrail_events
+ * Shared so writers and the replay reader (audit_replay.c) agree on them. */
+#define AUDIT_BUS_KIND_ACTION    3000
+#define AUDIT_BUS_KIND_GUARDRAIL 3001
 
    /* Bring the audit bus up: create the in-process host, attach the producer and
     * the consumer, subscribe the consumer to the audit-row kind, and spawn the
@@ -50,6 +57,13 @@ extern "C"
    void audit_bus_emit(const char *actor, const char *tool, const char *args_hash,
                        const char *command, const char *mode, const char *reason_code,
                        const char *verdict, long long task_id);
+
+   /* Publish one guardrail-semantic risk event over the bus (same async,
+    * off-critical-path, best-effort contract as audit_bus_emit). The consumer
+    * thread performs the real db1 guardrail_events insert; the direct insert at
+    * the emit site is gone. Safe to call from any thread; a no-op (logged) if the
+    * bus is not running. */
+   void audit_bus_emit_guardrail(const guardrail_event_t *e);
 
    /* Stop emitting, drain every already-published row to the writer, join the
     * consumer thread, and tear the bus down. Lossless: rows published before the

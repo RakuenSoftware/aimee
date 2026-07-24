@@ -142,7 +142,7 @@ done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
    hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
-      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|audit_bus|audit_replay|OBJDIR\)/modules/bus' || true; })
+      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|audit_bus|audit_replay|guardrails_semantic|OBJDIR\)/modules/bus' || true; })
    if [ -n "$hits" ]; then
       note "FAIL: $f uses modules/bus outside a bus test target"
       printf '%s\n' "$hits" >&2

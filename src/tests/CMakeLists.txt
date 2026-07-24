@@ -207,6 +207,11 @@ aimee_add_test(test_bus_audit_replay_tool test_bus_audit_replay_tool.c ../module
 target_include_directories(test_bus_audit_replay_tool PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
 target_link_libraries(test_bus_audit_replay_tool PRIVATE Threads::Threads)
 
+# Second module on the bus: the guardrail-semantic event -> db1 guardrail_events.
+aimee_add_test(test_bus_guardrail_durability test_bus_guardrail_durability.c ../modules/audit/audit_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c ../modules/bus/bus_capture.c)
+target_include_directories(test_bus_guardrail_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_guardrail_durability PRIVATE Threads::Threads)
+
 
 
 
