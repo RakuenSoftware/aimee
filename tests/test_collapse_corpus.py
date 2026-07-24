@@ -22,7 +22,6 @@ PRIMITIVE_TYPES = (str, int, float, bool, type(None))
 
 
 _COMMENT_LINE_RE = re.compile(r"<!--\s*(.*?)\s*-->")
-_HEADER_FIELD_RE = re.compile(r"([a-z_]+):\s*([^;]+?)\s*(?=;|-->|$)")
 
 
 def _strip_comment_wrapper(line):
