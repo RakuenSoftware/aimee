@@ -228,36 +228,109 @@ extension to `scripts/gen-reference-docs.py:417`).
 
 ## Decision 5 — Promotion-gate substrate
 
-> **MISSING SUBSTRATE. Phase 5.0 introduces bucketing and promotion control.**
+> **STATUS: UNVERIFIED ABSENCE (F-003). The "no shadow→canary→default
+> controller exists" claim is supported by a bounded search, not by a
+> repository-wide negation. Phase 5.0 must include a Phase 5.0
+> discovery task that either re-confirms the absence with a more
+> targeted scan or surfaces the missing controller.**
 >
-> The only verified calibration-bucket code is the standalone
+> Bounded evidence for the absence claim (all four checks return no
+> hits in the indexed codebase):
+>
+> | Check | Method | Result |
+> | --- | --- | --- |
+> | Promotion-controller symbol | `find_symbol` / `index_find_callers` for `promote_to_default`, `shadow_canary_default`, `bucket_labels`, `shadow->canary`, `bucket_assignment` | **0 hits** in `src/` and `scripts/` (4 distinct symbol queries, all empty) |
+> | Promotion-controller substring | lexical search across `src/` and `scripts/` for `promote`, `canary`, `bucket_assignment`, `shadow->canary` | hits limited to: (a) `scripts/calibration-sidecar.py` (the sidecar's own bucket-fit code at lines `139-162` and default-config row at `:30-32`), and (b) a comment in `src/modules/config/config.h` referring to "promote (default 3)" inside the existing `guardrails_blast_radius_advisory` threshold preset — **not a transition controller**. |
+> | Calibration consumer | `index_find_callers` for `calibration-sidecar` | **0 hits** in `src/` (the sidecar has no verified C caller) |
+> | Rollout traffic-split | lexical search across `src/` for `rollout`, `traffic_split`, `routing_decision`, `default-flip` | only comments and unrelated config strings (e.g. `AGENT_ADMISSION_DEFAULT_GLOBAL_MAX` constant, ingress-compression proposal text) |
+>
+> The only verified calibration code is the standalone
 > `scripts/calibration-sidecar.py` script (bayanesian bucket code at
 > `scripts/calibration-sidecar.py:139-162`, default config at `:30-32`,
 > `fitted_buckets` assembly at `:160-188`). It is a sidecar that takes
 > JSON-on-stdin and writes JSON-on-stdout; it has no verified caller or
-> consumer in the C pipeline. There is no verified shadow→canary→default
-> transition controller anywhere in `src/` or `scripts/`. Environment gates
-> alone (e.g. `aimee_ir_stream_relay_enabled()` at
-> `src/server/aimee_ir_serve.c:30`) are NOT a promotion controller.
+> consumer in the C pipeline. Environment gates alone (e.g.
+> `aimee_ir_stream_relay_enabled()` at `src/server/aimee_ir_serve.c:30`)
+> are NOT a promotion controller — they are binary feature flags.
 >
-> Phase 5.0 must add bucket assignment, persisted calibration consumption
-> (e.g. an `audit_worm_read_page`-backed outcome histogram), and explicit
-> shadow→canary→default transition state before Phase 5 wires the collapse
-> scanner into it. Pairing: Phase 5.0 introduces bucketing +
-> transition-state; Phase 5 wires the collapse scanner into it.
+> **Phase 5.0 prerequisite (F-003):**
+>
+> 1. **Re-run the bounded search with the Phase 5 feature set in scope**
+>    (search for `shadow_rollout_*`, `bucket_*`, `*_transition_state`,
+>    `promote_*`, `canary_*` across the full repo, not just `src/` and
+>    `scripts/`). Document the search terms and the empty result.
+> 2. **If still absent**, Phase 5.0 introduces:
+>    - bucket assignment (consume `scripts/calibration-sidecar.py`'s
+>      `fitted_buckets` output via a new C reader, or re-implement the
+>      beta-binomial + conformal floor inline),
+>    - persisted calibration consumption (e.g. an `audit_worm_read_page`-
+>      backed outcome histogram, gated on Phase 2.3.0's audit-event schema),
+>    - explicit shadow→canary→default transition state machine
+>      (env-gated today is not sufficient).
+> 3. **Wire the collapse scanner into it** (Phase 5 mainline, gated on
+>    Phase 5.0 completion).
+>
+> **Pairing (F-003):** if the bounded search surfaces an existing
+> controller in scope (e.g. an unreferenced `bucket_*` symbol in a
+> feature branch), Phase 5 wires into it; otherwise Phase 5.0 introduces
+> bucketing + transition-state, and Phase 5 wires the collapse scanner
+> into it.
 
 ---
 
 ## Decision 6 — Audit-store schema and new-record decision
 
-> **AUDIT STORE EXISTS. The WORM row substrate is verified; the
-> structured-detail contract for `collapse_event` is NOT** and is a
-> Phase 2.3.0 prerequisite. The Phase 2.3.0 work introduces both the
-> writer wiring and the detail-schema contract AND the (optional)
-> query helper that consumers will use to filter on the new subkind.
+> **AUDIT STORE EXISTS. The WORM row substrate is verified AND its
+> registration/integration into the serving pipeline is now traced end
+> to end (F-004 closure). The structured-detail contract for
+> `collapse_event` is NOT** and is a Phase 2.3.0 prerequisite. The
+> Phase 2.3.0 work introduces both the writer wiring and the
+> detail-schema contract AND the (optional) query helper that
+> consumers will use to filter on the new subkind.
 
-Verified anchor lines (the WORM row substrate — every function is
-implemented and callable today):
+### 6.1 Verified WORM substrate (file:line, end-to-end traced)
+
+**Schema & lazy-open:**
+- `WORM_SCHEMA_SQL` constant at `src/modules/audit/audit_worm.c:33`
+  declares the `CREATE TABLE audit_event (seq, ts, actor_role,
+  actor_principal, action, subject, verdict, detail, key_id, prev_hash,
+  row_hash)` statement, plus append-only triggers
+  `audit_event_no_update` and `audit_event_no_delete` at `:46-48`.
+- Schema-apply call site `sqlite3_exec(db, WORM_SCHEMA_SQL, ...)` at
+  `src/modules/audit/audit_worm.c:106`, gated by `worm_open_locked(db_path)`
+  at `:88` (lazy-open under `g_worm_mu`).
+- Lazy-open default at `src/modules/audit/audit_worm.c:118` —
+  `worm_open_locked_default()` writes to
+  `$AIMEE_HOME/audit/worm-live.db`.
+
+**Registration / lifecycle integration (F-004 closure — the part the
+prior draft glossed):**
+
+| Step | Symbol | Where | Notes |
+| --- | --- | --- | --- |
+| Open/init | `audit_worm_init_at(db_path)` | def `src/modules/audit/audit_worm.c:125`, decl `src/modules/audit/audit_worm.h:43` | **PRODUCTION CALLERS: 0.** All current callers are in `src/tests/test_audit_worm.c` (`index_find_callers` returned 0 production callers, 12 test callers). The store is therefore opened **lazily** on first `audit_worm_append` (via `worm_open_locked_default()` at `src/modules/audit/audit_worm.c:159`, `:242`, `:450`, `:514`, `:597`, `:647`, `:684` — all gated on `!g_worm_db && worm_open_locked_default() != 0`). |
+| Chain-key load | `audit_worm_chain_key_load(key, key_id)` | decl `src/modules/audit/audit_worm_chain.h:45`; consumer `src/modules/audit/audit_worm.c:237` (inside `audit_worm_checkpoint`) and again at `:409` (inside `audit_worm_seal`) | Lazy: the key file `$AIMEE_HOME/.audit-chain-key` is loaded only when checkpoint/seal is invoked. |
+| Append | `audit_worm_append(...)` | def `src/modules/audit/audit_worm.c:135`; decl `src/modules/audit/audit_worm.h:50` | **PRODUCTION CALLERS:** (1) `src/server/server_mgmt_audit.c:23` (`append`, used by `server_mgmt_audit_intent` and `_outcome` — the management-intent / management-outcome audit trail), (2) `src/modules/guardrails/guardrails_action_audit.c:87` (`emit_worm_row` — tool-action audit), (3) `src/kb/kb_vault_rewrap.c:15` and `:19` (`kb_vault_rewrap_principal` — KB DEK rewrap audit, "intent" then "allow"/"deny"), (4) self-call from `audit_worm_metric_snapshot` at `src/modules/audit/audit_worm.c:678`. **Each production caller uses a free-form `action` string** (`management.intent`, `management.outcome`, `tool.<name>`, `vault.dek_rewrap`, `metric.snapshot`). |
+| Checkpoint (seal path #1) | `audit_worm_checkpoint()` | def `src/modules/audit/audit_worm.c:233`; decl `src/modules/audit/audit_worm.h:64` | **PRODUCTION CALLERS:** (a) self-call from `audit_worm_seal` at `src/modules/audit/audit_worm.c:510` (attests the head before VACUUM-into-snapshot), (b) `audit_sub_checkpoint` (the `aimee audit checkpoint` CLI subcommand) at `src/cmd_audit.c:42`. |
+| Seal (seal path #2) | `audit_worm_seal(path, sizeof path, &immutable)` | def `src/modules/audit/audit_worm.c:508`; decl `src/modules/audit/audit_worm.h:87` | **PRODUCTION CALLERS:** `audit_sub_seal` (the `aimee audit seal` CLI subcommand) at `src/cmd_audit.c:58`. Writes a snapshot to `path`, sets `immutable=1` if `CAP_LINUX_IMMUTABLE` is granted, otherwise `immutable=0` (crypto-only). |
+| Verify (sanity check) | `audit_worm_verify_chain(...)` | decl `src/modules/audit/audit_worm.h:57`; full verify `audit_worm_verify(...)` at def `src/modules/audit/audit_worm.c:559` | CLI surface: `aimee audit verify` (not separately enumerated; CLI integration). |
+| Query | `audit_worm_read_page(...)` | def `src/modules/audit/audit_worm.c:587`; decl `src/modules/audit/audit_worm.h:93` | **PRODUCTION CALLERS: 0.** All current callers are in `src/tests/test_audit_worm.c` (4 test callers — `test_read_page`, `test_metric_snapshot`, `test_detail_capped`). There is **no production query consumer** today; the API exists and is callable but is only exercised by tests. The `metric.snapshot` row (written by `audit_worm_metric_snapshot`) is also read only by `test_metric_snapshot` at `src/tests/test_audit_worm.c:274`. |
+| Metric snapshot precedent | `audit_worm_metric_snapshot(...)` | decl `src/modules/audit/audit_worm.h:97`; def `src/modules/audit/audit_worm.c:638` | Self-calls `audit_worm_append("audit", "metric", "metric.snapshot", ..., "ok", detail)` at `:678` (where `detail` is a JSON blob assembled at `:675-677`, e.g. `{"total":N,"allow":N,"block":N,...}`). **Note:** there is **no structured-detail schema** enforced on the `detail` column, no registration path, and no query/index helper for the `metric.snapshot` subkind. The same shape caveat applies to `collapse_event` until Phase 2.3.0 introduces one. |
+
+**End-to-end verdict (F-004 closure):** The WORM row substrate is
+**verified reachable end-to-end** on the management, tool-action, and
+KB-vault audit paths (each writes a hash-chained row at the relevant
+call site, and each is gated by the per-feature `audit_*_enabled` /
+`audit_worm_is_enabled` flag). The checkpoint and seal paths are
+verified reachable through the `aimee audit checkpoint` / `aimee audit
+seal` CLI subcommands at `src/cmd_audit.c:42/58`. **The query surface
+(`audit_worm_read_page`) is NOT exercised by any production caller
+today** — it is callable but no operator-dashboard, CLI, or HTTP
+handler currently consumes it. The Phase 2.3.0 work that introduces a
+`collapse_event` query helper will be the first production query
+consumer of `audit_worm_read_page`.
+
+### 6.2 Decision rationales
 
 - **WORM schema (SQLite `audit_event` table):**
   `src/modules/audit/audit_worm.c:33` → `WORM_SCHEMA_SQL` (the `CREATE TABLE
@@ -323,7 +396,7 @@ implemented and callable today):
   filter helper (or a JSON predicate over `audit_worm_read_page`'s
   cJSON array) — see §"Pairing" below.
 
-**Pairing (Prerequisites) — F002 closure:**
+**Pairing (Prerequisites) — F002 / F-004 closure:**
 
 - ✅ Schema — no prerequisite (existing `audit_event` table is the substrate).
 - ✅ Write API — no prerequisite (`audit_worm_append` at
@@ -331,8 +404,12 @@ implemented and callable today):
 - ✅ Checkpoint / seal — no prerequisite (`audit_worm_checkpoint` at
   `src/modules/audit/audit_worm.c:233` and `audit_worm_seal` at
   `src/modules/audit/audit_worm.c:508` are the lifecycle integration points).
-- ✅ Query surface (raw rows) — no prerequisite (`audit_worm_read_page` at
-  `src/modules/audit/audit_worm.c:587` is the consumer-side read).
+- ⚠ **Query surface (raw rows) — PARTIAL prerequisite.** The
+  `audit_worm_read_page` API exists and is callable, but **no production
+  caller exists** today. Phase 2.3.0 must introduce the first production
+  consumer in the form of a `audit_worm_collapse_event_query(...)` helper
+  that walks the cJSON array returned by `audit_worm_read_page` and
+  filters on the `guardrail.collapse.` prefix.
 - 🟡 **Phase 2.3.0 implementation work (F002):** the structured-detail
   contract for `collapse_event` is NOT yet defined and NOT yet wired.
   Phase 2.3.0 must:
@@ -352,11 +429,16 @@ implemented and callable today):
   3. Add a `audit_worm_collapse_event_query(...)` helper to
      `src/modules/audit/audit_worm.c` that walks the
      `audit_worm_read_page` cJSON array and filters rows whose
-     `action` starts with `guardrail.collapse.` (an in-memory prefix comparison over each bounded page returned by `audit_worm_read_page`; no SQL `LIKE` or index is introduced, so complete scans must page to exhaustion). **No SQLite index change is
-     required** — the existing `audit_event` table has no index on
-     `action` today; the filter is linear over the page, which is
-     acceptable for the page size (`audit_worm_read_page` returns
-     bounded pages per the header docstring at `:93`).
+     `action` starts with `guardrail.collapse.` (an in-memory prefix
+     comparison over each bounded page returned by `audit_worm_read_page`;
+     no SQL `LIKE` or index is introduced, so complete scans must page
+     to exhaustion). **No SQLite index change is required** — the
+     existing `audit_event` table has no index on `action` today; the
+     filter is linear over the page, which is acceptable for the page
+     size (`audit_worm_read_page` returns bounded pages per the header
+     docstring at `:93`). **This helper will be the first production
+     caller of `audit_worm_read_page`** — it is the integration that
+     closes F-004.
   4. Wire the lifecycle integration: `audit_worm_checkpoint` at
      `src/modules/audit/audit_worm.c:233` invoked at scan-end and
      `audit_worm_seal` at `:508` invoked at operator-triggered snapshot.
@@ -365,12 +447,17 @@ implemented and callable today):
   `src/modules/audit/audit_worm.c:638`; Phase 2.3.0 prerequisite if the
   Phase 5 promotion gate consumes audit-derived telemetry, otherwise Phase 5.0.
 
-**Summary of the F002 correction:** the prior draft claimed the
-`collapse_event` representation was already a "structured extension of
-`audit_event`" backed by an existing structured-detail schema and
-query helper. **Neither exists**. The WORM row substrate exists; the
-JSON contract, writer helper, and query helper do not. They are the
-Phase 2.3.0 prerequisite surface.
+**Summary of the F-002 / F-004 corrections:** the prior draft claimed
+the `collapse_event` representation was already a "structured extension
+of `audit_event`" backed by an existing structured-detail schema and
+query helper, AND it glossed the registration/sealing/query-surface
+verification with a list of "callable function definitions" rather
+than verifying which of them are actually wired into the serving
+pipeline. The current draft separates the verified WORM row substrate
+(which IS wired end-to-end in 3 production paths) from the missing
+structured-detail contract (which is a Phase 2.3.0 prerequisite) and
+from the missing production query consumer (which Phase 2.3.0 will
+introduce as the first production caller of `audit_worm_read_page`).
 
 ---
 
@@ -383,23 +470,44 @@ Phase 2.3.0 prerequisite surface.
 - `sampling_capability_matrix.md` §1: per-backend matrix.
 - `sampling_capability_matrix.md` §3: Phase 4.0 prerequisites.
 
-## Merge gate (F004 closure)
+## Merge gate (F-005 closure)
 
-This document does **not** embed commit SHA, branch name, or asserted
-HEAD state. Merge-gate status is recorded in repository workflow
-metadata (e.g. the PR that merges this document, or the workflow
-records owned by the gate process). Phase 1 is gated on that
-external workflow state, not on the bytes of this document. The
-acceptance criterion "Phase 1 implementation does not start until
-`collapse_anchors.md` is merged" is enforced by the workflow gate;
-this document only states the requirement.
+**Status:** **VALIDATION-PENDING — no repository artifact enforces this
+gate today.** Bounded search evidence:
+
+- The only GitHub Actions workflow in the tree that targets `main` with
+  a required-status check is `.github/workflows/branch-policy.yml`
+  (job `allow-only-testing-source`, line 4; gates PR source-branch
+  == `testing` only — it does not mention `collapse_anchors.md` or any
+  Phase 0 anchors document).
+- `.github/workflows/ci.yml` runs tests but does not introduce a
+  required check keyed to `docs/guardrails/collapse_anchors.md`.
+- No symbol named `collapse_anchors_required` / `phase0_gate_required`
+  / analogous is registered in `src/` or `scripts/` (index lookup
+  returned no matches; bounded to those two trees).
+
+Until a workflow rule is registered that fails when
+`docs/guardrails/collapse_anchors.md` is not present on the merge
+source for Phase 1+ feature work, the acceptance criterion "Phase 1
+implementation does not start until `collapse_anchors.md` is merged"
+relies on reviewer discipline, not on an automated gate. This is
+explicitly flagged so reviewers do not treat "gate enforced" as
+true on the current evidence.
+
+**Pairing (F-005):** introducing an automated workflow check that
+fails Phase 1+ merge requests when this document is absent from the
+merge source is a Phase 0.5 housekeeping task — it is **not** in
+Phase 1 scope. Until then, the gate is **enforced by convention only**;
+the document content itself does not assert otherwise.
 
 ## Acceptance check
 
 - [x] Six binding decisions, each with file:line citations.
 - [x] Every prerequisite-missing-substrate decision paired with its prerequisite phase (§2: doc-generator + parser + struct + `CFG_KEY_DESC` + rendered-output verification → Phase 1.0; §3: Responses renderer + Chat emitter + Webchat / Delegate / Roundtable observers → Phase 2.0–2.4; §4: sampling types → Phase 4.0; §5: bucketing → Phase 5.0; §6: audit writer + JSON detail contract + query helper + lifecycle integration → Phase 2.3.0).
 - [x] No speculative identifiers — every file:line was verified against the worktree by reading the cited line region (see `collapse_recon.md` §0 convention).
-- [x] F001 closure: Decision 2's "preferred" claim is qualified with the doc-generator rendering caveat and the Phase 1.0 prerequisite is annotated with the verification step (`make docs-gen` + render check).
-- [x] F002 closure: Decision 6 distinguishes the verified WORM row substrate from the missing structured-detail contract; Phase 2.3.0 lists the JSON contract + writer helper + query helper as explicit subtasks.
-- [x] F004 closure: no SHA / branch / HEAD state embedded in this document; merge gate is workflow-managed externally.
-- [x] Phase 1 implementation does not start until the workflow-managed merge gate is satisfied.
+- [x] F-001 closure (config side): Decision 2's "preferred" claim is qualified with the doc-generator rendering caveat and the Phase 1.0 prerequisite is annotated with the verification step (`make docs-gen` + render check). Per-path handler/emitter citations are in `collapse_recon.md` §2.2–§2.6, not duplicated here.
+- [x] F-002 closure: Decision 6 distinguishes the verified WORM row substrate from the missing structured-detail contract; Phase 2.3.0 lists the JSON contract + writer helper + query helper as explicit subtasks.
+- [x] F-003 closure: Decision 5 is now marked UNVERIFIED ABSENCE with a bounded-search evidence table (4 distinct queries, 0 hits in production code) and a Phase 5.0 re-discovery task before binding the architecture.
+- [x] F-004 closure: Decision 6.1 now traces the full lifecycle integration (init / chain-key / append / checkpoint / seal / verify / query) with production-caller counts from `index_find_callers`; the query-surface is honestly flagged as having 0 production callers and Phase 2.3.0 will introduce the first.
+- [x] F-005 closure: "Merge gate" is now marked VALIDATION-PENDING with bounded evidence (only `branch-policy.yml` exists; no anchor-gate workflow) and a Phase 0.5 housekeeping task to introduce the automated check.
+- [x] Phase 1 implementation does not start until this document is merged (gate is enforced by reviewer discipline today; automated enforcement is a Phase 0.5 prerequisite).
