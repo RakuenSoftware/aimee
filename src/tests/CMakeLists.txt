@@ -130,6 +130,14 @@ add_test(NAME test_context_engine COMMAND test_context_engine)
 set_tests_properties(test_context_engine PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
+
+# Event-bus wire codec (feature tree slice 1). Self-contained: bus_wire.c has no
+# dependency beyond libc, so the test links it directly rather than via a lib.
+aimee_add_test(test_bus_wire test_bus_wire.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_wire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+target_compile_definitions(test_bus_wire PRIVATE
+  BUS_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bus")
+
 aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)

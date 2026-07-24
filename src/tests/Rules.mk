@@ -213,6 +213,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-rrf \
                $(TESTPREFIX)/unit-test-kb-graph-analytics $(TESTPREFIX)/unit-test-lessons-cite-tracker $(TESTPREFIX)/unit-test-lessons-reflect $(TESTPREFIX)/unit-test-lessons-actuate $(TESTPREFIX)/unit-test-lessons-session-capture $(TESTPREFIX)/unit-test-kb-doc-hash \
                $(TESTPREFIX)/unit-test-prompt-sanitizer \
+               $(TESTPREFIX)/unit-test-bus-wire \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2522,6 +2523,22 @@ $(TESTPREFIX)/unit-test-lessons-session-capture: $(OBJDIR)/tests/test_lessons_se
 $(TESTPREFIX)/unit-test-kb-doc-hash: $(OBJDIR)/tests/test_kb_doc_hash.o \
                                      $(OBJDIR)/kb/kb_doc_hash.o
 	$(TESTLINK) -o $@ $^ $(L_CORE) -lcrypto
+
+# Event-bus wire codec (feature tree slice 1). Pure: no DB, no shared memory.
+# BUS_VECTOR_DIR points at the committed golden vectors so the binary can run
+# from any cwd; those bytes are the cross-language conformance authority (D8).
+# -Imodules/bus is scoped to the bus objects, never global: a global include
+# path would put bus headers on every shipping translation unit and leak the
+# D7 boundary the blast-radius gate exists to hold.
+$(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/tests/test_bus_wire.o: C_FLAGS += -Imodules/bus -DBUS_VECTOR_DIR=\"$(CURDIR)/tests/fixtures/bus\"
+$(TESTPREFIX)/unit-test-bus-wire: $(OBJDIR)/tests/test_bus_wire.o \
+                                  $(OBJDIR)/modules/bus/bus_wire.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-bus-wire
+unit-test-bus-wire: $(TESTPREFIX)/unit-test-bus-wire
+	$<
 
 # Render-boundary prompt sanitizer (graph-feedback §4 / P0). Pure: no DB.
 $(TESTPREFIX)/unit-test-prompt-sanitizer: $(OBJDIR)/tests/test_prompt_sanitizer.o \
