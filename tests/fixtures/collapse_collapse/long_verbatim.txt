@@ -1,0 +1,4 @@
+# shape: long paragraph repeated verbatim twice; expected: fire; expected_loop_start_offset: 106; expected_loop_span_bytes: 224
+prefix: begin
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.
+This is a deliberately long repeated span used to establish a collapse detector fixture with enough bytes to exceed short-span thresholds.

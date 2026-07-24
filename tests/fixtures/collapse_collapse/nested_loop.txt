@@ -1,25 +1,8 @@
-# shape: contiguous outer loop containing inner sub-repeats; expected: fire; expected_loop_start_offset: 164; expected_loop_span_bytes: 54; expected_repetitions: 4
-outer-start
+# shape: outer loop containing an inner repeated loop; expected: fire; expected_loop_start_offset: 104; expected_loop_span_bytes: 64
+outer: begin
+inner-a
 inner-a
 inner-b
-inner-a
 inner-b
-outer-end
-outer-start
-inner-a
-inner-b
-inner-a
-inner-b
-outer-end
-outer-start
-inner-a
-inner-b
-inner-a
-inner-b
-outer-end
-outer-start
-inner-a
-inner-b
-inner-a
-inner-b
-outer-end
+outer: end
+outer: begin

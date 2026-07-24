@@ -1,0 +1,6 @@
+# shape: single short span repeated verbatim 4 times; expected: fire; expected_loop_start_offset: 98; expected_loop_span_bytes: 72
+prefix: begin
+repeat
+repeat
+repeat
+repeat

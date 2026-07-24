@@ -1,0 +1,8 @@
+# shape: repeated loop iterations separated by non-repeating connective tissue; expected: fire; expected_loop_start_offset: 104; expected_loop_span_bytes: 78
+start
+item: same
+connective: one
+item: same
+connective: two
+item: same
+end
