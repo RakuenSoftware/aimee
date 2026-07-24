@@ -1,4 +1,7 @@
-# shape: interleaved verbatim loops with distinct connective markers; expected: fire; expected_loop_start_offset: 173; expected_loop_span_bytes: 11; expected_repetitions: 3
+# shape: interleaved verbatim loops with distinct connective markers; expected: fire; expected_loop_start_offset: 173; expected_loop_span_bytes: 11; expected_repetitions: 4
+item
+value
+connector-w
 item
 value
 connector-x

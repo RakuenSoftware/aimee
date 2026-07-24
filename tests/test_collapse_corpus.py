@@ -24,6 +24,14 @@ LEGIT = FIXTURE_ROOT / "collapse_legit"
 LEGIT_JSON = LEGIT / "json"
 GRAMMAR = REPO_ROOT / "docs" / "guardrails" / "json_grammar.md"
 
+# Default verbatim-rung threshold from
+# docs/proposals/accepted/repetition-collapse-guardrail.md sec.1:
+# "A trailing span of length >= M bytes (default 60) that repeats >= N
+# times (default 4) back-to-back." The corpus oracle pins N at this
+# default: every fire fixture must contain at least N verbatim
+# iterations so the detector's documented threshold is exercised.
+DETECTOR_THRESHOLD_N = 4
+
 _CANONICAL_HEADER = re.compile(
     r"^"
     r"shape:\s*(?P<shape>[^;]+); "
@@ -313,6 +321,21 @@ class TestGrammarDoc(unittest.TestCase):
         ]:
             self.assertIn(needle, text,
                           f"grammar must document loop iteration oracle: {needle!r}")
+
+    def test_grammar_documents_detector_threshold_N(self):
+        # F1 regression guard: the grammar doc must pin the
+        # detector's verbatim-rung N default (4) as the threshold
+        # the fire fixtures must exercise. This couples the corpus
+        # oracle to the proposal's documented default.
+        text = _read_bytes(GRAMMAR).decode()
+        self.assertIn(
+            "N", text,
+            "grammar must document the detector's N threshold",
+        )
+        self.assertIn(
+            "default 4", text,
+            "grammar must document the N=4 default verbatim threshold",
+        )
 
 
 class TestCanonicalEnvelope(unittest.TestCase):
@@ -623,6 +646,64 @@ class TestCollapseCollapse(unittest.TestCase):
             )
 
 
+    def test_fire_repetitions_meet_detector_threshold_N(self):
+        # Corpus assertion tying fixture repetition counts to the
+        # detector's documented N default from
+        # docs/proposals/accepted/repetition-collapse-guardrail.md
+        # sec.1. The proposal defines the unambiguous verbatim
+        # signal as a period that repeats >= N (default 4) times.
+        # Any fire fixture that declares fewer repetitions than N
+        # cannot exercise that threshold; the corpus would silently
+        # accept a "fire" fixture as compliant even when the
+        # detector would not actually fire on it.
+        #
+        # This check enforces the coupling between fixture reps
+        # and the proposal's N default. Changing DETECTOR_THRESHOLD_N
+        # requires updating every fire fixture accordingly, which
+        # is the documented contract.
+        for fn in self.REQUIRED_FILES:
+            p = COLLAPSE / fn
+            fields = _parse_header_for(p)
+            self.assertGreaterEqual(
+                fields["repetitions"], DETECTOR_THRESHOLD_N,
+                f"{p}: expected_repetitions={fields['repetitions']} is "
+                f"below the detector's documented N={DETECTOR_THRESHOLD_N} "
+                f"verbatim-repetition threshold "
+                f"(see docs/proposals/accepted/repetition-collapse-guardrail.md "
+                f"sec.1); the fixture must contain at least N verbatim "
+                f"iterations so the detector's default threshold is "
+                f"actually exercised",
+            )
+
+    def test_fire_repetitions_match_independent_byte_oracle(self):
+        # The declared expected_repetitions must equal the
+        # independent walk-forward iteration count the oracle
+        # computes from the body bytes. This guards against a
+        # regression where a fixture header lies about its
+        # repetition count: e.g. declares reps=4 but the body
+        # only contains 2 verbatim iterations at the declared
+        # period. Without this check, _check_fire only validates
+        # that the body has AT LEAST reps iterations (because of
+        # the >= 2 floor) so a fixture that over-declares would
+        # silently pass.
+        for fn in self.REQUIRED_FILES:
+            p = COLLAPSE / fn
+            header, body, file_bytes = _strip_envelope(p)
+            fields = _parse_header_for(p)
+            header_len = _header_length(p, file_bytes)
+            off_body = fields["offset"] - header_len
+            sp = fields["span"]
+            period = body[off_body:off_body + sp]
+            iterations = _count_verbatim_iterations(body, off_body, period)
+            self.assertEqual(
+                len(iterations), fields["repetitions"],
+                f"{p}: declared expected_repetitions={fields['repetitions']} "
+                f"but the body yields {len(iterations)} walk-forward "
+                f"iterations at the declared period; declared reps must "
+                f"equal the byte-oracle count exactly",
+            )
+
+
 class TestCollapseLegit(unittest.TestCase):
     REQUIRED_NON_JSON = [
         "ascii_box.txt",
@@ -670,123 +751,280 @@ class TestCollapseLegit(unittest.TestCase):
                              f"{fn}: no-fire must declare expected_repetitions: 0")
             self.assertTrue(fields["shape"], f"{fn}: shape empty")
 
-    def test_no_fire_bodies_have_no_paragraph_style_repeat(self):
-        """Every no-fire fixture declares its own periodic structure
-        as the suppression target the detector must learn to ignore
-        (e.g. ASCII box edges, markdown table rows, code boilerplate
-        stubs). That structural repeat is intentional and is exactly
-        what makes the fixture a legitimate no-fire target. We do NOT
-        want to assert "no verbatim repeat at all" — that would
-        contradict the corpus intent.
+    def test_no_fire_fixtures_demonstrate_declared_shape(self):
+        """Pre-detector corpus oracle: every no-fire fixture must
+        demonstrably exhibit its declared structural shape in the
+        body. This is the structural-suppression contract: each
+        fixture is a legitimate-repeat target the detector must
+        learn to suppress, so the fixture must genuinely contain
+        that structural repeat - not a paraphrase, not a one-off,
+        and not a degenerate body that would not exercise the
+        suppression code path.
 
-        What we DO want to assert: no no-fire fixture body may
-        contain a *paragraph-style* verbatim repeat: a continuous
-        block of substantive prose content (>= 40 bytes containing
-        several distinct words) that happens to repeat. Such a repeat
-        would be a content collapse the detector should fire on, and
-        smuggling one into a no-fire fixture would be dishonest.
-        Smaller structural markers (ASCII box edges, list items,
-        import statements, table separators) are below the prose-
-        length threshold and are explicitly allowed.
+        The validation walks the body's declared structure (parsed
+        JSON for JSON fixtures, line/structural count for text
+        fixtures). It does NOT use a length-based detector
+        threshold: which structural markers count as suppressable
+        is a detector policy choice that lives in detector code,
+        not in the pre-detector corpus oracle. Repeating a 200-byte
+        prose block would still be a legitimate no-fire target
+        provided the body genuinely exhibits its declared
+        structural shape.
 
-        Following the review's alternative recommendation: the
-        paragraphs-vs-structural distinction is fundamentally a
-        detector policy choice. The corpus test pins the *upper*
-        limit (no prose-style repeats) and leaves the detector
-        responsible for the lower bound (which structural markers
-        count as suppressable)."""
-        for sub in (LEGIT, LEGIT_JSON):
-            for p in sorted(sub.rglob("*")):
-                if not p.is_file():
-                    continue
-                if p.name.endswith(".meta"):
-                    continue
-                header, body, file_bytes = _strip_envelope(p)
-                period, a, b = _has_genuine_verbatim_loop(body)
-                if period is not None:
-                    self.fail(
-                        f"{p}: declared no-fire, but body contains a "
-                        f"paragraph-style verbatim repeat of length "
-                        f"{len(period)} at offsets {a} and {b}; such a "
-                        f"content-level collapse should live under "
-                        f"collapse_collapse/, not collapse_legit/"
-                    )
-
-    def test_no_fire_bodies_do_exhibit_a_structural_repeat(self):
-        """Companion check: each no-fire fixture body that the corpus
-        says demonstrates a "repeated shape" actually exhibits at
-        least one verbatim repeat at a small period size (a
-        structural marker such as a row, line, fence, or box).
-        This protects against a regression where a no-fire fixture
-        becomes so generic that it has no repetition at all, in
-        which case it would not be exercising the suppression code
-        path the detector must implement.
-
-        Fixtures that are accepted as one-off examples (e.g. fenced
-        markdown whose body has just one fence, or primitives.json
-        which is a primitive array with periodic numbers) are
-        exempted from this check via the ``EXPECTED_STRUCTURAL_REPEAT``
-        set below; the remaining fixtures must exhibit at least one
-        boundary-aligned repeat of period length in [2, 20)."""
-        # Fixtures whose body intentionally has no boundary-aligned repeat
-        # in [2, 20) bytes: the JSON primitive list, the JSON object list,
-        # the nested-array of objects, and the single-fenced markdown doc.
-        # Keyed by path relative to FIXTURE_ROOT so the comparison is
-        # unambiguous.
-        expected_no_repeat = {
-            # The JSON primitive list and the nested-array of primitives
-            # have repeating primitive values but no boundary-aligned
-            # verbatim repeat of period in [2, 20) bytes (the comma +
-            # space pattern is shorter than the prose threshold the
-            # detector uses).
-            ("collapse_legit", "json", "primitives.json"),
-            ("collapse_legit", "json", "nested_primitives.json"),
-            # The nested.json sub-array of objects and the objects.json
-            # array share repeat-prone structural markers but the
-            # fixture-level body is exempt from the structural
-            # repeat walk because the detector's primary suppression
-            # path is the JSON-discriminator rule.
-            ("collapse_legit", "json", "nested.json"),
-            ("collapse_legit", "json", "objects.json"),
-            # The single-fence markdown doc has only one fence in its
-            # body; the structural-repeat walk is not appropriate.
-            ("collapse_legit", "json", "fenced.md"),
-        }
+        Fixtures whose declared shape is the JSON discriminator
+        rule (objects.json, nested.json, fenced.md) are validated
+        by the parsed-JSON walk; their byte-level repeats are not
+        the suppression contract. Fixtures whose declared shape is
+        a structural marker (ASCII boxes, table rows, fenced code
+        blocks, list items, repeated lines) are validated by a
+        shape-specific count of that marker in the body.
+        """
         for sub in (LEGIT, LEGIT_JSON):
             for p in sorted(sub.rglob("*")):
                 if not p.is_file() or p.name.endswith(".meta"):
                     continue
-                key = p.relative_to(FIXTURE_ROOT).parts
-                if key in expected_no_repeat:
-                    # No structural-repeat expectation; nothing to check.
-                    continue
-                header, body, file_bytes = _strip_envelope(p)
-                self.assertTrue(
-                    self._body_has_short_repeat(body),
-                    f"{p}: declared no-fire, but body does not exhibit "
-                    f"any boundary-aligned verbatim repeat of period in "
-                    f"[2, 20); the fixture should demonstrate a structural "
-                    f"repeat the detector must suppress.",
-                )
+                rel = p.relative_to(FIXTURE_ROOT).parts
+                self._validate_no_fire_shape(p, rel)
 
-    @staticmethod
-    def _body_has_short_repeat(body, min_period=2, max_period=20):
-        # Pure-whitespace marker periods (single newline) are too common
-        # to count, so require at least one byte that is neither whitespace
-        # nor a pure ASCII art character. A row separator "| Name |" or
-        # "1. " or "+-----+" qualifies because it contains "|"/" " among
-        # other characters.
-        ws = (b"\n", b" ", b"\t", b"\r")
-        for sp in range(min_period, max_period + 1):
-            seen = {}
-            for pos in range(0, len(body) - sp + 1):
-                slice_ = body[pos:pos + sp]
-                if slice_ in ws:
-                    continue
-                if slice_ in seen:
-                    return True
-                seen[slice_] = pos
-        return False
+    def _validate_no_fire_shape(self, p, rel):
+        name = p.name
+        rel_str = "/".join(rel)
+        # JSON fixtures are validated by their parsed structure.
+        if name == "primitives.json":
+            with open(p) as f:
+                value = json.load(f)
+            self.assertIsInstance(value, list,
+                                  f"{rel_str}: top-level must be array")
+            self.assertGreaterEqual(
+                len(value), 2,
+                f"{rel_str}: primitives.json must contain >= 2 primitive "
+                f"elements to demonstrate the array-of-primitives shape"
+                f"; got {len(value)}",
+            )
+            primitive_types = (int, float, str, bool, type(None))
+            self.assertTrue(
+                all(isinstance(v, primitive_types) for v in value),
+                f"{rel_str}: every element must be a primitive leaf",
+            )
+            return
+        if name == "nested_primitives.json":
+            with open(p) as f:
+                value = json.load(f)
+            self.assertIsInstance(value, list,
+                                  f"{rel_str}: top-level must be array")
+            self.assertGreaterEqual(
+                len(value), 2,
+                f"{rel_str}: nested_primitives.json must contain >= 2 "
+                f"sub-arrays; got {len(value)}",
+            )
+            primitive_types = (int, float, str, bool, type(None))
+            self.assertTrue(
+                all(isinstance(el, list) for el in value),
+                f"{rel_str}: every element must be a sub-array",
+            )
+            self.assertTrue(
+                all(isinstance(leaf, primitive_types)
+                    for sub in value for leaf in sub),
+                f"{rel_str}: every leaf must be a primitive",
+            )
+            self.assertTrue(
+                all(len(sub) >= 2 for sub in value),
+                f"{rel_str}: every sub-array must contain >= 2 primitive "
+                f"elements to demonstrate the nested-primitives shape",
+            )
+            return
+        if name == "objects.json":
+            with open(p) as f:
+                value = json.load(f)
+            self.assertIsInstance(value, list,
+                                  f"{rel_str}: top-level must be array")
+            self.assertGreaterEqual(
+                len(value), 2,
+                f"{rel_str}: objects.json must contain >= 2 objects to "
+                f"demonstrate the object-array shape; got {len(value)}",
+            )
+            self.assertTrue(all(isinstance(o, dict) for o in value),
+                            f"{rel_str}: every element must be an object")
+            keysets = {tuple(sorted(o.keys())) for o in value}
+            self.assertEqual(
+                len(keysets), 1,
+                f"{rel_str}: objects must share a uniform key set",
+            )
+            self.assertIn("kind", next(iter(keysets)),
+                          f"{rel_str}: must declare 'kind' discriminator")
+            primitive_types = (str, int, float, bool, type(None))
+            self.assertTrue(
+                all(isinstance(o["kind"], str) and
+                    all(isinstance(v, primitive_types)
+                        for v in o.values())
+                    for o in value),
+                f"{rel_str}: discriminator must be string; "
+                f"all values must be primitives",
+            )
+            return
+        if name == "nested.json":
+            with open(p) as f:
+                value = json.load(f)
+            self.assertIsInstance(value, list,
+                                  f"{rel_str}: top-level must be array")
+            self.assertGreaterEqual(
+                len(value), 2,
+                f"{rel_str}: nested.json must contain >= 2 sub-arrays; "
+                f"got {len(value)}",
+            )
+            primitive_types = (str, int, float, bool, type(None))
+            for i, sub in enumerate(value):
+                self.assertIsInstance(
+                    sub, list,
+                    f"{rel_str}[{i}]: every element must be a sub-array",
+                )
+                self.assertGreaterEqual(
+                    len(sub), 2,
+                    f"{rel_str}[{i}]: each sub-array must contain >= 2 "
+                    f"objects; got {len(sub)}",
+                )
+                self.assertTrue(
+                    all(isinstance(o, dict) for o in sub),
+                    f"{rel_str}[{i}]: every sub-array element must be "
+                    f"an object",
+                )
+                keysets = {tuple(sorted(o.keys())) for o in sub}
+                self.assertEqual(
+                    len(keysets), 1,
+                    f"{rel_str}[{i}]: objects must share a uniform "
+                    f"key set; got {keysets}",
+                )
+                self.assertIn(
+                    "kind", next(iter(keysets)),
+                    f"{rel_str}[{i}]: must declare 'kind' discriminator",
+                )
+                self.assertTrue(
+                    all(isinstance(o["kind"], str) and
+                        all(isinstance(v, primitive_types)
+                            for v in o.values())
+                        for o in sub),
+                    f"{rel_str}[{i}]: discriminator must be string; "
+                    f"all values must be primitives",
+                )
+            return
+        if rel == ("collapse_legit", "json", "fenced.md"):
+            _, body_bytes, _ = _strip_envelope(p)
+            text = body_bytes.decode("utf-8")
+            match = re.fullmatch(r"```json\n(.*?)\n```\n?", text, re.DOTALL)
+            self.assertIsNotNone(
+                match,
+                f"{rel_str}: must be a single paired ```json``` fence",
+            )
+            value = json.loads(match.group(1))
+            self.assertIsInstance(value, list, f"{rel_str}: inner must be array")
+            self.assertGreaterEqual(
+                len(value), 2,
+                f"{rel_str}: must contain >= 2 objects to demonstrate "
+                f"the fenced-JSON object-array shape; got {len(value)}",
+            )
+            keysets = {tuple(sorted(o.keys())) for o in value}
+            self.assertEqual(
+                len(keysets), 1,
+                f"{rel_str}: objects must share a uniform key set",
+            )
+            self.assertIn("kind", next(iter(keysets)),
+                          f"{rel_str}: must declare 'kind' discriminator")
+            return
+        if name == "ascii_box.txt":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            box_count = body_text.count("+-----+")
+            self.assertGreaterEqual(
+                box_count, 2,
+                f"{rel_str}: ascii_box.txt must contain >= 2 ASCII box "
+                f"frames; got {box_count}",
+            )
+            return
+        if name == "code_boilerplate.py":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            import_count = body_text.count("import os")
+            test_count = body_text.count("def test_")
+            self.assertGreaterEqual(
+                import_count, 2,
+                f"{rel_str}: code_boilerplate.py must contain >= 2 "
+                f"import blocks; got {import_count}",
+            )
+            self.assertGreaterEqual(
+                test_count, 2,
+                f"{rel_str}: code_boilerplate.py must contain >= 2 "
+                f"test stubs; got {test_count}",
+            )
+            return
+        if name == "fenced_python.md":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            fence_count = body_text.count("```python")
+            self.assertGreaterEqual(
+                fence_count, 2,
+                f"{rel_str}: fenced_python.md must contain >= 2 fenced "
+                f"python blocks; got {fence_count}",
+            )
+            return
+        if name == "markdown_table.md":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            row_lines = [
+                ln for ln in body_text.splitlines()
+                if ln.startswith("| ") and ln.endswith(" |")
+            ]
+            data_rows = [ln for ln in row_lines
+                         if not re.fullmatch(r"\| [-:]+ \|", ln)]
+            self.assertGreaterEqual(
+                len(data_rows), 2,
+                f"{rel_str}: markdown_table.md must contain >= 2 data "
+                f"rows; got {len(data_rows)}",
+            )
+            return
+        if name == "ordered_list.md":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            top_items = re.findall(r"(?m)^\d+\. ", body_text)
+            self.assertGreaterEqual(
+                len(top_items), 2,
+                f"{rel_str}: ordered_list.md must contain >= 2 top-level "
+                f"ordered items; got {len(top_items)}",
+            )
+            return
+        if name == "short_lines.txt":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            ok_count = sum(1 for ln in body_text.splitlines()
+                           if ln.strip() == "ok")
+            self.assertGreaterEqual(
+                ok_count, 2,
+                f"{rel_str}: short_lines.txt must contain >= 2 'ok' "
+                f"lines; got {ok_count}",
+            )
+            return
+        if name == "fp_risk_long_code.md":
+            _, body_bytes, _ = _strip_envelope(p)
+            body_text = body_bytes.decode("utf-8")
+            fence_count = body_text.count("```python")
+            self.assertGreaterEqual(
+                fence_count, 3,
+                f"{rel_str}: fp_risk_long_code.md must contain >= 3 "
+                f"fenced python blocks to demonstrate the long-boilerplate "
+                f"suppression shape; got {fence_count}",
+            )
+            return
+        if name == "jsonc_fragment.jsonc":
+            _, body, _ = _strip_envelope(p)
+            self.assertIn(
+                b"//", body,
+                f"{rel_str}: JSONC fragment must contain a `//` comment "
+                f"marker; the fixture is the JSONC exclusion contract",
+            )
+            return
+        self.fail(
+            f"unrecognized no-fire fixture: {rel_str}; "
+            f"add a per-shape validator to _validate_no_fire_shape"
+        )
 
     def test_json_payloads_are_valid_json(self):
         for fn in ["primitives.json", "nested.json",
@@ -957,14 +1195,86 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
         self.assertTrue(meta.exists(),
                         "nested_primitives.json must have a sibling .meta")
 
+    def test_nested_json_uniform_with_discriminator(self):
+        # F2 regression guard: nested.json must validate the same
+        # uniform-key-set, required-string-discriminator, and
+        # primitive-leaves rules that objects.json and fenced.md
+        # do. The accepted grammar treats every object array
+        # uniformly (regardless of nesting depth), so the rule
+        # must walk through sub-arrays and validate each one.
+        # Without this, nested.json could drift to heterogeneous
+        # objects or omit the discriminator while all corpus
+        # tests still pass.
+        def _validate_object_array(arr, path):
+            self.assertIsInstance(
+                arr, list, f"{path}: object array must be a list"
+            )
+            self.assertGreaterEqual(
+                len(arr), 1,
+                f"{path}: object array must contain at least one element",
+            )
+            for i, item in enumerate(arr):
+                self.assertIsInstance(
+                    item, dict,
+                    f"{path}[{i}]: object-array element must be an object",
+                )
+            keysets = {tuple(sorted(item.keys())) for item in arr}
+            self.assertEqual(
+                len(keysets), 1,
+                f"{path}: all objects must share the same key set; "
+                f"got keysets {keysets}",
+            )
+            keyset = next(iter(keysets))
+            self.assertIn(
+                "kind", keyset,
+                f"{path}: object array must declare a 'kind' "
+                f"discriminator field; missing from keys {keyset}",
+            )
+            primitive_types = (str, int, float, bool, type(None))
+            for i, item in enumerate(arr):
+                self.assertIsInstance(
+                    item.get("kind"), str,
+                    f"{path}[{i}]: 'kind' discriminator must be a string",
+                )
+                for k, v in item.items():
+                    self.assertIsInstance(
+                        v, primitive_types,
+                        f"{path}[{i}].{k}: value must be a primitive "
+                        f"(str|int|float|bool|null); got {type(v).__name__}",
+                    )
+
+        def _walk(node, path):
+            if isinstance(node, list):
+                if node and all(isinstance(el, dict) for el in node):
+                    _validate_object_array(node, path)
+                else:
+                    for i, el in enumerate(node):
+                        _walk(el, f"{path}[{i}]")
+            # dict leaves are validated by their parent object-array check
+
+        with open(LEGIT_JSON / "nested.json") as f:
+            value = json.load(f)
+        self.assertIsInstance(value, list, "nested.json top-level must be array")
+        _walk(value, "nested.json")
+
     def test_objects_uniform_with_discriminator(self):
         with open(LEGIT_JSON / "objects.json") as f:
             value = json.load(f)
+        self.assertIsInstance(value, list, "objects.json must be a list")
+        self.assertGreaterEqual(len(value), 1, "objects.json must be non-empty")
         keysets = {tuple(sorted(o.keys())) for o in value}
         self.assertEqual(len(keysets), 1, "objects.json must have uniform key set")
+        keyset = next(iter(keysets))
+        self.assertIn(
+            "kind", keyset,
+            f"objects.json must declare a 'kind' discriminator field; "
+            f"missing from keys {keyset}",
+        )
         discriminators = {o.get("kind") for o in value}
-        self.assertTrue(all(isinstance(d, str) for d in discriminators),
-                        "kind values must be strings (discriminator)")
+        self.assertTrue(
+            all(isinstance(d, str) and d for d in discriminators),
+            "kind values must be non-empty strings (discriminator)",
+        )
         primitive_types = (str, int, float, bool, type(None))
         self.assertTrue(
             all(isinstance(leaf, primitive_types)

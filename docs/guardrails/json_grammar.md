@@ -189,6 +189,30 @@ trigger.
   under `tests/fixtures/collapse_legit/`, not under the accepted-grammar
   JSON shapes).
 
+## Detector threshold pinning
+
+The verbatim-rung threshold the detector ships with is defined in
+`docs/proposals/accepted/repetition-collapse-guardrail.md` (Section 1):
+
+```
+A trailing span of length >= M bytes (default 60) that repeats
+>= N times (default 4) back-to-back.
+```
+
+This corpus pins the unambiguous N default of **4** as the
+threshold the fire fixtures must exercise. Every `fire` fixture's
+header MUST declare `expected_repetitions >= N` so the detector's
+default threshold is actually exercised by the fixture. The
+threshold itself lives in detector code; the corpus only asserts
+that fixtures couple to it.
+
+The pre-detector corpus oracle is structural: it validates each
+fixture's declared shape and repetitions directly, without
+presupposing which structural markers count as suppressable vs.
+collapsing. Which structural markers the detector fires on is a
+detector policy decision that lives in detector code, not in the
+corpus data.
+
 ## Detector oracle and metrics
 
 Each fixture header declares `fire` or `no-fire`, an absolute
