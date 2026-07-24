@@ -491,6 +491,75 @@ class TestCollapseCollapse(unittest.TestCase):
         )
         self._check_fire(p, shape_kind=self.SHAPE_CONTIGUOUS)
 
+    def test_fire_bodies_contain_genuine_verbatim_loop(self):
+        # Symmetric to the no-fire negative check on
+        # _has_genuine_verbatim_loop: every fire fixture body must
+        # itself contain a substantive verbatim period that repeats
+        # at least twice. This guards against a regression where a
+        # "fire" fixture degenerates into a structural-only repeat
+        # (e.g. a body composed entirely of single-byte or
+        # pure-marker tokens) and the oracle silently accepts it as
+        # a fire target.
+        #
+        # The probe uses min_period=4 because the corpus
+        # intentionally exercises both small (short_span: 6-byte
+        # period) and large (long_span: 127-byte period) verbatim
+        # loops; the substantive-content filter (period must
+        # contain at least one alphabetic byte) is what
+        # disqualifies marker-only bodies.
+        for fn in self.REQUIRED_FILES:
+            p = COLLAPSE / fn
+            header, body, file_bytes = _strip_envelope(p)
+            period, a, b = _has_genuine_verbatim_loop(body, min_period=4)
+            self.assertIsNotNone(
+                period,
+                f"{p}: declared fire, but body has no substantive "
+                f"verbatim loop of period >= 4 bytes; a fire fixture "
+                f"must genuinely repeat to exercise the detector",
+            )
+            self.assertGreaterEqual(
+                len(period), 4,
+                f"{p}: degenerate verbatim period {len(period)} bytes",
+            )
+            self.assertLess(
+                a, b,
+                f"{p}: verbatim loop offsets not strictly ordered: {a}, {b}",
+            )
+
+    def test_fire_declared_offsets_match_file_position(self):
+        # File-level offset honesty: the declared
+        # expected_loop_start_offset must equal the absolute byte
+        # offset of the first period byte in the file (not merely
+        # the body-relative offset, which the boundary-alignment
+        # check already verifies). A regression where the declared
+        # offset is a placeholder copy-pasted across fixtures would
+        # be caught here.
+        ascii_letters = set(range(b"a"[0], b"z"[0] + 1)) | set(
+            range(b"A"[0], b"Z"[0] + 1)
+        )
+        for fn in self.REQUIRED_FILES:
+            p = COLLAPSE / fn
+            header, body, file_bytes = _strip_envelope(p)
+            fields = _parse_header_for(p)
+            header_len = _header_length(p, file_bytes)
+            off_body = fields["offset"] - header_len
+            sp = fields["span"]
+            period = body[off_body:off_body + sp]
+            self.assertTrue(
+                any(b in ascii_letters for b in period),
+                f"{p}: period slice has no alphabetic byte; "
+                f"declared period is degenerate",
+            )
+            file_off_first_period = header_len + off_body
+            self.assertEqual(
+                file_off_first_period, fields["offset"],
+                f"{p}: declared offset {fields['offset']} does not "
+                f"equal header_len ({header_len}) + body_off "
+                f"({off_body}) = {file_off_first_period}; "
+                f"the declared offset must be the absolute byte "
+                f"position of the first period byte in the file",
+            )
+
 
 class TestCollapseLegit(unittest.TestCase):
     REQUIRED_NON_JSON = [

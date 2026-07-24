@@ -96,6 +96,15 @@ violations):
 * The wrapper forms (`# shape:` and `<!-- shape: ... -->`) are required
   for inline envelopes and carry no leading or trailing whitespace
   beyond what is specified above.
+* A sibling `.meta` file is itself a single-line record: its raw
+  content MUST end with exactly one LF (byte `0x0A`) or with no
+  trailing newline at all; both forms are equivalent under the
+  loader's LF-strip step. CRLF (`0x0D 0x0A`), any embedded CR, and
+  any embedded LF inside the record are rejected. The corpus test
+  enforces this via `test_meta_files_terminate_with_lf`, which asserts
+  an LF terminator on the checked-in `.meta` files; the no-newline
+  form is documented here as an allowed parser-side equivalence but
+  the canonical checked-in form is LF-terminated.
 
 These rules are enforced by an anchored regex match against the header
 content (between the wrapper bounds for `.md`, and starting at `# shape:`
