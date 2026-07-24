@@ -354,7 +354,12 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	switch step.Status {
 	case StepAdvanced:
 		next := node.Next
-		if node.Block == "gate.roundtable" && node.OnPass != "" {
+		// A gate's pass edge is `on_pass`, not `next`. This holds for every gate,
+		// not just gate.roundtable: gate.ci advances a green PR to the merge stage
+		// via on_pass. Honoring it only for gate.roundtable made gate.ci fall
+		// through to next=="" and finish the slice terminal-"accepted" at ci — so
+		// the merge node was never reached and the slice PR was left unmerged.
+		if node.OnPass != "" {
 			next = node.OnPass
 		}
 		if next == "" {
