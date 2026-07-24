@@ -128,9 +128,12 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
     * interactive session is single, so it keeps the shared HOME. Best-effort: a
     * failed mint leaves cli_cmd untouched (shared HOME, prior behavior). */
    char cli_cmd_home[CLI_SESSION_CMD_MAX];
+   /* Hoisted so the minted path survives past this block to be handed to the
+    * session after create (empty = no isolated home was minted). */
+   char iso_home[PATH_MAX];
+   iso_home[0] = '\0';
    if (is_claude && deleg)
    {
-      char iso_home[PATH_MAX];
       if (cli_session_isolated_claude_home(cwd, iso_home, sizeof(iso_home)) == 0)
       {
          int n = snprintf(cli_cmd_home, sizeof(cli_cmd_home), "HOME='%s' %s", iso_home, cli_cmd);
@@ -182,6 +185,12 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
    }
    /* cli_kind drives the TUI response parser (claude ●/❯/✻ vs codex •/›). */
    cli_session_set_kind(&sess, agent->cli_kind[0] ? agent->cli_kind : agent->name);
+
+   /* Hand the minted per-session HOME to the session so every teardown path
+    * (error or normal) rm-rf's it — homes are reclaimed on delegate exit rather
+    * than lingering until the 1h age sweep. No-op when no isolated home was minted. */
+   if (iso_home[0])
+      cli_session_set_isolated_home(&sess, iso_home);
 
    size_t plen = (system_prompt ? strlen(system_prompt) : 0) + strlen(user_prompt) + 4;
    char *full_prompt = malloc(plen);

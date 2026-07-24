@@ -144,6 +144,14 @@ void cli_session_set_kind(cli_session_t *s, const char *cli_kind)
    snprintf(s->cli_kind, sizeof(s->cli_kind), "%s", cli_kind ? cli_kind : "");
 }
 
+void cli_session_set_isolated_home(cli_session_t *s, const char *home)
+{
+   if (!s)
+      return;
+   free(s->iso_home);
+   s->iso_home = (home && home[0]) ? strdup(home) : NULL;
+}
+
 void cli_session_mark_baseline(cli_session_t *s)
 {
    if (!s)
@@ -645,6 +653,17 @@ void cli_session_destroy(cli_session_t *s)
    s->baseline = NULL;
    free(s->stream_emitted);
    s->stream_emitted = NULL;
+   /* Reclaim the isolated claude HOME the moment the seat tears down, so homes
+    * track the delegate lifecycle instead of piling up until the 1h age sweep.
+    * Unconditional (before the active/alive early-returns): a home may have been
+    * minted for a seat whose tmux session already died. cli_rmrf uses FTW_PHYS, so
+    * the symlinked shared credential/settings targets are never followed. */
+   if (s->iso_home)
+   {
+      cli_rmrf(s->iso_home);
+      free(s->iso_home);
+      s->iso_home = NULL;
+   }
    if (!s->active)
       return;
    if (!cli_session_is_alive(s))

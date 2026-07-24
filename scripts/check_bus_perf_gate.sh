@@ -96,4 +96,63 @@ if [ "$p50" -gt "$audit_ceiling" ]; then
    exit 1
 fi
 
-echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; memory rows pending"
+# 4. The vault credential-access audit trail (delivery step 3, another module on
+#    the bus): a functional check that vault access flows through the REAL server
+#    bridge -> obs_bus -> ledger with the fields mapped and NO secret leaked.
+#    Run here (like the durability test) because it needs the same special bus
+#    link set the standard unit-tests build does not assemble.
+echo "checking vault-access-on-bus audit trail..."
+vault_out=$(make -C src --no-print-directory unit-test-bus-vault-audit 2>&1 || true)
+if ! printf '%s\n' "$vault_out" | grep -q "test_bus_vault_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the vault-access-on-bus audit test did not pass — credential access" >&2
+   echo "      is not being recorded correctly through the bridge, or a secret leaked." >&2
+   printf '%s\n' "$vault_out" | tail -8 >&2
+   exit 1
+fi
+echo "vault-access audit: ok (access -> bridge -> bus -> ledger; no secret leak)"
+
+# 5. The sandbox degraded-isolation audit trail: a guarded exec that ran
+#    unsandboxed (or was refused) because the sandbox was unavailable flows
+#    through the REAL server bridge -> obs_bus -> ledger, fields mapped, no
+#    secret leaked. Same special-link reason as the vault test.
+echo "checking sandbox degraded-isolation audit trail..."
+sbx_out=$(make -C src --no-print-directory unit-test-bus-sandbox-audit 2>&1 || true)
+if ! printf '%s\n' "$sbx_out" | grep -q "test_bus_sandbox_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the sandbox-on-bus audit test did not pass — a degraded-isolation" >&2
+   echo "      exec is not being recorded correctly through the bridge, or a secret leaked." >&2
+   printf '%s\n' "$sbx_out" | tail -8 >&2
+   exit 1
+fi
+echo "sandbox audit: ok (degraded isolation -> bridge -> bus -> ledger; no secret leak)"
+
+# 6. The server-side memory-mutation audit trail: a memory change the server
+#    requested via kb_client flows through the REAL bridge -> obs_bus -> ledger,
+#    identity recorded, memory content never present. Same special-link reason.
+echo "checking server-side memory-mutation audit trail..."
+mem_out=$(make -C src --no-print-directory unit-test-bus-memory-audit 2>&1 || true)
+if ! printf '%s\n' "$mem_out" | grep -q "test_bus_memory_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the memory-on-bus audit test did not pass — a memory mutation is not" >&2
+   echo "      being recorded correctly through the bridge, or content leaked." >&2
+   printf '%s\n' "$mem_out" | tail -8 >&2
+   exit 1
+fi
+echo "memory audit: ok (mutation -> bridge -> bus -> ledger; no content)"
+
+# 7. The KB store-side memory audit: memory_core_crud fires the hook on every
+#    mutation (insert / merge / update / reject / delete) and, end-to-end, the REAL
+#    aimee-kb bridge lands a fingerprinted, content-free row in the KB ledger.
+echo "checking KB store-side memory-audit hook (end to end)..."
+kbmem_out=$(make -C src --no-print-directory unit-test-memory-audit-hook 2>&1 || true)
+if ! printf '%s\n' "$kbmem_out" | grep -q "test_memory_audit_hook: OK"; then
+   echo "" >&2
+   echo "FAIL: the KB store-side memory-audit test did not pass — memory_core_crud is" >&2
+   echo "      not firing the hook correctly, or the KB bridge/ledger path regressed." >&2
+   printf '%s\n' "$kbmem_out" | tail -8 >&2
+   exit 1
+fi
+echo "KB memory audit: ok (memory_core_crud -> hook -> KB bridge -> bus -> ledger)"
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access + sandbox + memory (server + kb) audit hold; memory rows pending"

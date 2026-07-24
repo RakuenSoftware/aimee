@@ -384,16 +384,16 @@ DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Event bus, linked ONLY into aimee-server via the audit migration ---
 # The per-action audit row (guardrails_action_audit.c, in DATA_SRCS above) is
-# emitted over the event bus (delivery step 3): audit_bus.c publishes it and a
-# consumer thread performs the ledger append. audit_bus.c and the bus it uses are
+# emitted over the event bus (delivery step 3): obs_bus.c publishes it and a
+# consumer thread performs the ledger append. obs_bus.c and the bus it uses are
 # the ONLY bus code in any shipping binary, and aimee-server is the ONLY shipping
 # binary that links it (the sole shipping consumer of guardrails_action_audit).
 # The D7 blast-radius gate enforces exactly this: bus symbols may appear in
 # aimee-server and nowhere else. See docs/dev/EVENT_BUS_DECISIONS.md (D7).
-BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/audit_bus.c modules/audit/audit_replay.c
+BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/bus/bus_capture.c modules/audit/obs_bus.c modules/audit/audit_replay.c
 BUS_SHIP_OBJS = $(BUS_SHIP_SRCS:%.c=$(OBJDIR)/%.o)
 $(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
-$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
 
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
@@ -454,6 +454,15 @@ SERVER_SRCS = cli_v1_routes.c cli_v1_routes_b.c cli_v1_routes_c.c cli_v1_routes_
 SERVER_SRCS += server/server_mgmt_token.c server/kb_verifier_server_stub.c kb/auth_oidc.c server/server_mgmt_audit.c server/server_mgmt_endpoint.c shared/management_read.c server/server_mgmt_read_endpoint.c server/server_mgmt_read_source.c server/server_mgmt_status.c server/server_mgmt_checkpoint_client.c kb/kb_mgmt_status.c kb/kb_mgmt_client.c kb/kb_mgmt_endpoint.c
 SERVER_SRCS += http_content_encoding.c server/server_http_keepalive.c
 SERVER_SRCS += modules/economizer/gateway_mutate_wire.c
+# The one object that links vault_service to the (D7-confined) audit bus, keeping
+# vault_service.o itself bus-free; server-only, co-linked with $(BUS_SHIP_OBJS).
+SERVER_SRCS += server/vault_audit_bridge.c
+# Likewise, the sole object linking sandbox.c to the audit bus (sandbox.o stays
+# bus-free). Server-only.
+SERVER_SRCS += server/sandbox_audit_bridge.c
+# The sole object linking kb_client's memory mutations to the audit bus (kb_client
+# stays bus-free). Server-only.
+SERVER_SRCS += server/memory_audit_bridge.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
@@ -471,7 +480,7 @@ SERVER_CMD_OBJS = $(OBJDIR)/server/cmd_session_lifecycle.o \
 # kb_client objects — request-side glue from the daemon to the
 # aimee-kb sidecar. The daemon needs these so server_state /
 # server_mcp_learning can route DB2-bound work over the kb socket.
-KB_CLIENT_OBJS = $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_ws.o $(OBJDIR)/modules/kb_client/kb_client_docs.o $(OBJDIR)/kb/kb_doc_hash.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_pdf.o $(OBJDIR)/modules/kb_client/kb_client_code_graph.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o \
+KB_CLIENT_OBJS = $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_ws.o $(OBJDIR)/modules/kb_client/kb_client_docs.o $(OBJDIR)/kb/kb_doc_hash.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_pdf.o $(OBJDIR)/modules/kb_client/kb_client_code_graph.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o \
                  $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
                  $(OBJDIR)/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/modules/kb_client/kb_client_prospective.o \
                  $(OBJDIR)/modules/kb_client/kb_client_roadmap.o \
@@ -1141,7 +1150,7 @@ $(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_O
 # oauth_pkce.o provides the base64url encoder kb/enroll.c uses to mint
 # enrollment tokens (now reachable from `aimee-kb enroll`). It is a leaf crypto
 # util (openssl + platform_random only), so the kb sidecar links it directly.
-$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) | $(KB_RESOLVER)
+$(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o $(KB_BEDROCK_IR_OBJS) $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS) $(BUS_SHIP_OBJS) $(OBJDIR)/kb/kb_obs_bus_stub.o $(OBJDIR)/kb/kb_memory_audit_bridge.o | $(KB_RESOLVER)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 

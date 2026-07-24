@@ -13,7 +13,7 @@
 
 #include "aimee.h" /* MODE_APPROVE */
 #include <aimee/audit/audit_action.h>
-#include <aimee/audit/audit_bus.h> /* the per-action row now crosses the event bus, not a direct write */
+#include <aimee/audit/obs_bus.h> /* the per-action row now crosses the event bus, not a direct write */
 #include <aimee/audit/audit_worm.h>
 #include "config.h"
 #include "guardrails.h"
@@ -135,7 +135,7 @@ static void emit_action_audit(const char *tool_name, const char *input_json,
     * audit_action_log. The direct call is gone — the bus is the sole route (an
     * all-or-nothing migration, no flagged parallel write). Still off the verdict's
     * critical path and best-effort: a publish failure never blocks the tool. */
-   audit_bus_emit(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
+   obs_bus_emit(actor, tool_name, args_hash, command, mode, reason, verdict, task_id);
    emit_worm_row(actor, tool_name, args_hash, mode, reason, verdict, task_id);
 }
 

@@ -38,6 +38,12 @@ typedef struct
    /* Clean response text already streamed to the caller this turn (so recv emits
     * only the growth as an incremental delta). malloc'd; freed on destroy. */
    char *stream_emitted;
+   /* Per-session claude HOME minted by cli_session_isolated_claude_home for an
+    * isolated delegate seat (NULL when the seat runs in the shared HOME). Owned by
+    * the session: cli_session_destroy rm-rf's the tree and frees this, so the home
+    * is reclaimed the moment the delegate exits instead of lingering for the 1h
+    * age-based sweep. malloc'd. */
+   char *iso_home;
 } cli_session_t;
 
 /* Incremental stream callback: invoked by cli_session_recv with each newly
@@ -122,6 +128,12 @@ void cli_session_prepare_claude(const char *work_dir, int autonomous);
  * home_out on success, -1 on any failure (caller then uses the shared HOME).
  * Reaps per-session homes older than an hour on each call. */
 int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz);
+
+/* Hand a minted isolated HOME (from cli_session_isolated_claude_home) to the
+ * session so cli_session_destroy reclaims it on exit. Copies `home`; pass NULL to
+ * clear. Call after a successful cli_session_create so every teardown path (error
+ * or normal) removes the home. No-op-safe when the seat uses the shared HOME. */
+void cli_session_set_isolated_home(cli_session_t *s, const char *home);
 
 /* Kills the tmux session. No-op if already dead. */
 void cli_session_destroy(cli_session_t *s);

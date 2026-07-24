@@ -1,5 +1,5 @@
-/* audit_bus.c: the governed-action audit row, carried over the event bus.
- * See audit_bus.h for the rationale and lifecycle.
+/* obs_bus.c: the governed-action audit row, carried over the event bus.
+ * See obs_bus.h for the rationale and lifecycle.
  *
  * Shape: one in-process bus host, one producer client (published to by any number
  * of caller threads, serialized by a mutex so the SPSC producer ring has a single
@@ -9,7 +9,7 @@
  * publishes and returns; the consumer writes asynchronously.
  */
 #define _GNU_SOURCE
-#include <aimee/audit/audit_bus.h>
+#include <aimee/audit/obs_bus.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -29,9 +29,10 @@
 #include "bus_region.h" /* bus_control_epoch */
 #include "config.h"     /* config_default_dir */
 #include "log.h"
+#include "wfe_def.h" /* wfe_sha256_raw — obs_bus_key_fingerprint */
 
-#define KIND_AUDIT_ACTION    AUDIT_BUS_KIND_ACTION
-#define KIND_GUARDRAIL_EVENT AUDIT_BUS_KIND_GUARDRAIL
+#define KIND_AUDIT_ACTION    OBS_BUS_KIND_ACTION
+#define KIND_GUARDRAIL_EVENT OBS_BUS_KIND_GUARDRAIL
 
 /* Per-field caps for the wire form. Generous vs the emitter's inputs (args_hash
  * 68, command preview 288, the rest short) so nothing a caller passes is clipped
@@ -149,7 +150,7 @@ static int write_row(const uint8_t *buf, uint32_t len)
        !(off = get_str(buf, off, len, reason, sizeof reason)) ||
        !(off = get_str(buf, off, len, verdict, sizeof verdict)) || off + 8 > len)
    {
-      aimee_log(LOG_WARN, "audit_bus", "dropping malformed audit row (len=%u)", len);
+      aimee_log(LOG_WARN, "obs_bus", "dropping malformed audit row (len=%u)", len);
       return 0;
    }
    int64_t task_id;
@@ -193,7 +194,7 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
    if (!(off = get_str(p, off, len, e.session_id, sizeof e.session_id)) ||
        !(off = get_str(p, off, len, e.tool_name, sizeof e.tool_name)) || off + 5 * 8 > len)
    {
-      aimee_log(LOG_WARN, "audit_bus", "dropping malformed guardrail event (len=%u)", len);
+      aimee_log(LOG_WARN, "obs_bus", "dropping malformed guardrail event (len=%u)", len);
       return 0;
    }
    double d[5];
@@ -209,7 +210,7 @@ static int write_guardrail(const uint8_t *p, uint32_t len)
        !(off = get_str(p, off, len, e.final_action, sizeof e.final_action)) ||
        !(off = get_str(p, off, len, e.explanation, sizeof e.explanation)) || off + 4 > len)
    {
-      aimee_log(LOG_WARN, "audit_bus", "dropping malformed guardrail event (len=%u)", len);
+      aimee_log(LOG_WARN, "obs_bus", "dropping malformed guardrail event (len=%u)", len);
       return 0;
    }
    int32_t dry;
@@ -270,7 +271,7 @@ static void capture_flush(void)
       return;
    if (g.capture.broken)
    {
-      aimee_log(LOG_WARN, "audit_bus", "capture sink broke (alloc); replay stream abandoned");
+      aimee_log(LOG_WARN, "obs_bus", "capture sink broke (alloc); replay stream abandoned");
       close(g.cap_fd);
       g.cap_fd = -1;
       return;
@@ -281,7 +282,7 @@ static void capture_flush(void)
       ssize_t w = write(g.cap_fd, g.capture.buf + off, g.capture.len - off);
       if (w <= 0)
       {
-         aimee_log(LOG_WARN, "audit_bus", "capture file write failed; replay stream abandoned");
+         aimee_log(LOG_WARN, "obs_bus", "capture file write failed; replay stream abandoned");
          close(g.cap_fd);
          g.cap_fd = -1;
          g.capture.broken = 1; /* stop the tap appending to a sink we can no longer drain */
@@ -357,7 +358,7 @@ static void capture_open(void)
    const char *dir = config_default_dir();
    if (!dir || !dir[0])
    {
-      aimee_log(LOG_WARN, "audit_bus", "no home dir; audit capture/replay stream disabled");
+      aimee_log(LOG_WARN, "obs_bus", "no home dir; audit capture/replay stream disabled");
       return;
    }
    /* time+pid identifies the process/session; a per-process counter breaks ties
@@ -371,7 +372,7 @@ static void capture_open(void)
    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
    if (fd < 0)
    {
-      aimee_log(LOG_WARN, "audit_bus", "cannot open audit capture file; replay stream disabled");
+      aimee_log(LOG_WARN, "obs_bus", "cannot open audit capture file; replay stream disabled");
       return;
    }
    g.cap_fd = fd;
@@ -464,12 +465,12 @@ static int start_locked(void)
 
    if (bus_host_create(&g.host, &cfg, NULL, NULL) != BUS_HOST_OK)
    {
-      aimee_log(LOG_ERROR, "audit_bus", "bus host create failed; audit rows will not be recorded");
+      aimee_log(LOG_ERROR, "obs_bus", "bus host create failed; audit rows will not be recorded");
       return -1;
    }
    if (attach(&g.producer) != 0 || attach(&g.consumer) != 0)
    {
-      aimee_log(LOG_ERROR, "audit_bus", "audit bus client attach failed");
+      aimee_log(LOG_ERROR, "obs_bus", "audit bus client attach failed");
       bus_host_destroy(&g.host);
       return -1;
    }
@@ -482,7 +483,7 @@ static int start_locked(void)
 
    if (pthread_create(&g.thread, NULL, consumer_main, NULL) != 0)
    {
-      aimee_log(LOG_ERROR, "audit_bus", "audit consumer thread spawn failed");
+      aimee_log(LOG_ERROR, "obs_bus", "audit consumer thread spawn failed");
       if (g.cap_fd >= 0)
          close(g.cap_fd);
       bus_capture_free(&g.capture);
@@ -497,7 +498,7 @@ static int start_locked(void)
    return 0;
 }
 
-int audit_bus_start(void)
+int obs_bus_start(void)
 {
    pthread_mutex_lock(&start_lock);
    int rc = g.started ? 0 : start_locked();
@@ -505,25 +506,25 @@ int audit_bus_start(void)
    return rc;
 }
 
-/* Lazy start on first emit, so audit_bus_emit is a drop-in for the old direct
+/* Lazy start on first emit, so obs_bus_emit is a drop-in for the old direct
  * audit_action_log in EVERY context (server, standalone agent, CLI) — a row is
- * never lost merely because no one called audit_bus_start(). atexit drains at a
+ * never lost merely because no one called obs_bus_start(). atexit drains at a
  * graceful process exit. Once stop() has run (g.terminated), a late emit does
- * NOT resurrect the bus; only an explicit audit_bus_start() restarts it. */
+ * NOT resurrect the bus; only an explicit obs_bus_start() restarts it. */
 static void ensure_started(void)
 {
    if (atomic_load_explicit(&g.emitting, memory_order_acquire))
       return;
    pthread_mutex_lock(&start_lock);
    if (!g.started && !g.terminated && start_locked() == 0)
-      atexit(audit_bus_stop);
+      atexit(obs_bus_stop);
    pthread_mutex_unlock(&start_lock);
 }
 
 /* Enter the emit window. Returns 1 if the caller may publish (and MUST call
  * leave_emit afterwards), 0 if the bus is not accepting emits.
  *
- * The refcount + re-check is what makes shutdown safe: audit_bus_stop sets
+ * The refcount + re-check is what makes shutdown safe: obs_bus_stop sets
  * emitting=0 and then waits for `publishers` to reach 0 before tearing down the
  * producer/host/pub_lock. A producer increments `publishers` BEFORE re-reading
  * emitting, so once stop observes publishers==0 (after storing emitting=0), no
@@ -580,18 +581,17 @@ static void publish(uint32_t kind, const uint8_t *buf, uint32_t len)
    if (!ok)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
-      aimee_log(LOG_WARN, "audit_bus",
+      aimee_log(LOG_WARN, "obs_bus",
                 "event not recorded (kind=%u rc=%d) — consumer stuck or publish error", kind, rc);
    }
 }
 
-void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, const char *command,
-                    const char *mode, const char *reason_code, const char *verdict,
-                    long long task_id)
+void obs_bus_emit(const char *actor, const char *tool, const char *args_hash, const char *command,
+                  const char *mode, const char *reason_code, const char *verdict, long long task_id)
 {
    if (!enter_emit())
    {
-      aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; row not recorded");
+      aimee_log(LOG_WARN, "obs_bus", "audit bus unavailable; row not recorded");
       return;
    }
 
@@ -601,20 +601,20 @@ void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, 
    if (len == 0)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
-      aimee_log(LOG_WARN, "audit_bus", "audit row too large to serialize; not recorded");
+      aimee_log(LOG_WARN, "obs_bus", "audit row too large to serialize; not recorded");
    }
    else
       publish(KIND_AUDIT_ACTION, buf, len);
    leave_emit();
 }
 
-void audit_bus_emit_guardrail(const guardrail_event_t *e)
+void obs_bus_emit_guardrail(const guardrail_event_t *e)
 {
    if (!e)
       return;
    if (!enter_emit())
    {
-      aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; guardrail event not recorded");
+      aimee_log(LOG_WARN, "obs_bus", "audit bus unavailable; guardrail event not recorded");
       return;
    }
 
@@ -623,14 +623,14 @@ void audit_bus_emit_guardrail(const guardrail_event_t *e)
    if (len == 0)
    {
       atomic_fetch_add_explicit(&g.dropped, 1, memory_order_relaxed);
-      aimee_log(LOG_WARN, "audit_bus", "guardrail event too large to serialize; not recorded");
+      aimee_log(LOG_WARN, "obs_bus", "guardrail event too large to serialize; not recorded");
    }
    else
       publish(KIND_GUARDRAIL_EVENT, buf, len);
    leave_emit();
 }
 
-void audit_bus_stop(void)
+void obs_bus_stop(void)
 {
    pthread_mutex_lock(&start_lock);
    if (!g.started)
@@ -672,7 +672,7 @@ void audit_bus_stop(void)
    pthread_mutex_unlock(&start_lock);
 }
 
-void audit_bus_flush(void)
+void obs_bus_flush(void)
 {
    if (!g.started)
       return;
@@ -683,7 +683,7 @@ void audit_bus_flush(void)
     * stuck consumer cannot hang the caller forever. Does NOT stop the bus. */
    uint64_t target = atomic_load_explicit(&g.enqueued, memory_order_acquire);
    const struct timespec nap = {.tv_sec = 0, .tv_nsec = 100 * 1000}; /* 100 us */
-   for (int i = 0; i < 50000; i++)                                    /* ~5 s cap */
+   for (int i = 0; i < 50000; i++)                                   /* ~5 s cap */
    {
       if (atomic_load_explicit(&g.processed, memory_order_acquire) >= target)
          return;
@@ -691,12 +691,40 @@ void audit_bus_flush(void)
    }
 }
 
-uint64_t audit_bus_dropped(void)
+uint64_t obs_bus_dropped(void)
 {
    return atomic_load_explicit(&g.dropped, memory_order_relaxed);
 }
 
-uint64_t audit_bus_written(void)
+uint64_t obs_bus_written(void)
 {
    return atomic_load_explicit(&g.written, memory_order_relaxed);
+}
+
+void obs_bus_key_fingerprint(const char *kind, const char *key, char *out, size_t out_len)
+{
+   if (!out || out_len == 0)
+      return;
+   out[0] = '\0';
+   if (out_len < 16)
+      return;
+   char buf[1200];
+   int n = snprintf(buf, sizeof buf, "%s\x1f%s", kind ? kind : "", key ? key : "");
+   size_t len = (n < 0) ? 0 : ((size_t)n < sizeof buf ? (size_t)n : sizeof buf);
+   unsigned char dig[32];
+   if (wfe_sha256_raw(buf, len, dig) != 0)
+   {
+      snprintf(out, out_len, "mk:?");
+      return;
+   }
+   static const char hx[] = "0123456789abcdef";
+   out[0] = 'm';
+   out[1] = 'k';
+   out[2] = ':';
+   for (int i = 0; i < 6; i++)
+   {
+      out[3 + i * 2] = hx[(dig[i] >> 4) & 0xf];
+      out[3 + i * 2 + 1] = hx[dig[i] & 0xf];
+   }
+   out[15] = '\0';
 }

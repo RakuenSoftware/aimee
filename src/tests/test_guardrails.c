@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "db.h"
-#include <aimee/audit/audit_bus.h> /* audit_bus_flush — gsem_record records guardrail events async now */
+#include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"
@@ -2098,7 +2098,7 @@ static void test_semantic_advisory_pre_tool_check(void)
 
    /* gsem_record now records over the event bus (async); flush so the count
     * baseline and the post-check counts reflect the writes deterministically. */
-   audit_bus_flush();
+   obs_bus_flush();
    guardrail_event_counts_t before_counts;
    assert(db1_guardrail_event_counts_7d(&before_counts) == 0);
 
@@ -2129,7 +2129,7 @@ static void test_semantic_advisory_pre_tool_check(void)
    assert(rc == 0);
    assert(strstr(msg, "semantic guardrail: high risk") != NULL);
 
-   audit_bus_flush(); /* drain the two async guardrail events into db1 before counting */
+   obs_bus_flush(); /* drain the two async guardrail events into db1 before counting */
    guardrail_event_counts_t counts;
    assert(db1_guardrail_event_counts_7d(&counts) == 0);
    assert(counts.warn == before_counts.warn);

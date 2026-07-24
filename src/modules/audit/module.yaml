@@ -12,7 +12,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/audit/audit_action.c",
-    "src/modules/audit/audit_bus.c",
+    "src/modules/audit/obs_bus.c",
     "src/modules/audit/audit_ledger.c",
     "src/modules/audit/audit_replay.c",
     "src/modules/audit/audit_worm.c",
@@ -20,7 +20,7 @@
   ],
   "public_headers": [
     "src/modules/audit/include/aimee/audit/audit_action.h",
-    "src/modules/audit/include/aimee/audit/audit_bus.h",
+    "src/modules/audit/include/aimee/audit/obs_bus.h",
     "src/modules/audit/include/aimee/audit/audit_ledger.h",
     "src/modules/audit/include/aimee/audit/audit_replay.h",
     "src/modules/audit/include/aimee/audit/audit_worm.h",

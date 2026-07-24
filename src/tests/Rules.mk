@@ -26,7 +26,7 @@ unit-test-server-management-listener-live: $(TESTPREFIX)/unit-test-server-manage
 	$<
 
 P5B3C_LIVE_SERVER_OBJS = $(filter-out $(OBJDIR)/server/server_main.o,$(SERVER_OBJS)) \
-    $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_replay.o \
+    $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/audit_replay.o \
     $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
     $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
     $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
@@ -53,7 +53,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/modules/skills/skill_review.o $(OBJDIR)/modules/skills/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
-                             $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/modules/kb_client/kb_client_prospective.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
+                             $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_index_parse.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o $(OBJDIR)/tests/modules/kb_client/kb_client_tool_registry.o $(OBJDIR)/modules/kb_client/kb_client_prospective.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o \
                              $(OBJDIR)/modules/protocols/mcp/mcp_client.o $(OBJDIR)/modules/protocols/mcp/mcp_client_registry.o \
                              $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/cli_main.o \
@@ -79,12 +79,12 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/mo
                              $(PLATFORM_AGENT_OBJS)
 
 # This bundle carries guardrails_action_audit.o and guardrails_semantic.o, which
-# now reference audit_bus_emit / audit_bus_emit_guardrail — so every test linking
+# now reference obs_bus_emit / obs_bus_emit_guardrail — so every test linking
 # it also needs the bus objects. Listed individually (NOT $(BUS_SHIP_OBJS)) so the
 # D7 "only aimee-server links BUS_SHIP_OBJS" invariant is untouched; these are
 # TEST binaries, which are allowed to link the bus. guardrail_events.o /
 # aimee_home.o / log.o are already in TEST_DATA_OBJS.
-BUS_TEST_OBJS = $(OBJDIR)/modules/audit/audit_bus.o \
+BUS_TEST_OBJS = $(OBJDIR)/modules/audit/obs_bus.o \
                 $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
                 $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
                 $(OBJDIR)/modules/bus/bus_ring.o $(OBJDIR)/modules/bus/bus_arena.o \
@@ -1513,7 +1513,7 @@ $(TESTPREFIX)/unit-test-workspace-memory: $(OBJDIR)/tests/test_workspace_memory.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
-                          $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
+                          $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
                           $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(DB1_OBJS) \
                           $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o \
                           $(OBJDIR)/modules/config/config.o $(OBJDIR)/modules/config/config_sections.o $(OBJDIR)/modules/config/config_database.o $(OBJDIR)/modules/config/config_learning.o $(OBJDIR)/modules/config/config_memory.o $(OBJDIR)/modules/config/config_charter.o $(OBJDIR)/modules/config/config_trigger.o $(OBJDIR)/modules/config/config_kb_maintenance.o $(OBJDIR)/modules/config/config_kb_curator.o $(OBJDIR)/modules/config/config_server_api.o $(OBJDIR)/modules/config/config_skills.o $(OBJDIR)/modules/config/config_save.o \
@@ -1607,7 +1607,7 @@ $(TESTPREFIX)/unit-test-kb-client-search: $(OBJDIR)/tests/test_kb_client_search.
 $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_cache.o \
-	                                  $(OBJDIR)/modules/kb_client/kb_client_memory.o \
+	                                  $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
 	                                  $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
@@ -2759,13 +2759,13 @@ unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
 	$<
 
 # The audit-on-bus DURABILITY test: the first module whose real path is being
-# migrated onto the bus. Emits N rows through the real audit_bus producer/consumer
+# migrated onto the bus. Emits N rows through the real obs_bus producer/consumer
 # and requires the real ledger to hold exactly N, each once, zero drops. Links
-# audit_bus + audit_ledger + the bus + the shared support objects. Test binary only.
-$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+# obs_bus + audit_ledger + the bus + the shared support objects. Test binary only.
+$(OBJDIR)/modules/audit/obs_bus.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/tests/test_bus_audit_durability.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_durability.o \
-                                              $(OBJDIR)/modules/audit/audit_bus.o \
+                                              $(OBJDIR)/modules/audit/obs_bus.o \
                                               $(OBJDIR)/modules/audit/audit_ledger.o \
                                               $(OBJDIR)/aimee_home.o \
                                               $(OBJDIR)/modules/bus/bus_client.o \
@@ -2789,7 +2789,7 @@ unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
 # link set as durability plus bus_capture.o. Test binary only.
 $(OBJDIR)/tests/test_bus_audit_replay.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-replay: $(OBJDIR)/tests/test_bus_audit_replay.o \
-                                          $(OBJDIR)/modules/audit/audit_bus.o \
+                                          $(OBJDIR)/modules/audit/obs_bus.o \
                                           $(OBJDIR)/modules/audit/audit_ledger.o \
                                           $(OBJDIR)/aimee_home.o \
                                           $(OBJDIR)/modules/bus/bus_client.o \
@@ -2811,7 +2811,7 @@ unit-test-bus-audit-replay: $(TESTPREFIX)/unit-test-bus-audit-replay
 # but the files stay bounded. Same link set as replay/durability.
 $(OBJDIR)/tests/test_bus_audit_retention.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-retention: $(OBJDIR)/tests/test_bus_audit_retention.o \
-                                             $(OBJDIR)/modules/audit/audit_bus.o \
+                                             $(OBJDIR)/modules/audit/obs_bus.o \
                                              $(OBJDIR)/modules/audit/audit_ledger.o \
                                              $(OBJDIR)/aimee_home.o \
                                              $(OBJDIR)/modules/bus/bus_client.o \
@@ -2834,7 +2834,7 @@ unit-test-bus-audit-retention: $(TESTPREFIX)/unit-test-bus-audit-retention
 $(OBJDIR)/modules/audit/audit_replay.o: C_FLAGS += -Imodules/bus
 $(OBJDIR)/tests/test_bus_audit_replay_tool.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-audit-replay-tool: $(OBJDIR)/tests/test_bus_audit_replay_tool.o \
-                                               $(OBJDIR)/modules/audit/audit_bus.o \
+                                               $(OBJDIR)/modules/audit/obs_bus.o \
                                                $(OBJDIR)/modules/audit/audit_replay.o \
                                                $(OBJDIR)/modules/audit/audit_ledger.o \
                                                $(OBJDIR)/aimee_home.o \
@@ -2855,10 +2855,10 @@ unit-test-bus-audit-replay-tool: $(TESTPREFIX)/unit-test-bus-audit-replay-tool
 
 # Second module on the bus: the guardrail-semantic event. Emits N over the bus and
 # requires the real db1 guardrail_events table to hold exactly N. guardrail_events.o
-# is in BUS_MEM_OBJS; audit_bus dispatches this kind to db1.
+# is in BUS_MEM_OBJS; obs_bus dispatches this kind to db1.
 $(OBJDIR)/tests/test_bus_guardrail_durability.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guardrail_durability.o \
-                                                  $(OBJDIR)/modules/audit/audit_bus.o \
+                                                  $(OBJDIR)/modules/audit/obs_bus.o \
                                                   $(OBJDIR)/modules/audit/audit_ledger.o \
                                                   $(OBJDIR)/aimee_home.o \
                                                   $(OBJDIR)/modules/bus/bus_client.o \
@@ -2876,11 +2876,99 @@ $(TESTPREFIX)/unit-test-bus-guardrail-durability: $(OBJDIR)/tests/test_bus_guard
 unit-test-bus-guardrail-durability: $(TESTPREFIX)/unit-test-bus-guardrail-durability
 	$<
 
-# Shutdown race: concurrent producers vs audit_bus_stop() (regression test for the
+# Vault credential-access audit, end-to-end through the REAL server bridge
+# (vault_audit_bridge.o) -> obs_bus -> ledger. Same bus link set as the audit
+# durability test, plus the bridge, the vault service + its crypto/store/cache
+# deps, and audit_action.o (audit_args_hash + audit_ensure_key).
+$(TESTPREFIX)/unit-test-bus-vault-audit: $(OBJDIR)/tests/test_bus_vault_audit.o \
+                                         $(OBJDIR)/server/vault_audit_bridge.o \
+                                         $(OBJDIR)/modules/audit/obs_bus.o \
+                                         $(OBJDIR)/modules/audit/audit_ledger.o \
+                                         $(OBJDIR)/modules/audit/audit_action.o \
+                                         $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                         $(OBJDIR)/modules/vault/vault_service.o \
+                                         $(OBJDIR)/modules/vault/vault_store.o \
+                                         $(OBJDIR)/modules/vault/vault_kek_check.o \
+                                         $(OBJDIR)/modules/vault/vault_crypto.o \
+                                         $(OBJDIR)/modules/vault/vault_kek_cache.o \
+                                         $(OBJDIR)/modules/vault/vault_server_key.o \
+                                         $(OBJDIR)/aimee_home.o \
+                                         $(OBJDIR)/modules/bus/bus_client.o \
+                                         $(OBJDIR)/modules/bus/bus_host.o \
+                                         $(OBJDIR)/modules/bus/bus_route.o \
+                                         $(OBJDIR)/modules/bus/bus_region.o \
+                                         $(OBJDIR)/modules/bus/bus_ring.o \
+                                         $(OBJDIR)/modules/bus/bus_arena.o \
+                                         $(OBJDIR)/modules/bus/bus_wire.o \
+                                         $(OBJDIR)/modules/bus/bus_capture.o \
+                                         $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-vault-audit
+unit-test-bus-vault-audit: $(TESTPREFIX)/unit-test-bus-vault-audit
+	$<
+
+# NOT in TEST_TARGETS: like the other bus tests it needs a special bus link set
+# the standard unit-tests build does not assemble, so the bench gate
+# (check_bus_perf_gate.sh) force-builds + runs it via this .PHONY target instead.
+
+# Sandbox degraded-isolation audit, end-to-end through the REAL server bridge
+# (sandbox_audit_bridge.o) -> obs_bus -> ledger. Same bus link set as the audit
+# durability test, plus the bridge, posix/sandbox.o, and audit_action.o.
+$(TESTPREFIX)/unit-test-bus-sandbox-audit: $(OBJDIR)/tests/test_bus_sandbox_audit.o \
+                                           $(OBJDIR)/server/sandbox_audit_bridge.o \
+                                           $(OBJDIR)/posix/sandbox.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
+                                           $(OBJDIR)/modules/audit/audit_ledger.o \
+                                           $(OBJDIR)/modules/audit/audit_action.o \
+                                           $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                           $(OBJDIR)/aimee_home.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(OBJDIR)/modules/bus/bus_capture.o \
+                                           $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-sandbox-audit
+unit-test-bus-sandbox-audit: $(TESTPREFIX)/unit-test-bus-sandbox-audit
+	$<
+
+# Server-side memory-mutation audit, end-to-end through the REAL bridge
+# (memory_audit_bridge.o) -> obs_bus -> ledger. Links the dep-free hook TU
+# (kb_client_memory_audit.o) — NOT the whole kb_client RPC stack.
+$(TESTPREFIX)/unit-test-bus-memory-audit: $(OBJDIR)/tests/test_bus_memory_audit.o \
+                                          $(OBJDIR)/server/memory_audit_bridge.o \
+                                          $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o \
+                                          $(OBJDIR)/modules/audit/obs_bus.o \
+                                          $(OBJDIR)/modules/audit/audit_ledger.o \
+                                          $(OBJDIR)/modules/audit/audit_action.o \
+                                          $(OBJDIR)/modules/workflows/wfe_canonical.o \
+                                          $(OBJDIR)/aimee_home.o \
+                                          $(OBJDIR)/modules/bus/bus_client.o \
+                                          $(OBJDIR)/modules/bus/bus_host.o \
+                                          $(OBJDIR)/modules/bus/bus_route.o \
+                                          $(OBJDIR)/modules/bus/bus_region.o \
+                                          $(OBJDIR)/modules/bus/bus_ring.o \
+                                          $(OBJDIR)/modules/bus/bus_arena.o \
+                                          $(OBJDIR)/modules/bus/bus_wire.o \
+                                          $(OBJDIR)/modules/bus/bus_capture.o \
+                                          $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-memory-audit
+unit-test-bus-memory-audit: $(TESTPREFIX)/unit-test-bus-memory-audit
+	$<
+
+# Shutdown race: concurrent producers vs obs_bus_stop() (regression test for the
 # in-flight-emit-vs-teardown UAF). Same link set as the guardrail durability test.
 $(OBJDIR)/tests/test_bus_shutdown_race.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-shutdown-race: $(OBJDIR)/tests/test_bus_shutdown_race.o \
-                                           $(OBJDIR)/modules/audit/audit_bus.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
                                            $(OBJDIR)/modules/audit/audit_ledger.o \
                                            $(OBJDIR)/aimee_home.o \
                                            $(OBJDIR)/modules/bus/bus_client.o \
@@ -3160,7 +3248,7 @@ $(TESTPREFIX)/unit-test-cmd-doctor: $(OBJDIR)/tests/test_cmd_doctor.o $(OBJDIR)/
                             $(DB2_OBJS) \
                             $(OBJDIR)/cmd_util.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
                             $(OBJDIR)/client_integrations.o $(OBJDIR)/db1/secrets.o \
-                            $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
+                            $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
                             $(OBJDIR)/modules/git/mcp_git_query.o $(OBJDIR)/tests/support/git_cred_inject_stub.o $(OBJDIR)/modules/git/forge_credentials.o $(OBJDIR)/modules/git/git_host_resolve.o $(OBJDIR)/modules/git/mcp_git_write.o \
                             $(OBJDIR)/modules/git/mcp_git_branch.o $(OBJDIR)/modules/git/mcp_git_pr.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5226,6 +5314,31 @@ $(TESTPREFIX)/unit-test-working-profile: $(OBJDIR)/tests/test_working_profile.o 
 $(TESTPREFIX)/unit-test-curiosity: $(OBJDIR)/tests/test_curiosity.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# KB store-side memory-audit hook + end-to-end onto aimee-kb's obs_bus/ledger:
+# memory_core_crud (db2 shim) fires the hook, the REAL KB bridge maps it, and the
+# row lands in the ledger. Links the db2-shim memory set plus the bus stack.
+$(TESTPREFIX)/unit-test-memory-audit-hook: $(OBJDIR)/tests/test_memory_audit_hook.o \
+                                           $(OBJDIR)/kb/kb_memory_audit_bridge.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
+                                           $(OBJDIR)/modules/audit/audit_ledger.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(OBJDIR)/modules/bus/bus_capture.o \
+                                           $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+# NOT in TEST_TARGETS: it links the bus objects, which the standard unit-tests
+# build does not assemble — so the bench gate (check_bus_perf_gate.sh) force-builds
+# and runs it via this .PHONY target, like the other bus tests.
+.PHONY: unit-test-memory-audit-hook
+unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
+	$<
+
 $(TESTPREFIX)/unit-test-cmd-identity: $(OBJDIR)/tests/test_cmd_identity.o \
                      $(OBJDIR)/cmd_identity.o $(OBJDIR)/working_profile.o \
                      $(DB1_OBJS) \
@@ -5661,13 +5774,13 @@ $(TESTPREFIX)/unit-test-kb-mdl: $(OBJDIR)/tests/test_kb_mdl.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-# guardrails_semantic.o -> audit_bus_emit_guardrail, so this test now links the
+# guardrails_semantic.o -> obs_bus_emit_guardrail, so this test now links the
 # bus (gsem_record records over it) plus the bus's own deps.
 $(OBJDIR)/tests/test_guardrails_semantic.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-guardrails-semantic: $(OBJDIR)/tests/test_guardrails_semantic.o \
                      $(OBJDIR)/modules/guardrails/guardrails_semantic.o \
                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/guardrail_events.o \
-                     $(OBJDIR)/modules/audit/audit_bus.o $(OBJDIR)/modules/audit/audit_ledger.o \
+                     $(OBJDIR)/modules/audit/obs_bus.o $(OBJDIR)/modules/audit/audit_ledger.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/modules/bus/bus_client.o $(OBJDIR)/modules/bus/bus_host.o \
                      $(OBJDIR)/modules/bus/bus_route.o $(OBJDIR)/modules/bus/bus_region.o \
