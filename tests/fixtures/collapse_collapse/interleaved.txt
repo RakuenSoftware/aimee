@@ -1,4 +1,3 @@
-# shape: multi-line loop body with non-repeating single-line connective tissue between iterations; expected: fire; expected_loop_start_offset: 276; expected_loop_span_bytes: 30; expected_repetitions: 4; connective_tissue: yes; expected_loop_iteration_offsets: 276,319,362,405
 alpha line one
 alpha line two
 tag-aaa line

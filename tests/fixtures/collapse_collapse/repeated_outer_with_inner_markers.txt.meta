@@ -1,0 +1,1 @@
+shape: contiguous outer loop with embedded structural markers; expected: fire; expected_loop_start_offset: 0; expected_loop_span_bytes: 45; expected_repetitions: 4

@@ -1,23 +1,23 @@
 # Deterministic JSON fragment grammar
 
-This document defines the byte-stable fixture grammar and oracle for the repetition-collapse detector. Inputs are UTF-8 bytes; offsets are an absolute byte offset from the start of the fixture file (byte zero of the file, including the header line). Offsets and spans are measured in UTF-8 bytes.
+This document defines the byte-stable fixture grammar and oracle for the repetition-collapse detector. Inputs are UTF-8 bytes. Offsets are an absolute byte offset from the **first generated payload byte** (byte 0 of the fixture body). Spans are measured in UTF-8 bytes.
 
 ## Scope of "start of generation"
 
-For the fixture corpus, "start of generation" means byte 0 of the fixture file. The fixture file is the canonical, self-contained input: it always begins with the single-line header described in *Canonical fixture envelope and oracle* and the body bytes that follow are what the detector is expected to classify. There is no separate prefix prompt; the header line is part of the file and counts toward every offset. This definition is what the oracle tests assert and what `expected_loop_start_offset` measures in every fixture header.
+For the fixture corpus, "start of generation" means byte 0 of the fixture body. Every fixture has a sibling `.meta` file that contains the oracle header; the `.meta` file is **not** part of the generated payload and does not count toward any offset. The payload file is the body only: the bytes a detector would receive as generation output. This definition is what the oracle tests assert and what `expected_loop_start_offset` measures in every fixture header.
 
 ## Accepted JSON shapes
 
 A fragment is a complete RFC 8259 JSON value. Markdown fencing is a wrapper: when the info string is exactly `json`, its inner content must independently satisfy one of the accepted shapes below. The accepted shapes are:
 
-1. **top-level or nested arrays of primitives** — `string`, `number`, `boolean`, or `null` leaves in a flat array, or arrays of such arrays;
-2. **arrays of uniform-shape objects with a required string discriminator and primitive leaves** — every element shares the same key set, including a string-valued discriminator key whose value is distinct per element; remaining leaves are primitives;
+1. **top-level or nested arrays of primitives** — `string`, `number`, `boolean`, or `null` leaves in a flat array, or rectangular arrays of such arrays. Every array at the same depth has the same length, and every leaf is at the same depth. Jagged or mixed-depth arrays are excluded;
+2. **arrays of uniform-shape objects with a required string discriminator and primitive leaves** — every element shares the same key set, including a string-valued discriminator key whose value is distinct per element; remaining leaves are primitives. The array may be nested inside uniform arrays of the same depth, but the outer container must be homogeneous (all arrays or all objects, not mixed);
 3. **objects with stable keys and compatible primitive leaf types repeated across array elements** — every element in the array shares the same key set, leaves are primitives, the set need not include a discriminator key, and each key keeps the same primitive leaf type across every record. The no-fire guarantee applies to shape-3 membership only when the fixture's bytes do not also satisfy the mechanical fire condition defined in the *Authoritative scope of the no-fire label* section. Within that boundary, the structural form is the determinant: a single-element array of one object, an array of objects whose leaf values vary, and an array of objects whose leaf values happen to coincide but do not form a contiguous verbatim period of length ≥ 3 bytes repeated ≥ N times all satisfy this shape and MUST NOT fire on the basis of structure alone. The discriminator is structural, not value-derived: the no-fire label is a property of the (key set, leaf-type signature), not of byte equality of the records; and
-4. **JSON fenced inside markdown code blocks** — a ` ``` json ... ``` ` wrapper whose inner content independently satisfies one of shapes 1–3.
+4. **JSON fenced inside markdown code blocks** — a canonical ` ```json ... ``` ` wrapper whose inner content independently satisfies one of shapes 1–3. The info string must be exactly `json` (no trailing spaces, no additional words, case-sensitive). The fence must be the complete, canonical wrapper: opening `` ```json `` on its own line, the JSON payload, and closing `` ``` `` on its own line. Extra text before or after the fence, or a fence with an info string other than exactly `json`, is malformed.
 
 For every uniform object array in shape 2, the discriminator is the lexicographically first key common to every element whose value is a string in every element **and whose value is distinct across every element**. If no such key exists, the shape is excluded from shape 2 (it may still satisfy shape 3 if the leaves are primitives and per-key types are uniform).
 
-For shape 3, "compatible primitive leaf types" means the set of leaf types for each key is uniform across every record: a key that is `int` in one record MUST be `int` in every other record; mixed numeric and string leaves for the same key across records is not shape 3. Two worked examples:
+For shape 3, "compatible primitive leaf types" means the JSON type label for each key is the same in every record: a key that is `int` in one record MUST be `int` in every other record; mixed numeric and string leaves for the same key across records is not shape 3. Two worked examples:
 
 * `{"x":1,"y":2},{"x":3,"y":4}` — key set `{x, y}` is stable; both keys are `int` everywhere; no fire on the basis of structure even if the records are byte-distinct.
 * `{"x":1,"y":"a"},{"x":2,"y":"b"}` — key set `{x, y}` is stable; `x` is `int` everywhere, `y` is `str` everywhere; no fire on the basis of structure.
@@ -30,11 +30,13 @@ The grammar excludes arbitrary heterogeneous objects, missing or extra keys, non
 
 ## Canonical fixture envelope and oracle
 
-Every fixture has one single-line header. Plain-text and source fixtures use `# shape:`; Markdown fixtures use `<!-- shape: ... -->`; a `.json` payload uses a sibling `.json.meta` file containing the unwrapped canonical line. These are the only envelope forms; `.meta`, `# shape:`, and `<!-- shape:` are normative.
+Every fixture has a sibling `.meta` file containing a single-line header. The `.meta` file is never part of the generated payload. The payload file is the body only.
 
 The required fields and spellings are:
 
 `shape:<description>; expected:<fire|no-fire>; expected_loop_start_offset:<integer>; expected_loop_span_bytes:<integer>; expected_repetitions:<integer>`
+
+JSON fixtures under `tests/fixtures/collapse_legit/json/` MUST additionally declare `category:<one of the accepted JSON shape categories>`.
 
 **Values MUST NOT contain `;`.** If a value would naturally include `;` (e.g. a description like `ramp; then loop`), the author MUST rephrase (e.g. `ramp then loop`) or pick a different separator inside the description. The header parser splits on `;` and a stray `;` inside a value silently truncates the value at that point; the parser will reject such a header, but the rule is normative here so authors do not need to read the test code to learn it.
 

@@ -1,4 +1,3 @@
-<!-- shape: enumerated ordered list with nested substeps; expected: no-fire; expected_loop_start_offset: -1; expected_loop_span_bytes: -1; expected_repetitions: 0 -->
 1. Configure network:
    1.1. Set DNS servers
    1.2. Verify routing table

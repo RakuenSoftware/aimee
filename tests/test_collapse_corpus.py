@@ -19,22 +19,11 @@ VALID_CATEGORIES = {
 }
 
 
-_COMMENT_LINE_RE = re.compile(r"<!--\s*(.*?)\s*-->")
-
-
-def _strip_comment_wrapper(line):
-    match = _COMMENT_LINE_RE.search(line)
-    if match:
-        return match.group(1)
-    return line
-
-
 _SEGMENT_RE = re.compile(r"([a-z_]+):\s*(.*?)\s*$")
 
 
 def _parse_header_line(line):
-    """Parse a header line by stripping an optional <!-- ... --> wrapper (and any
-    leading `#` shell-comment marker) and extracting `key:value;` segments.
+    """Parse a single-line `.meta` header into `key:value` pairs.
 
     The reserved separator is `;`. To prevent silent truncation of values (e.g. a
     shape description written as ``ramp; then loop`` would otherwise be parsed as
@@ -44,10 +33,7 @@ def _parse_header_line(line):
     rejected as a malformed header. Authors must NOT include `;` inside any field
     value; this invariant is enforced here and documented in the grammar.
     """
-    body = _strip_comment_wrapper(line).lstrip()
-    if body.startswith("#"):
-        body = body[1:].lstrip()
-    segments = body.split(";")
+    segments = line.strip().split(";")
     values = {}
     for segment in segments:
         segment = segment.strip()
@@ -66,12 +52,23 @@ def _parse_header_line(line):
 
 
 def metadata(path):
-    source = Path(f"{path}.meta") if path.suffix == ".json" else path
-    first_line = source.read_text(encoding="utf-8").splitlines()[0]
+    """Return the parsed `.meta` sidecar for a fixture payload file.
+
+    The `.meta` file is never part of the generated payload; all offsets are
+    relative to byte 0 of the payload body (`path.read_bytes()`).
+    """
+    meta = Path(f"{path}.meta")
+    assert meta.exists(), f"missing sidecar metadata: {meta}"
+    first_line = meta.read_text(encoding="utf-8").splitlines()[0]
     values = _parse_header_line(first_line)
     missing = set(REQUIRED_FIELDS) - set(values)
-    assert not missing, f"incomplete fixture header (missing {missing}): {source}"
+    assert not missing, f"incomplete fixture header (missing {missing}): {meta}"
     return values
+
+
+def _payload_bytes(path):
+    """Return the generated payload bytes for a fixture (the body without `.meta`)."""
+    return path.read_bytes()
 
 
 def test_every_fixture_has_complete_metadata():
@@ -81,9 +78,18 @@ def test_every_fixture_has_complete_metadata():
                 metadata(path)
 
 
+def test_every_fixture_has_a_meta_sidecar():
+    for tree in (ROOT / "collapse_legit", ROOT / "collapse_collapse"):
+        for path in tree.rglob("*"):
+            if path.is_file() and path.suffix != ".meta":
+                assert Path(f"{path}.meta").exists(), (
+                    f"fixture {path} must have a sibling .meta sidecar"
+                )
+
+
 def test_fire_oracles_are_absolute_byte_exact_verbatim_periods():
     for path in (ROOT / "collapse_collapse").glob("*"):
-        if not path.is_file():
+        if not path.is_file() or path.suffix == ".meta":
             continue
         values = metadata(path)
         if values.get("connective_tissue", "").strip().lower() == "yes":
@@ -92,7 +98,7 @@ def test_fire_oracles_are_absolute_byte_exact_verbatim_periods():
         offset = int(values["expected_loop_start_offset"])
         span = int(values["expected_loop_span_bytes"])
         repetitions = int(values["expected_repetitions"])
-        payload = path.read_bytes()
+        payload = _payload_bytes(path)
         period = payload[offset:offset + span]
         assert repetitions >= 4
         assert len(period) == span
@@ -101,7 +107,7 @@ def test_fire_oracles_are_absolute_byte_exact_verbatim_periods():
 
 def test_interleaved_oracles_have_non_repeating_connective_tissue():
     for path in (ROOT / "collapse_collapse").glob("*"):
-        if not path.is_file():
+        if not path.is_file() or path.suffix == ".meta":
             continue
         values = metadata(path)
         if values.get("connective_tissue", "").strip().lower() != "yes":
@@ -123,7 +129,7 @@ def test_interleaved_oracles_have_non_repeating_connective_tissue():
         assert iteration_offsets[0] == offset, (
             f"first iteration offset must equal expected_loop_start_offset: {path}"
         )
-        payload = path.read_bytes()
+        payload = _payload_bytes(path)
         period = payload[offset:offset + span]
         assert len(period) == span
         for i, off in enumerate(iteration_offsets):
@@ -181,129 +187,161 @@ def _is_primitive(value):
     return _primitive_type_label(value) is not None
 
 
-def _common_string_keys(records):
-    if not records:
-        return set()
-    candidates = None
-    for record in records:
-        string_keys = {k for k, v in record.items() if isinstance(v, str)}
-        candidates = string_keys if candidates is None else candidates & string_keys
-    return candidates or set()
+def _shape1_signature(value):
+    """Return a structural signature for a shape-1 value, or None if it is not a
+    rectangular array of primitives.
+
+    * primitive -> ("primitive",)
+    * list of uniform children -> ("list", length, child_signature)
+    * mixed/empty/non-primitive -> None
+
+    Empty arrays are not allowed in the grammar, so they return None.
+    """
+    if _is_primitive(value):
+        return ("primitive",)
+    if not isinstance(value, list) or not value:
+        return None
+    child_sigs = [_shape1_signature(child) for child in value]
+    if any(sig is None for sig in child_sigs):
+        return None
+    first = child_sigs[0]
+    if not all(sig == first for sig in child_sigs):
+        return None
+    return ("list", len(value), first)
 
 
-def _all_keys_common(records):
-    if not records:
-        return set()
-    candidates = None
-    for record in records:
-        common_keys = set(record.keys())
-        candidates = common_keys if candidates is None else candidates & common_keys
-    return candidates or set()
+def _validate_primitives_array(payload):
+    """Shape 1: top-level or nested rectangular arrays of primitives.
+
+    The payload must be a non-empty list whose structural signature is a uniform
+    list of primitives, possibly nested to a uniform depth. Jagged arrays such as
+    `[1, [2]]` or `[[1], [[2]]]` are rejected because their leaves are not at a
+    single depth.
+    """
+    if not isinstance(payload, list) or not payload:
+        return False
+    sig = _shape1_signature(payload)
+    if sig is None or sig[0] != "list":
+        return False
+    # Walk to the leaf signature to confirm it is a primitive.
+    while sig[0] == "list":
+        sig = sig[2]
+    return sig == ("primitive",)
 
 
-def _discriminator_for_shape2(records):
+def _object_array_signature(records):
+    """Return a structural signature for a list of objects, or None if they are not
+    uniform-shape objects with primitive leaves.
+
+    The signature is (frozenset(keys), dict(key -> primitive_type_label)).
+    """
+    if not records or not all(isinstance(r, dict) for r in records):
+        return None
+    keys = frozenset(records[0].keys())
+    if not all(frozenset(r.keys()) == keys for r in records):
+        return None
+    key_types = {}
+    for key in keys:
+        labels = [_primitive_type_label(r[key]) for r in records]
+        if None in labels or len(set(labels)) != 1:
+            return None
+        key_types[key] = labels[0]
+    return (keys, key_types)
+
+
+def _discriminator_for_records(records):
     """Lexicographically first key common to every record whose value is a string in every
     record AND whose value is distinct across every record."""
-    candidates = _common_string_keys(records)
-    for key in sorted(candidates):
+    sig = _object_array_signature(records)
+    if sig is None:
+        return None
+    keys, key_types = sig
+    string_keys = [k for k in sorted(keys) if key_types[k] == "str"]
+    for key in string_keys:
         values = [record[key] for record in records]
         if len(set(values)) == len(values):
             return key
     return None
 
 
-def _walk_arrays(payload):
-    """Yield every array node reachable from payload (including payload if it is a list)."""
-    if isinstance(payload, list):
-        yield payload
-        for head in payload:
-            yield from _walk_arrays(head)
+def _shape2_records(records):
+    """True iff `records` is a non-empty list of uniform objects with a required string
+    discriminator and primitive leaves.
+    """
+    if not records or not all(isinstance(r, dict) for r in records):
+        return False
+    sig = _object_array_signature(records)
+    if sig is None:
+        return False
+    return _discriminator_for_records(records) is not None
 
 
-def _leaves_are_primitives(payload):
-    """True iff every leaf reachable through nested arrays is a primitive."""
-    queue = [payload]
-    while queue:
-        head = queue.pop(0)
-        if isinstance(head, list):
-            queue.extend(head)
-            continue
-        if not _is_primitive(head):
-            return False
-    return True
+def _shape3_records(records):
+    """True iff `records` is a non-empty list of objects with stable keys and compatible
+    primitive leaf types across every record.
+    """
+    if not records or not all(isinstance(r, dict) for r in records):
+        return False
+    return _object_array_signature(records) is not None
 
 
-def _validate_primitives_array(payload):
-    """Shape 1: top-level or nested arrays of primitives."""
+def _validate_uniform_object_array(payload, records_validator):
+    """Validate that `payload` is a (possibly nested) uniform array of objects.
+
+    The outer container must be homogeneous: either every top-level element is an
+    object, or every top-level element is a non-empty array of objects. A mixed
+    container such as `[{"a": 1}, [{"b": 2}]]` is rejected, as is a heterogeneous
+    outer container that merely contains one valid nested object array.
+    """
     if not isinstance(payload, list) or not payload:
         return False
-    return _leaves_are_primitives(payload)
+    if all(isinstance(el, dict) for el in payload):
+        return records_validator(payload)
+    if all(isinstance(el, list) and el for el in payload):
+        signatures = [_object_array_signature(el) for el in payload]
+        if any(sig is None for sig in signatures):
+            return False
+        first = signatures[0]
+        if not all(sig == first for sig in signatures):
+            return False
+        return all(records_validator(el) for el in payload)
+    return False
 
 
 def _validate_discriminator_array(payload):
-    """Shape 2: arrays (top-level or nested) of uniform-shape objects with required string
-    discriminator and primitive leaves. The discriminator key value must be distinct across
-    every record in the same array; the key must be common to all records."""
-    found_any = False
-    for array in _walk_arrays(payload):
-        if not array or not all(isinstance(el, dict) for el in array):
-            continue
-        common_keys = _all_keys_common(array)
-        if not common_keys:
-            return False
-        discriminator = _discriminator_for_shape2(array)
-        if not discriminator:
-            return False
-        for record in array:
-            if set(record.keys()) != common_keys:
-                return False
-            for key, value in record.items():
-                if key == discriminator:
-                    if not isinstance(value, str):
-                        return False
-                else:
-                    if not _is_primitive(value):
-                        return False
-        found_any = True
-    return found_any
+    """Shape 2: arrays of uniform-shape objects with required string discriminator.
+
+    The complete payload must belong to the shape; a heterogeneous outer container
+    that contains one valid nested object array is rejected.
+    """
+    return _validate_uniform_object_array(payload, _shape2_records)
 
 
 def _validate_stable_keys_array(payload):
-    """Shape 3: arrays (top-level or nested) of objects with stable keys,
-    primitive leaves, and compatible per-key primitive leaf types across records.
+    """Shape 3: arrays of objects with stable keys and compatible primitive leaf types.
 
-    Compatible primitive leaf types means the JSON type label for each key is the
-    same in every record. A key that is int in one record and str in another
-    (e.g. [{"x": 1}, {"x": "a"}]) excludes the array from shape 3.
+    The complete payload must belong to the shape; a heterogeneous outer container
+    that contains one valid nested object array is rejected.
     """
-    found_any = False
-    for array in _walk_arrays(payload):
-        if not array or not all(isinstance(el, dict) for el in array):
-            continue
-        common_keys = _all_keys_common(array)
-        if not common_keys:
-            return False
-        key_types = {key: None for key in common_keys}
-        for record in array:
-            if set(record.keys()) != common_keys:
-                return False
-            for key, value in record.items():
-                if not _is_primitive(value):
-                    return False
-                label = _primitive_type_label(value)
-                if key_types[key] is None:
-                    key_types[key] = label
-                elif key_types[key] != label:
-                    return False
-        found_any = True
-    return found_any
+    return _validate_uniform_object_array(payload, _shape3_records)
 
 
-_FENCE_RE = re.compile(r"```json\s*\n(.*?)\n```", re.DOTALL)
+# Canonical fenced JSON: exact info string `json`, complete wrapper, no extra text.
+_FENCE_RE = re.compile(r"^\s*```json\n(.*)\n```\s*$", re.DOTALL)
 
 
 def _extract_fenced_json(md_text):
-    return [match.strip() for match in _FENCE_RE.findall(md_text)]
+    """Return the single fenced JSON body if `md_text` is exactly one canonical
+    ` ```json ... ``` ` block, else return an empty list.
+
+    The grammar requires the info string to be exactly `json`, the opening fence
+    to be on its own line, the closing fence to be on its own line, and no extra
+    text before or after the fence (leading/trailing whitespace only is allowed).
+    """
+    match = _FENCE_RE.match(md_text)
+    if match:
+        return [match.group(1)]
+    return []
 
 
 INNER_JSON_SHAPE_VALIDATORS = (
@@ -329,19 +367,21 @@ _VALIDATORS = {
 
 
 def _json_payloads_for(path):
-    """Parse and return all JSON payloads (fenced markdown returns one per fence)."""
+    """Parse and return all JSON payloads (fenced markdown returns one per canonical fence)."""
     text = path.read_text(encoding="utf-8")
     if path.suffix == ".json":
         return [json.loads(text)]
     if path.suffix == ".md":
-        return [json.loads(body) for body in _extract_fenced_json(text)]
+        bodies = _extract_fenced_json(text)
+        assert bodies, f"no canonical ```json fence found in {path}"
+        return [json.loads(body) for body in bodies]
     return []
 
 
 def _category_from_meta(path):
-    """Read the declared `category:` field from a fixture header."""
-    source = Path(f"{path}.meta") if path.suffix == ".json" else path
-    first_line = source.read_text(encoding="utf-8").splitlines()[0]
+    """Read the declared `category:` field from a fixture `.meta` sidecar."""
+    meta = Path(f"{path}.meta")
+    first_line = meta.read_text(encoding="utf-8").splitlines()[0]
     match = re.search(r"category:\s*([a-z_]+)", first_line)
     assert match, f"fixture under tests/fixtures/collapse_legit/json/ must declare category: {path}"
     category = match.group(1)
@@ -417,12 +457,10 @@ def test_no_fire_bodies_have_no_mechanical_fire_period():
     for path in (ROOT / "collapse_legit").rglob("*"):
         if not path.is_file() or path.suffix == ".meta":
             continue
-        source = Path(f"{path}.meta") if path.suffix == ".json" else path
-        first_line = source.read_text(encoding="utf-8").splitlines()[0]
-        values = _parse_header_line(first_line)
+        values = metadata(path)
         if values.get("expected", "").strip() != "no-fire":
             continue
-        payload = path.read_bytes()
+        payload = _payload_bytes(path)
         periods = _mechanical_fire_periods(payload)
         assert not periods, (
             f"no-fire fixture body contains a mechanical fire period "
@@ -430,6 +468,62 @@ def test_no_fire_bodies_have_no_mechanical_fire_period():
             f"consequence of structure, not a label-only assertion. Offending "
             f"periods: {[(s, off, bytes(p)) for s, off, p in periods[:5]]}; "
             f"fixture: {path}"
+        )
+
+
+def test_shape1_rejects_jagged_and_mixed_depth_arrays():
+    """Shape 1 requires rectangular arrays of primitives: every array at the same
+    depth has the same length and every leaf is at the same depth. Jagged or
+    mixed-depth arrays must be rejected.
+    """
+    invalid = [
+        [1, [2]],
+        [[1], [[2]]],
+        [[1, 2], [3, 4, 5]],
+        [[1, 2], [3]],
+        [[], [1]],
+        [[1], []],
+    ]
+    for payload in invalid:
+        assert not _validate_primitives_array(payload), (
+            f"expected shape-1 rejection for jagged/mixed-depth array: {payload!r}"
+        )
+
+    valid = [
+        [1, 2, 3],
+        [[1, 2], [3, 4]],
+        [[[1, 2]], [[3, 4]]],
+        [True, False, None, "x", 1.5],
+    ]
+    for payload in valid:
+        assert _validate_primitives_array(payload), (
+            f"expected shape-1 acceptance for rectangular primitives: {payload!r}"
+        )
+
+
+def test_shape2_rejects_heterogeneous_outer_containers():
+    """Shape 2 must be rejected when the outer container is heterogeneous, even if it
+    contains a valid nested object array.
+    """
+    invalid = [
+        [{"kind": "a", "value": 1}, [{"kind": "b", "value": 2}]],
+        [{"kind": "a"}, [{"kind": "b"}, {"kind": "c"}]],
+        [[{"kind": "a"}], {"kind": "b"}],
+    ]
+    for payload in invalid:
+        assert not _validate_discriminator_array(payload), (
+            f"expected shape-2 rejection for heterogeneous outer container: {payload!r}"
+        )
+
+    valid = [
+        [{"kind": "a", "value": 1}, {"kind": "b", "value": 2}],
+        [[{"kind": "a"}], [{"kind": "b"}]],
+        [[{"kind": "a", "x": 1}, {"kind": "b", "x": 2}],
+         [{"kind": "c", "x": 3}, {"kind": "d", "x": 4}]],
+    ]
+    for payload in valid:
+        assert _validate_discriminator_array(payload), (
+            f"expected shape-2 acceptance for uniform object array: {payload!r}"
         )
 
 
@@ -460,6 +554,21 @@ def test_shape3_rejects_per_key_type_changes():
     for payload in good_cases:
         assert _validate_stable_keys_array(payload), (
             f"expected shape-3 acceptance for uniform per-key types: {payload!r}"
+        )
+
+
+def test_shape3_rejects_heterogeneous_outer_containers():
+    """Shape 3 must be rejected when the outer container is heterogeneous, even if it
+    contains a valid nested object array.
+    """
+    invalid = [
+        [{"x": 1}, [{"x": 2}]],
+        [{"x": 1}, [{"x": 2}, {"x": 3}]],
+        [[{"x": 1}], {"x": 2}],
+    ]
+    for payload in invalid:
+        assert not _validate_stable_keys_array(payload), (
+            f"expected shape-3 rejection for heterogeneous outer container: {payload!r}"
         )
 
 
@@ -504,3 +613,24 @@ def test_fenced_json_validates_complete_payload_not_any_inner_array():
     # A list of valid shape-1 arrays is itself shape-1 (nested arrays of primitives).
     valid_nested = [[1, 2, 3], [4, 5, 6]]
     assert _validate_json_fenced(valid_nested)
+
+
+def test_fenced_json_requires_exact_json_info_string_and_canonical_wrapper():
+    """The fence parser must reject malformed fences: trailing whitespace in the info
+    string, wrong case, text before/after the fence, or a fence that appears anywhere
+    inside other content.
+    """
+    # Trailing space after `json` is rejected.
+    assert _extract_fenced_json("```json \n[1]\n```") == []
+    # Wrong case is rejected.
+    assert _extract_fenced_json("```JSON\n[1]\n```") == []
+    # Extra text before the fence is rejected.
+    assert _extract_fenced_json("intro\n```json\n[1]\n```") == []
+    # Extra text after the fence is rejected.
+    assert _extract_fenced_json("```json\n[1]\n```\noutro") == []
+    # A fence buried in the middle of text is rejected.
+    assert _extract_fenced_json("before\n```json\n[1]\n```\nafter") == []
+    # A canonical fence is accepted.
+    assert _extract_fenced_json("```json\n[1]\n```") == ["[1]"]
+    # Leading and trailing whitespace around a canonical fence is accepted.
+    assert _extract_fenced_json("  \n```json\n[1]\n```\n  ") == ["[1]"]

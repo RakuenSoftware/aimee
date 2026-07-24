@@ -1,0 +1,1 @@
+shape: short contiguous verbatim repeat of compact token block; expected: fire; expected_loop_start_offset: 0; expected_loop_span_bytes: 6; expected_repetitions: 4

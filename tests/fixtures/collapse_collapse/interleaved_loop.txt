@@ -1,4 +1,3 @@
-# shape: loop with non-repeating connective tissue between iterations; expected: fire; expected_loop_start_offset: 248; expected_loop_span_bytes: 13; expected_repetitions: 4; connective_tissue: yes; expected_loop_iteration_offsets: 248,274,300,326
 payload-loop
 connector-aa
 payload-loop
