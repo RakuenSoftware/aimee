@@ -28,7 +28,7 @@ static wfe_verdict_t mk(const char *persona, wfe_verdict_kind_t k, const char *h
 }
 
 /* ---- mock panel provider for the engine sub-test ---- */
-static int g_mode; /* 0=approve all required, 1=request changes, 2=unreachable */
+static int g_mode; /* 0=approve all required, 1=request changes, 2=unreachable, 3=module disabled */
 /* last review packet the panel saw (S1: proposal + focus reach the panel) */
 static char g_seen_proposal[512];
 static char g_seen_focus[128];
@@ -43,6 +43,8 @@ static int mock_panel(const wfe_review_packet_t *pkt, const char *const *require
    snprintf(g_seen_workdir, sizeof g_seen_workdir, "%s", pkt->workdir);
    if (g_mode == 2)
       return -1;
+   if (g_mode == 3)
+      return WFE_PANEL_MODULE_DISABLED;
    int n = 0;
    for (int i = 0; i < nreq && n < max; i++)
       out[n++] = mk(required[i], g_mode == 0 ? WFE_V_APPROVE : WFE_V_REQUEST_CHANGES,
@@ -220,6 +222,20 @@ int main(void)
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "active") == 0);
       assert(strncmp(wi.pause_reason, "panel_", 6) == 0); /* panel_unreachable */
+   }
+
+   /* An explicitly disabled optional module is permanent for this startup. It
+    * must fail terminally rather than entering the scheduler's transient panel retry loop. */
+   {
+      g_mode = 3;
+      wfe_set_panel_provider(mock_panel);
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rt", "r3", "p3", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "failed") == 0);
    }
 
    printf("ok\n");

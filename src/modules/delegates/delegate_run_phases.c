@@ -7,7 +7,7 @@
  *   delegate_record_exit_learning     - persist post-run learning + IE event
  *   delegate_detect_noop_write        - flag a write delegate that changed nothing
  */
-#include "delegate_run_phases.h"
+#include <aimee/delegates/delegate_run_phases.h>
 
 #include "aimee.h"
 #include "agent.h"

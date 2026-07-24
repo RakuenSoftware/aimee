@@ -7,9 +7,9 @@
 
 #include <stdio.h>
 
-#include "audit_action.h" /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
-#include "obs_bus.h"      /* obs_bus_emit */
-#include "sandbox.h"      /* sandbox_audit_hook_fn, sandbox_mode_to_string */
+#include <aimee/audit/audit_action.h> /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
+#include <aimee/audit/obs_bus.h>      /* obs_bus_emit */
+#include "sandbox.h"                  /* sandbox_audit_hook_fn, sandbox_mode_to_string */
 
 /* sandbox_audit_hook_fn: publish one degraded-isolation audit row over the bus
  * (KIND_AUDIT_ACTION -> the audit ledger + capture/replay). NON-SECRET only:

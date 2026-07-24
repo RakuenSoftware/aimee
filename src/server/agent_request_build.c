@@ -9,8 +9,8 @@
 #include "agent_request_shaping.h" /* agent_request_shape_user_prompt */
 #include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
 #include "config.h"
-#include "aimee_ir.h"
-#include "aimee_backend.h"
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/translation/aimee_backend.h>
 #include "cJSON.h"
 #include <stdlib.h>
 #include <string.h>

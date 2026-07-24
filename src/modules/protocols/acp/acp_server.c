@@ -3,7 +3,7 @@
  * Phase 1: newline-delimited JSON-RPC 2.0 over stdio + the `initialize`
  * handshake advertising aimee's capabilities. Stdout carries ACP JSON-RPC only
  * (one message per line); logs/diagnostics belong on stderr. */
-#include "acp_server.h"
+#include "aimee/protocols/acp/acp_server.h"
 #include "cJSON.h"
 
 #include <stdio.h>

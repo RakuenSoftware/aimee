@@ -12,7 +12,7 @@
 #include "db1.h"
 #include "agent.h"
 #include "agent_config.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "agent_tools.h"
 #include "anchor_snapshot.h"
 #include <arpa/inet.h>

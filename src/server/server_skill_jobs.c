@@ -3,8 +3,7 @@
 #define _GNU_SOURCE
 #endif
 #include "server_compute_impl.h"
-#include "skill_curator.h"
-#include "gw_orch_delegates.h"
+#include <aimee/delegates/gw_orch_delegates.h>
 #include "config.h"
 #include "log.h"
 #include "cJSON.h"
@@ -102,10 +101,4 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    }
    if (backing.spawn_rc != 0)
       LOG_WARN("skill_review", "failed to submit review job for session %s", session_id);
-}
-
-void server_compute_skill_curator_async(server_ctx_t *ctx)
-{
-   (void)ctx;
-   skill_curator_maybe();
 }

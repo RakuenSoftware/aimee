@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "../headers/gateway_pipeline.h"
+#include <aimee/gateway/gateway_pipeline.h>
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 

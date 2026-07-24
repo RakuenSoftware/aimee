@@ -622,6 +622,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->module_governance = -1;
    cfg->module_delegates = -1;
    cfg->module_workflows = -1;
+   cfg->module_roundtable = -1;
    cfg->module_economizer = -1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
@@ -865,11 +866,11 @@ static void config_set_defaults(config_t *cfg)
    config_kb_curator_defaults(cfg); /* kb.curator.* + kb.evidence.embed.* */
    cfg->skills_review_enabled = 0;
    cfg->skills_review_nudge_interval = 10;
-   cfg->skills_curator_enabled = 0;
-   cfg->skills_curator_interval_hours = 168;
    cfg->skills_stale_after_days = 30;
    cfg->skills_archive_after_days = 90;
    cfg->skills_dispatch_enabled = 1;
+   cfg->skills_curator_enabled = 0;
+   cfg->skills_curator_interval_hours = 168;
    cfg->skills_dispatch_max_index = 24;
    cfg->skills_dispatch_advisory = 0;
    cfg->skills_capability_autostub = 0;
@@ -1802,6 +1803,10 @@ int config_load_file(config_t *cfg)
    }
 
    config_parse_computer_use(cfg, root);
+
+   /* context.engine: active context-compaction engine (re-homed from the
+    * removed config_plugin.c; read by context_engine_set_active in server_main) */
+   config_parse_context_engine(cfg, root);
 
    /* Neural-assisted semantic guardrails (guardrails.semantic.*) */
    {

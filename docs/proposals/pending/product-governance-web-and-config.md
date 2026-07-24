@@ -53,6 +53,22 @@ tenant-scoped local reference authenticator, but exposes no OIDC or organization
 surface through CLI, environment/configuration, API, or web. Its audit projection remains a
 deterministic read-only view sourced directly from the core audit ledger.
 
+OIDC is a provider-neutral governance contract. Control manages named issuer profiles rather than
+shipping provider-specific modes. A profile declares standards-based issuer discovery or explicit
+authorization, token, user-info, JWKS, and end-session endpoints; client identity; a vault-backed
+client-secret reference; redirect URIs; scopes; PKCE and nonce policy; accepted signing algorithms;
+and mappings from namespaced claims to Aimee tenant, principal, group, and role attributes. GitHub,
+Entra ID, Okta, Keycloak, Auth0, or another conforming issuer may be configured through the same
+contract; none is compiled in, privileged, or selected by a provider enum.
+
+When `governance` is selected, issuer profiles are configurable from Aimee Control Plane's
+governance UI and the equivalent CLI, environment/configuration, and non-web API surfaces. The UI
+renders effective fields from the same descriptor/config metadata and stores secrets only through
+`vault`; it never embeds a client secret in rendered config or browser state. With `control-web`
+disabled, every OIDC operation remains available headlessly. With `governance` absent, issuer
+profiles and every OIDC setting are absent from advertised GUI, CLI, environment catalog, config
+schema, and API surfaces; accepted legacy input, if any, is migration-only and never advertised.
+
 Core contracts remain product-neutral. Runtime and Control choose deployment topology and custody:
 Runtime hosts per-user memory and enforcement instances; Control hosts multi-tenant shared-memory
 instances, distributes policy artifacts consumed by core `execution-policy`, and projects the core

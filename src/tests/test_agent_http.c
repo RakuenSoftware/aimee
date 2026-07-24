@@ -12,8 +12,8 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"
-#include "delegate_driver.h"
-#include "delegate_xml_fallback.h"
+#include <aimee/delegates/delegate_driver.h>
+#include <aimee/delegates/delegate_xml_fallback.h>
 #include "model_provider.h"
 #include "model_sampling.h"
 #include "platform_test_util.h"

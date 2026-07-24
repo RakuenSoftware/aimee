@@ -656,6 +656,15 @@ the liveness and delivery proposals own dispositions, cleanup ledgers, compatibi
 At completion, omitted optional modules leave no residue and feature implementation no longer lives
 in broad `src/`, `src/server/`, `src/kb/`, `src/db1/`, `src/db2/`, or global-header buckets.
 
+### Tracked delegates header transition
+
+Owner: required-core `delegates`. Completed 2026-07-22. All 19 delegate headers now live under
+`src/modules/delegates/include/aimee/delegates/`; all consumers use canonical includes; the flat Make/CMake
+include roots are removed; and `src/modules/delegates/module.yaml` declares the complete public-header set.
+The header-layout contract, source-ownership mutation tests, and refactor public-header baseline prevent
+flat shadows or a second supported public API from returning. The pre-existing roundtable/delegates header
+cycle remains a separate dependency-design follow-up rather than being hidden inside this mechanical move.
+
 ## Review status
 
 Earlier roundtable approvals applied to revisions of the former monolithic proposal. They are

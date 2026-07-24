@@ -16,7 +16,7 @@
 #include "kb_client_mtls.h"
 #include "kb_client_ws.h"
 #include "db1.h"
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
 #include "server_kb_heartbeat.h"
@@ -26,11 +26,10 @@
 #include "events.h"
 #include "agent_exec.h"
 #include "log.h"
-#include "audit_action.h"
+#include <aimee/audit/audit_action.h>
 #include "platform_path.h"
 #include "platform_process.h"
 #include "shutdown_forensics.h"
-#include "headers/plugin_loader.h"
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
 #include "vault_server_key.h"
@@ -38,7 +37,7 @@
 #include "vault_audit_bridge.h"   /* route vault credential-access events onto the audit bus */
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
-#include "audit_replay.h"         /* --audit-replay: inspect a governed-action capture file */
+#include <aimee/audit/audit_replay.h> /* --audit-replay: inspect a governed-action capture file */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -256,12 +255,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    kb_cache_configure(-1);
    kb_client_ws_start();
 
-   /* Parse plugin extension config keys not covered by config_load(). */
-   config_load_plugin_extensions(&cfg);
-
-   /* Register bundled context engine and discover plugins from all sources.
-    * Must run after config_load so plugin_loader can read install prefix from env.
-    * Set active engine from config (empty = default compactor). */
+   /* Register the bundled context engine and set the active engine from config
+    * (empty = default compactor). */
    context_engine_register_compactor();
    if (cfg.context_engine[0])
       context_engine_set_active(cfg.context_engine);
@@ -269,12 +264,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Clear the cached audit_action/audit_worm gates on config reload so a live
     * config.set / SIGHUP toggles the audit + WORM dual-write without a restart. */
    guardrails_action_audit_register_reload();
-   {
-      char perr[256] = {0};
-      plugin_loader_discover_all(perr, sizeof(perr));
-      if (perr[0])
-         LOG_WARN("server", "plugin discovery: %s", perr);
-   }
 
    /* DB2 + pgvector startup and supervision are owned by aimee-kb, not
     * aimee-server.  Keep the server on the DB1 side of the service split. */

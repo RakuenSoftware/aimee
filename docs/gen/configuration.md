@@ -285,7 +285,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
 - **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `backends`, `fetch_pages`, `max_results`, `searxng_url`, `tavily_api_key`
 - **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `review`
+- **`skills`** — _Skill subsystem (capability, dispatch, eval, review; nested objects)._ Keys: `capability`, `dispatch`, `eval`, `review`
 - **`telemetry`** — `metrics_token`
 - **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`, `kb_gzip_enabled`, `kb_pool_enabled`, `server_keepalive_enabled`, `thinclient_gzip_enabled`
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
@@ -302,7 +302,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 208 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. Secrets and tokens should be supplied through the environment or credential vault, never committed.
 
 ### Paths & assets
 
@@ -313,7 +313,6 @@ The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
 | `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
-| `AIMEE_INSTALL_PREFIX` | Install prefix used to locate bundled assets and plugins. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_TOOLSETS_CONFIG` | Path to a toolsets config file (overrides the default tool allowlists). |
@@ -492,12 +491,6 @@ The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_NET_DEBUG` | Verbose network debug logging. |
 | `AIMEE_TLS_INSECURE` | Disable TLS certificate verification (development only). |
 
-### Plugins
-
-| Variable | Description |
-|----------|-------------|
-| `AIMEE_ENABLE_PROJECT_PLUGINS` | Allow loading project-local plugins. |
-
 ### Diagnostics & misc
 
 | Variable | Description |
@@ -509,7 +502,7 @@ The binaries read 209 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLISH_DSN`, `AIMEE_KB_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_KB_MTLS_MAX_CONNECTIONS`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_KB_RUNTIME_UID`, `AIMEE_KB_STATUS_BIND`, `AIMEE_KB_STATUS_DSN`, `AIMEE_KB_STATUS_PORT`, `AIMEE_KB_STATUS_PROVISION_DSN`, `AIMEE_KB_STATUS_TLS_CA`, `AIMEE_KB_STATUS_TLS_CERT`, `AIMEE_KB_STATUS_TLS_KEY`, `AIMEE_KB_TOKEN_AUTHORITY_DSN`, `AIMEE_KB_TOKEN_AUTHORITY_SOCKET_GID`, `AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN`, `AIMEE_KB_TOKEN_ROOT_CUSTODY_ID`, `AIMEE_KB_VAULT_OPERATOR_ENABLED`, `AIMEE_KB_VAULT_ORCHESTRATOR_URL`, `AIMEE_MGMT_STATUS_KEY_ID`, `AIMEE_MGMT_STATUS_PUBLIC_KEY`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_SERVER_MGMT_BIND`, `AIMEE_SERVER_MGMT_ISSUER`, `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, `AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TEST_PG_URL`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_ENGINE`, `AIMEE_WFE_HTTP_SOCKET`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WITNESS_CADENCE_TEST_S`, `AIMEE_WITNESS_HARNESS_ROLE`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
+`AIMEE_ALLOW_MAIN_CHECKOUT`, `AIMEE_API_BEARER_TOKEN`, `AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CI_WEBHOOK_SECRET`, `AIMEE_CLIENT_TYPE`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_EVAL_URL`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_IR_PATH`, `AIMEE_IR_RESP_PATH`, `AIMEE_IR_SHADOW`, `AIMEE_IR_STREAM_RELAY`, `AIMEE_KB_HARDENED`, `AIMEE_KB_JWKS_MANIFEST_ROOT_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLICATION_HWM_CUSTODY_ID`, `AIMEE_KB_JWKS_PUBLISH_DSN`, `AIMEE_KB_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_KB_MTLS_MAX_CONNECTIONS`, `AIMEE_KB_OIDC_MAX_TOKEN_AGE`, `AIMEE_KB_RUNTIME_UID`, `AIMEE_KB_STATUS_BIND`, `AIMEE_KB_STATUS_DSN`, `AIMEE_KB_STATUS_PORT`, `AIMEE_KB_STATUS_PROVISION_DSN`, `AIMEE_KB_STATUS_TLS_CA`, `AIMEE_KB_STATUS_TLS_CERT`, `AIMEE_KB_STATUS_TLS_KEY`, `AIMEE_KB_TOKEN_AUTHORITY_DSN`, `AIMEE_KB_TOKEN_AUTHORITY_SOCKET_GID`, `AIMEE_KB_TOKEN_ROOTS_PROVISION_DSN`, `AIMEE_KB_TOKEN_ROOT_CUSTODY_ID`, `AIMEE_KB_VAULT_OPERATOR_ENABLED`, `AIMEE_KB_VAULT_ORCHESTRATOR_URL`, `AIMEE_MGMT_STATUS_KEY_ID`, `AIMEE_MGMT_STATUS_PUBLIC_KEY`, `AIMEE_MODULE_ROUNDTABLE`, `AIMEE_OCR_URL`, `AIMEE_ORCH_DELEGATES`, `AIMEE_ORCH_WORKFLOWS`, `AIMEE_PANEL_SEAT_WAIT_SECS`, `AIMEE_PRIMARY_CLI_INGESTOR`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_SANDBOX_HOST_MOUNTS`, `AIMEE_SERVER_MGMT_BIND`, `AIMEE_SERVER_MGMT_ISSUER`, `AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`, `AIMEE_SERVER_MGMT_STATUS_SECONDARY_LEAF_PIN`, `AIMEE_STAGE_GOVERNANCE`, `AIMEE_STAGE_MEMORY`, `AIMEE_TEST_PG_URL`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_CN`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_TSR_URL`, `AIMEE_VAULT_KMS_HELPER`, `AIMEE_VAULT_KMS_HWM_DOMAIN`, `AIMEE_VAULT_KMS_HWM_PUBKEY`, `AIMEE_VAULT_KMS_KEY_ID`, `AIMEE_VAULT_PKCS11_LABEL`, `AIMEE_VAULT_PKCS11_MODULE`, `AIMEE_VAULT_PKCS11_PIN`, `AIMEE_VAULT_PKCS11_SLOT`, `AIMEE_VAULT_TPM2_BLOB_PATH`, `AIMEE_VAULT_TPM2_NV_INDEX`, `AIMEE_VAULT_TPM2_TCTI`, `AIMEE_WFE_ENGINE`, `AIMEE_WFE_HTTP_SOCKET`, `AIMEE_WFE_WORKTREE_GC_GRACE_SECS`, `AIMEE_WITNESS_CADENCE_TEST_S`, `AIMEE_WITNESS_HARNESS_ROLE`, `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`, `AIMEE_WORKFLOW_BRANCH`, `AIMEE_WORKFLOW_ENFORCE_STAGE`, `AIMEE_WORKFLOW_LEASE_TTL_SECS`
 
 ## External & provider environment
 

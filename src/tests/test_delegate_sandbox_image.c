@@ -7,7 +7,7 @@
 
 #include "aimee.h"
 #include "config.h"
-#include "delegate_sandbox_image.h"
+#include <aimee/delegates/delegate_sandbox_image.h>
 #include "platform_path.h"
 #include "platform_test_util.h"
 

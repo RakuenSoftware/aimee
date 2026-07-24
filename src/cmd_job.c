@@ -4,8 +4,8 @@
 #include "agent_coord.h"
 #include "agent_tasks.h"
 #include "cmd_agent_delegate_impl.h"
-#include "delegate_economics.h"
-#include "delegate_patch_coordinator.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_patch_coordinator.h>
 #include "db1.h"
 #include "cJSON.h"
 

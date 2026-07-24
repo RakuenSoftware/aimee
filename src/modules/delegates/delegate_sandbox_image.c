@@ -14,7 +14,7 @@
  * tags the result by content hash, and reuses it on later turns; the delegate then
  * RUNS that image `--network none`. The per-workspace/global forms are `image:` only. */
 
-#include "delegate_sandbox_image.h"
+#include <aimee/delegates/delegate_sandbox_image.h>
 
 #include "aimee.h" /* MAX_PATH_LEN */
 #include "cJSON.h"

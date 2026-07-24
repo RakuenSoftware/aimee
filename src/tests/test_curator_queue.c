@@ -12,7 +12,7 @@
 
 #include "aimee.h"
 #include "kb_curator_extract.h"
-#include "kb/kb_curator_sidecar.h"
+#include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
 #include "db2_test_shim.h"
 #include "../kb_curator_queue.h"

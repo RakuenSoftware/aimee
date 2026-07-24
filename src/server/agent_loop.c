@@ -9,7 +9,7 @@
  */
 #include "aimee.h"
 #include "agent_exec.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "dstr.h"
 #include "log.h"
 #include "util.h"

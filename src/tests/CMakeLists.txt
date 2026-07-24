@@ -34,26 +34,6 @@ endfunction()
 
 # Portable unit tests that build cleanly under both POSIX and the current
 # Windows CMake target set.
-add_executable(test_plugin_loader test_plugin_loader.c)
-target_include_directories(test_plugin_loader PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
-  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
-aimee_enable_test_asserts(test_plugin_loader)
-if(TARGET aimee-agent)
-  if(NOT WIN32)
-    target_link_libraries(test_plugin_loader PRIVATE
-      -Wl,--start-group aimee-agent aimee-data aimee-core -Wl,--end-group)
-  else()
-    target_link_libraries(test_plugin_loader PRIVATE aimee-agent aimee-data aimee-core)
-  endif()
-elseif(TARGET aimee-core)
-  target_link_libraries(test_plugin_loader PRIVATE aimee-core)
-endif()
-add_test(NAME test_plugin_loader COMMAND test_plugin_loader)
-set_tests_properties(test_plugin_loader PROPERTIES
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_memory_provider test_memory_provider.c)
 aimee_add_test(test_harness_memory test_harness_memory.c)
 aimee_add_test(test_memory_redirect test_memory_redirect.c)
@@ -68,11 +48,12 @@ aimee_add_test(test_plugin_c_hook test_plugin_c_hook.c)
 # the module + cJSON directly rather than linking aimee-core, so the test's
 # agent_http_get/git_host_cred_get stubs don't clash with the real symbols.
 add_executable(test_git_org_repos test_git_org_repos.c
-  ../server/git_org_repos.c ../vendor/cJSON.c)
+  ../modules/git/git_org_repos.c ../vendor/cJSON.c)
 target_include_directories(test_git_org_repos PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_org_repos)
 add_test(NAME test_git_org_repos COMMAND test_git_org_repos)
@@ -83,11 +64,13 @@ set_tests_properties(test_git_org_repos PROPERTIES
 # GitLab/Gitea device flow. HTTP + vault externals stubbed in the test (never
 # invoked by the pure functions under test).
 add_executable(test_git_oauth_device test_git_oauth_device.c
-  ../server/git_oauth_device.c ../vendor/cJSON.c)
+  ../modules/git/git_oauth_device.c ../vendor/cJSON.c)
 target_include_directories(test_git_oauth_device PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/vault
   ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
 aimee_enable_test_asserts(test_git_oauth_device)
 add_test(NAME test_git_oauth_device COMMAND test_git_oauth_device)
@@ -99,11 +82,12 @@ set_tests_properties(test_git_oauth_device PROPERTIES
 # (never invoked by the pure functions under test). POSIX-only (<pty.h>).
 if(NOT WIN32)
   add_executable(test_git_oauth_gh test_git_oauth_gh.c
-    ../server/git_oauth_gh.c)
+    ../modules/git/git_oauth_gh.c)
   target_include_directories(test_git_oauth_gh PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../headers
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/../modules/git
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
   target_link_libraries(test_git_oauth_gh PRIVATE Threads::Threads)
   aimee_enable_test_asserts(test_git_oauth_gh)
@@ -249,13 +233,13 @@ aimee_add_test(test_wfe_autonomous_route test_wfe_autonomous_route.c)
 aimee_add_test(test_wfe_router_catalog test_wfe_router_catalog.c)
 aimee_add_test(test_wfe_enforce test_wfe_enforce.c)
 aimee_add_test(test_wfe_advance test_wfe_advance.c)
-aimee_add_test(test_aimee_ir test_aimee_ir.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_metrics test_aimee_ir_metrics.c ../server/aimee_ir_metrics.c)
-aimee_add_test(test_aimee_frontend test_aimee_frontend.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_frontend_responses.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_backend test_aimee_backend.c ../server/aimee_backend_anthropic.c ../server/aimee_backend_openai.c ../server/aimee_backend_responses.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../server/aimee_ir_metrics.c ../server/aimee_backend_anthropic.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_openai.c ../server/aimee_ir.c)
-aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../server/aimee_backend_openai.c ../server/aimee_backend_responses.c ../server/aimee_frontend_anthropic.c ../server/aimee_frontend_responses.c ../server/aimee_ir.c ../server/aimee_ir_metrics.c)
-aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../server/aimee_ir_stream.c ../server/aimee_ir.c)
+aimee_add_test(test_aimee_ir test_aimee_ir.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_metrics test_aimee_ir_metrics.c ../modules/ir/aimee_ir_metrics.c)
+aimee_add_test(test_aimee_frontend test_aimee_frontend.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_backend test_aimee_backend.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_shadow test_aimee_ir_shadow.c ../server/aimee_ir_shadow.c ../modules/ir/aimee_ir_metrics.c ../modules/translation/aimee_backend_anthropic.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_openai.c ../modules/ir/aimee_ir.c)
+aimee_add_test(test_aimee_ir_serve test_aimee_ir_serve.c ../server/aimee_ir_serve.c ../modules/translation/aimee_backend_openai.c ../modules/translation/aimee_backend_responses.c ../modules/translation/aimee_frontend_anthropic.c ../modules/translation/aimee_frontend_responses.c ../modules/ir/aimee_ir.c ../modules/ir/aimee_ir_metrics.c)
+aimee_add_test(test_aimee_ir_stream test_aimee_ir_stream.c ../modules/translation/aimee_ir_stream.c ../modules/ir/aimee_ir.c)
 aimee_add_test(test_wfe_binding test_wfe_binding.c)
 aimee_add_test(test_shutdown_forensics test_shutdown_forensics.c)
 

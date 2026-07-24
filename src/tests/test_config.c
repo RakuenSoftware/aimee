@@ -146,7 +146,6 @@ int main(void)
       assert(cfg.db1_path[0] != '\0');
       assert(strcmp(cfg.guardrails_semantic_mode, "off") == 0); /* default */
       assert(cfg.skills_review_nudge_interval == 10);
-      assert(cfg.skills_curator_interval_hours == 168);
       assert(cfg.skills_stale_after_days == 30);
       assert(cfg.skills_archive_after_days == 90);
       assert(cfg.skills_dispatch_enabled == 1);
@@ -274,7 +273,6 @@ int main(void)
       cfg.guardrails_semantic_prompt_threshold = 0.65;
       cfg.guardrails_semantic_block_threshold = 0.95;
       cfg.skills_review_nudge_interval = 12;
-      cfg.skills_curator_interval_hours = 240;
       cfg.skills_stale_after_days = 45;
       cfg.skills_archive_after_days = 120;
       cfg.skills_dispatch_enabled = 0;
@@ -546,7 +544,6 @@ int main(void)
       assert(fabs(cfg2.guardrails_semantic_prompt_threshold - 0.65) < 0.0001);
       assert(fabs(cfg2.guardrails_semantic_block_threshold - 0.95) < 0.0001);
       assert(cfg2.skills_review_nudge_interval == 12);
-      assert(cfg2.skills_curator_interval_hours == 240);
       assert(cfg2.skills_stale_after_days == 45);
       assert(cfg2.skills_archive_after_days == 120);
       assert(cfg2.skills_dispatch_enabled == 0);
@@ -937,6 +934,34 @@ int main(void)
       int rc = config_load(&cfg);
       assert(rc == -1); /* strict mode rejects */
       g_config_strict = 0;
+   }
+
+   /* Retired background skill-curator keys remain load-compatible for existing
+    * installations, but saving the config must scrub them permanently. */
+   {
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\nskills:\n  curator:\n    enabled: true\n"
+                 "  curator_interval_hours: 12\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      g_config_strict = 1;
+      assert(config_load(&cfg) == 0);
+      assert(config_save(&cfg) == 0);
+      g_config_strict = 0;
+
+      f = fopen(cpath, "r");
+      assert(f);
+      char saved[65536];
+      size_t saved_len = fread(saved, 1, sizeof(saved) - 1, f);
+      fclose(f);
+      saved[saved_len] = '\0';
+      assert(strstr(saved, "curator_interval_hours") == NULL);
+      assert(strstr(saved, "skills:\n  curator:") == NULL);
    }
 
    /* --- schema validation: type mismatch detected --- */

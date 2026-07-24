@@ -5,7 +5,7 @@
 #include "workspace_turn.h"
 #include "workspace_provider.h"
 #include "config.h"
-#include "delegate_backend.h"
+#include <aimee/delegates/delegate_backend.h>
 #include "workspace_provider_container.h"
 #include "aimee_home.h"
 #include "platform_path.h"

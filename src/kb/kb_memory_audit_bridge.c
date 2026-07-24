@@ -12,7 +12,7 @@
 
 #include "aimee.h"   /* prerequisites for memory.h (KIND_*, config_t, ...) */
 #include "memory.h"  /* memory_set_audit_hook */
-#include "obs_bus.h" /* obs_bus_emit, obs_bus_key_fingerprint */
+#include <aimee/audit/obs_bus.h> /* obs_bus_emit, obs_bus_key_fingerprint */
 
 /* memory_audit_hook_fn: publish one memory-mutation audit row over the KB's bus
  * (KIND_ACTION -> the KB audit ledger + capture/replay). NON-SECRET only: actor =

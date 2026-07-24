@@ -12,6 +12,7 @@ RUN apt-get update \
         ca-certificates \
         clang \
         git \
+        libp11-kit-dev \
         libpq-dev \
         libssl-dev \
         libzstd-dev \

@@ -1,4 +1,4 @@
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "role_templates.h" /* role_template_max_turns (per-role cap) */
 
 #include <string.h>

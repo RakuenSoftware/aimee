@@ -53,7 +53,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
     * operator actually set, so an untouched config never sprouts a modules: block and the
     * resolver's env/default fallback stays in effect for the rest. */
    if (cfg->module_memory != -1 || cfg->module_governance != -1 || cfg->module_delegates != -1 ||
-       cfg->module_workflows != -1 || cfg->module_economizer != -1)
+       cfg->module_workflows != -1 || cfg->module_roundtable != -1 || cfg->module_economizer != -1)
    {
       cJSON *m = cJSON_AddObjectToObject(root, "modules");
       if (m)
@@ -66,6 +66,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON_AddBoolToObject(m, "delegates", cfg->module_delegates ? 1 : 0);
          if (cfg->module_workflows != -1)
             cJSON_AddBoolToObject(m, "workflows", cfg->module_workflows ? 1 : 0);
+         if (cfg->module_roundtable != -1)
+            cJSON_AddBoolToObject(m, "roundtable", cfg->module_roundtable ? 1 : 0);
          if (cfg->module_economizer != -1)
             cJSON_AddBoolToObject(m, "economizer", cfg->module_economizer ? 1 : 0);
       }
@@ -562,12 +564,11 @@ int config_save(const config_t *cfg)
       if (cfg->memory_maintenance_summarize_enabled)
          cJSON_AddBoolToObject(mem_maint, "summarize_enabled", 1);
    }
-   if (cfg->skills_review_nudge_interval != 10 || cfg->skills_curator_interval_hours != 168 ||
-       cfg->skills_stale_after_days != 30 || cfg->skills_archive_after_days != 90 ||
-       cfg->skills_review_enabled || cfg->skills_curator_enabled || !cfg->skills_dispatch_enabled ||
-       cfg->skills_dispatch_max_index != 24 || cfg->skills_dispatch_advisory ||
-       cfg->skills_capability_autostub || cfg->skills_eval_gate_enabled ||
-       cfg->skills_eval_threshold != 0.01)
+   if (cfg->skills_review_nudge_interval != 10 || cfg->skills_stale_after_days != 30 ||
+       cfg->skills_archive_after_days != 90 || cfg->skills_review_enabled ||
+       !cfg->skills_dispatch_enabled || cfg->skills_dispatch_max_index != 24 ||
+       cfg->skills_dispatch_advisory || cfg->skills_capability_autostub ||
+       cfg->skills_eval_gate_enabled || cfg->skills_eval_threshold != 0.01)
    {
       cJSON *skills = cJSON_AddObjectToObject(root, "skills");
       if (cfg->skills_review_enabled)
@@ -576,12 +577,6 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(review, "enabled", 1);
       }
       cJSON_AddNumberToObject(skills, "review_nudge_interval", cfg->skills_review_nudge_interval);
-      if (cfg->skills_curator_enabled)
-      {
-         cJSON *curator = cJSON_AddObjectToObject(skills, "curator");
-         cJSON_AddBoolToObject(curator, "enabled", 1);
-      }
-      cJSON_AddNumberToObject(skills, "curator_interval_hours", cfg->skills_curator_interval_hours);
       cJSON_AddNumberToObject(skills, "stale_after_days", cfg->skills_stale_after_days);
       cJSON_AddNumberToObject(skills, "archive_after_days", cfg->skills_archive_after_days);
       cJSON *dispatch = cJSON_AddObjectToObject(skills, "dispatch");

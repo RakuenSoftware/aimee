@@ -40,12 +40,6 @@ int config_module_enabled(int config_tristate, int env_default)
    return env_default ? 1 : 0;
 }
 
-#include "skill_curator.h"
-int skill_curator_maybe(void)
-{
-   return 0;
-}
-
 #include "db1_trigger.h"
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)

@@ -10,7 +10,7 @@
 #include <sqlite3.h>
 
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_resolve_entities.h"
+#include "kb_curator_resolve_entities.h"
 
 /* Stub the heavy embed + vector deps the handler references. Returns a full
  * 384-dim vector so the resolve match/upsert path is exercised (the builtin

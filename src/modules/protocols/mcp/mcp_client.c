@@ -2,7 +2,7 @@
  * mcp_client.c: MCP client — transport abstraction, JSON-RPC framing,
  * session handshake / tool dispatch, and a stdio transport.
  */
-#include "mcp_client.h"
+#include "aimee/protocols/mcp/mcp_client.h"
 
 #include <errno.h>
 #include <stdio.h>

@@ -1,0 +1,1013 @@
+{
+  "schema_version": 1,
+  "tests": [
+    {
+      "ctest": true,
+      "make": false,
+      "module": "audit",
+      "test": "src/tests/test_audit_action.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "audit",
+      "test": "src/tests/test_audit_ledger.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "audit",
+      "test": "src/tests/test_audit_worm.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "audit",
+      "test": "src/tests/test_audit_worm_chain.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_economizer.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_snapshot.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "config",
+      "test": "src/tests/test_config_surface.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_aimee_ir_rescue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_docker.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_local.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_backend_ssh.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_context_shed.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_credentials.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_dispatch_reliability.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_driver.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_economics.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_ephemeral_ws.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_handoff.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_patch_coordinator.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_plan.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_role.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_sandbox_image.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_delegate_xml_fallback.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "delegates",
+      "test": "src/tests/test_gw_orch_delegates.c"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "delegates",
+      "test": "src/tests/test_panel_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_p4_delegate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_pipeline.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "gateway",
+      "test": "src/tests/test_gateway_policy.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_forge_credentials.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_cred_inject.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_forge_vault.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_host_resolve.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_oauth_device.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_oauth_gh.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_ops.c"
+    },
+    {
+      "ctest": true,
+      "make": false,
+      "module": "git",
+      "test": "src/tests/test_git_org_repos.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_pr_ci_grade.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_project.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_ssh_agent.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_verify_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_git_verify_select.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "git",
+      "test": "src/tests/test_mcp_git.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "governance",
+      "test": "src/tests/test_response_governance_stage.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_aimee_ir.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "ir",
+      "test": "src/tests/test_aimee_ir_metrics.c"
+    },
+    {
+      "ctest": false,
+      "make": false,
+      "module": "ir",
+      "test": "src/tests/test_panel_ir_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_code_unit.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_contradictions.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_custom_stages.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_fixtures.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_claims.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_code_unit.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_narrative.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_invalidate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_judge.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_link_artifacts.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_notify.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_pipeline.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_pipeline_sched.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_profile.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_promote.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_queue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_resolve_entities.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_serve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_synthesize.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_version.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_kb_curator_llm.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_kb_curator_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "learning",
+      "test": "src/tests/test_learning_bundle.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "learning",
+      "test": "src/tests/test_learning_metrics.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_gw_stage_memory.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_advanced.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_assemble_util.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_embed_dim_guard.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_fact_gate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_filter.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_health.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_lanes.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_profiles.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_ranker_boundary.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_recall_pivot.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_redirect.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_memory_retrieval_eval.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "memory",
+      "test": "src/tests/test_workspace_memory.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "module-runtime",
+      "test": "src/tests/test_plugin_c_hook.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_acp_server.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_integration.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_registry.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_client_sse.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_gateway_tools.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "protocols",
+      "test": "src/tests/test_mcp_native_surface.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_delegate_ensemble.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_chair.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_capture.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_chunk.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_pipeline_eval.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_preset.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_seat_resolve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "roundtable",
+      "test": "src/tests/test_roundtable_verify.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "routing",
+      "test": "src/tests/test_agent_caps.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "skills",
+      "test": "src/tests/test_skill.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "skills",
+      "test": "src/tests/test_skill_review.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "tools",
+      "test": "src/tests/test_tool_output_cap.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_backend.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_backend_bedrock.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_converse_stream.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_frontend.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "translation",
+      "test": "src/tests/test_aimee_ir_stream.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_capability.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_crypto.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_kek_cache.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_kms.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_master_rotate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_principal.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_seam.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_server_key.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_service.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_store.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "vault",
+      "test": "src/tests/test_vault_tpm2.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_gw_orch_workflows.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_advance.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_advance_exec.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_approval.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_autonomous_route.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_autonomy.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_bind_ingress.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_block_resolve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_blocks.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_custom.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_delegate_seam.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_deliver.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_enforce.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_engine.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_externalization.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_failure_taxonomy.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_foreach.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_foreach_spawn.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_gate_reject.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_artifacts.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_blocks.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_manager_flow.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_native_gate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_panel_roundtable.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_replay_worktree.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_roundtable.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_router.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_router_catalog.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_safety.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_scheduler.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_sliced_build.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_wfe_webapi.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workflows",
+      "test": "src/tests/test_workflow.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_handle.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_manifest.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_mirror.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider_container.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_provider_detached.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_runner_queue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_runner_registry.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_scope.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "workspace",
+      "test": "src/tests/test_workspace_turn.c"
+    }
+  ]
+}

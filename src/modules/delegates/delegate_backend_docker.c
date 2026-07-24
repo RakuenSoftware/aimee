@@ -18,7 +18,7 @@
  * struct and exec() prefixes `cd <cwd> &&` to subsequent commands
  * when set. */
 
-#include "delegate_backend_docker.h"
+#include <aimee/delegates/delegate_backend_docker.h>
 #include "util.h"
 
 #include "aimee.h"      /* MAX_PATH_LEN */

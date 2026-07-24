@@ -1,17 +1,17 @@
 /* server_state.c: server handlers for memory, index, rules, working memory, dashboard, workspace */
 #include "server_state_internal.h"
 #include "aimee.h"
-#include "aimee_ir_metrics.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "shadow_mirror.h"
 #include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
 #include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
 #include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "server.h"
 #include "dashboard.h"
-#include "render.h"               /* decision_to_json + db2_decision_log_list */
-#include "audit_ledger.h"         /* audit_ledger_read — server-incurred tool-action audit */
-#include "audit_worm.h"           /* audit_worm_verify/checkpoint — WORM audit store */
-#include "server_http_identity.h" /* server_http_identity_query — audit pagination params */
+#include "render.h"                   /* decision_to_json + db2_decision_log_list */
+#include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
+#include <aimee/audit/audit_worm.h>   /* audit_worm_verify/checkpoint — WORM audit store */
+#include "server_http_identity.h"     /* server_http_identity_query — audit pagination params */
 #include "lsp.h"
 #include "platform_path.h"
 #include "workspace.h"
@@ -2043,7 +2043,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, report);
 }
 
-/* --- Extended dashboard handlers (traces, plans, logs, plugins, onboard, memory-stats) --- */
+/* --- Extended dashboard handlers (traces, plans, logs, onboard, memory-stats) --- */
 
 static cJSON *parse_or_array(char *json)
 {
@@ -2245,17 +2245,6 @@ int handle_dashboard_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *json = kb_client_dashboard_logs_json();
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "data", parse_or_array(json));
-   free(json);
-   return send_and_free(conn, resp);
-}
-
-int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   (void)req;
-   char *json = api_dashboard_plugins();
-   cJSON *resp = jo_ok();
-   cJSON_AddItemToObject(resp, "data", parse_or_object(json));
    free(json);
    return send_and_free(conn, resp);
 }

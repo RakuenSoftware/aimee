@@ -1,0 +1,14 @@
+{
+  "descriptor_version": 1,
+  "id": "response-composition",
+  "dependencies": [
+    "config",
+    "ir",
+    "memory",
+    "module-runtime",
+    "skills"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  }
+}

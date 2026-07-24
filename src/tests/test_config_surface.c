@@ -84,6 +84,7 @@ static const char *FIXTURE_A =
     "default_max_tokens: 1\nmodel_meta:\n  refresh_minutes: 1\n  capability_routing: "
     "true\nensemble:\n  enabled: true\n  min_successful: 1\n  max_cost_usd: 1.0\n"
     "modules:\n  memory: true\n  governance: true\n  delegates: true\n  workflows: true\n  "
+    "roundtable: true\n  "
     "economizer: true";
 static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
@@ -144,6 +145,7 @@ static const char *FIXTURE_B =
     "default_max_tokens: 4096\nmodel_meta:\n  refresh_minutes: 4096\n  capability_routing: "
     "false\nensemble:\n  enabled: false\n  min_successful: 4096\n  max_cost_usd: 0.99\n"
     "modules:\n  memory: false\n  governance: false\n  delegates: false\n  workflows: false\n  "
+    "roundtable: false\n  "
     "economizer: false";
 
 int main(void)
@@ -335,6 +337,7 @@ int main(void)
    assert(cfgA.module_governance == 1 && cfgB.module_governance == 0);
    assert(cfgA.module_delegates == 1 && cfgB.module_delegates == 0);
    assert(cfgA.module_workflows == 1 && cfgB.module_workflows == 0);
+   assert(cfgA.module_roundtable == 1 && cfgB.module_roundtable == 0);
    assert(cfgA.module_economizer == 1 && cfgB.module_economizer == 0);
 
    /* config_module_enabled precedence: an explicit user tristate (0/1) is canonical and wins
@@ -345,6 +348,6 @@ int main(void)
    assert(config_module_enabled(-1, 0) == 0); /* unspecified -> env default OFF */
    assert(config_module_enabled(1, 1) == 1 && config_module_enabled(0, 0) == 0);
 
-   printf("all tests passed (146 parsed fields)\n");
+   printf("all parsed-field tests passed\n");
    return 0;
 }

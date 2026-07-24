@@ -11,7 +11,7 @@
 #include "cli_code_audit.h"
 #include "cli_css.h"
 #include "cli_mcp_serve.h"
-#include "acp_server.h"
+#include "aimee/protocols/acp/acp_server.h"
 #include "cli_profile.h"
 #include "client_constants.h"
 #include "client_integrations.h"
@@ -19,7 +19,7 @@
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
-#include "delegate_plan.h"
+#include <aimee/delegates/delegate_plan.h>
 #include "cli_chat_stream.h"
 #include "platform.h"
 #include "platform_path.h" /* platform_getppid */

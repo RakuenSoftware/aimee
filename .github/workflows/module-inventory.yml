@@ -1,0 +1,209 @@
+name: Module inventory
+
+# GitHub Team cannot enforce organization required-workflow rules. These
+# required checks therefore use the normal pull_request event and, like every
+# classic Team-plan check, their workflow/script definitions are reviewable PR
+# content. Do not present proposal-ordering as an isolated trusted executor; a
+# stronger guarantee requires Enterprise required workflows or an external app.
+on:
+  pull_request:
+    branches: [feature/core-modularization]
+  push:
+    branches: [feature/core-modularization]
+  workflow_dispatch:
+
+concurrency:
+  group: module-inventory-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  module-inventory:
+    name: module-inventory
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install test-only YAML parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Validate canonical inventory
+        run: ./scripts/check_module_inventory.sh
+      - name: Validate from a non-repository working directory
+        run: cd /tmp && "$GITHUB_WORKSPACE/scripts/check_module_inventory.sh"
+      - name: Prove a mutated inventory fails closed
+        run: |
+          root=$(mktemp -d)
+          cp tests/baselines/modules/canonical-inventory.yaml "$root/inventory.yaml"
+          python3 - "$root/inventory.yaml" <<'PY'
+          import json
+          import pathlib
+          import sys
+          path = pathlib.Path(sys.argv[1])
+          data = json.loads(path.read_text())
+          data["required"].remove("git")
+          data["required"].append("replacement-module")
+          path.write_text(json.dumps(data))
+          PY
+          if output=$(./scripts/check_module_inventory.sh \
+              --config-root "$root" --inventory inventory.yaml 2>&1); then
+            echo "::error::mutated inventory unexpectedly passed: $output"
+            exit 1
+          fi
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'rule=required-classification'
+      - name: Test inventory failure modes
+        run: python3 -I scripts/tests/test_check_module_inventory.py -v
+      - name: Enforce background skill-curator removal
+        run: python3 -I -S scripts/check_background_skill_curator_absence.py
+      - name: Test background skill-curator absence failure modes
+        run: python3 -I scripts/tests/test_check_background_skill_curator_absence.py -v
+      - name: Enforce canonical module source ownership
+        run: python3 -I -S scripts/check_module_source_ownership.py
+      - name: Test module source ownership failure modes
+        run: python3 -I scripts/tests/test_check_module_source_ownership.py -v
+      - name: Enforce panel contract boundary
+        run: python3 -I -S scripts/check_panel_contract_boundary.py
+      - name: Test panel contract boundary failure modes
+        run: python3 -I scripts/tests/test_check_panel_contract_boundary.py -v
+      - name: Enforce refactor surface baselines
+        run: python3 -I -S scripts/refactor_baselines.py
+      - name: Enforce refactor cleanup accounting
+        run: python3 -I -S scripts/check_cleanup_ledger.py
+      - name: Test refactor baseline failure modes
+        run: python3 -I scripts/tests/test_refactor_baselines.py -v
+      - name: Test cleanup-ledger failure modes
+        run: python3 -I scripts/tests/test_check_cleanup_ledger.py -v
+      - name: Enforce individual module documentation
+        run: python3 -I -S scripts/check_module_docs.py
+      - name: Test module-documentation failure modes
+        run: python3 -I scripts/tests/test_check_module_docs.py -v
+      - name: Enforce descriptor-declared module test registration
+        run: python3 -I -S scripts/check_module_test_registration.py
+      - name: Test module test-registration failure modes
+        run: python3 -I scripts/tests/test_check_module_test_registration.py -v
+
+  git-core-contract:
+    name: git-core-contract
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Validate approved Git core contract
+        run: python3 -I -S scripts/check_git_core_contract.py --require-status roundtable-approved
+      - name: Validate from a non-repository working directory
+        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_git_core_contract.py" --require-status roundtable-approved
+      - name: Test Git contract failure modes
+        run: python3 -I scripts/tests/test_check_git_core_contract.py -v
+
+  descriptor-envelope:
+    name: descriptor-envelope
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Validate descriptor fixtures and generated schema
+        run: |
+          python3 -I -S scripts/validate_module_descriptors.py \
+            --check-schema tests/fixtures/modules/positive
+      - name: Validate the complete production descriptor graph
+        run: |
+          python3 -I -S scripts/validate_module_descriptors.py \
+            --check-schema src/modules
+      - name: Test descriptor failure modes and taxonomy convergence
+        run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
+      - name: Enforce canonical module public-header layout
+        run: python3 -I -S scripts/check_module_header_layout.py
+      - name: Test module public-header layout failure modes
+        run: python3 -I scripts/tests/test_check_module_header_layout.py -v
+      - name: Enforce governance capability ownership
+        run: python3 -I -S scripts/check_capability_ownership.py --config-root "$GITHUB_WORKSPACE"
+      - name: Validate governance ownership from a non-repository working directory
+        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_capability_ownership.py" --config-root "$GITHUB_WORKSPACE"
+      - name: Test governance capability ownership failure modes
+        run: python3 -I scripts/tests/test_check_capability_ownership.py -v
+
+  module-doc-contract:
+    name: module-doc-contract
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Test provider-neutral OIDC, document grammar, and SSHSIG contracts
+        run: |
+          command -v ssh-keygen
+          command -v ssh-agent
+          command -v ssh-add
+          python3 -I scripts/tests/test_module_doc_contract.py -v
+          python3 -I scripts/tests/test_module_doc_git_snapshot.py -v
+          python3 -I scripts/tests/test_sign_module_docs.py -v
+
+  proposal-ordering:
+    name: proposal-ordering
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      # This executes the reviewed PR version under the documented Team-plan
+      # limitation above. Branch protection supplies enforcement, not isolation.
+      - name: Enforce Git proposal ordering
+        run: python3 -I -S scripts/check_proposal_ordering.py
+      - name: Prove event revision binding
+        env:
+          GITHUB_EVENT_NAME: push
+          GITHUB_REF: refs/heads/feature/core-modularization
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 -I -S scripts/check_proposal_ordering.py
+      - name: Validate CWD independence
+        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_proposal_ordering.py"
+      - name: Reject a non-repository config root
+        run: |
+          root=$(mktemp -d)
+          if output=$(python3 -I -S scripts/check_proposal_ordering.py \
+              --config-root "$root" 2>&1); then
+            echo "::error::non-repository config root unexpectedly passed: $output"
+            exit 1
+          fi
+          echo "$output"
+          printf '%s\n' "$output" | grep -q 'rule=config-root'
+      - name: Test proposal-ordering failure modes
+        run: python3 -I scripts/tests/test_check_proposal_ordering.py -v

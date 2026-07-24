@@ -14,11 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "audit_action.h" /* audit_ensure_key */
+#include <aimee/audit/audit_action.h> /* audit_ensure_key */
 #include "cJSON.h"
 #include "kb_client.h" /* kb_client_memory_audit_note */
 #include "log.h"       /* audit_log_open */
-#include "modules/audit/obs_bus.h"
+#include <aimee/audit/obs_bus.h>
 #include "server/memory_audit_bridge.h"
 
 /* audit_ledger.h is not on the default include path from tests/ the same way;

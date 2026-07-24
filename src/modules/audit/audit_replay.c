@@ -4,7 +4,7 @@
  * Two consumers: the aimee-server --audit-replay CLI (text, obs_bus_replay_print)
  * and the /v1/audit endpoints (JSON, audit_replay_to_json / audit_replay_capture_list).
  */
-#include "audit_replay.h"
+#include <aimee/audit/audit_replay.h>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "obs_bus.h" /* OBS_BUS_KIND_ACTION */
+#include <aimee/audit/obs_bus.h> /* OBS_BUS_KIND_ACTION */
 #include "bus_capture.h"
 #include "cJSON.h"
 

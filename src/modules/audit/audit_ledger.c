@@ -1,5 +1,5 @@
 /* audit_ledger.c: read the governed-action audit ledger. See audit_ledger.h. */
-#include "audit_ledger.h"
+#include <aimee/audit/audit_ledger.h>
 
 #include <stdio.h>
 #include <stdlib.h>

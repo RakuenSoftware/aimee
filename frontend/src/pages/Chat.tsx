@@ -1381,6 +1381,7 @@ export default function Chat() {
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [workflowChanged, setWorkflowChanged] = useState(false);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginLoaderAvailable, setPluginLoaderAvailable] = useState(false);
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [pluginsError, setPluginsError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -1814,15 +1815,28 @@ export default function Chat() {
     setPluginsLoading(true);
     try {
       const resp = await fetch('/api/plugins');
+      if (!resp.ok) {
+        setPluginLoaderAvailable(false);
+        setPlugins([]);
+        setPluginsError(null);
+        return;
+      }
       const data = await resp.json() as PluginInfo[];
+      setPluginLoaderAvailable(true);
       setPlugins(Array.isArray(data) ? data : []);
       setPluginsError(null);
     } catch {
+      setPluginLoaderAvailable(false);
+      setPlugins([]);
       setPluginsError('Failed to load plugins');
     } finally {
       setPluginsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void refreshPlugins();
+  }, [refreshPlugins]);
 
   useEffect(() => {
     if (pluginsOpen) void refreshPlugins();
@@ -3133,7 +3147,7 @@ export default function Chat() {
           metrics={allTimeMetrics}
         />
 
-        <PluginsPanel
+        {pluginLoaderAvailable && <PluginsPanel
           open={pluginsOpen}
           plugins={plugins}
           loading={pluginsLoading}
@@ -3141,7 +3155,7 @@ export default function Chat() {
           onToggle={() => { setPluginsOpen(o => !o); setRulesOpen(false); setContextOpen(false); }}
           onRefresh={() => { void refreshPlugins(); }}
           onPluginToggle={name => { void togglePlugin(name); }}
-        />
+        />}
 
         {/* Rules sidebar */}
         <RulesPanel open={rulesOpen} onToggle={() => { setRulesOpen(o => !o); setPluginsOpen(false); setContextOpen(false); }} />

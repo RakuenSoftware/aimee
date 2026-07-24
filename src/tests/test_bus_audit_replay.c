@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "obs_bus.h"
+#include <aimee/audit/obs_bus.h>
 #include "bus_capture.h"
 #include "log.h"
 

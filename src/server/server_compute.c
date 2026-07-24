@@ -9,7 +9,7 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
-#include "gateway_policy.h"
+#include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
 #include "agent.h"
@@ -17,25 +17,25 @@
 #include "cmd_agent_delegate_impl.h"
 #include "config.h"
 #include "token_tracker.h"
-#include "delegate_credential_retry.h"
-#include "delegate_launch.h"
-#include "delegate_sandbox_image.h"
-#include "delegate_source_authority.h"
+#include <aimee/delegates/delegate_credential_retry.h>
+#include <aimee/delegates/delegate_launch.h>
+#include <aimee/delegates/delegate_sandbox_image.h>
+#include <aimee/delegates/delegate_source_authority.h>
 #include "agent_source_authority.h" /* TLS source-authority context (race-free in-process) */
 #include "server_coord_dispatcher.h"
-#include "delegate_credentials.h"
+#include <aimee/delegates/delegate_credentials.h>
 #include "vault_service.h" /* WP-C.1 vault-first credential resolution */
 #include <openssl/crypto.h>
-#include "delegate_economics.h"
-#include "delegate_run_phases.h"
+#include <aimee/delegates/delegate_economics.h>
+#include <aimee/delegates/delegate_run_phases.h>
 #include "db1/delegate_learning.h"
 #include "kb_client.h"
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
-#include "delegate_role.h"
+#include <aimee/delegates/delegate_role.h>
 #include "delegate_ensemble.h"
 #include "evidence_replay.h"
-#include "delegate_ephemeral_ws.h"
+#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"

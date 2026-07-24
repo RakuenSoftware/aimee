@@ -1,4 +1,4 @@
-#include "mcp_client_registry.h"
+#include "aimee/protocols/mcp/mcp_client_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>

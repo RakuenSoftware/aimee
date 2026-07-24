@@ -1,5 +1,4 @@
 /* test_mcp_gateway_tools.c: unit tests for send_message and ask_user MCP tools. */
-#include "mcp_tools_gateway.h"
 #include "headers/server_mcp_gateway.h"
 #include <assert.h>
 #include <cJSON.h>
@@ -136,19 +135,6 @@ static void test_unknown_tool_returns_null(void)
    PASS("unknown_tool_returns_null");
 }
 
-/* ---- mcp_add_gateway_tools registers 2 tools ---- */
-
-static void test_gateway_tools_count(void)
-{
-   cJSON *tools = cJSON_CreateArray();
-   int before = cJSON_GetArraySize(tools);
-   mcp_add_gateway_tools(tools);
-   int after = cJSON_GetArraySize(tools);
-   assert(after - before == 2);
-   cJSON_Delete(tools);
-   PASS("gateway_tools_count");
-}
-
 int main(void)
 {
    printf("test_mcp_gateway_tools\n");
@@ -159,7 +145,6 @@ int main(void)
    test_ask_user_open_ended();
    test_ask_user_missing_question();
    test_unknown_tool_returns_null();
-   test_gateway_tools_count();
    printf("All tests passed.\n");
    return 0;
 }

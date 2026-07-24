@@ -21,8 +21,8 @@
 #include "server_http.h"
 
 #include "agent_config.h"
-#include "aimee_home.h"        /* aimee_home() for the origin working dir */
-#include "delegate_ensemble.h" /* ENSEMBLE_MAX_REFS */
+#include "aimee_home.h" /* aimee_home() for the origin working dir */
+#include <aimee/ir/panel_result.h>
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
@@ -855,10 +855,10 @@ static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
       memset(out, 0, sizeof(*out));
       return 0; /* no registry -> treat as unresolved, caller decides */
    }
-   rtp_participant_t parts[ENSEMBLE_MAX_REFS];
+   rtp_participant_t parts[AIMEE_PANEL_MAX_PARTICIPANTS];
    int n = cfg->ensemble_reference_count;
-   if (n > ENSEMBLE_MAX_REFS)
-      n = ENSEMBLE_MAX_REFS;
+   if (n > AIMEE_PANEL_MAX_PARTICIPANTS)
+      n = AIMEE_PANEL_MAX_PARTICIPANTS;
    for (int i = 0; i < n; i++)
    {
       agent_t *ag = agent_find(&acfg, cfg->ensemble_reference_models[i]);

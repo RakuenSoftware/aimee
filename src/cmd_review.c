@@ -17,7 +17,7 @@
 #include "config.h"
 #include "kb_client.h"
 #include "log.h"
-#include "skill.h"
+#include <aimee/skills/skill.h>
 #include "cJSON.h"
 
 #include <stdio.h>
