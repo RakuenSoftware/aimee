@@ -169,9 +169,9 @@ BEGIN
     RAISE EXCEPTION 'RUNTIME FAIL: schema build metadata not recorded (dim=% ver=%) — a hardened '
       'runtime kb could not verify the migration', v_dim, v_ver;
   END IF;
-  IF (public.to_regclass('public.kb_documents') IS NULL)
-     OR (public.to_regclass('public.kb_vault_witness_checkpoint') IS NULL)
-     OR (public.to_regprocedure('public.org_vault_witness_control_fence()') IS NULL) THEN
+  IF (pg_catalog.to_regclass('public.kb_documents') IS NULL)
+     OR (pg_catalog.to_regclass('public.kb_vault_witness_checkpoint') IS NULL)
+     OR (pg_catalog.to_regprocedure('public.org_vault_witness_control_fence()') IS NULL) THEN
     RAISE EXCEPTION 'RUNTIME FAIL: a required schema object is not visible to the runtime role';
   END IF;
   RAISE NOTICE 'RUNTIME OK: hardened pre-provisioned verify inputs readable as runtime '
