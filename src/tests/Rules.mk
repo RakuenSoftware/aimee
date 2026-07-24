@@ -492,9 +492,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-mcp-client-registry \
                $(TESTPREFIX)/unit-test-osv-check \
                $(TESTPREFIX)/unit-test-mcp-osv-cache \
-                \
-                \
-               -c-hook \
+               $(TESTPREFIX)/unit-test-plugin-c-hook \
                $(TESTPREFIX)/unit-test-memory-provider \
                $(TESTPREFIX)/unit-test-context-engine \
                $(TESTPREFIX)/unit-test-dogfood \
@@ -5198,7 +5196,7 @@ $(TESTPREFIX)/unit-test-memory-provider: $(OBJDIR)/tests/test_memory_provider.o 
                      $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
--c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
+$(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
                      $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                      $(OBJDIR)/log.o \
                      $(PLATFORM_BASIC_OBJS)
