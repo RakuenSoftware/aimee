@@ -3,6 +3,8 @@
 #include "memory_query.h"
 #include "tasks.h"
 
+#include "kb_client.h" /* kb_client_memory_audit_note (defined in kb_client_memory_audit.c) */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,6 +315,7 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
       return -1;
    }
 
+   int64_t rec_id = 0;
    if (out)
    {
       memset(out, 0, sizeof(*out));
@@ -327,8 +330,20 @@ int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *k
          if (cJSON_IsNumber(id_j))
             out->id = (int64_t)id_j->valuedouble;
       }
+      rec_id = out->id;
+   }
+   else
+   {
+      /* Extract the id for the audit note even when the caller wants no row back. */
+      cJSON *mem_j = cJSON_GetObjectItemCaseSensitive(resp, "memory");
+      cJSON *id_j = cJSON_IsObject(mem_j) ? cJSON_GetObjectItemCaseSensitive(mem_j, "id")
+                                          : cJSON_GetObjectItemCaseSensitive(resp, "id");
+      if (cJSON_IsNumber(id_j))
+         rec_id = (int64_t)id_j->valuedouble;
    }
    cJSON_Delete(resp);
+   /* NON-CONTENT audit: identity + confidence + session only, never the content. */
+   kb_client_memory_audit_note("memory.insert", rec_id, tier, kind, key, confidence, session_id, 1);
    return 0;
 }
 
@@ -544,6 +559,7 @@ int kb_client_memory_update(int64_t id, const char *content)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
+   kb_client_memory_audit_note("memory.update", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
 }
 
@@ -565,5 +581,6 @@ int kb_client_memory_reject(int64_t id, const char *reason)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
+   kb_client_memory_audit_note("memory.reject", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
 }

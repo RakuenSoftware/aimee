@@ -127,4 +127,18 @@ if ! printf '%s\n' "$sbx_out" | grep -q "test_bus_sandbox_audit: OK"; then
 fi
 echo "sandbox audit: ok (degraded isolation -> bridge -> bus -> ledger; no secret leak)"
 
-echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access + sandbox audit hold; memory rows pending"
+# 6. The server-side memory-mutation audit trail: a memory change the server
+#    requested via kb_client flows through the REAL bridge -> obs_bus -> ledger,
+#    identity recorded, memory content never present. Same special-link reason.
+echo "checking server-side memory-mutation audit trail..."
+mem_out=$(make -C src --no-print-directory unit-test-bus-memory-audit 2>&1 || true)
+if ! printf '%s\n' "$mem_out" | grep -q "test_bus_memory_audit: OK"; then
+   echo "" >&2
+   echo "FAIL: the memory-on-bus audit test did not pass — a memory mutation is not" >&2
+   echo "      being recorded correctly through the bridge, or content leaked." >&2
+   printf '%s\n' "$mem_out" | tail -8 >&2
+   exit 1
+fi
+echo "memory audit: ok (mutation -> bridge -> bus -> ledger; no content)"
+
+echo "check_bus_perf_gate: ok — dispatch + audit within budget; audit durability holds; vault-access + sandbox + memory audit hold; memory rows pending"
