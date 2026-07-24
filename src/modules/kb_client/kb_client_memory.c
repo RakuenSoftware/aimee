@@ -770,6 +770,7 @@ int kb_client_memory_delete(int64_t id)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
+   kb_client_memory_audit_note("memory.delete", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
 }
 

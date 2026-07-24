@@ -608,6 +608,29 @@ int kb_client_memory_link_create(int64_t source_id, int64_t target_id, const cha
 int kb_client_memory_link_query(int64_t memory_id, memory_link_t *out, int max);
 int kb_client_memory_link_delete(int64_t link_id);
 
+/* Audit hook: notified after each SERVER-INITIATED memory mutation via aimee-kb
+ * (insert / update / delete / reject) with NON-CONTENT fields only — the
+ * operation, the memory id, and (for insert) the tier / kind / key identity,
+ * confidence, and session — plus whether the kb call succeeded. The memory
+ * CONTENT (and use_cases / reject reason), the PII-bearing payload, is NEVER
+ * passed. This is the SERVER's view of the memory changes it requested; aimee-kb
+ * records the authoritative event on its own bus at the mutation site. Installed
+ * once at startup by a server-only bridge forwarding to the observability bus;
+ * kb_client itself has NO event-bus dependency (stays linkable everywhere). NULL
+ * by default. Set once before serving. */
+typedef void (*kb_client_memory_audit_hook_fn)(const char *op, int64_t id, const char *tier,
+                                               const char *kind, const char *key, double confidence,
+                                               const char *session_id, int ok);
+void kb_client_set_memory_audit_hook(kb_client_memory_audit_hook_fn fn);
+
+/* Internal: fire the memory-audit hook (if installed). Defined in the dep-free
+ * kb_client_memory_audit.c (kept free of RPC/cJSON so the bridge->bus test can
+ * link the seam without the whole kb_client stack); callable from the kb_client
+ * memory TUs (mutations, and kb_client_memory.c for delete). */
+void kb_client_memory_audit_note(const char *op, int64_t id, const char *tier, const char *kind,
+                                 const char *key, double confidence, const char *session_id,
+                                 int ok);
+
 /* Delete a memory by id via aimee-kb.  Returns 0 on success, -1 on
  * failure / kb unreachable.  Mirrors memory_delete(). */
 int kb_client_memory_delete(int64_t id);

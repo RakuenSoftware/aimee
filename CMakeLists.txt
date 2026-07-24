@@ -886,6 +886,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c
     ${AIMEE_SRC_DIR}/server/vault_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c
+    ${AIMEE_SRC_DIR}/server/memory_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/server_runner_endpoints.c
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
@@ -896,6 +897,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c
     ${AIMEE_SRC_DIR}/server/vault_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c
+    ${AIMEE_SRC_DIR}/server/memory_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/server_runner_endpoints.c
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
@@ -968,6 +970,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_index_parse.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_memory.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_memory_mutations.c
+    ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_memory_audit.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_agent.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_dashboard.c
     ${AIMEE_SRC_DIR}/modules/kb_client/kb_client_tasks.c
