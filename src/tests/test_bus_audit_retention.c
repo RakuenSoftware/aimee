@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "audit_bus.h"
+#include <aimee/audit/audit_bus.h>
 #include "log.h"
 
 #define KEEP 16 /* must match AB_CAP_KEEP in audit_bus.c */

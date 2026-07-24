@@ -1,4 +1,5 @@
 CC      = gcc
+AIMEE_WITH_PLUGIN_LOADER ?= 0
 OBJDIR  = build/obj
 
 ifeq ($(OS),Windows_NT)
@@ -98,7 +99,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Imodules/benchmarks -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -Imodules/kb-synthesis -Imodules/module-runtime/include -Imodules/plugin-loader/include -Imodules/protocols/include -Imodules/skills/include -Imodules/tools -Imodules/translation/include -DAIMEE_WITH_PLUGIN_LOADER=1 -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Imodules/config -Imodules/economizer -Imodules/learning -Imodules/roadmap -Imodules/sandbox -Imodules/lsp -Imodules/skill -Imodules/css -Imodules/webuser -Imodules/memory -Imodules/governance -Imodules/workflows -Imodules/vault -Imodules/git -Imodules/workspace -Imodules/guardrails -Imodules/roundtable -Imodules/kb_client -Imodules/agent_eval -Ipipeline -Imodules/audit/include -Imodules/benchmarks -Imodules/delegates/include -Imodules/gateway/include -Imodules/ir/include -Imodules/kb-synthesis -Imodules/module-runtime/include -Imodules/plugin-loader/include -Imodules/protocols/include -Imodules/skills/include -Imodules/tools -Imodules/translation/include -DAIMEE_WITH_PLUGIN_LOADER=$(AIMEE_WITH_PLUGIN_LOADER) -DAIMEE_WITH_ROUNDTABLE=1 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -300,10 +301,15 @@ CORE_SRCS = db1/db.c db1/db_schema.c modules/config/config.c modules/config/conf
             aimee_home.c shared/kb_paths.c provider_client.c kb_curator_provider.c \
             compact.c modules/economizer/economizer_proof.c modules/economizer/economizer_wire_snapshot.c modules/economizer/economizer_openai.c modules/economizer/economizer_anthropic.c modules/economizer/economizer_json.c modules/economizer/economizer_provenance.c modules/economizer/economizer_dispatch_lease.c modules/economizer/coord_closet.c modules/economizer/fold_budget.c modules/economizer/context_fold.c modules/economizer/context_reduce.c modules/economizer/tool_condense.c modules/economizer/fold_register.c modules/economizer/fold_recall.c modules/economizer/task_rail.c modules/economizer/episode_seal.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c modules/protocols/mcp/mcp_tools.c modules/protocols/mcp/mcp_tool_profile.c modules/protocols/mcp/mcp_tools_extended.c modules/protocols/mcp/mcp_skill_tools.c modules/protocols/mcp/mcp_tools_gateway.c events.c \
-            model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c modules/plugin-loader/plugin.c modules/module-runtime/extension.c \
-            modules/plugin-loader/plugin_loader.c modules/memory/memory_provider.c modules/module-runtime/pre_llm_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
+            model_registry.c models_dev.c models_dev_cache.c modules/lsp/lsp_client.c modules/lsp/lsp_manager.c \
+            modules/memory/memory_provider.c modules/module-runtime/pre_llm_hook.c modules/config/config_plugin.c code_collect.c codex_auth.c \
             modules/workflows/wfe_iface.c modules/workflows/wfe_def.c modules/workflows/wfe_validate.c modules/workflows/wfe_canonical.c modules/workflows/wfe_custom.c modules/workflows/wfe_manager_artifacts.c modules/workflows/wfe_externalization.c modules/workflows/tool_egress.c modules/workflows/wfe_native_gate.c modules/workflows/wfe_enforce.c modules/workflows/wfe_deliver.c modules/workflows/wfe_advance.c modules/workflows/wfe_advance_exec.c modules/workflows/wfe_block_resolve.c modules/workflows/wfe_bind_ingress.c modules/workflows/wfe_router.c modules/workflows/wfe_router_catalog.c modules/workflows/wfe_autonomous_route.c \
             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
+ifeq ($(AIMEE_WITH_PLUGIN_LOADER),1)
+CORE_SRCS += modules/plugin-loader/plugin.c modules/plugin-loader/plugin_loader.c modules/module-runtime/extension.c
+else
+CORE_SRCS += plugin_stubs.c
+endif
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---

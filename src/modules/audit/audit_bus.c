@@ -9,7 +9,7 @@
  * publishes and returns; the consumer writes asynchronously.
  */
 #define _GNU_SOURCE
-#include "audit_bus.h"
+#include <aimee/audit/audit_bus.h>
 
 #include <dirent.h>
 #include <fcntl.h>

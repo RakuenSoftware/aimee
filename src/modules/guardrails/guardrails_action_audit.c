@@ -13,7 +13,7 @@
 
 #include "aimee.h" /* MODE_APPROVE */
 #include <aimee/audit/audit_action.h>
-#include "audit_bus.h" /* the per-action row now crosses the event bus, not a direct write */
+#include <aimee/audit/audit_bus.h> /* the per-action row now crosses the event bus, not a direct write */
 #include <aimee/audit/audit_worm.h>
 #include "config.h"
 #include "guardrails.h"

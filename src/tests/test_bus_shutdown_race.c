@@ -18,7 +18,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_bus.h"
+#include <aimee/audit/audit_bus.h>
 #include "db1/db1.h"
 
 #define NTHREADS 4

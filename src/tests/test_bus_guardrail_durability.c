@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "audit_bus.h" /* audit_bus_*, guardrail_event_t, db1_guardrail_event_* */
+#include <aimee/audit/audit_bus.h> /* audit_bus_*, guardrail_event_t, db1_guardrail_event_* */
 #include "db1/db1.h"
 
 #define N 2000

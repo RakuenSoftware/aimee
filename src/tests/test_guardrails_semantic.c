@@ -9,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "audit_bus.h" /* gsem_record now records via the bus; drain it before asserting */
+#include <aimee/audit/audit_bus.h> /* gsem_record now records via the bus; drain it before asserting */
 #include "db1.h"
 #include "guardrail_events.h"
 #include "guardrails_semantic.h"

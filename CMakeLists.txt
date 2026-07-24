@@ -18,6 +18,7 @@ if(DEFINED AIMEE_VERSION_STR AND NOT AIMEE_VERSION_STR STREQUAL "")
     add_compile_definitions(AIMEE_VERSION="${AIMEE_VERSION_STR}")
 endif()
 
+option(AIMEE_WITH_PLUGIN_LOADER "Build the optional plugin manifest loader" OFF)
 option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)

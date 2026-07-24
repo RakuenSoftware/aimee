@@ -20,7 +20,9 @@
   ],
   "public_headers": [
     "src/modules/audit/include/aimee/audit/audit_action.h",
+    "src/modules/audit/include/aimee/audit/audit_bus.h",
     "src/modules/audit/include/aimee/audit/audit_ledger.h",
+    "src/modules/audit/include/aimee/audit/audit_replay.h",
     "src/modules/audit/include/aimee/audit/audit_worm.h",
     "src/modules/audit/include/aimee/audit/audit_worm_chain.h"
   ],
@@ -32,9 +34,5 @@
   ],
   "docs": [
     "docs/modules/audit.md"
-  ],
-  "private_headers": [
-    "src/modules/audit/audit_bus.h",
-    "src/modules/audit/audit_replay.h"
   ]
 }

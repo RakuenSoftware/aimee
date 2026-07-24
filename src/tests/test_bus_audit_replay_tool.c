@@ -13,8 +13,8 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "audit_bus.h"
-#include "audit_replay.h"
+#include <aimee/audit/audit_bus.h>
+#include <aimee/audit/audit_replay.h>
 #include "cJSON.h"
 #include "log.h"
 

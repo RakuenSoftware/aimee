@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "db.h"
-#include "audit_bus.h" /* audit_bus_flush — gsem_record records guardrail events async now */
+#include <aimee/audit/audit_bus.h> /* audit_bus_flush — gsem_record records guardrail events async now */
 #include "db1.h"
 #include "db2.h"
 #include "db2_test_shim.h"

@@ -21,7 +21,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "audit_bus.h"
+#include <aimee/audit/audit_bus.h>
 #include <aimee/audit/audit_ledger.h>
 #include "cJSON.h"
 #include "log.h"
