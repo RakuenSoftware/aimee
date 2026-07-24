@@ -3,7 +3,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <pthread.h>
-#ifdef WITH_PKCS11
 #include <dlfcn.h>
 #include <p11-kit/pkcs11.h>
 typedef struct { pthread_mutex_t mu; void *dl; CK_FUNCTION_LIST_PTR f; CK_SESSION_HANDLE s; int sealed; } pk11_ctx;
@@ -31,7 +30,4 @@ static int unseal(void*v,const void*p,size_t n){(void)p;(void)n;pk11_ctx*c=v;pth
 static int seal(void*v){((pk11_ctx*)v)->sealed=1;return 0;}
 static int rotate(void*v,const char*a,int*b,int*c,char*d,size_t e,char*f,size_t g){(void)v;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;return -1;}
 static const vault_custody_provider_t p={"pkcs11",&g,get_kek,rotate,sealed,unseal,seal,NULL,NULL};
-#else
-static int fail(void*v,uint8_t k[VAULT_KEK_LEN]){(void)v;(void)k;return -1;} static int yes(void*v){(void)v;return 1;} static int no(void*v,const void*p,size_t n){(void)v;(void)p;(void)n;return -1;} static int no_seal(void*v){(void)v;return -1;} static int rot(void*v,const char*a,int*b,int*c,char*d,size_t e,char*f,size_t g){(void)v;(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;return -1;} static const vault_custody_provider_t p={"pkcs11",NULL,fail,rot,yes,no,no_seal,NULL,NULL};
-#endif
 const vault_custody_provider_t *vault_custody_pkcs11_provider(void){return &p;}

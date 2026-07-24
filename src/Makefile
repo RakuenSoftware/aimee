@@ -370,13 +370,13 @@ else
 KB_TPM2_CFLAGS :=
 KB_TPM2_LDLIBS :=
 endif
-ifeq ($(WITH_PKCS11),1)
-KB_PKCS11_CFLAGS := -DWITH_PKCS11 $(shell pkg-config --cflags p11-kit-1 2>/dev/null || echo -I/usr/include/p11-kit-1)
+# The PKCS#11 custody provider is the only supported build: vault_custody_pkcs11.c
+# has no non-PKCS11 code path, so the KB (its only compiler, via the kb/%.o rule)
+# always builds against the p11-kit headers and links libdl for dlopen of the
+# operator-provided PKCS#11 module. There is no WITH_PKCS11 knob; `libp11-kit-dev`
+# is a mandatory build dependency of aimee-kb.
+KB_PKCS11_CFLAGS := $(shell pkg-config --cflags p11-kit-1 2>/dev/null || echo -I/usr/include/p11-kit-1)
 KB_PKCS11_LDLIBS := -ldl
-else
-KB_PKCS11_CFLAGS :=
-KB_PKCS11_LDLIBS :=
-endif
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
 DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
