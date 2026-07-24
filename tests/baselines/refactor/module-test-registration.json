@@ -159,7 +159,7 @@
     },
     {
       "ctest": false,
-      "make": false,
+      "make": true,
       "module": "delegates",
       "test": "src/tests/test_panel_provider.c"
     },
