@@ -941,10 +941,27 @@ WHERE work_item_id=? AND current_stage=? AND state='active' AND pause_reason='' 
 // runner failure without any intervening forward progress. 'redispatch' is
 // deliberately NOT progress: a recovery that keeps re-dispatching work that
 // keeps failing is exactly the no-progress loop this bounds.
+// Capacity backpressure is excluded: the provider refused to start the work, so
+// the delegate never got a chance to fail. Those waits are bounded separately by
+// CapacityWaitsSinceProgress.
 func (s *Store) RunnerFailuresSinceProgress(ctx context.Context, workItemID, stage string) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_event
 WHERE work_item_id=? AND stage=? AND kind='pause'
+  AND detail NOT LIKE 'capacity_backpressure:%'
+  AND id > COALESCE((SELECT MAX(id) FROM lifecycle_event
+                     WHERE work_item_id=? AND kind IN ('advance','loop','create')), 0)`,
+		workItemID, stage, workItemID).Scan(&count)
+	return count, err
+}
+
+// CapacityWaitsSinceProgress counts how many times this stage has parked waiting
+// out provider capacity without any intervening forward progress.
+func (s *Store) CapacityWaitsSinceProgress(ctx context.Context, workItemID, stage string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_event
+WHERE work_item_id=? AND stage=? AND kind='pause'
+  AND detail LIKE 'capacity_backpressure:%'
   AND id > COALESCE((SELECT MAX(id) FROM lifecycle_event
                      WHERE work_item_id=? AND kind IN ('advance','loop','create')), 0)`,
 		workItemID, stage, workItemID).Scan(&count)
@@ -1224,7 +1241,9 @@ func (s *Store) Resume(ctx context.Context, workItemID string) error {
 	if reason == "" {
 		return errors.New("workflow is not paused")
 	}
-	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true}
+	// delegate_failed parks explicitly for a human, so a human must be able to
+	// release it once the underlying delegate problem is addressed.
+	operatorReasons := map[string]bool{"manual": true, "wall_cap": true, "turn_cap": true, "retry_limit": true, "convergence_limit": true, "convergence_no_progress": true, "budget_cap": true, "fanout_limit": true, "workflow_definition_invalid": true, "workflow_block_unavailable": true, "delegate_failed": true}
 	if !operatorReasons[reason] {
 		return fmt.Errorf("pause reason %q is lifecycle-owned and cannot be resumed manually", reason)
 	}

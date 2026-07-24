@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1066,5 +1067,93 @@ func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
 	got, err := store.WorkItem(t.Context(), item.ID)
 	if err != nil || got.PauseReason != "delegate_failed" {
 		t.Fatalf("item not parked delegate_failed: %+v err=%v", got, err)
+	}
+}
+
+type rateLimitedRunner struct{ calls int }
+
+func (r *rateLimitedRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	r.calls++
+	return StepResult{}, &DelegateExecutionError{
+		Err:        fmt.Errorf("vault credential for agent 'MiniMax-M3' is rate-limited; retry in 30s"),
+		Dispatched: false,
+	}
+}
+
+// Provider capacity refusals are self-clearing and advertise their own
+// retry-after, so waiting them out must not consume the runner-failure bound
+// that parks an item for a human. Before this was distinguished, a throttled
+// credential parked a live run permanently within a minute.
+func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: one\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "one.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_capacity", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &rateLimitedRunner{}
+	eng, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < maxRunnerFailuresWithoutProgress+4; attempt++ {
+		out, err := eng.Advance(t.Context(), item.ID)
+		if err != nil {
+			t.Fatalf("advance %d: %v", attempt, err)
+		}
+		if out.PauseReason != "capacity_backpressure" {
+			t.Fatalf("attempt %d: capacity refusal parked %q, want capacity_backpressure", attempt, out.PauseReason)
+		}
+		if _, err := store.ResumeTransient(t.Context(), "capacity_backpressure", 0); err != nil {
+			t.Fatalf("resume %d: %v", attempt, err)
+		}
+	}
+}
+
+// A stage parked for a human must be releasable by a human once the underlying
+// delegate problem is fixed.
+func TestDelegateFailedIsOperatorResumable(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	item := db1.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 100}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Park(t.Context(), item.ID, "work", "delegate_failed", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Resume(t.Context(), item.ID); err != nil {
+		t.Fatalf("operator cannot release a park meant for a human: %v", err)
+	}
+	got, err := store.WorkItem(t.Context(), item.ID)
+	if err != nil || got.PauseReason != "" {
+		t.Fatalf("item still paused: %+v err=%v", got, err)
 	}
 }
