@@ -3828,7 +3828,7 @@ $(TESTPREFIX)/unit-test-vault-witness-offline: $(OBJDIR)/tests/test_vault_witnes
 # bit-flips of a VALID stream must never verify clean and must never crash. Kept as
 # a CI unit test (not a corpus fuzzer) so any future change letting a mutated stream
 # pass is caught. Fast (~1s) and self-contained (no args, fixed LCG seed).
-$(TESTPREFIX)/unit-test-witness-offline-fuzz: $(OBJDIR)/tests/fuzz_witness_offline_mutation.o \
+$(TESTPREFIX)/unit-test-witness-offline-fuzz: $(OBJDIR)/tests/test_witness_offline_fuzz.o \
                               $(OBJDIR)/modules/vault/vault_witness_offline.o \
                               $(OBJDIR)/modules/vault/vault_witness_verify.o \
                               $(OBJDIR)/modules/vault/vault_witness_record.o \
