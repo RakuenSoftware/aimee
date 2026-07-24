@@ -952,7 +952,7 @@ run a standalone embedder or curator LLM instead, use the
 > dependency (`@rakuensoftware/smoothgui`) is vendored in-repo
 > (`frontend/vendor/`), so the build pulls nothing from a private registry and needs
 > no npm token. Build with `--build-arg WITH_RUNTIME_WEB=0` to ship server + kb only.
-> At runtime the UI is on unless you set `AIMEE_WEBCHAT_ENABLED=0` (provide
+> At runtime the UI is on unless you set `AIMEE_RUNTIME_WEB_ENABLED=0` (provide
 > `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD` for a PAM login). It serves HTTPS on
 > `:8443`.
 

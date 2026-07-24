@@ -1011,8 +1011,8 @@ void cmd_dashboard(app_ctx_t *ctx, int argc, char **argv)
 
 /* --- cmd_webchat --- */
 
-#define WEBCHAT_SERVICE_NAME "aimee-webchat.service"
-#define WEBCHAT_SERVICE_SRC  "systemd/aimee-webchat.service"
+#define WEBCHAT_SERVICE_NAME "aimee-runtime-web.service"
+#define WEBCHAT_SERVICE_SRC  "systemd/aimee-runtime-web.service"
 #define WEBCHAT_SERVICE_DEST "/etc/systemd/system/" WEBCHAT_SERVICE_NAME
 
 /* Provision the ingress trusted-proxy secret so the webchat OpenAI proxy actually
@@ -1193,7 +1193,7 @@ void cmd_webchat(app_ctx_t *ctx, int argc, char **argv)
    if (!sub || subcmd_dispatch(cmd_webchat_subs, sub, ctx, argc, argv) != 0)
    {
       fprintf(stderr, "usage: aimee webchat <enable|disable|status>\n");
-      fprintf(stderr, "       to run the server directly: aimee-webchat --port <port>\n");
+      fprintf(stderr, "       to run the server directly: aimee-runtime-web --port <port>\n");
    }
 }
 
