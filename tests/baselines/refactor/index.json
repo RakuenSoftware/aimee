@@ -147,7 +147,7 @@
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-          "sha256": "4d19916e464cab53f021ef25f788c415f3a84535fef16f3724ddbacfab55c187"
+          "sha256": "c7771d412be38388ccd229d0ff11567044f9137d6edee2dee01da02749c9b7a5"
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
@@ -1307,7 +1307,7 @@
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin.h",
-          "sha256": "4d19916e464cab53f021ef25f788c415f3a84535fef16f3724ddbacfab55c187"
+          "sha256": "c7771d412be38388ccd229d0ff11567044f9137d6edee2dee01da02749c9b7a5"
         },
         {
           "path": "src/modules/plugin-loader/include/aimee/plugin-loader/plugin_loader.h",
@@ -1352,7 +1352,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "54566bc1962c97a57bc818a4518029ec11982663ebf349b0a246110064a683e8",
+      "sha256": "ca751342e05714e674e6c34b19aa495cc23dcc607be28cfbc047ad789171a7a8",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {
