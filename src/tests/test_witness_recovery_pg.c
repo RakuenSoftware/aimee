@@ -153,8 +153,9 @@ int main(void)
         "post-restart emit failed");
    MUST(s9.records_emitted == 5, "committed-but-unemitted: expected 5 records, got %llu",
         (unsigned long long)s9.records_emitted);
-   MUST(s9.checkpoints_emitted == 1, "committed-but-unemitted checkpoint was LOST after restart "
-                                     "(emitted %llu)",
+   MUST(s9.checkpoints_emitted == 1,
+        "committed-but-unemitted checkpoint was LOST after restart "
+        "(emitted %llu)",
         (unsigned long long)s9.checkpoints_emitted);
    printf("witness_recovery_pg: boundary 9 OK (checkpoint committed pre-kill is emitted after "
           "restart)\n");

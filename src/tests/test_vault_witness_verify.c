@@ -193,7 +193,8 @@ static void test_inclusion(void)
    vault_witness_leaf_t leaves[3];
    for (int i = 0; i < 3; i++)
    {
-      assert(vault_witness_shard_key_hash(shards[i].tenant, shards[i].provider, leaves[i].key) == 0);
+      assert(vault_witness_shard_key_hash(shards[i].tenant, shards[i].provider, leaves[i].key) ==
+             0);
       assert(vault_witness_leaf_hash(shards[i].tenant, shards[i].provider, shards[i].seq,
                                      shards[i].head, leaves[i].hash) == 0);
    }

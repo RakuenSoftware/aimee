@@ -184,7 +184,8 @@ int main(void)
    {
       EVP_PKEY_CTX *c = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, NULL);
       size_t outlen = sizeof seed;
-      int ok = c && EVP_PKEY_derive_init(c) == 1 && EVP_PKEY_CTX_set_hkdf_md(c, EVP_sha256()) == 1 &&
+      int ok = c && EVP_PKEY_derive_init(c) == 1 &&
+               EVP_PKEY_CTX_set_hkdf_md(c, EVP_sha256()) == 1 &&
                EVP_PKEY_CTX_set1_hkdf_key(c, kek, VAULT_KEK_LEN) == 1 &&
                EVP_PKEY_CTX_add1_hkdf_info(c, (const unsigned char *)VAULT_WITNESS_SIGNER_SEED_INFO,
                                            (int)strlen(VAULT_WITNESS_SIGNER_SEED_INFO)) == 1 &&
@@ -212,7 +213,8 @@ int main(void)
     * contains() would make every absence check pass for free. */
    {
       uint8_t zero[VAULT_KEK_LEN] = {0};
-      MUST(memcmp(kek, zero, VAULT_KEK_LEN) != 0, "server KEK is all-zero (canary would be vacuous)");
+      MUST(memcmp(kek, zero, VAULT_KEK_LEN) != 0,
+           "server KEK is all-zero (canary would be vacuous)");
       uint8_t probe[VAULT_KEK_LEN + 8];
       memcpy(probe, "PREFIX--", 8);
       memcpy(probe + 8, kek, VAULT_KEK_LEN);
@@ -235,8 +237,9 @@ int main(void)
    /* A truncated dump would let a secret hide past the cutoff and pass vacuously.
     * The canary works at small scale by design; if the dump ever fills the buffer,
     * fail loudly rather than scanning only a prefix. */
-   MUST(dn < sizeof dump, "witness table dump was truncated at %zu bytes; the secret scan would "
-                          "only cover a prefix",
+   MUST(dn < sizeof dump,
+        "witness table dump was truncated at %zu bytes; the secret scan would "
+        "only cover a prefix",
         sizeof dump);
    char kek_hex[VAULT_KEK_LEN * 2 + 1], seed_hex[32 * 2 + 1];
    for (int i = 0; i < VAULT_KEK_LEN; i++)
@@ -245,8 +248,7 @@ int main(void)
       snprintf(seed_hex + i * 2, 3, "%02x", seed[i]);
    MUST(!contains(dump, dn, (const uint8_t *)kek_hex, VAULT_KEK_LEN * 2),
         "the server KEK appears (hex) in a witness table");
-   MUST(!contains(dump, dn, kek, VAULT_KEK_LEN),
-        "the server KEK appears (raw) in a witness table");
+   MUST(!contains(dump, dn, kek, VAULT_KEK_LEN), "the server KEK appears (raw) in a witness table");
    MUST(!contains(dump, dn, (const uint8_t *)seed_hex, 32 * 2),
         "the witness signing seed appears (hex) in a witness table");
    MUST(!contains(dump, dn, seed, 32), "the witness signing seed appears (raw) in a witness table");
@@ -260,20 +262,23 @@ int main(void)
     * ("vault:<sentinel>") or stored a digest that happened to contain it. Exact SQL
     * equality proves no prefix/suffix/transform: all five canary rows equal the
     * sentinel, and none merely contains it. */
-   int64_t exact = count_query(conn,
-                               "SELECT count(*) FROM kb_vault_witness_log WHERE tenant='!kb' AND "
-                               "provider='!audit' AND source_id LIKE 'canary-%' AND provider_cred=?1",
-                               SENTINEL_CRED);
+   int64_t exact =
+       count_query(conn,
+                   "SELECT count(*) FROM kb_vault_witness_log WHERE tenant='!kb' AND "
+                   "provider='!audit' AND source_id LIKE 'canary-%' AND provider_cred=?1",
+                   SENTINEL_CRED);
    int64_t wrapped =
        count_query(conn,
                    "SELECT count(*) FROM kb_vault_witness_log WHERE tenant='!kb' AND "
                    "provider='!audit' AND source_id LIKE 'canary-%' AND provider_cred<>?1 AND "
                    "position(?1 in provider_cred) > 0",
                    SENTINEL_CRED);
-   MUST(exact == 5, "provider_cred is not stored verbatim: %lld of 5 canary rows equal the sentinel",
+   MUST(exact == 5,
+        "provider_cred is not stored verbatim: %lld of 5 canary rows equal the sentinel",
         (long long)exact);
-   MUST(wrapped == 0, "provider_cred was wrapped/transformed (contains but does not equal the "
-                      "sentinel) in %lld rows",
+   MUST(wrapped == 0,
+        "provider_cred was wrapped/transformed (contains but does not equal the "
+        "sentinel) in %lld rows",
         (long long)wrapped);
 
    OPENSSL_cleanse(kek, sizeof kek);

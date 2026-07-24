@@ -10,7 +10,7 @@
 #include "modules/vault/vault_witness_record.h"
 #include "modules/vault/vault_witness_signer.h"
 
-#define EMIT_ERR 256
+#define EMIT_ERR        256
 #define EMIT_MAX_SHARDS 4096
 /* Rows per read. Bounded so each statement, each frame loop and each cursor
  * advance stays small; the caller's budget governs how many batches a run drains.
@@ -87,8 +87,8 @@ static db2_witness_emit_result_t emit_shard_batch(void *conn, const pending_t *p
    if (!st)
       return DB2_WITNESS_EMIT_ERROR;
    if (aimee_pg_bind_text(st, "?1", p->tenant) != 0 ||
-       aimee_pg_bind_text(st, "?2", p->provider) != 0 || aimee_pg_bind_int64(st, "?3", after) != 0 ||
-       aimee_pg_bind_int64(st, "?4", limit) != 0)
+       aimee_pg_bind_text(st, "?2", p->provider) != 0 ||
+       aimee_pg_bind_int64(st, "?3", after) != 0 || aimee_pg_bind_int64(st, "?4", limit) != 0)
    {
       aimee_pg_finalize(st);
       return DB2_WITNESS_EMIT_ERROR;
@@ -394,11 +394,10 @@ db2_witness_emit_result_t db2_witness_emit_run(db2_witness_emit_sink_fn sink, vo
    int64_t cp_after = 0, cp_head = 0;
    int have_cp = 0;
    {
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(conn,
-                           "SELECT kind,tenant,provider,last_emitted,head_seq "
-                           "FROM org_vault_witness_emit_pending()",
-                           err, sizeof err);
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                             "SELECT kind,tenant,provider,last_emitted,head_seq "
+                                             "FROM org_vault_witness_emit_pending()",
+                                             err, sizeof err);
       if (!st)
          return DB2_WITNESS_EMIT_ERROR;
       aimee_pg_step_t sr;
@@ -455,8 +454,7 @@ db2_witness_emit_result_t db2_witness_emit_run(db2_witness_emit_sink_fn sink, vo
    {
       if (pend[i].head_seq <= pend[i].last_emitted)
          continue;
-      rc = emit_shard(conn, &pend[i], EMIT_BATCH_ROWS, (uint64_t)max_per_stream, sink, ctx,
-                      &stats);
+      rc = emit_shard(conn, &pend[i], EMIT_BATCH_ROWS, (uint64_t)max_per_stream, sink, ctx, &stats);
    }
    /* Checkpoints arrive at cadence (roughly one per tick), so a single batch keeps
     * up in steady state. After a long outage the stream drains over several ticks
@@ -472,9 +470,8 @@ db2_witness_emit_result_t db2_witness_emit_run(db2_witness_emit_sink_fn sink, vo
    for (size_t i = 0; i < n; i++)
       if (pend[i].head_seq > pend[i].last_emitted)
          stats.backlog_records += (uint64_t)(pend[i].head_seq - pend[i].last_emitted);
-   stats.backlog_records -= (stats.backlog_records < stats.records_emitted)
-                                ? stats.backlog_records
-                                : stats.records_emitted;
+   stats.backlog_records -= (stats.backlog_records < stats.records_emitted) ? stats.backlog_records
+                                                                            : stats.records_emitted;
    if (have_cp && cp_head > cp_after)
       stats.backlog_checkpoints = (uint64_t)(cp_head - cp_after);
    stats.backlog_checkpoints -= (stats.backlog_checkpoints < stats.checkpoints_emitted)

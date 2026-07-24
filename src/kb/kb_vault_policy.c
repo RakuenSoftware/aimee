@@ -9,9 +9,9 @@
 #include "vault_custody_tpm2.h"         /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_custody_pkcs11.h"
 #include "vault_custody_kms.h"
-#include "vault_internal.h"          /* vault_custody_set_provider */
-#include "vault_server_key.h"        /* vault_is_sealed */
-#include "vault_witness_signer.h"    /* vault_witness_signer_identity (P2b gate) */
+#include "vault_internal.h"       /* vault_custody_set_provider */
+#include "vault_server_key.h"     /* vault_is_sealed */
+#include "vault_witness_signer.h" /* vault_witness_signer_identity (P2b gate) */
 #include <openssl/crypto.h>
 #include <stdio.h>
 #include <string.h>

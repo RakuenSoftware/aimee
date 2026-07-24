@@ -368,25 +368,26 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
    {
       aimee_pg_stmt_t *st = aimee_pg_prepare(
           conn,
-          "SELECT org_vault_witness_checkpoint_persist(?1,?2,?3::boolean,?4,?5,?6,?7,?8,?9::smallint,"
+          "SELECT "
+          "org_vault_witness_checkpoint_persist(?1,?2,?3::boolean,?4,?5,?6,?7,?8,?9::smallint,"
           "?10,?11,?12)",
           err, sizeof err);
       if (!st)
          goto rollback;
-      int bad = aimee_pg_bind_int64(st, "?1", (int64_t)cp.seq) != 0 ||
-                aimee_pg_bind_blob(st, "?2", cp.root, 32) != 0 ||
-                aimee_pg_bind_text(st, "?3", cp.has_predecessor ? "true" : "false") != 0 ||
-                aimee_pg_bind_blob(st, "?4", cp.predecessor_digest, 32) != 0 ||
-                aimee_pg_bind_int64(st, "?5", (int64_t)cp.shard_count) != 0 ||
-                aimee_pg_bind_blob(st, "?6", snap.buf ? snap.buf : (const uint8_t *)"",
-                                   (int)snap.len) != 0 ||
-                aimee_pg_bind_blob(st, "?7", cp.leaf_snapshot_digest, 32) != 0 ||
-                aimee_pg_bind_blob(st, "?8", cp.signer_key_id, VAULT_WITNESS_SIGNER_KEY_ID_LEN) !=
-                    0 ||
-                aimee_pg_bind_int64(st, "?9", cp.sig_alg) != 0 ||
-                aimee_pg_bind_int64(st, "?10", cp.sig_version) != 0 ||
-                aimee_pg_bind_blob(st, "?11", cp.signature, 64) != 0 ||
-                aimee_pg_bind_int64(st, "?12", fence) != 0;
+      int bad =
+          aimee_pg_bind_int64(st, "?1", (int64_t)cp.seq) != 0 ||
+          aimee_pg_bind_blob(st, "?2", cp.root, 32) != 0 ||
+          aimee_pg_bind_text(st, "?3", cp.has_predecessor ? "true" : "false") != 0 ||
+          aimee_pg_bind_blob(st, "?4", cp.predecessor_digest, 32) != 0 ||
+          aimee_pg_bind_int64(st, "?5", (int64_t)cp.shard_count) != 0 ||
+          aimee_pg_bind_blob(st, "?6", snap.buf ? snap.buf : (const uint8_t *)"", (int)snap.len) !=
+              0 ||
+          aimee_pg_bind_blob(st, "?7", cp.leaf_snapshot_digest, 32) != 0 ||
+          aimee_pg_bind_blob(st, "?8", cp.signer_key_id, VAULT_WITNESS_SIGNER_KEY_ID_LEN) != 0 ||
+          aimee_pg_bind_int64(st, "?9", cp.sig_alg) != 0 ||
+          aimee_pg_bind_int64(st, "?10", cp.sig_version) != 0 ||
+          aimee_pg_bind_blob(st, "?11", cp.signature, 64) != 0 ||
+          aimee_pg_bind_int64(st, "?12", fence) != 0;
       if (bad)
       {
          aimee_pg_finalize(st);
@@ -440,14 +441,15 @@ int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_
    if (!conn)
       return -1;
    char err[CP_ERR];
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
-                                          /* No min(bytea) in PostgreSQL, so pick a
-                                           * sample via array_agg rather than an
-                                           * aggregate over the bytea itself. */
-                                          "SELECT count(*), "
-                                          "encode((array_agg(signer_key_id ORDER BY seq))[1],'hex') "
-                                          "FROM kb_vault_witness_checkpoint WHERE signer_key_id <> ?1",
-                                          err, sizeof err);
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        /* No min(bytea) in PostgreSQL, so pick a
+                         * sample via array_agg rather than an
+                         * aggregate over the bytea itself. */
+                        "SELECT count(*), "
+                        "encode((array_agg(signer_key_id ORDER BY seq))[1],'hex') "
+                        "FROM kb_vault_witness_checkpoint WHERE signer_key_id <> ?1",
+                        err, sizeof err);
    if (!st)
       return -1;
    if (aimee_pg_bind_blob(st, "?1", key_id, (int)key_id_len) != 0)

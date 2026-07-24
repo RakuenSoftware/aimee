@@ -90,7 +90,8 @@ int main(void)
     * single constant value the whole time the hand-off is not actually working. */
    if (distinct < 2)
    {
-      fprintf(stderr, "witness gate race: FAIL — reader saw no progress (distinct=%ld)\n", distinct);
+      fprintf(stderr, "witness gate race: FAIL — reader saw no progress (distinct=%ld)\n",
+              distinct);
       return 1;
    }
    printf("witness gate race: ok (distinct transitions observed=%ld, out-of-domain=0)\n", distinct);

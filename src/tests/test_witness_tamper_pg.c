@@ -277,8 +277,9 @@ int main(void)
    vault_witness_offline_report_t both;
    MUST(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &both) == 0,
         "offline verification of the combined stream did not run");
-   printf("witness_tamper_pg: combined copies -> records=%zu duplicate=%zu conflict=%zu tamper=%d\n",
-          both.records, both.records_duplicate, both.records_conflict, both.any_tamper);
+   printf(
+       "witness_tamper_pg: combined copies -> records=%zu duplicate=%zu conflict=%zu tamper=%d\n",
+       both.records, both.records_duplicate, both.records_conflict, both.any_tamper);
    /* Lock down the checkpoint side too. Without this, a regression that made every
     * checkpoint verify as BAD_SIG or UNKNOWN_KEY would still leave this test green,
     * because the record conflict alone sets any_tamper. The duplicate arises because
@@ -298,8 +299,9 @@ int main(void)
    }
    if (both.records_conflict < 2 || !both.any_tamper)
    {
-      fprintf(stderr, "SCENARIO 2 FAILED: comparing retained and post-tamper copies did NOT "
-                      "expose the coherent rewrite (conflict=%zu tamper=%d)\n",
+      fprintf(stderr,
+              "SCENARIO 2 FAILED: comparing retained and post-tamper copies did NOT "
+              "expose the coherent rewrite (conflict=%zu tamper=%d)\n",
               both.records_conflict, both.any_tamper);
       return 1;
    }
@@ -320,8 +322,9 @@ int main(void)
                                                        sizeof sample);
       if (cov != 0)
       {
-         fprintf(stderr, "SCENARIO 3 FAILED: anchor coverage check itself failed on an honest "
-                         "store (returned %d) — the check is broken, not the store\n",
+         fprintf(stderr,
+                 "SCENARIO 3 FAILED: anchor coverage check itself failed on an honest "
+                 "store (returned %d) — the check is broken, not the store\n",
                  cov);
          return 1;
       }
@@ -387,8 +390,9 @@ int main(void)
       }
       if (vr.unknown_key < 1)
       {
-         fprintf(stderr, "SCENARIO 4 FAILED: foreign signer key not reported by verify run "
-                         "(checked=%lld unknown=%lld)\n",
+         fprintf(stderr,
+                 "SCENARIO 4 FAILED: foreign signer key not reported by verify run "
+                 "(checked=%lld unknown=%lld)\n",
                  (long long)vr.checked, (long long)vr.unknown_key);
          return 1;
       }
@@ -411,8 +415,9 @@ int main(void)
          if (db2_witness_checkpoint_verify_run(256, &vr) != 0 || vr.bad_signature != 0 ||
              vr.unknown_key != 0)
          {
-            fprintf(stderr, "SCENARIO 4 FAILED: restoring the signed body did not restore a clean "
-                            "verdict (bad=%lld unknown=%lld)\n",
+            fprintf(stderr,
+                    "SCENARIO 4 FAILED: restoring the signed body did not restore a clean "
+                    "verdict (bad=%lld unknown=%lld)\n",
                     (long long)vr.bad_signature, (long long)vr.unknown_key);
             return 1;
          }
@@ -427,8 +432,9 @@ int main(void)
       }
       if (vr.bad_signature < 1)
       {
-         fprintf(stderr, "SCENARIO 4 FAILED: checkpoint whose signer_key_id was swapped still "
-                         "verified (checked=%lld bad=%lld)\n",
+         fprintf(stderr,
+                 "SCENARIO 4 FAILED: checkpoint whose signer_key_id was swapped still "
+                 "verified (checked=%lld bad=%lld)\n",
                  (long long)vr.checked, (long long)vr.bad_signature);
          return 1;
       }

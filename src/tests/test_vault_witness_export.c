@@ -13,14 +13,15 @@ static void test_frame_roundtrip(void)
 
    uint8_t frame[VAULT_WITNESS_EXPORT_HEADER_LEN + 64];
    size_t len = 0;
-   assert(vault_witness_export_frame(VAULT_WITNESS_EXPORT_CHECKPOINT, payload, sizeof payload, frame,
-                                     sizeof frame, &len) == 0);
+   assert(vault_witness_export_frame(VAULT_WITNESS_EXPORT_CHECKPOINT, payload, sizeof payload,
+                                     frame, sizeof frame, &len) == 0);
    assert(len == VAULT_WITNESS_EXPORT_HEADER_LEN + 64);
 
    vault_witness_export_kind_t kind;
    const uint8_t *p;
    size_t plen;
-   assert(vault_witness_export_parse(frame, len, &kind, &p, &plen) == VAULT_WITNESS_EXPORT_PARSE_OK);
+   assert(vault_witness_export_parse(frame, len, &kind, &p, &plen) ==
+          VAULT_WITNESS_EXPORT_PARSE_OK);
    assert(kind == VAULT_WITNESS_EXPORT_CHECKPOINT && plen == 64 && memcmp(p, payload, 64) == 0);
 }
 
@@ -101,7 +102,8 @@ static void test_empty_payload(void)
    vault_witness_export_kind_t kind;
    const uint8_t *p;
    size_t plen;
-   assert(vault_witness_export_parse(frame, len, &kind, &p, &plen) == VAULT_WITNESS_EXPORT_PARSE_OK);
+   assert(vault_witness_export_parse(frame, len, &kind, &p, &plen) ==
+          VAULT_WITNESS_EXPORT_PARSE_OK);
    assert(plen == 0 && p == NULL);
 }
 

@@ -198,7 +198,6 @@ static void test_malformed_frame(void)
                                        &(vault_witness_offline_report_t){0}) == 0);
 }
 
-
 /* A retained stream that repeats records byte-identically (re-emission after a
  * restart, or a collector retry) must still verify clean. */
 static void test_duplicate_records_tolerated(void)
@@ -472,7 +471,7 @@ static void test_snapshot_digest_ok_but_root_mismatch(void)
    cp.shard_count = 1;
    cp.sig_alg = VAULT_WITNESS_SIG_ED25519;
    cp.sig_version = 1;
-   memset(cp.root, 0xAB, 32); /* NOT the root of the snapshot's leaf set */
+   memset(cp.root, 0xAB, 32);                       /* NOT the root of the snapshot's leaf set */
    SHA256(snap, snap_len, cp.leaf_snapshot_digest); /* but the digest IS correct */
    uint8_t key_id[16];
    memset(key_id, 0xC7, 16);
@@ -498,8 +497,8 @@ static void test_snapshot_digest_ok_but_root_mismatch(void)
 
    vault_witness_offline_report_t rep;
    assert(vault_witness_offline_verify(g_stream, g_len, &anchor, 1, &rep) == 0);
-   assert(rep.checkpoints_ok == 1);       /* the signature is perfectly valid */
-   assert(rep.snapshots_bad == 0);        /* and the digest matches its bytes */
+   assert(rep.checkpoints_ok == 1);          /* the signature is perfectly valid */
+   assert(rep.snapshots_bad == 0);           /* and the digest matches its bytes */
    assert(rep.snapshots_root_mismatch == 1); /* yet the leaves do not rebuild the root */
    assert(rep.snapshots_ok == 0);
    assert(rep.any_tamper == 1);

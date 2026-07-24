@@ -435,9 +435,8 @@ static int db2_verify_pre_provisioned(void *conn, int expected_dim, char *err, s
    /* 2. Schema version: recorded and not older than what this kb depends on. */
    {
       char e2[256] = "";
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(conn, "SELECT value FROM kb_meta WHERE key='schema_version'", e2,
-                           sizeof e2);
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn, "SELECT value FROM kb_meta WHERE key='schema_version'", e2, sizeof e2);
       long ver = -1;
       if (st && aimee_pg_step(st, e2, sizeof e2) == AIMEE_PG_ROW)
       {

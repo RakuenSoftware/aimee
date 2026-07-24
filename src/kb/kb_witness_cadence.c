@@ -43,7 +43,8 @@ int kb_witness_boot_check(char *err, size_t errlen)
     * form aimee-witness-verify's anchor file uses, so an operator can capture it from
     * the boot log of a key-holding kb (there is no separate export command yet). The
     * pubkey and key_id are PUBLIC; only the private seed is secret. */
-   char anchor_line[VAULT_WITNESS_SIGNER_KEY_ID_LEN * 2 + 1 + VAULT_WITNESS_ED25519_PUB_LEN * 2 + 1];
+   char
+       anchor_line[VAULT_WITNESS_SIGNER_KEY_ID_LEN * 2 + 1 + VAULT_WITNESS_ED25519_PUB_LEN * 2 + 1];
    {
       size_t o = 0;
       for (size_t i = 0; i < VAULT_WITNESS_SIGNER_KEY_ID_LEN; i++)
@@ -139,7 +140,7 @@ static int log_sink(void *ctx, vault_witness_export_kind_t kind, const uint8_t *
  * the cost flat as the chain grows; older checkpoints are already covered by the
  * offline verifier over retained copies, which is the authority for history. */
 #define KB_WITNESS_VERIFY_INTERVAL_S 300
-#define KB_WITNESS_VERIFY_WINDOW 256
+#define KB_WITNESS_VERIFY_WINDOW     256
 
 /* Test-only cadence override. A real-daemon kill/liveness harness needs the cadence
  * to fire in seconds, not minutes; production intervals would make such a test take
@@ -163,17 +164,16 @@ static time_t witness_interval(time_t production_s)
 static void emit_once(void)
 {
    db2_witness_emit_stats_t s;
-   db2_witness_emit_result_t r = db2_witness_emit_run(log_sink, NULL, KB_WITNESS_EMIT_MAX_PER_STREAM, &s);
+   db2_witness_emit_result_t r =
+       db2_witness_emit_run(log_sink, NULL, KB_WITNESS_EMIT_MAX_PER_STREAM, &s);
    switch (r)
    {
    case DB2_WITNESS_EMIT_OK:
       if (s.records_emitted || s.checkpoints_emitted)
          LOG_DEBUG("kb.witness",
                    "emitted records=%llu checkpoints=%llu snapshots=%llu backlog=%llu/%llu",
-                   (unsigned long long)s.records_emitted,
-                   (unsigned long long)s.checkpoints_emitted,
-                   (unsigned long long)s.snapshots_emitted,
-                   (unsigned long long)s.backlog_records,
+                   (unsigned long long)s.records_emitted, (unsigned long long)s.checkpoints_emitted,
+                   (unsigned long long)s.snapshots_emitted, (unsigned long long)s.backlog_records,
                    (unsigned long long)s.backlog_checkpoints);
       break;
    case DB2_WITNESS_EMIT_PARITY_MISMATCH:
@@ -276,8 +276,8 @@ void kb_witness_cadence_tick(time_t now)
             LOG_ERROR("kb.witness",
                       "INTEGRITY: retained checkpoints failed verification "
                       "(checked=%lld bad_signature=%lld unknown_key=%lld continuity_broken=%d)",
-                      (long long)vr.checked, (long long)vr.bad_signature,
-                      (long long)vr.unknown_key, vr.continuity_broken);
+                      (long long)vr.checked, (long long)vr.bad_signature, (long long)vr.unknown_key,
+                      vr.continuity_broken);
          }
          else if (vr.continuity_unproven)
          {

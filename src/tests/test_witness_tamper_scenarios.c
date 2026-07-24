@@ -56,8 +56,7 @@ static void gen_keypair(uint8_t priv[32], uint8_t pub[32])
 
 /* Build one record in a shard. `variant` perturbs the content so two records can
  * share a shard_seq while differing — which is what a fork looks like. */
-static void make_record(vault_witness_record_t *r, uint64_t seq, int variant,
-                        const uint8_t *pred)
+static void make_record(vault_witness_record_t *r, uint64_t seq, int variant, const uint8_t *pred)
 {
    memset(r, 0, sizeof *r);
    r->source = VAULT_WITNESS_SRC_REWRAP;
