@@ -354,6 +354,9 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
             db1_context_cache_invalidate();
          if (!skip_side_effects)
             memory_maybe_run_maintenance();
+         /* An existing memory's content was overwritten by an exact-key merge —
+          * a real mutation, audited (distinct op so merges stay filterable). */
+         mem_audit("memory.merge", existing_id, tier, kind, norm_key, new_conf, session_id);
          return 0;
       }
    }
@@ -424,6 +427,9 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          if (db1_context_cache_invalidate)
             db1_context_cache_invalidate();
          memory_maybe_run_maintenance();
+         /* An existing near-duplicate memory's content was overwritten — audited
+          * (the submitted key's identity fingerprint; task_id is the merged id). */
+         mem_audit("memory.merge", dup_id, tier, kind, norm_key, new_conf, session_id);
          return 0;
       }
    }

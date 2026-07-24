@@ -361,11 +361,13 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
 int memory_delete(int64_t id);
 int memory_stats(memory_stats_t *out);
 
-/* Audit hook: notified after each memory MUTATION at the store (insert / update /
- * delete / reject) with NON-CONTENT fields only — the operation, the memory id,
- * and (for insert) its tier / kind / key identity, confidence, and session. This
- * fires in aimee-kb, at the authoritative mutation site, so it catches EVERY
- * caller (agent-driven via kb_client, KB-internal maintenance, and CLI). A
+/* Audit hook: notified after each memory MUTATION at the store — insert, an
+ * exact-key or near-duplicate content overwrite ("memory.merge"), update, delete,
+ * and reject — with NON-CONTENT fields only: the operation, the memory id, and
+ * (for insert/merge) its tier / kind / key identity, confidence, and session. (A
+ * supersede is recorded as its follow-on insert.) This fires in aimee-kb, at the
+ * authoritative mutation site, so it catches every caller regardless of entry
+ * point — agent-driven via kb_client, KB-internal maintenance, and CLI. A
  * KB-side bridge forwards it to aimee-kb's own observability bus. The memory
  * CONTENT (and use_cases / reject reason) — the PII payload — is NEVER passed;
  * and the key/kind, which can themselves embed PII, are fingerprinted by the
