@@ -89,7 +89,15 @@ Two observations worth carrying forward:
   at all — not a path, not a bare filename. Both specify their surface and lifecycle key and stop
   there. A migration slice for either starts with locating the code, not moving it. (`workflows.md`
   is the only other module document naming neither, and `workflows` is not in this class: its module
-  root holds 30 sources and 24 private headers that its descriptor does not yet declare.)
+  root holds 30 sources and 24 private headers that its descriptor does not yet declare.) These two,
+  and `response-composition` (which names only the `aimee_ir.h` IR contract, no implementation site),
+  are **deliberately unlatched**: their code does not exist yet. `control-web`/`runtime-web` are the
+  optional GUI modules owned by `docs/proposals/pending/product-governance-web-and-config.md`, which
+  will supply their implementation. The correct disposition is to keep them as valid, unlatched
+  descriptors — not to write placeholder code purely to satisfy the completeness latch, and not to
+  remove the descriptors (their IDs are reserved by the owning proposals). A silent flip of any of the
+  three to `ownership_complete: true` without real implementation would be a regression; the descriptor
+  mutation suite and the empty-domain guard (slice 39) both defend against it.
 - `kb-synthesis` remains: its canonical document names `src/kb/` (a family of ~22 `kb_curator_*`
   sources compiled into `aimee-kb`) and `src/db2`, deeply coupled to the rest of the KB — a large
   entangled extraction, not a self-contained block. The four `tools`/`routing`/`execution-policy`

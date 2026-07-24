@@ -1,4 +1,12 @@
-/* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders */
+/* agent_tools.c: tool execution, checkpoints, and tool definition JSON builders.
+ *
+ * BOUNDARY (core modularization): this is the server-side session-state slice of
+ * the tools contract (turn/snapshot/toolset state, e.g. agent_tools_begin_turn /
+ * agent_tools_set_snap_id / agent_tools_set_active_toolset). It is deliberately
+ * NOT part of the `tools` module — the tool-call dispatcher and implementations
+ * live in src/modules/tools/ (agent_tools_dispatch.c, agent_tools.c). The two
+ * halves communicate only through the public agent_tools.h. Do NOT add tool
+ * dispatch or tool implementations here; they belong in src/modules/tools/. */
 #include "aimee.h"
 #include "util.h"
 #include "agent_tools.h"
