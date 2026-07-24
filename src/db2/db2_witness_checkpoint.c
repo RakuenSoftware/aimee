@@ -566,3 +566,36 @@ done:
    OPENSSL_cleanse(key_id, sizeof key_id);
    return rc;
 }
+
+int db2_witness_checkpoint_freshness(int64_t *out_count, int64_t *out_age_seconds)
+{
+   if (out_count)
+      *out_count = 0;
+   if (out_age_seconds)
+      *out_age_seconds = 0;
+   if (!out_count || !out_age_seconds)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[CP_ERR];
+   /* One scan: the count, and the age of the newest checkpoint. When empty the age
+    * column is NULL, reported as 0 with count 0 — the caller reads count first. */
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT count(*), "
+       "COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - MAX(created_at)::timestamp))::bigint,0) "
+       "FROM kb_vault_witness_checkpoint",
+       err, sizeof err);
+   if (!st)
+      return -1;
+   int rc = -1;
+   if (aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW)
+   {
+      *out_count = aimee_pg_column_int64(st, 0);
+      *out_age_seconds = aimee_pg_column_int64(st, 1);
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}

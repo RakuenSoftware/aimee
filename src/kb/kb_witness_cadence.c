@@ -11,6 +11,19 @@
 #include "modules/vault/vault_witness_signer.h"
 #include "util.h"
 
+/* Result of the most recent continuous verification pass, read by the release gate.
+ * -1 = never run yet (fail-closed: the gate treats it as not-clean); 0 = last pass
+ * was not clean; 1 = last pass was clean. Written by the cadence (main-loop thread),
+ * read by the HTTP egress path (listener thread); a plain aligned int read/write is
+ * atomic on our targets and the worst case is reading the previous tick's value,
+ * which is acceptable for a health gate. `volatile` for cross-thread visibility. */
+static volatile int g_last_verify_clean = -1;
+
+int kb_witness_verification_last_clean(void)
+{
+   return g_last_verify_clean;
+}
+
 int kb_witness_boot_check(char *err, size_t errlen)
 {
    if (err && errlen)
@@ -224,10 +237,13 @@ void kb_witness_cadence_tick(time_t now)
     * become undetectable in the interim — the evidence is durable and the offline
     * verifier sees the same thing. */
    {
+      /* The first verify runs on the first tick after boot (next_verify seeded to
+       * `now`), so the release gate's "last verification clean" term becomes
+       * available promptly rather than staying fail-closed for a full interval. */
       static time_t next_verify = 0;
       time_t verify_interval = witness_interval(KB_WITNESS_VERIFY_INTERVAL_S);
       if (next_verify == 0)
-         next_verify = now + verify_interval;
+         next_verify = now;
       if (now >= next_verify)
       {
          next_verify = now + verify_interval;
@@ -236,12 +252,14 @@ void kb_witness_cadence_tick(time_t now)
          {
             /* Could not verify is not verified. It is not proof of tampering
              * either, so this is a warning rather than an integrity alert — but it
-             * must never be silent. */
+             * must never be silent. The release gate reads this as NOT clean. */
+            g_last_verify_clean = 0;
             LOG_WARN("kb.witness", "checkpoint verification could not run; evidence is unverified "
                                    "until it succeeds");
          }
          else if (vr.bad_signature > 0 || vr.unknown_key > 0 || vr.continuity_broken)
          {
+            g_last_verify_clean = 0;
             LOG_ERROR("kb.witness",
                       "INTEGRITY: retained checkpoints failed verification "
                       "(checked=%lld bad_signature=%lld unknown_key=%lld continuity_broken=%d)",
@@ -252,15 +270,23 @@ void kb_witness_cadence_tick(time_t now)
          {
             /* A gap and a fork are indistinguishable from the stored run alone, so
              * this is a work item for an operator to resolve by comparing retained
-             * copies — deliberately not reported as clean, and not as tampering. */
+             * copies — deliberately not reported as clean, and not as tampering. The
+             * release gate treats UNPROVEN as NOT clean (fail-closed): egress stays
+             * closed until an operator resolves the gap. */
+            g_last_verify_clean = 0;
             LOG_WARN("kb.witness",
                      "checkpoint continuity UNPROVEN over the retained window (checked=%lld); "
                      "compare cross-gap leaf sets against retained copies before concluding clean",
                      (long long)vr.checked);
          }
          else
+         {
+            /* Clean: signatures valid, keys known, continuity ok (including the
+             * vacuous checked==0 case on a fresh kb — nothing to disagree with). */
+            g_last_verify_clean = 1;
             LOG_DEBUG("kb.witness", "checkpoint run verified: %lld checkpoints",
                       (long long)vr.checked);
+         }
       }
    }
 

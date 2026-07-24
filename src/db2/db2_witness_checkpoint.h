@@ -56,6 +56,18 @@ db2_witness_checkpoint_result_t db2_witness_checkpoint_produce(int64_t *out_seq)
 int db2_witness_checkpoint_anchor_coverage(const uint8_t *key_id, size_t key_id_len,
                                            int64_t *out_unknown, char *sample, size_t sample_cap);
 
+/* Release-gate freshness input. Reports how many checkpoints exist and the age in
+ * seconds of the latest one (by created_at). A stalled checkpoint chain — the age
+ * growing without bound — means signed-root production has stopped, which is the
+ * state in which a coherent local rewrite would no longer be caught by a fresh
+ * signed root, so the release gate must close on it. A kb with ZERO checkpoints has
+ * not stalled (it simply has no evidence yet); the caller treats count==0 as "not
+ * stale" so a fresh key-holding kb is not deadlocked before its first checkpoint.
+ *
+ * Returns 0 on success (with *out_count and, when count>0, *out_age_seconds set),
+ * -1 if the query could not run — which the caller MUST treat as fail-closed. */
+int db2_witness_checkpoint_freshness(int64_t *out_count, int64_t *out_age_seconds);
+
 /* Continuous verification over the retained checkpoint run. Loads the most recent
  * `limit` checkpoints, reconstructs each from its stored columns, verifies every
  * signature against the current witness key, and checks predecessor continuity

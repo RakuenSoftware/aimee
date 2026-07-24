@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "db2.h"
 #include "db2/db2_internal.h"
@@ -94,7 +95,9 @@ int main(int argc, char **argv)
    CHECK(kb_vault_live_keys_allowed() == 0, "live keys allowed while still SEALED");
    CHECK(kb_witness_boot_check(err, sizeof err) == 0,
          "boot check refused while sealed (should be a no-op): %s", err);
-   printf("witness_boot_tpm: sealed regime OK (no live keys, boot check is a no-op)\n");
+   /* The release gate is closed while sealed — no live keys (term 1). */
+   CHECK(kb_egress_release_allowed() == 0, "release gate OPEN while sealed (term 1 not fail-closed)");
+   printf("witness_boot_tpm: sealed regime OK (no live keys, boot check no-op, gate closed)\n");
 
    /* Unseal the real anchor. On a stub (non-WITH_TPM2) build this stays sealed. */
    if (vault_unseal(secret, strlen(secret)) != 0 || vault_is_sealed() != 0)
@@ -124,15 +127,71 @@ int main(int argc, char **argv)
          "boot check REFUSED valid evidence under live keys (false positive): %s", err);
    printf("witness_boot_tpm: positive OK (live keys + verifiable evidence -> boot check passes)\n");
 
-   /* NEGATIVE: a retained checkpoint signed by a key this kb cannot derive must make
-    * the boot check refuse. The checkpoint table is WORM; an attacker (or a restored
-    * foreign database) has already defeated that, so we disable the trigger to reach
-    * the state and require the boot gate to catch it. */
+   /* ── The P2b release gate conjunction, term by term ─────────────────────────
+    * The gate returns 1 ONLY on a live-key kb whose witnessing is healthy; every
+    * term is fail-closed. We are under a real unsealed anchor, so terms 1-2 hold;
+    * we drive terms 3-5 directly. */
+
+   /* Term 5 fail-closed by default: verification has not run yet since boot, so the
+    * gate must be CLOSED even though the evidence is valid. */
+   CHECK(kb_egress_release_allowed() == 0,
+         "gate OPEN before any verification pass (term 5 not fail-closed)");
+   printf("witness_boot_tpm: gate closed pre-verification (term 5 fail-closed) OK\n");
+
+   /* Drive the cadence until a continuous verification pass has run. The cadence
+    * gates its whole body (checkpoint + verify + emit) behind one interval check, so
+    * the first tick only arms the timer; a later tick past the (compressed) interval
+    * runs the verify. Loop with real sleeps until last_clean flips off its -1
+    * "never run" sentinel, bounded so a hang fails rather than spins. */
+   setenv("AIMEE_WITNESS_CADENCE_TEST_S", "1", 1);
+   {
+      int ran = 0;
+      for (int i = 0; i < 40; i++)
+      {
+         kb_witness_cadence_tick(time(NULL));
+         if (kb_witness_verification_last_clean() != -1)
+         {
+            ran = 1;
+            break;
+         }
+         struct timespec ts = {.tv_sec = 0, .tv_nsec = 300L * 1000 * 1000};
+         nanosleep(&ts, NULL);
+      }
+      CHECK(ran, "the cadence never ran a verification pass");
+   }
+   CHECK(kb_witness_verification_last_clean() == 1,
+         "verification did not report clean over a valid chain (last_clean=%d)",
+         kb_witness_verification_last_clean());
+
+   /* HEALTHY: every term holds -> gate OPEN. This is the whole point of the gate;
+    * if this were 0 the gate would never open on a healthy production kb. */
+   CHECK(kb_egress_release_allowed() == 1,
+         "gate CLOSED on a fully healthy live-key kb (the gate would never open)");
+   printf("witness_boot_tpm: gate OPEN on a healthy live-key kb OK\n");
+
+   /* Term 4 — freshness. Age the latest checkpoint past the bound; the gate closes.
+    * The checkpoint table is WORM, so disable the trigger to reach the state an
+    * operator would see when the chain has stalled. */
    CHECK(exec_sql(conn, "ALTER TABLE kb_vault_witness_checkpoint DISABLE TRIGGER USER") == 0,
          "could not disable checkpoint WORM");
    CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
+                        "SET created_at = (CURRENT_TIMESTAMP - interval '4000 seconds')::text") == 0,
+         "aging created_at failed");
+   CHECK(kb_egress_release_allowed() == 0, "gate OPEN with a stale checkpoint chain (term 4)");
+   /* Restore freshness and confirm the gate re-opens — proving term 4 was the cause,
+    * not a one-way latch. */
+   CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint SET created_at = pg_now_text()") == 0,
+         "restoring created_at failed");
+   CHECK(kb_egress_release_allowed() == 1, "gate did not re-open after freshness restored (term 4)");
+   printf("witness_boot_tpm: gate closes on a stale chain and re-opens when fresh (term 4) OK\n");
+
+   /* Term 3 — anchor coverage. A retained checkpoint signed by a key this kb cannot
+    * derive closes the gate AND makes the boot check refuse. */
+   CHECK(exec_sql(conn, "UPDATE kb_vault_witness_checkpoint "
                         "SET signer_key_id = decode(repeat('be',16),'hex')") == 0,
          "foreign signer_key_id UPDATE failed");
+   CHECK(kb_egress_release_allowed() == 0,
+         "gate OPEN with a checkpoint signed by an underivable key (term 3)");
    err[0] = '\0';
    int refused = kb_witness_boot_check(err, sizeof err);
    CHECK(refused != 0,
@@ -143,10 +202,12 @@ int main(int argc, char **argv)
     * wrong reason. Require the foreign-key message specifically. */
    CHECK(strstr(err, "cannot derive") != NULL,
          "boot check refused, but not via the foreign-key path (message: %s)", err);
-   printf("witness_boot_tpm: negative OK (live keys + unverifiable checkpoint -> boot REFUSES: %s)\n",
+   printf("witness_boot_tpm: gate closes + boot REFUSES on an underivable-key checkpoint (term 3): "
+          "%s\n",
           err);
 
    db2_shutdown();
-   printf("witness_boot_tpm: PASSED (boot-refusal composition proven under a real TPM anchor)\n");
+   printf("witness_boot_tpm: PASSED (boot-refusal + release-gate conjunction proven under a real "
+          "TPM anchor)\n");
    return 0;
 }

@@ -177,8 +177,8 @@ Not separately exercised here: files and crash artifacts. The evidence never
 touches the filesystem on the kb (the durable store is Postgres; emission is the
 log path), and no witness code writes a temp file or is expected to core-dump with
 evidence resident, so the DB + emitted-bytes scan covers the reachable surface. A
-core-dump scan would require a real anchor build and is folded into the same
-validation-pending item as the boot-refusal path.
+core-dump scan of a real key-holding process remains a deployment-time operator
+procedure, deferred beyond this umbrella.
 
 ## 4. The release gate
 

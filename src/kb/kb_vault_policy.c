@@ -3,12 +3,16 @@
  * unimplemented anchors — kept out of the shared config layer so the enum + the
  * "real anchor only" rule live in one kb-owned place. */
 #include "kb_vault_policy.h"
-#include "vault_custody_mock.h" /* vault_custody_mock_provider */
-#include "vault_custody_tpm2.h" /* vault_custody_tpm2_provider (real or stub) */
+#include "db2/db2_witness_checkpoint.h" /* anchor coverage + freshness (P2b gate) */
+#include "kb/kb_witness_cadence.h"      /* last-verification-clean + freshness bound */
+#include "vault_custody_mock.h"         /* vault_custody_mock_provider */
+#include "vault_custody_tpm2.h"         /* vault_custody_tpm2_provider (real or stub) */
 #include "vault_custody_pkcs11.h"
 #include "vault_custody_kms.h"
-#include "vault_internal.h"   /* vault_custody_set_provider */
-#include "vault_server_key.h" /* vault_is_sealed */
+#include "vault_internal.h"          /* vault_custody_set_provider */
+#include "vault_server_key.h"        /* vault_is_sealed */
+#include "vault_witness_signer.h"    /* vault_witness_signer_identity (P2b gate) */
+#include <openssl/crypto.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -134,11 +138,79 @@ int kb_vault_management_status_keys_allowed(void)
    return g_selected == KB_CUSTODY_KMS && vault_is_sealed() == 0 && vault_custody_kms_hwm_ready();
 }
 
+/* The P2b production egress gate, as the conjunction the umbrella (§4) requires.
+ * Every term is fail-closed: any query that cannot run, or any term that does not
+ * hold, returns 0 (egress stays closed). It returns 1 ONLY on a key-holding kb
+ * (real, unsealed anchor) whose witnessing is healthy, so a dev / file-custody /
+ * mock kb — where kb_vault_live_keys_allowed() is false — always gets 0.
+ *
+ * Checked on every egress request. The two DB reads (coverage, freshness) are
+ * counts over the small checkpoint table and are cheap relative to the envelope
+ * crypto the egress itself performs.
+ *
+ * Scope: this is a health/liveness gate layered on top of the primary defenses
+ * (evidence commits atomically before key use; tampering is caught by external
+ * comparison). On a kb with ZERO checkpoints terms 3-5 hold vacuously, so a fresh
+ * kb is governed only by term 1 — deliberate, so the first egress is not deadlocked
+ * before any evidence exists. Deleting an existing chain to reach that state
+ * requires defeating the checkpoint WORM (an already-compromised kb, outside the
+ * single-machine threat model) and self-corrects within one checkpoint interval;
+ * the gate does not attempt to catch a fully-compromised kb, which is the external
+ * comparison's job. */
+static int witness_release_gate_open(void)
+{
+   /* 1. Live keys are allowed under the selected custody anchor (excludes file/mock
+    *    and a sealed anchor). */
+   if (!kb_vault_live_keys_allowed())
+      return 0;
+
+   /* 2. Witnessing is functional: the signing identity this kb would witness with
+    *    is derivable. On a key-holding kb witnessing is non-disableable, so this is
+    *    the observable "witnessing is active" signal. */
+   uint8_t pub[VAULT_WITNESS_ED25519_PUB_LEN], key_id[VAULT_WITNESS_SIGNER_KEY_ID_LEN];
+   if (vault_witness_signer_identity(pub, key_id) != 0)
+      return 0;
+
+   int open = 0;
+   do
+   {
+      /* 3. The anchor set covers every retained checkpoint's signer_key_id: none is
+       *    signed by a key this kb cannot derive (a foreign/revoked key). A coverage
+       *    check that cannot run is treated as not-covered. */
+      int64_t unknown = -1;
+      if (db2_witness_checkpoint_anchor_coverage(key_id, sizeof key_id, &unknown, NULL, 0) != 0 ||
+          unknown != 0)
+         break;
+
+      /* 4. The latest signed checkpoint is not older than the configured bound. A kb
+       *    with zero checkpoints has not stalled (no evidence yet) and is not gated
+       *    on this term; once a chain exists, a stale head closes the gate. */
+      int64_t count = 0, age = 0;
+      if (db2_witness_checkpoint_freshness(&count, &age) != 0)
+         break;
+      if (count > 0 && age > KB_WITNESS_CHECKPOINT_MAX_AGE_S)
+         break;
+
+      /* 5. Continuous verification's last result was clean (not-run and unproven both
+       *    read as not-clean → fail-closed). */
+      if (kb_witness_verification_last_clean() != 1)
+         break;
+
+      open = 1;
+   } while (0);
+
+   OPENSSL_cleanse(pub, sizeof pub);
+   OPENSSL_cleanse(key_id, sizeof key_id);
+   return open;
+}
+
 int kb_egress_release_allowed(void)
 {
 #if defined(AIMEE_P2B_INTEGRATION_TEST_OVERRIDE)
+   /* The one conspicuous bypass: an integration-only build that skips the witness
+    * health conjunction and gates on live keys alone. Never in a production build. */
    return kb_vault_live_keys_allowed();
 #else
-   return 0;
+   return witness_release_gate_open();
 #endif
 }
