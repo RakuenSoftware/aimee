@@ -171,8 +171,8 @@ new emitter function at the bottom of `src/server/aimee_ir_stream.c` after
 >
 > Phase 4 collapses per-backend sampling knob duplication by moving knobs
 > onto the canonical typed-sampling surface at
-> `src/headers/aimee_ir.h:118-132` (`temperature`, `has_temperature`, `top_p`,
-> `has_top_p`, `top_k`, `has_top_k`, `max_tokens`, `has_max_tokens`,
+> `src/headers/aimee_ir.h:115-129` (`max_tokens`, `has_max_tokens`, `temperature`, `has_temperature`, `top_p`,
+> `has_top_p`, `top_k`, `has_top_k`,
 > `stop_sequences[]`, `n_stop`).
 >
 > Per-backend honours are enumerated in `sampling_capability_matrix.md` §1
