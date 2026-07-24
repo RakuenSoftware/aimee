@@ -141,6 +141,9 @@ aimee_add_test(test_bus_ring test_bus_ring.c ../modules/bus/bus_ring.c)
 target_include_directories(test_bus_ring PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 find_package(Threads REQUIRED)
 target_link_libraries(test_bus_ring PRIVATE Threads::Threads)
+aimee_add_test(test_bus_region test_bus_region.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c)
+target_include_directories(test_bus_region PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
+
 
 
 aimee_add_test(test_self_update test_self_update.c ../self_update_util.c)
