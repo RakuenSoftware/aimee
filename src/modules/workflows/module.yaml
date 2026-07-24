@@ -20,6 +20,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/workflows/gw_orch_workflows.c",
+    "src/modules/workflows/tool_egress.c",
     "src/modules/workflows/wfe_advance.c",
     "src/modules/workflows/wfe_advance_exec.c",
     "src/modules/workflows/wfe_approval.c",
@@ -52,6 +53,7 @@
   ],
   "private_headers": [
     "src/modules/workflows/gw_orch_workflows.h",
+    "src/modules/workflows/tool_egress.h",
     "src/modules/workflows/wfe_advance.h",
     "src/modules/workflows/wfe_advance_exec.h",
     "src/modules/workflows/wfe_approval.h",
