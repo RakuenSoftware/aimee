@@ -115,6 +115,25 @@ static int log_sink(void *ctx, vault_witness_export_kind_t kind, const uint8_t *
 #define KB_WITNESS_VERIFY_INTERVAL_S 300
 #define KB_WITNESS_VERIFY_WINDOW 256
 
+/* Test-only cadence override. A real-daemon kill/liveness harness needs the cadence
+ * to fire in seconds, not minutes; production intervals would make such a test take
+ * minutes per checkpoint. AIMEE_WITNESS_CADENCE_TEST_S, when set to a small integer
+ * (1..60), shortens BOTH the checkpoint and verify intervals. It is a strict lower
+ * bound only — it can never lengthen an interval or disable the cadence — so an
+ * accidental production setting can at worst make checkpoints slightly more
+ * frequent, never suppress them. Unset or malformed leaves the production values. */
+static time_t witness_interval(time_t production_s)
+{
+   const char *v = getenv("AIMEE_WITNESS_CADENCE_TEST_S");
+   if (!v || !v[0])
+      return production_s;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (end && *end == '\0' && n >= 1 && n <= 60 && (time_t)n < production_s)
+      return (time_t)n;
+   return production_s;
+}
+
 static void emit_once(void)
 {
    db2_witness_emit_stats_t s;
@@ -155,11 +174,12 @@ static void emit_once(void)
 void kb_witness_cadence_tick(time_t now)
 {
    static time_t next = 0;
+   time_t interval = witness_interval(KB_WITNESS_CHECKPOINT_INTERVAL_S);
    if (next == 0)
-      next = now + KB_WITNESS_CHECKPOINT_INTERVAL_S;
+      next = now + interval;
    if (now < next)
       return;
-   next = now + KB_WITNESS_CHECKPOINT_INTERVAL_S;
+   next = now + interval;
 
    int64_t seq = -1;
    db2_witness_checkpoint_result_t r = db2_witness_checkpoint_produce(&seq);
@@ -205,11 +225,12 @@ void kb_witness_cadence_tick(time_t now)
     * verifier sees the same thing. */
    {
       static time_t next_verify = 0;
+      time_t verify_interval = witness_interval(KB_WITNESS_VERIFY_INTERVAL_S);
       if (next_verify == 0)
-         next_verify = now + KB_WITNESS_VERIFY_INTERVAL_S;
+         next_verify = now + verify_interval;
       if (now >= next_verify)
       {
-         next_verify = now + KB_WITNESS_VERIFY_INTERVAL_S;
+         next_verify = now + verify_interval;
          db2_witness_verify_report_t vr;
          if (db2_witness_checkpoint_verify_run(KB_WITNESS_VERIFY_WINDOW, &vr) != 0)
          {
