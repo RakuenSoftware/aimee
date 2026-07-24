@@ -63,7 +63,13 @@ Two observations worth carrying forward:
 - `execution-policy`, `routing` and `tools` are each named across two or more directories, and each is
   declared as a dependency by several other descriptors — ten, six and five respectively. Their
   migration is a decomposition question — which of the named files is the module and which is a
-  consumer — not a file move.
+  consumer — not a file move. `docs/validation/core-modularization-class-a-decomposition.md` performs
+  that establishment for all three from the source, with a recommended boundary and the specific
+  decision each migration still needs. In short: the `config_fields.c`/`config_sections.c` paths cited
+  for `tools` and `execution-policy` are `config` surface, not module-core; `tools` has the one clean
+  boundary (the `agent_tools*` family) and is blocked only on a dispatch-location decision and build
+  coupling; `routing` needs `agent_config.c` split; `execution-policy` needs `agent_policy.c` split
+  across three modules and is the highest-risk.
 
 ## What would change this document
 
