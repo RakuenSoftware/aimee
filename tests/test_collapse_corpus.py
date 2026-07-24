@@ -3,8 +3,8 @@
 Verifies that the checked-in fixtures under tests/fixtures/ match the byte
 oracle promised by their headers, that JSON payloads in the json/ subdir
 parse as standard JSON, that no .json file contains an inline // comment
-header (an excluded fragment form), and that every fixture can drive a
-TP/FP/FN/TN verdict via the declared oracle bytes.
+header (an excluded fragment form), and and that fire-fixture offsets and spans identify repeated byte periods. Detector
+integration is intentionally deferred until detector code exists.
 
 Run:  python3 -m unittest tests/test_collapse_corpus.py  -v
 """
@@ -68,39 +68,6 @@ def _iter_fixtures():
                     out.append(p)
     return out
 
-
-def _run_oracle_detector(data, fields):
-    """Stub detector for the corpus. Returns "loop" iff the declared period
-    of `fields["span"]` bytes starting at `fields["offset"]` occurs at least
-    2 times (contiguously or non-contiguously) in `data`. For no-fire
-    fixtures (offset=-1) it returns "no-loop". This is the oracle that
-    later detector code must match."""
-    if fields["expected"] == "no-fire":
-        return "no-loop"
-    off = fields["offset"]
-    sp = fields["span"]
-    if off < 0 or sp < 2 or off + sp > len(data):
-        return "no-loop"
-    period = data[off:off + sp]
-    if len(period) != sp:
-        return "no-loop"
-    n, pos = 0, off
-    while pos + sp <= len(data) and data[pos:pos + sp] == period:
-        n += 1
-        pos += sp
-    if n >= 2:
-        return "loop"
-    body = data[off:]
-    n_alt, search_pos = 0, 0
-    while True:
-        idx = body.find(period, search_pos)
-        if idx < 0:
-            break
-        n_alt += 1
-        search_pos = idx + sp
-    if n_alt >= 2:
-        return "loop"
-    return "no-loop"
 
 
 class TestGrammarDoc(unittest.TestCase):
@@ -344,9 +311,21 @@ class TestCollapseLegit(unittest.TestCase):
             header_line.startswith("# shape:"),
             f"fenced.md header must start with '# shape:', got: {header_line!r}",
         )
-        body = data[lf + 1:].decode("utf-8", errors="replace")
-        self.assertIn("```json", body, "fenced.md: missing ```json fence")
-        self.assertRegex(body, r"```\s*$", "fenced.md: missing closing ``` fence")
+        body = data[lf + 1:].decode("utf-8", errors="strict")
+        match = re.fullmatch(r"```json\n(.*?)\n```\n?", body, re.DOTALL)
+        self.assertIsNotNone(match, "fenced.md: expected one paired json fence")
+        value = json.loads(match.group(1))
+        self.assertIsInstance(value, list, "fenced JSON must be an object array")
+        self.assertTrue(value, "fenced JSON object array must not be empty")
+        self.assertTrue(all(isinstance(item, dict) for item in value))
+        keysets = {tuple(sorted(item)) for item in value}
+        self.assertEqual(len(keysets), 1, "fenced objects must have uniform keys")
+        self.assertTrue(all(isinstance(item.get("kind"), str) for item in value),
+                        "fenced objects require a string kind discriminator")
+        primitive_types = (str, int, float, bool, type(None))
+        self.assertTrue(all(isinstance(leaf, primitive_types)
+                            for item in value for leaf in item.values()),
+                        "fenced object leaves must be primitive")
 
 
 class TestAcceptedGrammarShapes(unittest.TestCase):
@@ -371,109 +350,6 @@ class TestAcceptedGrammarShapes(unittest.TestCase):
         text = _read_bytes(LEGIT_JSON / "fenced.md").decode()
         self.assertRegex(text, r"```json")
 
-
-class TestDetectorExercise(unittest.TestCase):
-    """Drive every fixture through the oracle detector and verify the
-    declared outcome matches the detector's verdict. Accumulate TP/FP/FN/TN
-    counts and assert the metric definitions from the grammar doc hold for
-    the corpus as a whole.
-
-    The oracle detector is the test-only stub `_run_oracle_detector`. For
-    TP/FP/FN/TN mapping the declared `expected` is the ground truth label
-    and the oracle detector verdict (driven by the declared offset+span) is
-    the prediction.
-    """
-
-    EXPECTED_LABELS = {
-        "short_span.txt": "fire",
-        "long_span.txt": "fire",
-        "ramp_then_loop.txt": "fire",
-        "nested_loop.txt": "fire",
-        "interleaved.txt": "fire",
-        "ascii_box.txt": "no-fire",
-        "code_boilerplate.py": "no-fire",
-        "fenced_python.md": "no-fire",
-        "markdown_table.md": "no-fire",
-        "ordered_list.md": "no-fire",
-        "short_lines.txt": "no-fire",
-        "primitives.json": "no-fire",
-        "nested.json": "no-fire",
-        "objects.json": "no-fire",
-        "fenced.md": "no-fire",
-    }
-
-    def test_all_fixtures_have_labels(self):
-        seen = {p.name for p in _iter_fixtures()}
-        missing = set(self.EXPECTED_LABELS) - seen
-        unexpected = seen - set(self.EXPECTED_LABELS)
-        self.assertFalse(missing,
-                         f"fixtures present on disk but missing from label map: {missing}")
-        self.assertFalse(unexpected,
-                         f"label map references fixtures not on disk: {unexpected}")
-
-    def test_oracle_detector_matches_declared_outcome(self):
-        """For every fixture, the oracle detector's verdict must equal the
-        declared expected outcome."""
-        for p in _iter_fixtures():
-            with self.subTest(fixture=p.name):
-                data = _read_bytes(p)
-                fields = _parse_header_for(p)
-                declared = fields["expected"]
-                verdict = _run_oracle_detector(data, fields)
-                expected_verdict = "loop" if declared == "fire" else "no-loop"
-                self.assertEqual(
-                    verdict, expected_verdict,
-                    f"{p.name}: oracle detector verdict {verdict!r} != declared {declared!r}",
-                )
-
-    def test_tp_fp_fn_tn_aggregates(self):
-        """Run the oracle detector over the whole corpus and assert the
-        accumulated TP/FP/FN/TN counts satisfy the metric definitions from
-        the grammar doc:
-            precision = TP / (TP + FP)
-            recall    = TP / (TP + FN)
-            specificity = TN / (TN + FP)
-        The fixture corpus is designed so that the oracle detector agrees
-        with every declared label: TP = number of fire fixtures,
-        TN = number of no-fire fixtures, FP = FN = 0.
-        """
-        tp = fp = fn = tn = 0
-        for p in _iter_fixtures():
-            data = _read_bytes(p)
-            fields = _parse_header_for(p)
-            label = fields["expected"]
-            verdict = _run_oracle_detector(data, fields)
-            detect = (verdict == "loop")
-            truth = (label == "fire")
-            if detect and truth:
-                tp += 1
-            elif detect and not truth:
-                fp += 1
-            elif not detect and truth:
-                fn += 1
-            else:
-                tn += 1
-        self.assertEqual(fp, 0,
-                         f"oracle detector should not mis-fire on legit corpus, got FP={fp}")
-        self.assertEqual(fn, 0,
-                         f"oracle detector should not miss any collapse, got FN={fn}")
-        n_fire = sum(1 for v in self.EXPECTED_LABELS.values() if v == "fire")
-        n_no_fire = sum(1 for v in self.EXPECTED_LABELS.values() if v == "no-fire")
-        self.assertEqual(tp, n_fire,
-                         f"TP should equal number of fire fixtures ({n_fire}), got {tp}")
-        self.assertEqual(tn, n_no_fire,
-                         f"TN should equal number of no-fire fixtures ({n_no_fire}), got {tn}")
-        if tp + fp > 0:
-            precision = tp / (tp + fp)
-            self.assertGreaterEqual(precision, 0.0)
-            self.assertLessEqual(precision, 1.0)
-        if tp + fn > 0:
-            recall = tp / (tp + fn)
-            self.assertEqual(recall, 1.0, "recall should be 1.0 on the oracle corpus")
-        if tn + fp > 0:
-            specificity = tn / (tn + fp)
-            self.assertEqual(specificity, 1.0,
-                             "specificity should be 1.0 on the oracle corpus")
 
 
 if __name__ == "__main__":
