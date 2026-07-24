@@ -2,20 +2,20 @@
 
 ## What this records
 
-Nine module descriptors carry `ownership_complete: true`. Seventeen do not, and they are not one
-group. This document tracks the eight whose module root contains nothing but `module.yaml` — no
-implementation has ever been moved under `src/modules/<id>/`. It exists so that gap is recorded in
-one place rather than inferred by re-measuring the tree, and so `rule=ownership-empty-domain` has
-somewhere to point.
+Nineteen module descriptors carry `ownership_complete: true`. Seven do not. This document tracks
+those seven, whose module root contains nothing but `module.yaml` — no implementation has ever been
+moved under `src/modules/<id>/`. It exists so that gap is recorded in one place rather than inferred
+by re-measuring the tree, and so `rule=ownership-empty-domain` has somewhere to point.
 
-The other nine unlatched descriptors have implementation files in their module root that the
-descriptor does not declare. They are a different problem — declaration, then latching — and are not
-tracked here.
+The Class B descriptors that once had undeclared implementation files in their roots — governance,
+learning, workspace, vault, config, git, delegates, workflows, memory — have since been declared and
+latched, as has `benchmarks` (the first Class A code migration). These seven empty-root descriptors
+are the only remainder.
 
 ## Why an empty root cannot be latched
 
 `validate_complete_ownership` compares the declared source and private-header sets against every
-matching file under the module root. For these eight, both actual sets are empty, so set equality
+matching file under the module root. For these seven, both actual sets are empty, so set equality
 holds vacuously and the latch would pass on the source and private-header rules. Until slice 39 the
 only thing preventing it was the separate `docs == ["docs/modules/<id>.md"]` requirement, which none
 of them satisfies — one field away from a descriptor asserting completeness for a module that has not
@@ -23,7 +23,7 @@ been migrated at all.
 
 `docs/modules/module-runtime.md` states that modules without the latch "remain migration debt and
 must not feed generated build profiles." Latching an empty root would silently clear that debt for
-the eight modules furthest from done, and would do it for the eight where the assertion is least
+the seven modules furthest from done, and would do it for the seven where the assertion is least
 true. Slice 39 therefore rejects `ownership_complete: true` whenever the module-local domain is
 empty, with `rule=ownership-empty-domain`.
 
@@ -36,7 +36,13 @@ design question stays open rather than being pre-answered by an opt-out.
 The failure message says the module is not migrated rather than broken. These descriptors are valid;
 they are early.
 
-## The eight
+## The remaining seven
+
+`benchmarks` has been migrated and latched: the cohesive eval framework in the former non-descriptor
+`src/modules/agent_eval/` directory (four sources + two headers) was relocated under
+`src/modules/benchmarks/` and the descriptor declares and latches it. The `agent_eval` directory name,
+forbidden by the canonical taxonomy, is gone; the `agent_eval_` symbol prefix is retained as the
+framework's API identity. Seven Class A modules remain.
 
 Locations below are what each module's own canonical document names. They are a starting inventory
 for a future migration slice, not an ownership assignment: no audit has confirmed that these files
@@ -44,7 +50,6 @@ are the module's, exclusively or at all. A migration slice must establish that i
 
 | module | canonical document names | notes |
 |---|---|---|
-| `benchmarks` | `src/modules/agent_eval/` (`agent_eval.h`) | Adjacent to an existing non-descriptor module directory. |
 | `control-web` | nothing | The document describes the Control Plane GUI, dashboard, assets, listener and proxy behaviour without naming a source location. |
 | `execution-policy` | `src/server/agent_policy.c`, `src/modules/guardrails/guardrails_action_audit.c`, `src/modules/config/config_fields.c`, `src/modules/config/config_sections.c` | Named locations span server, guardrails and config; the policy surface is distributed rather than sited. |
 | `kb-synthesis` | `src/kb/` (`kb_curator_synthesize.h`), `src/db2` | Lives with the KB and its PostgreSQL store. |

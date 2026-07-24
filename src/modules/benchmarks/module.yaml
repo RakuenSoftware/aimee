@@ -11,5 +11,20 @@
   "enabled_by_default": false,
   "runtime_toggle": {
     "supported": false
-  }
+  },
+  "ownership_complete": true,
+  "sources": [
+    "src/modules/benchmarks/agent_eval.c",
+    "src/modules/benchmarks/agent_eval_baseline.c",
+    "src/modules/benchmarks/agent_eval_benchmarks.c",
+    "src/modules/benchmarks/agent_eval_memory_support.c"
+  ],
+  "private_headers": [
+    "src/modules/benchmarks/agent_eval.h",
+    "src/modules/benchmarks/agent_eval_internal.h"
+  ],
+  "tests": [],
+  "docs": [
+    "docs/modules/benchmarks.md"
+  ]
 }

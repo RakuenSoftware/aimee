@@ -9,11 +9,16 @@ verification, workflow approval, memory behavior, or general telemetry.
 
 ## Public contracts
 
-The target module directory currently contains only `src/modules/benchmarks/module.yaml`. Existing
-physical contracts remain distributed through `src/modules/agent_eval/agent_eval.h`, `memory.benchmark`,
-`eval.run`, benchmark scripts/catalogs, regression baselines, and CI smoke gates. Treating those as
-benchmark ownership is a target classification, not evidence that relocation or optional isolation is
-complete.
+The module directory `src/modules/benchmarks/` owns four sources — `agent_eval.c` (shared eval
+machinery: case scoring, latency buckets, temp-db bootstrap, progress files), `agent_eval_baseline.c`
+(regression baseline load/compare/save), `agent_eval_benchmarks.c` (LoCoMo and LongMemEval dataset
+runners), and `agent_eval_memory_support.c` (memory-retrieval eval support) — behind two module-root
+headers: `agent_eval.h`, the public contract consumed by CLI, server, and test callers through
+`-Imodules/benchmarks`, and `agent_eval_internal.h`, the private seam shared across the four sources.
+This code was relocated from the former non-descriptor `src/modules/agent_eval/` directory, whose
+name the canonical taxonomy forbids; the `agent_eval_` symbol prefix is retained as the framework's
+API identity. `memory.benchmark` and `eval.run` route handlers, benchmark scripts/catalogs, and CI
+smoke gates remain owned elsewhere and consume this module rather than belonging to it.
 
 ## Dependencies and consumers
 
