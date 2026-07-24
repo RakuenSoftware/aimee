@@ -1,4 +1,4 @@
-# shape: single short span repeated verbatim 4 times; expected: fire; expected_loop_start_offset: 85; expected_loop_span_bytes: 32
+# shape: short span x4; expected: fire; expected_loop_start_offset: 102; expected_loop_span_bytes: 11
 alpha
 beta
 alpha

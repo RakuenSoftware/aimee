@@ -1,9 +1,9 @@
-# shape: repeated loop iterations separated by connective tissue; expected: fire; expected_loop_start_offset: 86; expected_loop_span_bytes: 50
+# shape: interleaved loop x3 with connective between iterations; expected: fire; expected_loop_start_offset: 143; expected_loop_span_bytes: 11
 item
 value
-connective one
+connective
 item
 value
-connective two
+connective
 item
 value
