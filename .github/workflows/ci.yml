@@ -99,7 +99,9 @@ jobs:
         run: ./scripts/check_tier_deps.sh
       - name: Enforce guardrail-collapse Phase 0 anchor contract
         shell: bash
-        # Diff-aware gate: Phase 1+ changes must carry the merged anchor contract.
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        # Diff-aware gate: Phase 1+ changes require anchors already merged on the PR base.
         run: python3 scripts/check-collapse-anchor-gate.py
 
   build:

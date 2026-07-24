@@ -236,3 +236,108 @@ def test_gate_script_is_executable_python() -> None:
         env={**os.environ, "HOME": "/tmp"},
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_gate_rejects_phase_one_change_when_base_branch_lacks_anchors(
+    fake_worktree: Path,
+) -> None:
+    """F001 regression: integration test that validates a PR-style diff
+    containing Phase 1+ changes against a target branch whose head does
+    NOT carry the merged anchor document.
+
+    The realistic scenario is: a PR is opened against ``base`` (the
+    target branch) which has never merged the Phase 0 anchors.  Even if
+    the PR head happens to carry the anchors file (because the same PR
+    adds it), the gate must fail because the contract requires the
+    anchors to be **already merged** on the target branch before
+    Phase 1+ work begins.
+
+    The test mirrors the CI event model by setting ``BASE_SHA`` to the
+    target-branch head and validating the PR head diff, exactly as the
+    gate's ``diff_against_base`` resolution does in CI mode.
+    """
+    # Target branch head: no anchor file, no Phase 1+ surfaces.
+    _commit(fake_worktree, "base: readme", {"README.md": "base\n"})
+    base_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fake_worktree, env={**os.environ, "HOME": "/tmp"},
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    # PR head branch: adds a Phase 1+ surface (src/server/foo.c) AND
+    # the anchors file (because in reality the same PR can carry both).
+    _commit(
+        fake_worktree, "PR: adds server file and anchors",
+        {
+            "src/server/foo.c": "void foo(void) {}\n",
+            "docs/guardrails/collapse_anchors.md":
+                "# Anchors\n\n" + "\n".join(
+                    f"## Decision {n} - placeholder\n" for n in range(1, 7)
+                ) + "\n",
+        },
+    )
+    result = _run_gate(fake_worktree, base_sha=base_head)
+    assert result.returncode == 1, (
+        f"gate must reject PR whose base branch lacks anchors; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "target branch" in result.stderr
+    assert "does not yet contain" in result.stderr
+
+
+def test_gate_accepts_phase_one_change_when_base_branch_has_anchors(
+    fake_worktree: Path,
+) -> None:
+    """F001 closure: companion to the rejection test above.  When the
+    target branch already carries the merged anchor document AND the
+    PR head touches a Phase 1+ surface, the gate must pass (the
+    anchors file is already on the target branch, satisfying the
+    merge-first contract)."""
+    _write_anchors(fake_worktree, list(range(1, 7)))
+    _commit(fake_worktree, "base: anchors", {})
+    base_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fake_worktree, env={**os.environ, "HOME": "/tmp"},
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    # PR head: Phase 1+ change only (anchor file not touched again).
+    _commit(
+        fake_worktree, "PR: server change only",
+        {"src/server/foo.c": "void foo(void) {}\n"},
+    )
+
+    result = _run_gate(fake_worktree, base_sha=base_head)
+    assert result.returncode == 0, (
+        f"gate must pass when target branch has anchors; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "present with all six decisions" in result.stdout
+
+
+def test_gate_rejects_phase_one_change_when_base_branch_decisions_incomplete(
+    fake_worktree: Path,
+) -> None:
+    """F001 closure: when the target branch carries the anchor file but
+    it is missing one of the six ``## Decision N`` headings, the gate
+    must reject the PR even though the file is present."""
+    _write_anchors(fake_worktree, [1, 2, 3, 4, 5])  # missing Decision 6
+    _commit(fake_worktree, "base: incomplete anchors", {})
+    base_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=fake_worktree, env={**os.environ, "HOME": "/tmp"},
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    _commit(
+        fake_worktree, "PR: server change",
+        {"src/server/foo.c": "void foo(void) {}\n"},
+    )
+
+    result = _run_gate(fake_worktree, base_sha=base_head)
+    assert result.returncode == 1, (
+        f"gate must reject PR whose base branch has incomplete anchors; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "missing on the target branch" in result.stderr
+    assert "6" in result.stderr

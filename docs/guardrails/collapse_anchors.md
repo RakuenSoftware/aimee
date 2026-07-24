@@ -280,15 +280,36 @@ extension to `scripts/gen-reference-docs.py:417`).
 
 ---
 
-## Decision 6 — Audit-store schema and new-record decision
+## Decision 6 — Audit-store schema and `collapse_event` representation
 
-> **AUDIT STORE EXISTS. The WORM row substrate is verified AND its
-> registration/integration into the serving pipeline is now traced end
-> to end (F-004 closure). The structured-detail contract for
-> `collapse_event` is NOT** and is a Phase 2.3.0 prerequisite. The
-> Phase 2.3.0 work introduces both the writer wiring and the
-> detail-schema contract AND the (optional) query helper that
-> consumers will use to filter on the new subkind.
+> **BINDING REPRESENTATION DECISION (single, unambiguous):**
+> `collapse_event` is a **structured-field extension of the existing
+> `audit_event` row** in the WORM store
+> (`src/modules/audit/audit_worm.c:33`).  It is **NOT** a new record
+> type, **NOT** a sibling table, and **NOT** a row in
+> `db1.lifecycle_event`.  No third option.
+>
+> Phase 0 verifies the underlying substrate (the `audit_event` table,
+> its WORM triggers, its hash chain, and its write/checkpoint/seal
+> lifecycle) is reachable from production callers.  The selected
+> representation (a structured-field extension) **requires three
+> Phase 2.3.0 deliverables** to become usable, none of which are
+> verified by Phase 0:
+>
+> 1. **A `collapse_event` writer** (file:line helper, plus call sites
+>    at the per-path relay choke points in §3) that constructs a
+>    single `audit_event` row per event.
+> 2. **Registration / sealing lifecycle integration** -- the writer
+>    must use `audit_worm_chain_key_load`, `audit_worm_append`,
+>    `audit_worm_checkpoint`, and `audit_worm_seal` as the rest of
+>    the production callers already do (no new lifecycle surface).
+> 3. **A production query path** -- a filter helper that walks the
+>    cJSON array returned by `audit_worm_read_page` and selects
+>    `guardrail.collapse.v1.*` rows; this helper is also the first
+>    production caller of `audit_worm_read_page` (which today has
+>    zero production callers -- see §6.1).
+>
+> See §6.3 for the full prerequisite list and file:line targets.
 
 ### 6.1 Verified WORM substrate (file:line, end-to-end traced)
 
@@ -449,103 +470,134 @@ consumer of `audit_worm_read_page`.
   `src/modules/audit/audit_worm.c:638`; Phase 2.3.0 prerequisite if the
   Phase 5 promotion gate consumes audit-derived telemetry, otherwise Phase 5.0.
 
-**Summary of the F-002 / F-004 corrections:** the prior draft claimed
-the `collapse_event` representation was already a "structured extension
-of `audit_event`" backed by an existing structured-detail schema and
-query helper, AND it glossed the registration/sealing/query-surface
-verification with a list of "callable function definitions" rather
+**Summary of the F-002 / F-004 corrections (this round):** the prior
+draft presented `collapse_event` as an already-verified structured
+extension of `audit_event` AND simultaneously listed the writer, JSON
+detail contract, and query helper as Phase 2.3.0 future work -- two
+incompatible framings that did not name what is and is not verified by
+Phase 0.  This round separates them: the Decision 6 binding statement
+gives the representation once and only once (structured-field
+extension of the existing `audit_event` row), §6.1 enumerates the
+verified WORM substrate (file:line, end-to-end), §6.3.2 enumerates
+the three required deliverables (writer, lifecycle integration,
+production query path) and labels each as a Phase 2.3.0 prerequisite
+that is **not** verified by Phase 0, §6.3.3 isolates the JSON detail
+contract as a Phase 2.3.0 prerequisite, and §6.3.5 pairs every
+prerequisite with its prerequisite phase.  The earlier "structured
+extension already exists" framing is retracted; Phase 0 acceptance
+for the audit-store substrate is now marked complete on the
+representation axis only.
 
 
 ---
 
 ## 6.3 F-002 binding decision (audit-store `collapse_event`)
 
-> **BINDING REPRESENTATION DECISION:** `collapse_event` is a
+> **SINGLE, UNAMBIGUOUS BINDING DECISION:** `collapse_event` is a
 > **structured-field extension of the existing `audit_event` row** in
 > the WORM store (`src/modules/audit/audit_worm.c:33`).  It is **NOT**
-> a new record type.
+> a new record type, **NOT** a sibling `collapse_event` table, and
+> **NOT** a row in `db1.lifecycle_event`.  No third option.  This
+> section restates the decision with the writer / registration /
+> sealing / production query path requirements explicitly listed and
+> each marked as a Phase 2.3.0 prerequisite (none verified by Phase 0).
 
-Concretely, every collapse event is written as one row in the existing
+### 6.3.1 Selected representation (file:line, all existing symbols)
+
+Every collapse event is written as **one row** in the existing
 `audit_event` table, using the existing write API and lifecycle
-integration:
+integration.  The row layout is:
 
-- `action = "guardrail.collapse.v1.<verb>"` (e.g.
-  `guardrail.collapse.v1.observe`, `guardrail.collapse.v1.enforce`,
-  `guardrail.collapse.v1.escalate`, `guardrail.collapse.v1.shadow.mismatch`,
-  `guardrail.collapse.v1.demote`).  The versioned prefix lets collapse
-  rows coexist with management, tool-action, KB-vault, and metric-snapshot
-  rows on the same hash-chained `audit_event` table; non-collapse
-  consumers of `audit_worm_read_page` (the only existing production
-  query surface — see §6.1) continue to function unchanged.
-- `subject` and `verdict` are populated from the per-path relay choke
-  point (§3).  `detail` is a JSON object whose contract is defined by
-  Phase 2.3.0 (see "Phase 2.3.0 prerequisites" below).
-- Registration / sealing lifecycle is the existing WORM lifecycle:
-  `audit_worm_chain_key_load` at
-  `src/modules/audit/audit_worm_chain.h:45`,
-  `audit_worm_append` at `src/modules/audit/audit_worm.c:135`,
-  `audit_worm_checkpoint` at `:233`, `audit_worm_seal` at `:508`,
-  `audit_worm_verify` at `:559`, `audit_worm_read_page` at `:587`.
+| Column | Value | Source |
+| --- | --- | --- |
+| `action` | `"guardrail.collapse.v1.<verb>"` (e.g. `.observe`, `.enforce`, `.escalate`, `.shadow.mismatch`, `.demote`) | bound here |
+| `subject` | `<routing_key>` (the per-path relay choke point from §3) | bound here |
+| `verdict` | per-event verdict (e.g. `allow`, `block`, `escalate`) | bound here |
+| `detail` | JSON object whose keys are defined by Phase 2.3.0 | **Phase 2.3.0 prerequisite** (NOT verified by Phase 0) |
+| `actor_role` / `actor_principal` / `key_id` / `prev_hash` / `row_hash` | populated by the existing WORM pipeline | verified at `src/modules/audit/audit_worm.c:33-48, 135` |
+| `ts` / `seq` | populated by the existing WORM pipeline | verified at `src/modules/audit/audit_worm.c:33-48` |
 
-**Why not a new record type (rationale, F-002 closure):**
+### 6.3.2 Required deliverables to make the decision usable
+
+The binding decision is **complete** in the sense that the
+representation is fixed.  To **use** the representation, three
+Phase 2.3.0 deliverables are required (each is a prerequisite, none
+is verified by Phase 0):
+
+1. **Writer (Phase 2.3.0 prerequisite, NOT verified by Phase 0):**
+   `audit_worm_collapse_event_log(...)` alongside
+   `audit_worm_metric_snapshot` at `src/modules/audit/audit_worm.c:638`.
+   Builds the JSON `detail` per the contract and calls
+   `audit_worm_append("guardrail.collapse", "", "guardrail.collapse.v1.<verb>",
+   "<routing_key>", "<verdict>", detail)` per the convention.
+2. **Registration / sealing lifecycle (Phase 2.3.0 prerequisite, NOT
+   verified by Phase 0):** the writer must use the existing WORM
+   lifecycle, not a new one.  Specifically: `audit_worm_chain_key_load`
+   at `src/modules/audit/audit_worm_chain.h:45`,
+   `audit_worm_append` at `src/modules/audit/audit_worm.c:135`,
+   `audit_worm_checkpoint` at `:233`, `audit_worm_seal` at `:508`,
+   `audit_worm_verify` at `:559`, `audit_worm_read_page` at `:587`.
+   No new lifecycle surface is required, but **the writer's
+   call-site integration at the per-path relay choke points in §3
+   is gated on Phase 2.0–2.4 prerequisite slices, each gated on
+   Phase 2.3.0** -- those are the wirings, not new lifecycle
+   primitives.
+3. **Production query path (Phase 2.3.0 prerequisite, NOT verified by
+   Phase 0):** `audit_worm_collapse_event_query(...)` filter helper
+   near `audit_worm_read_page` at `src/modules/audit/audit_worm.c:587`.
+   Walks the cJSON array returned by `audit_worm_read_page` and
+   matches rows whose `action` starts with `guardrail.collapse.`
+   (in-memory prefix comparison over each bounded page; no SQL `LIKE`
+   or index change required, because `audit_event` has no index on
+   `action`).  **This helper will be the first production caller of
+   `audit_worm_read_page`** -- verified by §6.1 that
+   `audit_worm_read_page` has zero production callers today.
+
+### 6.3.3 JSON detail contract (Phase 2.3.0 prerequisite)
+
+`docs/guardrails/collapse_event_detail.md` defines the JSON contract
+for the `detail` column when `action` starts with
+`guardrail.collapse.v1.`.  Required keys:
+`schema` (`"v1"`), `phase`
+(`"observe"|"enforce"|"escalate"|"shadow.mismatch"|"demote"`),
+`bucket`, `routing_key`, `counter`, plus path-specific optional
+fields.  The `detail` column at `src/modules/audit/audit_worm.c:42`
+is `TEXT` with no SQLite schema enforcement; the contract is the
+contract for the *interpretation* of the bytes, mirroring the
+opaque-JSON precedent for `metric.snapshot` rows at
+`src/modules/audit/audit_worm.c:675-677`.  **This contract document
+is a Phase 2.3.0 prerequisite and is NOT verified by Phase 0.**
+
+### 6.3.4 Rationale (F-002 closure)
 
 - The existing `audit_event` table already enforces immutability
   (WORM triggers at `src/modules/audit/audit_worm.c:46-48`),
   hash-chaining (`prev_hash` / `row_hash` columns), and sealing
   (`audit_worm_seal`).  A sibling `collapse_event` table would require
   its own schema, its own hash-chain primitive, and its own checkpoint
-  table — duplicated work for an operational record that has identical
+  table -- duplicated work for an operational record that has identical
   storage-shape requirements.
-- The `db1.lifecycle_event` table does not carry a hash chain — it is
-  signed-by-an-actor workflow state, not a security log.  Using it
-  would weaken the collapse event's tamper-evidence story.
+- The `db1.lifecycle_event` table does not carry a hash chain -- it is
+  signed-by-an-actor workflow state, not a security log.  Using it would
+  weaken the collapse event's tamper-evidence story.
 - The versioned `action` prefix keeps the existing
   `audit_worm_read_page` query surface unchanged for non-collapse
   consumers and gives collapse-aware consumers a stable prefix to
   filter on without a SQL `LIKE` / index change.
 
-**Phase 2.3.0 prerequisites (the only remaining work for collapse-event
-substrate):**
+### 6.3.5 Pairing (every prerequisite paired with its prerequisite phase)
 
-1. **`docs/guardrails/collapse_event_detail.md`** — JSON contract for
-   the `detail` column when `action` starts with
-   `guardrail.collapse.v1.`.  Required keys:
-   `schema` (`"v1"`), `phase` (`"observe"|"enforce"|"escalate"|"shadow.mismatch"|"demote"`),
-   `bucket`, `routing_key`, `counter`, plus path-specific optional
-   fields.  The `detail` column at `src/modules/audit/audit_worm.c:42`
-   is `TEXT` with no SQLite schema enforcement; the contract is the
-   contract for the *interpretation* of the bytes, mirroring the
-   opaque-JSON precedent for `metric.snapshot` rows at
-   `src/modules/audit/audit_worm.c:675-677`.
-2. **`audit_worm_collapse_event_log(...)`** writer helper alongside
-   `audit_worm_metric_snapshot` at `src/modules/audit/audit_worm.c:638`.
-   Builds the JSON `detail` per the contract and calls
-   `audit_worm_append("guardrail.collapse", "", "guardrail.collapse.v1.<verb>",
-   "<routing_key>", "<verdict>", detail)` per the convention.
-3. **`audit_worm_collapse_event_query(...)`** filter helper near
-   `audit_worm_read_page` at `src/modules/audit/audit_worm.c:587`.
-   Walks the cJSON array returned by `audit_worm_read_page` and
-   matches rows whose `action` starts with `guardrail.collapse.`
-   (in-memory prefix comparison over each bounded page; no SQL `LIKE`
-   / index change is required, because the existing `audit_event`
-   table has no index on `action`).  **This helper will be the first
-   production caller of `audit_worm_read_page`.**
-4. **Lifecycle integration of the writer** at the per-path relay
-   choke points in §3 — wired by Phase 2.0–2.4 prerequisite slices,
-   each gated on Phase 2.3.0.
-
-**Pairing:**
-
-- `collapse_event` JSON contract → Phase 2.3.0 prerequisite.
-- `audit_worm_collapse_event_log` writer → Phase 2.3.0 prerequisite.
-- `audit_worm_collapse_event_query` query helper → Phase 2.3.0
+- `collapse_event` JSON contract document → **Phase 2.3.0** prerequisite.
+- `audit_worm_collapse_event_log` writer helper → **Phase 2.3.0** prerequisite.
+- `audit_worm_collapse_event_query` query helper → **Phase 2.3.0**
   prerequisite (closes the F-004 "0 production callers" gap as the
   first production consumer of `audit_worm_read_page`).
-- Lifecycle integration of the writer at the per-path relay choke
-  point → Phase 2.0–2.4 prerequisite slices, gated on Phase 2.3.0.
+- Call-site integration of the writer at the per-path relay choke
+  points in §3 → **Phase 2.0–2.4** prerequisite slices, each gated
+  on Phase 2.3.0.
 - Optional reader hook for Phase 5 promotion-gate telemetry
-  (`dump_metric_audit_action_breakdown(...)`) → Phase 5.0 if needed,
-  else Phase 2.3.0.
+  (`dump_metric_audit_action_breakdown(...)`) → **Phase 5.0** if
+  needed, else Phase 2.3.0.
 
 ---
 ## Cross-references to the companion documents
@@ -604,7 +656,7 @@ must update both `PHASE_ONE_PREFIXES` in the script and this section.
 - [x] Every prerequisite-missing-substrate decision paired with its prerequisite phase (§2: doc-generator + parser + struct + `CFG_KEY_DESC` + rendered-output verification → Phase 1.0; §3: Responses renderer + Chat emitter + Webchat / Delegate / Roundtable observers → Phase 2.0–2.4; §4: sampling types → Phase 4.0; §5: bucketing → Phase 5.0; §6: audit writer + JSON detail contract + query helper + lifecycle integration → Phase 2.3.0).
 - [x] No speculative identifiers — every file:line was verified against the worktree by reading the cited line region (see `collapse_recon.md` §0 convention).
 - [x] F-001 closure (config side): Decision 2's "preferred" claim is qualified with the doc-generator rendering caveat and the Phase 1.0 prerequisite is annotated with the verification step (`make docs-gen` + render check). Per-path handler/emitter citations are in `collapse_recon.md` §2.2–§2.6, not duplicated here.
-- [x] F-002 closure: §6.3 now records the **binding representation decision** -- `collapse_event` is a structured-field extension of the existing `audit_event` row (action = `guardrail.collapse.v1.<verb>`, subject/verdict populated from the per-path relay choke point, detail = JSON object whose contract is Phase 2.3.0's deliverable).  Phase 2.3.0 prerequisites are listed explicitly: JSON contract document, `audit_worm_collapse_event_log` writer helper, `audit_worm_collapse_event_query` filter helper, and lifecycle integration at the per-path relay choke points.
+- [x] F-002 closure: Decision 6 and §6.3 now state one unambiguous binding representation decision -- `collapse_event` is a structured-field extension of the existing `audit_event` row, NOT a new record type, NOT a sibling table, NOT a row in `db1.lifecycle_event` (no third option).  §6.3.2 enumerates the three required deliverables (writer, registration/sealing lifecycle, production query path) and labels each as a Phase 2.3.0 prerequisite that is NOT verified by Phase 0.  §6.3.3 isolates the JSON detail contract as a Phase 2.3.0 prerequisite.  §6.3.5 pairs every prerequisite with its prerequisite phase.  The earlier "structured extension already exists" framing is retracted.
 - [x] F-003 closure: Decision 5 is now marked UNVERIFIED ABSENCE with a bounded-search evidence table (4 distinct queries, 0 hits in production code) and a Phase 5.0 re-discovery task before binding the architecture.
 - [x] F-004 closure: Decision 6.1 now traces the full lifecycle integration (init / chain-key / append / checkpoint / seal / verify / query) with production-caller counts from `index_find_callers`; the query-surface is honestly flagged as having 0 production callers and Phase 2.3.0 will introduce the first.
 - [x] F-005 closure: "Merge gate" now states the gate is **ENFORCED in CI** by `scripts/check-collapse-anchor-gate.py`, wired as the `Enforce guardrail-collapse Phase 0 anchor contract` step at `.github/workflows/ci.yml:100-103` (the `lint` job, after `check_tier_deps.sh`).  The script resolves its comparison base from `BASE_SHA` (set by the runner for `pull_request` events), then `HEAD~1`, then `git diff HEAD`, and fails closed (exit 2) when no comparison base is reachable.  Behavioural coverage of the accepted and rejected histories lives in `tests/test_check_collapse_anchor_gate.py`.
@@ -619,17 +671,19 @@ must update both `PHASE_ONE_PREFIXES` in the script and this section.
     diff as a Phase 1+ change -- once merged, its on-disk presence is
     what gates subsequent work (regression covered by
     `test_gate_passes_when_anchors_already_merged_and_phase_one_touches_other_files`).
-  - F-002: §6.3 rewritten to record the **binding representation
-    decision** (`collapse_event` = structured-field extension of the
-    existing `audit_event` row), with the rationale (WORM substrate
-    reuse, tamper-evidence parity with the metric-snapshot precedent)
-    and the explicit Phase 2.3.0 prerequisite list (JSON contract
-    document, `audit_worm_collapse_event_log` writer helper,
-    `audit_worm_collapse_event_query` query helper, lifecycle
-    integration at the per-path relay choke points).  The earlier
-    UNRESOLVED framing was retracted -- Phase 0 acceptance for the
-    audit-store substrate is now marked complete on the
-    representation axis.
+  - F-002: Decision 6 intro + §6.3 rewritten to record one
+    unambiguous binding representation decision (`collapse_event` =
+    structured-field extension of the existing `audit_event` row,
+    NOT a new record type, NOT a sibling table, NOT a row in
+    `db1.lifecycle_event`).  §6.3.2 lists the writer, lifecycle
+    integration, and production query path as three separate
+    Phase 2.3.0 prerequisites, each explicitly labelled NOT
+    verified by Phase 0.  §6.3.3 isolates the JSON detail contract.
+    §6.3.5 pairs every prerequisite with its prerequisite phase.
+    Rationale (WORM substrate reuse, tamper-evidence parity with
+    metric-snapshot precedent) is preserved in §6.3.4.  The earlier
+    UNRESOLVED framing and the prior "already verified" overclaim
+    are both retracted.
   - F-003: `docs/guardrails/sampling_capability_matrix.md` §1 rewritten
     so every backend × knob cell carries a verified file:line citation
     (✅/⚠/❌/n/a) traced from parser → typed IR → backend-builder.
