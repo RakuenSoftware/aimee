@@ -49,7 +49,6 @@ PHASE_ONE_PREFIXES = (
     "src/headers/aimee_ir.h",
     "src/modules/config/",
     "src/modules/audit/",
-    "scripts/check-collapse-anchor-gate.py",
 )
 
 
