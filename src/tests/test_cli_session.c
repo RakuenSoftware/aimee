@@ -209,6 +209,35 @@ static void test_recv_ok_on_stable_pane(void)
    assert(strstr(buf, "STATIC OUTPUT") != NULL);
 }
 
+static int g_hb_calls;
+static void hb_counter_cb(void *ud)
+{
+   (void)ud;
+   g_hb_calls++;
+}
+
+/* A tmux-CLI turn makes no aimee HTTP calls, so recv must drive the liveness
+ * heartbeat itself or the stale-idle monitor reaps a healthy long turn (the
+ * claude roundtable-seat regression). The heartbeat fires on the first loop
+ * iteration, so even a short recv proves the wiring. */
+static void test_recv_drives_heartbeat(void)
+{
+   setenv("FAKE_TMUX_MODE", "changing", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   g_hb_calls = 0;
+   cli_session_set_heartbeat_cb(hb_counter_cb, NULL);
+   (void)cli_session_recv(&s, buf, sizeof(buf), 1000);
+   cli_session_set_heartbeat_cb(NULL, NULL);
+   assert(g_hb_calls >= 1);
+
+   /* With no callback set, recv must not crash and must not call the old one. */
+   g_hb_calls = 0;
+   s = fake_session();
+   (void)cli_session_recv(&s, buf, sizeof(buf), 1000);
+   assert(g_hb_calls == 0);
+}
+
 static void test_capture_joins_wraps_and_includes_scrollback(void)
 {
    unlink(g_capturelog);
@@ -1155,6 +1184,7 @@ int main(void)
 
    printf("test_recv_ok_on_stable_pane... ");
    test_recv_ok_on_stable_pane();
+   test_recv_drives_heartbeat();
    printf("OK\n");
 
    printf("test_capture_joins_wraps_and_includes_scrollback... ");

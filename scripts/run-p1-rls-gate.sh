@@ -105,6 +105,20 @@ echo "== P7 whole-vault re-wrap concurrency and failure assertions =="
 echo "== P7 whole-vault re-wrap staging and promotion assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_vault_rewrap_pg_test.sql"
 
+echo "== P7-witness-e1 evidence store: C<->SQL digest parity, append, WORM, ACLs =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_pg_test.sql"
+
+# The cadence/boot/gate run as aimee_kb_runtime on the hardened tier; this DB has the
+# three-role split + schema_grants, so exercise the full witness surface AS that role
+# (every op must succeed; every forge/control path must stay denied). This is the
+# gate that catches a missing runtime grant — the class of bug the owner-only tests
+# never could.
+echo "== P7-witness runtime-role least-privilege gate (as aimee_kb_runtime) =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_runtime_role_pg_test.sql"
+
+echo "== P7-witness-e2 wiring gate (isolated DB: audit + reseal + open ledgers) =="
+"$ROOT/scripts/run-p7-witness-wiring.sh" "$BASE_URL"
+
 echo "== P2a org-model catalog + entitlement isolation assertions (same provisioned db) =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p2a_catalog_rls_test.sql"
 

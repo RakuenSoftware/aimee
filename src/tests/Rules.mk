@@ -375,6 +375,17 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-crypto \
                $(TESTPREFIX)/unit-test-vault-kek-check \
                $(TESTPREFIX)/unit-test-vault-reseal-receipt \
+               $(TESTPREFIX)/unit-test-vault-witness-record \
+               $(TESTPREFIX)/unit-test-vault-witness-merkle \
+               $(TESTPREFIX)/unit-test-vault-witness-checkpoint \
+               $(TESTPREFIX)/unit-test-vault-witness-export \
+               $(TESTPREFIX)/unit-test-vault-witness-verify \
+               $(TESTPREFIX)/unit-test-vault-witness-signer \
+               $(TESTPREFIX)/unit-test-vault-witness-proof \
+               $(TESTPREFIX)/unit-test-vault-witness-offline \
+               $(TESTPREFIX)/unit-test-witness-tamper-scenarios \
+               $(TESTPREFIX)/unit-test-witness-offline-fuzz \
+               $(TESTPREFIX)/unit-test-witness-gate-race \
                $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
@@ -4165,6 +4176,78 @@ $(TESTPREFIX)/unit-test-vault-reseal-receipt: $(OBJDIR)/tests/test_vault_reseal_
                               $(OBJDIR)/modules/vault/vault_reseal_receipt.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
+$(TESTPREFIX)/unit-test-vault-witness-record: $(OBJDIR)/tests/test_vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-merkle: $(OBJDIR)/tests/test_vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-checkpoint: $(OBJDIR)/tests/test_vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-export: $(OBJDIR)/tests/test_vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-verify: $(OBJDIR)/tests/test_vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-signer: $(OBJDIR)/tests/test_vault_witness_signer.o \
+                              $(OBJDIR)/modules/vault/vault_witness_signer.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-witness-proof: $(OBJDIR)/tests/test_vault_witness_proof.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-witness-gate-race: $(OBJDIR)/tests/test_witness_gate_race.o \
+                              $(OBJDIR)/kb/kb_witness_gate_state.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-vault-witness-offline: $(OBJDIR)/tests/test_vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Deterministic mutation property test over the offline verifier: 60k fixed-seed
+# bit-flips of a VALID stream must never verify clean and must never crash. Kept as
+# a CI unit test (not a corpus fuzzer) so any future change letting a mutated stream
+# pass is caught. Fast (~1s) and self-contained (no args, fixed LCG seed).
+$(TESTPREFIX)/unit-test-witness-offline-fuzz: $(OBJDIR)/tests/test_witness_offline_fuzz.o \
+                              $(OBJDIR)/modules/vault/vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-witness-tamper-scenarios: $(OBJDIR)/tests/test_witness_tamper_scenarios.o \
+                              $(OBJDIR)/modules/vault/vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
 $(TESTPREFIX)/unit-test-vault-mutation-budget: \
                               $(OBJDIR)/tests/test_vault_mutation_budget.o \
                               $(OBJDIR)/modules/vault/vault_mutation_budget.o
@@ -4373,6 +4456,55 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
 # hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
 # via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
 $(TESTPREFIX)/unit-test-kb-audit-worm-pg: $(OBJDIR)/tests/test_kb_audit_worm_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/unit-test-witness-checkpoint-produce-pg: $(OBJDIR)/tests/test_witness_checkpoint_produce_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/unit-test-witness-emit-pg: $(OBJDIR)/tests/test_witness_emit_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/aimee-witness-boot-tpm-harness: $(OBJDIR)/tools/witness_boot_tpm_harness.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS)
+
+$(TESTPREFIX)/aimee-witness-cadence-harness: $(OBJDIR)/tools/witness_cadence_harness.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/unit-test-witness-canary-pg: $(OBJDIR)/tests/test_witness_canary_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/unit-test-witness-recovery-pg: $(OBJDIR)/tests/test_witness_recovery_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
+$(TESTPREFIX)/unit-test-witness-tamper-pg: $(OBJDIR)/tests/test_witness_tamper_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
                               $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \

@@ -6,6 +6,13 @@
 
 #include <stddef.h>
 
+/* DB2 schema version. Recorded in kb_meta.schema_version at apply (migrate) time,
+ * and checked by a hardened-tier runtime kb (which cannot apply DDL) to refuse a
+ * stale / un-migrated schema. BUMP this whenever schema.sql adds or changes objects
+ * that a runtime kb depends on, so a runtime kb started against an old schema fails
+ * closed rather than running degraded. */
+#define AIMEE_DB2_SCHEMA_VERSION 1
+
 struct sqlite3;
 
 #ifdef __cplusplus

@@ -95,7 +95,7 @@ static const char *home_dir(void)
  * config dirs on the persistent volume, the npm prefix on PATH. Fills `buf`
  * (>= 7 slots) with "KEY=VALUE" strings stored in `store` (a flat char buffer)
  * and NUL-terminates `buf`. */
-static void build_env(cli_oauth_vendor_t v, char store[7][512], char *buf[8])
+static void build_env(cli_oauth_vendor_t v, char store[8][512], char *buf[9])
 {
    const char *h = home_dir();
    snprintf(store[0], 512, "HOME=%s", h);
@@ -106,10 +106,15 @@ static void build_env(cli_oauth_vendor_t v, char store[7][512], char *buf[8])
    /* A login that wants no pager/editor must not block; keep it headless. */
    snprintf(store[5], 512, "NO_COLOR=1");
    snprintf(store[6], 512, "CI=1");
+   /* claude-code self-updates on launch; in this npm-global layout its updater
+    * leaves an empty package + dangling launcher (see Dockerfile.server). aimee
+    * owns the pinned install, so forbid the vendor auto-updater. This env array
+    * does not inherit the process env, so set it explicitly for install/login. */
+   snprintf(store[7], 512, "DISABLE_AUTOUPDATER=1");
    (void)v;
-   for (int i = 0; i < 7; i++)
+   for (int i = 0; i < 8; i++)
       buf[i] = store[i];
-   buf[7] = NULL;
+   buf[8] = NULL;
 }
 
 /* Absolute path to the installed executable in the npm prefix. */
@@ -157,8 +162,8 @@ int cli_oauth_install(cli_oauth_vendor_t v, char *err, size_t errn)
       snprintf(err, errn, "unsupported vendor");
       return -1;
    }
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
 
    char exe[600];
@@ -242,8 +247,8 @@ static void tmux_paths(cli_oauth_vendor_t v, char *sock, size_t sockn, char *ses
 
 static int tmux_capture(cli_oauth_vendor_t v, const char *sock, const char *sess, char **out)
 {
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
    /* -J joins wrapped lines so a verification URL wider than the pane is captured
     * as one logical line (paired with the wide pane in cli_oauth_start) — without
@@ -255,8 +260,8 @@ static int tmux_capture(cli_oauth_vendor_t v, const char *sock, const char *sess
 
 static void tmux_kill(cli_oauth_vendor_t v, const char *sock, const char *sess)
 {
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
    const char *argv[] = {"tmux", "-S", sock, "kill-session", "-t", sess, NULL};
    char *out = NULL;
@@ -378,8 +383,8 @@ int cli_oauth_start(cli_oauth_vendor_t v, cli_oauth_start_t *out, char *err, siz
    tmux_paths(v, sock, sizeof(sock), sess, sizeof(sess));
    tmux_kill(v, sock, sess); /* clear any stale session before starting */
 
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
 
    /* Launch the login in a detached tmux session, argv-only. The vendor matrix:
@@ -509,8 +514,8 @@ int cli_oauth_submit_code(cli_oauth_vendor_t v, const char *session, const char 
       snprintf(err, errn, "unknown session");
       return -1;
    }
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
    /* send-keys is argv: the code is a literal key string, never shell-parsed. */
    const char *keys[] = {"tmux", "-S", sock, "send-keys", "-t", sess, code, "Enter", NULL};
@@ -543,8 +548,8 @@ int cli_oauth_poll(cli_oauth_vendor_t v, const char *session, cli_oauth_state_t 
    *state = CLI_OAUTH_PENDING;
 
    /* Authoritative check: does the vendor now report a valid login? */
-   char store[7][512];
-   char *env[8];
+   char store[8][512];
+   char *env[9];
    build_env(v, store, env);
    char exe[600];
    exe_path(v, exe, sizeof(exe));
