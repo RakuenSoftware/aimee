@@ -6,7 +6,7 @@ metadata:
   description: >-
     aimee server — the /v1 API (primary model, agent loop, memory, delegates).
     Uses the aimee-kb plugin for shared/vector features via AIMEE_KB_API_URL.
-    Bundles the aimee-webchat browser UI (HTTPS :8443), a first-class surface
+    Bundles the aimee-runtime-web browser UI (HTTPS :8443), a first-class surface
     that is ON by default; this deploy serves it on :8443 — set a PAM login
     (AIMEE_WEBCHAT_USER/PASSWORD) so an operator can sign in.
   vendor: RakuenSoftware
@@ -47,13 +47,13 @@ services:
       # are the SmoothNAS tier-bound bind sources for this plugin's `home` and
       # `workspaces` volumes; a future tierd could inject this automatically.
       AIMEE_SANDBOX_HOST_MOUNTS: "/var/lib/aimee=/mnt/media/.plugins/aimee-server/home,/var/lib/aimee-workspaces=/mnt/media/.plugins/aimee-server/workspaces"
-      # ---- Browser webchat (aimee-webchat, HTTPS on :8443) --------------------
+      # ---- Browser webchat (aimee-runtime-web, HTTPS on :8443) --------------------
       # ON: the UI is a first-class surface and serves on :8443. Provide a PAM
       # login below so an operator can sign in — set USER + a REAL password via
       # the plugin's env override at deploy time (do NOT commit a real secret to
       # this file). Without USER/PASSWORD the login page serves but no one can
-      # sign in. Set AIMEE_WEBCHAT_ENABLED=0 to opt this deploy out entirely.
-      AIMEE_WEBCHAT_ENABLED: "1"
+      # sign in. Set AIMEE_RUNTIME_WEB_ENABLED=0 to opt this deploy out entirely.
+      AIMEE_RUNTIME_WEB_ENABLED: "1"
       # Webchat PAM login (USER + PASSWORD) is provided at deploy time via the
       # plugin config block below — never committed here.
     volumes:
@@ -79,7 +79,7 @@ services:
         expose: false
         hostExpose: true
       # webchat UI. The port is declared so the host can reach it once webchat is
-      # enabled; nothing listens on it while AIMEE_WEBCHAT_ENABLED=0 (a connection
+      # enabled; nothing listens on it while AIMEE_RUNTIME_WEB_ENABLED=0 (a connection
       # to :8443 is simply refused until the UI is turned on).
       - name: webchat
         port: 8443

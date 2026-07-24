@@ -205,9 +205,9 @@ The hidden `hooks` command is used by configured editor/agent integrations:
 
 ## Webchat
 
-- `aimee-webchat --port 8080`: ask `aimee-server` to host the browser webchat surface.
+- `aimee-runtime-web --port 8080`: ask `aimee-server` to host the browser webchat surface.
 
-`aimee-webchat` is also a thin client. It does not read storage directly.
+`aimee-runtime-web` is also a thin client. It does not read storage directly.
 
 ## MCP Server
 

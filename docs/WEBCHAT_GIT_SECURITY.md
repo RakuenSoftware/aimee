@@ -1,6 +1,6 @@
 # Webchat git credential security model
 
-How aimee-webchat handles a webuser's git forge credentials (at rest, in transit
+How aimee-runtime-web handles a webuser's git forge credentials (at rest, in transit
 to git, and inside the in-browser editor) and where exposure is and isn't
 closed. This is the reference for the `webchat git projects + in-browser VSCode`
 feature (proposal in `docs/proposals/done/webchat-git-projects-and-vscode.md`).

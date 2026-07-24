@@ -4,12 +4,12 @@
 # simply unavailable, so this image also runs standalone (DB1-backed endpoints
 # only). The legacy unix-socket kb transport + autostart were retired (#2747).
 #
-# WITH_WEBCHAT bundles the browser UI (aimee-webchat). It is ON by default — the
+# WITH_RUNTIME_WEB bundles the browser UI (aimee-runtime-web). It is ON by default — the
 # UI is a first-class surface. @rakuensoftware/smoothgui is vendored as a tarball
 # under frontend/vendor/ (a file: dependency), so the frontend builds with NO
-# registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
+# registry token and NO credentials. Set --build-arg WITH_RUNTIME_WEB=0 to build the
 # server-only image (skips the frontend + Go webchat stages entirely).
-ARG WITH_WEBCHAT=1
+ARG WITH_RUNTIME_WEB=1
 # WITH_VSCODE bundles code-server (full in-browser VSCode, Open-VSX only) for the
 # webchat Projects/editor surface. ON by default — the editor is a first-class
 # feature; build with --build-arg WITH_VSCODE=0 to omit it (saves ~100 MB).
@@ -55,18 +55,18 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: the standalone Go browser server (cgo: PAM + sqlite) ---
-FROM golang:1.25-bookworm AS webchat-build
+FROM golang:1.25-bookworm AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /src/webchat
-COPY webchat/go.mod webchat/go.sum ./
+WORKDIR /src/runtime-web
+COPY runtime-web/go.mod webchat/go.sum ./
 RUN go mod download
-COPY webchat/ ./
-RUN CGO_ENABLED=1 go build -o /out/aimee-webchat .
+COPY runtime-web/ ./
+RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 
 # Go owns the WFE control plane. It is built and run independently from the
 # temporary C agent resource plane so a provider crash restarts both processes
@@ -80,16 +80,16 @@ RUN go mod download
 COPY server-go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server
 
-# Collect webchat artifacts into a uniform /webchat layout. The "1" variant pulls
+# Collect webchat artifacts into a uniform /runtime-web layout. The "1" variant pulls
 # from the frontend + Go builds above (only in the build graph when
-# WITH_WEBCHAT=1 selects this stage). The "0" variant is empty → no webchat in the
-# image (WITH_WEBCHAT=0 opts the UI out of the build entirely).
-FROM debian:bookworm-slim AS webchat-stage-1
-COPY --from=webchat-build /out/aimee-webchat /webchat/aimee-webchat
-COPY --from=frontend-build /frontend/dist/index.html /webchat/index.html
-FROM debian:bookworm-slim AS webchat-stage-0
-RUN mkdir -p /webchat
-FROM webchat-stage-${WITH_WEBCHAT} AS webchat-stage
+# WITH_RUNTIME_WEB=1 selects this stage). The "0" variant is empty → no webchat in the
+# image (WITH_RUNTIME_WEB=0 opts the UI out of the build entirely).
+FROM debian:bookworm-slim AS runtime-web-stage-1
+COPY --from=runtime-web-build /out/aimee-runtime-web /runtime-web/aimee-runtime-web
+COPY --from=frontend-build /frontend/dist/index.html /runtime-web/index.html
+FROM debian:bookworm-slim AS runtime-web-stage-0
+RUN mkdir -p /runtime-web
+FROM runtime-web-stage-${WITH_RUNTIME_WEB} AS runtime-web-stage
 
 # Optional code-server (full VSCode in the browser). The "1" variant fetches the
 # pinned, arch-matched .deb and extracts it under /opt/codeserver (only in the
@@ -116,7 +116,7 @@ FROM debian:bookworm-slim
 # (crypto), libzstd + zlib (compression). The server reaches Postgres-backed DB2
 # only through aimee-kb, so it does not link libpq itself. curl is for the
 # container HEALTHCHECK. libpam0g + libpam-modules (pam_unix.so) back the
-# co-located aimee-webchat browser login.
+# co-located aimee-runtime-web browser login.
 #
 # tmux + nodejs + npm are enablers for server-hosted OAuth CLI agents
 # (`aimee agent add claude-oauth` / `codex-oauth`): the vendor CLI is installed on
@@ -245,23 +245,23 @@ COPY --from=build /src/aimee /usr/local/bin/aimee
 # Co-located webchat browser UI: the Go service, the single-file React SPA, the
 # PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
 # AIMEE_HOME so its Unix-socket transports line up with the server.
-# Optional webchat: /webchat is empty unless built with WITH_WEBCHAT=1. Install
+# Optional webchat: /runtime-web is empty unless built with WITH_RUNTIME_WEB=1. Install
 # the binary + SPA when present; the entrypoint skips the browser UI when absent.
-COPY --from=webchat-stage /webchat/ /tmp/webchat-stage/
-RUN if [ -f /tmp/webchat-stage/aimee-webchat ]; then \
-        install -m 0755 /tmp/webchat-stage/aimee-webchat /usr/local/bin/aimee-webchat; \
-        mkdir -p /usr/local/share/aimee-webchat; \
-        cp /tmp/webchat-stage/index.html /usr/local/share/aimee-webchat/index.html; \
+COPY --from=runtime-web-stage /runtime-web/ /tmp/runtime-web-stage/
+RUN if [ -f /tmp/runtime-web-stage/aimee-runtime-web ]; then \
+        install -m 0755 /tmp/runtime-web-stage/aimee-runtime-web /usr/local/bin/aimee-runtime-web; \
+        mkdir -p /usr/local/share/aimee-runtime-web; \
+        cp /tmp/runtime-web-stage/index.html /usr/local/share/aimee-runtime-web/index.html; \
         echo "aimee: webchat bundled in image"; \
-    else echo "aimee: webchat not bundled (built with WITH_WEBCHAT=0)"; fi; \
-    rm -rf /tmp/webchat-stage
+    else echo "aimee: webchat not bundled (built with WITH_RUNTIME_WEB=0)"; fi; \
+    rm -rf /tmp/runtime-web-stage
 # Optional code-server: /opt/codeserver/usr is empty unless WITH_VSCODE=1, so
 # this COPY is a no-op in the default build. When present it lands code-server at
 # /usr/bin/code-server; the webchat supervisor launches a per-user instance.
 COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
 RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
-COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
-COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
+COPY deploy/container/pam-aimee-runtime-web /etc/pam.d/aimee-runtime-web
+COPY deploy/container/runtime-web-lib.sh /usr/local/bin/runtime-web-lib.sh
 COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
@@ -283,7 +283,7 @@ COPY config/workflows/ /opt/aimee/defaults/workflows/
 # (pam_unix needs /etc/shadow), then drops aimee-server to the "aimee" user.
 WORKDIR /var/lib/aimee
 # 8740 = server /v1 (plaintext, loopback-only); 8743 = server /v1 over native TLS
-# (the remote thin-client port); 8443 = aimee-webchat browser UI (HTTPS).
+# (the remote thin-client port); 8443 = aimee-runtime-web browser UI (HTTPS).
 EXPOSE 8740 8743 8443
 
 # NOTE: the server's worker threads need a 64 MB stack (the 8 MB container

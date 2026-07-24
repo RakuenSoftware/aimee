@@ -24,7 +24,7 @@ import (
 	"github.com/RakuenSoftware/smoothgui/auth"
 )
 
-const pamService = "aimee-webchat"
+const pamService = "aimee-runtime-web"
 
 type server struct {
 	cfg      *config
@@ -73,7 +73,7 @@ func run(cfg *config) error {
 	addr := fmt.Sprintf(":%d", cfg.port)
 
 	if !cfg.tlsEnabled() {
-		log.Printf("aimee-webchat: http on %s", addr)
+		log.Printf("aimee-runtime-web: http on %s", addr)
 		return http.ListenAndServe(addr, mux)
 	}
 
@@ -98,7 +98,7 @@ func run(cfg *config) error {
 		TLSConfig: tlsCfg,
 	}
 
-	log.Printf("aimee-webchat: https on %s", addr)
+	log.Printf("aimee-runtime-web: https on %s", addr)
 	return srv.ListenAndServeTLS("", "")
 }
 
@@ -417,7 +417,7 @@ func generateSelfSignedCert(certPath, keyPath string) error {
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "aimee-webchat"},
+		Subject:               pkix.Name{CommonName: "aimee-runtime-web"},
 		NotBefore:             time.Now().Add(-time.Minute),
 		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

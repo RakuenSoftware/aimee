@@ -141,7 +141,7 @@ jobs:
           ./aimee version
           ./aimee-server --version
           ./aimee-kb --version
-          test -x ./aimee-webchat
+          test -x ./aimee-runtime-web
       # A configured remote is an exclusive transport: no local probe, no local
       # execution, no local fallback. The test is black-box (temp HOME, a local
       # HTTP stand-in, and a unix-socket sentinel that must never be contacted),
@@ -315,7 +315,7 @@ jobs:
         run: cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF
 
       # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
-      # aimee-gateway, and aimee-webchat are Linux/Docker components and are not
+      # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
       # built here, so the MinGW runner needs no libpq/zstd/OpenSSL.
       - name: Build the thin client
         run: cmake --build build --parallel 2 --target aimee

@@ -1,4 +1,4 @@
-module github.com/JBailes/aimee/webchat
+module github.com/JBailes/aimee/runtime-web
 
 go 1.25.0
 
