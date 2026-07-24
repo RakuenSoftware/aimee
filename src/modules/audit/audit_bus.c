@@ -13,6 +13,7 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -53,7 +54,12 @@ static struct
    atomic_uint_least64_t dropped;
    atomic_uint_least64_t written;
    int started;
+   int terminated; /* set by stop; blocks lazy resurrection after shutdown */
 } g;
+
+/* Guards start/stop transitions and the started/terminated fields. Separate from
+ * g.pub_lock (which serializes producers) and never held across a producer wait. */
+static pthread_mutex_t start_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---------------------------------------------------------- wire form ---- */
 
@@ -216,17 +222,11 @@ static int attach(bus_client_t *c)
 
 /* ------------------------------------------------------- lifecycle ------- */
 
-int audit_bus_start(void)
+/* Bring the bus up. start_lock MUST be held and g.started MUST be false. */
+static int start_locked(void)
 {
-   if (g.started)
-      return 0;
-
    memset(&g, 0, sizeof g);
    pthread_mutex_init(&g.pub_lock, NULL);
-   atomic_store(&g.emitting, 0);
-   atomic_store(&g.stop, 0);
-   atomic_store(&g.dropped, 0);
-   atomic_store(&g.written, 0);
 
    bus_host_config_t cfg;
    memset(&cfg, 0, sizeof cfg);
@@ -263,13 +263,37 @@ int audit_bus_start(void)
    return 0;
 }
 
+int audit_bus_start(void)
+{
+   pthread_mutex_lock(&start_lock);
+   int rc = g.started ? 0 : start_locked();
+   pthread_mutex_unlock(&start_lock);
+   return rc;
+}
+
+/* Lazy start on first emit, so audit_bus_emit is a drop-in for the old direct
+ * audit_action_log in EVERY context (server, standalone agent, CLI) — a row is
+ * never lost merely because no one called audit_bus_start(). atexit drains at a
+ * graceful process exit. Once stop() has run (g.terminated), a late emit does
+ * NOT resurrect the bus; only an explicit audit_bus_start() restarts it. */
+static void ensure_started(void)
+{
+   if (atomic_load_explicit(&g.emitting, memory_order_acquire))
+      return;
+   pthread_mutex_lock(&start_lock);
+   if (!g.started && !g.terminated && start_locked() == 0)
+      atexit(audit_bus_stop);
+   pthread_mutex_unlock(&start_lock);
+}
+
 void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, const char *command,
                     const char *mode, const char *reason_code, const char *verdict,
                     long long task_id)
 {
+   ensure_started();
    if (!atomic_load_explicit(&g.emitting, memory_order_acquire))
    {
-      aimee_log(LOG_WARN, "audit_bus", "audit row emitted before start / after stop; not recorded");
+      aimee_log(LOG_WARN, "audit_bus", "audit bus unavailable; row not recorded");
       return;
    }
 
@@ -318,8 +342,12 @@ void audit_bus_emit(const char *actor, const char *tool, const char *args_hash, 
 
 void audit_bus_stop(void)
 {
+   pthread_mutex_lock(&start_lock);
    if (!g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
       return;
+   }
    /* Reject new emits, then tell the consumer to final-drain and exit. */
    atomic_store_explicit(&g.emitting, 0, memory_order_release);
    atomic_store_explicit(&g.stop, 1, memory_order_release);
@@ -330,6 +358,8 @@ void audit_bus_stop(void)
    bus_host_destroy(&g.host);
    pthread_mutex_destroy(&g.pub_lock);
    g.started = 0;
+   g.terminated = 1; /* a lazy emit must not resurrect the bus after shutdown */
+   pthread_mutex_unlock(&start_lock);
 }
 
 uint64_t audit_bus_dropped(void)

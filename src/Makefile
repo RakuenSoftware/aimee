@@ -379,6 +379,19 @@ DATA_SRCS = code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/m
             kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c modules/roadmap/roadmap_decompose.c modules/roadmap/roadmap_auto.c modules/roadmap/roadmap_milestone.c modules/roadmap/roadmap_reassess.c modules/roadmap/roadmap_report.c kb/kb_mdl.c
 DATA_OBJS = $(DATA_SRCS:%.c=$(OBJDIR)/%.o)
 
+# --- Event bus, linked ONLY into aimee-server via the audit migration ---
+# The per-action audit row (guardrails_action_audit.c, in DATA_SRCS above) is
+# emitted over the event bus (delivery step 3): audit_bus.c publishes it and a
+# consumer thread performs the ledger append. audit_bus.c and the bus it uses are
+# the ONLY bus code in any shipping binary, and aimee-server is the ONLY shipping
+# binary that links it (the sole shipping consumer of guardrails_action_audit).
+# The D7 blast-radius gate enforces exactly this: bus symbols may appear in
+# aimee-server and nowhere else. See docs/dev/EVENT_BUS_DECISIONS.md (D7).
+BUS_SHIP_SRCS = modules/bus/bus_wire.c modules/bus/bus_ring.c modules/bus/bus_region.c modules/bus/bus_arena.c modules/bus/bus_route.c modules/bus/bus_host.c modules/bus/bus_client.c modules/audit/audit_bus.c
+BUS_SHIP_OBJS = $(BUS_SHIP_SRCS:%.c=$(OBJDIR)/%.o)
+$(OBJDIR)/modules/bus/%.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+
 # --- Layer 2: Agent execution (agent loop, tools, HTTP, policy) ---
 AGENT_SRCS = server/agent_runtime.c server/agent_request_build.c server/agent_logging.c server/agent_parallel.c server/agent_runtime_liveness.c server/agent_fallback.c server/agent_context_budget.c server/agent_bridge.c server/tool_call_args.c server/agent_request_shaping.c server/agent_adapter.c server/primary_session_adapter.c server/primary_cli_ingestor.c server/agent_policy.c server/agent_policy_intercept.c modules/agent_eval/agent_eval.c modules/agent_eval/agent_eval_memory_support.c modules/agent_eval/agent_eval_baseline.c modules/agent_eval/agent_eval_benchmarks.c server/agent_coord.c \
              server/agent_tasks.c server/agent_tools.c server/computer_use.c server/script_runner.c server/script_rpc.c toolset.c server/tool_args_coerce.c server/tool_schema_sanitizer.c server/osv_check.c server/http_retry.c server/failover.c \
@@ -1094,7 +1107,7 @@ $(WEBCHAT): $(WEBCHAT_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(BUS_SHIP_OBJS) $(OBJDIR)/aimee_client.o
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 

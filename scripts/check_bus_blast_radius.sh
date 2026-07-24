@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # check_bus_blast_radius.sh — enforce D7 of docs/dev/EVENT_BUS_DECISIONS.md.
 #
-# The event bus is unproven until its conformance suite (slice 10) and its perf
-# gate (slice 12) are green, so no shipping binary may link it while the feature
-# tree is in flight. This runs on *every* slice PR, not only at tree level: a
-# tree-level-only gate would let a regression between slices 10 and 12 link the
-# bus into a shipping binary and still pass each slice's own checks.
+# D7 INVARIANT (post step-3). Through the twelve-slice feature tree no shipping
+# binary linked the bus. Delivery step 3 — the first real module migration —
+# links it into EXACTLY ONE shipping binary, aimee-server, and ONLY to carry the
+# per-action governed-action audit row: guardrails_action_audit.c publishes the
+# row via modules/audit/audit_bus.c, which a consumer thread drains to the ledger.
+# So the blast radius is now precisely:
+#   - bus SOURCE:  only src/modules/bus/* and src/modules/audit/audit_bus.c may
+#                  include a bus header (layer 3).
+#   - bus OBJECTS: only the aimee-server link line may name the bus objects
+#                  (BUS_SHIP_OBJS), and only the BUS_SHIP definition + its compile
+#                  rules may name modules/bus in src/Makefile (layer 2).
+#   - every OTHER shipping binary stays bus-free (layer 4, best-effort — see below).
+# This runs on every PR, so a regression that links the bus into a second binary,
+# or lets a non-audit module include it, trips immediately.
 #
 # The check is a whitelist of where the bus may be named, not a blacklist of
 # shipping targets. An earlier version enumerated the shipping source-list
@@ -13,6 +22,12 @@
 # variable nobody remembered to list would pass. Inverting it makes the textual
 # layer complete by construction: the bus may appear in exactly the places below
 # and nowhere else in the build.
+#
+# Layer 4 honesty note: the shipping binaries are stripped (-s) with LTO, so `nm`
+# reports no static symbols for them — it cannot actually see a bus symbol linked
+# into a stripped binary. Layer 4 is therefore a best-effort backstop for
+# UNSTRIPPED/CI builds; the load-bearing guarantee is layers 1-3, which reason
+# about source and build text and are complete by construction.
 #
 # Four layers, and their honest limits:
 #   1-2. Build-graph text. Complete for anything written as a literal path.
@@ -67,12 +82,27 @@ strip_comments() {
 }
 
 # ------------------------------------------------------- 1. make build graph
-# src/Makefile builds every shipping binary. The bus belongs to no shipping
-# target, so it must not be named there — not in a source list, not on an
-# include path, not in a link rule.
-hits=$({ grep -n 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments)
+# src/Makefile builds every shipping binary. Post step-3 the bus IS named here,
+# but only to carry the audit migration into aimee-server. Two textual invariants
+# keep "only via audit, only aimee-server" complete by construction:
+#   (a) modules/bus may be NAMED only in the BUS_SHIP source list and the two
+#       compile rules that add -Imodules/bus per bus/audit_bus object. Anything
+#       else naming modules/bus is a new, unaudited bus reference in the shipping
+#       build.
+#   (b) the bus objects (BUS_SHIP_OBJS) may be CONSUMED only by their own
+#       definition and the aimee-server link line ($(SERVER):). A second binary
+#       linking them would widen the blast radius past audit-in-the-server.
+hits=$({ grep -n 'modules/bus' src/Makefile 2>/dev/null || true; } | strip_comments |
+   { grep -vE 'BUS_SHIP_SRCS|C_FLAGS \+= -Imodules/bus' || true; })
 if [ -n "$hits" ]; then
-   note "FAIL: src/Makefile names modules/bus — the bus must not reach a shipping target"
+   note "FAIL: src/Makefile names modules/bus outside the BUS_SHIP definition/compile rules"
+   printf '%s\n' "$hits" >&2
+   fail=1
+fi
+hits=$({ grep -n 'BUS_SHIP_OBJS' src/Makefile 2>/dev/null || true; } | strip_comments |
+   { grep -vE 'BUS_SHIP_OBJS =|\$\(SERVER\):' || true; })
+if [ -n "$hits" ]; then
+   note "FAIL: BUS_SHIP_OBJS is linked by a target other than aimee-server (\$(SERVER))"
    printf '%s\n' "$hits" >&2
    fail=1
 fi
@@ -107,7 +137,8 @@ done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
    -not -path './.git/*' -not -path '*/node_modules/*' -not -path './build/*' \
    -not -path '*/build/*' | sed 's|^\./||')
 
-# In the two files where the bus IS allowed, it may only feed bus test targets.
+# In the two test build files where the bus IS allowed, it may only feed bus
+# test targets.
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
    hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
@@ -221,6 +252,17 @@ for bin in "$@"; do
       missing=$((missing + 1))
       continue
     fi
+   # aimee-server carries the bus on purpose (D7 step 3: the audit migration).
+   # It is EXPECTED to reference bus symbols; layers 1-3 and the src/Makefile
+   # confinement above prove no other target links them, and nm cannot see static
+   # bus symbols in this stripped binary in any case. Exempt it explicitly rather
+   # than leaning on that blindness.
+   case "$(basename "$path")" in
+   aimee-server | aimee-server.exe)
+      checked=$((checked + 1))
+      continue
+      ;;
+   esac
    # Defined symbols catch a linked bus object; undefined ones catch a shipping
    # object that references the bus and is only waiting for someone to satisfy
    # it. Both tables are queried, and an unreadable binary fails closed.
@@ -245,8 +287,10 @@ done
 
 if [ "$fail" -ne 0 ]; then
    note ""
-   note "The event bus must not be linked into a shipping binary in this feature"
-   note "tree (D7). See docs/dev/EVENT_BUS_DECISIONS.md."
+   note "The event bus may be linked only into aimee-server, and only to carry the"
+   note "audit migration (D7 step 3). A bus symbol in any other shipping binary, or"
+   note "a bus reference outside modules/bus + audit_bus, is a blast-radius"
+   note "regression. See docs/dev/EVENT_BUS_DECISIONS.md."
    exit 1
 fi
 

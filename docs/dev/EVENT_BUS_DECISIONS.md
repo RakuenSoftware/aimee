@@ -330,6 +330,41 @@ of `aimee`, `aimee-server`, `aimee-kb`, `aimee-gateway`, or `aimee-webchat` — 
 `SRCS`/`OBJS` variables those targets are built from in `src/Makefile` and their `CMakeLists.txt`
 target sources — and that `src/modules/bus/` is referenced only by the bus test targets.
 
+### D7 — revision 4: the invariant transitions when step 3 lands
+
+The rule above ("the bus links into **no** shipping binary") held for the whole twelve-slice feature
+tree. **Delivery step 3 — the first real module migration onto the bus — deliberately ends it.** The
+per-action governed-action audit row (`modules/guardrails/guardrails_action_audit.c`) no longer calls
+the file writer directly; it publishes the row over the bus via `modules/audit/audit_bus.c`, whose
+consumer thread drains it to the ledger. This is an all-or-nothing migration — there is no flagged
+parallel direct path — so the bus becomes load-bearing for one real, off-critical-path operation.
+
+The blast-radius invariant therefore **narrows from "no shipping binary" to "exactly one, only via
+audit":**
+
+- **Source.** Only `src/modules/bus/*` and `src/modules/audit/audit_bus.c` may include a bus header.
+- **Objects.** Only `aimee-server` links the bus, through a single `BUS_SHIP_OBJS` group named on its
+  link line; `src/Makefile` may name `modules/bus` only in the `BUS_SHIP` source list and the two
+  per-object `-Imodules/bus` compile rules. Audit is compiled into `aimee-server` (via
+  `guardrails_action_audit.c`, in `DATA_SRCS`) and nowhere else among shipping binaries, so that is
+  the whole footprint.
+- **Every other shipping binary stays bus-free.**
+
+`scripts/check_bus_blast_radius.sh` was revised to enforce exactly this: layer 1 permits the confined
+`src/Makefile` references and requires `BUS_SHIP_OBJS` to be consumed only by `$(SERVER)`; layer 3
+allowlists `audit_bus.c`; layer 4 exempts `aimee-server` (it carries the bus on purpose) and holds
+every other binary to zero bus symbols. **Honest limit:** shipping binaries are stripped (`-s`) with
+LTO, so `nm` sees no static symbols in them — layer 4 is a best-effort backstop for unstripped/CI
+builds, and the load-bearing guarantee is the source/build-text layers, which are complete by
+construction.
+
+**Durability note.** The old direct write `fflush`'d each row, so it was durable the instant it
+returned. The bus path is asynchronous: the producer publishes and returns, and the consumer writes
+sub-millisecond later. A graceful shutdown drains losslessly (`audit_bus_stop`, also via `atexit`),
+but a hard kill (`SIGKILL`/crash) can lose the few rows still in the ring. This is consistent with the
+audit row's pre-existing best-effort contract (`audit_action_log` already dropped silently when the
+log was not open) and is the accepted trade for moving the write off the caller's thread.
+
 ---
 
 ## D8 — The Go reference client is pure Go
