@@ -21,20 +21,20 @@ KB_TOKEN_ROOTS_PROVISIONER = ../aimee-kb-token-roots-provision$(EXEEXT)
 KB_JWKS_PUBLISHER = ../aimee-kb-jwks-publish$(EXEEXT)
 KB_STATUS_AUTHORITY = ../aimee-kb-status-authority$(EXEEXT)
 KB_TOKEN_AUTHORITY = ../aimee-kb-token-authority$(EXEEXT)
-WEBCHAT = ../aimee-webchat$(EXEEXT)
+RUNTIME_WEB = ../aimee-runtime-web$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
 
-# aimee-webchat is the only Go artifact and needs the Go toolchain (go.mod pins a
+# aimee-runtime-web is the only Go artifact and needs the Go toolchain (go.mod pins a
 # newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
 # (aimee / aimee-server / aimee-kb) need no Go, so `make all` builds webchat only
 # when `go` is on PATH and otherwise skips it with a note — a source install on a
 # box without Go still gets a working core instead of a hard `go: not found`.
 HAVE_GO := $(shell command -v go >/dev/null 2>&1 && echo 1)
 ifeq ($(HAVE_GO),1)
-ALL_WEBCHAT = $(WEBCHAT)
+ALL_RUNTIME_WEB = $(RUNTIME_WEB)
 else
-ALL_WEBCHAT =
+ALL_RUNTIME_WEB =
 endif
 
 define AIMEE_RUNTIME_MUTATION_GUARD
@@ -171,7 +171,7 @@ endif
 
 # dashboard.c is always compiled: provides api_metrics, api_delegations, and
 # the other JSON API functions used by the server RPC layer.  The browser UI
-# (aimee-webchat) is now the standalone Go binary and no longer embedded here.
+# (aimee-runtime-web) is now the standalone Go binary and no longer embedded here.
 ifeq ($(OS),Windows_NT)
     UI_PLATFORM_SRCS = windows/dashboard.c
 else
@@ -746,15 +746,15 @@ DEPS = $(ALL_OBJS:.o=.d)
 
 .PHONY: all clean install inc-check forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb
 
-all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
+all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
 # The forwarder is a standalone static binary (libc only, no aimee objects); it is
 # shipped in the aimee-server image and docker-cp'd into a delegate sandbox.
 $(FORWARDER): aimee_forwarder.c
 	$(CC) -static -O2 -Wall -Wextra -Werror -o $@ $<
 ifneq ($(HAVE_GO),1)
-	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-webchat (browser UI)."
-	@echo "aimee:        Install Go (>=1.25, see webchat/go.mod) and re-run to build it,"
+	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-runtime-web (browser UI)."
+	@echo "aimee:        Install Go (>=1.25, see runtime-web/go.mod) and re-run to build it,"
 	@echo "aimee:        or run the browser UI from the Docker image instead."
 endif
 
@@ -823,12 +823,12 @@ lean:
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
 # daemon system libraries are dynamically linked. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
-check-linking: $(BINARY) $(WEBCHAT) $(SERVER) $(KB) $(GATEWAY)
+check-linking: $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
 ifeq ($(OS),Windows_NT)
 	@echo "check-linking: skipped on Windows (MinGW runtime is intentionally static)"
 else ifeq ($(UNAME_S),Darwin)
 	@fail=0; \
-	for bin in $(BINARY) $(WEBCHAT) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(otool -L "$$bin" | tail -n+2); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -842,7 +842,7 @@ else ifeq ($(UNAME_S),Darwin)
 			done; \
 			continue; \
 		fi; \
-		if [ "$$bin" = "$(WEBCHAT)" ]; then \
+		if [ "$$bin" = "$(RUNTIME_WEB)" ]; then \
 			if echo "$$deps" | grep -q libpq; then \
 				echo "  ERROR: libpq linked into webchat (no DB2 access)"; \
 				fail=1; \
@@ -907,7 +907,7 @@ else ifeq ($(UNAME_S),Darwin)
 	echo "check-linking: ok"
 else
 	@fail=0; \
-	for bin in $(BINARY) $(WEBCHAT) $(SERVER) $(KB) $(GATEWAY); do \
+	for bin in $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY); do \
 		echo "check-linking: $$bin"; \
 		deps=$$(ldd "$$bin"); \
 		if [ "$$bin" = "$(BINARY)" ]; then \
@@ -921,7 +921,7 @@ else
 			done; \
 			continue; \
 		fi; \
-		if [ "$$bin" = "$(WEBCHAT)" ]; then \
+		if [ "$$bin" = "$(RUNTIME_WEB)" ]; then \
 			if echo "$$deps" | grep -q libpq; then \
 				echo "  ERROR: libpq linked into webchat (no DB2 access)"; \
 				fail=1; \
@@ -1112,10 +1112,10 @@ $(BINARY): $(CLI_OBJS) $(CLIENT_SUPPORT_OBJS)
 	$(CC) -o $@ $^ $(L_CLIENT)
 
 # Go webchat server: serves the browser UI, handles PAM auth, proxies chat to aimee-server.
-WEBCHAT_GO_SRCS := $(wildcard ../webchat/*.go) ../webchat/go.mod
-$(WEBCHAT): $(WEBCHAT_GO_SRCS)
+RUNTIME_WEB_GO_SRCS := $(wildcard ../runtime-web/*.go) ../runtime-web/go.mod
+$(RUNTIME_WEB): $(RUNTIME_WEB_GO_SRCS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	cd ../webchat && go build -o "$(CURDIR)/$@" .
+	cd ../runtime-web && go build -o "$(CURDIR)/$@" .
 
 # Server (daemon). DB2-bound work routes through kb_client to aimee-kb;
 # keep this target free of DB2_OBJS and libpq.
@@ -1344,10 +1344,10 @@ CFLAGS_DATADIR = -DAIMEE_DATADIR='"$(DATADIR)"'
 install:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	@mkdir -p build && date +%s > $(BUILD_ID_FILE)
-	$(MAKE) $(BINARY) $(WEBCHAT) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY)
+	$(MAKE) $(BINARY) $(RUNTIME_WEB) $(SERVER) $(KB) $(KB_RESOLVER) $(GATEWAY)
 	rm -f $(PREFIX)/bin/aimee-client $(PREFIX)/bin/aimee-worker
 	install -m 755 $(BINARY) $(PREFIX)/bin/aimee
-	install -m 755 $(WEBCHAT) $(PREFIX)/bin/aimee-webchat
+	install -m 755 $(RUNTIME_WEB) $(PREFIX)/bin/aimee-runtime-web
 	install -m 755 $(SERVER) $(PREFIX)/bin/aimee-server
 	install -m 755 $(FORWARDER) $(PREFIX)/bin/aimee-forwarder
 	install -m 755 $(KB) $(PREFIX)/bin/aimee-kb
@@ -1523,7 +1523,7 @@ $(OBJDIR)/kb/db2/db_schema.o: db2/db_schema.c schema_data.h
 	$(CC) -c $(C_FLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
 
 # --- React webchat frontend (requires npm; optional) ---
-# Builds the React SPA into frontend/dist/ for use by aimee-webchat (Go).
+# Builds the React SPA into frontend/dist/ for use by aimee-runtime-web (Go).
 FRONTEND_DIR      = ../frontend
 
 .PHONY: frontend
@@ -1532,7 +1532,7 @@ frontend:
 
 clean:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(RM) build $(BINARY) $(SERVER) $(WEBCHAT) $(KB) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(GATEWAY) $(RETIRED_ROOT_BINARIES) \
+	$(RM) build $(BINARY) $(SERVER) $(RUNTIME_WEB) $(KB) $(KB_RESOLVER) $(KB_TOKEN_ROOTS_PROVISIONER) $(KB_JWKS_PUBLISHER) $(GATEWAY) $(RETIRED_ROOT_BINARIES) \
 	       $(BINARY)-asan $(SERVER)-asan \
 	       $(LEAN_BINARY) $(LEAN_SERVER) $(LEAN_KB) \
 	       tests/unit-test-* tests/bench-perf tests/fuzz_extractors tests/fuzz_json_parse \

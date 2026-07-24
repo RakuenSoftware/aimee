@@ -78,7 +78,7 @@ model providers are reached only when you explicitly delegate.
 | `aimee` | The thin CLI you run. Holds no database; forwards typed requests to `aimee-server`. Also hosts the MCP bridge (`aimee mcp-serve`). |
 | `aimee-server` | The persistent local hub. Owns local state (DB1/SQLite), runs the compute pool, routes delegates, serves hooks, exposes the RPC and HTTP /v1 surfaces. |
 | `aimee-kb` | The knowledge service. Owns DB2 (Postgres + pgvector), which may be a local single-user database or a shared knowledge service: memories, rules, code index, embeddings, ingest/curator. |
-| `aimee-webchat` | A standalone Go service that serves the browser UI and proxies to `aimee-server`. |
+| `aimee-runtime-web` | A standalone Go service that serves the browser UI and proxies to `aimee-server`. |
 
 (An optional `aimee-gateway` adds ambient-presence delivery, Telegram/ntfy/
 webhooks, speech-to-text/text-to-speech, and is not part of the core path.)
@@ -128,7 +128,7 @@ gates each tool call; PostToolUse re-indexes edited files.
 ## 3. Installation
 
 aimee ships four binaries: the **`aimee`** thin client, **`aimee-server`**,
-**`aimee-kb`**, and **`aimee-webchat`**. For a guided, step-by-step path (Docker
+**`aimee-kb`**, and **`aimee-runtime-web`**. For a guided, step-by-step path (Docker
 server + per-OS thin-client setup), see the
 [Quickstart](docs/QUICKSTART.md); this chapter is the exhaustive reference. There
 are two ways to stand it up:
@@ -241,12 +241,12 @@ that uses a *remote* kb and needs no local database, run `AIMEE_KB_MODE=remote
 | ctags (indexing) | `universal-ctags` | `ctags` | `ctags` | `brew install universal-ctags` |
 | ripgrep (search) | `ripgrep` | `ripgrep` | `ripgrep` | `brew install ripgrep` |
 
-Go 1.25+ is required only to build `aimee-webchat`. Then `install.sh`, in order:
+Go 1.25+ is required only to build `aimee-runtime-web`. Then `install.sh`, in order:
 
 1. **Check prerequisites** (FTS5 + the dev headers); if any are missing it stops
    and points you back at `install-deps.sh` rather than escalating privileges.
 2. **Build** (only if sources changed): `cd src && make all server`, producing
-   `aimee`, `aimee-server`, and `aimee-kb` at the repo root, plus `aimee-webchat`
+   `aimee`, `aimee-server`, and `aimee-kb` at the repo root, plus `aimee-runtime-web`
    when a Go toolchain is on `PATH` (otherwise `make` notes it was skipped and the
    C services still build, webchat is optional for a source install).
 3. **Stop any running server/KB** gracefully to avoid "text file busy".
@@ -277,7 +277,7 @@ and installs just `aimee.exe`; point it at a server with `aimee remote set` (or
 
 ```bash
 cd src
-make                # DB-free clients  -> ../aimee, ../aimee-webchat
+make                # DB-free clients  -> ../aimee, ../aimee-runtime-web
 make server         # server + KB      -> ../aimee-server, ../aimee-kb
 make install        # install all four to ~/.local/bin
 make lean           # size-optimized variants (aimee-lean, ...)
@@ -1188,11 +1188,11 @@ recheck` gate registered MCP packages against OSV advisories.
 
 ## 23. Webchat and the browser UI
 
-`aimee-webchat` serves a browser chat + dashboard. It is a thin client: it holds
+`aimee-runtime-web` serves a browser chat + dashboard. It is a thin client: it holds
 no database and proxies to `aimee-server` over its `/v1` HTTP surface.
 
 ```bash
-aimee-webchat --port 8080
+aimee-runtime-web --port 8080
 ```
 
 It authenticates browser users with PAM (a self-signed TLS cert is generated if
@@ -1623,7 +1623,7 @@ the typed KB `/v1` HTTP API to `aimee-kb`; the storage boundary holds. See
 | Delegate fails immediately | `aimee provider test <name>`; check credentials/`auth_cmd`; inspect `aimee delegate log`. |
 | Writes blocked unexpectedly | Planning mode active, or a worktree redirect, check `guardrail_mode` and `aimee session show`. Set `AIMEE_ANTIPATTERNS_BYPASS=1` only to confirm a diagnosis. |
 | Build fails on `make check-linking` | A tier boundary was violated (libpq in server, SQLite in KB). See [`src/README.md`](src/README.md). |
-| Webchat login fails | PAM service `aimee-webchat` configured? Check login rate limiting and TLS cert. |
+| Webchat login fails | PAM service `aimee-runtime-web` configured? Check login rate limiting and TLS cert. |
 
 Raise log verbosity with `AIMEE_LOG_LEVEL=debug`. For unclean server exits,
 shutdown forensics are recorded to DB1 and surfaced by `aimee status`.

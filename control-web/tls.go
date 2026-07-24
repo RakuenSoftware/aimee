@@ -36,7 +36,7 @@ func ensureTLS(cfg *config) (string, string, error) {
 	}
 	tmpl := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "aimee-kb-console"},
+		Subject:               pkix.Name{CommonName: "aimee-control-web"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(2, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

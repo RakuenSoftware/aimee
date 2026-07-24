@@ -9,7 +9,7 @@ aimee-forwarder
 /aimee-kb-resolver
 /aimee-negation-eval
 /aimee-blast-radius-eval
-/aimee-webchat
+/aimee-runtime-web
 /aimee-gateway
 src/build/
 src/*.a

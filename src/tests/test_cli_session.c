@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include "cJSON.h"
 #include "cli_session.h"
@@ -1014,8 +1015,63 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
    }
 }
 
+/* Per-session claude HOME isolation: a fresh HOME with the OAuth token symlinked
+ * from the shared home and ~/.claude.json seeded from it; missing credentials
+ * fall back (-1) so a seat is never launched unauthenticated. */
+static void test_isolated_claude_home(void)
+{
+   char shared[128];
+   snprintf(shared, sizeof(shared), "/tmp/aimee-iso-%d", (int)getpid());
+   char cdir[192], creds[288], json[288], settings[288];
+   snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
+   mkdir(shared, 0700);
+   mkdir(cdir, 0700);
+   snprintf(creds, sizeof(creds), "%s/.credentials.json", cdir);
+   snprintf(json, sizeof(json), "%s/.claude.json", shared);
+   snprintf(settings, sizeof(settings), "%s/settings.json", cdir);
+   FILE *f = fopen(creds, "w");
+   assert(f);
+   fputs("{\"token\":\"x\"}", f);
+   fclose(f);
+   f = fopen(json, "w");
+   assert(f);
+   fputs("{\"oauthAccount\":{\"id\":\"a\"}}", f);
+   fclose(f);
+   f = fopen(settings, "w");
+   assert(f);
+   fputs("{}", f);
+   fclose(f);
+   setenv("HOME", shared, 1);
+
+   char home[PATH_MAX];
+   assert(cli_session_isolated_claude_home("/w/d", home, sizeof(home)) == 0);
+   assert(strncmp(home, shared, strlen(shared)) == 0); /* under the shared home */
+
+   struct stat st;
+   char p[512];
+   snprintf(p, sizeof(p), "%s/.claude/.credentials.json", home);
+   assert(lstat(p, &st) == 0 && S_ISLNK(st.st_mode)); /* creds SHARED via symlink */
+   snprintf(p, sizeof(p), "%s/.claude.json", home);
+   assert(stat(p, &st) == 0 && st.st_size > 0); /* per-session json seeded */
+   FILE *rf = fopen(p, "r");
+   assert(rf);
+   char buf[4096] = {0};
+   fread(buf, 1, sizeof(buf) - 1, rf);
+   fclose(rf);
+   assert(strstr(buf, "oauthAccount") && strstr(buf, "hasCompletedOnboarding"));
+   assert(strstr(buf, "/w/d")); /* trust seeded for the worktree */
+
+   /* No credentials in the shared home -> fall back to shared HOME (-1). */
+   unlink(creds);
+   char home2[PATH_MAX];
+   assert(cli_session_isolated_claude_home("/w/d", home2, sizeof(home2)) == -1);
+   printf("  PASS: test_isolated_claude_home\n");
+}
+
 int main(void)
 {
+   test_isolated_claude_home();
+
    printf("test_resolve_cwd_existing_used... ");
    test_resolve_cwd_existing_used();
    printf("OK\n");

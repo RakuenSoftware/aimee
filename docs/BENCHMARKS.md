@@ -226,7 +226,7 @@ This document captures the current benchmark baseline for aimee’s latency-sens
 
 The current deployment mode is:
 
-- **Thin client**: `aimee` and `aimee-webchat` talk to
+- **Thin client**: `aimee` and `aimee-runtime-web` talk to
   the local `aimee-server` over a Unix socket. DB1 stays in that local
   server; DB2 (incl. pgvector) stays in `aimee-kb`, which may be local or
   shared in non-default deployments.

@@ -326,7 +326,7 @@ bus into a shipping binary and still pass every per-slice gate. *(Per-PR enforce
 3.)*
 
 The check is auditable rather than magic: it asserts that no `bus_*.o` object appears in the link line
-of `aimee`, `aimee-server`, `aimee-kb`, `aimee-gateway`, or `aimee-webchat` — by inspecting the
+of `aimee`, `aimee-server`, `aimee-kb`, `aimee-gateway`, or `aimee-runtime-web` — by inspecting the
 `SRCS`/`OBJS` variables those targets are built from in `src/Makefile` and their `CMakeLists.txt`
 target sources — and that `src/modules/bus/` is referenced only by the bus test targets.
 

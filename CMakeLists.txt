@@ -31,7 +31,7 @@ option(WITH_TLS "Enable in-client TLS for https:// remote aimee-servers" ON)
 option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
 # Thin-client-only profile: configure and build ONLY the `aimee` CLI target,
 # skipping the unit-test suite (aimee-server / aimee-kb / aimee-gateway /
-# aimee-webchat are not CMake targets at all — they build via `make -C src`).
+# aimee-runtime-web are not CMake targets at all — they build via `make -C src`).
 # The thin client links only Threads (+ OpenSSL for https), so this lets
 # a release/packaging box build it with no Go, libpq, zstd, PAM, or libsecret
 # toolchain. Composes with AIMEE_LEAN for a size-optimized, stripped binary.
@@ -1407,7 +1407,7 @@ add_dependencies(aimee agent_help_header)
 
 # --- Non-thin-client targets ------------------------------------------------
 # CMake builds ONLY the `aimee` thin client (+ the unit-test suite below).
-# aimee-server, aimee-kb, aimee-gateway and aimee-webchat are Linux/Docker
+# aimee-server, aimee-kb, aimee-gateway and aimee-runtime-web are Linux/Docker
 # components built EXCLUSIVELY via `make -C src` (see src/Makefile); their CMake
 # targets were removed because CMake's source lists are not maintained for the
 # full server build (they drifted ~188 files behind src/Makefile) and no CI gate

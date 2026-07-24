@@ -1,5 +1,5 @@
 [Unit]
-Description=Aimee Webchat Server
+Description=Aimee Runtime Web Server
 After=network.target
 
 [Service]
@@ -11,7 +11,7 @@ Environment=HOME=/root
 # automatically (a drop-in EnvironmentFile, plus the matching
 # ingress_trusted_proxy_secret in aimee config). Set it manually otherwise:
 #   Environment=AIMEE_INGRESS_PROXY_SECRET=<shared-secret>
-ExecStart=/usr/local/bin/aimee-webchat --port 8080
+ExecStart=/usr/local/bin/aimee-runtime-web --port 8080
 WorkingDirectory=/root/aimee
 Restart=on-failure
 RestartSec=5

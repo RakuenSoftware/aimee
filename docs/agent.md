@@ -179,7 +179,7 @@ cd src && make lint                       # clang-format check
 pkill aimee-server; cd src && make all server             # rebuild before restart
 ```
 
-Binaries land at repo root (`../aimee`, `../aimee-webchat`, `../aimee-server`, `../aimee-kb`).
+Binaries land at repo root (`../aimee`, `../aimee-runtime-web`, `../aimee-server`, `../aimee-kb`).
 
 ---
 

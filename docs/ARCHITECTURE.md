@@ -47,7 +47,7 @@ graph TB
 
     subgraph Local["Local machine (same-user trust zone)"]
         CLI["aimee<br/>thin CLI + MCP serve<br/>(DB-free)"]
-        WC["aimee-webchat<br/>Go browser service<br/>(DB-free)"]
+        WC["aimee-runtime-web<br/>Go browser service<br/>(DB-free)"]
         SRV["aimee-server<br/>DB1 owner · compute pool<br/>· RPC + HTTP /v1"]
         KB["aimee-kb<br/>DB2 owner · local/shared KB<br/>· pgvector · ingest/curator"]
         GW["aimee-gateway<br/>(optional) ambient presence"]
@@ -75,12 +75,12 @@ graph TB
 | Artifact | Language | Owns | Links | Startup |
 |----------|----------|------|-------|---------|
 | `aimee` | C11 | nothing (thin client) | `-lpthread` only, **no** SQLite, **no** libpq | < 10 ms |
-| `aimee-webchat` | Go | nothing (thin client) | pure Go (PAM via cgo) | fast |
+| `aimee-runtime-web` | Go | nothing (thin client) | pure Go (PAM via cgo) | fast |
 | `aimee-server` | C11 | Local DB1 (SQLite), sessions, compute pool, delegate routing, hooks, MCP dispatch, HTTP /v1 | `-lsqlite3`, **never** libpq | persistent |
 | `aimee-kb` | C11 | DB2 (Postgres + pgvector), memory inference, embeddings, code index, ingest/curator; local or shared by deployment | `-lpq`, **never** SQLite | persistent |
 | `aimee-gateway` | C11 | optional ambient-presence delivery (Telegram/ntfy/webhook, STT/TTS) | minimal | optional |
 
-The two **thin clients** (`aimee`, `aimee-webchat`) never touch a database.
+The two **thin clients** (`aimee`, `aimee-runtime-web`) never touch a database.
 They reach `aimee-server` over its `/v1` HTTP surface (the local `aimee-http.sock`
 Unix socket by default, or a remote `host:port`) and forward typed requests.
 This is what keeps the CLI startup under 10 ms and why hook checks add ~1 ms to a
@@ -198,7 +198,7 @@ graph TD
     aimee["aimee (client)<br/>-lpthread"]
     server["aimee-server<br/>-lsqlite3 +ssl +pam"]
     kb["aimee-kb<br/>-lpq +zstd +ssl"]
-    webchat["aimee-webchat<br/>pure Go"]
+    webchat["aimee-runtime-web<br/>pure Go"]
 
     aimee --> Core
     server --> Core --> Data
@@ -346,12 +346,12 @@ client and by containerized deployments. See [`api/openapi-v1.yaml`](../api/open
 
 ## 8. The webchat service
 
-`aimee-webchat` is a standalone Go HTTP service that serves the browser UI built
+`aimee-runtime-web` is a standalone Go HTTP service that serves the browser UI built
 from [`frontend/`](../frontend) (React 19 + Vite, bundled to a single HTML file).
 It is a thin client: it holds no database and proxies everything to
 `aimee-server` over the same `/v1` HTTP surface the CLI uses.
 
-- **Auth**, PAM-backed login (`aimee-webchat` PAM service), SQLite-backed
+- **Auth**, PAM-backed login (`aimee-runtime-web` PAM service), SQLite-backed
   sessions with a TTL, login rate limiting, optional self-signed TLS.
 - **Routes**, chat (SSE streaming via the socket), dashboard panels (proxied
   from the server), collab-rule review, channels (a local message board), and an
