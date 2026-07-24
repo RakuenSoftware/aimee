@@ -1,9 +1,10 @@
-# shape: loop iterations with non-repeating connective tissue; expected: fire; expected_loop_start_offset: 172; expected_loop_span_bytes: 11; expected_repetitions: 4
+# shape: loop with connective tissue inside each repeated iteration; expected: fire; expected_loop_start_offset: 178; expected_loop_span_bytes: 22; expected_repetitions: 4
 start
 item: same
-glue: alpha-marker
+glue: same
 item: same
-glue: beta-marker
+glue: same
 item: same
-glue: gamma-marker
+glue: same
 item: same
+glue: same
