@@ -56,6 +56,22 @@ if(NOT WIN32)
 endif()
 
 set(AIMEE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(AIMEE_PLUGIN_LOADER_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/plugin-loader/include")
+set(AIMEE_MODULE_RUNTIME_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/module-runtime/include")
+set(AIMEE_AUDIT_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/audit/include")
+set(AIMEE_GATEWAY_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/gateway/include")
+set(AIMEE_IR_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/ir/include")
+set(AIMEE_TRANSLATION_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/translation/include")
+set(AIMEE_DELEGATES_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/delegates/include")
+set(AIMEE_PROTOCOLS_INCLUDE_DIR
+    "${AIMEE_SRC_DIR}/modules/protocols/include")
 
 # LTO / IPO: must be set BEFORE any target is declared so the setting takes
 # effect uniformly across aimee-core/data/agent/cmd and every test binary.
