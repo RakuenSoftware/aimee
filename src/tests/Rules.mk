@@ -346,6 +346,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-witness-signer \
                $(TESTPREFIX)/unit-test-vault-witness-proof \
                $(TESTPREFIX)/unit-test-vault-witness-offline \
+               $(TESTPREFIX)/unit-test-witness-tamper-scenarios \
+               $(TESTPREFIX)/unit-test-witness-offline-fuzz \
                $(TESTPREFIX)/unit-test-vault-mutation-budget \
                $(TESTPREFIX)/unit-test-vault-reseal-orchestrator \
                $(TESTPREFIX)/unit-test-org-vault-rewrap \
@@ -3731,6 +3733,20 @@ $(TESTPREFIX)/unit-test-vault-witness-proof: $(OBJDIR)/tests/test_vault_witness_
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-vault-witness-offline: $(OBJDIR)/tests/test_vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_offline.o \
+                              $(OBJDIR)/modules/vault/vault_witness_verify.o \
+                              $(OBJDIR)/modules/vault/vault_witness_record.o \
+                              $(OBJDIR)/modules/vault/vault_witness_merkle.o \
+                              $(OBJDIR)/modules/vault/vault_witness_checkpoint.o \
+                              $(OBJDIR)/modules/vault/vault_witness_export.o \
+                              $(OBJDIR)/modules/vault/vault_witness_proof.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+# Deterministic mutation property test over the offline verifier: 60k fixed-seed
+# bit-flips of a VALID stream must never verify clean and must never crash. Kept as
+# a CI unit test (not a corpus fuzzer) so any future change letting a mutated stream
+# pass is caught. Fast (~1s) and self-contained (no args, fixed LCG seed).
+$(TESTPREFIX)/unit-test-witness-offline-fuzz: $(OBJDIR)/tests/fuzz_witness_offline_mutation.o \
                               $(OBJDIR)/modules/vault/vault_witness_offline.o \
                               $(OBJDIR)/modules/vault/vault_witness_verify.o \
                               $(OBJDIR)/modules/vault/vault_witness_record.o \

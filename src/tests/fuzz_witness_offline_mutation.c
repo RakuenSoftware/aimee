@@ -66,4 +66,7 @@ int main(void){
     if(r.any_tamper==0 && r.malformed==0 && r.snapshots_ok==1 && r.checkpoints_ok==1) missed++;
   }
   printf("mutation_fuzz: 60000 mutations, silently-clean=%d\n", missed);
+  /* Leak-clean so this passes as a CI unit test under ASAN. */
+  EVP_PKEY_free(pk);
+  EVP_PKEY_CTX_free(c);
   return missed? 1:0; }
