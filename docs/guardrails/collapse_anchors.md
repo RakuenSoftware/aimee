@@ -458,63 +458,94 @@ verification with a list of "callable function definitions" rather
 
 ---
 
-## 6.3 F-002 explicit unresolved-status decision (audit-store `collapse_event`)
+## 6.3 F-002 binding decision (audit-store `collapse_event`)
 
-> **STATUS: UNRESOLVED for Phase 0. The `collapse_event` representation is
-> NOT bound in this reconnaissance packet.** F-002 closure: this packet
-> does not complete the `collapse_event` structured-detail contract, the
-> `audit_worm_collapse_event_log` writer helper, or the
-> `audit_worm_collapse_event_query` query helper. All three are Phase 2.3.0
-> prerequisite work; the F-002 review recommendation is satisfied by
-> recording the decision as unresolved rather than asserting the schema
-> today. **Acceptance check for Phase 0 is therefore NOT marked complete
-> for the audit-store substrate.** Downstream phases that depend on a
-> resolved `collapse_event` representation are blocked until Phase 2.3.0
-> lands.
+> **BINDING REPRESENTATION DECISION:** `collapse_event` is a
+> **structured-field extension of the existing `audit_event` row** in
+> the WORM store (`src/modules/audit/audit_worm.c:33`).  It is **NOT**
+> a new record type.
 
-What is resolved in this packet (file:line):
+Concretely, every collapse event is written as one row in the existing
+`audit_event` table, using the existing write API and lifecycle
+integration:
 
-- Substrate schema: `WORM_SCHEMA_SQL` at `src/modules/audit/audit_worm.c:33`,
-  applied at `:106` under `worm_open_locked` (`:88`). Table columns and
-  WORM triggers are verified (§6.1).
-- Write API: `audit_worm_append` at `src/modules/audit/audit_worm.c:135`
-  (decl `src/modules/audit/audit_worm.h:50`). Verified end-to-end on
-  three production call sites: `src/server/server_mgmt_audit.c:23`,
-  `src/modules/guardrails/guardrails_action_audit.c:87`,
-  `src/kb/kb_vault_rewrap.c:15/19` (§6.1).
-- Lifecycle integration: `audit_worm_checkpoint` at
-  `src/modules/audit/audit_worm.c:233`, `audit_worm_seal` at `:508`
-  (verified through `src/cmd_audit.c:42/58`).
-- Query surface: `audit_worm_read_page` at
-  `src/modules/audit/audit_worm.c:587` — **0 production callers** today
-  (§6.1).
+- `action = "guardrail.collapse.v1.<verb>"` (e.g.
+  `guardrail.collapse.v1.observe`, `guardrail.collapse.v1.enforce`,
+  `guardrail.collapse.v1.escalate`, `guardrail.collapse.v1.shadow.mismatch`,
+  `guardrail.collapse.v1.demote`).  The versioned prefix lets collapse
+  rows coexist with management, tool-action, KB-vault, and metric-snapshot
+  rows on the same hash-chained `audit_event` table; non-collapse
+  consumers of `audit_worm_read_page` (the only existing production
+  query surface — see §6.1) continue to function unchanged.
+- `subject` and `verdict` are populated from the per-path relay choke
+  point (§3).  `detail` is a JSON object whose contract is defined by
+  Phase 2.3.0 (see "Phase 2.3.0 prerequisites" below).
+- Registration / sealing lifecycle is the existing WORM lifecycle:
+  `audit_worm_chain_key_load` at
+  `src/modules/audit/audit_worm_chain.h:45`,
+  `audit_worm_append` at `src/modules/audit/audit_worm.c:135`,
+  `audit_worm_checkpoint` at `:233`, `audit_worm_seal` at `:508`,
+  `audit_worm_verify` at `:559`, `audit_worm_read_page` at `:587`.
 
-What is NOT resolved (Phase 2.3.0 prerequisite, F-002):
+**Why not a new record type (rationale, F-002 closure):**
 
-- The structured-detail JSON contract for the `detail` column when
-  `action` starts with `guardrail.collapse.`. The existing `detail` column
-  is `TEXT` (`src/modules/audit/audit_worm.c:42`) with no schema
-  enforcement; the precedent `metric.snapshot` row writes an opaque
-  JSON object (`:675-677`). The collapse_event JSON contract
-  (required keys, version prefix, optional fields) is deferred to the
-  Phase 2.3.0 design doc / `docs/guardrails/collapse_event_detail.md`.
-- The `audit_worm_collapse_event_log(...)` writer helper that builds the
-  JSON `detail` and calls `audit_worm_append("guardrail.collapse", ...)`
-  with a `guardrail.collapse.v1.<verb>` action verb. Site: alongside
-  `audit_worm_metric_snapshot` at `src/modules/audit/audit_worm.c:638`.
-- The `audit_worm_collapse_event_query(...)` filter helper that walks the
-  `audit_worm_read_page` cJSON array and matches rows whose `action`
-  starts with `guardrail.collapse.`. Site: same file, near `:587`.
+- The existing `audit_event` table already enforces immutability
+  (WORM triggers at `src/modules/audit/audit_worm.c:46-48`),
+  hash-chaining (`prev_hash` / `row_hash` columns), and sealing
+  (`audit_worm_seal`).  A sibling `collapse_event` table would require
+  its own schema, its own hash-chain primitive, and its own checkpoint
+  table — duplicated work for an operational record that has identical
+  storage-shape requirements.
+- The `db1.lifecycle_event` table does not carry a hash chain — it is
+  signed-by-an-actor workflow state, not a security log.  Using it
+  would weaken the collapse event's tamper-evidence story.
+- The versioned `action` prefix keeps the existing
+  `audit_worm_read_page` query surface unchanged for non-collapse
+  consumers and gives collapse-aware consumers a stable prefix to
+  filter on without a SQL `LIKE` / index change.
 
-Pairing:
+**Phase 2.3.0 prerequisites (the only remaining work for collapse-event
+substrate):**
 
-- `collapse_event` representation contract → Phase 2.3.0 prerequisite.
+1. **`docs/guardrails/collapse_event_detail.md`** — JSON contract for
+   the `detail` column when `action` starts with
+   `guardrail.collapse.v1.`.  Required keys:
+   `schema` (`"v1"`), `phase` (`"observe"|"enforce"|"escalate"|"shadow.mismatch"|"demote"`),
+   `bucket`, `routing_key`, `counter`, plus path-specific optional
+   fields.  The `detail` column at `src/modules/audit/audit_worm.c:42`
+   is `TEXT` with no SQLite schema enforcement; the contract is the
+   contract for the *interpretation* of the bytes, mirroring the
+   opaque-JSON precedent for `metric.snapshot` rows at
+   `src/modules/audit/audit_worm.c:675-677`.
+2. **`audit_worm_collapse_event_log(...)`** writer helper alongside
+   `audit_worm_metric_snapshot` at `src/modules/audit/audit_worm.c:638`.
+   Builds the JSON `detail` per the contract and calls
+   `audit_worm_append("guardrail.collapse", "", "guardrail.collapse.v1.<verb>",
+   "<routing_key>", "<verdict>", detail)` per the convention.
+3. **`audit_worm_collapse_event_query(...)`** filter helper near
+   `audit_worm_read_page` at `src/modules/audit/audit_worm.c:587`.
+   Walks the cJSON array returned by `audit_worm_read_page` and
+   matches rows whose `action` starts with `guardrail.collapse.`
+   (in-memory prefix comparison over each bounded page; no SQL `LIKE`
+   / index change is required, because the existing `audit_event`
+   table has no index on `action`).  **This helper will be the first
+   production caller of `audit_worm_read_page`.**
+4. **Lifecycle integration of the writer** at the per-path relay
+   choke points in §3 — wired by Phase 2.0–2.4 prerequisite slices,
+   each gated on Phase 2.3.0.
+
+**Pairing:**
+
+- `collapse_event` JSON contract → Phase 2.3.0 prerequisite.
 - `audit_worm_collapse_event_log` writer → Phase 2.3.0 prerequisite.
-- `audit_worm_collapse_event_query` query helper (first production caller
-  of `audit_worm_read_page`) → Phase 2.3.0 prerequisite.
-- Lifecycle integration of the writer (call sites on the per-path relay
-  choke point from §3) → Phase 2.0–2.4 prerequisite slices, gated on
-  Phase 2.3.0.
+- `audit_worm_collapse_event_query` query helper → Phase 2.3.0
+  prerequisite (closes the F-004 "0 production callers" gap as the
+  first production consumer of `audit_worm_read_page`).
+- Lifecycle integration of the writer at the per-path relay choke
+  point → Phase 2.0–2.4 prerequisite slices, gated on Phase 2.3.0.
+- Optional reader hook for Phase 5 promotion-gate telemetry
+  (`dump_metric_audit_action_breakdown(...)`) → Phase 5.0 if needed,
+  else Phase 2.3.0.
 
 ---
 ## Cross-references to the companion documents
@@ -528,33 +559,44 @@ Pairing:
 
 ## Merge gate (F-005 closure)
 
-**Status:** **VALIDATION-PENDING — no repository artifact enforces this
-gate today.** Bounded search evidence:
+**Status:** **ENFORCED in CI by `scripts/check-collapse-anchor-gate.py`,
+invoked as a step in the `lint` job of `.github/workflows/ci.yml`.**
 
-- The only GitHub Actions workflow in the tree that targets `main` with
-  a required-status check is `.github/workflows/branch-policy.yml`
-  (job `allow-only-testing-source`, line 4; gates PR source-branch
-  == `testing` only — it does not mention `collapse_anchors.md` or any
-  Phase 0 anchors document).
-- `.github/workflows/ci.yml` runs tests but does not introduce a
-  required check keyed to `docs/guardrails/collapse_anchors.md`.
-- No symbol named `collapse_anchors_required` / `phase0_gate_required`
-  / analogous is registered in `src/` or `scripts/` (index lookup
-  returned no matches; bounded to those two trees).
+The gate is enforced by the workflow artifact this document ships:
 
-Until a workflow rule is registered that fails when
-`docs/guardrails/collapse_anchors.md` is not present on the merge
-source for Phase 1+ feature work, the acceptance criterion "Phase 1
-implementation does not start until `collapse_anchors.md` is merged"
-relies on reviewer discipline, not on an automated gate. This is
-explicitly flagged so reviewers do not treat "gate enforced" as
-true on the current evidence.
+- `scripts/check-collapse-anchor-gate.py` — a Python script that runs
+  in the `lint` job's `Enforce guardrail-collapse Phase 0 anchor
+  contract` step at `.github/workflows/ci.yml:100-103`.  The step
+  invokes the script with no arguments; the script resolves its
+  comparison base from `BASE_SHA` (when set by the runner for
+  `pull_request` events) or from `HEAD~1` (when available) and falls
+  back to `git diff HEAD` only if neither is reachable.
+- Phase 1+ surfaces watched by the gate (see
+  `PHASE_ONE_PREFIXES` in the script):
+  - `src/server/`
+  - `src/modules/guardrails/`
+  - `src/headers/aimee_ir.h`
+  - `src/modules/config/`
+  - `src/modules/audit/`
+  - `scripts/check-collapse-anchor-gate.py`
+- When the validated diff touches any of those paths, the gate
+  requires `docs/guardrails/collapse_anchors.md` to be present in the
+  working tree and to contain every `## Decision N` heading for
+  N in 1..6.  The anchor file is **not** required to appear in the
+  same diff — once it is merged, its on-disk presence (not its
+  re-modification) is what gates subsequent Phase 1+ work.
+- Diff-discovery failures (`git` binary missing, invalid `BASE_SHA`,
+  shallow checkout with no usable parent) cause the gate to exit 2
+  rather than silently passing — see `tests/test_check_collapse_anchor_gate.py`
+  for the behavioural coverage of both accepted and rejected histories.
+- The gate is wired into the same `lint` job that runs formatting and
+  `check_tier_deps.sh`, so any failure blocks the PR's required CI
+  status in the same way as those long-running checks do.
 
-**Pairing (F-005):** introducing an automated workflow check that
-fails Phase 1+ merge requests when this document is absent from the
-merge source is a Phase 0.5 housekeeping task — it is **not** in
-Phase 1 scope. Until then, the gate is **enforced by convention only**;
-the document content itself does not assert otherwise.
+**Pairing (F-005 closure):** the workflow rule is the artifact this
+Phase 0 commit ships — no Phase 0.5 housekeeping task remains.  Future
+changes to the watched-path list or to the comparison-base resolution
+must update both `PHASE_ONE_PREFIXES` in the script and this section.
 
 ## Acceptance check
 
@@ -562,21 +604,32 @@ the document content itself does not assert otherwise.
 - [x] Every prerequisite-missing-substrate decision paired with its prerequisite phase (§2: doc-generator + parser + struct + `CFG_KEY_DESC` + rendered-output verification → Phase 1.0; §3: Responses renderer + Chat emitter + Webchat / Delegate / Roundtable observers → Phase 2.0–2.4; §4: sampling types → Phase 4.0; §5: bucketing → Phase 5.0; §6: audit writer + JSON detail contract + query helper + lifecycle integration → Phase 2.3.0).
 - [x] No speculative identifiers — every file:line was verified against the worktree by reading the cited line region (see `collapse_recon.md` §0 convention).
 - [x] F-001 closure (config side): Decision 2's "preferred" claim is qualified with the doc-generator rendering caveat and the Phase 1.0 prerequisite is annotated with the verification step (`make docs-gen` + render check). Per-path handler/emitter citations are in `collapse_recon.md` §2.2–§2.6, not duplicated here.
-- [x] F-002 closure: Decision 6 distinguishes the verified WORM row substrate from the missing structured-detail contract; Phase 2.3.0 lists the JSON contract + writer helper + query helper as explicit subtasks. **§6.3 explicitly records the `collapse_event` representation as UNRESOLVED for Phase 0** and pairs it with Phase 2.3.0. Phase 0 acceptance for the audit-store substrate is **NOT** marked complete on the resolved-decision axis; the substrate location and lifecycle integration are resolved, the structured-detail contract is not.
+- [x] F-002 closure: §6.3 now records the **binding representation decision** -- `collapse_event` is a structured-field extension of the existing `audit_event` row (action = `guardrail.collapse.v1.<verb>`, subject/verdict populated from the per-path relay choke point, detail = JSON object whose contract is Phase 2.3.0's deliverable).  Phase 2.3.0 prerequisites are listed explicitly: JSON contract document, `audit_worm_collapse_event_log` writer helper, `audit_worm_collapse_event_query` filter helper, and lifecycle integration at the per-path relay choke points.
 - [x] F-003 closure: Decision 5 is now marked UNVERIFIED ABSENCE with a bounded-search evidence table (4 distinct queries, 0 hits in production code) and a Phase 5.0 re-discovery task before binding the architecture.
 - [x] F-004 closure: Decision 6.1 now traces the full lifecycle integration (init / chain-key / append / checkpoint / seal / verify / query) with production-caller counts from `index_find_callers`; the query-surface is honestly flagged as having 0 production callers and Phase 2.3.0 will introduce the first.
-- [x] F-005 closure: "Merge gate" is now marked VALIDATION-PENDING with bounded evidence (only `branch-policy.yml` exists; no anchor-gate workflow) and a Phase 0.5 housekeeping task to introduce the automated check.
-- [x] Phase 1 implementation does not start until this document is merged (gate is enforced by reviewer discipline today; automated enforcement is a Phase 0.5 prerequisite).
+- [x] F-005 closure: "Merge gate" now states the gate is **ENFORCED in CI** by `scripts/check-collapse-anchor-gate.py`, wired as the `Enforce guardrail-collapse Phase 0 anchor contract` step at `.github/workflows/ci.yml:100-103` (the `lint` job, after `check_tier_deps.sh`).  The script resolves its comparison base from `BASE_SHA` (set by the runner for `pull_request` events), then `HEAD~1`, then `git diff HEAD`, and fails closed (exit 2) when no comparison base is reachable.  Behavioural coverage of the accepted and rejected histories lives in `tests/test_check_collapse_anchor_gate.py`.
+- [x] Phase 1 implementation does not start until this document is merged.  Enforcement is automated by the CI step introduced by this artifact (see "Merge gate" above); reviewer discipline is a backstop, not the primary mechanism.
 - [x] Review-feedback closures recorded in this round:
-  - F-001: `scripts/check-collapse-anchor-gate.py` added and wired as a
-    required step in `.github/workflows/ci.yml` after `check_tier_deps.sh`;
-    the step fails any PR that does not include a `docs/guardrails/collapse_anchors.md`
-    document containing all six `## Decision N` headings.
-  - F-002: §6.3 added, explicitly recording the `collapse_event`
-    representation as UNRESOLVED for Phase 0 with Phase 2.3.0 as the
-    prerequisite phase for the JSON contract, the writer helper, and the
-    query helper. The Phase 0 acceptance status for the audit-store
-    substrate is downgraded accordingly.
+  - F-001 / F-005: `scripts/check-collapse-anchor-gate.py` hardened in
+    this round so that (a) diff-discovery failures fail closed with
+    exit 2 instead of silently passing (regression covered by
+    `test_gate_fails_closed_when_diff_discovery_cannot_run` and
+    `test_gate_fails_closed_when_base_sha_is_invalid`) and (b) the
+    gate no longer requires the anchors file to appear in the same
+    diff as a Phase 1+ change -- once merged, its on-disk presence is
+    what gates subsequent work (regression covered by
+    `test_gate_passes_when_anchors_already_merged_and_phase_one_touches_other_files`).
+  - F-002: §6.3 rewritten to record the **binding representation
+    decision** (`collapse_event` = structured-field extension of the
+    existing `audit_event` row), with the rationale (WORM substrate
+    reuse, tamper-evidence parity with the metric-snapshot precedent)
+    and the explicit Phase 2.3.0 prerequisite list (JSON contract
+    document, `audit_worm_collapse_event_log` writer helper,
+    `audit_worm_collapse_event_query` query helper, lifecycle
+    integration at the per-path relay choke points).  The earlier
+    UNRESOLVED framing was retracted -- Phase 0 acceptance for the
+    audit-store substrate is now marked complete on the
+    representation axis.
   - F-003: `docs/guardrails/sampling_capability_matrix.md` §1 rewritten
     so every backend × knob cell carries a verified file:line citation
     (✅/⚠/❌/n/a) traced from parser → typed IR → backend-builder.
