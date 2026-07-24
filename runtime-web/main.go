@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	// PAM helper subprocess: aimee-webchat __pam_auth <service> <username>
+	// PAM helper subprocess: aimee-runtime-web __pam_auth <service> <username>
 	if len(os.Args) > 1 && os.Args[1] == "__pam_auth" {
 		os.Exit(auth.RunPAMHelper(os.Args[2:]))
 	}
@@ -25,13 +25,13 @@ func main() {
 
 	cfg, err := newConfig(*port, *certFile, *keyFile, *socketPath, *dbPath, *spaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aimee-webchat: config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "aimee-runtime-web: config: %v\n", err)
 		os.Exit(1)
 	}
 
-	log.Printf("aimee-webchat: starting on :%d", cfg.port)
+	log.Printf("aimee-runtime-web: starting on :%d", cfg.port)
 	if err := run(cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "aimee-webchat: %v\n", err)
+		fmt.Fprintf(os.Stderr, "aimee-runtime-web: %v\n", err)
 		os.Exit(1)
 	}
 }

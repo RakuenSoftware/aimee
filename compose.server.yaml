@@ -10,7 +10,7 @@
 #   docker compose -f compose.server.yaml up --build
 #
 # Server /v1 on :8743 over native TLS (bearer "aimee-local-dev"; self-signed cert
-# auto-provisioned — pass curl -k or trust it); kb /v1 on :8741. The aimee-webchat
+# auto-provisioned — pass curl -k or trust it); kb /v1 on :8741. The aimee-runtime-web
 # browser UI is on https://localhost:8443 (self-signed; log in as
 # AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD, default aimee / aimee-local-dev).
 #   curl -k -H "Authorization: Bearer aimee-local-dev" https://localhost:8743/v1/health
@@ -114,9 +114,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-      # The browser UI (aimee-webchat) is built and bundled by default. Its npm
+      # The browser UI (aimee-runtime-web) is built and bundled by default. Its npm
       # dependency (@rakuensoftware/smoothgui) is vendored under frontend/vendor/,
-      # so the build needs NO credentials. Build --build-arg WITH_WEBCHAT=0 to
+      # so the build needs NO credentials. Build --build-arg WITH_RUNTIME_WEB=0 to
       # ship the server-only image.
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -132,12 +132,12 @@ services:
       AIMEE_SERVER_HTTP_BIND: "1"
       # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
       # surface, built into the image (no credentials needed). Set
-      # AIMEE_WEBCHAT_ENABLED=0 to ship server-only. The entrypoint provisions the
+      # AIMEE_RUNTIME_WEB_ENABLED=0 to ship server-only. The entrypoint provisions the
       # single login account below via PAM; change it (and use a real password)
       # for anything beyond local dev. Leave USER/PASSWORD unset to serve the UI
       # with no account (login page up, nobody can sign in until one is
       # provisioned).
-      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_RUNTIME_WEB_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
       # "Sign in with OAuth" (webchat → git host). Set the GitHub client ID +
@@ -161,7 +161,7 @@ services:
       # plaintext /v1 off-loopback). Plaintext 8740 stays bound to 127.0.0.1 inside
       # the container (the healthcheck below still uses it) and is NOT published.
       - "8743:8743"
-      # webchat UI — on by default; gated off only by AIMEE_WEBCHAT_ENABLED=0 above.
+      # webchat UI — on by default; gated off only by AIMEE_RUNTIME_WEB_ENABLED=0 above.
       - "8443:8443"
     depends_on:
       aimee-kb:

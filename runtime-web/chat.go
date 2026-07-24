@@ -198,7 +198,7 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	// ownership + lightweight metadata. Best-effort: a failure here must not
 	// break the chat response that already streamed.
 	if uerr := s.touchChatSession(currentUser(r), effectiveSID, cwd, req.Message); uerr != nil {
-		log.Printf("aimee-webchat: persist session %q: %v", effectiveSID, uerr)
+		log.Printf("aimee-runtime-web: persist session %q: %v", effectiveSID, uerr)
 	}
 	if err != nil {
 		sseWrite(w, "error", map[string]string{"message": err.Error()})

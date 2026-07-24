@@ -39,7 +39,7 @@ services:
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_SERVER_HTTP_BIND: "1"
       # Browser webchat (the wizard lives here). Provision the login via PAM.
-      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_RUNTIME_WEB_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
       # Reach the managed kb by name on the shared network once it is up.

@@ -1,6 +1,6 @@
 # Dashboard & Logs (browser UI)
 
-The **Dashboard** and **Logs** tabs of [`aimee-webchat`](../MANUAL.md#23-webchat-and-the-browser-ui)
+The **Dashboard** and **Logs** tabs of [`aimee-runtime-web`](../MANUAL.md#23-webchat-and-the-browser-ui)
 give an operator an at-a-glance view of what **`aimee-server`** is doing. They
 are served by the webchat thin client (default `https://<host>:8443`) which
 holds no state and proxies to `aimee-server` over its `/v1` HTTP surface.
@@ -90,9 +90,9 @@ negative-margin hacks). The grid is `repeat(3, minmax(0, 1fr))` columns with
 ## Data architecture
 
 ```
-browser ──/api/dashboard──> aimee-webchat ──dashboard.all──> aimee-server
+browser ──/api/dashboard──> aimee-runtime-web ──dashboard.all──> aimee-server
         <────── JSON ───────              <──── payload ─────
-browser ──/api/audit───────> aimee-webchat ──dashboard.audit─> aimee-server
+browser ──/api/audit───────> aimee-runtime-web ──dashboard.audit─> aimee-server
 ```
 
 ### `dashboard.all` (the `/api/dashboard` payload)

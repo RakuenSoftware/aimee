@@ -1,7 +1,7 @@
-# webchat-lib.sh — POSIX sh helpers to bootstrap + launch aimee-webchat inside a
+# webchat-lib.sh — POSIX sh helpers to bootstrap + launch aimee-runtime-web inside a
 # container. Sourced (not executed) by the image entrypoints, which run as root.
 #
-# aimee-webchat is the Go browser service. It is co-located with aimee-server in
+# aimee-runtime-web is the Go browser service. It is co-located with aimee-server in
 # the same image and shares AIMEE_HOME, so its Unix-socket transports line up
 # automatically:
 #   - chat stream + dashboard RPC  -> $AIMEE_HOME/aimee-http.sock  (server /v1 UDS)
@@ -16,7 +16,7 @@
 
 WEBCHAT_PORT="${AIMEE_WEBCHAT_PORT:-8443}"
 WEBCHAT_HOME="${AIMEE_HOME:-/var/lib/aimee}"
-WEBCHAT_SPA="${AIMEE_WEBCHAT_SPA:-/usr/local/share/aimee-webchat/index.html}"
+WEBCHAT_SPA="${AIMEE_WEBCHAT_SPA:-/usr/local/share/aimee-runtime-web/index.html}"
 webchat_pid=""
 
 webchat_log() { printf '[webchat] %s\n' "$*"; }
@@ -183,18 +183,19 @@ webchat_bootstrap_user() {
     webchat_bootstrap_extra_users
 }
 
-# Falsy test for the disable toggle: 0/false/no/off (any case) turns the browser
+# Falsy test for the disable toggle: AIMEE_RUNTIME_WEB_ENABLED (back-compat alias
+# AIMEE_RUNTIME_WEB_ENABLED). 0/false/no/off (any case) turns the browser
 # UI off. Anything else — including unset/empty — leaves it ON. The webchat is a
 # first-class surface: it ships enabled and must be explicitly disabled.
 webchat_is_enabled() {
-    case "$(printf '%s' "${AIMEE_WEBCHAT_ENABLED:-1}" | tr 'A-Z' 'a-z')" in
+    case "$(printf '%s' "${AIMEE_RUNTIME_WEB_ENABLED:-${AIMEE_RUNTIME_WEB_ENABLED:-1}}" | tr 'A-Z' 'a-z')" in
         0 | false | no | off) return 1 ;;
         *) return 0 ;;
     esac
 }
 
 # Provision the webchat<->server shared trust secret. Both aimee-server (which
-# validates a webchat `X-Aimee-Webuser` assertion) and aimee-webchat (which sends
+# validates a webchat `X-Aimee-Webuser` assertion) and aimee-runtime-web (which sends
 # it, plus uses it as the legacy socket bearer) read $AIMEE_HOME/server.token.
 # Without it EVERY per-user vault/git/editor call fails closed ("aimee-server
 # unavailable" / "editor unavailable"), because webchat short-circuits before it
@@ -228,20 +229,20 @@ webchat_ensure_server_token() {
     webchat_log "generated server.token (webchat<->server trust for per-user vault/git/editor)"
 }
 
-# Launch aimee-webchat in the background (as root, for PAM). Self-signed TLS on
+# Launch aimee-runtime-web in the background (as root, for PAM). Self-signed TLS on
 # :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
 webchat_start() {
     # The browser UI ships ENABLED: it is a first-class surface, switched off only
-    # when an operator sets AIMEE_WEBCHAT_ENABLED=0. The server's /v1 API is the
+    # when an operator sets AIMEE_RUNTIME_WEB_ENABLED=0. The server's /v1 API is the
     # machine contract; webchat is the human one.
     if ! webchat_is_enabled; then
-        webchat_log "AIMEE_WEBCHAT_ENABLED=0; browser UI disabled by operator"
+        webchat_log "AIMEE_RUNTIME_WEB_ENABLED=0; browser UI disabled by operator"
         return 0
     fi
-    # webchat is optional: images built with WITH_WEBCHAT=0 ship no aimee-webchat
+    # webchat is optional: images built with WITH_RUNTIME_WEB=0 ship no aimee-runtime-web
     # binary. Skip the browser UI rather than fail — the server is the contract.
-    if ! command -v aimee-webchat >/dev/null 2>&1; then
-        webchat_log "aimee-webchat not present (image built without WITH_WEBCHAT); skipping browser UI"
+    if ! command -v aimee-runtime-web >/dev/null 2>&1; then
+        webchat_log "aimee-runtime-web not present (image built without WITH_RUNTIME_WEB); skipping browser UI"
         return 0
     fi
     webchat_bootstrap_user
@@ -255,9 +256,9 @@ webchat_start() {
         _wc_tls="--cert $AIMEE_WEBCHAT_TLS_CERT --key $AIMEE_WEBCHAT_TLS_KEY"
         webchat_log "using operator TLS cert $AIMEE_WEBCHAT_TLS_CERT"
     fi
-    webchat_log "starting aimee-webchat on :$WEBCHAT_PORT (https), socket=$WEBCHAT_HOME/aimee-server.sock"
+    webchat_log "starting aimee-runtime-web on :$WEBCHAT_PORT (https), socket=$WEBCHAT_HOME/aimee-server.sock"
     # shellcheck disable=SC2086
-    HOME=/root aimee-webchat \
+    HOME=/root aimee-runtime-web \
         --port "$WEBCHAT_PORT" \
         --socket "$WEBCHAT_HOME/aimee-server.sock" \
         --db "$WEBCHAT_HOME/webchat.db" \

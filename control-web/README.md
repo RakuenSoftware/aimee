@@ -5,7 +5,7 @@ console. See `docs/KB_CONSOLE.md` for the trust model and how to run it.
 
 ## What is (and is NOT) reused from `webchat/`
 
-The console deliberately mirrors `aimee-webchat`'s *shape* but shares no code with
+The console deliberately mirrors `aimee-runtime-web`'s *shape* but shares no code with
 it, so the kb's auth surface is not coupled to webchat's PAM-typed upstream.
 
 **Reused (as patterns, reimplemented here):**

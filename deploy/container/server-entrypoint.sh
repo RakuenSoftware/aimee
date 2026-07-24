@@ -1,7 +1,7 @@
 #!/bin/sh
 # Entrypoint for the aimee-server image with the co-located webchat browser UI.
 #
-# Runs as root so it can bootstrap the PAM login user and run aimee-webchat
+# Runs as root so it can bootstrap the PAM login user and run aimee-runtime-web
 # (which needs /etc/shadow access for pam_unix). aimee-server itself is dropped
 # to the unprivileged "aimee" user. Lifecycle follows the SERVER: when it exits,
 # webchat is torn down and the container exits with the server's status;
@@ -111,7 +111,7 @@ for cli_dir in .codex .claude .config .npm-global; do
     [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
 done
 
-. /usr/local/bin/webchat-lib.sh
+. /usr/local/bin/runtime-web-lib.sh
 . /usr/local/bin/plane-supervisor.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }

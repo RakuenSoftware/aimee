@@ -157,14 +157,14 @@ jobs:
           # the C images.
           cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
+          # Images bundle the browser UI (WITH_RUNTIME_WEB=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
-          # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
+          # the build needs no npm token. The aimee-kb image ignores WITH_RUNTIME_WEB.
           # The deploy stack brings up a separate, profile-gated aimee-llm container
           # only when the setup wizard's page-2 config puts a role local.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
-            WITH_WEBCHAT=1
+            WITH_RUNTIME_WEB=1
             ${{ matrix.image.embedder_arg }}
             ${{ matrix.image.reranker_arg }}
             ${{ matrix.image.extra_args }}

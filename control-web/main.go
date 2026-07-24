@@ -1,12 +1,13 @@
-// Command kb-console is the aimee-kb web console: a standalone Go thin-client that
-// fronts a shared aimee-kb's /v1 surface directly, so a company KB is administrable
-// with no colocated aimee-server. It mirrors aimee-webchat's shape (auto-TLS HTTPS,
-// SQLite sessions, /api/* proxy) but uses NO PAM — login is OIDC (with a
-// presence-flag break-glass) and it holds a scoped console-admin credential whose
-// route allowlist the kb enforces server-side (see src/kb/http/kb_route_acl.c).
+// Command control-web is the aimee-kb Control Plane web console: a standalone Go
+// thin-client that fronts a shared aimee-kb's /v1 surface directly, so a company KB
+// is administrable with no colocated aimee-server. It mirrors aimee-runtime-web's
+// shape (auto-TLS HTTPS, SQLite sessions, /api/* proxy) but uses NO PAM — login is
+// OIDC (with a presence-flag break-glass) and it holds a scoped console-admin
+// credential whose route allowlist the kb enforces server-side (kb_route_acl.c).
 //
-// Default-off: it only runs when explicitly launched with a console-admin cred
-// file, and binds to localhost unless told otherwise.
+// Optional module `control-web`: ships ENABLED and binds to localhost unless told
+// otherwise. Turn it off for fully scripted deployments with AIMEE_CONTROL_WEB_ENABLED=0
+// (or the -disabled flag); the container then idles without a listener.
 package main
 
 import (
@@ -26,14 +27,24 @@ func main() {
 	cfg := &config{}
 	flag.StringVar(&cfg.addr, "addr", "127.0.0.1:8744", "listen address (default localhost)")
 	flag.StringVar(&cfg.kbBaseURL, "kb", envOr("AIMEE_KB_API_URL", "https://127.0.0.1:8741"), "aimee-kb base URL")
-	flag.StringVar(&cfg.credFile, "cred", os.Getenv("KB_CONSOLE_CRED_FILE"), "console-admin bearer file (mode 0600)")
-	flag.StringVar(&cfg.consoleHome, "home", envOr("KB_CONSOLE_HOME", defaultHome()), "console state dir")
+	flag.StringVar(&cfg.credFile, "cred", os.Getenv("CONTROL_WEB_CRED_FILE"), "console-admin bearer file (mode 0600)")
+	flag.StringVar(&cfg.consoleHome, "home", envOr("CONTROL_WEB_HOME", defaultHome()), "console state dir")
 	flag.StringVar(&cfg.spaPath, "spa", "", "console SPA index.html (auto-discovered if empty)")
 	flag.StringVar(&cfg.certFile, "cert", "", "TLS cert (auto-generated if empty)")
 	flag.StringVar(&cfg.keyFile, "key", "", "TLS key")
-	oidcFile := flag.String("oidc", os.Getenv("KB_CONSOLE_OIDC_FILE"), "read-only OIDC config JSON")
+	oidcFile := flag.String("oidc", os.Getenv("CONTROL_WEB_OIDC_FILE"), "read-only OIDC config JSON")
 	insecureKB := flag.Bool("insecure-kb", false, "skip TLS verify to the kb (dev only)")
+	disabled := flag.Bool("disabled", false, "start disabled: log and idle without a listener (also AIMEE_CONTROL_WEB_ENABLED=0)")
 	flag.Parse()
+
+	// Optional-module gate. control-web ships enabled; an operator turns it off for a
+	// fully scripted / headless deployment via the -disabled flag or
+	// AIMEE_CONTROL_WEB_ENABLED in {0,false,no,off}. When off we idle rather than exit
+	// so the container stays healthy (no restart loop) but binds no listener.
+	if *disabled || !controlWebEnabled() {
+		log.Printf("control-web: disabled by operator (AIMEE_CONTROL_WEB_ENABLED=0 / -disabled); no listener")
+		select {}
+	}
 
 	if cfg.spaPath == "" {
 		cfg.spaPath = discoverSPA()
@@ -46,7 +57,13 @@ func main() {
 	}
 	bearer, err := cfg.loadCred()
 	if err != nil {
-		die("%v", err)
+		// control-web ships enabled, but a scoped console-admin cred is a deployment
+		// input the kb must provision. Without it, idle (healthy, no listener) with a
+		// clear message rather than crash-loop a default-on container. Operators who
+		// do not want the console at all set AIMEE_CONTROL_WEB_ENABLED=0.
+		log.Printf("control-web: enabled but no console-admin credential (%v); idling — "+
+			"provide CONTROL_WEB_CRED_FILE or set AIMEE_CONTROL_WEB_ENABLED=0", err)
+		select {}
 	}
 
 	sessDB := filepath.Join(cfg.consoleHome, "sessions.db")
@@ -66,7 +83,7 @@ func main() {
 
 	kbClient := &http.Client{Timeout: 15 * time.Second}
 	if *insecureKB {
-		log.Printf("kb-console: WARNING -insecure-kb set — kb TLS verification disabled (dev only, never in production)")
+		log.Printf("control-web: WARNING -insecure-kb set — kb TLS verification disabled (dev only, never in production)")
 		kbClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
 
@@ -85,24 +102,24 @@ func main() {
 	srv.loadSPA()
 
 	if !isLoopback(cfg.addr) {
-		log.Printf("kb-console: WARNING binding non-loopback address %q — the OIDC login + console-admin proxy will be network-reachable", cfg.addr)
+		log.Printf("control-web: WARNING binding non-loopback address %q — the OIDC login + console-admin proxy will be network-reachable", cfg.addr)
 	}
 
 	if err := srv.startupProbe(); err != nil {
 		die("startup probe: %v", err)
 	}
 	if !cfg.oidcConfigured() {
-		log.Printf("kb-console: WARNING oidc not configured — break-glass-only until OIDC is set")
+		log.Printf("control-web: WARNING oidc not configured — break-glass-only until OIDC is set")
 	}
 	if cfg.oidcConfigured() && !srv.fleetOIDCEnabled {
-		log.Printf("kb-console: WARNING OIDC issuer/audience differs from kb; fleet proxy disabled")
+		log.Printf("control-web: WARNING OIDC issuer/audience differs from kb; fleet proxy disabled")
 	}
 
 	certFile, keyFile, err := ensureTLS(cfg)
 	if err != nil {
 		die("tls: %v", err)
 	}
-	log.Printf("kb-console: listening https://%s (kb=%s)", cfg.addr, cfg.kbBaseURL)
+	log.Printf("control-web: listening https://%s (kb=%s)", cfg.addr, cfg.kbBaseURL)
 	httpSrv := &http.Server{
 		Addr:              cfg.addr,
 		Handler:           srv.routes(),
@@ -149,11 +166,24 @@ func envOr(k, def string) string {
 	return def
 }
 
+// controlWebEnabled reports the module toggle: enabled unless AIMEE_CONTROL_WEB_ENABLED
+// is explicitly falsy (0/false/no/off, any case). Unset/empty leaves it ON — control-web
+// is a first-class surface that ships enabled and must be explicitly disabled. Mirrors
+// aimee-runtime-web's webchat_is_enabled entrypoint gate.
+func controlWebEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AIMEE_CONTROL_WEB_ENABLED"))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 func defaultHome() string {
 	if h, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(h, "aimee", "kb-console")
+		return filepath.Join(h, "aimee", "control-web")
 	}
-	return "./kb-console-home"
+	return "./control-web-home"
 }
 
 // discoverSPA finds the built console SPA relative to the binary.
@@ -176,6 +206,6 @@ func discoverSPA() string {
 }
 
 func die(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "kb-console: "+format+"\n", a...)
+	fmt.Fprintf(os.Stderr, "control-web: "+format+"\n", a...)
 	os.Exit(1)
 }

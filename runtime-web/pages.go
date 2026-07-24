@@ -13,7 +13,7 @@ var spaHTML []byte
 
 const fallbackSPA = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>aimee</title>
 <style>body{font-family:system-ui;background:#111;color:#aaa;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}</style>
-</head><body><p>SPA not built. Run <code>cd frontend && npm run build</code> then restart aimee-webchat.</p></body></html>`
+</head><body><p>SPA not built. Run <code>cd frontend && npm run build</code> then restart aimee-runtime-web.</p></body></html>`
 
 // initSPA loads the React SPA from cfg.spaPath or auto-discovers it.
 func initSPA(cfg *config) error {
@@ -35,18 +35,18 @@ func initSPA(cfg *config) error {
 
 	if path == "" {
 		spaHTML = []byte(fallbackSPA)
-		log.Printf("aimee-webchat: SPA not found, serving fallback page (use --spa to specify path)")
+		log.Printf("aimee-runtime-web: SPA not found, serving fallback page (use --spa to specify path)")
 		return nil
 	}
 
 	b, err := os.ReadFile(path)
 	if err != nil {
 		spaHTML = []byte(fallbackSPA)
-		log.Printf("aimee-webchat: SPA read error (%v), serving fallback", err)
+		log.Printf("aimee-runtime-web: SPA read error (%v), serving fallback", err)
 		return nil
 	}
 	spaHTML = b
-	log.Printf("aimee-webchat: loaded SPA from %s (%d bytes)", path, len(b))
+	log.Printf("aimee-runtime-web: loaded SPA from %s (%d bytes)", path, len(b))
 	return nil
 }
 

@@ -317,7 +317,7 @@ cmake_target_links() {
     ' "$cmake_file"
 }
 cmake_client_links=$(cmake_target_links aimee)
-cmake_webchat_links=$(cmake_target_links aimee-webchat)
+cmake_webchat_links=$(cmake_target_links aimee-runtime-web)
 cmake_server_links=$(cmake_target_links aimee-server)
 cmake_boundary_failures=""
 for target_block in client webchat; do
@@ -580,7 +580,7 @@ _par_collect() {
 
 _check_existing_shipped_artifacts() {
     local INTEG_BINARY="../aimee"
-    local INTEG_WEBCHAT="../aimee-webchat"
+    local INTEG_WEBCHAT="../aimee-runtime-web"
     local INTEG_SERVER="../aimee-server"
     local INTEG_KB="../aimee-kb"
     local INTEG_GATEWAY="../aimee-gateway"
@@ -730,7 +730,7 @@ _group_integ() {
     INTEG_OBJDIR=build/obj-integrity
     INTEG_BINARY=build/aimee-integrity
     INTEG_SERVER=build/aimee-server-integrity
-    INTEG_WEBCHAT=build/aimee-webchat-integrity
+    INTEG_WEBCHAT=build/aimee-runtime-web-integrity
     INTEG_KB=build/aimee-kb-integrity
     INTEG_GATEWAY=build/aimee-gateway-integrity
     rm -rf "$INTEG_OBJDIR" "$INTEG_BINARY" "$INTEG_SERVER" "$INTEG_WEBCHAT" "$INTEG_KB" "$INTEG_GATEWAY"
@@ -818,7 +818,7 @@ _group_integ() {
     fi
 
     # The CLI client (aimee) is a DB-free thin wrapper — no DB libraries allowed.
-    # aimee-webchat is now a full HTTP server process with its own SQLite session
+    # aimee-runtime-web is now a full HTTP server process with its own SQLite session
     # store (PAM auth sessions, rate-limit state); it may link sqlite but must not
     # contain aimee DB1/DB2 API strings (aimee_db_, kb_client, etc.).
     storage_string_leaks=""
@@ -890,7 +890,7 @@ _group_lean() {
     # 9b. Lean build succeeds and meets size limit
     LEAN_BIN=build/aimee-lean-integrity
     LEAN_SRV=build/aimee-server-lean-integrity
-    LEAN_WEB=build/aimee-webchat-lean-integrity
+    LEAN_WEB=build/aimee-runtime-web-lean-integrity
     LEAN_KB=build/aimee-kb-lean-integrity
     LEAN_GW=build/aimee-gateway-lean-integrity
     LEAN_OBJ=build/obj-lean-integrity
@@ -923,7 +923,7 @@ _group_dynlink() {
     DLOBJ=build/obj-dynlink
     DLBIN=build/aimee-dynlink
     DLSRV=build/aimee-server-dynlink
-    DLWEB=build/aimee-webchat-dynlink
+    DLWEB=build/aimee-runtime-web-dynlink
     DLKB=build/aimee-kb-dynlink
     DLGW=build/aimee-gateway-dynlink
     rm -rf "$DLOBJ" "$DLBIN" "$DLSRV" "$DLWEB" "$DLKB" "$DLGW"
@@ -1013,7 +1013,7 @@ _group_branchswitch() {
     BSOBJ=build/obj-branchswitch
     BSBIN=build/aimee-branchswitch
     BSSRV=build/aimee-server-branchswitch
-    BSWEB=build/aimee-webchat-branchswitch
+    BSWEB=build/aimee-runtime-web-branchswitch
     BSKB=build/aimee-kb-branchswitch
     BSGW=build/aimee-gateway-branchswitch
     BSBRANCH=build/branchswitch-branch.txt

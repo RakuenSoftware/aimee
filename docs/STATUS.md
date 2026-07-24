@@ -29,7 +29,7 @@ feature-tracking reference rather than a complete roadmap.
 | Setup/quickstart provisioning | Done | Provides setup flows to provision the local environment for first use. | cmd_core.c |
 | Workspace add/remove | Done | Adds and removes repositories from the managed workspace set. | cmd_core.c |
 | Bootstrap script (setup.sh) | Done | Includes a bootstrap script for initial environment and dependency setup. | setup.sh |
-| Standalone Go webchat | Done | `aimee-webchat` serves the browser UI, handles auth/session storage, and proxies live work to `aimee-server`. | webchat/, server.c |
+| Standalone Go webchat | Done | `aimee-runtime-web` serves the browser UI, handles auth/session storage, and proxies live work to `aimee-server`. | webchat/, server.c |
 | Network inventory | Done | Loads configured network host inventory for delegate routing. | cmd_agent.c, agents.json |
 | Personas (8 built-in + custom) | Done | Named identity/voice + delegate policy, settable per session and used to staff roundtable panels and workflow steps. See [personas.md](personas.md). | persona.c, prompts.c |
 | Webchat top-nav + per-tab projects | Done | One tab per tool (Chat/Dashboard/Edit Workflows/Workflow Actions/Delegates/Projects/Graph/Editor); each tab selects its own git project. | frontend/src/App.tsx, frontend/src/components/ProjectPicker.tsx |
@@ -103,19 +103,19 @@ feature-tracking reference rather than a complete roadmap.
 
 ## Server Architecture
 
-The shipped artifacts are four binaries: `aimee`, `aimee-webchat`, `aimee-server`, and `aimee-kb`. Common runtime code and git MCP handlers are linked directly into the binaries that need them instead of being shipped as separate executables or shared libraries. Long-running work uses `aimee-server`'s in-process compute pool; there is no separate worker binary.
+The shipped artifacts are four binaries: `aimee`, `aimee-runtime-web`, `aimee-server`, and `aimee-kb`. Common runtime code and git MCP handlers are linked directly into the binaries that need them instead of being shipped as separate executables or shared libraries. Long-running work uses `aimee-server`'s in-process compute pool; there is no separate worker binary.
 
 | Binary | Libraries | External deps |
 |--------|-----------|---------------|
 | `aimee` | Thin CLI transport + MCP stdio bridge | pthread |
-| `aimee-webchat` | DB-free webchat launcher; talks only to `aimee-server` through `webchat.serve` | pthread |
+| `aimee-runtime-web` | DB-free webchat launcher; talks only to `aimee-server` through `webchat.serve` | pthread |
 | `aimee-server` | Local DB1 daemon, agent/runtime orchestration, KB RPC client | sqlite3, ssl, crypto, pam |
 | `aimee-kb` | Local-or-shared DB2 RPC service + memory/KB pipeline (incl. pgvector) | libpq, ssl, crypto |
 
 ```mermaid
 flowchart TD
     CLI[aimee\nCLI + MCP stdio] -->|JSON RPC| SRV[aimee-server\nDB1 + compute pool]
-    WEB[aimee-webchat\nbrowser-facing client] -->|JSON RPC| SRV
+    WEB[aimee-runtime-web\nbrowser-facing client] -->|JSON RPC| SRV
     SRV -->|typed KB /v1 HTTP| KB[aimee-kb\nDB2 + pgvector]
     SRV --> DB1[src/db1/*]
     KB --> DB2[src/db2/*]

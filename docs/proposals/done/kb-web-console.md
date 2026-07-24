@@ -62,7 +62,7 @@ The design text below is the historical record.
 ## Goal
 
 Give **aimee-kb** — the standalone, shareable knowledge-base service that owns DB2 —
-its own browser UI, built on **SmoothGUI** the same way `aimee-webchat` is. Today a
+its own browser UI, built on **SmoothGUI** the same way `aimee-runtime-web` is. Today a
 shared/company KB is administered only over the CLI and raw `/v1` HTTP. Operators of a
 shared KB need a UI to:
 
@@ -83,7 +83,7 @@ point of a company-wide KB. (Operator-locked 2026-07-04: *new dedicated console 
 
 ## §0 What already exists (so we don't rebuild it)
 
-**The GUI template — `aimee-webchat` (`webchat/*.go` + `frontend/`).** A standalone **Go
+**The GUI template — `aimee-runtime-web` (`webchat/*.go` + `frontend/`).** A standalone **Go
 thin client** that serves the vendored-SmoothGUI React 19 + Vite SPA (`frontend/`, bundled
 to a single inlined `dist/index.html`) and proxies `/api/*` to a backend `/v1`. It holds no
 domain DB — only a SQLite **session** store — does PAM login, auto-generates TLS, and
@@ -136,7 +136,7 @@ The Dashboard is mostly wiring behind **one** aggregate endpoint (§2).
 
 ## §1 The service — `aimee-kb-console`
 
-A new Go thin-client mirroring `aimee-webchat`:
+A new Go thin-client mirroring `aimee-runtime-web`:
 
 - Serves a **second SPA build** (a distinct entry/router inside `frontend/`, reusing the
   vendored `@rakuensoftware/smoothgui` tarball + Vite config → its own inlined
