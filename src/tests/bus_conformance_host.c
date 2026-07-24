@@ -34,10 +34,11 @@
 #include "bus_client.h"
 #include "bus_host.h"
 
-#define KIND_NOTIFY   1000
-#define KIND_ACK      1001
-#define KIND_ECHO     1002
-#define KIND_NOSERVER 1003
+#define KIND_NOTIFY     1000
+#define KIND_ACK        1001
+#define KIND_ECHO       1002
+#define KIND_NOSERVER   1003
+#define KIND_CANCEL_ACK 1004
 
 static uint64_t now_ms(void)
 {
@@ -137,67 +138,90 @@ int main(int argc, char **argv)
       return 1;
    }
 
-   /* Signal readiness: the file existing is the readiness marker the runner
-    * waits on. Accept one external client (blocking, but bounded by the runner's
-    * own timeout on the whole process). */
-   int csock = accept(lsock, NULL, NULL);
-   if (csock < 0)
-   {
-      perror("accept");
-      return 1;
-   }
-   if (bus_host_serve_attach(&h, csock) != BUS_HOST_OK)
-   {
-      fprintf(stderr, "external attach denied\n");
-      return 1;
-   }
-   int ext = find_external(&h, cc.reply.handle_id);
-   if (ext < 0)
-   {
-      fprintf(stderr, "external slot not found\n");
-      return 1;
-   }
-   /* The external client is subscribed to the ack kind so it can observe that
-    * the C client received its notification. */
-   bus_host_subscribe(&h, (uint32_t)ext, KIND_ACK);
-
-   /* Pump + service loop, bounded. */
+   /* Service external clients one at a time. When one disconnects it is reaped
+    * and the next is accepted into the freed slot — which is what proves
+    * reaped-client recovery across the language boundary. Bounded by the overall
+    * timeout so it can never hang. */
    uint64_t start = now_ms();
+   uint64_t hostclock = 0;
+
    while (now_ms() - start < timeout_ms)
    {
-      bus_host_pump(&h);
-      cc.reply.host_epoch = bus_control_epoch(h.control); /* keep epoch fresh */
-
-      bus_event_t ev;
-      while (bus_client_poll(&cc, &ev) == BUS_CLIENT_OK)
+      int csock = accept(lsock, NULL, NULL);
+      if (csock < 0)
+         break;
+      if (bus_host_serve_attach(&h, csock) != BUS_HOST_OK)
       {
-         if (ev.frame.event_kind == KIND_NOTIFY)
-         {
-            /* Prove receipt: answer with an ack the external client sees. */
-            bus_client_publish(&cc, KIND_ACK, ev.payload, ev.payload_len);
-         }
-         else if (ev.frame.event_kind == KIND_ECHO && (ev.frame.hdr_flags & BUS_F_REQUEST))
-         {
-            bus_client_reply(&cc, KIND_ECHO, ev.frame.correlation_id, ev.payload,
-                             ev.payload_len);
-         }
+         close(csock);
+         continue;
       }
-      bus_host_pump(&h);
+      int ext = find_external(&h, cc.reply.handle_id);
+      if (ext < 0)
+      {
+         close(csock);
+         continue;
+      }
+      /* Subscribe the (freshly-handled) external client to the notices it
+       * observes: the ack for its notifications and the cancel-ack. */
+      bus_host_subscribe(&h, (uint32_t)ext, KIND_ACK);
+      bus_host_subscribe(&h, (uint32_t)ext, KIND_CANCEL_ACK);
 
-      /* If the external client has gone, stop. A zero-length recv (peer closed)
-       * is detected by a non-blocking peek. */
-      char probe;
-      ssize_t pr = recv(csock, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
-      if (pr == 0)
-         break; /* peer closed */
+      uint64_t cc_hb = 0;
+      for (;;)
+      {
+         if (now_ms() - start >= timeout_ms)
+            goto shutdown;
 
-      struct timespec nap = {.tv_sec = 0, .tv_nsec = 1 * 1000 * 1000};
-      nanosleep(&nap, NULL);
+         /* The internal server must stay alive across the reap that collects a
+          * departed external client, or KIND_ECHO would lose its server. It
+          * heartbeats every iteration with an advancing value. */
+         bus_client_heartbeat(&cc, ++cc_hb);
+         bus_host_pump(&h);
+
+         bus_event_t ev;
+         while (bus_client_poll(&cc, &ev) == BUS_CLIENT_OK)
+         {
+            if (ev.frame.event_kind == KIND_NOTIFY)
+               bus_client_publish(&cc, KIND_ACK, ev.payload, ev.payload_len);
+            else if (ev.frame.event_kind == KIND_ECHO && (ev.frame.hdr_flags & BUS_F_REQUEST))
+               bus_client_reply(&cc, KIND_ECHO, ev.frame.correlation_id, ev.payload,
+                                ev.payload_len);
+            else if (ev.frame.hdr_flags & BUS_F_CANCEL)
+               /* The internal server received the cancel: tell the external
+                * client, so cancel delivery is observable across the boundary. */
+               bus_client_publish(&cc, KIND_CANCEL_ACK, NULL, 0);
+         }
+         bus_host_pump(&h);
+
+         /* Peer closed? Reap it and move on to the next client. */
+         char probe;
+         ssize_t pr = recv(csock, &probe, 1, MSG_PEEK | MSG_DONTWAIT);
+         if (pr == 0)
+         {
+            close(csock);
+            /* Drive the reaper: the external client never heartbeat. The first
+             * tick starts its stale clock; the second, past the window, collects
+             * it. The internal server heartbeats before each tick so the blanket
+             * reap never mistakes it for dead. */
+            bus_client_heartbeat(&cc, ++cc_hb);
+            hostclock += 1000;
+            bus_host_reap(&h, hostclock, 1);
+            bus_client_heartbeat(&cc, ++cc_hb);
+            hostclock += 1000;
+            uint32_t reaped = bus_host_reap(&h, hostclock, 1);
+            if (reaped == 0)
+               fprintf(stderr, "warning: external client not reaped\n");
+            break;
+         }
+
+         struct timespec nap = {.tv_sec = 0, .tv_nsec = 1 * 1000 * 1000};
+         nanosleep(&nap, NULL);
+      }
    }
 
+shutdown:
    bus_client_detach(&cc);
    bus_host_destroy(&h);
-   close(csock);
    close(lsock);
    unlink(path);
    return 0;
