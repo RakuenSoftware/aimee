@@ -99,9 +99,13 @@ FROM runtime-web-stage-${WITH_RUNTIME_WEB} AS runtime-web-stage
 FROM debian:bookworm-slim AS code-server-stage-1
 ARG TARGETARCH
 ARG CODE_SERVER_VERSION=4.96.4
+# Release downloads go through GitHub/CDN edges that intermittently return 5xx
+# (a 504 here failed the whole T3 e2e-docker topology). `curl -fsSL` alone turns
+# that into a hard build failure, so retry with backoff. --retry-all-errors is
+# required: -f makes an HTTP 504 exit 22, which plain --retry would NOT retry.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
-    && curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
+    && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
     && mkdir -p /opt/codeserver \
     && dpkg-deb -x /tmp/cs.deb /opt/codeserver \
     && rm /tmp/cs.deb \
@@ -157,12 +161,12 @@ RUN set -eux; \
       arm64) darch=aarch64; carch=aarch64 ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
       | tar -xz -C /tmp docker/docker; \
     install -m0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker; \
     mkdir -p /usr/local/lib/docker/cli-plugins; \
-    curl -fsSL "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
       -o /usr/local/lib/docker/cli-plugins/docker-compose; \
     chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
     docker --version; docker compose version
@@ -175,7 +179,7 @@ ARG GH_CLI_VERSION=2.96.0
 RUN set -eux; \
     gharch="${TARGETARCH:-amd64}"; \
     case "$gharch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
       | tar -xz -C /tmp "gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh"; \
     install -m0755 "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh" /usr/local/bin/gh; \
     rm -rf "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}"; \

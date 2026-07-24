@@ -1068,9 +1068,62 @@ static void test_isolated_claude_home(void)
    printf("  PASS: test_isolated_claude_home\n");
 }
 
+/* cli_session_destroy reclaims the minted isolated HOME so homes track the
+ * delegate lifecycle instead of lingering until the 1h age sweep. Also pins the
+ * FTW_PHYS safety: the SHARED credential the home symlinks to must survive. */
+static void test_isolated_home_reclaimed_on_destroy(void)
+{
+   char shared[128];
+   snprintf(shared, sizeof(shared), "/tmp/aimee-isorm-%d", (int)getpid());
+   char cdir[192], creds[288], json[288];
+   snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
+   mkdir(shared, 0700);
+   mkdir(cdir, 0700);
+   snprintf(creds, sizeof(creds), "%s/.credentials.json", cdir);
+   snprintf(json, sizeof(json), "%s/.claude.json", shared);
+   FILE *f = fopen(creds, "w");
+   assert(f);
+   fputs("{\"token\":\"x\"}", f);
+   fclose(f);
+   f = fopen(json, "w");
+   assert(f);
+   fputs("{\"oauthAccount\":{\"id\":\"a\"}}", f);
+   fclose(f);
+   setenv("HOME", shared, 1);
+
+   char home[PATH_MAX];
+   assert(cli_session_isolated_claude_home("/w/d", home, sizeof(home)) == 0);
+   struct stat st;
+   assert(stat(home, &st) == 0 && S_ISDIR(st.st_mode)); /* minted on disk */
+
+   /* A never-created (active=0) session still reclaims its attached home on
+    * destroy — cleanup runs before the active/alive early-returns. */
+   cli_session_t s;
+   memset(&s, 0, sizeof(s));
+   cli_session_set_isolated_home(&s, home);
+   assert(s.iso_home && strcmp(s.iso_home, home) == 0);
+   cli_session_destroy(&s);
+
+   assert(stat(home, &st) != 0);                    /* the whole home tree is gone */
+   assert(s.iso_home == NULL);                      /* handle freed + cleared */
+   assert(stat(creds, &st) == 0 && st.st_size > 0); /* shared credential untouched */
+
+   /* Idempotent / safe on a session with no isolated home. */
+   cli_session_t s2;
+   memset(&s2, 0, sizeof(s2));
+   cli_session_destroy(&s2);
+
+   unlink(creds);
+   unlink(json);
+   rmdir(cdir);
+   rmdir(shared);
+   printf("  PASS: test_isolated_home_reclaimed_on_destroy\n");
+}
+
 int main(void)
 {
    test_isolated_claude_home();
+   test_isolated_home_reclaimed_on_destroy();
 
    printf("test_resolve_cwd_existing_used... ");
    test_resolve_cwd_existing_used();
