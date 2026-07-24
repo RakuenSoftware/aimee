@@ -47,10 +47,7 @@ reachability on divergent paths.
 >   per line, the last row is `guardrails_blast_radius_advisory_enabled` at
 >   `:1408`).
 > - Config-load entry: `config_load(config_t *cfg)` at
->   `src/modules/config/config.c:1109` (F-CITE-002 closure: the symbol-index
->   `find_symbol` returns `:1069` here, which is `config_module_enabled` — a
->   different function on the same struct; the live-source line `:1109` is
->   the authoritative `config_load` def per 'code outranks your repro').
+>   `src/modules/config/config.c:1109` (definition verified directly in the current source; declaration at `src/modules/config/config.h:2063`).
 > - Section parser: `config_parse_guardrails_section(config_t *cfg, cJSON
 >   *root)` at `src/modules/config/config_sections.c:1264` (F-CITE-002
 >   closure: the symbol-index reports `:1258`, which is the comment/header
@@ -159,11 +156,7 @@ extension to `scripts/gen-reference-docs.py:417`).
 >   typedef sits at `:82` for `aimee_sse_emit_fn` and at `:90` for
 >   `anthropic_delta_emit`).
 > - **Live wire-up today:** `messages_stream_ir_relay` at
->   `src/server/anthropic_http.c:973` (dispatcher; F-CITE-003 closure:
->   function-definition line is `:973`; preceding docstring at `:971-972`;
->   the symbol-index `find_symbol` returns `:957` for this identifier,
->   which is a call-site reference inside `messages_stream`, not the def);
->   gate at `src/server/anthropic_http.c:1251`
+>   `src/server/anthropic_http.c:973` (definition verified directly in the current source); gate at `src/server/anthropic_http.c:1251` and call at `:1253`
 >   (`aimee_ir_stream_relay_enabled()`, default-OFF). The same env
 >   (`AIMEE_IR_STREAM_RELAY`) is referenced via `aimee_ir_stream_relay_enabled()`
 >   at `src/server/aimee_ir_serve.c:30`.
@@ -359,8 +352,7 @@ implemented and callable today):
   3. Add a `audit_worm_collapse_event_query(...)` helper to
      `src/modules/audit/audit_worm.c` that walks the
      `audit_worm_read_page` cJSON array and filters rows whose
-     `action` starts with `guardrail.collapse.` (string `LIKE` over
-     the existing `action` field). **No SQLite index change is
+     `action` starts with `guardrail.collapse.` (an in-memory prefix comparison over each bounded page returned by `audit_worm_read_page`; no SQL `LIKE` or index is introduced, so complete scans must page to exhaustion). **No SQLite index change is
      required** — the existing `audit_event` table has no index on
      `action` today; the filter is linear over the page, which is
      acceptable for the page size (`audit_worm_read_page` returns
