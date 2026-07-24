@@ -23,7 +23,7 @@ contract), the header docstring itself is the second citation.
 
 > **BINDING DECISION — PATHS DIVERGE. Phase 2 is split per handler/relay.**
 >
-> The verified typed relay (`aimee_delta_t` at `src/headers/aimee_ir.h:177`)
+> The verified typed relay (`aimee_delta_t` at `src/headers/aimee_ir.h:209`)
 > is reachable **only** from the IR-enabled `/v1/messages` branch today.
 > Responses, Chat, Webchat, Delegate, and Roundtable paths do NOT converge
 > on that single typed relay. They will not converge until each missing
@@ -34,9 +34,9 @@ contract), the header docstring itself is the second citation.
 
 | Artifact | Verified at |
 | --- | --- |
-| `aimee_delta_t` (struct) | `src/headers/aimee_ir.h:177` (definition; preceding comment at :172) |
-| `aimee_delta_type_t` (enum) | `src/headers/aimee_ir.h:167` |
-| Enum members actually present | `src/headers/aimee_ir.h:168-174`: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`, `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`, `AIMEE_DELTA_ERROR` |
+| `aimee_delta_t` (struct) | `src/headers/aimee_ir.h:209` (definition; preceding comment at :204) |
+| `aimee_delta_type_t` (enum) | `src/headers/aimee_ir.h:194` |
+| Enum members actually present | `src/headers/aimee_ir.h:188-193`: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA`, `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP`, `AIMEE_DELTA_ERROR` |
 | `aimee_block_type_t` (enum) | `src/headers/aimee_ir.h:48`; members `AIMEE_BLK_TEXT`, `AIMEE_BLK_TOOL_USE`, `AIMEE_BLK_TOOL_RESULT`, `AIMEE_BLK_IMAGE`, `AIMEE_BLK_DOCUMENT`, `AIMEE_BLK_THINKING`, `AIMEE_BLK_UNKNOWN` (:50-57) |
 | `aimee_wire_t` (enum) | `src/headers/aimee_ir.h:36`; members `AIMEE_WIRE_UNKNOWN`, `AIMEE_WIRE_ANTHROPIC`, `AIMEE_WIRE_OPENAI_CHAT`, `AIMEE_WIRE_RESPONSES` (:38-42) |
 | `aimee_sse_emit_fn` sink typedef | `src/headers/aimee_ir_stream.h:85` (signature-compatible with `server_http_sse_event_emit`) |
@@ -99,7 +99,7 @@ the collapse work can use as precedent.
 | Streaming request handler (SSE entry from `handle_conn`) | `handle_messages_stream` at `src/server/server_http.c:1290` (one-line wrapper); `g_messages_stream_handler` registered via `server_http_set_messages_stream_handler` at `src/server/server_http.c:817`; called from `messages_stream` at `src/server/anthropic_http.c:1071`. `handle_conn` dispatches at `src/server/server_http.c:2103`. |
 | SSE / delta emitter (legacy translator — text_delta production) | `xlate_emit_text_delta` at `src/server/anthropic_ingress.c:557` → emits `content_block_delta { delta.type = "text_delta", delta.text = … }`. Called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:703` (the path that walks `cJSON_GetObjectItemCaseSensitive(delta, "content")` and forwards the string into `xlate_emit_text_delta`). |
 | SSE / delta emitter (IR-delta path, default-OFF today) | `messages_stream_ir_relay` at `src/server/anthropic_http.c:973` (dispatcher) → routes through `openai_chunk_to_deltas` (`src/server/aimee_ir_stream.c:42`) → `anthropic_delta_emit` (`src/server/aimee_ir_stream.c:539`). Wire-up gate at `src/server/anthropic_http.c:1251` (`aimee_ir_stream_relay_enabled()`). |
-| Convergent typed-relay symbol | `aimee_delta_t` (`src/headers/aimee_ir.h:177`); enum members observed on this path: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA` (text), `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP` |
+| Convergent typed-relay symbol | `aimee_delta_t` (`src/headers/aimee_ir.h:209`); enum members observed on this path: `AIMEE_DELTA_TURN_START`, `AIMEE_DELTA_BLOCK_START`, `AIMEE_DELTA_BLOCK_DELTA` (text), `AIMEE_DELTA_BLOCK_STOP`, `AIMEE_DELTA_TURN_STOP` |
 | Existing scanner-style call site usable as precedent | `aimee_ir_shadow_observe_request` invoked at `src/server/anthropic_http.c:1075` (gated no-op by `AIMEE_IR_SHADOW`); `gw_stage_memory` (`src/modules/memory/gw_stage_memory.h:43`) — universal stage seam registered in the same request pipeline that owns `messages_stream` |
 
 **Verdict — REACHES typed relay.** This is the only path with a verified
@@ -205,7 +205,7 @@ counters from `stream_event` directly.
 | Streaming request handler | `roundtable.review` is dispatched via `rh_dispatch_op_async` (`src/server/server_http_routes.c:2070`); it gathers panel verdicts and returns a non-streaming JSON envelope. There is no incremental SSE on this surface today. |
 | SSE / delta emitter | N/A. The roundtable returns discrete JSON panel verdicts. |
 | Reaches typed relay? | **NO, and the surface is non-streaming.** The IR-delta struct is not a target for this path. |
-| Existing scanner-style call site | The roundtable-side "scanner" is the per-panel verdict-stage registry (workflow layer). The stage-registry pattern (`aimee_ir_transform_fn` registry — see `src/headers/aimee_ir.h:295` and the docstring at :286-298) is the precedent for collapsing rule-side modules without touching the model-call surface. |
+| Existing scanner-style call site | The roundtable-side "scanner" is the per-panel verdict-stage registry (workflow layer). The stage-registry pattern (`aimee_ir_transform_fn` registry — see `src/headers/aimee_ir.h:288` and the docstring at :294-300) is the precedent for collapsing rule-side modules without touching the model-call surface. |
 
 **Verdict — DIVERGES; Phase 2.4 prerequisite.** Roundtable is a
 non-streaming panel-verdict proxy. Phase 2.4 must use its own observation
@@ -219,7 +219,7 @@ is a separate concern.
 The six paths do **not** all converge today. Only the IR-enabled Messages
 branch reaches the typed relay surface; the divergent paths in §2.2–§2.6
 require separate Phase 2 slices. The typed relay surface is defined at
-`src/headers/aimee_ir.h:167-178`: one enum (`aimee_delta_type_t`), one
+`src/headers/aimee_ir.h:194-209`: one enum (`aimee_delta_type_t`), one
 struct (`aimee_delta_t`). Phase 2 collapses onto `aimee_delta_t` on each
 path — but each path requires its own implementation and verification
 slice.
@@ -235,7 +235,7 @@ The collapse work must tap **producer** and **consumer** sites for
 | --- | --- | --- |
 | Producer (legacy translator, OpenAI chat chunk → Anthropic SSE `text_delta`) | `/v1/messages` | `src/server/anthropic_ingress.c:557` — `xlate_emit_text_delta` (type=`text_delta`, attaches to `delta.text`); called from `anthropic_stream_feed_openai` at `src/server/anthropic_ingress.c:703` |
 | Producer (IR path: `BLOCK_DELTA` for kind=TEXT / THINKING) | `/v1/messages` | `src/server/aimee_ir_stream.c:445` — `delta_build_events` case `AIMEE_DELTA_BLOCK_DELTA` (writes `delta.type = "text_delta"`, `delta.text = d->text_delta`) |
-| Consumer (the `aimee_delta_t.text_delta` field carries the payload) | `/v1/messages` | `src/headers/aimee_ir.h:184` — member declaration `const char *text_delta;  /* BLOCK_DELTA for text/thinking */` (field carries the bytes; lifetime comment at `src/headers/aimee_ir_stream.h:29` says "BORROW into the parsed chunk (transient)") |
+| Consumer (the `aimee_delta_t.text_delta` field carries the payload) | `/v1/messages` | `src/headers/aimee_ir.h:204` — member declaration `const char *text_delta;  /* BLOCK_DELTA for text/thinking */` (field carries the bytes; lifetime comment at `src/headers/aimee_ir_stream.h:29` says "BORROW into the parsed chunk (transient)") |
 | Compute-then-chunk producer (OpenAI chat completions — `text_delta` analogue) | `/v1/chat/completions` | `src/server/openai_chat.c:775-783` — slicing loop emits `openai_format_chat_chunk` frames; chat wire field is `choices[0].delta.content` (assigned at `:701`) |
 | Compute-then-chunk producer (Responses wire) | `/v1/responses` | `src/server/openai_chat.c:1261` — `openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe))`; emitted at the same line via `emit(ctx, "response.output_text.delta", dframe)` |
 
@@ -252,7 +252,7 @@ precedents are:
 | `aimee_ir_shadow_observe_request` | declared at `src/headers/aimee_ir_shadow.h:12`; called at `src/server/anthropic_http.c:1075` (SSE stream entry) — gated by `AIMEE_IR_SHADOW` (default-OFF) | Parses the inbound request into the IR, rebuilds it, compares bytes; never affects the turn |
 | `aimee_ir_shadow_compare_bodies` | `src/headers/aimee_ir_shadow.h:33` | Compares the legacy-translated provider body to the IR-built body for the SAME inbound request; counts mismatches |
 | `aimee_ir_shadow_compare_response` | `src/headers/aimee_ir_shadow.h:55` | Compares IR-parsed provider response to legacy-parsed; same no-op contract |
-| `ingress_preinject_query_from_messages` | `src/server/ingress_preinject.c:409`; called from the route handlers in §2.1 | Walks inbound Anthropic `messages[]` and extracts the LAST user-role content; precedent for a per-request shape-agnostic query extractor (the IR-equivalent `aimee_ir_last_user_text` lives in `src/headers/aimee_ir.h:230`) |
+| `ingress_preinject_query_from_messages` | `src/server/ingress_preinject.c:409`; called from the route handlers in §2.1 | Walks inbound Anthropic `messages[]` and extracts the LAST user-role content; precedent for a per-request shape-agnostic query extractor (the IR-equivalent `aimee_ir_last_user_text` lives in `src/headers/aimee_ir.h:280`) |
 | `gw_stage_memory` | `src/modules/memory/gw_stage_memory.h:43`; called per `/v1/messages` and `/v1/chat/completions` via `gw_request_t` registry | The shape-agnostic stage seam that scans/mutates the inbound request before build |
 
 These five call sites are **the precedents** for the Phase 1+ collapse
