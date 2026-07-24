@@ -76,7 +76,7 @@ static int line_is_fence_open(const char *line, size_t llen, int *fence_char_out
    while (k < llen && is_ws(line[k]))
       k++;
    if (k < llen && line[k] == '`')
-      return 0; /* backtick fence with backticks in info string - allow later */
+      return 0; /* CommonMark: a backtick fence whose info string contains backticks is not a code fence. */
    *fence_char_out = (int)ch;
    *fence_run_out  = run;
    return 1;
@@ -259,10 +259,6 @@ size_t rc_parse_regions(const char *buf, size_t len, rc_region_set_t *out)
                run_kind = RC_REGION_FENCE;
                run_start = line_begin;
             }
-            if (line_end - line_begin == 0)
-            {
-               /* nothing extra */
-            }
          }
       }
       else
@@ -299,22 +295,21 @@ size_t rc_parse_regions(const char *buf, size_t len, rc_region_set_t *out)
          }
          else if (is_list)
          {
-            /* LIST_BODY is the content past the marker on the line itself -
-             * we mark only that slice, not future continuation, so a list
-             * body becomes a set of 1-line regions. That is enough to gate
-             * the detector because any verbatim repeated text that lives in
-             * a bullet line will overlap the line range we mark here. */
+            /* LIST_BODY covers the entire list-item line (marker + content)
+             * so any verbatim repeat whose byte range straddles a list item
+             * - whether or not the period aligns to the marker - is gated.
+             * Limitation: indented continuation lines of a multi-line list
+             * item are NOT part of the LIST_BODY region. A verbatim repeat
+             * that lives entirely in continuation lines will NOT be
+             * suppressed; the corpus fixture legit_multiline_list_item
+             * locks the documented behavior. */
             FLUSH_RUN();
-            size_t cont_start = line_begin + marker_end;
-            if (cont_start < line_end)
-            {
-               size_t cont_end = line_end;
-               if (cont_end > cont_start && buf[cont_end - 1] == '\n')
-                  cont_end--;
-               if (cont_end > cont_start && buf[cont_end - 1] == '\r')
-                  cont_end--;
-               emit_region(out, RC_REGION_LIST_BODY, cont_start, cont_end);
-            }
+            size_t line_end_no_nl = line_end;
+            if (line_end_no_nl > line_begin && buf[line_end_no_nl - 1] == '\n')
+               line_end_no_nl--;
+            if (line_end_no_nl > line_begin && buf[line_end_no_nl - 1] == '\r')
+               line_end_no_nl--;
+            emit_region(out, RC_REGION_LIST_BODY, line_begin, line_end_no_nl);
          }
          else
          {
@@ -343,8 +338,6 @@ typedef struct
    const char *buf;
    size_t      len;
    size_t      pos;
-   size_t      nested_start;  /* start offset of the most recently entered container */
-   int         depth;
 } jp_t;
 
 /* Forward declarations. */
@@ -584,8 +577,6 @@ size_t rc_parse_json_spans(const char *buf, size_t len, rc_json_span_set_t *out)
    jp.buf  = buf;
    jp.len  = len;
    jp.pos  = 0;
-   jp.nested_start = 0;
-   jp.depth = 0;
 
    while (jp.pos < len)
    {

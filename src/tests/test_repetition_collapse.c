@@ -52,9 +52,9 @@ static int load_corpus(char **out_buf, size_t *out_len)
 
 typedef struct
 {
-   const char *id;
-   const char *body;
-   int         expected_hit;
+   char *id;
+   char *body;
+   int   expected_hit;
 } loaded_fixture_t;
 
 static loaded_fixture_t *load_fixtures(int *out_n)
@@ -69,21 +69,19 @@ static loaded_fixture_t *load_fixtures(int *out_n)
    loaded_fixture_t *out = (loaded_fixture_t *)calloc((size_t)n, sizeof(*out));
    for (int i = 0; i < n; i++)
    {
-      cJSON *fx = cJSON_GetArrayItem(fixtures, i);
-      cJSON *id  = cJSON_GetObjectItemCaseSensitive(fx, "id");
-      cJSON *body = cJSON_GetObjectItemCaseSensitive(fx, "body");
-      cJSON *hit  = cJSON_GetObjectItemCaseSensitive(fx, "expected_loop_hit");
-      out[i].id = id->valuestring;
-      out[i].body = body->valuestring;
+      cJSON *item = cJSON_GetArrayItem(fixtures, i);
+      cJSON *id   = cJSON_GetObjectItemCaseSensitive(item, "id");
+      cJSON *body = cJSON_GetObjectItemCaseSensitive(item, "body");
+      cJSON *hit  = cJSON_GetObjectItemCaseSensitive(item, "expected_loop_hit");
+      out[i].id = (id && cJSON_IsString(id) && id->valuestring) ? strdup(id->valuestring) : NULL;
+      out[i].body = (body && cJSON_IsString(body) && body->valuestring) ? strdup(body->valuestring) : NULL;
       out[i].expected_hit = (cJSON_IsTrue(hit) || (cJSON_IsBool(hit) && !cJSON_IsFalse(hit))) ? 1 : 0;
-      fprintf(stderr,"LOAD_DBG i=%d id=%s expected_hit=%d hit_type=%d\\n", i, out[i].id?out[i].id:"NULL", out[i].expected_hit, hit?hit->type:-1);
    }
    cJSON_Delete(root);
    free(buf);
    *out_n = n;
    return out;
-   /* (ids and bodies are heap-copied above so the caller can free them and
-    * free out itself once done). */
+   /* id/body are strdup'd; the caller frees them and the array. */
 }
 
 static void test_range_overlap_basic(void)
@@ -140,6 +138,8 @@ static void test_corpus_precision_and_repeatability(int *out_tp, int *out_fp,
       rc_result_t a, b;
       if (!run_detect(fx[i].body, fx[i].expected_hit, &a, &b))
       {
+         fprintf(stderr, "  corpus fixture failed: id=%s expected_hit=%d got_hit=%d loop_start=%zu span=%zu\n",
+                 fx[i].id ? fx[i].id : "NULL", fx[i].expected_hit, a.hit, a.loop_start_offset, a.loop_span_bytes);
          assert(0 && "corpus fixture failed");
       }
       if (fx[i].expected_hit)
@@ -174,7 +174,7 @@ static void test_corpus_precision_and_repeatability(int *out_tp, int *out_fp,
       assert(prec >= RC_REQUIRED_PRECISION);
    }
    *out_tp = tp; *out_fp = fp; *out_tn = tn; *out_fn = fn;
-   for (int i = 0; i < n; i++) { free((void *)fx[i].id); free((void *)fx[i].body); } free(fx);
+   for (int i = 0; i < n; i++) { free(fx[i].id); free(fx[i].body); } free(fx);
    banner("test_corpus_precision_and_repeatability");
 }
 

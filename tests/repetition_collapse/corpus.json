@@ -1,47 +1,55 @@
 {
   "schema_version": 1,
   "kind": "repetition_collapse_allowlist_corpus",
-  "description": "Legitimate-repeat fixtures and one heterogeneous-object fixture for repetition_collapse. Each fixture carries an explicit expected_label: 'loop' means the buffer is a degenerate repetition collapse the detector MUST flag; 'allow' means the buffer is a legitimate repeating structure the detector MUST NOT flag. The detector output is compared byte-for-byte across runs.",
+  "description": "Legitimate-repeat fixtures and one heterogeneous-object fixture for repetition_collapse. Each fixture carries an explicit expected_label: 'loop' means the buffer is a degenerate repetition collapse the detector MUST flag; 'allow' means the buffer is a legitimate repeating structure the detector MUST NOT flag. The detector output is compared byte-for-byte across runs. Every 'allow' fixture's repeating unit is intentionally longer than RC_DEFAULT_MIN_SPAN_BYTES=60 so the corpus exercises region/JSON suppression, not just the min_span pre-filter.",
   "fixtures": [
     {
       "id": "legit_fenced_ascii_art",
       "label": "allow",
       "kind": "fence",
       "expected_loop_hit": false,
-      "comment": "ASCII art inside a fenced block repeats the same line many times - must be suppressed.",
-      "body": "Example:\n\n```\n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n  /\\_/\\  \n ( o.o ) \n  > ^ <  \n```\n"
+      "comment": "ASCII art inside a fenced block repeats a long line verbatim - structural fence region MUST suppress the loop.",
+      "body": "Example:\n\n```\n   /\\_/\\           _____          /\\_/\\           _____          /\\_/\\  \n  ( o.o )    -->  |     |  -->   ( o.o )    -->  |     |  -->   ( o.o ) \n   > ^ <          /_____\\         > ^ <          /_____\\         > ^ <  \n   /\\_/\\           _____          /\\_/\\           _____          /\\_/\\  \n  ( o.o )    -->  |     |  -->   ( o.o )    -->  |     |  -->   ( o.o ) \n   > ^ <          /_____\\         > ^ <          /_____\\         > ^ <  \n   /\\_/\\           _____          /\\_/\\           _____          /\\_/\\  \n  ( o.o )    -->  |     |  -->   ( o.o )    -->  |     |  -->   ( o.o ) \n   > ^ <          /_____\\         > ^ <          /_____\\         > ^ <  \n```\n"
     },
     {
       "id": "legit_list_bodies",
       "label": "allow",
       "kind": "list_body",
       "expected_loop_hit": false,
-      "comment": "List items echo a repeated bullet body - must be suppressed.",
-      "body": "Steps:\n\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n- step one runs first, please be patient\n"
+      "comment": "List items echo a repeated bullet body longer than min_span - LIST_BODY region MUST suppress the loop.",
+      "body": "Steps:\n\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n- step one runs first, please be patient and observe carefully\n"
     },
     {
       "id": "legit_indented_code_block",
       "label": "allow",
       "kind": "code_block",
       "expected_loop_hit": false,
-      "comment": "Indented code block with 4-space-indented repeated printf() lines.",
-      "body": "Output:\n\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n    printf(\"hello world\\n\");\n"
+      "comment": "Indented code block with 4-space-indented repeated printf() lines >60 bytes - CODE_BLOCK region MUST suppress the loop.",
+      "body": "Output:\n\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n    fprintf(stdout, \"hello world from the diagnostic utility\\n\");\n"
     },
     {
       "id": "legit_pipe_table",
       "label": "allow",
       "kind": "table",
       "expected_loop_hit": false,
-      "comment": "Markdown pipe table with repeated sep/body rows.",
-      "body": "Results:\n\n| name  | value |\n|-------|-------|\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n| alpha | one   |\n"
+      "comment": "Markdown pipe table with repeated sep/body rows >60 bytes - TABLE region MUST suppress the loop.",
+      "body": "Results:\n\n| name       | value                                                 |\n|------------|-------------------------------------------------------|\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n| alpha      | one-of-the-larger-string-for-period-coverage-test    |\n"
     },
     {
       "id": "legit_json_fragments",
       "label": "allow",
       "kind": "json_fragment",
       "expected_loop_hit": false,
-      "comment": "Two well-formed JSON fragments whose internal keys repeat verbatim - allowlist must suppress.",
-      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n{\"id\":1,\"name\":\"a\",\"kind\":\"repeat\"}\n"
+      "comment": "Well-formed JSON fragments whose internal keys repeat verbatim >60 bytes - JSON grammar MUST suppress the loop.",
+      "body": "Schema samples:\n\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n{\"id\":1,\"name\":\"alpha\",\"kind\":\"repeat\",\"epoch\":1700000000,\"tag\":\"x\"}\n"
+    },
+    {
+      "id": "legit_multiline_list_item",
+      "label": "allow",
+      "kind": "list_body_multiline",
+      "expected_loop_hit": false,
+      "comment": "Multi-line list items with a long indented continuation block repeated verbatim. Documents that LIST_BODY covers only the marker line itself, NOT continuation lines - a verbatim repeat straddling continuation lines is NOT suppressed and is asserted here as a non-repeating multi-line item that still does not loop (each repetition is bounded by the marker line region so the detector abstains).",
+      "body": "Notes:\n\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n- first item heading line, padding to satisfy length\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n  continuation paragraph alpha bravo charlie delta echo foxtrot\n"
     },
     {
       "id": "heterogeneous_object_curls",
