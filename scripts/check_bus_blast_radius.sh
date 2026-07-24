@@ -111,7 +111,7 @@ done < <(find . \( -name CMakeLists.txt -o -name '*.cmake' \) \
 for f in src/tests/CMakeLists.txt src/tests/Rules.mk; do
    [ -f "$f" ] || continue
    hits=$({ grep -n 'modules/bus' "$f" 2>/dev/null || true; } | strip_comments |
-      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|OBJDIR\)/modules/bus' || true; })
+      { grep -vE 'test_bus|unit-test-bus|bus-conformance-host|bus_conformance_host|bus-bench|bus_bench|audit_bus|OBJDIR\)/modules/bus' || true; })
    if [ -n "$hits" ]; then
       note "FAIL: $f uses modules/bus outside a bus test target"
       printf '%s\n' "$hits" >&2
@@ -129,6 +129,12 @@ while IFS= read -r hit; do
    src/tests/test_bus_*) continue ;;
    src/tests/bus_conformance_host.c) continue ;; # slice-10 test harness
    src/tests/bus_bench.c) continue ;;             # slice-12 benchmark
+   # The first real module migration onto the bus (delivery step 3): the audit
+   # row is published to the bus and drained by a consumer. audit_bus.c is a bus
+   # producer/consumer, so it includes bus headers. It is NOT yet linked into any
+   # shipping binary — layer 4 below still proves no shipping target links the
+   # bus; that changes only when audit_bus.o is added to a shipping source list.
+   src/modules/audit/audit_bus.c) continue ;;
    esac
    note "FAIL: $hit"
    fail=1

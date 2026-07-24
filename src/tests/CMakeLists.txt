@@ -183,6 +183,14 @@ aimee_add_test(test_bus_config_autonomy test_bus_config_autonomy.c ../modules/bu
 target_include_directories(test_bus_config_autonomy PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus)
 target_link_libraries(test_bus_config_autonomy PRIVATE Threads::Threads)
 
+# audit-on-bus durability: the first module being migrated onto the bus. Emits N
+# rows through the real producer/consumer and requires the real ledger to hold
+# exactly N, each once, zero drops. audit_bus + bus compiled in; the ledger reader
+# and file writer come from aimee-core. Test binary only.
+aimee_add_test(test_bus_audit_durability test_bus_audit_durability.c ../modules/audit/audit_bus.c ../modules/bus/bus_client.c ../modules/bus/bus_host.c ../modules/bus/bus_route.c ../modules/bus/bus_region.c ../modules/bus/bus_ring.c ../modules/bus/bus_arena.c ../modules/bus/bus_wire.c)
+target_include_directories(test_bus_audit_durability PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../modules/bus ${CMAKE_CURRENT_SOURCE_DIR}/../modules/audit)
+target_link_libraries(test_bus_audit_durability PRIVATE Threads::Threads)
+
 
 
 

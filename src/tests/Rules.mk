@@ -2728,6 +2728,30 @@ $(TESTPREFIX)/unit-test-bus-config-autonomy: $(OBJDIR)/tests/test_bus_config_aut
 unit-test-bus-config-autonomy: $(TESTPREFIX)/unit-test-bus-config-autonomy
 	$<
 
+# The audit-on-bus DURABILITY test: the first module whose real path is being
+# migrated onto the bus. Emits N rows through the real audit_bus producer/consumer
+# and requires the real ledger to hold exactly N, each once, zero drops. Links
+# audit_bus + audit_ledger + the bus + the shared support objects. Test binary only.
+$(OBJDIR)/modules/audit/audit_bus.o: C_FLAGS += -Imodules/bus
+$(OBJDIR)/tests/test_bus_audit_durability.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-audit-durability: $(OBJDIR)/tests/test_bus_audit_durability.o \
+                                              $(OBJDIR)/modules/audit/audit_bus.o \
+                                              $(OBJDIR)/modules/audit/audit_ledger.o \
+                                              $(OBJDIR)/aimee_home.o \
+                                              $(OBJDIR)/modules/bus/bus_client.o \
+                                              $(OBJDIR)/modules/bus/bus_host.o \
+                                              $(OBJDIR)/modules/bus/bus_route.o \
+                                              $(OBJDIR)/modules/bus/bus_region.o \
+                                              $(OBJDIR)/modules/bus/bus_ring.o \
+                                              $(OBJDIR)/modules/bus/bus_arena.o \
+                                              $(OBJDIR)/modules/bus/bus_wire.o \
+                                              $(BUS_MEM_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+.PHONY: unit-test-bus-audit-durability
+unit-test-bus-audit-durability: $(TESTPREFIX)/unit-test-bus-audit-durability
+	$<
+
 .PHONY: unit-test-bus-capture
 unit-test-bus-capture: $(TESTPREFIX)/unit-test-bus-capture
 	$<
