@@ -68,6 +68,25 @@ type Runner interface {
 // one stage before the item is parked for a human instead of auto-resumed.
 const maxRunnerFailuresWithoutProgress = 8
 
+// maxCapacityWaitsWithoutProgress bounds how long a stage waits out provider
+// capacity before giving up. Capacity backpressure is self-clearing, so this is
+// far higher than the runner-failure bound: it exists only so a permanently
+// throttled credential cannot hold an item forever.
+const maxCapacityWaitsWithoutProgress = 240
+
+// isCapacityBackpressure reports whether err is the provider refusing more work
+// right now rather than the delegate failing. Both forms carry their own
+// retry-after, so re-dispatching after a wait is the correct recovery and the
+// attempt must not count against the no-progress bound.
+func isCapacityBackpressure(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := err.Error()
+	return strings.Contains(detail, "aimee_err=concurrency_limit") ||
+		strings.Contains(detail, "is rate-limited; retry in")
+}
+
 type Engine struct {
 	db            *db1.Store
 	artifacts     *wfe.ArtifactStore
@@ -240,11 +259,22 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, nil
 		}
 		reason := "runner_unavailable"
+		capacity := isCapacityBackpressure(err)
+		if capacity {
+			// The provider refused the dispatch outright; no delegate ran. Park
+			// on a distinct transient reason so this waits out the throttle on a
+			// longer backoff instead of burning the runner-failure bound.
+			reason = "capacity_backpressure"
+		}
 		// A stage that keeps failing without ever advancing is not a transient
 		// outage: stop auto-resuming it and park for a human. Without this an
 		// endlessly-failing delegate retries on the transient backoff forever.
-		if failures, ferr := e.db.RunnerFailuresSinceProgress(context.WithoutCancel(ctx), item.ID, item.Stage); ferr == nil &&
-			failures >= maxRunnerFailuresWithoutProgress {
+		bound, counter := maxRunnerFailuresWithoutProgress, e.db.RunnerFailuresSinceProgress
+		if capacity {
+			bound, counter = maxCapacityWaitsWithoutProgress, e.db.CapacityWaitsSinceProgress
+		}
+		if failures, ferr := counter(context.WithoutCancel(ctx), item.ID, item.Stage); ferr == nil &&
+			failures >= bound {
 			reason = "delegate_failed"
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
