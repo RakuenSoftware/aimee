@@ -735,6 +735,87 @@ nodes:
 	}
 }
 
+type acceptedRunner struct{}
+
+func (acceptedRunner) Run(context.Context, StepRequest) (StepResult, error) {
+	return StepResult{Status: StepAccepted, Detail: "no-op: empty diff vs base"}, nil
+}
+
+// A step returning StepAccepted completes the item as an accepted no-op and does
+// NOT advance to a remaining stage. This is what freeze does on an empty diff so a
+// no-op slice cannot loop through review to convergence_no_progress.
+func TestStepAcceptedFinishesItemWithoutAdvancing(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte(`name: slice
+start: freeze
+nodes:
+  - id: source
+    block: understand
+  - id: impl
+    block: implement
+    in: {plan: source.out}
+  - id: freeze
+    block: freeze
+    in: {branch: impl.out}
+    next: pr
+  - id: pr
+    block: pr.open
+    in: {src: freeze.out}
+    next: ci
+  - id: ci
+    block: gate.ci
+    in: {pr: pr.out}
+    on_pass: merge
+    on_fail: impl
+  - id: merge
+    block: merge
+    in: {pr: pr.out}
+`)
+	if err := os.WriteFile(filepath.Join(workflowDir, "slice.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal("wi_noop", []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := artifacts.PutNodeArtifact("wi_noop", "impl", "branch", []byte("head")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_noop", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(store, artifacts, workflowDir, acceptedRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := eng.Advance(context.Background(), "wi_noop")
+	if err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if !out.Terminal || out.State != "accepted" {
+		t.Fatalf("StepAccepted must finish the item accepted, got terminal=%v state=%q", out.Terminal, out.State)
+	}
+	if out.NextStage != "" {
+		t.Fatalf("no-op accept must not advance to a next stage, got %q", out.NextStage)
+	}
+}
+
 func TestGateReviewsItsBoundArtifactNotThePlanShortcut(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, "workflows")
