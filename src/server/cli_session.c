@@ -7,7 +7,10 @@
 #include "cli_session.h"
 #include "util.h"
 #include "workspace_provider.h"
+#include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -375,6 +378,145 @@ void cli_session_prepare_claude(const char *work_dir, int autonomous)
       close(lf);
    }
    pthread_mutex_unlock(&g_prep_mu);
+}
+
+/* nftw callback: remove one entry. FTW_DEPTH gives post-order so a directory is
+ * removed after its children; FTW_PHYS (set by the caller) means a symlink is
+ * removed as the link, never followed — so the shared .credentials.json target is
+ * never touched. */
+static int cli_home_unlink_cb(const char *p, const struct stat *st, int type, struct FTW *ftw)
+{
+   (void)st;
+   (void)type;
+   (void)ftw;
+   remove(p);
+   return 0;
+}
+
+static void cli_rmrf(const char *path)
+{
+   nftw(path, cli_home_unlink_cb, 16, FTW_DEPTH | FTW_PHYS);
+}
+
+/* Reap per-session claude homes older than an hour so they cannot accumulate on
+ * the volume. Best-effort; an in-use home has a fresh mtime and is skipped. */
+static void cli_claude_homes_sweep(const char *base)
+{
+   DIR *d = opendir(base);
+   if (!d)
+      return;
+   time_t now = time(NULL);
+   struct dirent *e;
+   while ((e = readdir(d)) != NULL)
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      char p[PATH_MAX];
+      if ((size_t)snprintf(p, sizeof(p), "%s/%s", base, e->d_name) >= sizeof(p))
+         continue;
+      struct stat st;
+      if (lstat(p, &st) != 0 || !S_ISDIR(st.st_mode))
+         continue;
+      if (now - st.st_mtime < 3600)
+         continue;
+      cli_rmrf(p);
+   }
+   closedir(d);
+}
+
+/* Mint a per-session claude HOME so concurrent delegate seats do not share one
+ * ~/.claude.json and ~/.claude runtime tree (session history, sessions,
+ * session-env). claude-code writes those non-atomically all turn, so N concurrent
+ * seats corrupt/block each other and wedge to the CLI timeout — a review that
+ * finishes solo in ~1 min hangs under load. Each turn gets its own HOME; only the
+ * OAuth token and settings.json are shared, symlinked (read-mostly), and
+ * ~/.claude.json is seeded from the shared one (oauthAccount / onboarding / trust)
+ * then diverges per turn.
+ *
+ * Best-effort: on ANY failure returns -1 and fills nothing, so the caller launches
+ * with the shared HOME (the prior behavior) — this can never make claude
+ * unlaunchable. Fills home_out with the new HOME on success. */
+int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz)
+{
+   if (!home_out || home_out_sz == 0)
+      return -1;
+   home_out[0] = '\0';
+   const char *shared = cli_claude_home();
+
+   char base[PATH_MAX];
+   if ((size_t)snprintf(base, sizeof(base), "%s/.claude-homes", shared) >= sizeof(base))
+      return -1;
+   mkdir(base, 0700); /* ignore EEXIST */
+   cli_claude_homes_sweep(base);
+
+   char home[PATH_MAX];
+   if ((size_t)snprintf(home, sizeof(home), "%s/s.XXXXXX", base) >= sizeof(home))
+      return -1;
+   if (mkdtemp(home) == NULL)
+      return -1;
+
+   char cdir[PATH_MAX];
+   if ((size_t)snprintf(cdir, sizeof(cdir), "%s/.claude", home) >= sizeof(cdir))
+      return -1;
+   if (mkdir(cdir, 0700) != 0 && errno != EEXIST)
+      return -1;
+
+   /* Share the OAuth token (required to authenticate) and settings.json (MCP
+    * servers + hooks + the auto-updater disable) by symlink. The credential is
+    * mandatory: without it claude cannot auth, so a failed link falls back to the
+    * shared HOME rather than launching an unauthenticated seat. */
+   char src[PATH_MAX], dst[PATH_MAX];
+   if ((size_t)snprintf(src, sizeof(src), "%s/.claude/.credentials.json", shared) >= sizeof(src) ||
+       (size_t)snprintf(dst, sizeof(dst), "%s/.credentials.json", cdir) >= sizeof(dst))
+      return -1;
+   /* symlink() happily links to a missing target, so verify the shared token
+    * actually exists — a dangling credential link would launch an unauthenticated
+    * seat. No token -> fall back to the shared HOME. */
+   if (access(src, R_OK) != 0 || symlink(src, dst) != 0)
+      return -1;
+   if ((size_t)snprintf(src, sizeof(src), "%s/.claude/settings.json", shared) < sizeof(src) &&
+       (size_t)snprintf(dst, sizeof(dst), "%s/settings.json", cdir) < sizeof(dst))
+      (void)symlink(src, dst); /* helpful, not fatal */
+
+   /* Seed ~/.claude.json from the shared one for oauthAccount + onboarding, plus
+    * trust for this worktree. A mid-write/corrupt shared file (skip=1) means we
+    * cannot recover the account -> fall back to the shared HOME. */
+   char sharedjson[PATH_MAX], homejson[PATH_MAX];
+   if ((size_t)snprintf(sharedjson, sizeof(sharedjson), "%s/.claude.json", shared) >=
+           sizeof(sharedjson) ||
+       (size_t)snprintf(homejson, sizeof(homejson), "%s/.claude.json", home) >= sizeof(homejson))
+      return -1;
+   int skip = 0;
+   cJSON *root = cli_claude_cfg_load(sharedjson, &skip);
+   if (!root)
+      return -1;
+   cli_json_set_true(root, "hasCompletedOnboarding");
+   if (work_dir && work_dir[0])
+   {
+      cJSON *projects = cJSON_GetObjectItemCaseSensitive(root, "projects");
+      if (!cJSON_IsObject(projects))
+      {
+         cJSON_DeleteItemFromObject(root, "projects");
+         projects = cJSON_AddObjectToObject(root, "projects");
+      }
+      cJSON *proj = projects ? cJSON_GetObjectItemCaseSensitive(projects, work_dir) : NULL;
+      if (projects && !cJSON_IsObject(proj))
+      {
+         cJSON_DeleteItemFromObject(projects, work_dir);
+         proj = cJSON_AddObjectToObject(projects, work_dir);
+      }
+      if (proj)
+         cli_json_set_true(proj, "hasTrustDialogAccepted");
+   }
+   char *out = cJSON_Print(root);
+   int wrote = out && cli_write_file_atomic(homejson, out) == 0;
+   free(out);
+   cJSON_Delete(root);
+   if (!wrote)
+      return -1;
+
+   snprintf(home_out, home_out_sz, "%s", home);
+   return 0;
 }
 
 int cli_session_resolve_cwd(const char *turn_cwd, char *out, size_t n)

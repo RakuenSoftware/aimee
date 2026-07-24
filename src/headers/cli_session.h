@@ -115,6 +115,14 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
  * for the TUI to start at all); the bypass warning is left untouched. */
 void cli_session_prepare_claude(const char *work_dir, int autonomous);
 
+/* Mint a per-session claude HOME so concurrent delegate seats don't share one
+ * ~/.claude.json + ~/.claude runtime tree (which claude-code writes non-atomically
+ * all turn, wedging concurrent seats). Only the OAuth token + settings.json are
+ * shared (symlinked); the rest is per-turn. Best-effort: returns 0 and fills
+ * home_out on success, -1 on any failure (caller then uses the shared HOME).
+ * Reaps per-session homes older than an hour on each call. */
+int cli_session_isolated_claude_home(const char *work_dir, char *home_out, size_t home_out_sz);
+
 /* Kills the tmux session. No-op if already dead. */
 void cli_session_destroy(cli_session_t *s);
 
