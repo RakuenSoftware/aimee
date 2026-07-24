@@ -150,9 +150,27 @@ atomicity remains unproven until §1 runs. The release gate in §4 stays closed.
 
 ## 3. Canary scan
 
-Database, files, logs, crash artifacts, and the bytes actually emitted to the
-consumer. No raw KEK or DEK material anywhere. `provider:cred` asserted to be a
-stable identifier, never a credential handle or wrapped-key reference.
+**Status: BUILT and validated on real PG17** (`src/tests/test_witness_canary_pg.c`).
+Proves empirically what the format guarantees by construction:
+
+- extracts the two real secrets a leak would expose — the server KEK, and the
+  HKDF-derived witness signing seed (re-derived with the exact production params so
+  it is scanned INDEPENDENTLY of the KEK) — and requires that neither appears in the
+  emitted stream OR in a raw dump of every bytea/text witness column (raw and hex);
+- requires the `provider_cred` sentinel to survive by **exact SQL equality** across
+  all seeded rows (not substring, so a wrapped or digested value is caught), in both
+  emission and storage.
+
+Guarded against a vacuous pass: the KEK is asserted non-trivial, the scanner is
+positive-controlled against a buffer that contains the KEK, and the table dump is
+asserted non-truncated so a secret cannot hide past a cutoff.
+
+Not separately exercised here: files and crash artifacts. The evidence never
+touches the filesystem on the kb (the durable store is Postgres; emission is the
+log path), and no witness code writes a temp file or is expected to core-dump with
+evidence resident, so the DB + emitted-bytes scan covers the reachable surface. A
+core-dump scan would require a real anchor build and is folded into the same
+validation-pending item as the boot-refusal path.
 
 ## 4. The release gate
 
