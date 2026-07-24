@@ -97,10 +97,13 @@ static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
    *has_pred = 0;
    memset(pred, 0, 32);
    char err[CP_ERR];
+   /* seq is BIGINT, read via aimee_pg_column_int64, which does not touch the single
+    * blob cache the bytea columns share — so it folds into this one query safely and
+    * the input to the digest is provably exactly one row. */
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
        "SELECT root,has_predecessor,predecessor_digest,shard_count,leaf_snapshot_digest,"
-       "signer_key_id,sig_alg,sig_version,created_at FROM kb_vault_witness_checkpoint "
+       "signer_key_id,sig_alg,sig_version,created_at,seq FROM kb_vault_witness_checkpoint "
        "ORDER BY seq DESC LIMIT 1",
        err, sizeof err);
    if (!st)
@@ -147,22 +150,10 @@ static int previous_digest(void *conn, int *has_pred, uint8_t pred[32])
    ok = ok && hp && ca;
    if (ok)
       snprintf(prev.created_at, sizeof prev.created_at, "%s", ca);
+   prev.seq = (uint64_t)aimee_pg_column_int64(st, 9); /* seq, from the same row */
    aimee_pg_finalize(st);
    if (!ok)
       return -1;
-   /* Re-read the seq (needed for the signable body). */
-   aimee_pg_stmt_t *sq = aimee_pg_prepare(
-       conn, "SELECT seq FROM kb_vault_witness_checkpoint ORDER BY seq DESC LIMIT 1", err,
-       sizeof err);
-   if (!sq)
-      return -1;
-   if (aimee_pg_step(sq, err, sizeof err) != AIMEE_PG_ROW)
-   {
-      aimee_pg_finalize(sq);
-      return -1;
-   }
-   prev.seq = (uint64_t)aimee_pg_column_int64(sq, 0);
-   aimee_pg_finalize(sq);
    if (vault_witness_checkpoint_digest(&prev, pred) != 0)
       return -1;
    *has_pred = 1;

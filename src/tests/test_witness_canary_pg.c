@@ -26,6 +26,8 @@
 #include <unistd.h>
 
 #include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/kdf.h>
 
 #include "db2.h"
 #include "db2/db2_internal.h"
@@ -152,10 +154,26 @@ int main(void)
    /* The secrets a leak would expose. */
    uint8_t kek[VAULT_KEK_LEN];
    MUST(vault_server_kek(kek) == 0, "could not read the server KEK");
-   /* The witness signing seed is HKDF(KEK, SEED_INFO). We do not have a direct
-    * accessor (by design — it is transient), but any leak of it would equally be a
-    * leak of the KEK it derives from, and the KEK is the stronger canary: if the KEK
-    * is absent, the seed cannot have been emitted either. We scan for the KEK. */
+
+   /* The witness signing SEED = HKDF-SHA256(ikm=KEK, salt="", info=SEED_INFO). It is
+    * transient in production (derived, used, cleansed) with no accessor, so the
+    * canary re-derives it with the exact production parameters and scans for it
+    * INDEPENDENTLY of the KEK: the two are distinct byte strings, and a seed leak
+    * (into a debug line, a core-dump fragment, a witness sub-field) would not show as
+    * a KEK leak. */
+   uint8_t seed[32];
+   {
+      EVP_PKEY_CTX *c = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, NULL);
+      size_t outlen = sizeof seed;
+      int ok = c && EVP_PKEY_derive_init(c) == 1 && EVP_PKEY_CTX_set_hkdf_md(c, EVP_sha256()) == 1 &&
+               EVP_PKEY_CTX_set1_hkdf_key(c, kek, VAULT_KEK_LEN) == 1 &&
+               EVP_PKEY_CTX_add1_hkdf_info(c, (const unsigned char *)VAULT_WITNESS_SIGNER_SEED_INFO,
+                                           (int)strlen(VAULT_WITNESS_SIGNER_SEED_INFO)) == 1 &&
+               EVP_PKEY_derive(c, seed, &outlen) == 1 && outlen == sizeof seed;
+      EVP_PKEY_CTX_free(c);
+      MUST(ok, "could not re-derive the witness signing seed");
+      MUST(memcmp(seed, kek, VAULT_KEK_LEN) != 0, "seed equals KEK — HKDF params wrong");
+   }
 
    for (int i = 1; i <= 5; i++)
    {
@@ -183,30 +201,43 @@ int main(void)
            "scanner positive control failed: contains() cannot find the KEK it is looking for");
    }
 
-   /* 1. The server KEK must not appear in the emitted stream. */
+   /* 1. Neither the server KEK nor the derived signing seed may appear in the
+    *    emitted stream. */
    MUST(!contains(g_stream, g_len, kek, VAULT_KEK_LEN),
         "the server KEK appears in the emitted witness stream");
+   MUST(!contains(g_stream, g_len, seed, sizeof seed),
+        "the witness signing seed appears in the emitted witness stream");
 
    /* 2. Nor in a raw dump of the witness tables. The dump is hex-encoded, so compare
     *    against the hex of the KEK as well as the raw bytes. */
    static uint8_t dump[1 << 20];
    size_t dn = dump_witness_tables(conn, dump, sizeof dump);
    MUST(dn > 0, "witness table dump was empty");
-   char kek_hex[VAULT_KEK_LEN * 2 + 1];
+   char kek_hex[VAULT_KEK_LEN * 2 + 1], seed_hex[32 * 2 + 1];
    for (int i = 0; i < VAULT_KEK_LEN; i++)
       snprintf(kek_hex + i * 2, 3, "%02x", kek[i]);
+   for (int i = 0; i < 32; i++)
+      snprintf(seed_hex + i * 2, 3, "%02x", seed[i]);
    MUST(!contains(dump, dn, (const uint8_t *)kek_hex, VAULT_KEK_LEN * 2),
         "the server KEK appears (hex) in a witness table");
    MUST(!contains(dump, dn, kek, VAULT_KEK_LEN),
         "the server KEK appears (raw) in a witness table");
+   MUST(!contains(dump, dn, (const uint8_t *)seed_hex, 32 * 2),
+        "the witness signing seed appears (hex) in a witness table");
+   MUST(!contains(dump, dn, seed, 32), "the witness signing seed appears (raw) in a witness table");
 
    /* 3. provider_cred is a passed-through stable identifier: the sentinel must
     *    survive verbatim in the emitted record. If it were replaced by a credential
     *    handle or a wrapped-key reference, it would not appear. */
    MUST(contains(g_stream, g_len, (const uint8_t *)SENTINEL_CRED, strlen(SENTINEL_CRED)),
-        "provider_cred sentinel did not survive round-trip; the field is not a stable identifier");
+        "provider_cred sentinel did not survive round-trip in the emitted stream");
+   /* And in storage: a storage-side transformation (hash/encrypt/handle) would not
+    * be caught by the emit-path check alone if emission re-encoded from elsewhere. */
+   MUST(contains(dump, dn, (const uint8_t *)SENTINEL_CRED, strlen(SENTINEL_CRED)),
+        "provider_cred sentinel is not stored verbatim; storage is not a stable identifier");
 
    OPENSSL_cleanse(kek, sizeof kek);
+   OPENSSL_cleanse(seed, sizeof seed);
    db2_shutdown();
    printf("witness_canary_pg: PASSED (no KEK in evidence or tables; provider_cred is a stable "
           "identifier)\n");

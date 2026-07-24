@@ -169,6 +169,39 @@ int main(void)
       snprintf(sid, sizeof sid, "b11-%d", i);
       MUST(append_record(conn, sid) == 0, "append %s failed", sid);
    }
+   /* First, the strongest cursor guarantee: a kill BEFORE any frame is durably sunk
+    * must not advance the cursor at all. Emit with a sink that fails on frame 0, then
+    * confirm a restart re-reads from the same position and loses nothing — proving
+    * the cursor never runs ahead of durable emission. */
+   {
+      g_sink_budget = 0; /* the process dies before the first frame lands */
+      db2_witness_emit_stats_t sz;
+      db2_witness_emit_result_t rz = db2_witness_emit_run(capture_sink, NULL, 8192, &sz);
+      MUST(rz == DB2_WITNESS_EMIT_SINK_FAILED, "expected an immediate sink failure, got %d",
+           (int)rz);
+      MUST(sz.records_emitted == 0, "the cursor advanced with nothing durably sunk (%llu records)",
+           (unsigned long long)sz.records_emitted);
+      g_sink_budget = -1;
+      conn = simulate_restart();
+      MUST(conn != NULL, "restart after zero-sink kill failed");
+      db2_witness_emit_stats_t szr;
+      MUST(db2_witness_emit_run(capture_sink, NULL, 8192, &szr) == DB2_WITNESS_EMIT_OK,
+           "resume after zero-sink kill failed");
+      MUST(szr.records_emitted == 10,
+           "zero-sink kill lost records: resume emitted %llu, expected all 10",
+           (unsigned long long)szr.records_emitted);
+      printf("witness_recovery_pg: zero-sink kill OK (cursor did not advance; all 10 records "
+             "recovered)\n");
+   }
+
+   /* Re-append the same 10 records' worth for the mid-batch case below (the run
+    * above already drained 6..15). Use a fresh range so the chain stays contiguous. */
+   for (int i = 16; i <= 25; i++)
+   {
+      char sid[16];
+      snprintf(sid, sizeof sid, "b11-%d", i);
+      MUST(append_record(conn, sid) == 0, "append %s failed", sid);
+   }
    size_t before_partial = g_len;
    g_sink_budget = 4; /* accept 4 frames, then the "process dies" */
    db2_witness_emit_stats_t s10;

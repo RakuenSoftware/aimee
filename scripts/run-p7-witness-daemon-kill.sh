@@ -87,7 +87,13 @@ grep -q "HARNESS STOPPED" "$WORK/run2.err" 2>/dev/null && true
 kill -TERM "$PID"; wait "$PID" 2>/dev/null || true; PID=""
 grep -q "HARNESS STOPPED" "$WORK/run2.out" || { echo "FAIL: restart did not come up and stop cleanly"; sed -n '1,20p' "$WORK/run2.err"; exit 1; }
 n2=$(grep -c "kb.witness.evidence" "$WORK/run2.err" || true)
-echo "run 2: restarted cleanly, emitted $n2 evidence frames"
+# The restart must actually RECOVER and emit, not merely come up: after a hard kill
+# the cursor may be behind (re-emission) and the still-running cadence produces new
+# checkpoints, so a healthy restart emits at least one frame. Zero here would mean
+# the post-kill cadence produced but the sink never delivered — a silent failure the
+# clean-startup check alone would miss.
+[ "${n2:-0}" -ge 1 ] || { echo "FAIL: restart came up but emitted no evidence (silent recovery failure)"; exit 1; }
+echo "run 2: restarted and recovered, emitted $n2 evidence frames"
 
 echo "== rebuild the retained stream from the REAL emitted log lines =="
 # The anchor is on stdout; evidence is on stderr as 'kind=... b64=<BASE64>'.

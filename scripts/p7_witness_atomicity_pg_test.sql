@@ -138,18 +138,46 @@ END $$;
 -- ---------------------------------------------------------------------------
 -- D. A witness append that FAILS must take its source event down with it. This is
 --    the direction that matters most: a source event committing without evidence
---    is precisely the hole the umbrella exists to close. The witness log's
---    shard_seq > 0 CHECK is used as the injected failure, since it fires inside
---    the same transaction exactly as a real witness failure would.
+--    is precisely the hole the umbrella exists to close.
+--
+--    The failure must be trippable ONLY by the witness INSERT itself, and the
+--    append must genuinely be reached — otherwise the test passes for the wrong
+--    reason. (An earlier version poisoned the shard with seq=-1, but the shard's own
+--    CHECK (seq >= 0) rejects that UPDATE before the append ever runs, so the
+--    invariant was never exercised.) Instead we pre-plant a witness_log row at the
+--    exact shard_seq the next append will target. The log is append-only, and a
+--    plain INSERT is allowed, so this leaves a legitimate, self-consistent state in
+--    which the ONLY thing that fails is the append's own INSERT — a primary-key
+--    conflict (23505) on (tenant, provider, shard_seq).
 -- ---------------------------------------------------------------------------
+
+-- Step 1: the pre-plant must SUCCEED silently. If it raised, the rest of the test
+-- would be meaningless, so its success is asserted separately (in its own committed
+-- statement, so it survives the append's rollback below).
+DO $$
+DECLARE v_head BIGINT; v_next BIGINT; v_pred BYTEA;
+BEGIN
+  SELECT seq, head_hash INTO v_head, v_pred FROM public.kb_vault_witness_shard
+    WHERE tenant='!kb' AND provider='!audit';
+  IF v_head IS NULL THEN
+    RAISE EXCEPTION 'ATOMICITY FAIL: no !kb/!audit shard to target (section C must run first)';
+  END IF;
+  v_next := v_head + 1;
+  INSERT INTO public.kb_vault_witness_log(tenant,provider,shard_seq,source_kind,source_id,
+    source_hash,has_source_pred,source_pred_hash,witness_pred_hash,record_hash,event_ts,
+    seal_epoch,fencing_token)
+  VALUES('!kb','!audit',v_next,0,'preplant',decode(repeat('cd',32),'hex'),false,
+    decode(repeat('00',32),'hex'),v_pred,decode(repeat('ce',32),'hex'),
+    '2026-07-23T00:00:00Z',1,1);
+  RAISE NOTICE 'ATOMICITY setup: pre-planted a conflicting witness row at shard_seq %', v_next;
+END $$;
+
+-- Step 2: the append is genuinely reached and fails ONLY on its own witness INSERT.
 DO $$
 DECLARE v_before BIGINT; v_failed BOOLEAN := false; v_msg TEXT := ''; v_state TEXT := '';
 BEGIN
   SELECT count(*) INTO v_before FROM public.kb_audit_event;
   BEGIN
-    -- Poison the shard row so the next append's head advance violates a constraint.
-    UPDATE public.kb_vault_witness_shard SET seq = -1
-      WHERE tenant='!kb' AND provider='!audit';
     PERFORM public.kb_audit_worm_append('kb','uid:0','vault.key_use','anthropic:s3','allow','');
   EXCEPTION WHEN OTHERS THEN
     v_failed := true;
@@ -158,21 +186,22 @@ BEGIN
   END;
   -- The load-bearing assertion: the append FAILED rather than committing an audit
   -- event with no evidence. If the witness call were ever unwired from this path,
-  -- the poisoned shard would be irrelevant and the append would succeed here.
+  -- the pre-planted conflict would be irrelevant and the append would succeed.
   IF NOT v_failed THEN
-    RAISE EXCEPTION 'ATOMICITY FAIL: poisoned witness state did not fail the append — '
-      'the witness call is not on the audit path';
+    RAISE EXCEPTION 'ATOMICITY FAIL: the append succeeded despite a pre-planted witness conflict — '
+      'the witness INSERT is not on the audit path';
   END IF;
-  -- And the failure must come from the witness state we poisoned, not from some
-  -- unrelated error that would make this test pass for the wrong reason.
-  IF v_state <> '23514' AND position('witness' in lower(v_msg)) = 0 THEN
-    RAISE EXCEPTION 'ATOMICITY FAIL: append failed for an unrelated reason (% / %)',
+  -- The failure must be the witness INSERT's primary-key conflict, not something
+  -- else. 23505 is unique_violation, and only the append's witness INSERT can hit
+  -- the row we planted at that exact (tenant, provider, shard_seq).
+  IF v_state <> '23505' THEN
+    RAISE EXCEPTION 'ATOMICITY FAIL: append failed with % (%), expected the witness PK conflict 23505',
       v_state, v_msg;
   END IF;
   IF (SELECT count(*) FROM public.kb_audit_event) <> v_before THEN
     RAISE EXCEPTION 'ATOMICITY FAIL: audit event committed even though its witness append failed';
   END IF;
-  RAISE NOTICE 'ATOMICITY OK: a failed witness append aborts its source event (% )', v_state;
+  RAISE NOTICE 'ATOMICITY OK: a failed witness append (PK conflict) aborts its source event';
 END $$;
 
 DO $$ BEGIN RAISE NOTICE 'p7_witness_atomicity_pg_test: all checks passed'; END $$;
