@@ -2,20 +2,20 @@
 
 ## What this records
 
-Twenty-two module descriptors carry `ownership_complete: true`. Four do not. This document tracks
-those four, whose module root contains nothing but `module.yaml` — no implementation has ever been
+Twenty-three module descriptors carry `ownership_complete: true`. Three do not. This document tracks
+those three, whose module root contains nothing but `module.yaml` — no implementation has ever been
 moved under `src/modules/<id>/`. It exists so that gap is recorded in one place rather than inferred
 by re-measuring the tree, and so `rule=ownership-empty-domain` has somewhere to point.
 
 The Class B descriptors that once had undeclared implementation files in their roots — governance,
 learning, workspace, vault, config, git, delegates, workflows, memory — have since been declared and
-latched, as has `benchmarks` (the first Class A code migration). These four empty-root descriptors
+latched, as has `benchmarks` (the first Class A code migration). These three empty-root descriptors
 are the only remainder.
 
 ## Why an empty root cannot be latched
 
 `validate_complete_ownership` compares the declared source and private-header sets against every
-matching file under the module root. For these four, both actual sets are empty, so set equality
+matching file under the module root. For these three, both actual sets are empty, so set equality
 holds vacuously and the latch would pass on the source and private-header rules. Until slice 39 the
 only thing preventing it was the separate `docs == ["docs/modules/<id>.md"]` requirement, which none
 of them satisfies — one field away from a descriptor asserting completeness for a module that has not
@@ -23,7 +23,7 @@ been migrated at all.
 
 `docs/modules/module-runtime.md` states that modules without the latch "remain migration debt and
 must not feed generated build profiles." Latching an empty root would silently clear that debt for
-the four modules furthest from done, and would do it for the four where the assertion is least
+the three modules furthest from done, and would do it for the three where the assertion is least
 true. Slice 39 therefore rejects `ownership_complete: true` whenever the module-local domain is
 empty, with `rule=ownership-empty-domain`.
 
@@ -36,7 +36,7 @@ design question stays open rather than being pre-answered by an opt-out.
 The failure message says the module is not migrated rather than broken. These descriptors are valid;
 they are early.
 
-## The remaining four
+## The remaining three
 
 `benchmarks` has been migrated and latched: the cohesive eval framework in the former non-descriptor
 `src/modules/agent_eval/` directory (four sources + two headers) was relocated under
@@ -70,7 +70,16 @@ validation (`tool_validate`) and side-effect classification (`tool_side_effect`)
 with the server/`tools` surface, and the trace/metrics/manifest half of `agent_policy.c` stays too; all
 are reached through the shared `src/headers/agent_exec.h`, which the module implements. The
 enforcement points that consume the decision — guardrails' `pre_tool_check`, gateway policing — stay
-where they are. Four Class A modules remain.
+where they are.
+
+`kb-synthesis` has since been migrated (pilot #5): the KB curator family (21 sources + 16 headers) was
+relocated from `src/kb/` into `src/modules/kb-synthesis/`. Unlike the earlier splits it is **KB-tier** —
+the sources include KB-internal service headers (`kb.h`, `index.h`, `kb_service_*`, `kb_mdl.h`, …), so
+they compile with the KB build flags into `$(OBJDIR)/kb/modules/kb-synthesis/` (the
+`KB_SYNTHESIS_SRCS`/`KB_SYNTHESIS_OBJS` pair) and link only into `aimee-kb`; `-Imodules/kb-synthesis`
+lets the in-KB consumers (`kb.c`, `cmd_kb.c`, the curator config/profile) resolve the curator headers.
+The DB2 artifact/link storage APIs and the core `kb_curator_provider.c` adapter stay their owners' and
+are consumed through their contracts. Three Class A modules remain — all three no-source.
 
 Locations below are what each module's own canonical document names. They are a starting inventory
 for a future migration slice, not an ownership assignment: no audit has confirmed that these files
@@ -79,7 +88,6 @@ are the module's, exclusively or at all. A migration slice must establish that i
 | module | canonical document names | notes |
 |---|---|---|
 | `control-web` | nothing | The document describes the Control Plane GUI, dashboard, assets, listener and proxy behaviour without naming a source location. |
-| `kb-synthesis` | `src/kb/` (`kb_curator_synthesize.h`), `src/db2` | Lives with the KB and its PostgreSQL store. |
 | `response-composition` | `src/modules/ir/include/aimee/ir/aimee_ir.h` | Only an IR contract is named; no implementation site. |
 | `runtime-web` | nothing | As with `control-web`, the document specifies the surface and lifecycle key but no source location. |
 
@@ -98,12 +106,10 @@ Two observations worth carrying forward:
   remove the descriptors (their IDs are reserved by the owning proposals). A silent flip of any of the
   three to `ownership_complete: true` without real implementation would be a regression; the descriptor
   mutation suite and the empty-domain guard (slice 39) both defend against it.
-- `kb-synthesis` remains: its canonical document names `src/kb/` (a family of ~22 `kb_curator_*`
-  sources compiled into `aimee-kb`) and `src/db2`, deeply coupled to the rest of the KB — a large
-  entangled extraction, not a self-contained block. The four `tools`/`routing`/`execution-policy`
-  distributed cases were each resolved by extracting only the self-contained module surface and
-  reaching the rest through a shared header; `kb-synthesis` has no comparable clean seam yet, and
-  `control-web`/`runtime-web`/`response-composition` have no located source at all.
+- All three remaining modules are **no-source**: `control-web`/`runtime-web`/`response-composition`
+  have no located implementation, so there is nothing to migrate. The five modules whose code existed
+  and could physically move — `benchmarks`, `tools`, `routing`, `execution-policy`, `kb-synthesis` —
+  have all been migrated and latched.
 
 ## What would change this document
 

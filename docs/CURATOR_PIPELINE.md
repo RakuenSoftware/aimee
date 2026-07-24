@@ -14,7 +14,7 @@ with GPU work).
 
 ## The stage registry
 
-Defined in `src/kb/kb_curator_pipeline.h` and populated in `src/kb/kb_curator_drain.c`
+Defined in `src/modules/kb-synthesis/kb_curator_pipeline.h` and populated in `src/modules/kb-synthesis/kb_curator_drain.c`
 (`CURATOR_STAGES[]`). Each stage is:
 
 ```c
@@ -113,7 +113,7 @@ No drain-loop code changes are needed — the registry drives it.
 
 ## Source map
 
-- `src/kb/kb_curator_pipeline.{h,c}` — stage descriptor + `run_pass`.
-- `src/kb/kb_curator_drain.c` — the registry (`CURATOR_STAGES[]`), the two lane workers, the stage adapters.
+- `src/modules/kb-synthesis/kb_curator_pipeline.{h,c}` — stage descriptor + `run_pass`.
+- `src/modules/kb-synthesis/kb_curator_drain.c` — the registry (`CURATOR_STAGES[]`), the two lane workers, the stage adapters.
 - `src/tests/test_curator_pipeline_sched.c` — `run_pass` scheduling (lane filter / budget / error-stop).
 - `src/tests/test_curator_pipeline.c` — end-to-end curator chain over the sqlite shim.

@@ -9,10 +9,18 @@ embedding/reranking, code indexing, basic memory recall, or the deterministic Ti
 
 ## Public contracts
 
-Current contracts include `src/kb/kb_curator_synthesize.h`, `kb_curator_provider.h`, curator pipeline
-stages, serve endpoints, and DB2 artifact/link APIs. The descriptor directory currently has no source;
-implementation is distributed across `src/kb`, `src/db2`, root curator profile/config, and HTTP/CLI code.
-That placement is migration debt and should be narrowed only after separating required ingestion stages.
+`src/modules/kb-synthesis/` owns the KB curator family — 21 sources and 16 headers relocated from
+`src/kb/`: the curator pipeline and queue, extraction (evidence/code), grounding, entity resolution,
+contradiction reconciliation, judging, promotion, the index writers (narrative/claims/code-unit),
+artifact linking, LLM and sidecar drivers, notify/version, and `kb_curator_synthesize.{c,h}`. These are
+**KB-tier** sources: they include KB-internal service headers (`kb.h`, `index.h`, `kb_service_*`,
+`kb_mdl.h`, `kb_learning_synth.h`, …), so they compile with the KB build flags into
+`$(OBJDIR)/kb/modules/kb-synthesis/` (the `KB_SYNTHESIS_SRCS`/`KB_SYNTHESIS_OBJS` pair) and link only
+into `aimee-kb`. The curator's public headers are reached by its in-KB consumers (`kb.c`, `cmd_kb.c`,
+the curator config/profile) through `-Imodules/kb-synthesis`; per the flat-layout convention the
+module-root headers are declared as `private_headers`. `kb_curator_provider.c` (the provider adapter in
+core, not KB-tier) and the DB2 artifact/link storage APIs stay their owners' and are consumed through
+their contracts.
 
 ## Dependencies and consumers
 

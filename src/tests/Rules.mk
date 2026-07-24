@@ -813,7 +813,7 @@ $(TESTPREFIX)/unit-test-css-render: \
 
 $(TESTPREFIX)/unit-test-curator-version: \
                                        $(OBJDIR)/tests/test_curator_version.o \
-                                       $(OBJDIR)/kb/kb_curator_version.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_version.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/kb_payload.o \
@@ -837,22 +837,22 @@ $(TESTPREFIX)/unit-test-curator-invalidate: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-$(TESTPREFIX)/unit-test-curator-notify: $(OBJDIR)/tests/test_curator_notify.o $(OBJDIR)/kb/kb_curator_notify.o $(TEST_CORE_OBJS)
+$(TESTPREFIX)/unit-test-curator-notify: $(OBJDIR)/tests/test_curator_notify.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_notify.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-$(TESTPREFIX)/unit-test-curator-pipeline-sched: $(OBJDIR)/tests/test_curator_pipeline_sched.o $(OBJDIR)/kb/kb_curator_pipeline.o $(TEST_CORE_OBJS)
+$(TESTPREFIX)/unit-test-curator-pipeline-sched: $(OBJDIR)/tests/test_curator_pipeline_sched.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_pipeline.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
-$(TESTPREFIX)/unit-test-curator-custom-stages: $(OBJDIR)/tests/test_curator_custom_stages.o $(OBJDIR)/kb/kb_curator_custom.o $(TEST_CORE_OBJS)
+$(TESTPREFIX)/unit-test-curator-custom-stages: $(OBJDIR)/tests/test_curator_custom_stages.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_custom.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/tests/test_curator_queue.o \
-                                       $(OBJDIR)/kb/kb_curator_queue.o \
-                                       $(OBJDIR)/kb/kb_curator_extract.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
                                        $(OBJDIR)/kb/kb_memory_facts.o \
-                                       $(OBJDIR)/kb/kb_curator_llm.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -2889,11 +2889,11 @@ $(TESTPREFIX)/unit-test-delegate-dispatch-reliability: \
 
 $(TESTPREFIX)/unit-test-curator-code-unit: \
                                        $(OBJDIR)/tests/test_curator_code_unit.o \
-                                       $(OBJDIR)/kb/kb_curator_queue.o \
-                                       $(OBJDIR)/kb/kb_curator_extract_code.o \
-                                       $(OBJDIR)/kb/kb_curator_extract.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/kb_curator_grounding.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract_code.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -2905,7 +2905,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
 
 $(TESTPREFIX)/unit-test-curator-resolve-entities: \
                                        $(OBJDIR)/tests/test_curator_resolve_entities.o \
-                                       $(OBJDIR)/kb/kb_curator_resolve_entities.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_resolve_entities.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
@@ -2918,7 +2918,7 @@ $(TESTPREFIX)/unit-test-curator-resolve-entities: \
 
 $(TESTPREFIX)/unit-test-curator-index-narrative: \
                                        $(OBJDIR)/tests/test_curator_index_narrative.o \
-                                       $(OBJDIR)/kb/kb_curator_index_narrative.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_narrative.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -2930,7 +2930,7 @@ $(TESTPREFIX)/unit-test-curator-index-narrative: \
 
 $(TESTPREFIX)/unit-test-curator-index-claims: \
                                        $(OBJDIR)/tests/test_curator_index_claims.o \
-                                       $(OBJDIR)/kb/kb_curator_index_claims.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_claims.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -2942,7 +2942,7 @@ $(TESTPREFIX)/unit-test-curator-index-claims: \
 
 $(TESTPREFIX)/unit-test-curator-contradictions: \
                                        $(OBJDIR)/tests/test_curator_contradictions.o \
-                                       $(OBJDIR)/kb/kb_curator_contradictions.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_contradictions.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -2954,7 +2954,7 @@ $(TESTPREFIX)/unit-test-curator-contradictions: \
 
 $(TESTPREFIX)/unit-test-curator-index-code-unit: \
                                        $(OBJDIR)/tests/test_curator_index_code_unit.o \
-                                       $(OBJDIR)/kb/kb_curator_index_code_unit.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_code_unit.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
@@ -2968,13 +2968,13 @@ $(TESTPREFIX)/unit-test-curator-index-code-unit: \
 
 $(TESTPREFIX)/unit-test-curator-pipeline: \
                                        $(OBJDIR)/tests/test_curator_pipeline.o \
-                                       $(OBJDIR)/kb/kb_curator_resolve_entities.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_resolve_entities.o \
                                        $(OBJDIR)/kb_curator_provider.o \
-                                       $(OBJDIR)/kb/kb_curator_index_code_unit.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_index_code_unit.o \
                                        $(OBJDIR)/db2/kb_runtime_state.o \
                                        $(OBJDIR)/tests/support/kb_txn_stub.o \
-                                       $(OBJDIR)/kb/kb_curator_link_artifacts.o \
-                                       $(OBJDIR)/kb/kb_curator_serve.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_link_artifacts.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_serve.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -2986,7 +2986,7 @@ $(TESTPREFIX)/unit-test-curator-pipeline: \
 
 $(TESTPREFIX)/unit-test-curator-serve: \
                                        $(OBJDIR)/tests/test_curator_serve.o \
-                                       $(OBJDIR)/kb/kb_curator_serve.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_serve.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(OBJDIR)/cJSON.o \
@@ -2995,7 +2995,7 @@ $(TESTPREFIX)/unit-test-curator-serve: \
 
 $(TESTPREFIX)/unit-test-curator-link-artifacts: \
                                        $(OBJDIR)/tests/test_curator_link_artifacts.o \
-                                       $(OBJDIR)/kb/kb_curator_link_artifacts.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_link_artifacts.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -3009,9 +3009,9 @@ $(TESTPREFIX)/unit-test-curator-link-artifacts: \
 # "sidecars". Only depends on cJSON; no DB link.
 $(TESTPREFIX)/unit-test-curator-judge: \
                                        $(OBJDIR)/tests/test_curator_judge.o \
-                                       $(OBJDIR)/kb/kb_curator_judge.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_judge.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -3024,8 +3024,8 @@ $(TESTPREFIX)/unit-test-curator-judge: \
 $(TESTPREFIX)/unit-test-kb-surprising-judge: \
                                        $(OBJDIR)/tests/test_kb_surprising_judge.o \
                                        $(OBJDIR)/kb/kb_surprising_judge.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -3036,9 +3036,9 @@ $(TESTPREFIX)/unit-test-kb-surprising-judge: \
 # synthesize_topic — graceful drain entry under the sqlite shim (gated off).
 $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/tests/test_curator_synthesize.o \
-                                       $(OBJDIR)/kb/kb_curator_synthesize.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_synthesize.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -3057,8 +3057,8 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
 # run_synthesis_pass; graph/feature/background deps are stubbed in the test.
 $(TESTPREFIX)/unit-test-kb-reflection: \
                                        $(OBJDIR)/tests/test_kb_reflection.o \
-                                       $(OBJDIR)/kb/kb_curator_sidecar.o \
-                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/provider_client.o \
                                        $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -3074,7 +3074,7 @@ $(TESTPREFIX)/unit-test-kb-reflection: \
 # promote_entity — pure scope-lattice step + graceful drain entry (gated off).
 $(TESTPREFIX)/unit-test-curator-promote: \
                                        $(OBJDIR)/tests/test_curator_promote.o \
-                                       $(OBJDIR)/kb/kb_curator_promote.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_promote.o \
                                        $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -3089,7 +3089,7 @@ $(TESTPREFIX)/unit-test-curator-promote: \
 $(OBJDIR)/tests/test_curator_fixtures.o: C_FLAGS += -DCURATOR_FIXTURE_DIR=\"$(CURDIR)/../benchmarks/curator/fixtures\"
 $(TESTPREFIX)/unit-test-curator-fixtures: \
                                        $(OBJDIR)/tests/test_curator_fixtures.o \
-                                       $(OBJDIR)/kb/kb_curator_grounding.o \
+                                       $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_grounding.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3773,7 +3773,7 @@ $(TESTPREFIX)/unit-test-kb-curator-provider: $(OBJDIR)/tests/test_kb_curator_pro
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-kb-curator-llm: $(OBJDIR)/tests/test_kb_curator_llm.o \
-                                  $(OBJDIR)/kb/kb_curator_llm.o $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                  $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                   $(OBJDIR)/kb_curator_provider.o $(OBJDIR)/provider_client.o \
                                   $(OBJDIR)/text.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/tests/support/mock_agent_http.o
@@ -3802,7 +3802,7 @@ $(TESTPREFIX)/unit-test-turn-narration: $(OBJDIR)/tests/test_turn_narration.o \
                                          $(OBJDIR)/turn_narration.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-kb: $(OBJDIR)/tests/test_kb.o $(OBJDIR)/kb/kb.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/kb/kb_ingest_workers.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/kb/kb_curator_notify.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o \
+$(TESTPREFIX)/unit-test-kb: $(OBJDIR)/tests/test_kb.o $(OBJDIR)/kb/kb.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/kb/kb_ingest_workers.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_notify.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o \
                              $(OBJDIR)/sketch.o $(OBJDIR)/db2/sketch.o \
                              $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/kb_ws_stub.o $(OBJDIR)/posix/memory.o \
                              $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o \

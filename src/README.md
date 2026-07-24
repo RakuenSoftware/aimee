@@ -1276,7 +1276,7 @@ loops, making each instance an effectively stateless request server over a share
 database. Many `aimee-server` instances (many users) reach one KB over HTTP `:8741`
 (`AIMEE_KB_API_URL`). Critically, the background pipeline claims work straight off
 DB2 with `FOR UPDATE SKIP LOCKED` (`db2_kb_ingest_queue_claim_next` in
-`src/kb/kb_ingest_workers.c`; the curator drain in `kb_curator_extract_code.c`), so
+`src/kb/kb_ingest_workers.c`; the curator drain in `src/modules/kb-synthesis/kb_curator_extract_code.c`), so
 concurrent KB replicas never double-claim a row; Postgres is the only
 coordinator. The scale-out recipe is therefore: **run N `aimee-kb` replicas behind
 a load balancer over one Postgres.**

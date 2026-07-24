@@ -10,7 +10,7 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
-#include "../kb/kb_curator_link_artifacts.h"
+#include "kb_curator_link_artifacts.h"
 
 /* Controllable stubs for the embed + vector-NN deps (the sqlite shim has no
  * pgvector). Default: embedding succeeds (384-d) but the NN search returns

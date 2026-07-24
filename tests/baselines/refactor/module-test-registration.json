@@ -292,6 +292,138 @@
     {
       "ctest": false,
       "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_code_unit.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_contradictions.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_custom_stages.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_fixtures.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_claims.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_code_unit.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_index_narrative.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_invalidate.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_judge.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_link_artifacts.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_notify.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_pipeline.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_pipeline_sched.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_profile.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_promote.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_queue.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_resolve_entities.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_serve.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_synthesize.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_curator_version.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_kb_curator_llm.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "kb-synthesis",
+      "test": "src/tests/test_kb_curator_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
       "module": "learning",
       "test": "src/tests/test_learning_bundle.c"
     },

@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "kb/kb_curator_pipeline.h"
+#include "kb_curator_pipeline.h"
 
 static int q_a, q_b, n_a, n_b, n_err, n_off;
 

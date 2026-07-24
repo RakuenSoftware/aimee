@@ -87,7 +87,7 @@ def validate(root: Path) -> None:
     require("db1_maintenance_state_save" in memory, "memory-maintenance-preserved", "save anchor")
     require((root / "src/db1/maintenance.c").is_file(), "maintenance-state-preserved", "DB1 implementation")
 
-    kb_files = list((root / "src/kb").glob("kb_curator_*.c"))
+    kb_files = list((root / "src/modules/kb-synthesis").glob("kb_curator_*.c"))
     require(len(kb_files) >= 3, "kb-curator-preserved", "KB curator implementation family")
     require((root / "src/modules/config/config_kb_curator.c").is_file(), "kb-curator-preserved", "KB config")
     build_text = "\n".join(read(root / rel) for rel in BUILD_FILES)
@@ -119,7 +119,7 @@ def validate(root: Path) -> None:
     preserved = disposition.get("preserved", {})
     require(preserved.get("generic_memory_maintenance") == "src/modules/memory/memory_maintenance.c",
             "disposition", "memory boundary")
-    require(preserved.get("kb_synthesis_curator") == "src/kb/kb_curator_pipeline.c",
+    require(preserved.get("kb_synthesis_curator") == "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "disposition", "KB boundary")
     roundtable = disposition.get("roundtable", {})
     require(roundtable.get("decision") == "approve", "disposition", "roundtable decision")
