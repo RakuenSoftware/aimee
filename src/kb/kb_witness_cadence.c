@@ -42,6 +42,19 @@ int kb_witness_boot_check(char *err, size_t errlen)
                   "working checkpoint signer");
       return -1;
    }
+   /* Render the public trust anchor in the exact `<32-hex key_id>:<64-hex pubkey>`
+    * form aimee-witness-verify's anchor file uses, so an operator can capture it from
+    * the boot log of a key-holding kb (there is no separate export command yet). The
+    * pubkey and key_id are PUBLIC; only the private seed is secret. */
+   char anchor_line[VAULT_WITNESS_SIGNER_KEY_ID_LEN * 2 + 1 + VAULT_WITNESS_ED25519_PUB_LEN * 2 + 1];
+   {
+      size_t o = 0;
+      for (size_t i = 0; i < VAULT_WITNESS_SIGNER_KEY_ID_LEN; i++)
+         o += (size_t)snprintf(anchor_line + o, sizeof anchor_line - o, "%02x", key_id[i]);
+      anchor_line[o++] = ':';
+      for (size_t i = 0; i < VAULT_WITNESS_ED25519_PUB_LEN; i++)
+         o += (size_t)snprintf(anchor_line + o, sizeof anchor_line - o, "%02x", pub[i]);
+   }
    OPENSSL_cleanse(pub, sizeof pub);
 
    /* Anchor coverage: every retained checkpoint must name a key this kb can
@@ -72,6 +85,9 @@ int kb_witness_boot_check(char *err, size_t errlen)
                   (long long)unknown, sample[0] ? sample : "unknown");
       return -1;
    }
+   /* Publish the trust anchor for operators to pin with retained copies. Logged once
+    * at boot on the key-holding path; the values are public. */
+   LOG_INFO("kb.witness", "trust anchor (pin this with retained copies): %s", anchor_line);
    return 0;
 }
 
