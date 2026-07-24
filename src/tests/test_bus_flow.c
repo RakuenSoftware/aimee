@@ -128,8 +128,9 @@ static bus_host_config_t cfg(void)
 static uint64_t g_seq[512];
 static uint32_t g_kind[512];
 static uint32_t g_n;
-static void tap(void *ctx, const bus_frame_t *f)
+static void tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
 {
+   (void)pl; (void)pn;
    (void)ctx;
    must(g_n < 512, "tap buffer");
    g_seq[g_n] = f->seq;
