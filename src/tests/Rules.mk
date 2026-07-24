@@ -5347,6 +5347,31 @@ $(TESTPREFIX)/unit-test-working-profile: $(OBJDIR)/tests/test_working_profile.o 
 $(TESTPREFIX)/unit-test-curiosity: $(OBJDIR)/tests/test_curiosity.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# KB store-side memory-audit hook + end-to-end onto aimee-kb's obs_bus/ledger:
+# memory_core_crud (db2 shim) fires the hook, the REAL KB bridge maps it, and the
+# row lands in the ledger. Links the db2-shim memory set plus the bus stack.
+$(TESTPREFIX)/unit-test-memory-audit-hook: $(OBJDIR)/tests/test_memory_audit_hook.o \
+                                           $(OBJDIR)/kb/kb_memory_audit_bridge.o \
+                                           $(OBJDIR)/modules/audit/obs_bus.o \
+                                           $(OBJDIR)/modules/audit/audit_ledger.o \
+                                           $(OBJDIR)/modules/bus/bus_client.o \
+                                           $(OBJDIR)/modules/bus/bus_host.o \
+                                           $(OBJDIR)/modules/bus/bus_route.o \
+                                           $(OBJDIR)/modules/bus/bus_region.o \
+                                           $(OBJDIR)/modules/bus/bus_ring.o \
+                                           $(OBJDIR)/modules/bus/bus_arena.o \
+                                           $(OBJDIR)/modules/bus/bus_wire.o \
+                                           $(OBJDIR)/modules/bus/bus_capture.o \
+                                           $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lpthread
+
+# NOT in TEST_TARGETS: it links the bus objects, which the standard unit-tests
+# build does not assemble — so the bench gate (check_bus_perf_gate.sh) force-builds
+# and runs it via this .PHONY target, like the other bus tests.
+.PHONY: unit-test-memory-audit-hook
+unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
+	$<
+
 $(TESTPREFIX)/unit-test-cmd-identity: $(OBJDIR)/tests/test_cmd_identity.o \
                      $(OBJDIR)/cmd_identity.o $(OBJDIR)/working_profile.o \
                      $(DB1_OBJS) \
