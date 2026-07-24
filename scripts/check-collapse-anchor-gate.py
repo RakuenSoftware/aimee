@@ -27,16 +27,22 @@ Resolution of the contract:
    covered even before the developer commits.  This is the pre-PR
    dev workflow.
 3. Local repository without ``HEAD~1`` (initial commit or shallow
-   clone) -> diff is the working tree against ``HEAD``, so staged
-   + unstaged edits are still validated.
+   clone) -> diff is the union of ``HEAD``'s tracked files and the
+   working tree, so a Phase 1+ path committed in the initial commit
+   (invisible to a HEAD~1..HEAD diff) still trips the gate.  This is
+   the F3 follow-up: a clean initial commit that introduces Phase 1+
+   paths must not pass silently.
 4. Otherwise the gate fails closed -- silently passing would defeat the
    enforcement contract.
 
-CI mode (the ``GITHUB_ACTIONS`` or ``CI`` env var is set) requires a
-non-empty ``BASE_SHA``; an unset ``BASE_SHA`` in CI mode is a
-configuration failure and the gate fails closed.  This is the F001
-fix: the base-reference contract is mandatory whenever the runner
-signals it is operating in CI mode.
+CI mode (the ``GITHUB_ACTIONS`` env var is set) requires a non-empty
+``BASE_SHA``; an unset ``BASE_SHA`` in CI mode is a configuration
+failure and the gate fails closed.  This is the F001 fix: the
+base-reference contract is mandatory whenever the runner signals it
+is operating in CI mode.  The generic ``CI=true`` env var is
+intentionally NOT treated as CI mode (F3 follow-up) because many
+local development tools and IDEs set it and would otherwise turn
+ordinary local dev runs into confusing "BASE_SHA unset" failures.
 
 Phase 1+ surfaces are listed in ``PHASE_ONE_PREFIXES``.  When at least
 one of those paths is present in the diff being validated AND the
@@ -120,17 +126,22 @@ def _local_base_ref(cwd: Path) -> str | None:
 
 
 def _ci_mode() -> bool:
-    """True iff the surrounding environment looks like a CI runner.
+    """True iff the surrounding environment looks like a GitHub Actions
+    runner.
 
     The gate must validate the base-reference contract whenever the
     runner signals CI mode, because that is the only mode in which a
     target-branch / PR-head split exists.  An unset ``BASE_SHA`` under
     CI mode is treated as a configuration failure (F001).
+
+    Only ``GITHUB_ACTIONS`` is treated as authoritative: the generic
+    ``CI=true`` env var is set by many local development tools and IDEs
+    and would otherwise turn a local dev run into a "fail closed with
+    no BASE_SHA" surprise (F3 follow-up).  Anyone running the gate
+    against a non-GitHub CI should set ``GITHUB_ACTIONS`` explicitly
+    rather than rely on the loose ``CI`` env var.
     """
-    return bool(
-        os.environ.get("GITHUB_ACTIONS", "").strip()
-        or os.environ.get("CI", "").strip()
-    )
+    return bool(os.environ.get("GITHUB_ACTIONS", "").strip())
 
 
 def _diff_names(*args: str, cwd: Path) -> list[str]:
@@ -167,6 +178,21 @@ def _working_tree_names(cwd: Path) -> list[str]:
     return names
 
 
+def _head_tree_names(cwd: Path) -> list[str]:
+    """Return the names of every file tracked at ``HEAD``.
+
+    Used as the initial-commit fallback: when ``HEAD~1`` is unavailable
+    there is no prior commit to diff against, but a Phase 1+ path
+    present in the initial commit itself is exactly the scenario the
+    contract forbids.  ``git ls-tree -r HEAD`` is best-effort: on a
+    corrupt tree it returns the empty string, and the caller treats the
+    result as an empty Phase 1+ list (which is no worse than the
+    pre-existing behaviour).
+    """
+    out = _git_text_ok("ls-tree", "-r", "--name-only", "HEAD", cwd=cwd)
+    return [line for line in out.splitlines() if line]
+
+
 def diff_against_base(cwd: Path) -> list[str]:
     """Return the list of files changed in the diff being validated.
 
@@ -181,8 +207,11 @@ def diff_against_base(cwd: Path) -> list[str]:
        (staged + unstaged).  The union is required by F002: a Phase 1+
        change staged but not committed must still trip the gate.
     3. Local repository without ``HEAD~1`` (initial commit or shallow
-       clone) -> diff from the working tree against ``HEAD``, so staged
-       + unstaged edits are still validated.
+       clone) -> union of ``HEAD``'s tracked files and the working
+       tree, so a Phase 1+ path committed in the initial commit
+       (which is invisible to a HEAD~1..HEAD diff) still trips the
+       gate.  This is the F3 follow-up: a clean initial commit that
+       introduces Phase 1+ paths must not pass silently.
     4. Otherwise the gate fails closed -- silently passing would
        defeat the enforcement contract.
     """
@@ -207,9 +236,12 @@ def diff_against_base(cwd: Path) -> list[str]:
         )
 
     try:
+        # capture_output=True so the SHA / error from ``git rev-parse``
+        # does not leak into the gate's stdout (the gate's stdout is
+        # asserted on by tests).
         has_parent = subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", "HEAD~1"],
-            cwd=cwd, text=True,
+            cwd=cwd, text=True, capture_output=True,
         ).returncode == 0
     except OSError as exc:
         raise GateError(f"could not invoke git: {exc}") from exc
@@ -240,7 +272,19 @@ def diff_against_base(cwd: Path) -> list[str]:
                 combined.append(path)
         return combined
 
-    return _working_tree_names(cwd)
+    # F3 follow-up: when HEAD~1 is unavailable, the working tree diff
+    # alone misses Phase 1+ paths that were committed in the initial
+    # commit itself.  The initial commit IS the base in this scenario,
+    # so the gate must inspect HEAD's tree as well.
+    head_tree = _head_tree_names(cwd)
+    working_tree = _working_tree_names(cwd)
+    seen: set[str] = set()
+    combined: list[str] = []
+    for path in [*head_tree, *working_tree]:
+        if path not in seen:
+            seen.add(path)
+            combined.append(path)
+    return combined
 
 
 def phase_one_touched(paths: list[str]) -> bool:

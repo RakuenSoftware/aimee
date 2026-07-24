@@ -254,7 +254,41 @@ def test_gate_script_is_executable_python() -> None:
     """Smoke test preserved from the prior artifact: running the script
     against the real worktree must succeed because the worktree carries
     the merged anchor document and the prior commit does not touch a
-    Phase 1+ path."""
+    Phase 1+ path.
+
+    F3 follow-up: if the developer has any Phase 1+ path dirty in the
+    real worktree (staged, unstaged, or untracked) the gate is
+    supposed to fail closed, and running the smoke test in that
+    state would produce a confusing failure that looks like a test
+    bug.  Skip the smoke test in that case so the test suite stays
+    usable while a developer has Phase 1+ work in flight.
+    """
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=REPO_ROOT, env={**os.environ, "HOME": "/tmp"},
+        capture_output=True, text=True, check=True,
+    )
+    dirty = [
+        line[3:].strip().split(" -> ", 1)[-1]
+        for line in status.stdout.splitlines() if line.strip()
+    ]
+    if any(
+        path.startswith(
+            (
+                "src/server/",
+                "src/modules/guardrails/",
+                "src/headers/aimee_ir.h",
+                "src/modules/config/",
+                "src/modules/audit/",
+            )
+        )
+        for path in dirty
+    ):
+        pytest.skip(
+            "real worktree has a Phase 1+ path dirty; "
+            "smoke test is run against a clean anchor-only state"
+        )
+
     result = subprocess.run(
         ["python3", str(SCRIPT_SRC)],
         cwd=REPO_ROOT, capture_output=True, text=True,
@@ -485,22 +519,65 @@ def test_gate_fails_closed_in_ci_mode_without_base_sha(
     assert "BASE_SHA" in result.stderr
 
 
-def test_gate_fails_closed_in_ci_mode_via_ci_env_var(
+def test_gate_does_not_treat_plain_ci_env_as_ci_mode(
     fake_worktree: Path,
 ) -> None:
-    """F001 closure: the generic ``CI`` env var is also a CI signal,
-    not only ``GITHUB_ACTIONS``.  This mirrors the matrix the
-    workflow needs to cover."""
+    """F3 follow-up: a plain ``CI=true`` env var (set by many local dev
+    tools and IDEs) must NOT trip the gate's CI-mode branch.  Only
+    ``GITHUB_ACTIONS`` is treated as authoritative so a developer
+    running the gate from such a tool does not get a confusing
+    "BASE_SHA unset in CI mode" failure with no Phase 1+ change
+    actually present.
+
+    The pre-F3 behaviour was: ``CI=true`` raised GateError even on a
+    valid local-mode run, breaking developer tools that set
+    ``CI=true`` (Jenkins, many IDEs, and various CLI utilities).  The
+    post-F3 behaviour is: ``CI=true`` is ignored, the gate runs the
+    local-mode contract, and the result is the same as if the env
+    var were unset.  In this test setup the local-mode base
+    (HEAD~1) carries the anchors, so the gate passes -- and
+    importantly it does NOT print the CI-mode BASE_SHA error.
+    """
     _write_anchors(fake_worktree, list(range(1, 7)))
     _commit(fake_worktree, "Phase 0", {})
     _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
 
     result = _run_gate_with_env(fake_worktree, {"CI": "true"})
-    assert result.returncode != 0, (
-        f"gate must fail closed under CI=true without BASE_SHA; "
+    assert result.returncode == 0, (
+        f"gate must pass in local mode under CI=true when base has anchors; "
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
-    assert "BASE_SHA" in result.stderr
+    assert "BASE_SHA is unset in CI mode" not in result.stderr, (
+        "plain CI=true must not be treated as CI mode (F3 follow-up); "
+        f"got stderr={result.stderr!r}"
+    )
+    assert "present with all six decisions" in result.stdout
+
+
+def test_gate_plain_ci_env_does_not_mask_missing_base_anchors(
+    fake_worktree: Path,
+) -> None:
+    """F3 follow-up (counterpart): when ``CI=true`` is set but the
+    local base genuinely lacks the anchor file, the gate must still
+    fail closed via the local-mode contract -- not via the
+    CI-mode BASE_SHA branch, and not silently pass.  This confirms
+    the F3 fix does not weaken the merge-first contract.
+    """
+    # Base commit has the seed but no anchor file.  The Phase 1+
+    # change alone lands a server path.
+    _commit(fake_worktree, "Phase 1", {"src/server/foo.c": "x\n"})
+
+    result = _run_gate_with_env(fake_worktree, {"CI": "true"})
+    assert result.returncode != 0, (
+        f"gate must fail closed when local base lacks anchors under CI=true; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "BASE_SHA is unset in CI mode" not in result.stderr, (
+        "plain CI=true must not be treated as CI mode (F3 follow-up); "
+        f"got stderr={result.stderr!r}"
+    )
+    # Local-mode failure: the anchor file is required.
+    assert "required" in result.stderr or "missing" in result.stderr
 
 
 def test_gate_passes_in_local_mode_without_ci_when_no_phase_one_change(
@@ -519,3 +596,82 @@ def test_gate_passes_in_local_mode_without_ci_when_no_phase_one_change(
         f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     assert "no Phase 1+ paths changed" in result.stdout
+
+
+def test_gate_rejects_phase_one_path_committed_in_initial_commit(
+    tmp_path: Path,
+) -> None:
+    """F3 follow-up: when ``HEAD~1`` is unavailable (initial commit) and
+    the working tree is clean, a Phase 1+ path committed in that
+    initial commit must still trip the gate.  Pre-F3 the gate would
+    see an empty diff from ``_working_tree_names`` and pass silently,
+    which defeated the merge-first contract for the very first commit
+    of a fresh repository.
+    """
+    repo = tmp_path / "initialwt"
+    repo.mkdir()
+    scripts_dir = repo / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(SCRIPT_SRC, scripts_dir / "check-collapse-anchor-gate.py")
+    (scripts_dir / "check-collapse-anchor-gate.py").chmod(0o755)
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "test@test")
+    _git(repo, "config", "user.name", "test")
+    _git(repo, "config", "--global", "--add", "safe.directory", str(repo))
+
+    # Single commit containing a Phase 1+ path but NO anchor file.
+    # The merge-first contract requires the anchors to be merged
+    # before Phase 1+ work; an initial commit that ships Phase 1+
+    # without the anchor file must fail closed.  Pre-F3 the gate
+    # would have seen an empty diff (HEAD~1 is invalid AND the
+    # working tree is clean) and passed silently.
+    (repo / "src" / "server").mkdir(parents=True)
+    (repo / "src" / "server" / "foo.c").write_text("void foo(void) {}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "initial: phase 1+ path only")
+
+    result = _run_gate(repo)
+    assert result.returncode == 1, (
+        f"gate must fail closed when an initial commit carries a Phase 1+ path "
+        f"without the anchor file; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "required" in result.stderr
+
+
+def test_gate_accepts_phase_one_path_committed_in_initial_commit_with_anchors(
+    tmp_path: Path,
+) -> None:
+    """F3 follow-up (counterpart): an initial commit that lands the
+    anchor document AND the Phase 1+ path in the same commit is a
+    valid merge-first: the anchors are present at HEAD (which is the
+    only available base reference).  The gate must pass.
+    """
+    repo = tmp_path / "initialwt_ok"
+    repo.mkdir()
+    scripts_dir = repo / "scripts"
+    scripts_dir.mkdir()
+    shutil.copyfile(SCRIPT_SRC, scripts_dir / "check-collapse-anchor-gate.py")
+    (scripts_dir / "check-collapse-anchor-gate.py").chmod(0o755)
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "test@test")
+    _git(repo, "config", "user.name", "test")
+    _git(repo, "config", "--global", "--add", "safe.directory", str(repo))
+
+    (repo / "docs" / "guardrails").mkdir(parents=True)
+    (repo / "docs" / "guardrails" / "collapse_anchors.md").write_text(
+        "# Anchors\n\n" + "\n".join(
+            f"## Decision {n} - placeholder\n" for n in range(1, 7)
+        ) + "\n"
+    )
+    (repo / "src" / "server").mkdir(parents=True)
+    (repo / "src" / "server" / "foo.c").write_text("void foo(void) {}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "initial: phase 1+ path with anchors")
+
+    result = _run_gate(repo)
+    assert result.returncode == 0, (
+        f"gate must pass when an initial commit carries both anchors and "
+        f"Phase 1+ path; stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "present with all six decisions" in result.stdout

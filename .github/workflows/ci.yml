@@ -100,9 +100,14 @@ jobs:
       - name: Test guardrail-collapse Phase 0 anchor contract
         run: python3 -m pytest tests/test_check_collapse_anchor_gate.py
       - name: Enforce guardrail-collapse Phase 0 anchor contract
+        # The gate is a PR-base contract: it only has a target branch to
+        # validate against on pull_request events.  Push and
+        # workflow_dispatch runs do not have a PR base, so the step
+        # skips rather than failing closed with an empty BASE_SHA.
+        if: github.event_name == 'pull_request'
         shell: bash
         env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         # Diff-aware gate: Phase 1+ changes require anchors already merged on the PR base.
         run: python3 scripts/check-collapse-anchor-gate.py
 
