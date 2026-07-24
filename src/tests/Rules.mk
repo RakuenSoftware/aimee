@@ -217,6 +217,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-bus-ring \
                $(TESTPREFIX)/unit-test-bus-region \
                $(TESTPREFIX)/unit-test-bus-arena \
+               $(TESTPREFIX)/unit-test-bus-host \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-compute \
@@ -2561,6 +2562,20 @@ $(OBJDIR)/tests/test_bus_arena.o: C_FLAGS += -Imodules/bus
 $(TESTPREFIX)/unit-test-bus-arena: $(OBJDIR)/tests/test_bus_arena.o \
                                    $(OBJDIR)/modules/bus/bus_arena.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+# Event-bus host: admission, fd passing, reaping (feature tree slice 5). Uses
+# memfd + socketpair; no DB. Links region, ring and arena.
+$(OBJDIR)/tests/test_bus_host.o: C_FLAGS += -Imodules/bus
+$(TESTPREFIX)/unit-test-bus-host: $(OBJDIR)/tests/test_bus_host.o \
+                                  $(OBJDIR)/modules/bus/bus_host.o \
+                                  $(OBJDIR)/modules/bus/bus_region.o \
+                                  $(OBJDIR)/modules/bus/bus_ring.o \
+                                  $(OBJDIR)/modules/bus/bus_arena.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS)
+
+.PHONY: unit-test-bus-host
+unit-test-bus-host: $(TESTPREFIX)/unit-test-bus-host
+	$<
 
 .PHONY: unit-test-bus-arena
 unit-test-bus-arena: $(TESTPREFIX)/unit-test-bus-arena
